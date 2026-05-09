@@ -718,6 +718,31 @@ async fn check_for_updates() -> Result<Option<update_service::UpdateInfoDto>, St
         .map_err(|e| format!("update check task: {e}"))?
 }
 
+/// Stop autosync + tunnel, then download and apply the pending update.
+/// Velopack's `apply_updates_and_restart` `exit(0)`s the process on success,
+/// so this only returns on error.
+#[tauri::command]
+async fn apply_updates(
+    state: tauri::State<'_, AutoSyncState>,
+    tunnel_state: tauri::State<'_, TunnelState>,
+) -> Result<(), String> {
+    {
+        let mut g = state.0.lock().await;
+        if let Some(engine) = g.take() {
+            engine.stop().await;
+        }
+    }
+    {
+        let mut tg = tunnel_state.0.lock().await;
+        if let Some(t) = tg.take() {
+            t.stop().await;
+        }
+    }
+    tokio::task::spawn_blocking(|| update_service::UpdateService::new().apply())
+        .await
+        .map_err(|e| format!("apply task: {e}"))?
+}
+
 // ─── Phase 4 (Sync surfaces) ─────────────────────────────────────────────────
 
 async fn editor_for(
@@ -799,6 +824,13 @@ async fn list_watched_edits(
 /// and blocks on the event loop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Logger init BEFORE VelopackApp::build() so install/update lifecycle
+    // events surface in stderr. RUST_LOG controls level; default = info.
+    let _ = env_logger::Builder::from_env(
+        env_logger::Env::default().default_filter_or("info"),
+    )
+    .try_init();
+
     velopack::VelopackApp::build().run();
 
     tauri::Builder::default()
@@ -836,6 +868,7 @@ pub fn run() {
             probe_server_fingerprint,
             set_server_fingerprint,
             check_for_updates,
+            apply_updates,
             begin_edit_in_place,
             save_edit_in_place,
             close_edit_in_place,

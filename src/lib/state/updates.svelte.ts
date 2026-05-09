@@ -5,7 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type UpdateInfo = { version: string; releaseName: string };
-export type UpdateState = "idle" | "checking" | "available" | "uptodate" | "error";
+export type UpdateState = "idle" | "checking" | "available" | "uptodate" | "error" | "applying";
 
 class UpdateStore {
   state = $state<UpdateState>("idle");
@@ -24,6 +24,23 @@ class UpdateStore {
       const res = await invoke<UpdateInfo | null>("check_for_updates");
       if (res) { this.info = res; this.state = "available"; }
       else     { this.info = null; this.state = "uptodate"; }
+    } catch (e) {
+      this.error = String(e);
+      this.state = "error";
+    }
+  }
+
+  /**
+   * Apply the pending update. Stops autosync, downloads, then exits the
+   * process to swap binaries — control never returns on success. On error
+   * the dialog stays open so the user can retry or close.
+   */
+  async apply() {
+    if (this.state !== "available") return;
+    this.state = "applying";
+    this.error = "";
+    try {
+      await invoke<void>("apply_updates");
     } catch (e) {
       this.error = String(e);
       this.state = "error";
