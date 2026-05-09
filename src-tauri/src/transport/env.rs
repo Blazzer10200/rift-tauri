@@ -28,8 +28,7 @@ pub fn hostname() -> Option<String> {
 /// `chrono::Utc::now().timestamp_nanos_opt()` which can collide when two
 /// callers fire inside the same nanosecond OR when nanos aren't supported.
 pub fn short_id() -> String {
-    use rand::RngCore;
     let mut buf = [0u8; 4];
-    rand::rngs::OsRng.fill_bytes(&mut buf);
+    rand::fill(&mut buf);
     format!("{:08x}", u32::from_le_bytes(buf))
 }

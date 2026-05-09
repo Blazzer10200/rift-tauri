@@ -2,6 +2,52 @@
 
 Older changelog entries flow here as new versions ship. Live entry stays in `docs/CHANGELOG.md`.
 
+## v0.2.5-alpha — 2026-05-09 — Agent-driven sweep: M13 cancel-tokens + Vitest + russh 0.60 + L9 partial
+
+End-to-end campaign using the new Claude Code agent roster (recon/scout/architect/operator/verifier). Five Phase-0 reconnaissance agents mapped IPC contract + test coverage + russh upstream + rustls feature flags + Velopack signing. Three Phase-1 architects designed the cancel-token API + russh migration + Vitest harness. Phase-2 operators implemented in parallel.
+
+### Landed
+
+- **M13** Bootstrap mid-chunk cancel — `tokio_util::sync::CancellationToken` threaded through `download_paths` → `download_files_batch` → `download_atomic_via`. `tokio::select!` races the inner `sftp.read` future, aborting mid-chunk without rewriting to a chunk loop. New `cancel_download` Tauri cmd; `connection.cancelDownload()` exposed. UI abort wiring deferred.
+- **L4** russh 0.54 → 0.60 — closes future-incompat warning **AND** patches DoS vuln (GHSA-f5v4-2wr6-hqmg, scout-discovered, bigger than the audit flagged). Required: `rand` 0.8 → 0.10 (russh 0.60 dropped rand_core 0.6 path); two source-file fixes (`ssh_keygen.rs`, `transport/env.rs`) for the `OsRng → rand::rng()` API change.
+- **Vitest harness from zero** — frontend test infra scaffolded: `vitest.config.ts`, `__mocks__/@tauri-apps/api/`, 11 passing seed tests across `utils.test.ts` + `connection.test.ts`. Backend already has 49 inline `#[test]` fns across 13 modules.
+- **H4** Velopack signing doc TODO enriched at `update_service.rs:75` — `signtool` + GH-secrets P12-base64 pattern + AAS upgrade path embedded.
+- **L9** partial — direct `rustls` w/ `default-features=false, features=["ring",...]` forces ring at our crate level, but `aws-lc-rs` still pulled transitively by `hyper-rustls`/`tokio-rustls`/`ureq`/`rustls-platform-verifier`. Full drop needs `cargo deny` or `[patch.crates-io]`.
+
+### Deferred
+
+- **M6** POSIX perms / **L8** hostname POSIX — latent (Windows-only app)
+- **L14** ConflictResolver — interactive runtime behavior test, not static
+
+### Verify
+
+- `cargo check`: clean
+- `npm run check`: 0 errors, 1 pre-existing warning
+- `npm run test`: 11/11 pass
+
+v0.2.4-alpha archived.
+
+## v0.2.4-alpha — 2026-05-09 — Audit fix-pass round 3: 4 more findings + verified no-ops
+
+Continuation autopilot of the 2026-05-09 audit sweep while user AFK. Round 1+2 closed 42 findings. Round 3 closes 4 more and verifies 3 already-correct items, leaving 6 genuinely deferred (POSIX-port / upstream / scoped-session work).
+
+### Closed
+- **M4** `atomic_write_json` hardened on Windows — `sync_all()` before rename for crash-durability + 5-attempt retry on `MoveFileExW` sharing violations + tmp cleanup.
+- **M16** drag-drop payload `catch {}` upgraded to `console.warn` in `LocalPane.svelte` and `RemotePane.svelte`.
+- **L11** `connection.disconnect()` doc comment — explains tauri event listeners are deliberately preserved across disconnect/reconnect.
+- **L2** Dead utility types removed from `$lib/utils.ts`.
+
+### Verified no-op
+- **M10** `selectedConflict` prune already at `AppShell.svelte:46-51`.
+- **L7** Tauri capabilities already minimal.
+- **L10** Ctrl+P wired at `AppShell.svelte:106`.
+
+### Deferred (carried into v0.2.5-alpha)
+- **M6** POSIX file perms — latent. **M13** Bootstrap mid-chunk cancel — needs cancellation token. **L4** russh future-incompat — upstream. **L8** hostname POSIX — latent. **L9** dual-crypto stack — needs feature-flag work. **L14** ConflictResolver semantics — behavioral verification only.
+
+### Note
+Source bumped to 0.2.4-alpha but **no installer built** — user steered to dev-server-default workflow. v0.2.3-alpha archived.
+
 ## v0.2.3-alpha — 2026-05-09 — Audit fix-pass round 2: 14 more findings landed
 
 Continuation of the 2026-05-09 audit sweep. Round 1 (v0.2.2-alpha) closed 28 findings; round 2 closes another 14 across the medium and low tiers, plus a defense-in-depth path-traversal extension. 18 audit findings remain (mostly LOW/style).

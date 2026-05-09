@@ -74,12 +74,20 @@ impl Default for UpdateService {
 
 fn resolve_manager() -> Result<Option<velopack::UpdateManager>, String> {
     // SECURITY TODO (audit H4) — before public v14 ship:
-    //   1. Generate a Velopack signing keypair: `vpk pack --signing-key ...`
-    //   2. Embed the public key here as `Some(UpdateOptions { public_key: Some("..."), ... })`
-    //      (third arg below). Otherwise a compromised release host can
-    //      ship a tampered binary and the auto-updater installs it silently.
-    //   Local FileSource path is dev-only (RIFT_UPDATE_FEED), so leaving
-    //   it unsigned is acceptable for that branch.
+    //   1. Get a code-signing cert (P12/PFX). Per CA/Browser Forum 2023-06,
+    //      certs must live in HSM (USB or Azure Key Vault). For SmallTeam
+    //      use Azure Artifact Signing (AAS, ~$120/yr) — eliminates on-disk key.
+    //   2. CI: store P12 base64 in GH secret `CERT_P12_BASE64` + `CERT_PASSWORD`.
+    //      Decode at job start, pass to `vpk pack --signTemplate
+    //      "/td sha256 /fd sha256 /f cert.p12 /p {password}
+    //       /tr http://timestamp.comodoca.com"`. Add `permissions: contents: write`.
+    //   3. Embed Velopack-issued public key here via `UpdateOptions { public_key: Some("...") }`
+    //      (third arg below). Without it, a compromised release host can ship
+    //      a tampered binary and the auto-updater installs it silently.
+    //   Rotation: revoke old cert at CA, update both GH secrets, retrigger release.
+    //   SmartScreen reputation resets on cert change — AAS mitigates.
+    //   Local FileSource path is dev-only (RIFT_UPDATE_FEED) — unsigned is OK there.
+    //   Refs: docs.velopack.io/packaging/signing + docs.velopack.io/distributing/github-actions
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
         let p = Path::new(&local);
         if p.is_dir() {

@@ -380,6 +380,10 @@ class ConnectionStore {
     }
   }
 
+  async cancelDownload() {
+    await invoke("cancel_download");
+  }
+
   async refreshStatus() {
     try {
       const s = await invoke<AutoSyncStatus | null>("get_autosync_status");
