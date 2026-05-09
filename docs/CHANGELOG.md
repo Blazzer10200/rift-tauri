@@ -2,34 +2,32 @@
 
 > Live changelog = current version only. Older entries archive to `archive/CHANGELOG-archive.md` on bump.
 
-## v0.2.4-alpha — 2026-05-09 — Audit fix-pass round 3: 4 more findings + verified no-ops
+## v0.2.6-alpha — 2026-05-09 — End-to-end auto-sync unblocked: russh-sftp `write()` quirk fixed
 
-Continuation autopilot of the 2026-05-09 audit sweep while user AFK. Round 1+2 closed 42 findings. Round 3 closes 4 more and verifies 3 already-correct items, leaving 6 genuinely deferred (POSIX-port / upstream / scoped-session work).
+First live multi-file sync test against the homelab FXServer surfaced a hard blocker: every upload returned `sync failed: write tmp …rift-tmp: No such file`. Root cause was russh-sftp 2.1.2's `session::write()` opening with `OpenFlags::WRITE` only (no `CREATE`, no `TRUNCATE`) — fine for overwriting an existing file, fails immediately when writing a fresh `.rift-tmp`. Same library quirk also bit `upload_bytes` (used by edit-trail + lock-presence heartbeats), where it would silently leave trailing garbage when a new payload was shorter than the existing remote file.
 
-### Closed
-- **M4** `atomic_write_json` hardened on Windows — `sync_all()` before rename for crash-durability + 5-attempt retry on `MoveFileExW` sharing violations (AV / Search indexer / Explorer thumbnailer transient holds). Cleans up tmp file on terminal failure.
-- **M16** drag-drop payload `catch {}` upgraded to `console.warn` in `LocalPane.svelte` and `RemotePane.svelte` — silently swallowed JSON parse failures now surface for debugging.
-- **L11** `connection.disconnect()` doc comment — explains tauri event listeners are deliberately preserved across disconnect/reconnect (re-wiring would race with in-flight emits).
-- **L2** Dead utility types removed from `$lib/utils.ts` — `WithoutChild`, `WithoutChildren`, `WithoutChildrenOrChild` were shadcn-svelte boilerplate, zero imports across `src/`.
+### Landed
 
-### Verified no-op (audit findings already correct)
-- **M10** `selectedConflict` prune effect — already wired at `AppShell.svelte:46-51` via prior round.
-- **L7** Tauri capabilities — `core:default` + explicit window perms + `opener:default` is already minimal for current feature set.
-- **L10** Ctrl+P shortcut — actually wired at `AppShell.svelte:106` → `gotoSettings("servers")`. Command-palette claim is accurate.
+- **`upload_atomic_via`** swapped `sftp.write()` → `sftp.create()` (`WRITE | CREATE | TRUNCATE`). File-handle scope ensures the SFTP close packet flushes before the rename. ([sftp/mod.rs:1024-1037](src-tauri/src/sftp/mod.rs#L1024-L1037))
+- **`upload_bytes`** swapped to `sftp.create()` + `write_all`. Closes both the first-creation and short-payload-trailing-garbage cases on edit-trail and lock-presence writes. ([sftp/mod.rs:864-876](src-tauri/src/sftp/mod.rs#L864-L876))
 
-### Deferred (need scoped sessions, not autopilot)
-- **M6** POSIX file perms — latent, no Windows impact.
-- **M13** Bootstrap mid-chunk cancel — needs Rust-side cancellation token threaded through `download_paths`. Chunk-level cancel (50/chunk) already works.
-- **L4** russh future-incompat — upstream crate.
-- **L8** hostname binary on POSIX — latent.
-- **L9** dual-crypto stack — needs `rustls-platform-verifier` feature-flag investigation to drop `aws-lc-rs`.
-- **L14** ConflictResolver semantics — code-correct, audit asked for behavioral verification only.
+### Verified end-to-end (live tests against FXServer @ 192.168.1.170)
+
+- Single-file edit → synced byte-for-byte (`fxmanifest.lua` 0.2.0→0.2.2 round-trip).
+- Burst write — 5 files in <1s — all 5 landed inside debounce window.
+- 2 MB random binary — SHA1 match on both ends.
+- Delete propagation — local `rm` → remote vanishes.
+- All file types eligible (no allow-list / size cap); ignore module blocks only editor temp + build outputs.
+
+### Found, not fixed
+
+- **`.rift-lock` orphan after source delete** — lock-presence heartbeat not released on `Deleted` events. Minor, swept manually.
+- **Logs not flushing in dev mode** — `~/.rift/rift-autosync.log` likely buffers until process exit. Diagnostic blind-spot.
+- **Write-tool atomic save not seen by notify-rs** — Edit (in-place modify) reliable; tool-level atomic-rename creates may need IDE-real-save verification.
 
 ### Verify
-- `cargo check --lib` — clean, only known russh future-incompat note.
-- `npm run check` — 3933 / 0 errors / 1 advisory (intentional Settings:18).
 
-### Note
-Source bumped to 0.2.4-alpha but **no installer built this session** — user explicitly steered to dev-server-default workflow. Run full build pipeline (`npm run tauri build` + silent install + iconcache bust) when batch is ready to ship.
+- `cargo check`: clean
+- end-to-end SFTP round-trips: passing
 
-v0.2.3-alpha archived.
+v0.2.5-alpha archived.

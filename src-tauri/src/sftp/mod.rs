@@ -35,6 +35,7 @@ use russh::client::{self, Handle};
 use russh::keys::*;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FileType;
+use tokio::io::AsyncWriteExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -685,6 +686,7 @@ impl SftpClient {
         &self,
         jobs: &[(String, PathBuf)],
         parallelism: usize,
+        ct: tokio_util::sync::CancellationToken,
     ) -> Vec<bool> {
         let mut results = vec![false; jobs.len()];
         if jobs.is_empty() {
@@ -696,6 +698,9 @@ impl SftpClient {
         if live == 0 {
             // Fallback: serial atomic download on the main session.
             for (i, (r, l)) in jobs.iter().enumerate() {
+                if ct.is_cancelled() {
+                    break;
+                }
                 let res = self.download_file_atomic(r, l).await;
                 results[i] = res.success;
             }
@@ -719,15 +724,22 @@ impl SftpClient {
         for worker in workers {
             let rx = rx.clone();
             let results_arc = results_arc.clone();
+            let ct = ct.clone();
             tasks.push(tokio::spawn(async move {
                 loop {
+                    if ct.is_cancelled() {
+                        break;
+                    }
                     let job = {
                         let mut rxg = rx.lock().await;
                         rxg.recv().await
                     };
                     let Some((idx, remote, local)) = job else { break };
                     let _g = worker.gate.lock().await;
-                    let res = download_atomic_via(&worker.sftp, &remote, &local).await;
+                    let res = tokio::select! {
+                        r = download_atomic_via(&worker.sftp, &remote, &local) => r,
+                        _ = ct.cancelled() => OpResult::err("cancelled"),
+                    };
                     let mut r = results_arc.lock().await;
                     r[idx] = res.success;
                 }
@@ -850,8 +862,15 @@ impl SftpClient {
     }
 
     pub async fn upload_bytes(&self, bytes: &[u8], remote_path: &str) -> Result<(), String> {
-        self.sftp
-            .write(remote_path, bytes)
+        // russh-sftp's `write()` is WRITE-only (no CREATE/TRUNCATE) — fails on
+        // first creation and leaves trailing garbage if the new payload is
+        // shorter than the existing file. `create()` is WRITE|CREATE|TRUNCATE.
+        let mut f = self
+            .sftp
+            .create(remote_path)
+            .await
+            .map_err(|e| format!("create {remote_path}: {e}"))?;
+        f.write_all(bytes)
             .await
             .map_err(|e| format!("write {remote_path}: {e}"))
     }
@@ -1011,12 +1030,20 @@ async fn upload_atomic_via(
         let _ = mkdir_p_via(sftp, parent).await;
     }
     let tmp = format!("{remote_path}.rift-tmp");
-    // Stale .rift-tmp from a prior aborted upload — clear it first so the
-    // write doesn't trip an existing-file rejection on strict servers.
-    let _ = sftp.remove_file(&tmp).await;
-    if let Err(e) = sftp.write(&tmp, &bytes).await {
-        let _ = sftp.remove_file(&tmp).await;
-        return OpResult::err(format!("write tmp {tmp}: {e}"));
+    // russh-sftp's `write()` uses OpenFlags::WRITE only — no CREATE/TRUNCATE,
+    // so it fails NO_SUCH_FILE on a fresh tmp. `create()` is WRITE|CREATE|TRUNCATE.
+    // Wrap in a scope so the file handle drops (and the SFTP close packet
+    // is sent) before we attempt the rename.
+    {
+        let mut f = match sftp.create(&tmp).await {
+            Ok(f) => f,
+            Err(e) => return OpResult::err(format!("create tmp {tmp}: {e}")),
+        };
+        if let Err(e) = f.write_all(&bytes).await {
+            drop(f);
+            let _ = sftp.remove_file(&tmp).await;
+            return OpResult::err(format!("write tmp {tmp}: {e}"));
+        }
     }
     if let Err(e) = rename_via(sftp, &tmp, remote_path).await {
         let _ = sftp.remove_file(&tmp).await;

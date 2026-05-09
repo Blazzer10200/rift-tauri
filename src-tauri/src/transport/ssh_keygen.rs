@@ -65,8 +65,7 @@ impl SshKeygen {
             return Err(format!("key already exists: {}", private_path.display()));
         }
 
-        let mut rng = rand::rngs::OsRng;
-        let mut key = PrivateKey::random(&mut rng, Algorithm::Ed25519)
+        let mut key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519)
             .map_err(|e| format!("ed25519 generate: {e}"))?;
         key.set_comment(comment);
 

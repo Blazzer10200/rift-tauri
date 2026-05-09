@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::sync::{AutoSyncEngine, AutoSyncStatus, ConflictResolution, FolderSpec};
 
@@ -39,6 +40,11 @@ pub struct TunnelState(pub AsyncMutex<Option<tunnel::SshTunnel>>);
 pub struct EditInPlaceState(
     pub AsyncMutex<std::collections::HashMap<String, Arc<edit::in_place::EditInPlaceManager>>>,
 );
+
+/// M13: holds the CancellationToken for the currently in-flight download_paths
+/// call. None when idle. Set before the batch starts, cleared on completion or
+/// cancellation.
+pub struct DownloadState(pub AsyncMutex<Option<CancellationToken>>);
 
 #[tauri::command]
 fn app_version() -> String {
@@ -512,15 +518,42 @@ async fn upload_paths(
 async fn download_paths(
     server_key: String,
     jobs: Vec<(String, String)>,
+    dl_state: tauri::State<'_, DownloadState>,
 ) -> Result<Vec<bool>, String> {
+    let ct = CancellationToken::new();
+    {
+        let mut g = dl_state.0.lock().await;
+        *g = Some(ct.clone());
+    }
     let client = open_sftp_for(&server_key).await?;
     let mapped: Vec<(String, PathBuf)> = jobs
         .into_iter()
         .map(|(remote, local)| (remote, PathBuf::from(local)))
         .collect();
-    let result = client.download_files_batch(&mapped, 4).await;
+    let result = tokio::select! {
+        r = client.download_files_batch(&mapped, 4, ct.clone()) => r,
+        _ = ct.cancelled() => {
+            client.close().await;
+            // Return all-false — caller treats as aborted batch.
+            return Ok(vec![false; mapped.len()]);
+        }
+    };
     client.close().await;
+    {
+        let mut g = dl_state.0.lock().await;
+        *g = None;
+    }
     Ok(result)
+}
+
+/// M13: cancel an in-flight download_paths call. No-op if nothing is running.
+#[tauri::command]
+async fn cancel_download(dl_state: tauri::State<'_, DownloadState>) -> Result<(), String> {
+    let g = dl_state.0.lock().await;
+    if let Some(ct) = g.as_ref() {
+        ct.cancel();
+    }
+    Ok(())
 }
 
 // ─── Phase 1j (tail services) — bootstrap detect / keygen / update check ─────
@@ -773,6 +806,7 @@ pub fn run() {
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
+        .manage(DownloadState(AsyncMutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             app_version,
             scan_drift,
@@ -791,6 +825,7 @@ pub fn run() {
             remote_list_dir,
             upload_paths,
             download_paths,
+            cancel_download,
             detect_bootstrap,
             bootstrap_list_files,
             generate_ssh_key,
