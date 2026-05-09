@@ -5,8 +5,13 @@
 //
 // Fingerprint format: OpenSSH-style `SHA256:<base64-no-pad>` of the SSH
 // wire-format public key blob — matches `ssh-keygen -lf <pub>` output.
-// Profiles may store either bare `SHA256:<b64>` or WPF/WinSCP's full
-// `ssh-ed25519 256 SHA256:<b64>` form; substring match accepts both.
+// Profiles may store any of:
+//   - bare `SHA256:<b64>`                 (rift-tauri canonical / OpenSSH)
+//   - `ssh-ed25519 256 SHA256:<b64>`      (some WinSCP exports)
+//   - `ssh-ed25519 255 <b64>`             (WPF Rift `~/.rift/*.json` format —
+//                                          NO `SHA256:` prefix)
+// The substring match strips `SHA256:` from the computed fingerprint and
+// looks for the bare b64 hash, accepting all three forms transparently.
 
 use base64::Engine;
 use russh::client;
@@ -41,7 +46,8 @@ impl client::Handler for PinningHandler {
             None => return Ok(false),
         };
         if let Some(trusted) = &self.trusted {
-            if !trusted.contains(&fp) {
+            let bare = fp.strip_prefix("SHA256:").unwrap_or(&fp);
+            if !trusted.contains(bare) {
                 return Ok(false);
             }
         }

@@ -68,9 +68,10 @@ impl BridgeClient {
     }
 }
 
-/// Minimal percent-encoder for query values — only escapes the chars FXServer
-/// resource names could plausibly contain (space, brackets). Avoids pulling
-/// `urlencoding` crate just for one call site.
+/// Percent-encoder for query values. Allows only RFC 3986 unreserved chars;
+/// everything else (incl. `&`, `=`, `+`, brackets, spaces) gets escaped so a
+/// resource name like `evil&token=stolen` can't smuggle extra query params
+/// into the bridge request URL.
 fn urlencoding_minimal(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

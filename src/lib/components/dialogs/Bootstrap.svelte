@@ -21,7 +21,7 @@
     serverKey: string;
     initialLocalRoot: string;
     detection: BootstrapDetection | null;
-    onClose: (result: { downloaded: number; failed: number; localRoot: string } | null) => void;
+    onClose: (result: { downloaded: number; failed: number; localRoot: string; cancelled: boolean } | null) => void;
   };
 
   let { open, serverKey, initialLocalRoot, detection, onClose }: Props = $props();
@@ -134,7 +134,7 @@
     if (skip || phase === "idle") {
       onClose(null);
     } else {
-      onClose({ downloaded: done, failed, localRoot });
+      onClose({ downloaded: done, failed, localRoot, cancelled });
     }
   }
 
@@ -208,7 +208,7 @@
           </div>
         {/if}
 
-        <p class="hint">Skips <span class="mono">[disabled]/</span> folders. Downloads run in parallel — close Rift to cancel.</p>
+        <p class="hint">Skips <span class="mono">[disabled]/</span> folders. Downloads run in parallel — click Cancel to stop after the current chunk.</p>
       </div>
 
       <div class="dialog-foot">

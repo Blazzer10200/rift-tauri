@@ -395,7 +395,13 @@ fn persist_fingerprint_if_new(server_key: &str, fingerprint: &str) {
     if fingerprint.is_empty() {
         return;
     }
-    let Ok(mut cfg) = profile::RiftConfig::load() else { return };
+    let mut cfg = match profile::RiftConfig::load() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("persist_fingerprint_if_new load failed for {server_key}: {e}");
+            return;
+        }
+    };
     let Some(pos) = cfg.servers.iter().position(|s| s.key == server_key) else { return };
     if cfg.servers[pos].fingerprint.as_deref().unwrap_or("") == fingerprint {
         return;
@@ -549,25 +555,36 @@ async fn bootstrap_list_files(
     client.close().await;
 
     let local_root_path = std::path::PathBuf::from(&local_root);
-    let remote_root_lc = remote_root.to_lowercase();
     let mut jobs = Vec::with_capacity(entries.len());
     for e in entries {
         if e.is_dir { continue; }
-        let lower = e.full_path.to_lowercase();
-        if lower.contains("/[disabled]/") { continue; }
-        if !lower.starts_with(&remote_root_lc) { continue; }
-        // Slice using the LOWERCASED string's prefix length to stay ASCII-safe;
-        // POSIX paths are ASCII in practice, but mixed-case Unicode would shift
-        // byte boundaries between original + lowercased forms.
-        let rel = lower[remote_root_lc.len()..].trim_start_matches('/');
-        if rel.is_empty() { continue; }
-        // Use ORIGINAL casing for the local path to preserve filename case
-        // (matters on case-sensitive local filesystems / future macOS port).
-        let original_rel = &e.full_path[e.full_path.len() - rel.len()..];
+        if e.full_path.contains("/[disabled]/") { continue; }
+        // Case-insensitive prefix match on the original byte-string. Avoids
+        // slicing the lowercased copy (which has a different byte length for
+        // Turkish `İ`→`i` and similar Unicode pairs and would panic on a
+        // non-char-boundary slice).
+        if e.full_path.len() < remote_root.len() { continue; }
+        let (head, tail) = e.full_path.split_at(remote_root.len());
+        if !head.eq_ignore_ascii_case(&remote_root) { continue; }
+        let original_rel = tail.trim_start_matches('/');
+        if original_rel.is_empty() { continue; }
         let local = local_root_path.join(original_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
         jobs.push((e.full_path, local.to_string_lossy().to_string()));
     }
     Ok(jobs)
+}
+
+/// Audit H11: reject paths that can escape via `..`. Rift's identity files
+/// and key-output dirs come from JS; without this, a malicious profile
+/// could point key reads at arbitrary filesystem locations.
+fn reject_path_traversal(p: &std::path::Path, label: &str) -> Result<(), String> {
+    use std::path::Component;
+    for c in p.components() {
+        if matches!(c, Component::ParentDir) {
+            return Err(format!("{label}: '..' components not allowed"));
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -577,6 +594,7 @@ fn generate_ssh_key(
     comment: String,
 ) -> Result<transport::KeyPaths, String> {
     let dir = std::path::PathBuf::from(target_dir);
+    reject_path_traversal(&dir, "target_dir")?;
     transport::SshKeygen::generate(&dir, &filename, &comment)
 }
 
@@ -588,6 +606,62 @@ fn generate_default_ssh_key(comment: Option<String>) -> Result<transport::KeyPat
 #[tauri::command]
 fn default_ssh_key_exists() -> bool {
     transport::SshKeygen::default_key_exists()
+}
+
+/// Returns the canonical default ed25519 key path for this user
+/// (typically `~/.ssh/id_ed25519` resolved against the home dir).
+/// Used by the AddServer dialog to pre-fill the Identity file field
+/// instead of guessing with a literal `~` that russh can't expand.
+#[tauri::command]
+fn default_ssh_key_path() -> Option<String> {
+    transport::SshKeygen::default_key_path().map(|p| p.to_string_lossy().to_string())
+}
+
+/// Audit C2 — TOFU prompt: probe the server's host-key fingerprint by
+/// opening a one-shot SFTP session WITHOUT a pinned fingerprint, capturing
+/// what the server presents, then closing immediately. The fingerprint is
+/// returned to the UI so the user can confirm before we save it to the
+/// profile. Avoids the prior blind-TOFU silent persist.
+#[tauri::command]
+async fn probe_server_fingerprint(server_key: String) -> Result<String, String> {
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?
+        .clone();
+    let key_path = std::path::PathBuf::from(&server.key_path);
+    reject_path_traversal(&key_path, "key_path")?;
+    let client = sftp::SftpClient::connect(sftp::ConnectArgs {
+        host: &server.host,
+        port: server.port,
+        user: &server.user,
+        key_path: &key_path,
+        trusted_fingerprint: None,
+    })
+    .await?;
+    let fp = client.fingerprint().to_string();
+    client.close().await;
+    Ok(fp)
+}
+
+/// Audit C2 — write a user-confirmed fingerprint to a profile. Distinct from
+/// `persist_fingerprint_if_new` (silent TOFU): this is the explicit-trust path
+/// triggered by the confirmation dialog, and it overwrites any prior value
+/// because the user has just decided.
+#[tauri::command]
+fn set_server_fingerprint(server_key: String, fingerprint: String) -> Result<(), String> {
+    if fingerprint.trim().is_empty() {
+        return Err("empty fingerprint".into());
+    }
+    let mut cfg = profile::RiftConfig::load()?;
+    let pos = cfg
+        .servers
+        .iter()
+        .position(|s| s.key == server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?;
+    cfg.servers[pos].fingerprint = Some(fingerprint);
+    cfg.save().map_err(|e| format!("save profile: {e}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -611,18 +685,23 @@ async fn editor_for(
     state: &EditInPlaceState,
     app: &tauri::AppHandle,
 ) -> Result<Arc<edit::in_place::EditInPlaceManager>, String> {
-    // Hold the state lock across the SFTP open so two concurrent
-    // begin_edit_in_place calls for the same server can't both open an SFTP
-    // connection and leak one into garbage. The lock is per-server-state
-    // (one map for ALL editors) — fine here because editor init is rare and
-    // the SFTP handshake is sequential anyway.
-    let mut g = state.0.lock().await;
-    if let Some(m) = g.get(server_key) {
-        return Ok(m.clone());
+    // Fast-path read under the lock, then drop it before the SFTP open so a
+    // slow connection on one server can't stall begin_edit_in_place calls
+    // on a different server (or the same server's other editor methods).
+    {
+        let g = state.0.lock().await;
+        if let Some(m) = g.get(server_key) {
+            return Ok(m.clone());
+        }
     }
     let client = open_sftp_for(server_key).await?;
     let sftp_arc = Arc::new(client);
-    let mgr = Arc::new(edit::in_place::EditInPlaceManager::new(sftp_arc, app.clone())?);
+    let mgr = Arc::new(edit::in_place::EditInPlaceManager::new(server_key.to_string(), sftp_arc, app.clone())?);
+    // Two concurrent first-time inits for the same server may both reach
+    // here; `or_insert` ensures one wins and the other Arc<EditInPlaceManager>
+    // (with its SFTP client) is dropped immediately. Worst case: one
+    // wasted SFTP handshake. Better than UI-wide stall.
+    let mut g = state.0.lock().await;
     Ok(g.entry(server_key.to_string()).or_insert(mgr).clone())
 }
 
@@ -710,7 +789,10 @@ pub fn run() {
             generate_ssh_key,
             generate_default_ssh_key,
             default_ssh_key_exists,
+            default_ssh_key_path,
             read_default_ssh_pub_key,
+            probe_server_fingerprint,
+            set_server_fingerprint,
             check_for_updates,
             begin_edit_in_place,
             save_edit_in_place,

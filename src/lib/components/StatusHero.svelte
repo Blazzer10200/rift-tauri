@@ -13,7 +13,7 @@
   );
 
   type Variant = "default" | "ok" | "warn" | "danger" | "info";
-  const heroVariant = $derived<Variant>((() => {
+  const heroVariant = $derived.by<Variant>(() => {
     if (!connection.status) return "default";
     if (connection.conflictCount > 0) return "danger";
     if (connection.status.state === "error") return "danger";
@@ -21,7 +21,7 @@
     if (connection.lockCount > 0) return "warn";
     if (connection.status.state === "watching" || connection.status.state === "syncing") return "ok";
     return "info";
-  })());
+  });
 </script>
 
 <section class="hero" data-variant={heroVariant}>

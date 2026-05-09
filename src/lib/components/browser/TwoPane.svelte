@@ -38,9 +38,11 @@
     }
   });
 
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
   function flash(msg: string, kind: "ok" | "err" | "info" = "info") {
     toast = { msg, kind };
-    setTimeout(() => { toast = null; }, 4500);
+    if (toastTimer !== null) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast = null; toastTimer = null; }, 4500);
   }
 
   function setLocalPath(idx: number, p: string) { browserTabs.updateLocalPath(idx, p); }
@@ -117,9 +119,9 @@
     if (remoteSel.length > 0) downloadRemotesToLocal(remoteSel);
     if (localSel.length === 0 && remoteSel.length === 0) flash("Select files on either side first.", "info");
   }
-  function onEdit() { flash("Edit-in-place: open the file by double-clicking (Phase 6).", "info"); }
-  function onDiff() { flash("Diff view ships in Phase 8 (conflicts).", "info"); }
-  function onDelete() { flash("Delete: confirm dialog ships in Phase 6.", "info"); }
+  function onEdit() { flash("Open files by double-clicking to edit in place.", "info"); }
+  function onDiff() { flash("Diff view: pick a file in the Conflicts tab.", "info"); }
+  function onDelete() { flash("Delete is not yet wired — coming in a backend follow-up.", "info"); }
 </script>
 
 <div class="two-pane">

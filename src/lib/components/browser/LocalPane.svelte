@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Folder, FolderOpen, FileCode, File, ChevronRight } from "lucide-svelte";
+  import { Folder, FileCode, File, ChevronRight } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { connection } from "../../state/connection.svelte";
@@ -79,10 +79,7 @@
   function parentOf(p: string): string | null {
     const norm = p.replaceAll("\\", "/").replace(/\/+$/, "");
     const idx = norm.lastIndexOf("/");
-    if (idx <= 0) {
-      if (/^[A-Za-z]:$/.test(norm)) return null;
-      return null;
-    }
+    if (idx <= 0) return null;
     if (/^[A-Za-z]:$/.test(norm.slice(0, idx))) {
       return norm.slice(0, idx) + "\\";
     }
@@ -208,7 +205,7 @@
       {:else}
         {#each filtered as e (e.path)}
           {@const status = rowStatus(e)}
-          {@const lk = !e.is_dir ? connection.lockForBasename(e.name) : null}
+          {@const lk = !e.is_dir ? (() => { const rp = connection.remoteForLocalPath(e.path); return rp ? connection.lockForRemotePath(rp) : null; })() : null}
           {@const Icon = pickIcon(e)}
           <div
             class="row"

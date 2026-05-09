@@ -21,6 +21,14 @@
   const autosyncOn = $derived(
     connection.status?.state === "watching" || connection.status?.state === "idle" || connection.status?.state === "syncing"
   );
+
+  async function toggleAutoSync() {
+    if (autosyncOn) {
+      await connection.disconnect();
+    } else {
+      try { await connection.connect(); } catch (e) { console.error(e); }
+    }
+  }
 </script>
 
 <div class="rail">
@@ -52,13 +60,21 @@
     </div>
     <div class="stat">
       <span class="stat-label">Auto-sync</span>
-      <span class="stat-val">
-        {#if autosyncOn}
+      <button
+        class="autosync-toggle"
+        type="button"
+        onclick={toggleAutoSync}
+        disabled={!connection.selected || connection.connecting}
+        title={autosyncOn ? "Click to stop auto-sync" : connection.connecting ? "Connecting…" : "Click to start auto-sync"}
+      >
+        {#if connection.connecting}
+          <span class="pill info"><span class="dot"></span>connecting…</span>
+        {:else if autosyncOn}
           <span class="pill ok"><span class="dot"></span>on</span>
         {:else}
           <span class="pill muted"><span class="dot"></span>off</span>
         {/if}
-      </span>
+      </button>
     </div>
     <div class="stat">
       <span class="stat-label">Locks</span>
