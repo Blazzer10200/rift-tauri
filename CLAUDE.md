@@ -72,6 +72,7 @@ None exceed the 2000-line agent-split threshold yet, but `auto_sync.rs` and `sft
 - Don't run `npm run build` or `npm run tauri build` unless told.
 - Don't use Playwright MCP (global ban — user verifies UI in browser).
 - Don't `EnterPlanMode` — use the `/plan` skill instead.
+- **Don't run `cargo check` while `npm run tauri dev` is alive.** Tauri dev watches Rust files and triggers incremental rebuilds; an external `cargo check` collides with its lock state and kills the running Rift Dev process w/o re-launching. Run `/check` before launching dev, or quit dev first. (S16 2026-05-09)
 
 ## Live state pointer
 
