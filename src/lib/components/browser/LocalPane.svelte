@@ -153,7 +153,9 @@
     try {
       const remotePaths = JSON.parse(data) as string[];
       onDropPaths?.(remotePaths);
-    } catch {}
+    } catch (err) {
+      console.warn("LocalPane: drop payload parse failed", err);
+    }
   }
 </script>
 

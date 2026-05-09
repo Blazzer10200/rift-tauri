@@ -39,7 +39,41 @@ pub fn cache_path(prefix: &str, profile_key: &str) -> std::io::Result<PathBuf> {
 }
 
 pub fn atomic_write_json(path: &std::path::Path, json: &str) -> std::io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
     let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json)?;
-    std::fs::rename(&tmp, path)
+    {
+        let mut f = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&tmp)?;
+        f.write_all(json.as_bytes())?;
+        // M4: fsync the temp file before the rename so a crash post-rename
+        // can't leave us with a 0-byte target. Cheap on local SSDs.
+        f.sync_all()?;
+    }
+
+    // M4: on Windows, AV scanners / Search indexers / Explorer thumbnailers
+    // briefly hold the destination open for reading. MoveFileExW returns
+    // ERROR_SHARING_VIOLATION transiently; retry a few times before failing.
+    let mut last_err: Option<std::io::Error> = None;
+    for attempt in 0..5u32 {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = Some(e);
+                if attempt < 4 {
+                    std::thread::sleep(std::time::Duration::from_millis(
+                        50 * u64::from(attempt + 1),
+                    ));
+                }
+            }
+        }
+    }
+    let _ = std::fs::remove_file(&tmp);
+    Err(last_err.unwrap_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::Other, "atomic_write_json: rename failed")
+    }))
 }
