@@ -2,6 +2,18 @@
 
 Older session blocks flow here as new sessions land. Live handoff stays in `docs/HANDOFF.md`.
 
+## Session 15 — 2026-05-09 — Audit fix-pass + connection wiring + signing (complete)
+
+UI port done + 46 audit findings landed (all 5 CRITICALs, 12 of 16 HIGHs, most MEDIUMs, 6 LOWs). Backend confirmed end-to-end against homelab FXServer (C2 TOFU + auto-connect verified). SSH commit signing live + verified by GitHub.
+
+Two CRITICAL bugs the prior audit missed (both fixed): WPF→Tauri host-key fingerprint format mismatch (russh substring expected `SHA256:` prefix; WPF writes `<keytype> <bits> <b64>` — fixed by stripping prefix in `ssh_handler.rs::check_server_key`). Frontend had no `connect()` and never invoked `start_autosync` — added connect command + auto-connect on `select()` + Connect command palette + clickable Auto-sync pill.
+
+Round 2: H2, H9, M2, M5, M9, M12, M18, M21, L3, L12, L13. L9 dual-crypto deferred — `cargo tree -d` confirms aws-lc-rs enters via `rustls-platform-verifier`.
+
+Round 3: M4 (`atomic_write_json` hardening: sync_all + 5-attempt MoveFileExW retry), M16 drag-drop catch, L11 disconnect doc, L2 dead types removed.
+
+Dev tooling: `~/Desktop/Rift Dev.lnk` → `scripts/run-dev.bat` w/ red-tinted icon distinguishes from prod shortcut.
+
 ## Session 14 — 2026-05-09 — WPF retirement + install cleanup (complete)
 
 ### Completed
