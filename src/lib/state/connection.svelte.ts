@@ -390,6 +390,10 @@ class ConnectionStore {
     }
   }
 
+  // L11: disconnect tears down the autosync session but deliberately leaves
+  // tauri event listeners (`wireEvents`) in place. They're wired once at app
+  // start and reused across reconnects — re-wiring on every connect would
+  // race with in-flight emits.
   async disconnect() {
     try {
       await invoke("stop_autosync");

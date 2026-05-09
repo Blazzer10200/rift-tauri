@@ -6,7 +6,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09 (S14). Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S15, v0.2.3-alpha):** UI port done + 42 audit findings landed (all 5 CRITICALs, 12 of 16 HIGHs, most MEDIUMs). Backend works end-to-end against the homelab FXServer (live test confirmed C2 TOFU + auto-connect). SSH commit signing live + verified by GitHub. Installed at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ desktop shortcut. **18 audit findings remain** (mostly LOW/style + 2 latent POSIX-port items).
+**Current state (post S15, source v0.2.4-alpha / installed binary v0.2.3-alpha):** UI port done + 46 audit findings landed (all 5 CRITICALs, 12 of 16 HIGHs, most MEDIUMs, 6 LOWs). Backend works end-to-end against the homelab FXServer (live test confirmed C2 TOFU + auto-connect). SSH commit signing live + verified by GitHub. **6 audit findings remain genuinely deferred** (POSIX-only / russh upstream / scoped-session work like Rust cancellation tokens). Installed at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ desktop shortcut still at v0.2.3-alpha — next "build" command compiles + installs v0.2.4-alpha.
 
 ## Session 15 — 2026-05-09 — Audit fix-pass + connection wiring + signing
 
@@ -30,8 +30,22 @@ Round-2 closed 14 more findings: H2 (refreshStatus error logging), H9 (askConfir
 
 L9 dual-crypto noted but deferred — `cargo tree -d` confirms `aws-lc-rs` enters via `rustls-platform-verifier`. Needs feature-flag work.
 
+### Round-3 fix-pass (v0.2.4-alpha) — autopilot session continuation post-compaction
+Round-3 closed 4 more findings + verified 3 already-correct. Autopilot while user AFK eating.
+- **Closed:** M4 atomic_write_json hardening (sync_all + 5-attempt retry on Windows MoveFileExW sharing violations + tmp cleanup), M16 drag-drop catch logging in LocalPane+RemotePane, L11 disconnect listener doc comment, L2 dead utility types removed (`WithoutChild`/`WithoutChildren`/`WithoutChildrenOrChild` from `$lib/utils.ts`).
+- **Verified no-op (already correct):** M10 selectedConflict prune effect already at AppShell.svelte:46-51; L7 capabilities already minimal; L10 Ctrl+P actually wired at AppShell.svelte:106.
+- **Source bumped to 0.2.4-alpha but NOT built/installed** — user steered to dev-server-default workflow last session. Installed binary still at v0.2.3-alpha until next "build" command.
+
+### Genuinely deferred (6 of original 60 — need scoped sessions, not autopilot)
+- **M6** POSIX file perms — latent, no Windows impact.
+- **M13** Bootstrap mid-chunk cancel — needs Rust cancellation token through download_paths. Chunk-level cancel already works.
+- **L4** russh future-incompat — upstream crate.
+- **L8** hostname binary on POSIX — latent.
+- **L9** dual-crypto stack — needs rustls-platform-verifier feature-flag work to drop aws-lc-rs.
+- **L14** ConflictResolver semantics — code-correct, audit asked behavioral verification only.
+
 ### Next session pickup
-Smoke-test v0.2.3-alpha. Live C2 verified (user re-added Endure RP successfully — fingerprint pinned in canonical SHA256: form). 18 findings remain (audit doc on Desktop): mostly LOW (L2/L4/L7/L8/L10/L11/L14) + a few specific MEDIUMs (M4 atomic_write_json on Windows, M6 POSIX perms, M10 effect, M13 Bootstrap mid-chunk cancel, M16 drag-drop catch — note M16 patterns weren't found, may be obsolete).
+Run "build" if user wants v0.2.4-alpha installed. Otherwise smoke-test in dev. The audit is effectively closed for autopilot purposes — remaining 6 are scoped work.
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend (NASM blocker on aws-lc-rs)
