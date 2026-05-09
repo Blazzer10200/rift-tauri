@@ -92,12 +92,16 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 # vpk uploads Setup.exe + .nupkg + delta files as release assets and creates
 # the release/tag. --publish marks it published (not draft).
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
+$ghToken = (gh auth token).Trim()
+if (-not $ghToken) { throw 'gh auth token returned empty — run `gh auth login` first' }
+
 $uploadArgs = @(
     'upload', 'github',
     '--repoUrl', 'https://github.com/Blazzer10200/rift-tauri',
     '--publish',
     '--releaseName', $tag,
-    '--tag', $tag
+    '--tag', $tag,
+    '--token', $ghToken
 )
 if ($version -match '-(alpha|beta|rc)') {
     $uploadArgs += '--pre'
