@@ -44,6 +44,10 @@ Round-3 closed 4 more findings + verified 3 already-correct. Autopilot while use
 - **L9** dual-crypto stack — needs rustls-platform-verifier feature-flag work to drop aws-lc-rs.
 - **L14** ConflictResolver semantics — code-correct, audit asked behavioral verification only.
 
+### Dev tooling added this session
+- `~/Desktop/Rift Dev.lnk` → `scripts/run-dev.bat` (in repo, CRLF). Red-tinted `src-tauri/icons/icon-dev.ico` distinguishes from prod shortcut. Tauri window itself shows prod icon (compiled in) — only the desktop shortcut is differentiated.
+- "Rift" desktop shortcut still points at installed binary (v0.2.3-alpha). "Rift Dev" runs from source via `npm run tauri dev`.
+
 ### Next session pickup
 Run "build" if user wants v0.2.4-alpha installed. Otherwise smoke-test in dev. The audit is effectively closed for autopilot purposes — remaining 6 are scoped work.
 
