@@ -2,6 +2,7 @@
 
 pub mod auto_sync;
 pub mod drift_scanner;
+pub mod drift_watcher;
 pub mod edit_trail;
 pub mod ignore;
 pub mod lock_presence;

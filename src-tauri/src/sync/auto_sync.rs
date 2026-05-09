@@ -34,6 +34,7 @@ use tokio::sync::{mpsc, watch, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::bridge::BridgeClient;
+use crate::diagnostics::{self, DiagLevel, DiagStage};
 use crate::profile::ServerProfile;
 use crate::sftp::SftpClient;
 use crate::state::sync_snapshot::SHA1_MAX_BYTES;
@@ -151,10 +152,10 @@ struct DirtyEntry {
 }
 
 #[derive(Debug, Clone)]
-struct FolderWatch {
-    local_root: PathBuf,
-    remote_root: String,
-    resource_name: String,
+pub struct FolderWatch {
+    pub local_root: PathBuf,
+    pub remote_root: String,
+    pub resource_name: String,
 }
 
 const RETRY_BACKOFFS_SECS: &[u64] = &[30, 120, 600];
@@ -218,6 +219,8 @@ pub struct AutoSyncEngine {
     watcher: Mutex<Option<RecommendedWatcher>>,
     flush_task: Mutex<Option<JoinHandle<()>>>,
     event_task: Mutex<Option<JoinHandle<()>>>,
+    drift_watcher_task: Mutex<Option<JoinHandle<()>>>,
+    remote_scan_interval_secs: Arc<AtomicU64>,
     /// Tracker for fire-and-forget background tasks (lock acquire/release,
     /// bridge ping, edit-trail append). Aborted in `stop()` so they can't
     /// outlive the engine and hold stale `Arc<SftpClient>` clones.
@@ -268,6 +271,10 @@ impl AutoSyncEngine {
             watcher: Mutex::new(None),
             flush_task: Mutex::new(None),
             event_task: Mutex::new(None),
+            drift_watcher_task: Mutex::new(None),
+            remote_scan_interval_secs: Arc::new(AtomicU64::new(
+                crate::sync::drift_watcher::DEFAULT_SCAN_INTERVAL_SECS,
+            )),
             background_tasks: std::sync::Mutex::new(Vec::new()),
             stop_tx,
             disposed: AtomicBool::new(false),
@@ -283,6 +290,11 @@ impl AutoSyncEngine {
             if let Ok(ev) = res {
                 if tx.try_send(ev).is_err() {
                     log::warn!("autosync FS event channel full (cap=2048); dropping event");
+                    diagnostics::emit(
+                        DiagStage::QueueDropped,
+                        DiagLevel::Warn,
+                        "FS event channel full (cap=2048); event dropped",
+                    );
                 }
             }
         })
@@ -329,7 +341,36 @@ impl AutoSyncEngine {
         *engine.flush_task.lock().await = Some(flush_task);
 
         engine.set_state(AutoSyncState::Watching, "0 folder(s)".into()).await;
+
+        // DriftWatcher — closes the bidirectional sync loop. Polls the remote
+        // every `remote_scan_interval_secs` seconds, pulls files that drifted
+        // remotely, surfaces conflicts. Same Arc the public API holds, so it
+        // sees the same `disposed` flag and shuts down on `stop()`.
+        let dw_engine = engine.clone();
+        let dw_interval = engine.remote_scan_interval_secs.clone();
+        let dw_handle = crate::sync::drift_watcher::spawn(dw_engine, dw_interval);
+        *engine.drift_watcher_task.lock().await = Some(dw_handle);
+
         Ok(engine)
+    }
+
+    /// Update the DriftWatcher tick interval live (Settings > Sync surfaces
+    /// this). 0 = pause the watcher entirely; minimum effective tick is 5s
+    /// to avoid SFTP roundtrip stampedes on small folders.
+    pub fn set_remote_scan_interval(&self, secs: u64) {
+        self.remote_scan_interval_secs.store(secs, Ordering::Relaxed);
+        diagnostics::emit_with_fields(
+            DiagStage::System,
+            DiagLevel::Info,
+            None,
+            None,
+            format!("remote scan interval = {secs}s"),
+            serde_json::json!({ "interval_secs": secs }),
+        );
+    }
+
+    pub fn remote_scan_interval(&self) -> u64 {
+        self.remote_scan_interval_secs.load(Ordering::Relaxed)
     }
 
     pub async fn stop(&self) {
@@ -345,6 +386,13 @@ impl AutoSyncEngine {
         // want stop() to block on user-driven event flow. The DashMap ops are
         // atomic so an aborted future never leaves the map in a torn state.
         if let Some(h) = self.event_task.lock().await.take() {
+            h.abort();
+        }
+        // Drift watcher pulls and remote scans don't hold critical state — we
+        // abort rather than await; an in-flight pull may leave a partial
+        // `.rift-tmp` next to the destination but `download_file_atomic`
+        // cleans those up on the next attempt.
+        if let Some(h) = self.drift_watcher_task.lock().await.take() {
             h.abort();
         }
         // Abort any in-flight fire-and-forget tasks (lock release, bridge ping,
@@ -445,6 +493,70 @@ impl AutoSyncEngine {
             self.fire_status().await;
         }
     }
+
+    /// Snapshot of the per-rule ignore counts. Sync Inspector consumes this to
+    /// answer "why isn't my file syncing" — counts bucket by rule label
+    /// (e.g. `seg:.git`, `ext:.tmp`, `editor-lock(~$)`).
+    pub fn ignored_by_rule_snapshot(&self) -> HashMap<String, u64> {
+        self.ignored_by_rule
+            .iter()
+            .map(|kv| (kv.key().clone(), *kv.value()))
+            .collect()
+    }
+
+    // ─── DriftWatcher accessors (Phase: bidirectional sync) ──────────────────
+    //
+    // These expose the minimum surface the remote-scan watcher needs without
+    // forcing it to live inside this module. Kept narrow on purpose.
+
+    /// Cloned snapshot of currently-watched folders. Watcher uses this every
+    /// tick — a fresh clone is cheaper than holding the DashMap lock across
+    /// an SFTP roundtrip.
+    pub fn folders_clone(&self) -> Vec<FolderWatch> {
+        self.folders.iter().map(|kv| kv.value().clone()).collect()
+    }
+
+    /// `true` if a local-side push is in flight or queued. The remote-scan
+    /// loop pauses while this is set so we don't pull a file we're about to
+    /// upload, then re-flag it as drifted on the next tick.
+    pub fn is_pushing(&self) -> bool {
+        if !self.dirty.is_empty() {
+            return true;
+        }
+        // best-effort state read — if the lock is held briefly elsewhere,
+        // treat as not pushing rather than block.
+        match self.state.try_lock() {
+            Ok(g) => matches!(g.0, AutoSyncState::Syncing),
+            Err(_) => false,
+        }
+    }
+
+    /// `true` if `path` is currently sitting in the dirty queue (pending
+    /// upload). Used by the conflict-rename guard so we never overwrite a
+    /// local file that has unflushed bytes.
+    pub fn is_path_dirty(&self, path: &Path) -> bool {
+        self.dirty.contains_key(path)
+    }
+
+    /// Push a remote-pull-detected conflict into the same DashMap that local
+    /// pre-flight feeds. Surfaces in the existing Conflicts tab UI with the
+    /// existing ConflictResolver. Also fires the autosync conflict event.
+    pub fn record_remote_conflict(&self, local_path: &Path, record: ConflictRecord) {
+        let _ = self.app.emit("autosync://conflict", &record);
+        self.conflicts.insert(local_path.to_path_buf(), record);
+    }
+
+    /// Direct refs the watcher needs to download + update baseline.
+    pub fn sftp(&self) -> Arc<SftpClient> { self.sftp.clone() }
+    pub fn snapshot(&self) -> Arc<SyncSnapshot> { self.snapshot.clone() }
+    pub fn cache(&self) -> Arc<RemoteStateCache> { self.cache.clone() }
+    pub fn locks(&self) -> Option<Arc<LockPresence>> { self.locks.clone() }
+    pub fn app(&self) -> AppHandle { self.app.clone() }
+    pub fn resource_name_for(&self, remote_root: &str) -> Option<String> {
+        self.folders.get(remote_root).map(|fw| fw.resource_name.clone())
+    }
+    pub fn is_disposed(&self) -> bool { self.disposed.load(Ordering::SeqCst) }
+    pub fn track_pull_handle(&self, h: JoinHandle<()>) { self.track_background(h); }
 
     pub async fn status(&self) -> AutoSyncStatus {
         let (state, detail) = self.state.lock().await.clone();
@@ -610,6 +722,20 @@ impl AutoSyncEngine {
         if self.disposed.load(Ordering::SeqCst) {
             return;
         }
+        // Rescan signal: kernel/FSEvents/ReadDirectoryChangesW dropped events
+        // and is asking us to do a full reconcile. inotify man-page + Apple
+        // FSEvents docs both say robust apps MUST handle this — silently
+        // missing events otherwise. Auto-fire a drift scan against every
+        // watched folder so the snapshot catches up.
+        if ev.need_rescan() {
+            diagnostics::emit(
+                DiagStage::RescanSignal,
+                DiagLevel::Warn,
+                "notify reported event drop — triggering drift reconcile",
+            );
+            self.kick_drift_reconcile();
+            return;
+        }
         let kind = match ev.kind {
             EventKind::Create(_) => ChangeKind::Created,
             EventKind::Modify(_) => ChangeKind::Modified,
@@ -617,8 +743,65 @@ impl AutoSyncEngine {
             _ => return, // Access, Other — skip
         };
         for path in ev.paths {
+            // Diagnostic emit BEFORE filter so the panel shows what notify saw,
+            // even if the path is later ignored or doesn't map to a watch.
+            let path_str = path.to_string_lossy().to_string();
+            diagnostics::emit_for(
+                DiagStage::FsEvent,
+                DiagLevel::Debug,
+                None,
+                Some(&path_str),
+                format!("{kind:?}"),
+            );
             self.queue_path(path, kind);
         }
+    }
+
+    /// Fire a one-shot drift reconcile across every watched folder. Used by
+    /// the rescan-signal path AND callable from the Diagnostics panel via the
+    /// `diag_force_drift_scan` Tauri command. Background-spawned so the
+    /// notify handler isn't stalled by SFTP latency.
+    pub fn kick_drift_reconcile(&self) {
+        let folders: Vec<FolderWatch> = self
+            .folders
+            .iter()
+            .map(|kv| kv.value().clone())
+            .collect();
+        if folders.is_empty() {
+            return;
+        }
+        let sftp = self.sftp.clone();
+        let snapshot = self.snapshot.clone();
+        let h = tokio::spawn(async move {
+            diagnostics::emit(
+                DiagStage::DriftScanStart,
+                DiagLevel::Info,
+                format!("reconcile across {} folder(s)", folders.len()),
+            );
+            let scanner = crate::sync::DriftScanner::new(&sftp, Some(&snapshot));
+            let targets: Vec<crate::sync::FolderTarget> = folders
+                .iter()
+                .map(|fw| crate::sync::FolderTarget {
+                    resource_name: fw.resource_name.clone(),
+                    local_root: fw.local_root.to_string_lossy().to_string(),
+                    remote_root: fw.remote_root.clone(),
+                })
+                .collect();
+            let result = scanner.scan(&targets).await;
+            diagnostics::emit_with_fields(
+                DiagStage::DriftScanResult,
+                DiagLevel::Info,
+                None,
+                None,
+                "reconcile complete",
+                serde_json::json!({
+                    "entries": result.entries.len(),
+                    "missing_remote_folders": result.remote_folders_missing.len(),
+                    "listing_error": result.last_batch_listing_error,
+                }),
+            );
+        });
+        self.track_background(h);
     }
 
     fn queue_path(&self, path: PathBuf, kind: ChangeKind) {
@@ -630,6 +813,14 @@ impl AutoSyncEngine {
                 .entry(rule.to_string())
                 .and_modify(|n| *n += 1)
                 .or_insert(1);
+            diagnostics::emit_with_fields(
+                DiagStage::Ignored,
+                DiagLevel::Debug,
+                None,
+                Some(&path_str),
+                format!("ignored [{rule}]"),
+                serde_json::json!({ "rule": rule, "kind": format!("{kind:?}") }),
+            );
             return;
         }
         // Skip directory events (children fire their own).
@@ -673,6 +864,13 @@ impl AutoSyncEngine {
                 next_retry: now,
                 bypass_preflight: false,
             });
+        diagnostics::emit_for(
+            DiagStage::Queued,
+            DiagLevel::Debug,
+            None,
+            Some(&path_str),
+            format!("queued ({kind:?})"),
+        );
 
         // Drop a presence lock fire-and-forget on the FIRST dirty event for this
         // path in a cycle. Released on flush success (release inside process_entry)
@@ -843,7 +1041,16 @@ impl AutoSyncEngine {
                 let resource = fw.resource_name.clone();
                 let app = self.app.clone();
                 let h = tokio::spawn(async move {
+                    diagnostics::emit_for(
+                        DiagStage::BridgePing,
+                        DiagLevel::Debug,
+                        Some(&resource),
+                        None,
+                        "sync-done ping",
+                    );
+                    let started = std::time::Instant::now();
                     let r = bridge.sync_done(&resource).await;
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
                     let row = ActivityRow {
                         at: Utc::now(),
                         resource: resource.clone(),
@@ -858,6 +1065,19 @@ impl AutoSyncEngine {
                         kind: ActivityKind::Bridge,
                     };
                     let _ = app.emit("autosync://activity", &row);
+                    diagnostics::emit_with_fields(
+                        DiagStage::BridgeAck,
+                        if r.success { DiagLevel::Info } else { DiagLevel::Warn },
+                        Some(&resource),
+                        None,
+                        if r.success { "bridge ack".into() } else { format!("bridge fail: {}", r.error) },
+                        serde_json::json!({
+                            "success": r.success,
+                            "status": r.status,
+                            "error": r.error,
+                            "elapsed_ms": elapsed_ms,
+                        }),
+                    );
                 });
                 self.track_background(h);
             }
@@ -887,18 +1107,40 @@ impl AutoSyncEngine {
         };
 
         if entry.kind == ChangeKind::Deleted {
+            diagnostics::emit_for(
+                DiagStage::UploadStart,
+                DiagLevel::Debug,
+                Some(&fw.resource_name),
+                Some(&remote),
+                "delete start",
+            );
             let r = self.sftp.delete(&remote).await;
             if r.success {
                 self.failed.remove(&entry.path);
                 self.cache.forget(&remote);
                 self.snapshot.forget(&remote);
                 self.log_activity(&fw.resource_name, file_name(&entry.path), "deleted");
+                diagnostics::emit_for(
+                    DiagStage::UploadDone,
+                    DiagLevel::Info,
+                    Some(&fw.resource_name),
+                    Some(&remote),
+                    "deleted",
+                );
                 let rel = rel_of(fw, &entry.path);
                 EntryResult::Ok(Some(rel), "deleted".into())
             } else {
                 self.mark_failed(&entry);
                 self.log_activity(&fw.resource_name, file_name(&entry.path),
                     &format!("delete failed: {}", r.error));
+                diagnostics::emit_with_fields(
+                    DiagStage::UploadFail,
+                    DiagLevel::Warn,
+                    Some(&fw.resource_name),
+                    Some(&remote),
+                    format!("delete failed: {}", r.error),
+                    serde_json::json!({ "op": "delete", "error": r.error }),
+                );
                 EntryResult::Fail
             }
         } else {
@@ -928,6 +1170,14 @@ impl AutoSyncEngine {
                             "BLOCKED · locked by {}@{} — waiting",
                             foreign.user, foreign.host
                         ),
+                    );
+                    diagnostics::emit_with_fields(
+                        DiagStage::LockHeldByOther,
+                        DiagLevel::Warn,
+                        Some(&fw.resource_name),
+                        Some(&remote),
+                        format!("blocked by {}@{}", foreign.user, foreign.host),
+                        serde_json::json!({ "user": foreign.user, "host": foreign.host }),
                     );
                     return EntryResult::Requeued;
                 }
@@ -977,7 +1227,18 @@ impl AutoSyncEngine {
                 }
             }
 
+            let upload_started = std::time::Instant::now();
+            let local_size = std::fs::metadata(&entry.path).ok().map(|m| m.len()).unwrap_or(0);
+            diagnostics::emit_with_fields(
+                DiagStage::UploadStart,
+                DiagLevel::Debug,
+                Some(&fw.resource_name),
+                Some(&remote),
+                "upload start",
+                serde_json::json!({ "size": local_size }),
+            );
             let r = self.sftp.upload_file_atomic(&entry.path, &remote).await;
+            let elapsed_ms = upload_started.elapsed().as_millis() as u64;
             if r.success {
                 self.failed.remove(&entry.path);
                 // Capture authoritative server mtime.
@@ -1001,12 +1262,28 @@ impl AutoSyncEngine {
                     self.track_background(h);
                 }
                 self.log_activity(&fw.resource_name, file_name(&entry.path), "synced");
+                diagnostics::emit_with_fields(
+                    DiagStage::UploadDone,
+                    DiagLevel::Info,
+                    Some(&fw.resource_name),
+                    Some(&remote),
+                    "synced",
+                    serde_json::json!({ "size": local_size, "elapsed_ms": elapsed_ms }),
+                );
                 let rel = rel_of(fw, &entry.path);
                 EntryResult::Ok(Some(rel), "synced".into())
             } else {
                 self.mark_failed(&entry);
                 self.log_activity(&fw.resource_name, file_name(&entry.path),
                     &format!("sync failed: {}", r.error));
+                diagnostics::emit_with_fields(
+                    DiagStage::UploadFail,
+                    DiagLevel::Warn,
+                    Some(&fw.resource_name),
+                    Some(&remote),
+                    format!("sync failed: {}", r.error),
+                    serde_json::json!({ "op": "upload", "error": r.error, "elapsed_ms": elapsed_ms }),
+                );
                 EntryResult::Fail
             }
         }

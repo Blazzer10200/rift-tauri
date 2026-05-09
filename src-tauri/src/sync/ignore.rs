@@ -18,7 +18,14 @@ const IGNORE_EXTS: &[&str] = &[
     ".swp", ".tmp", ".bak", ".backup", ".pyc", ".rift-tmp", ".rift-lock",
 ];
 
-const IGNORE_FILE_EXACT: &[&str] = &["4913", ".DS_Store", "Thumbs.db", "desktop.ini"];
+const IGNORE_FILE_EXACT: &[&str] = &[
+    "4913", ".DS_Store", "Thumbs.db", "desktop.ini",
+    // Rift bookkeeping — written via direct SFTP (EditTrail), MUST NOT pass
+    // through the watch/push/pull pipeline or we get a self-loop:
+    // pull trail → notify → push → EditTrail rewrites remote trail → drift
+    // sees newer remote → pull again → forever.
+    ".rift-trail.jsonl",
+];
 
 /// Path-segment ignores. Each entry is the bare name; the matcher synthesizes
 /// `/<name>/` (and `\<name>\` on Windows).
@@ -86,6 +93,7 @@ pub fn classify(path: &str) -> Option<&'static str> {
                 ".DS_Store" => "file:.DS_Store",
                 "Thumbs.db" => "file:Thumbs.db",
                 "desktop.ini" => "file:desktop.ini",
+                ".rift-trail.jsonl" => "file:.rift-trail.jsonl",
                 _ => "file:?",
             });
         }
@@ -112,6 +120,15 @@ pub fn classify(path: &str) -> Option<&'static str> {
         if idx > 0 && idx + 8 < name.len() {
             return Some("editor-backup");
         }
+    }
+
+    // Rift conflict-rename marker — `<file>.rift-conflict.<user>-<ts>.<ext>`
+    // produced by the DriftWatcher when a remote pull would clobber a local
+    // file that's still dirty. These files are user-facing artifacts (the
+    // ConflictResolver UI surfaces them); they MUST NOT be re-uploaded as
+    // their own thing or we'd loop conflict-renames across machines.
+    if name.to_ascii_lowercase().contains(".rift-conflict.") {
+        return Some("rift-conflict-marker");
     }
 
     // <base>.tmp.<digits-or-dot> — Svelte/VSCode atomic save pattern

@@ -2,6 +2,46 @@
 
 Older session blocks flow here as new sessions land. Live handoff stays in `docs/HANDOFF.md`.
 
+## Session 18 — 2026-05-09 — v0.2.8-alpha shipped; two-repo split live
+
+### Completed
+- 7 S17 soft-spot items swept. 4 code fixes, 3 confirmed already-done.
+- `apply_updates` end-to-end: `UpdateService.apply()` (re-check → download → apply_and_restart in spawn_blocking, stops autosync+tunnel first). Dialog button live w/ `applying` state.
+- Two-repo split: public `rift-releases` created (Issues/Wiki/Projects/Discussions all OFF). `GITHUB_REPO_URL` flipped to rift-releases. `release.ps1` threads `$releaseRepo` through preflight/upload/verify.
+- `env_logger::Builder::from_env().try_init()` in `lib.rs::run()` before VelopackApp — `RUST_LOG=debug` now works.
+- Audit hygiene: L8 `.components().count()` (was `OsStr::len()`); L9 `Cow` on ignore-path normalize.
+- Confirmed already-done: M6 (atomic_write_json), L14 (dirs_home), .rift-lock release on Deleted, atomic-rename detection via `Modify(_)` wildcard.
+- Onboarding docs: README, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`, `docs/rift.json.example`.
+- v0.2.8-alpha published to rift-releases. Commit `b5298c9` on main.
+
+### Key Decisions
+- Two-repo split: velopack-rust 0.0.1298 has zero auth in AutoSource/HttpSource — public sibling is the only no-fork path.
+- `apply()` re-checks on every call (stateless UpdateService).
+
+## Session 17 — 2026-05-09 — Velopack + buddy onboarding + first public release
+
+### Completed
+- Velopack UI wired end-to-end: `UpdateDialog.svelte` (Bootstrap-pattern), global `updates.svelte.ts` runes store, sidebar `TabRail` pulse-dot pill, auto-popup on launch, Settings → About button — all reading from one shared store, single `<UpdateDialog/>` instance in AppShell
+- Audit #4 (last open CRITICAL) closed — `auto_sync.rs:277` mpsc bounded at 2048 + `try_send` + warn on overflow
+- Bridge token wired in `~/.rift/rift.json` — sync_done hot-reload now fires against FXServer `rift_bridge`
+- `scripts/release.ps1` publish pipeline — version-lockstep preflight (Cargo.toml + package.json + tauri.conf.json), `npm run tauri build`, staging dir, `vpk pack`, `vpk upload github --publish --pre --token $(gh auth token)`
+- v0.2.7-alpha published to private GitHub repo + all assets uploaded (Setup.exe, Portable.zip, .nupkg, manifest)
+- Trey (TREYDAY) pubkey appended to FXServer CT120 `/home/blazzer/.ssh/authorized_keys`; `docs/AUTHORIZED_KEYS.md` ledger committed
+- Repo flipped private (was accidentally public since creation). Releases now private-only — auto-update check will 404 for unauthenticated clients
+- Local install upgraded to v0.2.7-alpha (clean metadata, full self-replace dance)
+
+### Key Decisions
+- Single global UpdateDialog instance in AppShell (not Settings) so it works on every tab
+- Release version must match across 3 files: `Cargo.toml` + `package.json` + `tauri.conf.json`; release.ps1 enforces this
+
+## Session 16 — 2026-05-09 — End-to-end auto-sync unblocked + ship v0.2.6-alpha
+
+### Root-caused + fixed
+**russh-sftp 2.1.2 `session::write()` opens with `OpenFlags::WRITE` only** — no CREATE, no TRUNCATE. Every fresh `.rift-tmp` upload failed `NO_SUCH_FILE`. Fix: swapped both call sites to `sftp.create()` (`WRITE | CREATE | TRUNCATE`).
+
+### Operational gotcha
+**Don't run `cargo check` while `npm run tauri dev` is alive** — incremental-rebuild collision kills the running process. Restart Rift Dev manually after Rust edits.
+
 ## Session 15 — 2026-05-09 — Audit fix-pass + connection wiring + signing (complete)
 
 UI port done + 46 audit findings landed (all 5 CRITICALs, 12 of 16 HIGHs, most MEDIUMs, 6 LOWs). Backend confirmed end-to-end against homelab FXServer (C2 TOFU + auto-connect verified). SSH commit signing live + verified by GitHub.

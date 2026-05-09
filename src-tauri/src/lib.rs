@@ -7,6 +7,7 @@
 
 pub mod bootstrap;
 pub mod bridge;
+pub mod diagnostics;
 pub mod edit;
 pub mod local_fs;
 pub mod profile;
@@ -45,6 +46,179 @@ pub struct EditInPlaceState(
 /// call. None when idle. Set before the batch starts, cleared on completion or
 /// cancellation.
 pub struct DownloadState(pub AsyncMutex<Option<CancellationToken>>);
+
+// ─── Diagnostics (Sync Inspector) ────────────────────────────────────────────
+
+/// Frontend-facing snapshot of pipeline state. Aggregated from the autosync
+/// engine + diagnostics bus counters; emitted on `diag://state` every 500ms by
+/// the diag pump (see `lib::run`).
+#[derive(Debug, Clone, serde::Serialize)]
+struct DiagStateDto {
+    at: String,
+    autosync_state: Option<sync::AutoSyncState>,
+    autosync_detail: String,
+    watcher_count: usize,
+    queue_pending: usize,
+    queue_failed: usize,
+    queue_dropped_total: u64,
+    ignored_total: u64,
+    conflicts: usize,
+    last_drift_scan_at: Option<String>,
+    last_rescan_signal_at: Option<String>,
+    bus_lag_total: u64,
+    events_emitted_total: u64,
+}
+
+#[tauri::command]
+async fn diag_get_state(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<DiagStateDto, String> {
+    let g = state.0.lock().await;
+    let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts) =
+        if let Some(engine) = g.as_ref() {
+            let s = engine.status().await;
+            (
+                Some(s.state),
+                s.detail,
+                s.watches,
+                s.pending,
+                s.failed,
+                s.ignored_total,
+                s.conflicts,
+            )
+        } else {
+            (None, String::new(), 0, 0, 0, 0, 0)
+        };
+    let bus = diagnostics::bus();
+    Ok(DiagStateDto {
+        at: chrono::Utc::now().to_rfc3339(),
+        autosync_state,
+        autosync_detail,
+        watcher_count: watches,
+        queue_pending: pending,
+        queue_failed: failed,
+        queue_dropped_total: bus.queue_dropped_total(),
+        ignored_total,
+        conflicts,
+        last_drift_scan_at: bus.last_drift_scan_at().map(|d| d.to_rfc3339()),
+        last_rescan_signal_at: bus.last_rescan_signal_at().map(|d| d.to_rfc3339()),
+        bus_lag_total: bus.bus_lag_total(),
+        events_emitted_total: bus.events_emitted_total(),
+    })
+}
+
+/// Returns the on-disk path of the snapshot file for the active server.
+/// Frontend opens the file or its parent dir via the opener plugin.
+#[tauri::command]
+fn diag_snapshot_path(server_key: String) -> Result<String, String> {
+    state::paths::cache_path("snapshot", &server_key)
+        .map(|p| p.to_string_lossy().to_string())
+        .map_err(|e| format!("snapshot path: {e}"))
+}
+
+/// Diagnostics force-action: kick a drift reconcile across every watched
+/// folder for the active autosync engine. No-op if not connected. Emits
+/// DriftScanStart/Result diag events the panel surfaces.
+#[tauri::command]
+async fn diag_force_drift_scan(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else { return Ok(false) };
+    engine.kick_drift_reconcile();
+    Ok(true)
+}
+
+/// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
+/// when a sync isn't behaving. Keys are stable rule labels from
+/// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
+#[tauri::command]
+async fn diag_ignored_breakdown(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<std::collections::HashMap<String, u64>, String> {
+    let g = state.0.lock().await;
+    Ok(match g.as_ref() {
+        Some(engine) => engine.ignored_by_rule_snapshot(),
+        None => std::collections::HashMap::new(),
+    })
+}
+
+/// Update DriftWatcher tick interval (seconds). 0 = paused. Settings>Sync
+/// calls this when the user picks a different interval. Persists for the
+/// active autosync session; resets to default on next connect.
+#[tauri::command]
+async fn set_remote_scan_interval(
+    secs: u64,
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<(), String> {
+    let g = state.0.lock().await;
+    if let Some(engine) = g.as_ref() {
+        engine.set_remote_scan_interval(secs);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_remote_scan_interval(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<u64, String> {
+    let g = state.0.lock().await;
+    Ok(g.as_ref()
+        .map(|e| e.remote_scan_interval())
+        .unwrap_or(sync::drift_watcher::DEFAULT_SCAN_INTERVAL_SECS))
+}
+
+/// Periodic pipeline-state snapshot emitter. 500ms cadence — fast enough for
+/// the Diagnostics tab to feel live, slow enough to stay invisible to the
+/// rest of the app. Runs forever; first emit waits one tick so the autosync
+/// engine has a chance to register if the user just connected.
+async fn diag_state_pump(app: tauri::AppHandle) {
+    use tauri::Emitter;
+    use tauri::Manager;
+
+    let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        // Pull current autosync status off the managed engine (None if not
+        // connected). Mirrors `diag_get_state` w/o the command-handler boilerplate.
+        let st = app.state::<AutoSyncState>();
+        let g = st.0.lock().await;
+        let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts) =
+            if let Some(engine) = g.as_ref() {
+                let s = engine.status().await;
+                (
+                    Some(s.state),
+                    s.detail,
+                    s.watches,
+                    s.pending,
+                    s.failed,
+                    s.ignored_total,
+                    s.conflicts,
+                )
+            } else {
+                (None, String::new(), 0, 0, 0, 0, 0)
+            };
+        drop(g);
+        let bus = diagnostics::bus();
+        let dto = DiagStateDto {
+            at: chrono::Utc::now().to_rfc3339(),
+            autosync_state,
+            autosync_detail,
+            watcher_count: watches,
+            queue_pending: pending,
+            queue_failed: failed,
+            queue_dropped_total: bus.queue_dropped_total(),
+            ignored_total,
+            conflicts,
+            last_drift_scan_at: bus.last_drift_scan_at().map(|d| d.to_rfc3339()),
+            last_rescan_signal_at: bus.last_rescan_signal_at().map(|d| d.to_rfc3339()),
+            bus_lag_total: bus.bus_lag_total(),
+            events_emitted_total: bus.events_emitted_total(),
+        };
+        let _ = app.emit("diag://state", &dto);
+    }
+}
 
 #[tauri::command]
 fn app_version() -> String {
@@ -826,10 +1000,9 @@ async fn list_watched_edits(
 pub fn run() {
     // Logger init BEFORE VelopackApp::build() so install/update lifecycle
     // events surface in stderr. RUST_LOG controls level; default = info.
-    let _ = env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .try_init();
+    // LogForwarder also mirrors every log line into the diagnostics bus so
+    // the Sync Inspector picks them up alongside structured pipeline events.
+    diagnostics::LogForwarder::install();
 
     velopack::VelopackApp::build().run();
 
@@ -839,6 +1012,15 @@ pub fn run() {
         .manage(TunnelState(AsyncMutex::new(None)))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
+        .setup(|app| {
+            // Diagnostics: stream bus events to the frontend (`diag://event`)
+            // and emit a periodic pipeline-state snapshot (`diag://state`)
+            // every 500ms. Both run for the life of the process.
+            let app_handle = app.handle().clone();
+            diagnostics::spawn_frontend_pump(app_handle.clone());
+            tauri::async_runtime::spawn(diag_state_pump(app_handle));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             app_version,
             scan_drift,
@@ -873,6 +1055,12 @@ pub fn run() {
             save_edit_in_place,
             close_edit_in_place,
             list_watched_edits,
+            diag_get_state,
+            diag_snapshot_path,
+            diag_force_drift_scan,
+            diag_ignored_breakdown,
+            set_remote_scan_interval,
+            get_remote_scan_interval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

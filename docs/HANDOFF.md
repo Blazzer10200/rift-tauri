@@ -2,76 +2,50 @@
 
 > Live handoff = current session block. Older sessions flow to `archive/HANDOFF-archive.md`.
 
-## Session 18 — 2026-05-09 — v0.2.8-alpha shipped; two-repo split live
+## Session 19 — 2026-05-09 — v0.2.9-alpha: Sync Inspector + bidirectional sync + bridge fix
+
+The sync wheel is now closed in both directions and Rift has a one-button diagnostic surface so the next bug doesn't take a full session to triage. User went to bed mid-session; ship + push + power-down were autopiloted.
 
 ### Completed
-- 7 S17 soft-spot items swept. 4 code fixes, 3 confirmed already-done.
-- `apply_updates` end-to-end: `UpdateService.apply()` (re-check → download → apply_and_restart in spawn_blocking, stops autosync+tunnel first). Dialog button live w/ `applying` state. ([update_service.rs](../src-tauri/src/update_service.rs), [lib.rs:apply_updates cmd](../src-tauri/src/lib.rs), [updates.svelte.ts](../src/lib/state/updates.svelte.ts), [UpdateDialog.svelte](../src/lib/components/dialogs/UpdateDialog.svelte))
-- Two-repo split: public `rift-releases` created (Issues/Wiki/Projects/Discussions all OFF). `GITHUB_REPO_URL` flipped to rift-releases ([update_service.rs:17](../src-tauri/src/update_service.rs#L17)). `release.ps1` threads `$releaseRepo` through preflight/upload/verify.
-- `env_logger::Builder::from_env().try_init()` in `lib.rs::run()` before VelopackApp — `RUST_LOG=debug` now works.
-- Audit hygiene: L8 `.components().count()` (was `OsStr::len()`); L9 `Cow` on ignore-path normalize.
-- Confirmed already-done: M6 (atomic_write_json), L14 (dirs_home), .rift-lock release on Deleted, atomic-rename detection via `Modify(_)` wildcard.
-- Onboarding docs: README, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`, `docs/rift.json.example`.
-- rift-tauri source repo: description + 8 topics set, homepage → rift-releases.
-- v0.2.8-alpha published to rift-releases (had to bootstrap with README commit first — GH rejects publish on empty repo). Commit `b5298c9` on main.
+- **Sync Inspector** ([Diagnostics.svelte](../src/lib/components/diagnostics/Diagnostics.svelte) + [diagnostics.svelte.ts](../src/lib/state/diagnostics.svelte.ts) + [diagnostics/mod.rs](../src-tauri/src/diagnostics/mod.rs)): hidden tab via Ctrl+Shift+D, 14 live state tiles, virtualized event stream w/ expandable JSON rows, one-button "Copy diagnostic report" that bundles state + last 200 diag events + last 100 activity rows + sanitized profile + locks + conflicts + ignored-by-rule histogram. Inline scan-interval picker.
+- **Bidirectional sync** ([sync/drift_watcher.rs](../src-tauri/src/sync/drift_watcher.rs)): periodic remote-scan loop spawned on engine start, ticks every 30s (configurable). Auto-pulls `ToPull` entries, registers `Conflict` entries via existing UI, sidesteps to `<file>.rift-conflict.<user>@<host>-<ts>.<ext>` if local file is dirty (Syncthing's safety model). Respects cross-dev `LockPresence`. Tested live: server-side edit to `[endure]/endure_skills/README.md` pulled within ~30s.
+- **Rescan handler**: `notify::Event::need_rescan()` now auto-fires drift reconcile. Fixes silent kernel/FSEvents drops.
+- **Bridge URL fix** ([bridge/mod.rs](../src-tauri/src/bridge/mod.rs)): `BridgeClient` URLs now correctly include `/rift_bridge/` path prefix (FXServer `SetHttpHandler` routes under resource name). User's profile `bridgePort` corrected 30121 → 30120 (FXServer game port — `SetHttpHandler` does not bind its own port).
+- **Trail-loop fix** ([sync/ignore.rs](../src-tauri/src/sync/ignore.rs)): `.rift-trail.jsonl` added to ignore patterns. Stops the pull→notify→push→trail-rewrite→loop forever pattern observed live.
+- **20+ new diag emit points**: UploadStart/Done/Fail (with size+elapsed_ms+error), LockHeldByOther, BridgePing/Ack, RemoteScan, RemotePull. Every pipeline step traceable.
+- v0.2.9-alpha bumped + shipped.
 
 ### Key Decisions
-- Two-repo split: velopack-rust 0.0.1298 has zero auth in AutoSource/HttpSource — public sibling is the only no-fork path.
-- `apply()` re-checks on every call (stateless UpdateService). Redundant ~1s roundtrip but avoids caching the native `UpdateInfo` type across command boundaries.
-
-### Next Steps
-1. **Sync issues** — user flagged "issues with syncing" then redirected to ship. First task next session: get symptom + reproduce path (dev vs installed, file type, autosync vs edit-in-place vs drift).
-2. Add Trey as repo collaborator (GitHub handle still unknown — confirm when he's back).
-3. Code-signing cert (audit H4) — SmartScreen flags every fresh Setup.exe install.
-4. Onboarding docs phase B/C: `docs/ONBOARDING.md` is Trey-targeted; update when he's onboarded and hits gaps.
+- Bidirectional polling (30s) is the architecturally correct answer — verified by WinSCP docs (SFTP has no notify channel) and Syncthing's own design (watcher + periodic scan because watchers miss events).
+- Conflict-rename safety net is non-negotiable: NEVER overwrite a dirty local file. Pull to a sibling path, surface ConflictRecord.
+- Stick with `log` crate, not `tracing` migration. `LogForwarder` mirrors every existing log macro into the diag bus + chains to env_logger. Zero existing-call-site invasion.
 
 ### Don't Touch
-- `GITHUB_REPO_URL` must stay as `rift-releases` — never flip back to `rift-tauri` (was private, AutoSource has no auth).
-- `release.ps1` must use `$releaseRepo` for ALL gh + vpk calls. The v0.2.7-alpha + v0.1.0-alpha releases in rift-tauri are orphaned — clients no longer poll them.
-
-### Files Modified
-- `src-tauri/src/update_service.rs` — `apply()` method + `GITHUB_REPO_URL` flip
-- `src-tauri/src/lib.rs` — `apply_updates` command + env_logger init
-- `src-tauri/src/sync/auto_sync.rs:477,646` — L8 sort fix
-- `src-tauri/src/sync/ignore.rs:59` — L9 Cow
-- `src/lib/state/updates.svelte.ts` — `apply()` + `applying` state
-- `src/lib/components/dialogs/UpdateDialog.svelte` — button live + applying branch
-- `scripts/release.ps1` — two-repo split wired
-- `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` — bumped to 0.2.8-alpha
-- `docs/CHANGELOG.md`, `docs/archive/CHANGELOG-archive.md`
-- `README.md`, `docs/ONBOARDING.md` (new), `docs/CONTRIBUTING.md` (new), `docs/rift.json.example` (new)
-
----
-
-## Session 17 — 2026-05-09 — Velopack + buddy onboarding + first public release
-
-### Completed
-- Velopack UI wired end-to-end: `UpdateDialog.svelte` (Bootstrap-pattern), global `updates.svelte.ts` runes store, sidebar `TabRail` pulse-dot pill, auto-popup on launch, Settings → About button — all reading from one shared store, single `<UpdateDialog/>` instance in AppShell
-- Audit #4 (last open CRITICAL) closed — `auto_sync.rs:277` mpsc bounded at 2048 + `try_send` + warn on overflow
-- Bridge token wired in `~/.rift/rift.json` — sync_done hot-reload now fires against FXServer `rift_bridge`
-- `scripts/release.ps1` publish pipeline — version-lockstep preflight (Cargo.toml + package.json + tauri.conf.json), `npm run tauri build`, staging dir, `vpk pack`, `vpk upload github --publish --pre --token $(gh auth token)`
-- v0.2.7-alpha published to private GitHub repo + all assets uploaded (Setup.exe, Portable.zip, .nupkg, manifest)
-- Trey (TREYDAY) pubkey appended to FXServer CT120 `/home/blazzer/.ssh/authorized_keys`; `docs/AUTHORIZED_KEYS.md` ledger committed
-- Repo flipped private (was accidentally public since creation). Releases now private-only — auto-update check will 404 for unauthenticated clients
-- Local install upgraded to v0.2.7-alpha (clean metadata, full self-replace dance)
-
-### Key Decisions
-- Single global UpdateDialog instance in AppShell (not Settings) so it works on every tab
-- Release version must match across 3 files: `Cargo.toml` + `package.json` + `tauri.conf.json`; release.ps1 enforces this
-- Repo private → Velopack AutoSource hits 404 for unauth. Two paths: stay manual (Trey gets Setup.exe out-of-band) or split source/releases into two repos. Deferred to next session.
+- `bridgePort` in profile MUST stay 30120 (FXServer game port). 30121 was a configuration drift; resource uses `SetHttpHandler` which doesn't bind a separate port.
+- `.rift-trail.jsonl` ignore rule MUST stay in place. Removing it reintroduces the pull→push loop within seconds.
+- Frontend pump uses `tauri::async_runtime::spawn`, NOT `tokio::spawn`. The `setup()` hook fires before the tokio runtime is attached to that thread.
 
 ### Next Steps
-1. Decide: stay manual update or two-repo split (private source + public releases-only repo) for working auto-update
-2. Wire `apply_updates` Tauri command to enable the "Install & restart" button in UpdateDialog
-3. Phase B/C/D buddy onboarding docs: README rewrite, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`, `docs/rift.json.example` — do when Trey is back
-4. Add Trey's GitHub handle as repo collaborator (handle unknown — confirm w/ him on return)
-5. Deferred audit items: M6, L8, L9, L14 (scoped work, not blocking)
+1. **Verify the bridge fix works in practice** — next session: connect, save a file, watch for `bridge_ack: success` instead of WARN. If still failing, check that `[endure]/rift_bridge` is `started` in txAdmin (was found on disk but not listening on 30120).
+2. **Stale `.rift-lock` cleanup** — saw 3 orphans on the FXServer (`fxmanifest.lua.tmp.*.rift-lock`) from prior crash sessions. Sweep manually or add a stale-lock GC pass on engine start.
+3. **Code-signing cert** (audit H4) — SmartScreen still flags every fresh Setup.exe.
+4. **Optional polish**: edit-trail mtime fast-path in DriftWatcher (skip full scan if trail unchanged AND not on every-Nth full-scan tick). Saves SFTP roundtrips on quiet runs.
 
 ### Files Modified
-- `src/lib/components/dialogs/UpdateDialog.svelte` (new), `src/lib/state/updates.svelte.ts` (new)
-- `src/lib/components/AppShell.svelte`, `src/lib/components/shell/TabRail.svelte`, `src/lib/components/settings/Settings.svelte`
-- `src-tauri/src/sync/auto_sync.rs:277-285` (bounded mpsc), `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, `package.json`
-- `scripts/release.ps1` (new), `docs/AUTHORIZED_KEYS.md` (new), `.gitignore`, `docs/CHANGELOG.md`, `docs/archive/CHANGELOG-archive.md`
+- `src-tauri/src/diagnostics/mod.rs` (NEW)
+- `src-tauri/src/sync/drift_watcher.rs` (NEW)
+- `src-tauri/src/sync/auto_sync.rs` (emit points + DriftWatcher integration + accessors)
+- `src-tauri/src/sync/ignore.rs` (`.rift-trail.jsonl` + `.rift-conflict.` patterns)
+- `src-tauri/src/sync/mod.rs` (re-export DriftWatcher module)
+- `src-tauri/src/bridge/mod.rs` (path prefix fix)
+- `src-tauri/src/lib.rs` (diag commands + DriftWatcher state + setup hook spawn)
+- `src/lib/components/diagnostics/Diagnostics.svelte` (NEW)
+- `src/lib/state/diagnostics.svelte.ts` (NEW)
+- `src/lib/components/AppShell.svelte` (Ctrl+Shift+D + tab routing + palette entry)
+- `src/lib/components/shell/TabRail.svelte` (Tab type)
+- `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` (0.2.9-alpha)
+- `~/.rift/rift.json` (bridgePort 30121 → 30120, user-side data)
+- `docs/CHANGELOG.md` + `docs/archive/CHANGELOG-archive.md`
 
 ---
 
@@ -79,30 +53,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09. Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S16):** **v0.2.6-alpha shipped to GitHub + installed.** Source = `%LOCALAPPDATA%\Rift\rift-tauri.exe` = `0.2.6-alpha`. Auto-sync now end-to-end verified live against the homelab FXServer (single-file edit, 5-file burst write, 2 MB binary SHA1-match, delete propagation — all clean). Audit officially closed for autopilot purposes; remaining 4 deferreds (M6, L8, L9, L14) are all scoped work.
-
-## Session 16 — 2026-05-09 — End-to-end auto-sync unblocked + ship v0.2.6-alpha
-
-### Root-caused + fixed
-**russh-sftp 2.1.2 `session::write()` opens with `OpenFlags::WRITE` only** — no CREATE, no TRUNCATE. Every fresh `.rift-tmp` upload failed `NO_SUCH_FILE`. Same code path also left trailing garbage in `upload_bytes` when new payloads were shorter than existing files.
-
-Fix: swapped both call sites to `sftp.create()` (`WRITE | CREATE | TRUNCATE`):
-- `upload_atomic_via` ([sftp/mod.rs:1024-1037](src-tauri/src/sftp/mod.rs#L1024-L1037)) — primary file-sync path.
-- `upload_bytes` ([sftp/mod.rs:864-876](src-tauri/src/sftp/mod.rs#L864-L876)) — used by edit-trail + lock-presence heartbeats.
-
-### Verified live (FXServer @ 192.168.1.170)
-4-test autonomous pass: single-file edit ✓, 5-file burst ✓, 2 MB binary SHA1 match ✓, delete propagation ✓. All file types eligible (no allow-list / size cap); ignore module blocks junk only.
-
-### Found, not fixed (deferred)
-- **`.rift-lock` orphan after source delete** — lock-presence heartbeat not released on `Deleted` events. Minor, swept manually during teardown.
-- **Logs not flushing in dev mode** — `~/.rift/rift-autosync.log` buffers until process exit. Diagnostic blind-spot.
-- **Write-tool atomic save not seen by notify-rs** — Edit (in-place modify) reliable; tool-level atomic-rename creates may need IDE-real-save verification.
-
-### Operational gotcha (added to project CLAUDE.md)
-**Don't run `cargo check` while `npm run tauri dev` is alive** — it kills the running Rift Dev process via incremental-rebuild collision. Restart Rift Dev manually after Rust edits.
-
-### Shipped
-Commit `29da529` pushed to `main`. Bundles v0.2.5-alpha agent-driven sweep (M13 cancel-tokens, russh 0.60, Vitest harness) + v0.2.6-alpha russh-sftp fix.
+**Current state (post S19):** **v0.2.9-alpha shipped.** Bidirectional sync live (local→remote watcher + remote→local 30s polling). Sync Inspector tab at Ctrl+Shift+D — one button gives Claude every diagnostic signal. Bridge URL fix should restore FXServer hot-reload (verify next session).
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend (NASM blocker on aws-lc-rs)
@@ -115,3 +66,6 @@ Commit `29da529` pushed to `main`. Bundles v0.2.5-alpha agent-driven sweep (M13 
 - Tauri 2: `core:default` lacks `window:allow-*` — explicit perms required for custom titlebar
 - WPF fingerprint format: `<keytype> <bits> <b64>` w/o `SHA256:` — substring match strips the prefix to handle both shapes
 - russh-sftp `session::write()` is WRITE-only; use `session::create()` for any "write a new file" path
+- DriftWatcher conflict-rename guard MUST stay — never overwrite a dirty local file
+- `.rift-trail.jsonl` ignore rule MUST stay — pull→push loop reappears instantly without it
+- `bridgePort: 30120` in profile — `SetHttpHandler` resources route through FXServer's main HTTP port, not a separate one

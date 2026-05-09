@@ -3,7 +3,7 @@
   import { connection } from "../../state/connection.svelte";
   import { updates } from "../../state/updates.svelte";
 
-  type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings";
+  type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings" | "diagnostics";
 
   let { active, onChange }: {
     active: Tab;

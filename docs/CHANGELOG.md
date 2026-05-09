@@ -2,20 +2,21 @@
 
 > Live changelog = current version only. Older entries archive to `archive/CHANGELOG-archive.md` on bump.
 
-## v0.2.8-alpha — 2026-05-09 — apply_updates wired + two-repo split + S17 soft-spot sweep
+## v0.2.9-alpha — 2026-05-09 — Sync Inspector + bidirectional sync + bridge URL fix
 
-Update dialog button now actually installs. Auto-update path moved to a public sibling repo so unauthenticated clients can pull. Audit deferred items + onboarding docs cleaned up.
+Closes the sync wheel both directions and ships a one-button diagnostic surface so the next bug doesn't take a full session to triage.
 
 ### Landed
 
-- **`apply_updates` end-to-end** — `UpdateService.apply()` re-checks → `download_updates` → `apply_updates_and_restart` (blocking, exits the process). Tauri command stops AutoSync + tunnel before `spawn_blocking` so in-flight uploads don't die mid-transfer. Frontend store gets an `applying` state; dialog button no longer disabled. ([update_service.rs](../src-tauri/src/update_service.rs), [lib.rs](../src-tauri/src/lib.rs), [updates.svelte.ts](../src/lib/state/updates.svelte.ts), [UpdateDialog.svelte](../src/lib/components/dialogs/UpdateDialog.svelte))
-- **Two-repo split for auto-update** — Releases now publish to public `Blazzer10200/rift-releases` (no airholes — Issues/Wiki/Projects/Discussions all off). Velopack-rust 0.0.1298 has no auth in `AutoSource`, so the public sibling is the only no-fork path. Source repo stays private. `release.ps1` threads `$releaseRepo` through preflight + `vpk upload` + post-publish verify.
-- **Logger init** — `env_logger::Builder::from_env(...).try_init()` early in `run()`. All `log::info!/warn!` calls were silent no-ops before; `RUST_LOG=debug` now surfaces sync activity.
-- **Onboarding docs** — README rewrite, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`, `docs/rift.json.example`. Trey-targeted, ≤300 words each per project doc cap.
-- **Audit hygiene** — L8 `sort_by_key` switched from `OsStr::len()` (WTF-16 on Win) to `.components().count()`. L9 ignore-path normalize allocates only when `\\` present (`Cow`). M6 + L14 confirmed already done.
+- **Sync Inspector** — new hidden tab at Ctrl+Shift+D. 14 live state tiles (autosync, queue, ignored, locks, conflicts, last remote scan, pulled, last drift, bus lag, total emitted, …). Live event stream w/ expandable JSON rows. One big "Copy diagnostic report" button bundles state + last 200 diag events + last 100 activity rows + profile (sanitized) + locks + conflicts + ignored-by-rule histogram into clipboard JSON. Inline scan-interval picker. ([Diagnostics.svelte](../src/lib/components/diagnostics/Diagnostics.svelte), [diagnostics.svelte.ts](../src/lib/state/diagnostics.svelte.ts), [diagnostics/mod.rs](../src-tauri/src/diagnostics/mod.rs))
+- **Bidirectional sync** — new `DriftWatcher` task on the engine, ticks every 30s (configurable 15s/30s/1m/2m/5m/off). Auto-pulls `ToPull` entries, registers `Conflict` entries in the existing UI, **never overwrites a dirty local file** — sidesteps to `<file>.rift-conflict.<user>@<host>-<ts>.<ext>` per Syncthing's safety model. Respects cross-dev `LockPresence`. ([sync/drift_watcher.rs](../src-tauri/src/sync/drift_watcher.rs))
+- **Rescan handler** — `notify::Event::need_rescan()` now auto-fires a drift reconcile. Kernel/FSEvents drops are no longer silent.
+- **Bridge URL fix** — `BridgeClient` URLs now correctly prefix `/rift_bridge/` (FXServer `SetHttpHandler` routes under the resource name). Profile `bridgePort` corrected 30121 → 30120 (FXServer game port). Hot-reload pings stop failing. ([bridge/mod.rs](../src-tauri/src/bridge/mod.rs))
+- **Trail-loop fix** — `.rift-trail.jsonl` added to ignore patterns. Stops the pull → notify → push → EditTrail-rewrite-trail → drift-sees-newer → loop.
+- **20+ new diag emit points** across upload/lock/bridge/remote-scan/remote-pull paths; every step traceable in the panel.
 
 ### Verify
 
-- `cargo check`: clean. `svelte-check`: clean (1 pre-existing warning unrelated). Existing e2e auto-sync paths untouched.
+- `cargo check`: clean. `svelte-check`: 0 errors. Bidirectional pull tested live against homelab FXServer.
 
-v0.2.7-alpha archived.
+v0.2.8-alpha archived.
