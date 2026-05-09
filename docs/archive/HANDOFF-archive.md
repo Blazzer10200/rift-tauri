@@ -2,6 +2,35 @@
 
 Older session blocks flow here as new sessions land. Live handoff stays in `docs/HANDOFF.md`.
 
+## Session 9 — 2026-05-08 — Phase 5 dialogs + 1i closure + cleanup
+
+### New components (`src/lib/components/dialogs/`)
+- **`AddServer.svelte`** — 3-step stepper (Connection → Workspace → Bridge & Save) w/ per-step validation, summary card, edit-mode pre-fill, auto-suggest display name from host, `txAdmin` URL test via `plugin:opener|openUrl`.
+- **`Bootstrap.svelte`** — 6-state-aware UI driven by `detect_bootstrap` payload; chunked download via `bootstrap_list_files` + `download_paths` (50/chunk progress).
+- **`Keygen.svelte`** — wraps existing `default_ssh_key_exists` / `generate_default_ssh_key` / `read_default_ssh_pub_key`; Copy pubkey via `navigator.clipboard`.
+- **`Reupload.svelte`** — Skip / Always / Re-upload triplet. Wired for future edit-in-place + autosync prompts.
+- **`Confirm.svelte`** — generic Yes/No w/ `isDanger` styling + optional "Don't ask again" checkbox.
+- **`CommandPalette.svelte`** — Ctrl+K. Tokenized AND-match fuzzy filter over registered actions; ↑↓/Enter/Esc keybinds; mouse hover sets selection.
+
+### Backend additions (lib.rs + profile/mod.rs)
+- **`save_server(profile, edit_key)`** — adds or updates a server. `editKey=None` → slugify name + `unique_key` collision resolution. Edit mode preserves stable key + existing fingerprint.
+- **`delete_server(key)`** — removes profile; if it was `last_selected`, falls back to first remaining server.
+- **`bootstrap_list_files(server_key, local_root)`** — recursive remote walk (depth 8, skips `[disabled]/`) returning (remote, local) job pairs ready for `download_paths`.
+- **`profile::slugify`** + **`profile::unique_key`** + **`RiftConfig::save`** — write-back foundation.
+- **TOFU fingerprint persist** — `persist_fingerprint_if_new(key, fp)` called from `open_sftp_for` + `start_autosync` + `scan_drift` after successful connect when profile fingerprint is empty. Refuses to silently overwrite a mismatched pinned value (logs `warn!`).
+
+### Wire-up
+- `ServerPicker` rewired w/ Add/Edit/Delete buttons + Setup-key launcher.
+- `AppShell` mounts all 6 dialogs as state-driven components, registers 11 commands (Switch / Add / Setup-key / Bootstrap / 5 tab-jumps / Disconnect / Reload), binds Ctrl+K (palette) + Ctrl+P (picker), surfaces Settings tab w/ direct buttons.
+- `connection.svelte.ts` adds `deleteServer(key)` helper.
+
+### Cleanup
+- Removed Phase 0 stubs from `lib.rs`: `sftp_list` cmd, `ConnectArgs`/`ListEntry` types, `Client` Handler, `connect_sftp`, `addr_to_string`, duplicate `load_servers` cmd. ~110L dead code gone.
+- Bumped to v0.1.4 across `Cargo.toml`, `package.json`, `tauri.conf.json`.
+
+### Verified
+`cargo check` ✓ · `cargo clippy --lib --tests` ✓ zero warnings · `cargo test --lib` 47/47 ✓ · `npm run check` 0 errors 0 warnings.
+
 ## Session 8 — 2026-05-08 — Phase 4 (sync surfaces UI)
 
 Wired four placeholder sidebar tabs + lock badges + edit-in-place flow.
