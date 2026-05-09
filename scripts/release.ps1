@@ -50,9 +50,17 @@ if ($dirty) {
 }
 
 # --- Preflight: tag does not already exist ------------------------------
-$existing = gh release view $tag --json tagName 2>$null
-if ($existing) {
-    throw "GitHub release $tag already exists. Bump version or delete the release first."
+# `gh release view` exits non-zero + writes to stderr when the release isn't
+# found, which trips ErrorAction=Stop on PS5.1. Wrap to swallow the not-found
+# case and only throw if the release actually exists (exit 0).
+try {
+    $null = gh release view $tag --json tagName 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        throw "GitHub release $tag already exists. Bump version or delete the release first."
+    }
+} catch [System.Management.Automation.RuntimeException] {
+    if ($_.Exception.Message -like '*already exists*') { throw }
+    # else: not-found — proceed
 }
 
 # --- Build ---------------------------------------------------------------
