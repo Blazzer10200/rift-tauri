@@ -2,6 +2,47 @@
 
 > Live handoff = current session block. Older sessions flow to `archive/HANDOFF-archive.md`.
 
+## Session 18 — 2026-05-09 — v0.2.8-alpha shipped; two-repo split live
+
+### Completed
+- 7 S17 soft-spot items swept. 4 code fixes, 3 confirmed already-done.
+- `apply_updates` end-to-end: `UpdateService.apply()` (re-check → download → apply_and_restart in spawn_blocking, stops autosync+tunnel first). Dialog button live w/ `applying` state. ([update_service.rs](../src-tauri/src/update_service.rs), [lib.rs:apply_updates cmd](../src-tauri/src/lib.rs), [updates.svelte.ts](../src/lib/state/updates.svelte.ts), [UpdateDialog.svelte](../src/lib/components/dialogs/UpdateDialog.svelte))
+- Two-repo split: public `rift-releases` created (Issues/Wiki/Projects/Discussions all OFF). `GITHUB_REPO_URL` flipped to rift-releases ([update_service.rs:17](../src-tauri/src/update_service.rs#L17)). `release.ps1` threads `$releaseRepo` through preflight/upload/verify.
+- `env_logger::Builder::from_env().try_init()` in `lib.rs::run()` before VelopackApp — `RUST_LOG=debug` now works.
+- Audit hygiene: L8 `.components().count()` (was `OsStr::len()`); L9 `Cow` on ignore-path normalize.
+- Confirmed already-done: M6 (atomic_write_json), L14 (dirs_home), .rift-lock release on Deleted, atomic-rename detection via `Modify(_)` wildcard.
+- Onboarding docs: README, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`, `docs/rift.json.example`.
+- rift-tauri source repo: description + 8 topics set, homepage → rift-releases.
+- v0.2.8-alpha published to rift-releases (had to bootstrap with README commit first — GH rejects publish on empty repo). Commit `b5298c9` on main.
+
+### Key Decisions
+- Two-repo split: velopack-rust 0.0.1298 has zero auth in AutoSource/HttpSource — public sibling is the only no-fork path.
+- `apply()` re-checks on every call (stateless UpdateService). Redundant ~1s roundtrip but avoids caching the native `UpdateInfo` type across command boundaries.
+
+### Next Steps
+1. **Sync issues** — user flagged "issues with syncing" then redirected to ship. First task next session: get symptom + reproduce path (dev vs installed, file type, autosync vs edit-in-place vs drift).
+2. Add Trey as repo collaborator (GitHub handle still unknown — confirm when he's back).
+3. Code-signing cert (audit H4) — SmartScreen flags every fresh Setup.exe install.
+4. Onboarding docs phase B/C: `docs/ONBOARDING.md` is Trey-targeted; update when he's onboarded and hits gaps.
+
+### Don't Touch
+- `GITHUB_REPO_URL` must stay as `rift-releases` — never flip back to `rift-tauri` (was private, AutoSource has no auth).
+- `release.ps1` must use `$releaseRepo` for ALL gh + vpk calls. The v0.2.7-alpha + v0.1.0-alpha releases in rift-tauri are orphaned — clients no longer poll them.
+
+### Files Modified
+- `src-tauri/src/update_service.rs` — `apply()` method + `GITHUB_REPO_URL` flip
+- `src-tauri/src/lib.rs` — `apply_updates` command + env_logger init
+- `src-tauri/src/sync/auto_sync.rs:477,646` — L8 sort fix
+- `src-tauri/src/sync/ignore.rs:59` — L9 Cow
+- `src/lib/state/updates.svelte.ts` — `apply()` + `applying` state
+- `src/lib/components/dialogs/UpdateDialog.svelte` — button live + applying branch
+- `scripts/release.ps1` — two-repo split wired
+- `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` — bumped to 0.2.8-alpha
+- `docs/CHANGELOG.md`, `docs/archive/CHANGELOG-archive.md`
+- `README.md`, `docs/ONBOARDING.md` (new), `docs/CONTRIBUTING.md` (new), `docs/rift.json.example` (new)
+
+---
+
 ## Session 17 — 2026-05-09 — Velopack + buddy onboarding + first public release
 
 ### Completed
