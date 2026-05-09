@@ -1,0 +1,10 @@
+html, body, #app, #svelte {
+  height: 100%;
+}
+
+body {
+  background: #0F0F12;
+  color: #E8E8EE;
+  font-family: system-ui, sans-serif;
+  margin: 0;
+}
