@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.1.0"
+version = "0.1.4"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -40,3 +40,24 @@ anyhow = "1"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
+
+# SHA1 — pure Rust (RustCrypto). Used by SyncSnapshot for content-hash drift jitter
+# elimination + first-scan equality. NOT cryptographically-strong needs; matches
+# the WPF side's System.Security.Cryptography.SHA1.
+sha1 = "0.10"
+dashmap = "6.1.0"
+walkdir = "2.5.0"
+notify-debouncer-full = "0.7.0"
+futures = "0.3.32"
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy"] }
+
+# Phase 1h: server pubkey fingerprint pinning (OpenSSH-style SHA256:base64).
+# `sha2` for the digest, `base64` w/ NO_PAD engine to match OpenSSH's
+# `ssh-keygen -lf` output. Profile field `fingerprint` is also accepted in WPF's
+# WinSCP format (`ssh-ed25519 256 SHA256:xxx`) via substring match in Handler.
+sha2 = "0.10"
+base64 = "0.22"
+
+# Phase 1j: ed25519 keypair generation for SshKeygen. ssh-key types come via
+# russh::keys; rand provides the OsRng required by `PrivateKey::random`.
+rand = "0.8"
