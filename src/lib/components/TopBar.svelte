@@ -35,12 +35,14 @@
     "offline"
   );
 
-  const connCfg: Record<ConnState, { cls: string; label: string; detail: string }> = {
+  // Audit M18: wrap in $derived.by so detail strings re-evaluate when the
+  // underlying state changes (fingerprint, status.detail).
+  const connCfg = $derived.by<Record<ConnState, { cls: string; label: string; detail: string }>>(() => ({
     connected:  { cls: "ok",     label: "Connected",  detail: connection.selected?.fingerprint ? `ed25519 · ${connection.selected.fingerprint.slice(0, 18)}…` : "ed25519" },
     connecting: { cls: "info",   label: "Connecting", detail: "handshake" },
     error:      { cls: "danger", label: "Error",      detail: connection.status?.detail ?? "auth failed" },
     offline:    { cls: "muted",  label: "Offline",    detail: "not connected" },
-  };
+  }));
 
   const sel = $derived(connection.selected);
   const accentColor = "oklch(0.66 0.18 275)";

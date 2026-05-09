@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.2.2-alpha"
+version = "0.2.3-alpha"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -29,7 +29,7 @@ russh-sftp = "2.1"
 notify = "8"
 
 # Auto-updater — same Velopack ecosystem we use on the WPF side
-velopack = "0.0"
+velopack = "=0.0.1298"
 
 # Logging
 log = "0.4"

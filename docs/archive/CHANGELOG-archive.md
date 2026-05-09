@@ -2,6 +2,20 @@
 
 Older changelog entries flow here as new versions ship. Live entry stays in `docs/CHANGELOG.md`.
 
+## v0.2.2-alpha — 2026-05-09 — Debug-sweep fix pass: 28 audit findings landed
+
+Audit-driven fix sweep — 28 of 60 findings actioned (all 5 CRITICALs).
+
+**Critical:** C1 CSP set; C2 TOFU prompt (probe + Confirm + set_server_fingerprint); C3 bootstrap_list_files non-ASCII panic; C4 wireEvents race + try/catch rollback; C5 EditChangedEvent.serverKey filter.
+
+**High:** H1 openBootstrap guard; H3+H12 editor_for narrowed lock; H4 Velopack pinning TODO docs; H5 default_ssh_key_path command; H6 stale-phase toasts; H7 lockForBasename → remoteForLocalPath; H11 reject_path_traversal; H13 toast handle tracking; H15 stepper bypass; H16 ssh-preview NaN.
+
+**Medium / cosmetic:** M3/M7/M8/M11/M14/M19 + L1/L5/L15/L16/M15.
+
+**Verify:** cargo check + clippy clean; npm run check 3933 / 0 errors / 1 advisory.
+
+v0.2.1-alpha archived.
+
 ## v0.2.1-alpha — 2026-05-09 — Refresh build + SSH commit signing
 
 Maintenance bump w/ no code changes. Triggered by signing-pipeline configuration + first end-to-end verified build of the post-S13 codebase.

@@ -139,13 +139,16 @@ class ConnectionStore {
   }
 
   async loadServers() {
-    this.servers = await invoke<ServerProfile[]>("list_servers");
-    if (!this.selectedKey) {
-      const last = await invoke<string | null>("get_last_selected");
-      if (last && this.servers.some((s) => s.key === last)) {
-        this.selectedKey = last;
-        this.connect().catch((e) => console.error("auto-connect on load failed", e));
-      }
+    // Audit M9: fetch both before assigning so `selected` doesn't briefly
+    // resolve to null between the two awaits.
+    const [servers, last] = await Promise.all([
+      invoke<ServerProfile[]>("list_servers"),
+      this.selectedKey ? Promise.resolve<string | null>(null) : invoke<string | null>("get_last_selected"),
+    ]);
+    this.servers = servers;
+    if (!this.selectedKey && last && servers.some((s) => s.key === last)) {
+      this.selectedKey = last;
+      this.connect().catch((e) => console.error("auto-connect on load failed", e));
     }
   }
 
@@ -381,7 +384,10 @@ class ConnectionStore {
     try {
       const s = await invoke<AutoSyncStatus | null>("get_autosync_status");
       this.status = s;
-    } catch {}
+    } catch (e) {
+      // Audit H2: surface IPC failures so a stale UI isn't masked.
+      console.error("get_autosync_status failed", e);
+    }
   }
 
   async disconnect() {
