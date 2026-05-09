@@ -93,6 +93,9 @@
   onDestroy(() => {
     window.removeEventListener("keydown", onGlobalKey);
     connection.disposeEvents();
+    // Audit H9: resolve any in-flight confirm promises so awaiters unblock.
+    for (const resolve of pendingConfirms) resolve(false);
+    pendingConfirms.clear();
   });
 
   function onGlobalKey(e: KeyboardEvent) {
@@ -151,14 +154,22 @@
     }
   }
 
+  // Audit H9: track pending confirm resolvers so onDestroy can drain them
+  // (resolve(false)) instead of leaving the awaiter hanging forever if the
+  // shell unmounts mid-dialog.
+  const pendingConfirms = new Set<(ok: boolean) => void>();
   function askConfirm(opts: { title: string; body: string; isDanger?: boolean }): Promise<boolean> {
     return new Promise((resolve) => {
+      pendingConfirms.add(resolve);
       confirmState = {
         open: true,
         title: opts.title,
         body: opts.body,
         isDanger: opts.isDanger ?? false,
-        onResult: (ok) => resolve(ok),
+        onResult: (ok) => {
+          pendingConfirms.delete(resolve);
+          resolve(ok);
+        },
       };
     });
   }

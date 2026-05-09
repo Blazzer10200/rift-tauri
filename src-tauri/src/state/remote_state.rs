@@ -69,7 +69,12 @@ impl RemoteStateCache {
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(|e| e.into_inner())
+    m.lock().unwrap_or_else(|e| {
+        // Audit M5: log poison events so silent recovery doesn't hide
+        // the panic that originally poisoned the mutex.
+        log::error!("remote_state: recovering from poisoned mutex: {e}");
+        e.into_inner()
+    })
 }
 
 #[cfg(test)]

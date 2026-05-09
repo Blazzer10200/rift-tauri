@@ -6,7 +6,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09 (S14). Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S15, v0.2.2-alpha):** UI port done + 28 audit findings landed (incl. all 5 CRITICALs). Backend works end-to-end against the homelab FXServer. SSH commit signing live + verified by GitHub. Installed at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ desktop shortcut.
+**Current state (post S15, v0.2.3-alpha):** UI port done + 42 audit findings landed (all 5 CRITICALs, 12 of 16 HIGHs, most MEDIUMs). Backend works end-to-end against the homelab FXServer (live test confirmed C2 TOFU + auto-connect). SSH commit signing live + verified by GitHub. Installed at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ desktop shortcut. **18 audit findings remain** (mostly LOW/style + 2 latent POSIX-port items).
 
 ## Session 15 — 2026-05-09 — Audit fix-pass + connection wiring + signing
 
@@ -25,8 +25,13 @@ L5 verified: GITHUB_REPO_URL = Blazzer10200/rift-tauri ✅.
 - SSH commit signing active (gpg.format=ssh, ~/.ssh/id_ed25519). All commits 0df5b2f→ HEAD verified. Pre-signing commit 6e9d5f1 stays unverified (no force-push).
 - Bumped Cargo.toml/package.json/tauri.conf.json → 0.2.2-alpha. Built + installed + iconcache busted.
 
+### Round-2 fix-pass (v0.2.3-alpha) — autopilot session continuation
+Round-2 closed 14 more findings: H2 (refreshStatus error logging), H9 (askConfirm leak on unmount), M2 (path-traversal extended to local_list_dir/enqueue/resolve_conflict), M5 (mutex poison logging), M9 (loadServers atomic), M12 (typed openPath import), M18 (connCfg reactive), M21 (DriftReview selected pruning), L3 (velopack pinned to =0.0.1298), L12 (browser-tabs warn), L13 (Reupload Enter behavior).
+
+L9 dual-crypto noted but deferred — `cargo tree -d` confirms `aws-lc-rs` enters via `rustls-platform-verifier`. Needs feature-flag work.
+
 ### Next session pickup
-Smoke-test the v0.2.2-alpha install end-to-end (esp. C2 first-connect TOFU prompt — delete the Endure RP fingerprint via Edit, reconnect, verify the dialog appears). 32 audit findings remain (mostly LOW — see `Desktop/rift-tauri-debug-2026-05-09.md`).
+Smoke-test v0.2.3-alpha. Live C2 verified (user re-added Endure RP successfully — fingerprint pinned in canonical SHA256: form). 18 findings remain (audit doc on Desktop): mostly LOW (L2/L4/L7/L8/L10/L11/L14) + a few specific MEDIUMs (M4 atomic_write_json on Windows, M6 POSIX perms, M10 effect, M13 Bootstrap mid-chunk cancel, M16 drag-drop catch — note M16 patterns weren't found, may be obsolete).
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend (NASM blocker on aws-lc-rs)

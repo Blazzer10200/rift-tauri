@@ -270,9 +270,13 @@ async fn enqueue_for_flush_batch(
     bypass_preflight: bool,
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<u32, String> {
+    // Audit M2: bottom-line guard against `..` smuggled through JS.
+    let bufs: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    for p in &bufs {
+        reject_path_traversal(p, "enqueue path")?;
+    }
     let g = state.0.lock().await;
     let Some(engine) = g.as_ref() else { return Ok(0) };
-    let bufs: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
     Ok(engine.enqueue_for_flush_batch(bufs, deleted, bypass_preflight).await)
 }
 
@@ -282,9 +286,11 @@ async fn resolve_conflict(
     resolution: ConflictResolution,
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<(), String> {
+    let buf = PathBuf::from(local_path);
+    reject_path_traversal(&buf, "local_path")?;
     let g = state.0.lock().await;
     if let Some(engine) = g.as_ref() {
-        engine.resolve_conflict(&PathBuf::from(local_path), resolution).await?;
+        engine.resolve_conflict(&buf, resolution).await?;
     }
     Ok(())
 }
@@ -438,6 +444,7 @@ pub struct LocalEntry {
 #[tauri::command]
 fn local_list_dir(path: String) -> Result<Vec<LocalEntry>, String> {
     let p = std::path::Path::new(&path);
+    reject_path_traversal(p, "path")?;
     if !p.is_dir() {
         return Err(format!("not a directory: {path}"));
     }

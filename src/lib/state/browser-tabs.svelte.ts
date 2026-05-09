@@ -29,7 +29,10 @@ function savePersisted(tabs: BrowserTab[], activeIdx: number) {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ tabs, activeIdx }));
-  } catch {}
+  } catch (e) {
+    // Audit L12: surface localStorage quota / serialization failures.
+    console.warn("browser-tabs persist failed", e);
+  }
 }
 
 class BrowserTabsStore {

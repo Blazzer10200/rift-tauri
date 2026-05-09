@@ -27,7 +27,10 @@
   function onKey(e: KeyboardEvent) {
     if (!open) return;
     if (e.key === "Escape") dismiss();
-    if (e.key === "Enter") pick(dontAsk ? "always" : "reupload");
+    // Audit L13: Enter always means "reupload once" — the persistent
+    // "always" preference requires an explicit button click so users
+    // don't accidentally pin a default while typing.
+    if (e.key === "Enter") pick("reupload");
   }
 </script>
 

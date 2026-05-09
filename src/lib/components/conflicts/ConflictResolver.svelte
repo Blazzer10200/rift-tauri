@@ -78,7 +78,13 @@
         serverKey: s.key,
         remotePath: conflict.remote_path,
       });
-      await invoke("plugin:opener|open_path", { path: localTmp }).catch(() => {});
+      try {
+        const { openPath } = await import("@tauri-apps/plugin-opener");
+        await openPath(localTmp);
+      } catch (openErr) {
+        // Audit M12: typed import + surface failure rather than swallow.
+        error = `Couldn't launch editor: ${String(openErr)}`;
+      }
       info = `Editing ${localTmp}. Save in your editor; reupload from the watch list.`;
       await connection.refreshWatchedEdits();
     } catch (e) { error = String(e); }

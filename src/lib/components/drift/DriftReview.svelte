@@ -138,6 +138,20 @@
   const selectableIds = $derived(
     filtered.filter((e) => e.bucket !== "Conflict").map((e) => e.rel_path),
   );
+
+  // Audit M21: prune `selected` to entries that are still selectable when
+  // sideFilter / grouping / filtered list changes — otherwise applyPushPull
+  // operates on entries the user can no longer see.
+  $effect(() => {
+    const valid = new Set(selectableIds);
+    let changed = false;
+    const next = new Set<string>();
+    for (const id of selected) {
+      if (valid.has(id)) next.add(id);
+      else changed = true;
+    }
+    if (changed) selected = next;
+  });
   const allSelected = $derived(
     selectableIds.length > 0 && selectableIds.every((id) => selected.has(id)),
   );
