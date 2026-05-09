@@ -10,6 +10,8 @@ use russh::keys::ssh_key::{Algorithm, LineEnding, PrivateKey};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+use crate::state::paths::dirs_home;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyPaths {
@@ -23,7 +25,7 @@ pub struct SshKeygen;
 impl SshKeygen {
     /// User's default `~/.ssh/id_ed25519` path. Mirrors `SshKeygen.DefaultKeyPath`.
     pub fn default_key_path() -> Option<PathBuf> {
-        home_dir().map(|h| h.join(".ssh").join("id_ed25519"))
+        dirs_home().ok().map(|h| h.join(".ssh").join("id_ed25519"))
     }
 
     pub fn default_pub_key_path() -> Option<PathBuf> {
@@ -103,13 +105,6 @@ impl SshKeygen {
         let comment = comment.unwrap_or(&fallback);
         Self::generate(dir, "id_ed25519", comment)
     }
-}
-
-fn home_dir() -> Option<PathBuf> {
-    if let Ok(p) = std::env::var("USERPROFILE") {
-        return Some(PathBuf::from(p));
-    }
-    std::env::var("HOME").ok().map(PathBuf::from)
 }
 
 #[cfg(test)]

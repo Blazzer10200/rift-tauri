@@ -45,7 +45,10 @@ impl UpdateService {
 
     /// Check for an update. Returns Ok(None) when no source is configured or
     /// no update is available. Network / auth errors get logged + swallowed
-    /// so the UI banner stays hidden on dev boxes.
+    /// so the UI banner stays hidden on dev boxes. Velopack's `check_for_updates`
+    /// is blocking I/O — the wrapper at the Tauri command layer should call
+    /// this from `spawn_blocking` so the runtime isn't stalled on a slow
+    /// network probe.
     pub fn check(&self) -> Result<Option<UpdateInfoDto>, String> {
         let Some(mgr) = self.mgr.as_ref() else { return Ok(None) };
         match mgr.check_for_updates() {

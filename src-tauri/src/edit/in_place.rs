@@ -24,6 +24,8 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use crate::sftp::SftpClient;
+use crate::state::paths::dirs_home;
+use crate::transport::env::short_id;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,16 +74,9 @@ fn now_stamp() -> String {
     Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
 
-fn short_id() -> String {
-    use rand::RngCore;
-    let mut buf = [0u8; 4];
-    rand::rngs::OsRng.fill_bytes(&mut buf);
-    format!("{:08x}", u32::from_le_bytes(buf))
-}
-
 impl EditInPlaceManager {
     pub fn new(sftp: Arc<SftpClient>, app: AppHandle) -> Result<Self, String> {
-        let home = dirs_home()?;
+        let home = dirs_home().map_err(|e| format!("home dir: {e}"))?;
         let tmp_root = home
             .join(".rift")
             .join("rift-edits")
@@ -301,16 +296,6 @@ impl Drop for EditInPlaceManager {
     }
 }
 
-fn dirs_home() -> Result<PathBuf, String> {
-    if let Ok(p) = std::env::var("USERPROFILE") {
-        return Ok(PathBuf::from(p));
-    }
-    if let Ok(p) = std::env::var("HOME") {
-        return Ok(PathBuf::from(p));
-    }
-    Err("USERPROFILE / HOME not set".into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,17 +314,6 @@ mod tests {
         let s = short_id();
         assert_eq!(s.len(), 8);
         assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
-    }
-
-    #[test]
-    fn _unused_export_warning_silencer() {
-        let _ = WatchedFileInfo {
-            remote_path: String::new(),
-            tmp_path: String::new(),
-            display_name: String::new(),
-            last_saved_mtime: chrono::Utc::now(),
-            last_saved_size: 0,
-        };
     }
 
 }

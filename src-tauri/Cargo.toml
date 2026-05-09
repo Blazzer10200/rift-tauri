@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.1.5"
+version = "0.1.6"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -18,8 +18,8 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Async runtime
-tokio = { version = "1", features = ["full"] }
+# Async runtime — narrowed from "full" to what we actually use.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 
 # SSH + SFTP — pure Rust, no libssh2/C deps. Reference: T-Shell, Reach, Shell360.
 russh = { version = "0.54", default-features = false, features = ["ring", "rsa", "flate2", "async-trait"] }
@@ -36,10 +36,7 @@ log = "0.4"
 env_logger = "0.11"
 
 # Misc
-anyhow = "1"
-thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
-async-trait = "0.1"
 
 # SHA1 — pure Rust (RustCrypto). Used by SyncSnapshot for content-hash drift jitter
 # elimination + first-scan equality. NOT cryptographically-strong needs; matches
@@ -47,7 +44,6 @@ async-trait = "0.1"
 sha1 = "0.10"
 dashmap = "6.1.0"
 walkdir = "2.5.0"
-notify-debouncer-full = "0.7.0"
 futures = "0.3.32"
 reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy"] }
 

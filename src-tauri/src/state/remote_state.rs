@@ -39,12 +39,12 @@ impl RemoteStateCache {
     }
 
     pub fn try_get(&self, remote_path: &str) -> Option<Entry> {
-        self.data.lock().unwrap().get(remote_path).cloned()
+        lock(&self.data).get(remote_path).cloned()
     }
 
     pub fn set(&self, remote_path: &str, size: i64, mtime_utc: DateTime<Utc>) {
         {
-            let mut g = self.data.lock().unwrap();
+            let mut g = lock(&self.data);
             g.insert(remote_path.to_string(), Entry { size, mtime_utc });
         }
         let _ = self.save();
@@ -52,7 +52,7 @@ impl RemoteStateCache {
 
     pub fn forget(&self, remote_path: &str) {
         let removed = {
-            let mut g = self.data.lock().unwrap();
+            let mut g = lock(&self.data);
             g.remove(remote_path).is_some()
         };
         if removed {
@@ -61,11 +61,15 @@ impl RemoteStateCache {
     }
 
     fn save(&self) -> std::io::Result<()> {
-        let snapshot = self.data.lock().unwrap().clone();
+        let snapshot = lock(&self.data).clone();
         let json = serde_json::to_string(&snapshot)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         atomic_write_json(&self.path, &json)
     }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(test)]

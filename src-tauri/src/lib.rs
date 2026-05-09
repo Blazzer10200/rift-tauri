@@ -1,7 +1,9 @@
-// Rift v14 — Tauri + Svelte + russh backend.
-//
-// Velopack-Rust auto-update wired at run() — banner fires when a newer version
-// is released to Blazzer10200/rift-tauri.
+//! Rift v14 — Tauri + Svelte + russh backend.
+//!
+//! Velopack-Rust auto-update wired at `run()` — banner fires when a newer
+//! version is released to `Blazzer10200/rift-tauri`. The Tauri command surface
+//! lives at the bottom of this file (`run()`'s `invoke_handler!`) and is the
+//! contract with the Svelte frontend.
 
 pub mod bootstrap;
 pub mod bridge;
@@ -31,7 +33,9 @@ pub struct AutoSyncState(pub AsyncMutex<Option<Arc<AutoSyncEngine>>>);
 pub struct TunnelState(pub AsyncMutex<Option<tunnel::SshTunnel>>);
 
 /// Phase 4: per-server EditInPlaceManager. Keyed by server_key — each server
-/// gets its own SftpClient + watcher + tmp root. Lazy-init on first begin_edit.
+/// gets its own SftpClient + watcher + tmp root. Lazy-init on first begin_edit
+/// (lock held across init in [`editor_for`] to prevent connection leaks under
+/// concurrent open).
 pub struct EditInPlaceState(
     pub AsyncMutex<std::collections::HashMap<String, Arc<edit::in_place::EditInPlaceManager>>>,
 );
@@ -412,6 +416,10 @@ fn persist_fingerprint_if_new(server_key: &str, fingerprint: &str) {
 
 // ─── Phase 3 (Browser) — local + remote dir listing + batch transfer ─────────
 
+/// Browser-pane LocalEntry shape. Distinct from `local_fs::LocalEntry` because
+/// the frontend pre-dates the canonical version and uses a flatter
+/// `{path, is_dir, mtime: unix-seconds}` shape. Adapter constructed via the
+/// canonical walker; frontend type stays stable until the UI redesign rewires.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct LocalEntry {
     pub name: String,
@@ -424,35 +432,19 @@ pub struct LocalEntry {
 #[tauri::command]
 fn local_list_dir(path: String) -> Result<Vec<LocalEntry>, String> {
     let p = std::path::Path::new(&path);
-    let rd = std::fs::read_dir(p).map_err(|e| format!("readdir {path}: {e}"))?;
-    let mut out: Vec<LocalEntry> = Vec::new();
-    for entry in rd.flatten() {
-        let meta = match entry.metadata() {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        let name = entry.file_name().to_string_lossy().to_string();
-        let full = entry.path().to_string_lossy().to_string();
-        let mtime = meta
-            .modified()
-            .ok()
-            .and_then(|m| m.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        out.push(LocalEntry {
-            name,
-            path: full,
-            is_dir: meta.is_dir(),
-            size: if meta.is_dir() { 0 } else { meta.len() },
-            mtime,
-        });
+    if !p.is_dir() {
+        return Err(format!("not a directory: {path}"));
     }
-    out.sort_by(|a, b| match (a.is_dir, b.is_dir) {
-        (true, false) => std::cmp::Ordering::Less,
-        (false, true) => std::cmp::Ordering::Greater,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
-    Ok(out)
+    Ok(local_fs::list_directory(p)
+        .into_iter()
+        .map(|e| LocalEntry {
+            name: e.name,
+            path: e.full_path,
+            is_dir: e.is_directory,
+            size: e.size,
+            mtime: e.last_modified.timestamp(),
+        })
+        .collect())
 }
 
 async fn open_sftp_for(server_key: &str) -> Result<sftp::SftpClient, String> {
@@ -561,11 +553,18 @@ async fn bootstrap_list_files(
     let mut jobs = Vec::with_capacity(entries.len());
     for e in entries {
         if e.is_dir { continue; }
-        if e.full_path.to_lowercase().contains("/[disabled]/") { continue; }
-        if !e.full_path.to_lowercase().starts_with(&remote_root_lc) { continue; }
-        let rel = e.full_path[remote_root.len()..].trim_start_matches('/');
+        let lower = e.full_path.to_lowercase();
+        if lower.contains("/[disabled]/") { continue; }
+        if !lower.starts_with(&remote_root_lc) { continue; }
+        // Slice using the LOWERCASED string's prefix length to stay ASCII-safe;
+        // POSIX paths are ASCII in practice, but mixed-case Unicode would shift
+        // byte boundaries between original + lowercased forms.
+        let rel = lower[remote_root_lc.len()..].trim_start_matches('/');
         if rel.is_empty() { continue; }
-        let local = local_root_path.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        // Use ORIGINAL casing for the local path to preserve filename case
+        // (matters on case-sensitive local filesystems / future macOS port).
+        let original_rel = &e.full_path[e.full_path.len() - rel.len()..];
+        let local = local_root_path.join(original_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
         jobs.push((e.full_path, local.to_string_lossy().to_string()));
     }
     Ok(jobs)
@@ -597,8 +596,12 @@ fn read_default_ssh_pub_key() -> Option<String> {
 }
 
 #[tauri::command]
-fn check_for_updates() -> Result<Option<update_service::UpdateInfoDto>, String> {
-    update_service::UpdateService::new().check()
+async fn check_for_updates() -> Result<Option<update_service::UpdateInfoDto>, String> {
+    // Velopack's check is blocking network I/O — run it on a blocking thread
+    // so the runtime isn't parked on the github roundtrip.
+    tokio::task::spawn_blocking(|| update_service::UpdateService::new().check())
+        .await
+        .map_err(|e| format!("update check task: {e}"))?
 }
 
 // ─── Phase 4 (Sync surfaces) ─────────────────────────────────────────────────
@@ -608,16 +611,18 @@ async fn editor_for(
     state: &EditInPlaceState,
     app: &tauri::AppHandle,
 ) -> Result<Arc<edit::in_place::EditInPlaceManager>, String> {
-    {
-        let g = state.0.lock().await;
-        if let Some(m) = g.get(server_key) {
-            return Ok(m.clone());
-        }
+    // Hold the state lock across the SFTP open so two concurrent
+    // begin_edit_in_place calls for the same server can't both open an SFTP
+    // connection and leak one into garbage. The lock is per-server-state
+    // (one map for ALL editors) — fine here because editor init is rare and
+    // the SFTP handshake is sequential anyway.
+    let mut g = state.0.lock().await;
+    if let Some(m) = g.get(server_key) {
+        return Ok(m.clone());
     }
     let client = open_sftp_for(server_key).await?;
     let sftp_arc = Arc::new(client);
     let mgr = Arc::new(edit::in_place::EditInPlaceManager::new(sftp_arc, app.clone())?);
-    let mut g = state.0.lock().await;
     Ok(g.entry(server_key.to_string()).or_insert(mgr).clone())
 }
 
@@ -668,10 +673,13 @@ async fn list_watched_edits(
     Ok(all)
 }
 
+/// Application entry point. Velopack hooks run FIRST (before Tauri spins up)
+/// so install/update commands like `--veloapp-install` exit cleanly without
+/// dragging the whole UI runtime through the lifecycle event. Mirrors the WPF
+/// `Main()` pattern. After Velopack, registers managed state + Tauri commands
+/// and blocks on the event loop.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Velopack first — handles --veloapp-install/--veloapp-updated/etc and
-    // exits before Tauri spins up. Mirrors the WPF Main() pattern.
     velopack::VelopackApp::build().run();
 
     tauri::Builder::default()

@@ -6,10 +6,11 @@
 // no JobObject orphan-recovery dance, no OpenSSH dependency.
 //
 // Lifecycle:
-//   - `SshTunnel::start(args)` opens an SSH session (fingerprint-pinned, same
-//     Handler shape as `sftp::open_session`), binds a tokio TcpListener on
-//     127.0.0.1:0, captures the kernel-assigned port into `local_port`, and
-//     spawns an accept loop that fans each inbound conn into a per-conn task.
+//   - `SshTunnel::start(args)` opens an SSH session (fingerprint-pinned via the
+//     shared `transport::ssh_handler::PinningHandler`, same as the SFTP client),
+//     binds a tokio TcpListener on 127.0.0.1:0, captures the kernel-assigned
+//     port into `local_port`, and spawns an accept loop that fans each inbound
+//     conn into a per-conn task.
 //   - Each per-conn task opens a `channel_open_direct_tcpip(remote_host,
 //     remote_port, "127.0.0.1", local_port)` channel and `copy_bidirectional`s
 //     bytes between the TCP socket and the channel stream until either side EOFs.
@@ -17,22 +18,16 @@
 //     stop branch, breaks out, drops the listener + the russh `Handle` (the SSH
 //     session tears down). In-flight conn tasks finish on their own (the channel
 //     closes when the Handle drops, surfacing as EOF on the per-conn copy).
-//
-// Handler duplication: `sftp::Handler` is private to the sftp module; reusing
-// it would mean exporting + plumbing the captured-fingerprint state. The pin
-// shape here is small (~15L) and not on the hot path, so we keep a local
-// Handler and accept the duplication.
 
-use russh::client::{self};
+use russh::client;
 use russh::keys::*;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use base64::Engine;
+use crate::transport::ssh_handler::PinningHandler;
 
 pub struct TunnelArgs<'a> {
     pub host: &'a str,
@@ -46,35 +41,6 @@ pub struct TunnelArgs<'a> {
     /// Remote endpoint to forward to. Typically `"127.0.0.1"`.
     pub remote_host: &'a str,
     pub remote_port: u16,
-}
-
-struct Handler {
-    trusted: Option<String>,
-    captured: Arc<Mutex<Option<String>>>,
-}
-
-impl client::Handler for Handler {
-    type Error = russh::Error;
-    async fn check_server_key(&mut self, k: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        let blob = match k.to_bytes() {
-            Ok(b) => b,
-            Err(_) => return Ok(false),
-        };
-        let mut h = Sha256::new();
-        h.update(&blob);
-        let digest = h.finalize();
-        let b64 = base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest);
-        let fp = format!("SHA256:{b64}");
-        if let Some(trusted) = &self.trusted {
-            if !trusted.contains(&fp) {
-                return Ok(false);
-            }
-        }
-        if let Ok(mut g) = self.captured.lock() {
-            *g = Some(fp);
-        }
-        Ok(true)
-    }
 }
 
 /// Live SSH local-port-forward. Drop or call `.stop()` to tear down.
@@ -93,7 +59,7 @@ impl SshTunnel {
         let config = Arc::new(client::Config::default());
         let addr = format!("{}:{}", args.host, args.port);
         let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-        let handler = Handler {
+        let handler = PinningHandler {
             trusted: args.trusted_fingerprint.map(|s| s.to_string()),
             captured: captured.clone(),
         };

@@ -1,4 +1,4 @@
-// Phase 1b sync surface: drift detection + edit trail. AutoSync (1c) lands here too.
+//! Phase 1b sync surface: drift detection + edit trail. AutoSync (1c) lands here too.
 
 pub mod auto_sync;
 pub mod drift_scanner;

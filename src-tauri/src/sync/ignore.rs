@@ -127,11 +127,14 @@ pub fn classify(path: &str) -> Option<&'static str> {
         lower.contains("/web/build/") || lower.contains("/web/dist/");
 
     for seg in IGNORE_SEGMENTS {
+        // IGNORE_SEGMENTS entries are kept lowercase by convention so we can
+        // skip the per-iteration `.to_ascii_lowercase()` allocation on the
+        // synthesized needle. Validated by the lowercase-segments unit test.
         let needle = format!("/{seg}/");
-        if !lower.contains(&needle.to_ascii_lowercase()) {
+        if !lower.contains(&needle) {
             // Also match leading-no-slash form for relative paths starting with the seg.
             let leading = format!("{seg}/");
-            if !lower.starts_with(&leading.to_ascii_lowercase()) {
+            if !lower.starts_with(&leading) {
                 continue;
             }
         }
@@ -258,5 +261,15 @@ mod tests {
         assert!(names.contains(&"node_modules"));
         assert!(names.contains(&"target"));
         assert!(!names.iter().any(|n| n.starts_with('[')));
+    }
+
+    /// Guards the `pre-lower needle` optimization in `classify` — if anyone
+    /// adds an uppercase-bearing segment, the lowercase-input check would
+    /// silently miss it.
+    #[test]
+    fn segments_are_lowercase() {
+        for s in IGNORE_SEGMENTS {
+            assert_eq!(*s, s.to_ascii_lowercase(), "segment {s:?} must be lowercase");
+        }
     }
 }

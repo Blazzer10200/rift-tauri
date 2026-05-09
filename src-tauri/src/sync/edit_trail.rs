@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::sftp::SftpClient;
+use crate::transport::env::{current_user, hostname, short_id};
 
 const MAX_LINES: usize = 500;
 const TRAIL_FILE_NAME: &str = ".rift-trail.jsonl";
@@ -32,9 +33,7 @@ pub struct EditTrail<'a> {
 
 impl<'a> EditTrail<'a> {
     pub fn new(sftp: &'a SftpClient) -> Self {
-        let user = std::env::var("USERNAME")
-            .or_else(|_| std::env::var("USER"))
-            .unwrap_or_else(|_| "unknown".into());
+        let user = current_user();
         let host = hostname().unwrap_or_else(|| "unknown".into());
         Self { sftp, user, host }
     }
@@ -104,8 +103,9 @@ impl<'a> EditTrail<'a> {
 
     async fn read_raw(&self, remote_path: &str) -> Option<String> {
         let sandbox = std::env::temp_dir().join(format!(
-            "rift-trail-{}",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            "rift-trail-{}-{}",
+            std::process::id(),
+            short_id()
         ));
         let local = self.sftp.download_file(remote_path, &sandbox).await.ok()?;
         let text = std::fs::read_to_string(&local).ok();
@@ -115,21 +115,21 @@ impl<'a> EditTrail<'a> {
 }
 
 fn trim_to_tail(content: &str, max_lines: usize) -> String {
-    let lines: Vec<&str> = content.split('\n').collect();
-    if lines.len() <= max_lines {
-        return content.to_string();
+    // Preserve any trailing newline so the JSONL file stays well-formed across
+    // append cycles (consumers split on '\n' and an absent terminator can
+    // confuse line-based tooling).
+    let had_trailing_newline = content.ends_with('\n');
+    let body = content.trim_end_matches('\n');
+    let lines: Vec<&str> = body.split('\n').collect();
+    let mut out = if lines.len() <= max_lines {
+        body.to_string()
+    } else {
+        lines[lines.len() - max_lines..].join("\n")
+    };
+    if had_trailing_newline && !out.is_empty() {
+        out.push('\n');
     }
-    lines[lines.len() - max_lines..].join("\n")
-}
-
-fn hostname() -> Option<String> {
-    std::env::var("COMPUTERNAME").ok().or_else(|| {
-        std::process::Command::new("hostname")
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string())
-    })
+    out
 }
 
 #[cfg(test)]

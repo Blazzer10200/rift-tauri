@@ -1,13 +1,17 @@
+// Persistent cache of "remote resource folders we've previously discovered" —
+// drives fast-attach on connect. File-format compat: ~/.rift/discovery-<profileKey>.json
+// w/ camelCase fields ({ folders: [], cachedAt: ISO-8601 }).
+//
+// NOTE: implemented + tested but not yet wired to any Tauri command. Reserved
+// for the Phase 6 fast-reconnect path (skip full manifest scan when the
+// previously-cached discovery is still fresh). Keep working — don't gut.
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use super::paths::{atomic_write_json, cache_path};
-
-// Persistent cache of "remote resource folders we've previously discovered" —
-// drives fast-attach on connect. File-format compat: ~/.rift/discovery-<profileKey>.json
-// w/ camelCase fields ({ folders: [], cachedAt: ISO-8601 }).
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -37,7 +41,7 @@ impl ResourceDiscoveryCache {
     }
 
     pub fn get(&self) -> (Vec<String>, Option<DateTime<Utc>>) {
-        let g = self.inner.lock().unwrap();
+        let g = lock(&self.inner);
         let when = DateTime::parse_from_rfc3339(&g.cached_at)
             .ok()
             .map(|dt| dt.with_timezone(&Utc));
@@ -49,13 +53,17 @@ impl ResourceDiscoveryCache {
         let cached_at = now.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true);
         let snap = Snapshot { folders, cached_at };
         {
-            let mut g = self.inner.lock().unwrap();
+            let mut g = lock(&self.inner);
             *g = snap.clone();
         }
         let json = serde_json::to_string(&snap)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         atomic_write_json(&self.path, &json)
     }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 #[cfg(test)]

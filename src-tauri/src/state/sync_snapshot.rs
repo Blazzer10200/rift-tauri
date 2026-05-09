@@ -7,13 +7,13 @@ use std::sync::Mutex;
 
 use super::paths::{atomic_write_json, cache_path};
 
-// Per-file "synced snapshot" — records the LOCAL+REMOTE state at the moment we
-// know both sides agreed (after a successful push, pull, or seeded on first
-// scan when local mirrors remote). Drives the 3-way drift diff.
+// Per-file "synced snapshot" — records the LOCAL+REMOTE state at the moment
+// we know both sides agreed (after a successful push, pull, or seeded on
+// first scan when local mirrors remote). Drives the 3-way drift diff.
 //
-// File-format compat w/ WPF: ~/.rift/snapshot-<profileKey>.json. Top-level dict
-// keyed by remote path. Field names = PascalCase (matches System.Text.Json
-// default policy on the WPF side).
+// File-format compat w/ WPF: ~/.rift/snapshot-<profileKey>.json. Top-level
+// dict keyed by remote path. Field names = PascalCase (matches
+// System.Text.Json default policy on the WPF side).
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "PascalCase")]
@@ -31,9 +31,11 @@ pub struct SyncSnapshot {
     data: Mutex<HashMap<String, Entry>>,
 }
 
-const MTIME_TOLERANCE_SECS: i64 = 2;
-// Match the WPF AutoSync.Sha1MaxBytes ceiling (5 MiB) used by DriftScanner.
-pub const SHA1_MAX_BYTES: i64 = 5 * 1024 * 1024;
+pub const MTIME_TOLERANCE_SECS: i64 = 2;
+/// Files over this size skip SHA1 hashing — both AutoSync's post-flush snapshot
+/// refresh and DriftScanner's jitter-collapse paths consult this. Matches WPF
+/// `AutoSync.Sha1MaxBytes` = 64 MiB.
+pub const SHA1_MAX_BYTES: i64 = 64 * 1024 * 1024;
 
 impl SyncSnapshot {
     pub fn new(profile_key: &str) -> std::io::Result<Self> {
@@ -46,7 +48,7 @@ impl SyncSnapshot {
     }
 
     pub fn try_get(&self, remote_path: &str) -> Option<Entry> {
-        self.data.lock().unwrap().get(remote_path).cloned()
+        lock(&self.data).get(remote_path).cloned()
     }
 
     pub fn set(
@@ -59,7 +61,7 @@ impl SyncSnapshot {
         sha1: Option<String>,
     ) {
         {
-            let mut g = self.data.lock().unwrap();
+            let mut g = lock(&self.data);
             g.insert(
                 remote_path.to_string(),
                 Entry {
@@ -76,7 +78,7 @@ impl SyncSnapshot {
 
     pub fn forget(&self, remote_path: &str) {
         let removed = {
-            let mut g = self.data.lock().unwrap();
+            let mut g = lock(&self.data);
             g.remove(remote_path).is_some()
         };
         if removed {
@@ -85,7 +87,7 @@ impl SyncSnapshot {
     }
 
     pub fn count(&self) -> usize {
-        self.data.lock().unwrap().len()
+        lock(&self.data).len()
     }
 
     pub fn local_matches(e: &Entry, size: i64, mtime_utc: DateTime<Utc>) -> bool {
@@ -107,12 +109,25 @@ impl SyncSnapshot {
         Some(hex_upper(&hasher.finalize()))
     }
 
+    /// Last-write-wins under concurrent `set()` — the in-memory map is locked
+    /// only for the clone; serialize + write happen lock-free. Two parallel
+    /// callers may both clone-then-overwrite each other's disk snapshot. Fine
+    /// for this cache (next successful sync repopulates) but not for content
+    /// where every set must persist.
     fn save(&self) -> std::io::Result<()> {
-        let snapshot = self.data.lock().unwrap().clone();
+        let snapshot = lock(&self.data).clone();
         let json = serde_json::to_string(&snapshot)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         atomic_write_json(&self.path, &json)
     }
+}
+
+/// Mutex lock helper — recovers a poisoned mutex by taking its inner state.
+/// All sync_snapshot consumers (autosync flush loop, drift scan) treat the
+/// snapshot as a recoverable cache, so cascading panics from one panic-while-
+/// holding incident would be far worse than a stale-but-readable map.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 fn load_or_default(path: &Path) -> HashMap<String, Entry> {
@@ -123,9 +138,12 @@ fn load_or_default(path: &Path) -> HashMap<String, Entry> {
 }
 
 fn hex_upper(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
     let mut s = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        s.push_str(&format!("{:02X}", b));
+        // write! into a pre-allocated String avoids the per-byte format!
+        // String allocation; about 20× cheaper for SHA1 (20 bytes).
+        let _ = write!(s, "{:02X}", b);
     }
     s
 }

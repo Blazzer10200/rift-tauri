@@ -21,6 +21,7 @@ use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::sftp::SftpClient;
+use crate::transport::env::{current_user, hostname, short_id};
 
 const STALE_SEC: i64 = 180;
 const POLL_INTERVAL_MS: u64 = 10_000;
@@ -58,19 +59,8 @@ pub struct LockPresence {
 
 impl LockPresence {
     pub fn new(sftp: Arc<SftpClient>, remote_root: String, app: AppHandle) -> Arc<Self> {
-        let my_user = std::env::var("USERNAME")
-            .or_else(|_| std::env::var("USER"))
-            .unwrap_or_else(|_| "unknown".into());
-        let my_host = std::env::var("COMPUTERNAME")
-            .ok()
-            .or_else(|| {
-                std::process::Command::new("hostname")
-                    .output()
-                    .ok()
-                    .and_then(|o| String::from_utf8(o.stdout).ok())
-                    .map(|s| s.trim().to_string())
-            })
-            .unwrap_or_else(|| "unknown".into());
+        let my_user = current_user();
+        let my_host = hostname().unwrap_or_else(|| "unknown".into());
         let (stop_tx, _) = watch::channel(false);
         Arc::new(Self {
             sftp,
@@ -222,6 +212,11 @@ impl LockPresence {
             }
         }
 
+        // ADVISORY-ONLY: between clear() and the re-insert loop, concurrent
+        // find_lock_by_other() callers see an empty map. Refreshes are 10s
+        // apart so the window is bounded; an upload that races through this
+        // gap may proceed without seeing a foreign lock for one cycle. Locks
+        // are advisory anyway — last-writer-wins is the documented model.
         self.active_by_path.clear();
         for l in &found {
             self.active_by_path.insert(l.file_path.clone(), l.clone());
@@ -232,8 +227,9 @@ impl LockPresence {
 
     async fn try_read_lock(&self, remote_lock_path: &str) -> Option<LockBody> {
         let scratch = std::env::temp_dir().join(format!(
-            "rift-lock-{}",
-            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+            "rift-lock-{}-{}",
+            std::process::id(),
+            short_id()
         ));
         let _ = std::fs::create_dir_all(&scratch);
         let local = self.sftp.download_file(remote_lock_path, &scratch).await.ok()?;
