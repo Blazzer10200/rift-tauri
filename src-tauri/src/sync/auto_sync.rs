@@ -474,7 +474,7 @@ impl AutoSyncEngine {
             .iter()
             .map(|kv| (kv.key().clone(), kv.value().local_root.clone()))
             .collect();
-        watches.sort_by_key(|w| std::cmp::Reverse(w.1.as_os_str().len()));
+        watches.sort_by_key(|w| std::cmp::Reverse(w.1.components().count()));
         if watches.is_empty() {
             return 0;
         }
@@ -643,7 +643,7 @@ impl AutoSyncEngine {
         for kv in self.folders.iter() {
             let root = &kv.value().local_root;
             if path.starts_with(root) {
-                let l = root.as_os_str().len();
+                let l = root.components().count();
                 if l > best_len {
                     best_len = l;
                     owner = Some(kv.key().clone());

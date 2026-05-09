@@ -56,7 +56,11 @@ pub fn classify(path: &str) -> Option<&'static str> {
     if path.is_empty() {
         return Some("empty-path");
     }
-    let normalized = path.replace('\\', "/");
+    let normalized: std::borrow::Cow<str> = if path.contains('\\') {
+        std::borrow::Cow::Owned(path.replace('\\', "/"))
+    } else {
+        std::borrow::Cow::Borrowed(path)
+    };
     let trimmed = normalized.trim_end_matches('/');
     let name = trimmed.rsplit('/').next().unwrap_or("");
     if name.is_empty() {

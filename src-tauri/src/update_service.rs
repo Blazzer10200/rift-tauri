@@ -12,7 +12,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const GITHUB_REPO_URL: &str = "https://github.com/Blazzer10200/rift-tauri";
+// Releases live in a public sibling repo so unauthenticated AutoSource fetches
+// (which is what runtime clients do — velopack-rust 0.0.1298 has no auth in
+// AutoSource/HttpSource) succeed without exposing the source repo.
+pub const GITHUB_REPO_URL: &str = "https://github.com/Blazzer10200/rift-releases";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,6 +68,27 @@ impl UpdateService {
                 Ok(None)
             }
         }
+    }
+
+    /// Re-check, download, then apply + restart. Blocking I/O — must be
+    /// called from a `spawn_blocking` context. `apply_updates_and_restart`
+    /// `exit(0)`s on success, so this only returns on error. Caller must
+    /// stop autosync + tunnel BEFORE invoking — in-flight uploads die when
+    /// the process exits.
+    pub fn apply(&self) -> Result<(), String> {
+        let Some(mgr) = self.mgr.as_ref() else {
+            return Err("no update source configured".into());
+        };
+        let info = match mgr.check_for_updates() {
+            Ok(velopack::UpdateCheck::UpdateAvailable(info)) => info,
+            Ok(_) => return Err("no update available".into()),
+            Err(e) => return Err(format!("check_for_updates: {e}")),
+        };
+        mgr.download_updates(&info, None)
+            .map_err(|e| format!("download_updates: {e}"))?;
+        mgr.apply_updates_and_restart(&info)
+            .map_err(|e| format!("apply_updates_and_restart: {e}"))?;
+        Ok(())
     }
 }
 

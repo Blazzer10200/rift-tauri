@@ -6,6 +6,7 @@
 
   const variant = $derived<Variant>(
     updates.state === "available" ? "warn" :
+    updates.state === "applying"  ? "warn" :
     updates.state === "uptodate"  ? "ok"   :
     updates.state === "error"     ? "danger" :
                                     "info"
@@ -13,6 +14,7 @@
 
   const subTitle = $derived(
     updates.state === "available" ? "Update available" :
+    updates.state === "applying"  ? "Installing…" :
     updates.state === "uptodate"  ? "Up to date" :
     updates.state === "error"     ? "Check failed" :
                                     "Checking…"
@@ -63,7 +65,7 @@
         {#if updates.state === "checking"}
           <p class="lead">Talking to GitHub releases…</p>
 
-        {:else if updates.state === "available" && updates.info}
+        {:else if (updates.state === "available" || updates.state === "applying") && updates.info}
           <p class="lead">
             Rift <span class="mono">{updates.info.version}</span> is ready to install.
             You're currently on <span class="mono">{updates.currentVersion}</span>.
@@ -80,7 +82,11 @@
             </div>
           </div>
 
-          <p class="hint">Installing closes Rift, swaps the binary, and relaunches. In-flight syncs are paused first.</p>
+          {#if updates.state === "applying"}
+            <p class="hint">Downloading and swapping the binary — Rift will close and relaunch.</p>
+          {:else}
+            <p class="hint">Installing closes Rift, swaps the binary, and relaunches. In-flight syncs are paused first.</p>
+          {/if}
 
         {:else if updates.state === "uptodate"}
           <p class="lead">
@@ -111,14 +117,15 @@
           <RefreshCw size={11} class={updates.state === "checking" ? "spin" : ""}/>
           {updates.state === "checking" ? "Checking…" : "Check again"}
         </button>
-        {#if updates.state === "available"}
+        {#if updates.state === "available" || updates.state === "applying"}
           <button
             class="btn primary"
             type="button"
-            disabled
-            title="Self-install lands once apply_updates is wired"
+            onclick={() => updates.apply()}
+            disabled={updates.state === "applying"}
           >
-            <Download size={11}/> Install &amp; restart
+            <Download size={11} class={updates.state === "applying" ? "spin" : ""}/>
+            {updates.state === "applying" ? "Installing…" : "Install & restart"}
           </button>
         {/if}
       </div>

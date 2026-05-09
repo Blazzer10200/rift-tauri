@@ -4,6 +4,11 @@
 # build`, packs with Velopack, publishes to GitHub releases. Unsigned for now
 # (audit H4 — signing deferred until cert + AAS budget is in place).
 #
+# Two-repo split: source lives in private `rift-tauri`, releases publish to
+# public `rift-releases` so unauthenticated AutoSource clients can fetch
+# updates. Velopack-rust 0.0.1298 has no auth in AutoSource — the public
+# releases repo is the only no-fork path.
+#
 # Prereqs on PATH: npm, vpk (`dotnet tool install -g vpk`), gh (logged in).
 #
 # Bump versions BEFORE running this script (package.json + Cargo.toml in
@@ -54,10 +59,11 @@ if ($dirty) {
 # `gh release view` exits non-zero + writes to stderr when the release isn't
 # found, which trips ErrorAction=Stop on PS5.1. Wrap to swallow the not-found
 # case and only throw if the release actually exists (exit 0).
+$releaseRepo = 'Blazzer10200/rift-releases'
 try {
-    $null = gh release view $tag --json tagName 2>&1
+    $null = gh release view $tag --repo $releaseRepo --json tagName 2>&1
     if ($LASTEXITCODE -eq 0) {
-        throw "GitHub release $tag already exists. Bump version or delete the release first."
+        throw "GitHub release $tag already exists in $releaseRepo. Bump version or delete the release first."
     }
 } catch [System.Management.Automation.RuntimeException] {
     if ($_.Exception.Message -like '*already exists*') { throw }
@@ -106,7 +112,7 @@ if (-not $ghToken) { throw 'gh auth token returned empty — run `gh auth login`
 
 $uploadArgs = @(
     'upload', 'github',
-    '--repoUrl', 'https://github.com/Blazzer10200/rift-tauri',
+    '--repoUrl', "https://github.com/$releaseRepo",
     '--publish',
     '--releaseName', $tag,
     '--tag', $tag,
@@ -120,7 +126,7 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
 
 # --- Verify --------------------------------------------------------------
 Write-Host '=== Release published ===' -ForegroundColor Green
-gh release view $tag
+gh release view $tag --repo $releaseRepo
 
 # --- Cleanup -------------------------------------------------------------
 Remove-Item -Recurse -Force $staging

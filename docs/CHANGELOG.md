@@ -2,20 +2,20 @@
 
 > Live changelog = current version only. Older entries archive to `archive/CHANGELOG-archive.md` on bump.
 
-## v0.2.7-alpha — 2026-05-09 — Velopack self-update wired + audit #4 backpressure fix + buddy onboarding
+## v0.2.8-alpha — 2026-05-09 — apply_updates wired + two-repo split + S17 soft-spot sweep
 
-First proper Velopack release. UI surface lets users see + trigger update checks; sidebar pill + auto-popup catch them on launch. Backend audit #4 (only critical still live) cleaned. Trey's pubkey added to the FXServer for shared-account access.
+Update dialog button now actually installs. Auto-update path moved to a public sibling repo so unauthenticated clients can pull. Audit deferred items + onboarding docs cleaned up.
 
 ### Landed
 
-- **Velopack UI** — `UpdateDialog.svelte` matches Bootstrap's variant-tinted icon + `.lead`/`.hint` typography, single global instance mounted in `AppShell`. Reads from new `updates.svelte.ts` runes-class store (state/info/dialogOpen + `checkOnLaunch()` one-time auto-popup). Settings → About has a "Check for updates" button; sidebar `TabRail` shows a pulse-dot pill when an update is available. Install button stubbed pending `apply_updates` Tauri command.
-- **Audit #4 — bounded mpsc** — `notify` → tokio channel converted to `mpsc::channel(2048)` w/ `try_send` + `log::warn!` on overflow. Webpack/IDE rebuild bursts can't grow the queue unbounded under a stalled flush. ([sync/auto_sync.rs:277-285](../src-tauri/src/sync/auto_sync.rs#L277-L285))
-- **Bridge token wired** — `~/.rift/rift.json` `bridgeToken` now set; sync_done callbacks fire against the FXServer's `rift_bridge` resource, enabling hot-reload on save.
-- **Release pipeline** — `scripts/release.ps1`: version-sync preflight, `tauri build`, clean staging dir, `vpk pack`, `vpk upload github --publish` w/ auto `--pre` for alpha/beta/rc. Unsigned for now; signing deferred (audit H4).
-- **Buddy onboarding** — `docs/AUTHORIZED_KEYS.md` ledger + Trey's pubkey appended to `/home/blazzer/.ssh/authorized_keys` on FXServer (CT 120). Defensive `.gitignore` globs for `src-tauri/src/state/` runtime artifacts.
+- **`apply_updates` end-to-end** — `UpdateService.apply()` re-checks → `download_updates` → `apply_updates_and_restart` (blocking, exits the process). Tauri command stops AutoSync + tunnel before `spawn_blocking` so in-flight uploads don't die mid-transfer. Frontend store gets an `applying` state; dialog button no longer disabled. ([update_service.rs](../src-tauri/src/update_service.rs), [lib.rs](../src-tauri/src/lib.rs), [updates.svelte.ts](../src/lib/state/updates.svelte.ts), [UpdateDialog.svelte](../src/lib/components/dialogs/UpdateDialog.svelte))
+- **Two-repo split for auto-update** — Releases now publish to public `Blazzer10200/rift-releases` (no airholes — Issues/Wiki/Projects/Discussions all off). Velopack-rust 0.0.1298 has no auth in `AutoSource`, so the public sibling is the only no-fork path. Source repo stays private. `release.ps1` threads `$releaseRepo` through preflight + `vpk upload` + post-publish verify.
+- **Logger init** — `env_logger::Builder::from_env(...).try_init()` early in `run()`. All `log::info!/warn!` calls were silent no-ops before; `RUST_LOG=debug` now surfaces sync activity.
+- **Onboarding docs** — README rewrite, `docs/ONBOARDING.md`, `docs/CONTRIBUTING.md`, `docs/rift.json.example`. Trey-targeted, ≤300 words each per project doc cap.
+- **Audit hygiene** — L8 `sort_by_key` switched from `OsStr::len()` (WTF-16 on Win) to `.components().count()`. L9 ignore-path normalize allocates only when `\\` present (`Cow`). M6 + L14 confirmed already done.
 
 ### Verify
 
-- `cargo check`: clean. `svelte-check`: 0 errors. Live e2e auto-sync: still passing.
+- `cargo check`: clean. `svelte-check`: clean (1 pre-existing warning unrelated). Existing e2e auto-sync paths untouched.
 
-v0.2.6-alpha archived.
+v0.2.7-alpha archived.
