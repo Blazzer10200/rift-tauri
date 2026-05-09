@@ -60,10 +60,10 @@
         try {
           const exists = await invoke<boolean>("default_ssh_key_exists");
           if (exists && !keyPath) {
-            const home = (window as { __HOME__?: string }).__HOME__ ?? "~";
-            keyPath = `${home}/.ssh/id_ed25519`;
+            const path = await invoke<string | null>("default_ssh_key_path");
+            if (path) keyPath = path;
           }
-        } catch {}
+        } catch (e) { console.error("default ssh key path lookup failed", e); }
       })();
     }
   });
@@ -111,8 +111,15 @@
     if (step > 0) step -= 1;
   }
   function gotoStep(target: number) {
+    const clamped = Math.max(0, Math.min(lastStep, target));
+    if (clamped > step) {
+      for (let i = step; i < clamped; i++) {
+        const err = validateStep(i);
+        if (err) { error = err; step = i; return; }
+      }
+    }
     error = "";
-    step = Math.max(0, Math.min(lastStep, target));
+    step = clamped;
   }
 
   async function save() {
@@ -176,8 +183,11 @@
   const sshPreview = $derived.by(() => {
     const u = user.trim() || "user";
     const h = host.trim() || "host";
-    const p = parseInt(port.trim(), 10);
-    return `ssh ${u}@${h}${p && p !== 22 ? ` -p ${p}` : ""}`;
+    const trimmedPort = port.trim();
+    if (trimmedPort === "" || trimmedPort === "22") return `ssh ${u}@${h}`;
+    const p = parseInt(trimmedPort, 10);
+    if (!Number.isFinite(p) || p < 1 || p > 65535) return `ssh ${u}@${h} (invalid port)`;
+    return `ssh ${u}@${h} -p ${p}`;
   });
 </script>
 

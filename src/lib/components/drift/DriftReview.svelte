@@ -47,7 +47,7 @@
     const k = connection.selectedKey;
     if (!k) return;
     const raw = localStorage.getItem(STORAGE_KEY + "." + k);
-    if (raw !== null) subpathsText = raw;
+    subpathsText = raw ?? "";
   });
 
   function persist() {
@@ -217,9 +217,11 @@
   }
 
   let toast = $state<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | null = null;
   function flash(msg: string) {
     toast = msg;
-    setTimeout(() => { toast = null; }, 4500);
+    if (toastTimer !== null) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast = null; toastTimer = null; }, 4500);
   }
 
   function fmtSize(n: number): string {

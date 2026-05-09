@@ -4004,7 +4004,7 @@ dependencies = [
 
 [[package]]
 name = "rift-tauri"
-version = "0.2.1-alpha"
+version = "0.2.2-alpha"
 dependencies = [
  "base64 0.22.1",
  "chrono",

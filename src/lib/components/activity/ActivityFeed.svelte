@@ -181,7 +181,7 @@
       </div>
     {:else}
       <div style="height:{padTop}px"></div>
-      {#each slice as r, i (startIdx + "_" + r.at + "_" + i)}
+      {#each slice as r (r.at + "_" + r.resource + "_" + r.file + "_" + r.action)}
         {@const Icon = kindIcon(r.kind)}
         {@const v = kindVariant(r.kind)}
         <div class="row" style="height:{ROW_H}px">
@@ -201,7 +201,7 @@
 
   {#if paused}
     <div class="paused-banner mono">
-      Feed paused — {connection.activityFeed.length - frozen.length} new since pause
+      Feed paused — {Math.max(0, connection.activityFeed.length - frozen.length)} new since pause
     </div>
   {/if}
 </section>

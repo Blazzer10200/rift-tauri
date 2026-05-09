@@ -2,6 +2,30 @@
 
 Older session blocks flow here as new sessions land. Live handoff stays in `docs/HANDOFF.md`.
 
+## Session 14 — 2026-05-09 — WPF retirement + install cleanup (complete)
+
+### Completed
+- Root-caused dual-edit conflict: both HANDOFF files contradicted each other on "daily driver" — fixed by retiring WPF entirely
+- Uninstalled WPF Velopack binary + orphan rift-tauri v0.1.0 (`%LOCALAPPDATA%\RiftTauri\`)
+- Deleted WPF source `C:/AI Workflow/Rift Project/` (1.7 GB)
+- Rebuilt `Desktop\Rift.lnk` + `Start Menu\Rift.lnk` → `rift-tauri.exe` (Velopack nuked them)
+- Cleaned CLAUDE.md + 5 memory files
+
+### Hooks & Gotchas
+- **Velopack uninstall nukes parent dir + ALL shortcuts targeting that root.** Stash non-Velopack files before running `Update.exe uninstall` on a shared install dir.
+- 3-sec delayed self-delete races with file restores — force-restore from stash if hashes diverge.
+
+## Session 13 — 2026-05-09 — UI port phases 4–11 + 0.2.0-alpha ship
+
+**Tauri 2 fix first:** `data-tauri-drag-region` silently no-op'd — `core:default` lacks `core:window:allow-start-dragging`. Added explicit grants in `capabilities/default.json`. Memory: `reference_tauri2_drag_region.md`.
+
+**Phases 4–11** all /check-clean:
+- P4 Activity, P5 Drift, P6 Dialogs (.dialog-* primitives + dirtyEdits reupload), P7 Palette (fuzzy+group), P8 Conflicts (click-to-pick + diff peek), P9 Polish (LED pulse, density persist via `state/ui-prefs.svelte.ts`), P10 Verify (check 3933/0/1, clippy clean, cargo test 47/47), P11 Ship (0.1.6→0.2.0-alpha).
+
+**Build:** `productName:"Rift"`, `targets:["nsis"]` (MSI rejects `-alpha`), perUser, custom icon. Bundle 5.7MB → installed 21MB `%LOCALAPPDATA%\Rift\rift-tauri.exe` + shortcuts.
+
+---
+
 ## Session 12 — 2026-05-09 — UI redesign port (Phases 0–3)
 
 Claude Design "Rift App UI" deliverable bundle ported. **No backend touched.** 4 locked decisions: per-hunk conflict UI ships visually w/ file-level resolution under hood; drift severity skipped (no backend tag); ServerPicker retired (TopBar dropdown + Settings → Servers); version bump deferred to P11.

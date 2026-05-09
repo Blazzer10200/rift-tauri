@@ -73,6 +73,13 @@ impl Default for UpdateService {
 }
 
 fn resolve_manager() -> Result<Option<velopack::UpdateManager>, String> {
+    // SECURITY TODO (audit H4) — before public v14 ship:
+    //   1. Generate a Velopack signing keypair: `vpk pack --signing-key ...`
+    //   2. Embed the public key here as `Some(UpdateOptions { public_key: Some("..."), ... })`
+    //      (third arg below). Otherwise a compromised release host can
+    //      ship a tampered binary and the auto-updater installs it silently.
+    //   Local FileSource path is dev-only (RIFT_UPDATE_FEED), so leaving
+    //   it unsigned is acceptable for that branch.
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
         let p = Path::new(&local);
         if p.is_dir() {

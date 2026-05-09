@@ -28,6 +28,7 @@
 
   type ConnState = "connected" | "connecting" | "error" | "offline";
   const connState = $derived<ConnState>(
+    connection.connecting ? "connecting" :
     !connection.status ? "offline" :
     connection.status.state === "error" ? "error" :
     connection.status.state === "watching" || connection.status.state === "idle" || connection.status.state === "syncing" ? "connected" :

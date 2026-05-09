@@ -71,6 +71,8 @@
     { id: "tab-drift",    group: "Go to", title: "Drift",    shortcut: "Ctrl+3", run: () => (active = "drift")    },
     { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
     { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+5", run: () => (active = "settings") },
+    { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
+      run: () => connection.connect().catch((e) => console.error(e)) },
     { id: "disconnect",   group: "Sync",  title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
       run: () => connection.disconnect() },
     { id: "reload",       group: "Servers", title: "Reload servers",
@@ -128,7 +130,9 @@
     }
   }
 
+  let openingBootstrap = $state(false);
   async function openBootstrap() {
+    if (openingBootstrap || bootstrapOpen) return;
     const sel = connection.selected;
     if (!sel) {
       askConfirm({
@@ -138,8 +142,13 @@
       });
       return;
     }
-    bootstrapDetection = await detectBootstrapSafe(sel.key);
-    bootstrapOpen = true;
+    openingBootstrap = true;
+    try {
+      bootstrapDetection = await detectBootstrapSafe(sel.key);
+      bootstrapOpen = true;
+    } finally {
+      openingBootstrap = false;
+    }
   }
 
   function askConfirm(opts: { title: string; body: string; isDanger?: boolean }): Promise<boolean> {
@@ -153,6 +162,25 @@
       };
     });
   }
+
+  // Audit C2 — TOFU prompt. When connection.connect() probes a fresh
+  // fingerprint, show a confirmation dialog before we trust it.
+  let fingerprintHandled = $state<string | null>(null);
+  $effect(() => {
+    const fp = connection.pendingFingerprint;
+    if (!fp || fp === fingerprintHandled) return;
+    fingerprintHandled = fp;
+    const name = connection.selected?.name ?? "this server";
+    askConfirm({
+      title: "Trust this server fingerprint?",
+      body: `First connection to ${name}. Verify this matches what you expect from the server admin before accepting.\n\n${fp}`,
+      isDanger: false,
+    }).then((ok) => {
+      if (ok) connection.confirmFingerprint();
+      else connection.cancelFingerprint();
+      fingerprintHandled = null;
+    });
+  });
 
   async function handleReupload(
     head: { remotePath: string; tmpPath: string; displayName: string; mtime: string; size: number },

@@ -40,6 +40,7 @@ pub struct WatchedFileInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EditChangedEvent {
+    pub server_key: String,
     pub remote_path: String,
     pub tmp_path: String,
     pub display_name: String,
@@ -59,6 +60,7 @@ struct WatchedFile {
 }
 
 pub struct EditInPlaceManager {
+    server_key: String,
     sftp: Arc<SftpClient>,
     app: AppHandle,
     tmp_root: PathBuf,
@@ -75,7 +77,7 @@ fn now_stamp() -> String {
 }
 
 impl EditInPlaceManager {
-    pub fn new(sftp: Arc<SftpClient>, app: AppHandle) -> Result<Self, String> {
+    pub fn new(server_key: String, sftp: Arc<SftpClient>, app: AppHandle) -> Result<Self, String> {
         let home = dirs_home().map_err(|e| format!("home dir: {e}"))?;
         let tmp_root = home
             .join(".rift")
@@ -84,6 +86,7 @@ impl EditInPlaceManager {
         std::fs::create_dir_all(&tmp_root)
             .map_err(|e| format!("create tmp root {}: {e}", tmp_root.display()))?;
         Ok(Self {
+            server_key,
             sftp,
             app,
             tmp_root,
@@ -140,6 +143,7 @@ impl EditInPlaceManager {
         // 400ms coalescing via debounce_token matches WPF's behavior 1:1.
         let watched_arc = self.watched.clone();
         let app = self.app.clone();
+        let server_key_for_event = self.server_key.clone();
         let key = remote_path.to_string();
         let watch_target = local_path.clone();
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
@@ -156,6 +160,7 @@ impl EditInPlaceManager {
             let key = key.clone();
             let watched_arc = watched_arc.clone();
             let app = app.clone();
+            let server_key_for_event = server_key_for_event.clone();
             tokio::spawn(async move {
                 let token = {
                     let mut g = watched_arc.lock().await;
@@ -182,6 +187,7 @@ impl EditInPlaceManager {
                     w.last_saved_mtime = mtime;
                     w.last_saved_size = size;
                     EditChangedEvent {
+                        server_key: server_key_for_event.clone(),
                         remote_path: w.remote_path.clone(),
                         tmp_path: w.tmp_path.to_string_lossy().to_string(),
                         display_name: w.display_name.clone(),
