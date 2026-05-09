@@ -1,6 +1,10 @@
-// Phase 1e: rift_bridge HTTP client. Talks to http://<host>:<bridge_port>/<path>
-// (typically 127.0.0.1 over a forwarded SSH tunnel; for now we trust the user
-// has the tunnel up — Rust SSH-tunnel forwarder lands later as Phase 1g).
+// Phase 1e: rift_bridge HTTP client.
+//
+// FXServer's `SetHttpHandler` registers routes under the game's main HTTP
+// port (30120 by default), prefixed with the resource name. Final URL shape
+// is `http://<host>:<bridge_port>/rift_bridge/<route>`. The bridge_port in
+// the user's profile MUST be the FXServer game port (typically 30120), NOT
+// some arbitrary other port — `SetHttpHandler` does not bind its own port.
 //
 // Mirrors WPF Services/Transport/BridgeClient.cs (57L). Bearer token via
 // `X-Rift-Token` header. 8s timeout. Currently exposes one endpoint —
@@ -42,7 +46,7 @@ impl BridgeClient {
 
     pub async fn sync_done(&self, resource_name: &str) -> BridgeResult {
         let path = format!(
-            "/sync-done?resource={}",
+            "/rift_bridge/sync-done?resource={}",
             urlencoding_minimal(resource_name)
         );
         self.send(reqwest::Method::POST, &path).await

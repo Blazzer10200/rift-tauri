@@ -11,6 +11,7 @@
   import ActivityToast from "./ActivityToast.svelte";
   import TwoPane from "./browser/TwoPane.svelte";
   import ActivityFeed from "./activity/ActivityFeed.svelte";
+  import Diagnostics from "./diagnostics/Diagnostics.svelte";
   import DriftReview from "./drift/DriftReview.svelte";
   import ConflictList from "./conflicts/ConflictList.svelte";
   import ConflictResolver from "./conflicts/ConflictResolver.svelte";
@@ -23,7 +24,7 @@
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import { updates } from "../state/updates.svelte";
 
-  type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings";
+  type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings" | "diagnostics";
   type SettingsSection = "appearance" | "tokens" | "servers" | "keys" | "sync" | "editor" | "about";
 
   let active = $state<Tab>("browse");
@@ -73,6 +74,8 @@
     { id: "tab-drift",    group: "Go to", title: "Drift",    shortcut: "Ctrl+3", run: () => (active = "drift")    },
     { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
     { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+5", run: () => (active = "settings") },
+    { id: "tab-diagnostics", group: "Go to", title: "Sync Inspector", subtitle: "Live diagnostics for the sync pipeline", shortcut: "Ctrl+Shift+D",
+      run: () => (active = "diagnostics") },
     { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
       run: () => connection.connect().catch((e) => console.error(e)) },
     { id: "disconnect",   group: "Sync",  title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
@@ -107,6 +110,8 @@
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
     const k = e.key.toLowerCase();
+    if (e.shiftKey && k === "d") { e.preventDefault(); active = "diagnostics"; return; }
+    if (e.shiftKey) return;
     if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
     if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
@@ -285,6 +290,8 @@
             onLaunchKeygen={() => (keygenOpen = true)}
           />
         {/key}
+      {:else if active === "diagnostics"}
+        <Diagnostics />
       {/if}
     </main>
   </div>
