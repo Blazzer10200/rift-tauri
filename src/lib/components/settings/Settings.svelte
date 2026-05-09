@@ -4,6 +4,7 @@
   import { connection, type ServerProfile } from "../../state/connection.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { Cog, Bolt, Server, Key, RefreshCw, Terminal, Info, Plus, Pencil, Trash2, Copy, Check } from "lucide-svelte";
+  import { updates } from "../../state/updates.svelte";
 
   type Section = "appearance" | "tokens" | "servers" | "keys" | "sync" | "editor" | "about";
 
@@ -210,6 +211,15 @@
         <div class="set-row"><span>Style</span><span class="mono">Tailwind v4 · OKLCH tokens · Linear-precise</span></div>
         <div class="set-row"><span>SSH</span><span class="mono">russh + russh-sftp · ring backend</span></div>
         <div class="set-row"><span>License</span><span class="mono">MIT · github.com/Blazzer10200/rift</span></div>
+        <div class="set-row">
+          <span>Updates</span>
+          <span class="upd-cell">
+            <button type="button" onclick={() => updates.open()}>
+              <RefreshCw size={11}/>
+              Check for updates
+            </button>
+          </span>
+        </div>
       </div>
     {/if}
   </div>
@@ -334,4 +344,17 @@
   .srv-r { display: flex; gap: 4px; }
 
   .key-card { padding: 18px; display: flex; flex-direction: column; gap: 12px; align-items: flex-start; }
+
+  .upd-cell { display: inline-flex; align-items: center; gap: 8px; }
+  .upd-cell button {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 22px; padding: 0 10px;
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    color: var(--fg); border-radius: var(--radius-sm);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  }
+  .upd-cell button:hover:not(:disabled) { background: var(--surface-hover); }
+  .upd-cell button:disabled { opacity: 0.6; cursor: default; }
+  :global(.spin) { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>

@@ -6,3 +6,9 @@ src-tauri/target/
 src-tauri/gen/
 publish/
 Releases/
+
+# Defensive: runtime artifacts shouldn't land in the source tree, but if a
+# misconfigured HOME ever resolves rift_dir() here, don't let it get committed.
+src-tauri/src/state/*.json
+src-tauri/src/state/*.log
+src-tauri/src/state/rift-edits/

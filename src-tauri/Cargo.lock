@@ -4282,7 +4282,7 @@ dependencies = [
 
 [[package]]
 name = "rift-tauri"
-version = "0.2.6-alpha"
+version = "0.2.7-alpha"
 dependencies = [
  "base64 0.22.1",
  "chrono",

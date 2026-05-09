@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { FolderOpen, Activity, GitPullRequestArrow, TriangleAlert, Cog } from "lucide-svelte";
+  import { FolderOpen, Activity, GitPullRequestArrow, TriangleAlert, Cog, Download } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
+  import { updates } from "../../state/updates.svelte";
 
   type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings";
 
@@ -52,6 +53,22 @@
       </button>
     {/each}
   </div>
+
+  {#if updates.state === "available" && updates.info}
+    <button
+      class="update-pill"
+      type="button"
+      onclick={() => updates.open()}
+      title="Update {updates.info.version} available — click for details"
+    >
+      <span class="up-dot"></span>
+      <Download size={12}/>
+      <span class="up-text">
+        <span class="up-l">Update available</span>
+        <span class="up-v mono">{updates.info.version}</span>
+      </span>
+    </button>
+  {/if}
 
   <div class="foot">
     <div class="stat">
@@ -117,8 +134,40 @@
   .rail-btn:hover .rail-kbd { opacity: 1; }
   .rail-btn[data-active="true"] .rail-kbd { opacity: 0.7; }
 
-  .foot {
+  .update-pill {
     margin-top: auto;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
+    color: var(--fg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: inherit; font-size: var(--fs-xs);
+    text-align: left;
+    transition: background 120ms, border-color 120ms;
+  }
+  .update-pill:hover {
+    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+  }
+  .up-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 30%, transparent);
+    flex-shrink: 0;
+    animation: up-pulse 2s ease-in-out infinite;
+  }
+  @keyframes up-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 30%, transparent); }
+    50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 14%, transparent); }
+  }
+  .up-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+  .up-l { color: var(--fg); }
+  .up-v { color: var(--fg-muted); font-size: var(--fs-xs); }
+
+  .foot {
     display: flex; flex-direction: column; gap: 2px;
     padding: 8px 6px 4px;
     border-top: 1px solid var(--border);
