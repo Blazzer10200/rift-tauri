@@ -2,6 +2,20 @@
 
 Older changelog entries flow here as new versions ship. Live entry stays in `docs/CHANGELOG.md`.
 
+## v0.1.6-alpha — 2026-05-09 — Backend audit sweep: 85 findings, 6204 LOC touched
+
+Backend audit + fix pass across all 23 `src-tauri/src/` files; critical/high/medium findings landed. Dev-only — no public ship. UI untouched.
+
+**Critical:** Mutex-poison hardening (`sync_snapshot.rs`/`remote_state.rs`/`discovery.rs`); `SaveLocalCopy` data-loss guard; atomic `RiftConfig::save()` (tmp+rename); fire-and-forget `JoinHandle` tracking via `background_tasks`; `stat_local` Option return for missing-metadata paths.
+
+**High:** `get_remote_sha1` stderr capture; empty-root retry tightened (HashMap-keyed, was N round-trips); per-permanent-drop log warn; `spawn_blocking` for blocking I/O; `editor_for` TOCTOU fix (lock held across SFTP open).
+
+**Medium / cleanup:** `SHA1_MAX_BYTES` consolidation (3 defs → 1, fixes WPF mismatch); `MTIME_TOLERANCE_SECS` exported; shared `transport::{ssh_handler, env}` modules (~50L deduped); `paths::dirs_home` public; `local_fs::list_directory` canonical walker; temp-dir collision fix (pid+short_id, was nanosecond); `ensure_workers` `FuturesUnordered` short-circuit; private key loaded once in `OwnedConnectArgs`; tokio features narrowed; dead deps removed (anyhow/thiserror/etc); `hex_upper` write! optimization (~20× cheaper SHA1).
+
+**Verified:** `cargo clippy --lib --tests -- -D warnings` zero warnings; `cargo test --lib` 47+1 = 48/48; `npm run check` 318 files / 0 errors / 0 warnings.
+
+**Versions:** `Cargo.toml`, `package.json`, `tauri.conf.json` → 0.1.6. v0.1.5 archived.
+
 ## v0.1.5-alpha — 2026-05-09 — UI redesign foundation: Tailwind v4 + shadcn-svelte + Claude Design brief
 
 UI redesign substrate laid. No public ship; Phase 6 still deferred. Migration core (v0.1.4) remains functionally complete; this version adds the visual-iteration foundation and the Claude Design handoff package.

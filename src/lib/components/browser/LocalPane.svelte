@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { Folder, FolderOpen, FileCode, File, ChevronRight } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { connection } from "../../state/connection.svelte";
@@ -17,8 +18,9 @@
     onPathChange: (next: string) => void;
     onOpenInNewTab: (entry: LocalEntry) => void;
     onDropPaths?: (remoteOrLocalPaths: string[]) => void;
+    onSelectionChange?: (paths: string[]) => void;
   };
-  let { path, onPathChange, onOpenInNewTab, onDropPaths }: Props = $props();
+  let { path, onPathChange, onOpenInNewTab, onDropPaths, onSelectionChange }: Props = $props();
 
   let entries = $state<LocalEntry[]>([]);
   let filter = $state("");
@@ -39,6 +41,10 @@
   $effect(() => {
     void path;
     void load();
+  });
+
+  $effect(() => {
+    onSelectionChange?.([...selected]);
   });
 
   async function load() {
@@ -81,6 +87,21 @@
       return norm.slice(0, idx) + "\\";
     }
     return norm.slice(0, idx).replaceAll("/", "\\");
+  }
+
+  function rowStatus(e: LocalEntry): "conflict" | "synced" {
+    if (e.is_dir) return "synced";
+    const inConflict = connection.conflicts.some((c) => {
+      const cBase = c.local_path.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
+      return cBase === e.name;
+    });
+    return inConflict ? "conflict" : "synced";
+  }
+
+  function pickIcon(e: LocalEntry) {
+    if (e.is_dir) return Folder;
+    if (/\.(lua|ts|js|py|rs|cs|go|rb|json|yml|yaml|toml)$/i.test(e.name)) return FileCode;
+    return File;
   }
 
   function onRowClick(e: MouseEvent, entry: LocalEntry) {
@@ -141,47 +162,58 @@
 
 <svelte:window onclick={closeMenu} />
 
-<section class="pane">
-  <PathBreadcrumbs {path} sep={winSep} onNavigate={(p) => onPathChange(p)} />
-  <div class="toolbar">
-    <button
-      type="button"
-      class="up"
-      disabled={!parentOf(path)}
-      onclick={() => { const p = parentOf(path); if (p) onPathChange(p); }}
-    >↑ Up</button>
-    <input
-      class="filter"
-      placeholder="Filter…"
-      bind:value={filter}
-      type="text"
-    />
+<section class="pane" data-side="local">
+  <PathBreadcrumbs
+    side="local"
+    {path}
+    sep={winSep}
+    onNavigate={(p) => onPathChange(p)}
+    onRefresh={() => load()}
+    filterValue={filter}
+    onFilterChange={(v) => (filter = v)}
+  />
+  <div class="headcols">
+    <div class="col col-name">name</div>
+    <div class="col col-status" title="sync status">●</div>
+    <div class="col col-size">size</div>
+    <div class="col col-mtime">modified</div>
   </div>
   {#if error}
-    <div class="err">{error}</div>
+    <div class="err mono">{error}</div>
   {/if}
   <div
-    class="grid"
+    class="body"
     role="presentation"
     ondragover={onDragOver}
     ondrop={onDrop}
   >
-    <div class="header">
-      <span class="col-name">Name</span>
-      <span class="col-size">Size</span>
-      <span class="col-mtime">Modified</span>
-    </div>
-    <div class="body">
-      {#if loading}
-        <div class="empty">Loading…</div>
-      {:else if filtered.length === 0}
+    {#if loading}
+      <div class="empty">Loading…</div>
+    {:else if !path}
+      <div class="empty">No local root.</div>
+    {:else}
+      <button
+        type="button"
+        class="row up-row"
+        disabled={!parentOf(path)}
+        onclick={() => { const p = parentOf(path); if (p) onPathChange(p); }}
+      >
+        <span class="row-name"><span class="twirl"></span>↑ ..</span>
+        <span class="row-status"></span>
+        <span class="row-size mono">—</span>
+        <span class="row-mtime mono">—</span>
+      </button>
+      {#if filtered.length === 0}
         <div class="empty">{filter ? "No matches." : "Empty."}</div>
       {:else}
         {#each filtered as e (e.path)}
+          {@const status = rowStatus(e)}
+          {@const lk = !e.is_dir ? connection.lockForBasename(e.name) : null}
+          {@const Icon = pickIcon(e)}
           <div
             class="row"
-            class:dir={e.is_dir}
-            class:sel={selected.has(e.path)}
+            data-selected={selected.has(e.path)}
+            data-status={status}
             draggable="true"
             ondragstart={(ev) => onDragStart(ev, e)}
             onclick={(ev) => onRowClick(ev, e)}
@@ -191,22 +223,35 @@
             tabindex="0"
             onkeydown={(ev) => { if (ev.key === "Enter") onRowDblClick(e); }}
           >
-            <span class="col-name">
-              <span class="icon">{e.is_dir ? "▸" : "·"}</span>
-              {e.name}
-              {#if !e.is_dir}
-                {@const lk = connection.lockForBasename(e.name)}
-                {#if lk}
-                  <LockBadge holder={`${lk.user}@${lk.host}`} tooltip={`Locked remotely by ${lk.user}@${lk.host}`} />
-                {/if}
+            <span class="row-name">
+              {#if e.is_dir}
+                <span class="twirl"><ChevronRight size={10}/></span>
+                <Folder size={13}/>
+              {:else}
+                <span class="twirl"></span>
+                <Icon size={13}/>
+              {/if}
+              <span class="row-label mono">{e.name}</span>
+              {#if lk}
+                <LockBadge holder={`${lk.user}@${lk.host}`} tooltip={`Locked remotely by ${lk.user}@${lk.host}`} />
               {/if}
             </span>
-            <span class="col-size">{fmtSize(e.size, e.is_dir)}</span>
-            <span class="col-mtime">{fmtTime(e.mtime)}</span>
+            <span class="row-status" title={status}>
+              {#if status === "conflict"}
+                <span class="sym danger">▲</span>
+              {:else}
+                <span class="sym muted">·</span>
+              {/if}
+            </span>
+            <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
+            <span class="row-mtime mono">{fmtTime(e.mtime)}</span>
           </div>
         {/each}
       {/if}
-    </div>
+    {/if}
+  </div>
+  <div class="foot mono dim">
+    {filtered.length} {filtered.length === 1 ? "item" : "items"}{selected.size ? ` · ${selected.size} selected` : ""}
   </div>
 </section>
 
@@ -228,77 +273,88 @@
   .pane {
     display: flex; flex-direction: column;
     flex: 1; min-width: 0; min-height: 0;
-    background: #0F0F12;
+    background: var(--bg);
   }
-  .toolbar {
-    display: flex; gap: 8px; padding: 6px 8px;
-    border-bottom: 1px solid #26262E;
-    background: #0F0F12;
-  }
-  .up {
-    background: #17171C; color: #E8E8EE;
-    border: 1px solid #26262E; border-radius: 3px;
-    padding: 3px 10px; font-size: 12px; cursor: pointer;
-  }
-  .up:hover:not(:disabled) { border-color: #8B6BE6; }
-  .up:disabled { opacity: 0.4; cursor: not-allowed; }
-  .filter {
-    flex: 1;
-    background: #17171C; color: #E8E8EE;
-    border: 1px solid #26262E; border-radius: 3px;
-    padding: 3px 8px; font-size: 12px;
-  }
-  .filter:focus { outline: 0; border-color: #8B6BE6; }
   .err {
-    color: #FF5C6B; padding: 8px 12px;
-    background: #15101E; font-size: 12px; font-family: Consolas, monospace;
-    border-bottom: 1px solid #26262E;
+    color: var(--danger); padding: 8px 12px;
+    background: var(--danger-soft);
+    font-size: var(--fs-xs);
+    border-bottom: 1px solid color-mix(in oklch, var(--danger) 30%, transparent);
   }
-  .grid {
-    flex: 1; overflow: auto; min-height: 0;
-    display: flex; flex-direction: column;
-  }
-  .header, .row {
+
+  .headcols, .row {
     display: grid;
-    grid-template-columns: 1fr 80px 140px;
+    grid-template-columns: 1fr 24px 80px 140px;
     gap: 8px;
-    padding: 4px 12px;
     align-items: center;
-    font-size: 12px;
+    font-size: var(--fs-sm);
   }
-  .header {
-    color: #7A7A85; font-weight: 600;
-    border-bottom: 1px solid #26262E;
-    background: #17171C;
-    position: sticky; top: 0;
+  .headcols {
+    padding: 4px 12px;
+    color: var(--fg-subtle);
+    font-weight: 600;
+    font-size: var(--fs-xs);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev-1);
+    position: sticky; top: 0; z-index: 1;
   }
-  .body { flex: 1; }
+  .col-status { text-align: center; }
+  .body { flex: 1; overflow: auto; min-height: 0; padding: 4px 0; }
   .row {
-    border-bottom: 1px solid #15101E;
-    color: #E8E8EE;
+    padding: 0 12px;
+    height: var(--row-h);
+    color: var(--fg);
     cursor: default;
+    border-left: 2px solid transparent;
+    background: transparent;
+    text-align: left;
   }
-  .row:hover { background: #17171C; }
-  .row.sel { background: #15101E; color: #E8E8EE; outline: 1px solid #8B6BE6; outline-offset: -1px; }
-  .row.dir .col-name { color: #8B6BE6; }
-  .icon { display: inline-block; width: 14px; color: #7A7A85; }
-  .col-size, .col-mtime { color: #7A7A85; font-family: Consolas, monospace; }
-  .empty {
-    padding: 18px 12px; color: #7A7A85; font-size: 12px;
-    text-align: center;
+  .row:hover { background: var(--surface-hover); }
+  .row[data-selected="true"] {
+    background: var(--accent-soft);
+    border-left-color: var(--accent);
   }
+  .row[data-status="conflict"] .row-label { color: var(--danger); }
+  .up-row {
+    width: 100%;
+    border: 0;
+    font: inherit;
+  }
+  .up-row:disabled { opacity: 0.4; cursor: not-allowed; }
+  .row-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+  .row-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .twirl { display: inline-flex; width: 12px; color: var(--fg-faint); }
+  .row-status { text-align: center; }
+  .sym { font-size: 11px; }
+  .sym.danger { color: var(--danger); }
+  .sym.muted { color: var(--fg-faint); }
+  .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); }
+
+  .empty { padding: 22px; color: var(--fg-muted); font-size: var(--fs-sm); text-align: center; }
+
+  .foot {
+    padding: 4px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elev-1);
+    font-size: var(--fs-xs);
+  }
+
   .ctxmenu {
     position: fixed; z-index: 100;
-    background: #17171C; border: 1px solid #26262E; border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
     min-width: 160px; padding: 4px;
   }
   .ctxmenu button {
     display: block; width: 100%; text-align: left;
     background: transparent; border: 0;
-    color: #E8E8EE; font-size: 12px;
-    padding: 6px 10px; border-radius: 3px;
+    color: var(--fg); font-size: var(--fs-sm);
+    padding: 6px 10px; border-radius: var(--radius-xs);
     cursor: pointer;
   }
-  .ctxmenu button:hover { background: #15101E; color: #8B6BE6; }
+  .ctxmenu button:hover { background: var(--surface-hover); color: var(--accent); }
 </style>

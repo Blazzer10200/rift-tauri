@@ -1,6 +1,10 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import {
+    X, Server, ChevronLeft, ChevronRight, Check, Key, Terminal,
+    AlertTriangle, ExternalLink,
+  } from "lucide-svelte";
   import type { ServerProfile } from "../../state/connection.svelte";
 
   type Props = {
@@ -12,7 +16,6 @@
 
   let { open, editing, onClose, onLaunchKeygen }: Props = $props();
 
-  // ── form state ─────────────────────────────────────────────────────
   let name = $state("");
   let host = $state("");
   let port = $state("22");
@@ -25,9 +28,9 @@
   let bridgePort = $state("30121");
   let nameTouched = $state(false);
 
-  // Stepper: 0=Connection, 1=Workspace, 2=Bridge & Save.
   let step = $state(0);
   const lastStep = 2;
+  const stepLabels = ["Connection", "Workspace", "Bridge & save"];
 
   let error = $state("");
   let saving = $state(false);
@@ -53,7 +56,6 @@
       name = ""; host = ""; port = "22"; user = "";
       keyPath = ""; remoteRoot = ""; localRoot = "";
       txAdminUrl = ""; bridgeToken = ""; bridgePort = "30121";
-      // Auto-fill ~/.ssh/id_ed25519 if it exists
       void (async () => {
         try {
           const exists = await invoke<boolean>("default_ssh_key_exists");
@@ -66,14 +68,12 @@
     }
   });
 
-  // Auto-suggest display name from host (Add flow only).
   $effect(() => {
     if (!editing && !nameTouched && host.trim() && !name.trim()) {
       name = `Server (${host.trim()})`;
     }
   });
 
-  // ── validation per step ────────────────────────────────────────────
   function validateStep(s: number): string | null {
     if (s === 0) {
       if (!name.trim()) return "Display name is required.";
@@ -106,12 +106,10 @@
     error = "";
     if (step < lastStep) step += 1;
   }
-
   function back() {
     error = "";
     if (step > 0) step -= 1;
   }
-
   function gotoStep(target: number) {
     error = "";
     step = Math.max(0, Math.min(lastStep, target));
@@ -138,7 +136,6 @@
         txAdminUrl: txAdminUrl.trim() || null,
         bridgePort: Number.isFinite(bp) ? bp : null,
       };
-      // Pass-through extra fields the backend cares about (not in ServerProfile type)
       const payload = {
         ...profile,
         bridgeToken: bridgeToken.trim() || (editing as unknown as { bridgeToken?: string })?.bridgeToken || null,
@@ -164,279 +161,253 @@
       url = "http://" + url;
       txAdminUrl = url;
     }
-    try {
-      await openUrl(url);
-    } catch (e) {
-      error = "Could not open URL: " + String(e);
-    }
+    try { await openUrl(url); }
+    catch (e) { error = "Could not open URL: " + String(e); }
   }
 
   function onBackdrop(e: MouseEvent) {
     if (e.target === e.currentTarget && !saving) onClose(null);
   }
-
   function onKey(e: KeyboardEvent) {
     if (!open) return;
     if (e.key === "Escape" && !saving) onClose(null);
   }
 
-  const summary = $derived.by(() => {
-    const tx = txAdminUrl.trim() || "(none)";
-    const bridge = bridgeToken.trim() || (editing as unknown as { bridgeToken?: string })?.bridgeToken
-      ? "enabled"
-      : "(disabled)";
-    return [
-      `${name.trim() || "(unnamed)"}`,
-      `  ssh://${user.trim()}@${host.trim()}:${port.trim()}`,
-      `  remote → ${remoteRoot.trim()}`,
-      `  local  → ${localRoot.trim()}`,
-      `  txAdmin: ${tx}`,
-      `  bridge:  ${bridge}`,
-    ].join("\n");
+  const sshPreview = $derived.by(() => {
+    const u = user.trim() || "user";
+    const h = host.trim() || "host";
+    const p = parseInt(port.trim(), 10);
+    return `ssh ${u}@${h}${p && p !== 22 ? ` -p ${p}` : ""}`;
   });
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 {#if open}
-  <div class="backdrop" onclick={onBackdrop} role="presentation">
-    <div class="dialog" role="dialog" aria-modal="true" aria-label={editing ? "Edit server" : "Add server"}>
-      <header>
-        <h2>{editing ? "Edit server" : "Add server"}</h2>
-      </header>
+  <div class="dialog-overlay" onclick={onBackdrop} role="presentation">
+    <div class="dialog-shell as-shell" role="dialog" aria-modal="true" aria-label={editing ? "Edit server" : "Add server"}>
+      <div class="dialog-head">
+        <div class="dialog-icon"><Server size={14}/></div>
+        <div>
+          <div class="dialog-title">{editing ? "Edit server" : "Add server"}</div>
+          <div class="dialog-sub">Connect Rift to a remote FiveM dev server over SSH.</div>
+        </div>
+        <button class="dialog-close" type="button" onclick={() => !saving && onClose(null)} aria-label="Close">
+          <X size={14}/>
+        </button>
+      </div>
 
-      <!-- Stepper -->
       <div class="stepper">
-        {#each [
-          { label: "Connection", n: 1 },
-          { label: "Workspace",  n: 2 },
-          { label: "Bridge & Save", n: 3 },
-        ] as s, i (s.n)}
-          <div class="step" class:active={step === i} class:done={step > i}>
-            <span class="pip">{s.n}</span>
-            <span class="step-label">{s.label}</span>
-          </div>
-          {#if i < 2}<span class="step-bar"></span>{/if}
+        {#each stepLabels as label, i (label)}
+          <button
+            class="step"
+            type="button"
+            data-active={i === step}
+            data-done={i < step}
+            onclick={() => gotoStep(i)}
+            disabled={i > step && !stepValid}
+          >
+            <span class="step-dot">{#if i < step}<Check size={10}/>{:else}{i + 1}{/if}</span>
+            <span>{label}</span>
+          </button>
+          {#if i < stepLabels.length - 1}<span class="step-line"></span>{/if}
         {/each}
       </div>
 
-      <div class="content">
+      <div class="dialog-body as-body">
         {#if step === 0}
           <div class="field">
-            <label for="name">Display name *</label>
-            <input id="name" type="text" bind:value={name} oninput={() => (nameTouched = true)} placeholder="(auto-suggests from host)" />
+            <label class="field-label" for="as-name">Profile name <span class="field-sub">a short, memorable handle</span></label>
+            <input id="as-name" class="input" type="text" bind:value={name} oninput={() => (nameTouched = true)} placeholder="(auto-suggests from host)"/>
           </div>
-          <div class="row-2">
-            <div class="field grow">
-              <label for="host">Host *</label>
-              <input id="host" type="text" bind:value={host} />
+          <div class="row3">
+            <div class="field">
+              <label class="field-label" for="as-host">Host</label>
+              <input id="as-host" class="input mono" type="text" bind:value={host} placeholder="10.0.4.18"/>
             </div>
             <div class="field narrow">
-              <label for="port">Port *</label>
-              <input id="port" type="text" bind:value={port} />
+              <label class="field-label" for="as-port">Port</label>
+              <input id="as-port" class="input mono" type="text" bind:value={port}/>
+            </div>
+            <div class="field">
+              <label class="field-label" for="as-user">User</label>
+              <input id="as-user" class="input mono" type="text" bind:value={user} placeholder="fivem"/>
             </div>
           </div>
+          {#if (host.trim() || user.trim())}
+            <div class="conn-preview">
+              <Terminal size={11}/>
+              <span class="mono">{sshPreview}</span>
+            </div>
+          {/if}
           <div class="field">
-            <label for="user">User *</label>
-            <input id="user" type="text" bind:value={user} placeholder="ssh username (per-user account, not a shared service account)" />
-          </div>
-          <div class="field">
-            <label for="keypath">SSH private key *</label>
-            <div class="row-with-button">
-              <input id="keypath" type="text" bind:value={keyPath} placeholder="C:\Users\you\.ssh\id_ed25519" />
+            <label class="field-label" for="as-key">
+              Identity file <span class="field-sub">private key · ed25519 recommended</span>
+            </label>
+            <div class="input-row">
+              <input id="as-key" class="input mono" type="text" bind:value={keyPath} placeholder="C:\Users\you\.ssh\id_ed25519"/>
               {#if onLaunchKeygen}
-                <button type="button" class="aux" onclick={onLaunchKeygen}>Setup key</button>
+                <button class="btn" type="button" onclick={onLaunchKeygen}>
+                  <Key size={11}/> Generate
+                </button>
               {/if}
             </div>
           </div>
         {:else if step === 1}
           <div class="field">
-            <label for="rroot">Remote root * — must end at the FiveM resources folder</label>
-            <input id="rroot" type="text" bind:value={remoteRoot} placeholder="/opt/fxserver/server/txData/<base>/resources" />
+            <label class="field-label" for="as-rroot">
+              Remote root <span class="field-sub">must end at the FiveM <span class="mono">resources/</span> folder</span>
+            </label>
+            <input id="as-rroot" class="input mono" type="text" bind:value={remoteRoot} placeholder="/opt/fxserver/server/txData/<base>/resources"/>
           </div>
           <div class="field">
-            <label for="lroot">Local root *</label>
-            <input id="lroot" type="text" bind:value={localRoot} placeholder="local FiveM server resources folder" />
+            <label class="field-label" for="as-lroot">
+              Local root <span class="field-sub">the folder Rift watches on this machine</span>
+            </label>
+            <input id="as-lroot" class="input mono" type="text" bind:value={localRoot} placeholder="C:\dev\fivem\resources"/>
           </div>
           <div class="info-card">
-            <h3>What is the remote root?</h3>
-            <p>Path on the server that holds your <code>[resources]/</code> folders. Rift will sync into and out of this directory. If you point it at the parent (e.g. <code>/opt/fxserver/server</code> instead of <code>…/resources</code>), drift scans will see thousands of unrelated files.</p>
+            <div class="info-head">What is the remote root?</div>
+            <p>Path on the server that holds your <span class="mono">[bracketed]/</span> resource folders. Rift will sync into and out of this directory. If you point it at the parent (e.g. <span class="mono">/opt/fxserver/server</span> instead of <span class="mono">…/resources</span>), drift scans will see thousands of unrelated files.</p>
           </div>
         {:else if step === 2}
           <div class="field">
-            <label for="tx">txAdmin URL (optional, opens in browser for restart fallback)</label>
-            <div class="row-with-button">
-              <input id="tx" type="text" bind:value={txAdminUrl} placeholder="http://server.example:40120" />
-              <button type="button" class="aux" onclick={testTxAdmin}>Test</button>
+            <label class="field-label" for="as-tx">
+              txAdmin URL <span class="field-sub">optional — opens in browser for restart fallback</span>
+            </label>
+            <div class="input-row">
+              <input id="as-tx" class="input mono" type="text" bind:value={txAdminUrl} placeholder="http://server.example:40120"/>
+              <button class="btn" type="button" onclick={testTxAdmin} disabled={!txAdminUrl.trim()}>
+                <ExternalLink size={11}/> Test
+              </button>
             </div>
           </div>
           <div class="info-card">
-            <h3>rift_bridge — auto-sync companion (optional)</h3>
-            <p>Install the rift_bridge resource on your FXServer to enable auto-sync + restart-on-save. Leave token empty to disable.</p>
-            <div class="field">
-              <label for="btoken">Bridge token</label>
-              <input id="btoken" type="text" bind:value={bridgeToken} placeholder={editing ? "(leave empty to keep existing)" : ""} />
+            <div class="info-head">rift_bridge — auto-sync companion (optional)</div>
+            <p>Install the <span class="mono">rift_bridge</span> resource on your FXServer to enable auto-sync + restart-on-save. Leave the token empty to disable.</p>
+            <div class="field tight">
+              <label class="field-label" for="as-btoken">Bridge token</label>
+              <input id="as-btoken" class="input mono" type="text" bind:value={bridgeToken} placeholder={editing ? "(leave empty to keep existing)" : ""}/>
             </div>
-            <div class="field">
-              <label for="bport">Bridge port (default 30121)</label>
-              <input id="bport" type="text" bind:value={bridgePort} />
+            <div class="field tight">
+              <label class="field-label" for="as-bport">Bridge port <span class="field-sub">default 30121</span></label>
+              <input id="as-bport" class="input mono" type="text" bind:value={bridgePort}/>
             </div>
           </div>
-          <div class="summary-card">
-            <h3>Ready to save</h3>
-            <pre>{summary}</pre>
+          <div class="summary">
+            <div class="summary-head">Summary</div>
+            <div class="summary-grid mono">
+              <span class="dim">name</span><span>{name.trim() || "—"}</span>
+              <span class="dim">ssh</span><span>{user.trim() || "—"}@{host.trim() || "—"}:{port.trim()}</span>
+              <span class="dim">remote</span><span>{remoteRoot.trim() || "—"}</span>
+              <span class="dim">local</span><span>{localRoot.trim() || "—"}</span>
+              <span class="dim">txAdmin</span><span>{txAdminUrl.trim() || "(none)"}</span>
+              <span class="dim">bridge</span><span>{bridgeToken.trim() ? `enabled · port ${bridgePort.trim()}` : "(disabled)"}</span>
+            </div>
           </div>
         {/if}
       </div>
 
-      {#if error}<p class="error">{error}</p>{/if}
+      {#if error}
+        <div class="error mono">
+          <AlertTriangle size={11}/> {error}
+        </div>
+      {/if}
 
-      <footer>
-        <div>
-          {#if step > 0}
-            <button class="cancel" onclick={back} type="button" disabled={saving}>Back</button>
-          {/if}
-        </div>
-        <div class="footer-right">
-          <button class="cancel" onclick={() => onClose(null)} type="button" disabled={saving}>Cancel</button>
-          {#if step < lastStep}
-            <button class="primary" onclick={next} type="button" disabled={!stepValid}>Continue</button>
-          {:else}
-            <button class="primary" onclick={save} type="button" disabled={!allValid || saving}>
-              {saving ? "Saving…" : (editing ? "Save changes" : "Save")}
-            </button>
-          {/if}
-        </div>
-      </footer>
+      <div class="dialog-foot">
+        {#if step > 0}
+          <button class="btn ghost" type="button" onclick={back} disabled={saving}>
+            <ChevronLeft size={11}/> Back
+          </button>
+        {:else}
+          <button class="btn ghost" type="button" onclick={() => onClose(null)} disabled={saving}>Cancel</button>
+        {/if}
+        <div class="dialog-foot-spacer"></div>
+        {#if step > 0 && step < lastStep}
+          <button class="btn ghost" type="button" onclick={() => onClose(null)} disabled={saving}>Cancel</button>
+        {/if}
+        {#if step < lastStep}
+          <button class="btn primary" type="button" onclick={next} disabled={!stepValid}>
+            Continue <ChevronRight size={11}/>
+          </button>
+        {:else}
+          <button class="btn primary" type="button" onclick={save} disabled={!allValid || saving}>
+            <Check size={11}/> {saving ? "Saving…" : (editing ? "Save changes" : "Save server")}
+          </button>
+        {/if}
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
-  .backdrop {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.55);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 200;
-  }
-  .dialog {
-    background: #17171C;
-    border: 1px solid #3A2A66;
-    border-radius: 6px;
-    width: 640px; max-width: 92vw;
-    max-height: 92vh;
-    box-shadow: 0 18px 50px rgba(0,0,0,0.6);
-    color: #E8E8EE;
-    display: flex; flex-direction: column;
-  }
-  header { padding: 16px 20px; border-bottom: 1px solid #26262E; }
-  h2 { margin: 0; font-size: 14px; font-weight: 600; }
+  .as-shell { width: 640px; max-width: 92vw; }
+  .as-body { display: flex; flex-direction: column; gap: 12px; }
 
-  .stepper {
-    display: flex; align-items: center; justify-content: center;
-    padding: 14px 20px; gap: 8px;
-    border-bottom: 1px solid #26262E;
+  .step { /* override default button */
+    background: transparent; border: 0; cursor: pointer;
+    font: inherit;
   }
-  .step { display: flex; align-items: center; gap: 8px; }
-  .pip {
-    width: 22px; height: 22px;
-    border-radius: 11px;
-    background: #1F1F26;
-    border: 1px solid #26262E;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 11px; font-weight: 600;
-    color: #7A7A85;
-  }
-  .step.done .pip { border-color: #3A2A66; color: #8B6BE6; background: #1F1F26; }
-  .step.active .pip { background: #3A2A66; border-color: #3A2A66; color: white; }
-  .step-label { font-size: 12px; color: #7A7A85; }
-  .step.active .step-label { color: #E8E8EE; font-weight: 600; }
-  .step.done .step-label { color: #E8E8EE; }
-  .step-bar { width: 36px; height: 1px; background: #26262E; }
+  .step:disabled { cursor: not-allowed; opacity: 0.5; }
 
-  .content {
-    padding: 20px;
-    overflow: auto;
-    flex: 1;
-    display: flex; flex-direction: column; gap: 14px;
+  .row3 {
+    display: grid;
+    grid-template-columns: 1fr 88px 1fr;
+    gap: 10px;
   }
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { font-size: 11px; color: #7A7A85; }
-  .field input {
-    background: #0F0F12;
-    border: 1px solid #26262E;
-    border-radius: 4px;
-    color: #E8E8EE;
-    padding: 7px 9px;
-    font-size: 13px;
-    outline: none;
+  .field.tight { margin-bottom: 8px; }
+  .field.narrow .input { text-align: center; }
+
+  .conn-preview {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-2); font-size: var(--fs-xs);
+    align-self: start;
   }
-  .field input:focus { border-color: #3A2A66; }
-  .row-2 { display: flex; gap: 12px; }
-  .grow { flex: 1; }
-  .narrow { width: 100px; }
-  .row-with-button { display: flex; gap: 8px; }
-  .row-with-button input { flex: 1; }
-  button.aux {
-    background: #1F1F26;
-    border: 1px solid #26262E;
-    color: #E8E8EE;
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  button.aux:hover { background: #26262E; }
 
   .info-card {
-    background: #0F0F12;
-    border: 1px solid #26262E;
-    border-radius: 4px;
-    padding: 12px;
-    display: flex; flex-direction: column; gap: 8px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
   }
-  .info-card h3 { margin: 0; font-size: 12px; font-weight: 600; }
-  .info-card p { margin: 0; font-size: 11px; color: #7A7A85; line-height: 1.5; }
-  .info-card code { font-family: Consolas, monospace; color: #8B6BE6; font-size: 11px; }
-  .summary-card {
-    background: #15101E;
-    border: 1px solid #3A2A66;
-    border-radius: 4px;
-    padding: 12px;
+  .info-head { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); margin-bottom: 4px; }
+  .info-card p {
+    margin: 0 0 8px;
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
+    line-height: 1.5;
   }
-  .summary-card h3 { margin: 0 0 6px; font-size: 11px; font-weight: 600; }
-  .summary-card pre {
-    margin: 0;
-    font-family: Consolas, monospace;
-    font-size: 11px;
-    color: #7A7A85;
-    white-space: pre-wrap;
+  .info-card p:last-of-type { margin-bottom: 0; }
+
+  .summary {
+    background: var(--bg-elev-2);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent);
   }
+  .summary-head {
+    font-size: var(--fs-xs); color: var(--fg-faint);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 3px 10px;
+    font-size: var(--fs-xs);
+    color: var(--fg);
+  }
+  .summary-grid .dim { color: var(--fg-faint); }
 
   .error {
-    color: #FF5C6B;
-    font-size: 12px;
-    margin: 0;
-    padding: 0 20px 8px;
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--danger);
+    font-size: var(--fs-xs);
+    padding: 0 14px 4px;
   }
-
-  footer {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 14px 20px;
-    border-top: 1px solid #26262E;
-  }
-  .footer-right { display: flex; gap: 8px; }
-  button {
-    background: #1F1F26;
-    border: 1px solid #26262E;
-    color: #E8E8EE;
-    padding: 7px 16px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) { background: #26262E; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.primary { background: #3A2A66; border-color: #3A2A66; color: white; font-weight: 600; }
-  button.primary:hover:not(:disabled) { background: #4A3678; }
 </style>

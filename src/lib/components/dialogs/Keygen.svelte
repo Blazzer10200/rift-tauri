@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import { Key, X, Copy, RefreshCw, Check, AlertTriangle } from "lucide-svelte";
 
   type KeyPaths = {
     privatePath: string;
@@ -34,11 +35,11 @@
       if (exists) {
         const pub = await invoke<string | null>("read_default_ssh_pub_key");
         pubKey = pub ?? "";
-        intro = "An ed25519 key already exists at ~/.ssh/id_ed25519. Send the public key below to your server admin so they can add it to the server's authorized_keys.";
+        intro = "An ed25519 key already exists. Send the public key below to your server admin so they can add it to authorized_keys.";
         keyPath = "~/.ssh/id_ed25519";
       } else {
         pubKey = "";
-        intro = "No SSH key found at ~/.ssh/id_ed25519. Click Generate to create an ed25519 keypair (no passphrase). The public key will appear below — send it to your server admin to add to authorized_keys.";
+        intro = "No SSH key found at ~/.ssh/id_ed25519. Generate creates an ed25519 keypair (no passphrase) — the public key shows below to send to your admin.";
       }
     } catch (e) {
       error = String(e);
@@ -53,7 +54,7 @@
       pubKey = result.publicKeyText;
       keyPath = result.privatePath;
       exists = true;
-      intro = `Generated key at ${result.privatePath}. Send the public key to your admin.`;
+      intro = "Generated. Send the public key to your admin.";
     } catch (e) {
       error = String(e);
     } finally {
@@ -67,108 +68,123 @@
       await navigator.clipboard.writeText(pubKey);
       copied = true;
       setTimeout(() => (copied = false), 2000);
-    } catch (e) {
+    } catch {
       error = "Could not access clipboard.";
     }
   }
 
-  function done() {
-    onClose(keyPath || null);
-  }
-
-  function onBackdrop(e: MouseEvent) {
-    if (e.target === e.currentTarget) onClose(null);
-  }
-
+  function done() { onClose(keyPath || null); }
+  function onBackdrop(e: MouseEvent) { if (e.target === e.currentTarget) onClose(null); }
   function onKey(e: KeyboardEvent) {
     if (!open) return;
     if (e.key === "Escape") onClose(null);
   }
+
+  // Compute fingerprint preview (first/last chunks of pubkey)
+  const fingerprint = $derived.by(() => {
+    if (!pubKey) return "";
+    const parts = pubKey.trim().split(/\s+/);
+    return parts.length >= 2 ? parts[1].slice(0, 12) + "…" + parts[1].slice(-12) : "";
+  });
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 {#if open}
-  <div class="backdrop" onclick={onBackdrop} role="presentation">
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="SSH key setup">
-      <header>
-        <h2>SSH key setup</h2>
-      </header>
-
-      <p class="intro">{intro}</p>
-
-      <div class="pubkey-box">
-        <div class="label">{exists ? "Your public key — send this to your admin" : "Your public key (will appear after generation)"}</div>
-        <textarea readonly value={pubKey} placeholder="ssh-ed25519 …" rows="5"></textarea>
+  <div class="dialog-overlay" onclick={onBackdrop} role="presentation">
+    <div class="dialog-shell" style="width: 560px;" role="dialog" aria-modal="true" aria-label="SSH key setup">
+      <div class="dialog-head">
+        <div class="dialog-icon"><Key size={14}/></div>
+        <div>
+          <div class="dialog-title">SSH keypair</div>
+          <div class="dialog-sub">ed25519 · 256-bit{exists ? " · exists" : " · not yet generated"}</div>
+        </div>
+        <button class="dialog-close" type="button" onclick={() => onClose(null)} aria-label="Close">
+          <X size={14}/>
+        </button>
       </div>
 
-      {#if error}<p class="error">{error}</p>{/if}
+      <div class="dialog-body">
+        <p class="intro">{intro}</p>
 
-      <footer>
-        <button class="generate" onclick={generate} disabled={exists || busy} type="button">
-          {exists ? "Already have a key" : busy ? "Generating…" : "Generate ed25519 key"}
+        <div class="field">
+          <label class="field-label" for="kg-pub">
+            Public key <span class="field-sub">paste this into <span class="mono">~/.ssh/authorized_keys</span> on the remote</span>
+          </label>
+          <textarea
+            id="kg-pub"
+            class="key-blob mono"
+            readonly
+            value={pubKey}
+            placeholder="ssh-ed25519 …"
+            rows="4"
+          ></textarea>
+        </div>
+
+        {#if fingerprint}
+          <div class="field">
+            <label class="field-label" for="kg-fp">Fingerprint</label>
+            <div id="kg-fp" class="mono fp">{fingerprint}</div>
+          </div>
+        {/if}
+
+        <div class="field">
+          <label class="field-label" for="kg-loc">Private key location</label>
+          <div id="kg-loc" class="mono dim">{keyPath || "~/.ssh/id_ed25519"}</div>
+        </div>
+
+        {#if error}
+          <div class="error mono">
+            <AlertTriangle size={11}/> {error}
+          </div>
+        {/if}
+      </div>
+
+      <div class="dialog-foot">
+        <button class="btn ghost" type="button" onclick={done}>Close</button>
+        <div class="dialog-foot-spacer"></div>
+        <button
+          class="btn"
+          type="button"
+          onclick={generate}
+          disabled={exists || busy}
+          title={exists ? "Key already exists" : "Generate ed25519 keypair"}
+        >
+          <RefreshCw size={11} class={busy ? "spin" : ""}/>
+          {busy ? "Generating…" : exists ? "Exists" : "Generate"}
         </button>
-        <button class="copy" onclick={copy} disabled={!pubKey} type="button">
-          {copied ? "Copied ✓" : "Copy pubkey"}
+        <button
+          class="btn primary"
+          type="button"
+          onclick={copy}
+          disabled={!pubKey}
+        >
+          {#if copied}<Check size={11}/> Copied{:else}<Copy size={11}/> Copy public key{/if}
         </button>
-        <button class="done" onclick={done} type="button">Done</button>
-      </footer>
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
-  .backdrop {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.55);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 200;
-  }
-  .dialog {
-    background: #17171C;
-    border: 1px solid #3A2A66;
-    border-radius: 6px;
-    width: 560px; max-width: 92vw;
-    box-shadow: 0 18px 50px rgba(0,0,0,0.6);
-    padding: 18px 20px;
-    color: #E8E8EE;
-    display: flex; flex-direction: column; gap: 12px;
-  }
-  h2 { margin: 0; font-size: 14px; font-weight: 600; }
-  .intro { font-size: 12px; color: #7A7A85; line-height: 1.5; margin: 0; }
-  .pubkey-box {
-    background: #0F0F12;
-    border: 1px solid #26262E;
-    border-radius: 4px;
-    padding: 10px;
-  }
-  .label { font-size: 11px; color: #7A7A85; margin-bottom: 6px; }
-  textarea {
+  .intro { color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.5; margin: 0 0 12px; }
+  .key-blob {
     width: 100%;
-    background: transparent;
-    border: 0;
-    color: #E8E8EE;
-    font-family: Consolas, monospace;
-    font-size: 11px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 8px 10px;
+    color: var(--fg);
+    font-size: var(--fs-xs);
     resize: vertical;
     outline: none;
-    padding: 0;
   }
-  .error { color: #FF5C6B; font-size: 11px; margin: 0; }
-  footer {
-    display: flex; justify-content: flex-end; gap: 6px;
-    margin-top: 4px;
+  .key-blob:focus { border-color: var(--accent); }
+  .fp { color: var(--fg-2); font-size: var(--fs-sm); }
+  .error {
+    display: inline-flex; align-items: center; gap: 6px;
+    color: var(--danger);
+    font-size: var(--fs-xs);
+    margin-top: 8px;
   }
-  button {
-    background: #1F1F26;
-    border: 1px solid #26262E;
-    color: #E8E8EE;
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  button:hover:not(:disabled) { background: #26262E; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  button.done { color: #8B6BE6; border-color: #3A2A66; }
 </style>

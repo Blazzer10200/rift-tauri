@@ -91,6 +91,7 @@ class ConnectionStore {
   activityFeed = $state<ActivityRow[]>([]);
   watchedEdits = $state<WatchedEdit[]>([]);
   dirtyEdits = $state<Set<string>>(new Set());
+  pendingReuploads = $state<EditChangedEvent[]>([]);
 
   selected = $derived(
     this.selectedKey
@@ -178,6 +179,17 @@ class ConnectionStore {
         const next = new Set(this.dirtyEdits);
         next.add(e.payload.remotePath);
         this.dirtyEdits = next;
+
+        const key = this.selectedKey;
+        const alwaysReupload = key && localStorage.getItem(`rift.reupload.always.${key}`) === "1";
+        if (alwaysReupload) {
+          void invoke("save_edit_in_place", {
+            serverKey: key,
+            remotePath: e.payload.remotePath,
+          }).catch((err) => console.error("auto-reupload failed", err));
+        } else {
+          this.pendingReuploads = [...this.pendingReuploads, e.payload];
+        }
       }),
     );
     this.unlisteners.push(
@@ -221,6 +233,17 @@ class ConnectionStore {
   disposeEvents() {
     for (const u of this.unlisteners) u();
     this.unlisteners = [];
+  }
+
+  clearActivity() {
+    this.activityFeed = [];
+    this.lastActivity = null;
+  }
+
+  popReuploadPrompt() {
+    if (this.pendingReuploads.length > 0) {
+      this.pendingReuploads = this.pendingReuploads.slice(1);
+    }
   }
 
   async refreshStatus() {
