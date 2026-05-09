@@ -26,8 +26,9 @@ if ($cargoText -notmatch '(?ms)^\s*version\s*=\s*"([^"]+)"') {
     throw 'Cargo.toml: cannot parse version field'
 }
 $cargoVer = $matches[1]
-if ($pkg.version -ne $cargoVer) {
-    throw "Version mismatch: package.json=$($pkg.version), Cargo.toml=$cargoVer"
+$tauriCfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+if ($pkg.version -ne $cargoVer -or $pkg.version -ne $tauriCfg.version) {
+    throw "Version mismatch: package.json=$($pkg.version), Cargo.toml=$cargoVer, tauri.conf.json=$($tauriCfg.version)"
 }
 $version = $pkg.version
 $tag = "v$version"
