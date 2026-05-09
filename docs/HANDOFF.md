@@ -10,7 +10,7 @@
 
 **🚨 FIRST THING NEXT SESSION — AWAIT CLAUDE DESIGN HANDOFF.** UI foundation (Tailwind v4 + shadcn-svelte) shipped in v0.1.5-alpha. User opened a "Rift App UI" project in Anthropic Labs' Claude Design (claude.ai/design) using `docs/design/CLAUDE-DESIGN-BRIEF.md` as the foundational context, took screenshots of the running dev build, and is iterating on direction prompts there. **Once they paste/drop the exported deliverable bundle here, translate the OKLCH tokens into `src/app.css` and apply per-component visual decisions across the existing dialogs + shell.** Suggested order: (1) Confirm dialog as proof-of-concept → (2) remaining 5 dialogs → (3) AppShell/TopBar/ServerPicker → (4) Browser two-pane.
 
-**Current state (post Session 10, v0.1.5-alpha):** Migration core complete and committed (`5b9f5f7`, v0.1.4). UI foundation + Claude Design brief committed at session close. Phase 6 (v14.0.0 ship) still deferred per user.
+**Current state (post Session 11, v0.1.6-alpha):** Migration core complete + backend audit sweep landed (85 findings cataloged, critical/high/medium fixed). UI foundation + Claude Design brief in place from v0.1.5. Phase 6 (v14.0.0 ship) still deferred per user.
 
 **Release policy:** No public ship until user explicitly says go. Iterate via `npm run tauri dev`.
 
@@ -25,7 +25,36 @@
 | 4 | Sync surfaces (activity, drift, conflicts, locks, edit-in-place) | ✅ |
 | 5 | Dialogs — AddServer / Bootstrap / Keygen / Reupload / Confirm / CommandPalette | ✅ |
 | **5.5** | **UI redesign foundation — Tailwind v4 + shadcn-svelte + Claude Design brief** | ✅ Session 10 |
+| **5.6** | **Backend audit sweep — 85 findings cataloged, critical/high/medium fixed** | ✅ Session 11 |
 | 6 | v14.0.0 ship | ⏳ deferred |
+
+## Session 11 — 2026-05-09 — Backend audit sweep (v0.1.6-alpha)
+
+While user iterated on Claude Design, ran a comprehensive backend audit across all `src-tauri/src/` (23 files, 6204 LOC). Audit agent produced 85 findings into `docs/audit/BACKEND-AUDIT-2026-05-09.md` — full Critical/High/Medium/Low breakdown. Critical/High/Medium tier landed this session.
+
+**Top fixes:**
+- Mutex-poison cascade hardened across 3 state caches (`SyncSnapshot`, `RemoteStateCache`, `ResourceDiscoveryCache`).
+- `SaveLocalCopy` data-loss path closed — `let _ = std::fs::rename(...)` now bails before download on rename failure.
+- `RiftConfig::save()` made atomic (tmp+rename) — `~/.rift/rift.json` survives mid-write crashes.
+- Fire-and-forget JoinHandle tracking — bridge ping / lock acquire/release / edit-trail append now abort on `engine.stop()`.
+- `stat_local` returns `Option` so metadata errors no longer poison snapshot baselines with `(0, now())`.
+- 3-way SHA1_MAX_BYTES split (5MB/64MB/64MB) collapsed to single canonical 64MB const in `state::sync_snapshot`.
+- Shared transport modules added: `transport::ssh_handler::PinningHandler` (de-dups `Handler` between sftp + tunnel), `transport::env::{current_user, hostname, short_id}` (replaces 3 duplicate impls + nanosecond-temp-dir collisions).
+- Tokio features narrowed `["full"]` → 6 specifics. Dead deps dropped: `anyhow`, `thiserror`, `notify-debouncer-full`, `async-trait`.
+- `spawn_blocking` for the 3 walkdir/read_dir hotspots that ran sync I/O on the tokio runtime.
+- Per-file extras: `editor_for` TOCTOU lock, `get_remote_sha1` stderr capture + debug-log, `mark_failed` permanent-drop log warn, `ensure_workers` FuturesUnordered short-circuit, key-load-once via Arc, `hex_upper` write!, `ignore` needle pre-lower, `edit_trail::trim_to_tail` newline preservation.
+- ~12 inline doc additions for non-obvious invariants (advisory lock window, plaintext bridge token, autosync latency tradeoff, etc.).
+
+**Frontend untouched** per the "don't refactor UI mid-redesign" rule. `local_list_dir` Tauri command kept its legacy `{path, mtime: secs}` shape via an adapter; canonical walker is now `local_fs::list_directory`.
+
+**Verified:**
+- `cargo clippy --lib --tests -- -D warnings` ✓ zero warnings
+- `cargo test --lib` ✓ 47/47 pass (+ 1 new `segments_are_lowercase` invariant test = 48 total)
+- `npm run check` ✓ 318 files / 0 / 0
+
+**Bumped** 0.1.5 → 0.1.6 across Cargo.toml / package.json / tauri.conf.json. v0.1.5 entry archived.
+
+**Audit doc retained** at `docs/audit/BACKEND-AUDIT-2026-05-09.md` for the LOW-tier nitpicks that were deliberately not addressed this pass (cosmetic naming, `hostname()` subprocess vs env-var, etc.).
 
 ## Session 10 — 2026-05-09 — Backlog commit + UI foundation + Claude Design brief
 

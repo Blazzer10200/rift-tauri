@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::state::paths::rift_dir;
+use crate::state::paths::{atomic_write_json, rift_dir};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,8 +27,11 @@ pub struct ServerProfile {
     pub tx_admin_url: Option<String>,
     #[serde(default)]
     pub added_at: Option<String>,
-    // Bridge token (DPAPI-encrypted on WPF side) + bridge port — preserved on
-    // round-trip for Phase 2 write-back, not used by Phase 1b drift scanning.
+    // Bridge token + bridge port. NOTE: WPF DPAPI-encrypts the token at rest;
+    // the Tauri side currently stores it as plaintext in `~/.rift/rift.json`.
+    // Tauri 2 secure-storage integration is on the Phase 6 list — keep this
+    // gap visible until then. File perms (~/.rift owner-only) are the only
+    // protection until then.
     #[serde(default)]
     pub bridge_token: Option<String>,
     #[serde(default)]
@@ -60,8 +63,11 @@ impl RiftConfig {
         self.servers.iter().find(|s| s.key == key)
     }
 
-    /// Atomic-ish write to `~/.rift/rift.json`. Pretty JSON; preserves the
-    /// `serde(flatten) extra` bag for any unknown WPF fields.
+    /// Atomic write to `~/.rift/rift.json` via tmp-file + rename. Pretty JSON;
+    /// preserves the `serde(flatten) extra` bag for any unknown WPF fields. A
+    /// crash mid-write leaves the previous file intact (the rename is the
+    /// commit point) — without this the only source of server profiles could
+    /// be left half-written.
     pub fn save(&self) -> Result<(), String> {
         let path = config_path().map_err(|e| format!("rift dir: {e}"))?;
         if let Some(parent) = path.parent() {
@@ -69,7 +75,7 @@ impl RiftConfig {
         }
         let text = serde_json::to_string_pretty(self)
             .map_err(|e| format!("serialize rift.json: {e}"))?;
-        std::fs::write(&path, text).map_err(|e| format!("write {}: {e}", path.display()))
+        atomic_write_json(&path, &text).map_err(|e| format!("write {}: {e}", path.display()))
     }
 }
 

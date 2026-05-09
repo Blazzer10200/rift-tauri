@@ -7,7 +7,9 @@ pub fn rift_dir() -> std::io::Result<PathBuf> {
     Ok(dir)
 }
 
-fn dirs_home() -> std::io::Result<PathBuf> {
+/// Single source of truth for "where is the user's home". Tries `USERPROFILE`
+/// (Windows) then `HOME` (POSIX). Other modules import this — don't reinvent.
+pub fn dirs_home() -> std::io::Result<PathBuf> {
     if let Some(p) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
         if !p.as_os_str().is_empty() {
             return Ok(p);

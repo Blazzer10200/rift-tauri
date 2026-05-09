@@ -30,15 +30,15 @@
 //   - mtime preservation via setstat — WPF passes `PreserveTimestamp = false`
 //     so it's not actually a WPF feature; we match WPF behavior.
 
-use base64::Engine;
 use chrono::{DateTime, TimeZone, Utc};
 use russh::client::{self, Handle};
 use russh::keys::*;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::FileType;
-use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use crate::transport::ssh_handler::PinningHandler;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RemoteEntry {
@@ -82,51 +82,18 @@ pub struct ConnectArgs<'a> {
     pub trusted_fingerprint: Option<&'a str>,
 }
 
-/// Compute OpenSSH-style fingerprint: `SHA256:<base64-no-pad>` of the SSH
-/// wire-format public-key blob. Matches `ssh-keygen -lf <pub>` output.
-fn pubkey_fingerprint(pk: &ssh_key::PublicKey) -> Option<String> {
-    let blob = pk.to_bytes().ok()?;
-    let mut h = Sha256::new();
-    h.update(&blob);
-    let digest = h.finalize();
-    let b64 = base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest);
-    Some(format!("SHA256:{b64}"))
-}
-
-struct Handler {
-    trusted: Option<String>,
-    captured: Arc<Mutex<Option<String>>>,
-}
-
-impl client::Handler for Handler {
-    type Error = russh::Error;
-    async fn check_server_key(&mut self, k: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        let fp = match pubkey_fingerprint(k) {
-            Some(s) => s,
-            None => return Ok(false),
-        };
-        if let Some(trusted) = &self.trusted {
-            // Substring match: profile may store full WinSCP form
-            // ("ssh-ed25519 256 SHA256:xxx") or bare "SHA256:xxx".
-            if !trusted.contains(&fp) {
-                return Ok(false);
-            }
-        }
-        if let Ok(mut g) = self.captured.lock() {
-            *g = Some(fp);
-        }
-        Ok(true)
-    }
-}
-
 /// Captured connect args — reused by `ensure_workers` to spawn additional SSH
 /// sessions w/ the same fingerprint pinning. Owned (not borrowed) so it lives
 /// across the SftpClient's lifetime.
+///
+/// The private key is loaded once during `connect()` and reused for every
+/// worker session opened later — saves a disk-read + parse per worker (3
+/// reads per pool spin-up otherwise).
 struct OwnedConnectArgs {
     host: String,
     port: u16,
     user: String,
-    key_path: PathBuf,
+    key_pair: Arc<russh::keys::ssh_key::PrivateKey>,
     trusted_fingerprint: Option<String>,
 }
 
@@ -136,13 +103,13 @@ struct OwnedConnectArgs {
 /// WPF runs a 4-way pool; we mirror that ceiling. ~3-4× speedup vs serial.
 struct Worker {
     #[allow(dead_code)] // kept alive so the SSH session doesn't tear down under us
-    handle: Handle<Handler>,
+    handle: Handle<PinningHandler>,
     sftp: SftpSession,
     gate: tokio::sync::Mutex<()>,
 }
 
 pub struct SftpClient {
-    handle: Handle<Handler>,
+    handle: Handle<PinningHandler>,
     sftp: SftpSession,
     fingerprint: String,
     connect_args: OwnedConnectArgs,
@@ -155,12 +122,11 @@ pub struct SftpClient {
 /// the live handle, the live SFTP session, and the captured server fingerprint.
 async fn open_session(
     args: &OwnedConnectArgs,
-) -> Result<(Handle<Handler>, SftpSession, String), String> {
-    let key_pair = load_secret_key(&args.key_path, None).map_err(|e| format!("load key: {e}"))?;
+) -> Result<(Handle<PinningHandler>, SftpSession, String), String> {
     let config = Arc::new(client::Config::default());
     let addr = format!("{}:{}", args.host, args.port);
     let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let handler = Handler {
+    let handler = PinningHandler {
         trusted: args.trusted_fingerprint.clone(),
         captured: captured.clone(),
     };
@@ -175,7 +141,7 @@ async fn open_session(
     let auth = handle
         .authenticate_publickey(
             args.user.clone(),
-            russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash),
+            russh::keys::PrivateKeyWithHashAlg::new(args.key_pair.clone(), hash),
         )
         .await
         .map_err(|e| format!("auth: {e}"))?;
@@ -211,11 +177,15 @@ impl SftpClient {
     pub fn fingerprint(&self) -> &str { &self.fingerprint }
 
     pub async fn connect(args: ConnectArgs<'_>) -> Result<Self, String> {
+        // Load the key ONCE here, then share via Arc — workers reuse without
+        // re-reading the file (3+ disk-reads otherwise on a 4-worker pool).
+        let key_pair = load_secret_key(args.key_path, None)
+            .map_err(|e| format!("load key {}: {e}", args.key_path.display()))?;
         let captured_args = OwnedConnectArgs {
             host: args.host.to_string(),
             port: args.port,
             user: args.user.to_string(),
-            key_path: args.key_path.to_path_buf(),
+            key_pair: Arc::new(key_pair),
             trusted_fingerprint: args.trusted_fingerprint.map(|s| s.to_string()),
         };
         let (handle, sftp, fingerprint) = open_session(&captured_args).await?;
@@ -249,19 +219,24 @@ impl SftpClient {
             return;
         }
 
-        let mut open_futs = Vec::with_capacity(needed);
-        for _ in 0..needed {
-            let args = &self.connect_args;
-            open_futs.push(open_session(args));
-        }
-        let results = futures::future::join_all(open_futs).await;
+        // Open in parallel via FuturesUnordered so the first ready connection
+        // becomes available without waiting for all peers — relevant when one
+        // dial stalls on a slow handshake. Failures are logged + dropped so
+        // partial pool open is acceptable; live_worker_count() drives fallback.
+        use futures::stream::{FuturesUnordered, StreamExt};
+        let mut open_futs: FuturesUnordered<_> = (0..needed)
+            .map(|_| open_session(&self.connect_args))
+            .collect();
         let mut workers = self.workers.lock().await;
-        for (handle, sftp, _fp) in results.into_iter().flatten() {
-            workers.push(Arc::new(Worker {
-                handle,
-                sftp,
-                gate: tokio::sync::Mutex::new(()),
-            }));
+        while let Some(res) = open_futs.next().await {
+            match res {
+                Ok((handle, sftp, _fp)) => workers.push(Arc::new(Worker {
+                    handle,
+                    sftp,
+                    gate: tokio::sync::Mutex::new(()),
+                })),
+                Err(e) => log::warn!("sftp worker open failed: {e}"),
+            }
         }
     }
 
@@ -385,12 +360,13 @@ impl SftpClient {
                 .map(|m| m.into_inner())
                 .unwrap_or_default();
 
-            // Belt-and-braces: retry empty/missing roots on the main session.
-            // Worker can return 0 entries silently if its session breaks
-            // mid-walk; main retry confirms before propagating.
+            // Belt-and-braces: retry only roots the worker pool failed to
+            // populate (vec absent). Worker can return 0 entries silently if
+            // its session breaks mid-walk; main retry confirms before
+            // propagating. Genuinely-empty roots (worker returned `Some(vec![])`)
+            // do NOT retry — that's a serial round-trip per empty folder.
             for r in roots {
-                let needs_retry = out.get(r).map(|v| v.is_empty()).unwrap_or(true);
-                if needs_retry {
+                if !out.contains_key(r) {
                     if let Ok(retry) = list_recursive_via(
                         &self.sftp,
                         r,
@@ -399,11 +375,9 @@ impl SftpClient {
                     )
                     .await
                     {
-                        if !retry.is_empty() {
-                            out.insert(r.clone(), retry);
-                        } else {
-                            out.entry(r.clone()).or_default();
-                        }
+                        out.insert(r.clone(), retry);
+                    } else {
+                        out.entry(r.clone()).or_default();
                     }
                 }
             }
@@ -843,7 +817,9 @@ impl SftpClient {
     }
 
     /// SHA1 of a remote file via `sha1sum` over a transient exec channel.
-    /// Returns None on any failure (mirrors WPF's null-on-error).
+    /// Returns None on any failure (mirrors WPF's null-on-error). Stderr is
+    /// debug-logged so drift-scan failures are diagnosable without a server
+    /// shell; previously errors silently dropped.
     pub async fn get_remote_sha1(&self, path: &str) -> Option<String> {
         // sha1sum prints "<hex>  <filename>\n". We extract the hex prefix.
         // Quote the path to handle spaces / special chars.
@@ -851,21 +827,26 @@ impl SftpClient {
         let channel = self.handle.channel_open_session().await.ok()?;
         channel.exec(true, cmd).await.ok()?;
         let mut out = String::new();
+        let mut err = String::new();
         let mut chan = channel;
         while let Some(msg) = chan.wait().await {
             match msg {
                 russh::ChannelMsg::Data { data } => {
                     out.push_str(&String::from_utf8_lossy(&data));
                 }
+                russh::ChannelMsg::ExtendedData { data, ext: 1 } => {
+                    err.push_str(&String::from_utf8_lossy(&data));
+                }
                 russh::ChannelMsg::ExitStatus { .. } => break,
                 _ => {}
             }
         }
-        let hex = out.split_whitespace().next()?;
-        if hex.len() != 40 {
-            return None;
+        let hex = out.split_whitespace().next();
+        let result = hex.filter(|h| h.len() == 40).map(|h| h.to_uppercase());
+        if result.is_none() && !err.trim().is_empty() {
+            log::debug!("sha1sum {path}: stderr = {}", err.trim());
         }
-        Some(hex.to_uppercase())
+        result
     }
 
     pub async fn upload_bytes(&self, bytes: &[u8], remote_path: &str) -> Result<(), String> {
@@ -1101,8 +1082,11 @@ fn remote_parent(path: &str) -> Option<&str> {
     if idx == 0 { Some("/") } else { Some(&trimmed[..idx]) }
 }
 
+/// POSIX single-quote escape — `replace ' with '\\''`. Safe for typical
+/// SFTP-served paths (UTF-8, no NUL/newlines). Does NOT sanitize NUL bytes
+/// or newlines — SFTP technically allows them, no FXServer host ever uses
+/// them. If that changes, sanitize at the call site.
 fn shell_quote(s: &str) -> String {
-    // single-quote escape — replace ' with '\''
     let mut out = String::from("'");
     for c in s.chars() {
         if c == '\'' {

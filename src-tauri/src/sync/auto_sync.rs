@@ -13,9 +13,11 @@
 //   * Status surface: emits `autosync://status`, `autosync://activity`, and
 //     `autosync://conflict` Tauri events instead of the WPF
 //     ObservableCollection / Dispatcher dance.
-//   * LockPresence + BridgeClient hooks left as `None` for Phase 1c — wiring
-//     points exist but no Rust port yet (see Phase 1d/1e).
 //   * Mass-delete circuit breaker: scaled-by-folder-size threshold preserved.
+//   * Background tasks (lock acquire/release, bridge ping, edit-trail append)
+//     are tracked in `background_tasks` so `stop()` can abort them — fire-
+//     and-forget tasks otherwise outlive the engine via `Arc<SftpClient>`
+//     keepalive.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,17 +36,21 @@ use tokio::task::JoinHandle;
 use crate::bridge::BridgeClient;
 use crate::profile::ServerProfile;
 use crate::sftp::SftpClient;
+use crate::state::sync_snapshot::SHA1_MAX_BYTES;
 use crate::state::{RemoteStateCache, SyncSnapshot};
 use crate::sync::ignore;
 use crate::sync::lock_presence::LockPresence;
 
 // ─── Tunables (port from WPF) ────────────────────────────────────────────────
+//
+// Worst-case file-change → flush latency is `DEBOUNCE_MS + LOOP_TICK_MS` (today
+// 700 + 150 = 850ms). Mirrors WPF — surface as per-server config in Phase 6 if
+// users start asking.
 const DEBOUNCE_MS: u64 = 700;
 const CEILING_MS: u64 = 3000;
 const LOOP_TICK_MS: u64 = 150;
 const LOCK_HOLD_RETRY_SEC: u64 = 30;
 const MASS_DELETE_THRESHOLD: usize = 25;
-const SHA1_MAX_BYTES: i64 = 64 * 1024 * 1024;
 const UPLOAD_CONCURRENCY: usize = 4;
 
 // ─── Public types ────────────────────────────────────────────────────────────
@@ -165,12 +171,12 @@ fn merge_kind(a: ChangeKind, b: ChangeKind) -> ChangeKind {
 
 fn classify_action(a: &str) -> ActivityKind {
     let lower = a.to_ascii_lowercase();
-    if a.contains("BLOCKED") {
+    if lower.contains("blocked") {
         ActivityKind::Block
-    } else if a.contains("CONFLICT") {
-        ActivityKind::Conflict
-    } else if a.contains("conflict→") || a.contains("conflict skipped") {
+    } else if lower.contains("conflict\u{2192}") || lower.contains("conflict skipped") {
         ActivityKind::ConflictResolved
+    } else if lower.contains("conflict") {
+        ActivityKind::Conflict
     } else if lower.contains("drift") || lower.contains("scan") {
         ActivityKind::Drift
     } else if lower.contains("delete") {
@@ -212,6 +218,10 @@ pub struct AutoSyncEngine {
     watcher: Mutex<Option<RecommendedWatcher>>,
     flush_task: Mutex<Option<JoinHandle<()>>>,
     event_task: Mutex<Option<JoinHandle<()>>>,
+    /// Tracker for fire-and-forget background tasks (lock acquire/release,
+    /// bridge ping, edit-trail append). Aborted in `stop()` so they can't
+    /// outlive the engine and hold stale `Arc<SftpClient>` clones.
+    background_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     stop_tx: watch::Sender<bool>,
     disposed: AtomicBool,
 }
@@ -258,6 +268,7 @@ impl AutoSyncEngine {
             watcher: Mutex::new(None),
             flush_task: Mutex::new(None),
             event_task: Mutex::new(None),
+            background_tasks: std::sync::Mutex::new(Vec::new()),
             stop_tx,
             disposed: AtomicBool::new(false),
         });
@@ -323,7 +334,20 @@ impl AutoSyncEngine {
         if let Some(h) = self.flush_task.lock().await.take() {
             let _ = h.await;
         }
+        // event_task is aborted (vs awaited) because on_fs_event futures may
+        // park on the dirty DashMap shard locks under heavy churn — we don't
+        // want stop() to block on user-driven event flow. The DashMap ops are
+        // atomic so an aborted future never leaves the map in a torn state.
         if let Some(h) = self.event_task.lock().await.take() {
+            h.abort();
+        }
+        // Abort any in-flight fire-and-forget tasks (lock release, bridge ping,
+        // edit-trail append) so they can't outlive the engine.
+        let outstanding: Vec<JoinHandle<()>> = match self.background_tasks.lock() {
+            Ok(mut g) => std::mem::take(&mut *g),
+            Err(e) => std::mem::take(&mut *e.into_inner()),
+        };
+        for h in outstanding {
             h.abort();
         }
         // Drop the watcher to release notify resources.
@@ -332,6 +356,15 @@ impl AutoSyncEngine {
             lp.stop().await;
         }
         self.set_state(AutoSyncState::Disabled, "stopped".into()).await;
+    }
+
+    /// Track a fire-and-forget background task so `stop()` can abort it. Drops
+    /// already-completed handles opportunistically to keep the vec small.
+    fn track_background(&self, h: JoinHandle<()>) {
+        if let Ok(mut g) = self.background_tasks.lock() {
+            g.retain(|t| !t.is_finished());
+            g.push(h);
+        }
     }
 
     /// Snapshot of currently-watched remote roots — for `LockPresence` scoped poll.
@@ -514,7 +547,7 @@ impl AutoSyncEngine {
                 let r = self.sftp.download_file_atomic(&c.remote_path, local_path).await;
                 if r.success {
                     self.update_snapshot_after_sync(local_path, &c.remote_path).await;
-                    self.log_activity(&c.resource_name, file_name(local_path), "conflict→accept-remote");
+                    self.log_activity(&c.resource_name, file_name(local_path), "conflict\u{2192}accept-remote");
                 } else {
                     self.log_activity(&c.resource_name, file_name(local_path),
                         &format!("conflict accept-remote pull FAILED: {}", r.error));
@@ -532,22 +565,33 @@ impl AutoSyncEngine {
                 };
                 let aside = dir.join(&aside_name);
                 if local_path.exists() {
-                    let _ = std::fs::rename(local_path, &aside);
+                    if let Err(e) = std::fs::rename(local_path, &aside) {
+                        // CRITICAL: bail before download — overwriting the local
+                        // file w/o the aside copy is silent data loss.
+                        self.conflicts.insert(local_path.to_path_buf(), c.clone());
+                        let msg = format!(
+                            "conflict→savecopy aborted: aside rename failed ({e}); local file preserved"
+                        );
+                        self.log(&format!("CONFLICT savecopy abort {}: {e}", local_path.display()));
+                        self.log_activity(&c.resource_name, file_name(local_path), &msg);
+                        self.fire_status().await;
+                        return Err(msg);
+                    }
                 }
                 let r = self.sftp.download_file_atomic(&c.remote_path, local_path).await;
                 if r.success {
                     self.update_snapshot_after_sync(local_path, &c.remote_path).await;
                     self.log_activity(&c.resource_name, file_name(local_path),
-                        &format!("conflict→savecopy ({})", aside_name));
+                        &format!("conflict\u{2192}savecopy ({})", aside_name));
                 } else {
                     self.log_activity(&c.resource_name, file_name(local_path),
-                        &format!("conflict→savecopy pull FAILED: {}", r.error));
+                        &format!("conflict\u{2192}savecopy pull FAILED: {}", r.error));
                 }
             }
             ConflictResolution::ForceLocal => {
                 self.cache.set(&c.remote_path, c.local_size, c.local_mtime_utc);
                 self.enqueue_for_flush_batch(vec![local_path.to_path_buf()], false, true).await;
-                self.log_activity(&c.resource_name, file_name(local_path), "conflict→force-local");
+                self.log_activity(&c.resource_name, file_name(local_path), "conflict\u{2192}force-local");
             }
         }
         self.fire_status().await;
@@ -631,13 +675,14 @@ impl AutoSyncEngine {
             if let Some(fw) = self.folders.get(&watch_key_for_lock).map(|v| v.value().clone()) {
                 if let Some(remote) = map_local_to_remote(&path, &fw) {
                     let kind_at_queue = kind;
-                    tokio::spawn(async move {
+                    let h = tokio::spawn(async move {
                         if kind_at_queue == ChangeKind::Deleted {
                             locks.release(&remote).await;
                         } else {
                             locks.acquire(&remote).await;
                         }
                     });
+                    self.track_background(h);
                 }
             }
         }
@@ -706,7 +751,7 @@ impl AutoSyncEngine {
         // ── Mass-delete circuit breaker ───────────────────────────────────
         let delete_count = entries.iter().filter(|e| e.kind == ChangeKind::Deleted).count();
         let local_root_gone = !fw.local_root.exists();
-        let local_file_count = safe_count_files(&fw.local_root);
+        let local_file_count = safe_count_files(&fw.local_root).await;
         let scaled_threshold =
             ((local_file_count as f64 * 0.30) as usize).clamp(5, MASS_DELETE_THRESHOLD);
         if local_root_gone || delete_count >= scaled_threshold {
@@ -791,7 +836,7 @@ impl AutoSyncEngine {
             if let Some(bridge) = self.bridge.clone() {
                 let resource = fw.resource_name.clone();
                 let app = self.app.clone();
-                tokio::spawn(async move {
+                let h = tokio::spawn(async move {
                     let r = bridge.sync_done(&resource).await;
                     let row = ActivityRow {
                         at: Utc::now(),
@@ -808,6 +853,7 @@ impl AutoSyncEngine {
                     };
                     let _ = app.emit("autosync://activity", &row);
                 });
+                self.track_background(h);
             }
         }
 
@@ -815,10 +861,11 @@ impl AutoSyncEngine {
         if !trail_items.is_empty() {
             let sftp = self.sftp.clone();
             let remote_root = fw.remote_root.clone();
-            tokio::spawn(async move {
+            let h = tokio::spawn(async move {
                 let trail = crate::sync::EditTrail::new(&sftp);
                 let _ = trail.append(&remote_root, &trail_items).await;
             });
+            self.track_background(h);
         }
     }
 
@@ -897,7 +944,8 @@ impl AutoSyncEngine {
                             info.last_modified,
                         );
                         if remote_changed {
-                            let (local_size, local_mtime) = stat_local(&entry.path);
+                            let (local_size, local_mtime) = stat_local(&entry.path)
+                                .unwrap_or((0, Utc::now()));
                             let record = ConflictRecord {
                                 local_path: entry.path.to_string_lossy().to_string(),
                                 remote_path: remote.clone(),
@@ -930,17 +978,21 @@ impl AutoSyncEngine {
                 let info = self.sftp.remote_stat(&remote).await;
                 if info.exists && !info.is_directory {
                     self.cache.set(&remote, info.size, info.last_modified);
-                    let (lsize, lmtime) = stat_local(&entry.path);
-                    let sha = if lsize <= SHA1_MAX_BYTES {
-                        SyncSnapshot::compute_sha1(&entry.path)
-                    } else {
-                        None
-                    };
-                    self.snapshot.set(&remote, lsize, lmtime, info.size, info.last_modified, sha);
+                    // Skip baseline write if local stat fails — recording (0, now)
+                    // would poison the conflict pre-flight on the next sync.
+                    if let Some((lsize, lmtime)) = stat_local(&entry.path) {
+                        let sha = if lsize <= SHA1_MAX_BYTES {
+                            SyncSnapshot::compute_sha1(&entry.path)
+                        } else {
+                            None
+                        };
+                        self.snapshot.set(&remote, lsize, lmtime, info.size, info.last_modified, sha);
+                    }
                 }
                 if let Some(locks) = self.locks.clone() {
                     let r = remote.clone();
-                    tokio::spawn(async move { locks.release(&r).await });
+                    let h = tokio::spawn(async move { locks.release(&r).await });
+                    self.track_background(h);
                 }
                 self.log_activity(&fw.resource_name, file_name(&entry.path), "synced");
                 let rel = rel_of(fw, &entry.path);
@@ -963,7 +1015,7 @@ impl AutoSyncEngine {
         if !local_path.exists() {
             return;
         }
-        let (lsize, lmtime) = stat_local(local_path);
+        let Some((lsize, lmtime)) = stat_local(local_path) else { return };
         let sha = if lsize <= SHA1_MAX_BYTES {
             SyncSnapshot::compute_sha1(local_path)
         } else {
@@ -975,6 +1027,20 @@ impl AutoSyncEngine {
     fn mark_failed(&self, entry: &DirtyEntry) {
         let mut e = entry.clone();
         e.attempts += 1;
+        if e.attempts as usize > RETRY_BACKOFFS_SECS.len() {
+            // Permanent drop — flush_cycle's promote loop will skip it next tick.
+            // Surface to logs so the file doesn't disappear silently.
+            log::warn!(
+                "auto-sync giving up on {} after {} attempts",
+                e.path.display(),
+                e.attempts
+            );
+            self.log_activity(
+                "[autosync]",
+                file_name(&e.path),
+                &format!("FAILED — gave up after {} attempts", e.attempts),
+            );
+        }
         let idx = std::cmp::min(e.attempts as usize - 1, RETRY_BACKOFFS_SECS.len() - 1);
         e.next_retry = Utc::now() + chrono::Duration::seconds(RETRY_BACKOFFS_SECS[idx] as i64);
         self.failed.insert(entry.path.clone(), e);
@@ -1041,25 +1107,23 @@ fn file_name(p: &Path) -> &str {
     p.file_name().and_then(|s| s.to_str()).unwrap_or("?")
 }
 
-fn stat_local(p: &Path) -> (i64, DateTime<Utc>) {
-    match std::fs::metadata(p) {
-        Ok(m) => {
-            let size = m.len() as i64;
-            let mtime = m
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .and_then(|d| chrono::DateTime::<Utc>::from_timestamp(d.as_secs() as i64, 0))
-                .unwrap_or_else(Utc::now);
-            (size, mtime)
-        }
-        Err(_) => (0, Utc::now()),
-    }
+/// Read local size + mtime. Returns None on metadata error so callers can
+/// skip baseline writes rather than poisoning the snapshot with `(0, now())`.
+fn stat_local(p: &Path) -> Option<(i64, DateTime<Utc>)> {
+    let m = std::fs::metadata(p).ok()?;
+    let size = m.len() as i64;
+    let mtime = m
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| chrono::DateTime::<Utc>::from_timestamp(d.as_secs() as i64, 0))
+        .unwrap_or_else(Utc::now);
+    Some((size, mtime))
 }
 
 async fn wait_for_readable(path: &Path) -> bool {
     for _ in 0..4 {
-        if std::fs::File::open(path).is_ok() {
+        if tokio::fs::File::open(path).await.is_ok() {
             return true;
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -1068,17 +1132,24 @@ async fn wait_for_readable(path: &Path) -> bool {
 }
 
 /// Bounded recursive count — caps at 5000 enumerations to bound latency.
-fn safe_count_files(root: &Path) -> usize {
-    let mut count = 0usize;
-    for entry in walkdir::WalkDir::new(root).into_iter().filter_map(Result::ok) {
-        if entry.file_type().is_file() {
-            count += 1;
-            if count >= 5000 {
-                break;
+/// Walked off the tokio runtime via `spawn_blocking` so the flush task isn't
+/// stalled by a multi-thousand-file resource folder.
+async fn safe_count_files(root: &Path) -> usize {
+    let root = root.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let mut count = 0usize;
+        for entry in walkdir::WalkDir::new(&root).into_iter().filter_map(Result::ok) {
+            if entry.file_type().is_file() {
+                count += 1;
+                if count >= 5000 {
+                    break;
+                }
             }
         }
-    }
-    count
+        count
+    })
+    .await
+    .unwrap_or(0)
 }
 
 #[cfg(test)]

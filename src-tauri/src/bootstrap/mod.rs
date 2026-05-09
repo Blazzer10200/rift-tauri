@@ -32,6 +32,10 @@ pub struct BootstrapDetection {
 
 pub const SYNCED_THRESHOLD: f64 = 0.80;
 pub const UNINITIALIZED_THRESHOLD: f64 = 0.10;
+/// Threshold tuned for Qbox-style trees where ≥50% of top-level dirs are
+/// bracketed resource groups (`[qbx]`, `[standalone]`, etc.). Stock FXServer
+/// installs without resource grouping may false-positive `BadRemoteRoot`. If
+/// users hit this, surface a per-server override in Phase 6.
 pub const BAD_REMOTE_ROOT_BRACKETED_RATIO: f64 = 0.50;
 pub const BAD_REMOTE_ROOT_MIN_DIRS: usize = 3;
 const DISABLED_MARKER: &str = "[disabled]";

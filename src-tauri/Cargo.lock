@@ -1451,15 +1451,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "file-id"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
-dependencies = [
- "windows-sys 0.60.2",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2914,19 +2905,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify-debouncer-full"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c02b49179cfebc9932238d04d6079912d26de0379328872846118a0fa0dbb302"
-dependencies = [
- "file-id",
- "log",
- "notify",
- "notify-types",
- "walkdir",
-]
-
-[[package]]
 name = "notify-types"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4026,10 +4004,8 @@ dependencies = [
 
 [[package]]
 name = "rift-tauri"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
- "anyhow",
- "async-trait",
  "base64 0.22.1",
  "chrono",
  "dashmap",
@@ -4037,7 +4013,6 @@ dependencies = [
  "futures",
  "log",
  "notify",
- "notify-debouncer-full",
  "rand 0.8.6",
  "reqwest",
  "russh",
@@ -4049,7 +4024,6 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",
- "thiserror 2.0.18",
  "tokio",
  "velopack",
  "walkdir",
@@ -5392,9 +5366,7 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

@@ -25,13 +25,12 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::sftp::{RemoteEntry, SftpClient};
+use crate::state::sync_snapshot::{MTIME_TOLERANCE_SECS, SHA1_MAX_BYTES};
 use crate::state::SyncSnapshot;
 use crate::sync::ignore;
 
 const MAX_DEPTH: usize = 12;
 const REMOTE_HASH_BUDGET_PER_FOLDER: i32 = 25;
-/// Match WPF AutoSync.Sha1MaxBytes — files over this size skip hashing.
-const SHA1_MAX_BYTES: i64 = 64 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -128,11 +127,21 @@ impl<'a> DriftScanner<'a> {
     async fn scan_folder(&self, f: &FolderTarget, remote_hits: &[RemoteEntry]) -> FolderScan {
         let mut hash_budget: i32 = REMOTE_HASH_BUDGET_PER_FOLDER;
         // Local recursive walk. Full ignore-rule parity now via `ignore::should_ignore`.
+        // Walk runs on a blocking thread so a multi-thousand-file resource
+        // folder doesn't stall the tokio runtime mid-scan.
         let local_root = Path::new(&f.local_root);
-        let mut local_map: HashMap<String, LocalStat> = HashMap::new();
-        if local_root.exists() {
-            walk_local(local_root, local_root, &mut local_map);
-        }
+        let local_map: HashMap<String, LocalStat> = {
+            let local_root_owned = local_root.to_path_buf();
+            tokio::task::spawn_blocking(move || {
+                let mut m = HashMap::new();
+                if local_root_owned.exists() {
+                    walk_local(&local_root_owned, &local_root_owned, &mut m);
+                }
+                m
+            })
+            .await
+            .unwrap_or_default()
+        };
 
         // Critical data-safety guard: empty remote + non-empty local. Confirm
         // remote folder existence before deciding (mirrors WPF v13.55.1 fix).
@@ -290,8 +299,10 @@ impl<'a> DriftScanner<'a> {
                         }
                     }
                 }
-                // Fallback: looks-equal-by-stat (size + 2s mtime tolerance).
-                if ls.size == rs.size && (ls.mtime - rs.mtime).num_seconds().abs() <= 2 {
+                // Fallback: looks-equal-by-stat (size + mtime tolerance).
+                if ls.size == rs.size
+                    && (ls.mtime - rs.mtime).num_seconds().abs() <= MTIME_TOLERANCE_SECS
+                {
                     if let Some(s) = self.snapshot {
                         s.set(&remote_path, ls.size, ls.mtime, rs.size, rs.mtime, None);
                     }
