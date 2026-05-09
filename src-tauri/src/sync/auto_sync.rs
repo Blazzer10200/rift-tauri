@@ -274,10 +274,16 @@ impl AutoSyncEngine {
         });
 
         // Channel for FS events from the notify thread → tokio runtime.
-        let (tx, rx) = mpsc::unbounded_channel::<Event>();
+        // Bounded (audit #4) — webpack/IDE rebuild bursts under a stalled flush
+        // could grow an unbounded channel without limit. 2048 absorbs typical
+        // bursts (git checkout, webpack hot-rebuild). Try-send + drop-with-warn
+        // is the only non-blocking option since the watcher closure is sync.
+        let (tx, rx) = mpsc::channel::<Event>(2048);
         let watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
             if let Ok(ev) = res {
-                let _ = tx.send(ev);
+                if tx.try_send(ev).is_err() {
+                    log::warn!("autosync FS event channel full (cap=2048); dropping event");
+                }
             }
         })
         .map_err(|e| format!("notify watcher init: {e}"))?;

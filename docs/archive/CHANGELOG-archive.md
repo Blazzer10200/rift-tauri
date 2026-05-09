@@ -2,6 +2,19 @@
 
 Older changelog entries flow here as new versions ship. Live entry stays in `docs/CHANGELOG.md`.
 
+## v0.2.6-alpha — 2026-05-09 — End-to-end auto-sync unblocked: russh-sftp `write()` quirk fixed
+
+First live multi-file sync test against the homelab FXServer surfaced a hard blocker: every upload returned `sync failed: write tmp …rift-tmp: No such file`. Root cause was russh-sftp 2.1.2's `session::write()` opening with `OpenFlags::WRITE` only (no `CREATE`, no `TRUNCATE`) — fine for overwriting an existing file, fails immediately when writing a fresh `.rift-tmp`. Same library quirk also bit `upload_bytes` where it would silently leave trailing garbage when a new payload was shorter than the existing remote file.
+
+### Landed
+
+- **`upload_atomic_via`** swapped `sftp.write()` → `sftp.create()` (`WRITE | CREATE | TRUNCATE`). ([sftp/mod.rs:1024-1037](../../src-tauri/src/sftp/mod.rs#L1024-L1037))
+- **`upload_bytes`** swapped to `sftp.create()` + `write_all`. Closes both the first-creation and short-payload-trailing-garbage cases. ([sftp/mod.rs:864-876](../../src-tauri/src/sftp/mod.rs#L864-L876))
+
+### Verified end-to-end (live tests against FXServer)
+
+- Single-file edit → synced byte-for-byte. Burst write 5 files in <1s — all landed. 2 MB random binary — SHA1 match. Delete propagation clean.
+
 ## v0.2.5-alpha — 2026-05-09 — Agent-driven sweep: M13 cancel-tokens + Vitest + russh 0.60 + L9 partial
 
 End-to-end campaign using the new Claude Code agent roster (recon/scout/architect/operator/verifier). Five Phase-0 reconnaissance agents mapped IPC contract + test coverage + russh upstream + rustls feature flags + Velopack signing. Three Phase-1 architects designed the cancel-token API + russh migration + Vitest harness. Phase-2 operators implemented in parallel.

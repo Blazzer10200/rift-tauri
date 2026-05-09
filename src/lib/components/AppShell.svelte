@@ -20,6 +20,8 @@
   import Confirm from "./dialogs/Confirm.svelte";
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
+  import UpdateDialog from "./dialogs/UpdateDialog.svelte";
+  import { updates } from "../state/updates.svelte";
 
   type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings";
   type SettingsSection = "appearance" | "tokens" | "servers" | "keys" | "sync" | "editor" | "about";
@@ -88,6 +90,9 @@
       gotoSettings("servers");
     }
     window.addEventListener("keydown", onGlobalKey);
+    // Fire-and-forget — doesn't block first paint. Auto-pops the dialog
+    // exactly once if an update is available.
+    updates.checkOnLaunch();
   });
 
   onDestroy(() => {
@@ -343,6 +348,8 @@
     {commands}
     onClose={() => (paletteOpen = false)}
   />
+
+  <UpdateDialog />
 
   <ActivityToast />
 </div>
