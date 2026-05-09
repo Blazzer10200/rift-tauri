@@ -2,8 +2,11 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile, type ConflictRecord } from "../state/connection.svelte";
+  import Titlebar from "./shell/Titlebar.svelte";
+  import TabRail from "./shell/TabRail.svelte";
+  import StatusBar from "./shell/StatusBar.svelte";
   import TopBar from "./TopBar.svelte";
-  import ServerPicker from "./ServerPicker.svelte";
+  import Settings from "./settings/Settings.svelte";
   import StatusHero from "./StatusHero.svelte";
   import ActivityToast from "./ActivityToast.svelte";
   import TwoPane from "./browser/TwoPane.svelte";
@@ -15,13 +18,14 @@
   import Bootstrap from "./dialogs/Bootstrap.svelte";
   import Keygen from "./dialogs/Keygen.svelte";
   import Confirm from "./dialogs/Confirm.svelte";
+  import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
 
   type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings";
+  type SettingsSection = "appearance" | "tokens" | "servers" | "keys" | "sync" | "editor" | "about";
 
   let active = $state<Tab>("browse");
-  let pickerOpen = $state(false);
-  let version = $state("?");
+  let settingsSection = $state<SettingsSection>("appearance");
   let selectedConflict = $state<ConflictRecord | null>(null);
 
   // Dialog state
@@ -46,44 +50,40 @@
     }
   });
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: "browse", label: "Browse" },
-    { id: "activity", label: "Activity" },
-    { id: "drift", label: "Drift" },
-    { id: "conflicts", label: "Conflicts" },
-    { id: "settings", label: "Settings" },
-  ];
+  function gotoSettings(s: SettingsSection = "appearance") {
+    settingsSection = s;
+    active = "settings";
+  }
 
   // ── command registry ──────────────────────────────────────────────
   const commands = $derived<Command[]>([
-    { id: "switch-server", title: "Switch server…", subtitle: "Open the server picker", shortcut: "Ctrl+P",
-      run: () => (pickerOpen = true) },
-    { id: "add-server", title: "Add server…", subtitle: "Configure a new SSH/SFTP target",
+    { id: "switch-server", group: "Servers", title: "Manage servers…", subtitle: "Add, edit, or delete servers", shortcut: "Ctrl+P",
+      run: () => gotoSettings("servers") },
+    { id: "add-server", group: "Servers", title: "Add server…", subtitle: "Configure a new SSH/SFTP target",
       run: () => openAddServer() },
-    { id: "setup-key", title: "SSH key setup…", subtitle: "Generate or copy your default ed25519 key",
+    { id: "setup-key", group: "Servers", title: "SSH key setup…", subtitle: "Generate or copy your default ed25519 key",
       run: () => (keygenOpen = true) },
-    { id: "bootstrap", title: "Bootstrap from remote…",
+    { id: "bootstrap", group: "Sync", title: "Bootstrap from remote…",
       subtitle: connection.selected ? `Pull missing files for ${connection.selected.name}` : "Connect a server first",
       run: () => openBootstrap() },
-    { id: "tab-browse",   title: "Go to Browse",   run: () => (active = "browse")   },
-    { id: "tab-activity", title: "Go to Activity", run: () => (active = "activity") },
-    { id: "tab-drift",    title: "Go to Drift",    run: () => (active = "drift")    },
-    { id: "tab-conflicts",title: "Go to Conflicts",run: () => (active = "conflicts")},
-    { id: "tab-settings", title: "Go to Settings", run: () => (active = "settings") },
-    { id: "disconnect",   title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
+    { id: "tab-browse",   group: "Go to", title: "Browser",  shortcut: "Ctrl+1", run: () => (active = "browse")   },
+    { id: "tab-activity", group: "Go to", title: "Activity", shortcut: "Ctrl+2", run: () => (active = "activity") },
+    { id: "tab-drift",    group: "Go to", title: "Drift",    shortcut: "Ctrl+3", run: () => (active = "drift")    },
+    { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
+    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+5", run: () => (active = "settings") },
+    { id: "disconnect",   group: "Sync",  title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
       run: () => connection.disconnect() },
-    { id: "reload",       title: "Reload servers",
+    { id: "reload",       group: "Servers", title: "Reload servers",
       run: () => connection.loadServers() },
   ]);
 
   // ── lifecycle ──────────────────────────────────────────────────────
   onMount(async () => {
-    try { version = await invoke<string>("app_version"); } catch {}
     await connection.wireEvents();
     await connection.loadServers();
     await connection.refreshStatus();
     if (!connection.selectedKey && connection.servers.length === 0) {
-      pickerOpen = true;
+      gotoSettings("servers");
     }
     window.addEventListener("keydown", onGlobalKey);
   });
@@ -94,15 +94,16 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
-    // Ctrl+K (or Cmd+K) — command palette
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    const meta = e.ctrlKey || e.metaKey;
+    if (!meta) return;
+    const k = e.key.toLowerCase();
+    if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
+    if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
+    if (k === "n") { e.preventDefault(); openAddServer(); return; }
+    if (/^[1-5]$/.test(e.key)) {
       e.preventDefault();
-      paletteOpen = true;
-    }
-    // Ctrl+P — server picker
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
-      e.preventDefault();
-      pickerOpen = true;
+      const tab = (["browse", "activity", "drift", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
+      active = tab;
     }
   }
 
@@ -110,7 +111,6 @@
   function openAddServer(server: ServerProfile | null = null) {
     editingServer = server;
     addServerOpen = true;
-    pickerOpen = false;
   }
 
   async function detectBootstrapSafe(serverKey: string) {
@@ -154,6 +154,30 @@
     });
   }
 
+  async function handleReupload(
+    head: { remotePath: string; tmpPath: string; displayName: string; mtime: string; size: number },
+    choice: ReuploadChoice | null,
+  ) {
+    connection.popReuploadPrompt();
+    const key = connection.selectedKey;
+    if (!key) return;
+
+    if (choice === "always") {
+      localStorage.setItem(`rift.reupload.always.${key}`, "1");
+    }
+    if (choice === "reupload" || choice === "always") {
+      try {
+        await invoke("save_edit_in_place", {
+          serverKey: key,
+          remotePath: head.remotePath,
+        });
+      } catch (e) {
+        console.error("save_edit_in_place failed", e);
+      }
+    }
+    // skip / null → leave file dirty; user can act later
+  }
+
   async function deleteServer(s: ServerProfile) {
     const ok = await askConfirm({
       title: "Delete server?",
@@ -170,34 +194,18 @@
 </script>
 
 <div class="shell">
-  <TopBar {version} onPickServer={() => (pickerOpen = true)} />
+  <Titlebar
+    onOpenPalette={() => (paletteOpen = true)}
+    onOpenSettings={() => (active = "settings")}
+  />
+
+  <TopBar
+    onAddServer={() => openAddServer(null)}
+    onEditCurrent={(s) => openAddServer(s)}
+  />
 
   <div class="body">
-    <nav class="sidebar">
-      {#each tabs as t (t.id)}
-        <button
-          class="tab"
-          class:active={active === t.id}
-          onclick={() => (active = t.id)}
-          type="button"
-        >
-          {t.label}
-          {#if t.id === "conflicts" && connection.conflictCount > 0}
-            <span class="badge danger">{connection.conflictCount}</span>
-          {/if}
-          {#if t.id === "activity" && connection.activityFeed.length > 0}
-            <span class="badge dim">{connection.activityFeed.length}</span>
-          {/if}
-          {#if t.id === "browse" && connection.locks.length > 0}
-            <span class="badge warn">{connection.locks.length}</span>
-          {/if}
-        </button>
-      {/each}
-      <div class="sidebar-spacer"></div>
-      <button class="tab hint" onclick={() => (paletteOpen = true)} type="button" title="Command palette">
-        ⌕ Commands <kbd>Ctrl+K</kbd>
-      </button>
-    </nav>
+    <TabRail {active} onChange={(t) => (active = t)} />
 
     <main class="pane">
       {#if active === "browse"}
@@ -220,31 +228,24 @@
               <ConflictResolver conflict={selectedConflict} />
             {/key}
           {:else}
-            <div class="placeholder"><h2>Conflicts</h2><p class="hint">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
+            <div class="placeholder"><h2>Conflicts</h2><p class="help">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
           {/if}
         </div>
       {:else if active === "settings"}
-        <div class="placeholder">
-          <h2>Settings</h2>
-          <p>Manage servers from the picker. Use the command palette (<kbd>Ctrl+K</kbd>) for everything else.</p>
-          <div class="settings-actions">
-            <button onclick={() => (pickerOpen = true)} type="button">Open server picker</button>
-            <button onclick={() => (keygenOpen = true)} type="button">SSH key setup…</button>
-            <button onclick={openBootstrap} type="button" disabled={!connection.selected}>Bootstrap from remote…</button>
-          </div>
-        </div>
+        {#key settingsSection}
+          <Settings
+            initialSection={settingsSection}
+            onAddServer={() => openAddServer(null)}
+            onEditServer={(s) => openAddServer(s)}
+            onDeleteServer={(s) => deleteServer(s)}
+            onLaunchKeygen={() => (keygenOpen = true)}
+          />
+        {/key}
       {/if}
     </main>
   </div>
 
-  <ServerPicker
-    open={pickerOpen}
-    onClose={() => (pickerOpen = false)}
-    onAdd={() => openAddServer(null)}
-    onEdit={(s) => openAddServer(s)}
-    onDelete={(s) => deleteServer(s)}
-    onLaunchKeygen={() => { pickerOpen = false; keygenOpen = true; }}
-  />
+  <StatusBar />
 
   <AddServer
     open={addServerOpen}
@@ -288,9 +289,19 @@
     }}
   />
 
+  {#if connection.pendingReuploads.length > 0}
+    {@const head = connection.pendingReuploads[0]}
+    <Reupload
+      open={true}
+      fileName={head.displayName}
+      detail={head.remotePath}
+      onClose={(choice: ReuploadChoice | null) => handleReupload(head, choice)}
+    />
+  {/if}
+
   <CommandPalette
     open={paletteOpen}
-    commands={commands}
+    {commands}
     onClose={() => (paletteOpen = false)}
   />
 
@@ -299,87 +310,26 @@
 
 <style>
   .shell {
-    display: flex; flex-direction: column;
+    display: grid;
+    grid-template-rows: 32px 44px 1fr 22px;
     height: 100vh;
-    background: #0F0F12;
-    color: #E8E8EE;
+    background: var(--bg);
+    color: var(--fg);
   }
-  .body { display: flex; flex: 1; min-height: 0; }
-  .sidebar {
-    width: 168px;
-    background: #0F0F12;
-    border-right: 1px solid #26262E;
+  .body {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .pane {
+    min-height: 0; min-width: 0;
+    overflow: hidden;
     display: flex; flex-direction: column;
-    padding: 10px 8px;
-    gap: 2px;
   }
-  .sidebar-spacer { flex: 1; }
-  .tab {
-    background: transparent;
-    border: 0;
-    color: #7A7A85;
-    text-align: left;
-    padding: 8px 12px;
-    border-radius: 4px;
-    font-size: 13px;
-    cursor: pointer;
-    display: flex; align-items: center; gap: 8px;
-  }
-  .tab:hover { background: #17171C; color: #E8E8EE; }
-  .tab.active {
-    background: #15101E;
-    color: #E8E8EE;
-    border-left: 2px solid #8B6BE6;
-    padding-left: 10px;
-    font-weight: 600;
-  }
-  .tab.hint { font-size: 11px; color: #7A7A85; justify-content: space-between; }
-  .tab.hint kbd {
-    background: #1F1F26;
-    color: #7A7A85;
-    font-size: 9px;
-    padding: 1px 5px;
-    border-radius: 2px;
-    font-family: Consolas, monospace;
-  }
-  .badge {
-    margin-left: auto;
-    font-size: 10px;
-    font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 999px;
-    color: white;
-  }
-  .badge.danger { background: #FF5C6B; }
-  .badge.warn { background: #F0B95C; color: #15101E; }
-  .badge.dim { background: #26262E; color: #7A7A85; }
   .conflicts-pane { display: flex; flex: 1; min-height: 0; }
-
-  .pane { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  .pane > :global(.placeholder) { overflow: auto; flex: 1; }
   .browse-stack { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .placeholder { padding: 22px; color: #E8E8EE; }
-  .placeholder h2 { margin: 0 0 8px; font-size: 16px; }
-  .placeholder p { color: #7A7A85; font-size: 13px; margin: 4px 0; }
-  .placeholder kbd {
-    background: #1F1F26;
-    color: #E8E8EE;
-    font-size: 11px;
-    padding: 1px 6px;
-    border-radius: 2px;
-    font-family: Consolas, monospace;
-  }
-  .settings-actions { display: flex; gap: 8px; margin-top: 14px; }
-  .settings-actions button {
-    background: #1F1F26;
-    border: 1px solid #26262E;
-    color: #E8E8EE;
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .settings-actions button:hover:not(:disabled) { background: #26262E; }
-  .settings-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .hint { color: #7A7A85; font-size: 12px; }
+  .placeholder { padding: 22px; color: var(--fg); overflow: auto; flex: 1; }
+  .placeholder h2 { margin: 0 0 8px; font-size: var(--fs-lg); font-weight: 600; }
+  .placeholder p { color: var(--fg-muted); font-size: var(--fs-md); margin: 4px 0; }
 </style>

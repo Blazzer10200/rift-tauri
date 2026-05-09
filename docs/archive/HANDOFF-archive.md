@@ -2,6 +2,27 @@
 
 Older session blocks flow here as new sessions land. Live handoff stays in `docs/HANDOFF.md`.
 
+## Session 12 — 2026-05-09 — UI redesign port (Phases 0–3)
+
+Claude Design "Rift App UI" deliverable bundle ported. **No backend touched.** 4 locked decisions: per-hunk conflict UI ships visually w/ file-level resolution under hood; drift severity skipped (no backend tag); ServerPicker retired (TopBar dropdown + Settings → Servers); version bump deferred to P11.
+
+**P0** Foundation: OKLCH Rift tokens (4-step text scale, status semantics, density variants) + shadcn-svelte aliases. `@fontsource-variable/{inter,jetbrains-mono}` + `lucide-svelte`. `decorations: false`, 1600×1000 / min 1280×800. ModeWatcher dropped (dark-only).
+**P1** Shell: Custom Titlebar (drag region + window controls + Cmd+K), TopBar rewrite (server dropdown + ConnPill), TabRail (200px sidebar w/ count pips + foot stats), StatusBar (22px). AppShell grid `32/44/1fr/22`. Ctrl+1..5 tab switching.
+**P2** Settings: 7-section nav (Appearance/Tokens/Servers/Keys/Sync/Editor/About). Servers section absorbed ServerPicker CRUD; standalone deleted. Tokens section copies OKLCH blob.
+**P3** Browser: New `1fr 36px 1fr` grid (no draggable splitter). `OpRail` center column (upload/download/sync/edit/diff/delete). PathBreadcrumbs gained side tag (LOCAL/REMOTE) + refresh + filter. LockBadge restyled.
+
+`npm run check` clean. Dev build NOT yet runtime-tested; user to launch `npm run tauri dev` first thing next session.
+
+## Session 10 — 2026-05-09 — Backlog commit + UI foundation + Claude Design brief
+
+Sessions 2–9 bundled into `5b9f5f7 Phases 1-5 + 1i — migration core complete (v0.1.4-alpha)`. `build/` added to `.gitignore`.
+
+UI foundation: **shadcn-svelte (nova/zinc) + Tailwind v4 + Bits UI + Svelte 5 native transitions**. Files: `vite.config.js` (Tailwind plugin), `src/app.css` (OKLCH zinc theme), `src/app.html` (`class="dark"`), `src/routes/+layout.svelte` (ModeWatcher), `src/lib/utils.ts` (`cn` helper), `components.json`, `src/lib/components/ui/button/` (smoke-test).
+
+Claude Design brief at `docs/design/CLAUDE-DESIGN-BRIEF.md` — pre-digested context for claude.ai/design (product summary, tech constraints, component inventory, OKLCH tokens, 4 direction prompts: Linear / Raycast / Sublime / Win11-Mica).
+
+Bumped 0.1.4 → 0.1.5. `npm run check` 318/0/0 ✓ · `tauri dev` boots ✓.
+
 ## Session 9 — 2026-05-08 — Phase 5 dialogs + 1i closure + cleanup
 
 ### New components (`src/lib/components/dialogs/`)

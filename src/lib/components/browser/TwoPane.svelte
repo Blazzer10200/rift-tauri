@@ -1,10 +1,12 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
+  import { X } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
-  import { browserTabs, type BrowserTab } from "../../state/browser-tabs.svelte";
+  import { browserTabs } from "../../state/browser-tabs.svelte";
   import LocalPane from "./LocalPane.svelte";
   import RemotePane from "./RemotePane.svelte";
+  import OpRail from "./OpRail.svelte";
 
   type LocalEntry = {
     name: string; path: string; is_dir: boolean; size: number; mtime: number;
@@ -13,10 +15,9 @@
     full_path: string; name: string; is_dir: boolean; size: number; last_modified: string;
   };
 
-  let leftPct = $state(50);
-  let dragging = $state(false);
-  let containerEl: HTMLDivElement | undefined = $state();
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
+  let localSel = $state<string[]>([]);
+  let remoteSel = $state<string[]>([]);
 
   onMount(() => {
     const s = connection.selected;
@@ -36,18 +37,6 @@
       }
     }
   });
-
-  function startDrag(e: MouseEvent) {
-    e.preventDefault();
-    dragging = true;
-  }
-  function onMove(e: MouseEvent) {
-    if (!dragging || !containerEl) return;
-    const rect = containerEl.getBoundingClientRect();
-    const pct = ((e.clientX - rect.left) / rect.width) * 100;
-    leftPct = Math.max(15, Math.min(85, pct));
-  }
-  function endDrag() { dragging = false; }
 
   function flash(msg: string, kind: "ok" | "err" | "info" = "info") {
     toast = { msg, kind };
@@ -87,7 +76,7 @@
   async function uploadLocalsToRemote(localPaths: string[]) {
     const s = connection.selected;
     const t = browserTabs.active;
-    if (!s || !t) return;
+    if (!s || !t || localPaths.length === 0) return;
     const jobs: [string, string][] = localPaths
       .filter((lp) => !!basename(lp))
       .map((lp) => [lp, joinRemote(t.remotePath, basename(lp))]);
@@ -105,7 +94,7 @@
   async function downloadRemotesToLocal(remotePaths: string[]) {
     const s = connection.selected;
     const t = browserTabs.active;
-    if (!s || !t) return;
+    if (!s || !t || remotePaths.length === 0) return;
     const jobs: [string, string][] = remotePaths
       .filter((rp) => !!basename(rp))
       .map((rp) => [rp, joinLocal(t.localPath, basename(rp))]);
@@ -119,18 +108,25 @@
       flash(`Download failed: ${e}`, "err");
     }
   }
-</script>
 
-<svelte:window onmousemove={onMove} onmouseup={endDrag} />
+  // Op rail actions
+  function onUpload() { uploadLocalsToRemote(localSel); }
+  function onDownload() { downloadRemotesToLocal(remoteSel); }
+  function onSync() {
+    if (localSel.length > 0) uploadLocalsToRemote(localSel);
+    if (remoteSel.length > 0) downloadRemotesToLocal(remoteSel);
+    if (localSel.length === 0 && remoteSel.length === 0) flash("Select files on either side first.", "info");
+  }
+  function onEdit() { flash("Edit-in-place: open the file by double-clicking (Phase 6).", "info"); }
+  function onDiff() { flash("Diff view ships in Phase 8 (conflicts).", "info"); }
+  function onDelete() { flash("Delete: confirm dialog ships in Phase 6.", "info"); }
+</script>
 
 <div class="two-pane">
   <div class="tabstrip">
     {#each browserTabs.tabs as t, i (t.id)}
-      <div
-        class="tab"
-        class:active={i === browserTabs.activeIdx}
-      >
-        <button type="button" class="tab-label" onclick={() => browserTabs.setActive(i)}>
+      <div class="tab" data-active={i === browserTabs.activeIdx}>
+        <button type="button" class="tab-label mono" onclick={() => browserTabs.setActive(i)}>
           {t.name}
         </button>
         {#if browserTabs.tabs.length > 1}
@@ -138,7 +134,7 @@
             type="button" class="tab-x"
             onclick={() => browserTabs.close(i)}
             aria-label="Close tab"
-          >×</button>
+          ><X size={10}/></button>
         {/if}
       </div>
     {/each}
@@ -147,42 +143,41 @@
   {#if browserTabs.active}
     {@const t = browserTabs.active}
     {@const idx = browserTabs.activeIdx}
-    <div class="split" bind:this={containerEl}>
-      <div class="side" style="width: {leftPct}%">
-        <div class="side-label">Local</div>
-        <LocalPane
-          path={t.localPath}
-          onPathChange={(p: string) => setLocalPath(idx, p)}
-          onOpenInNewTab={(e: LocalEntry) => openLocalNewTab(e)}
-          onDropPaths={(remotePaths: string[]) => downloadRemotesToLocal(remotePaths)}
-        />
-      </div>
-      <button
-        type="button"
-        class="resizer"
-        class:active={dragging}
-        aria-label="Resize panes"
-        onmousedown={startDrag}
-      ></button>
-      <div class="side" style="width: {100 - leftPct}%">
-        <div class="side-label">Remote</div>
-        <RemotePane
-          serverKey={connection.selectedKey}
-          path={t.remotePath}
-          onPathChange={(p: string) => setRemotePath(idx, p)}
-          onOpenInNewTab={(e: RemoteEntry) => openRemoteNewTab(e)}
-          onDropPaths={(localPaths: string[]) => uploadLocalsToRemote(localPaths)}
-        />
-      </div>
+    <div class="split">
+      <LocalPane
+        path={t.localPath}
+        onPathChange={(p: string) => setLocalPath(idx, p)}
+        onOpenInNewTab={(e: LocalEntry) => openLocalNewTab(e)}
+        onDropPaths={(remotePaths: string[]) => downloadRemotesToLocal(remotePaths)}
+        onSelectionChange={(paths) => (localSel = paths)}
+      />
+      <OpRail
+        canUpload={localSel.length > 0}
+        canDownload={remoteSel.length > 0}
+        canEdit={localSel.length === 1 || remoteSel.length === 1}
+        canDelete={localSel.length > 0 || remoteSel.length > 0}
+        {onUpload}
+        {onDownload}
+        {onSync}
+        {onEdit}
+        {onDiff}
+        {onDelete}
+      />
+      <RemotePane
+        serverKey={connection.selectedKey}
+        path={t.remotePath}
+        onPathChange={(p: string) => setRemotePath(idx, p)}
+        onOpenInNewTab={(e: RemoteEntry) => openRemoteNewTab(e)}
+        onDropPaths={(localPaths: string[]) => uploadLocalsToRemote(localPaths)}
+        onSelectionChange={(paths) => (remoteSel = paths)}
+      />
     </div>
   {:else}
     <div class="placeholder">Pick a server to begin browsing.</div>
   {/if}
 
   {#if toast}
-    <div class="toast" class:ok={toast.kind === "ok"} class:err={toast.kind === "err"}>
-      {toast.msg}
-    </div>
+    <div class="toast" data-kind={toast.kind}>{toast.msg}</div>
   {/if}
 </div>
 
@@ -190,30 +185,31 @@
   .two-pane {
     display: flex; flex-direction: column;
     flex: 1; min-height: 0; min-width: 0;
-    background: #0F0F12;
+    background: var(--bg);
     position: relative;
   }
   .tabstrip {
     display: flex; gap: 2px;
     padding: 4px 8px 0;
-    background: #0F0F12;
-    border-bottom: 1px solid #26262E;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
     overflow-x: auto;
   }
   .tab {
     display: flex; align-items: center;
-    background: #17171C;
-    border: 1px solid #26262E; border-bottom: 0;
-    border-radius: 4px 4px 0 0;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border); border-bottom: 0;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
     padding: 0 4px 0 0;
-    color: #7A7A85;
-    font-size: 12px;
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
     max-width: 220px;
   }
-  .tab.active {
-    background: #15101E; color: #E8E8EE;
-    border-color: #8B6BE6;
-    border-bottom-color: #15101E;
+  .tab[data-active="true"] {
+    background: var(--bg);
+    color: var(--fg);
+    border-color: var(--border-strong);
+    border-bottom-color: var(--bg);
     margin-bottom: -1px;
   }
   .tab-label {
@@ -226,51 +222,37 @@
   }
   .tab-x {
     background: transparent; border: 0;
-    color: #7A7A85; cursor: pointer;
+    color: var(--fg-muted); cursor: pointer;
     width: 18px; height: 18px;
-    border-radius: 3px;
-    font-size: 14px; line-height: 1;
+    border-radius: var(--radius-xs);
+    display: inline-flex; align-items: center; justify-content: center;
   }
-  .tab-x:hover { background: #FF5C6B; color: #E8E8EE; }
-  .split { flex: 1; display: flex; min-height: 0; min-width: 0; }
-  .side {
-    display: flex; flex-direction: column;
-    min-width: 0; min-height: 0;
+  .tab-x:hover { background: var(--danger); color: oklch(0.99 0 0); }
+
+  .split {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 36px 1fr;
+    min-height: 0; min-width: 0;
   }
-  .side-label {
-    padding: 4px 12px;
-    background: #17171C;
-    color: #7A7A85;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid #26262E;
-  }
-  .resizer {
-    width: 4px; flex-shrink: 0;
-    background: #26262E;
-    cursor: col-resize;
-    border: 0; padding: 0;
-  }
-  .resizer:hover, .resizer.active { background: #8B6BE6; }
-  .resizer:focus-visible { outline: 0; background: #8B6BE6; }
+
   .placeholder {
     flex: 1; display: flex; align-items: center; justify-content: center;
-    color: #7A7A85; font-size: 13px;
+    color: var(--fg-muted); font-size: var(--fs-sm);
   }
+
   .toast {
     position: absolute;
     bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: #17171C;
-    border: 1px solid #26262E;
-    border-radius: 4px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
     padding: 8px 14px;
-    color: #E8E8EE;
-    font-size: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    color: var(--fg);
+    font-size: var(--fs-sm);
+    box-shadow: var(--shadow);
     z-index: 50;
   }
-  .toast.ok { border-color: #4ADE80; }
-  .toast.err { border-color: #FF5C6B; color: #FF5C6B; }
+  .toast[data-kind="ok"]  { border-color: color-mix(in oklch, var(--ok) 50%, transparent); color: var(--ok); }
+  .toast[data-kind="err"] { border-color: color-mix(in oklch, var(--danger) 50%, transparent); color: var(--danger); }
 </style>

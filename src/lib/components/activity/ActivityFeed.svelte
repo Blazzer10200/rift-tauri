@@ -1,26 +1,45 @@
 <script lang="ts">
+  import {
+    RefreshCw, Download, Trash2, AlertTriangle, Check,
+    GitBranch, Network, Lock, XCircle, Info, Pause, Play,
+  } from "lucide-svelte";
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
 
-  let filter = $state("");
-  let kindFilter = $state<ActivityKind | "all">("all");
+  type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "error" | "system";
 
-  const kinds: { id: ActivityKind | "all"; label: string }[] = [
+  let filter = $state("");
+  let group = $state<Group>("all");
+  let paused = $state(false);
+  let frozen = $state<ActivityRow[]>([]);
+
+  const groups: { id: Group; label: string }[] = [
     { id: "all", label: "All" },
     { id: "sync", label: "Sync" },
     { id: "pull", label: "Pull" },
     { id: "delete", label: "Delete" },
-    { id: "conflict", label: "Conflict" },
     { id: "drift", label: "Drift" },
+    { id: "conflict", label: "Conflicts" },
     { id: "bridge", label: "Bridge" },
-    { id: "block", label: "Block" },
-    { id: "error", label: "Error" },
+    { id: "error", label: "Errors" },
     { id: "system", label: "System" },
   ];
 
+  const source = $derived(paused ? frozen : connection.activityFeed);
+
+  function inGroup(r: ActivityRow, g: Group): boolean {
+    if (g === "all") return true;
+    if (g === "conflict") return r.kind === "conflict" || r.kind === "conflict_resolved";
+    return r.kind === g;
+  }
+
+  function countFor(g: Group): number {
+    return connection.activityFeed.filter((r) => inGroup(r, g)).length;
+  }
+
   const filtered = $derived.by(() => {
     const q = filter.trim().toLowerCase();
-    return connection.activityFeed.filter((r) => {
-      if (kindFilter !== "all" && r.kind !== kindFilter) return false;
+    return source.filter((r) => {
+      if (!inGroup(r, group)) return false;
       if (!q) return true;
       return (
         r.resource.toLowerCase().includes(q) ||
@@ -30,9 +49,9 @@
     });
   });
 
-  // Simple windowed virtualization — render only visible rows.
-  const ROW_H = 26;
-  const OVERSCAN = 8;
+  // Windowed virtualization
+  const ROW_H = 36;
+  const OVERSCAN = 6;
   let scroller: HTMLDivElement | undefined = $state();
   let scrollTop = $state(0);
   let viewport = $state(600);
@@ -60,36 +79,100 @@
   const padBot = $derived(Math.max(0, (filtered.length - endIdx) * ROW_H));
 
   function fmtTime(iso: string): string {
-    try { return new Date(iso).toLocaleTimeString(); } catch { return iso; }
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour12: false });
+    } catch { return iso; }
   }
-  function kindClass(k: ActivityKind): string { return `k-${k}`; }
+
+  type Variant = "ok" | "warn" | "danger" | "info" | "muted";
+
+  function kindIcon(k: ActivityKind) {
+    switch (k) {
+      case "sync": return RefreshCw;
+      case "pull": return Download;
+      case "delete": return Trash2;
+      case "conflict": return AlertTriangle;
+      case "conflict_resolved": return Check;
+      case "drift": return GitBranch;
+      case "bridge": return Network;
+      case "block": return Lock;
+      case "error": return XCircle;
+      case "system": return Info;
+    }
+  }
+
+  function kindVariant(k: ActivityKind): Variant {
+    switch (k) {
+      case "sync":
+      case "conflict_resolved": return "ok";
+      case "pull":
+      case "bridge": return "info";
+      case "drift":
+      case "delete":
+      case "block": return "warn";
+      case "conflict":
+      case "error": return "danger";
+      default: return "muted";
+    }
+  }
+
+  function togglePause() {
+    if (paused) {
+      paused = false;
+      frozen = [];
+    } else {
+      frozen = [...connection.activityFeed];
+      paused = true;
+    }
+  }
 </script>
 
 <section class="feed">
   <div class="toolbar">
+    <div class="segctl">
+      {#each groups as g (g.id)}
+        {@const n = g.id === "all" ? connection.activityFeed.length : countFor(g.id)}
+        <button
+          type="button"
+          data-active={group === g.id}
+          onclick={() => (group = g.id)}
+        >
+          {g.label}
+          {#if g.id !== "all"}
+            <span class="pip" data-zero={n === 0}>{n}</span>
+          {/if}
+        </button>
+      {/each}
+    </div>
+
     <input
       class="filter"
       type="text"
       placeholder="Filter resource / file / action…"
       bind:value={filter}
     />
-    <select class="kind" bind:value={kindFilter}>
-      {#each kinds as k (k.id)}
-        <option value={k.id}>{k.label}</option>
-      {/each}
-    </select>
-    <span class="count">{filtered.length} / {connection.activityFeed.length}</span>
+
+    <div class="actions">
+      <button class="btn ghost sm" type="button" onclick={togglePause} title={paused ? "Resume feed" : "Pause feed"}>
+        {#if paused}
+          <Play size={11}/> Resume
+        {:else}
+          <Pause size={11}/> Pause
+        {/if}
+      </button>
+      <button
+        class="btn ghost sm"
+        type="button"
+        onclick={() => connection.clearActivity()}
+        disabled={connection.activityFeed.length === 0}
+        title="Clear feed"
+      >
+        <Trash2 size={11}/> Clear
+      </button>
+    </div>
   </div>
 
-  <div class="header">
-    <span class="col-time">Time</span>
-    <span class="col-kind">Kind</span>
-    <span class="col-res">Resource</span>
-    <span class="col-file">File</span>
-    <span class="col-action">Action</span>
-  </div>
-
-  <div class="scroller" bind:this={scroller}>
+  <div class="list" bind:this={scroller}>
     {#if filtered.length === 0}
       <div class="empty">
         {connection.activityFeed.length === 0
@@ -99,76 +182,156 @@
     {:else}
       <div style="height:{padTop}px"></div>
       {#each slice as r, i (startIdx + "_" + r.at + "_" + i)}
-        <div class="row {kindClass(r.kind)}" style="height:{ROW_H}px">
-          <span class="col-time">{fmtTime(r.at)}</span>
-          <span class="col-kind">{r.kind}</span>
-          <span class="col-res">{r.resource}</span>
-          <span class="col-file" title={r.file}>{r.file}</span>
-          <span class="col-action">{r.action}</span>
+        {@const Icon = kindIcon(r.kind)}
+        {@const v = kindVariant(r.kind)}
+        <div class="row" style="height:{ROW_H}px">
+          <span class="time mono">{fmtTime(r.at)}</span>
+          <span class="kind" data-variant={v} title={r.kind}>
+            <Icon size={12}/>
+          </span>
+          <div class="text">
+            <span class="label">{r.action}</span>
+            <span class="detail mono" title={r.file}>{r.resource}{r.file ? ` · ${r.file}` : ""}</span>
+          </div>
         </div>
       {/each}
       <div style="height:{padBot}px"></div>
     {/if}
   </div>
+
+  {#if paused}
+    <div class="paused-banner mono">
+      Feed paused — {connection.activityFeed.length - frozen.length} new since pause
+    </div>
+  {/if}
 </section>
 
 <style>
   .feed {
     display: flex; flex-direction: column;
     flex: 1; min-height: 0;
-    background: #0F0F12; color: #E8E8EE;
+    padding: 10px 14px 14px;
+    background: var(--bg);
+    color: var(--fg);
+    position: relative;
   }
+
   .toolbar {
-    display: flex; gap: 8px; align-items: center;
-    padding: 8px 12px;
-    border-bottom: 1px solid #26262E;
-    background: #0F0F12;
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
   }
+
+  .segctl {
+    display: inline-flex; padding: 2px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    gap: 1px;
+    overflow-x: auto;
+    max-width: 60%;
+  }
+  .segctl button {
+    padding: 3px 9px; height: 22px;
+    background: transparent; border: 0;
+    color: var(--fg-muted);
+    font: inherit; font-size: var(--fs-xs);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    white-space: nowrap;
+  }
+  .segctl button:hover { color: var(--fg); }
+  .segctl button[data-active="true"] {
+    background: var(--surface);
+    color: var(--fg);
+    box-shadow: var(--shadow-sm);
+  }
+  .pip {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 16px; height: 14px; padding: 0 4px;
+    border-radius: 7px;
+    background: var(--bg-elev-3);
+    color: var(--fg-subtle);
+    font-size: 10px; line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .pip[data-zero="true"] { opacity: 0.45; }
+
   .filter {
-    flex: 1;
-    background: #17171C; color: #E8E8EE;
-    border: 1px solid #26262E; border-radius: 3px;
-    padding: 4px 8px; font-size: 12px;
+    flex: 1; min-width: 0;
+    background: var(--bg-elev-1);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    font: inherit; font-size: var(--fs-sm);
   }
-  .filter:focus { outline: 0; border-color: #8B6BE6; }
-  .kind {
-    background: #17171C; color: #E8E8EE;
-    border: 1px solid #26262E; border-radius: 3px;
-    padding: 4px 8px; font-size: 12px;
+  .filter:focus {
+    outline: 0;
+    border-color: var(--accent);
+    background: var(--bg-elev-2);
   }
-  .count { color: #7A7A85; font-size: 11px; font-family: Consolas, monospace; }
-  .header, .row {
+
+  .actions { display: inline-flex; gap: 6px; }
+
+  .list {
+    flex: 1; min-height: 0; overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+
+  .row {
     display: grid;
-    grid-template-columns: 80px 80px 140px 1fr 200px;
-    gap: 12px;
-    padding: 4px 12px;
+    grid-template-columns: 78px 28px 1fr;
+    gap: 10px;
     align-items: center;
-    font-size: 12px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--fs-sm);
   }
-  .header {
-    color: #7A7A85; font-weight: 600;
-    border-bottom: 1px solid #26262E;
-    background: #17171C;
+  .row:last-child { border-bottom: 0; }
+  .row:hover { background: var(--surface-hover); }
+
+  .time { color: var(--fg-subtle); font-size: var(--fs-xs); }
+  .kind {
+    width: 22px; height: 22px;
+    border-radius: var(--radius-xs);
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--bg-elev-2); color: var(--fg-muted);
   }
-  .scroller { flex: 1; overflow: auto; min-height: 0; }
-  .row { border-bottom: 1px solid #15101E; }
-  .row:hover { background: #17171C; }
-  .col-time, .col-kind { color: #7A7A85; font-family: Consolas, monospace; }
-  .col-res { color: #8B6BE6; font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .col-file { color: #E8E8EE; font-family: Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .col-action { color: #7A7A85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .row.k-sync .col-kind { color: #4ADE80; }
-  .row.k-pull .col-kind { color: #8B6BE6; }
-  .row.k-delete .col-kind { color: #FF5C6B; }
-  .row.k-conflict .col-kind { color: #FF5C6B; }
-  .row.k-conflict_resolved .col-kind { color: #4ADE80; }
-  .row.k-drift .col-kind { color: #F0B95C; }
-  .row.k-bridge .col-kind { color: #8B6BE6; }
-  .row.k-block .col-kind { color: #F0B95C; }
-  .row.k-error .col-kind { color: #FF5C6B; }
-  .row.k-system .col-kind { color: #7A7A85; }
+  .kind[data-variant="ok"]     { background: var(--ok-soft);     color: var(--ok); }
+  .kind[data-variant="warn"]   { background: var(--warn-soft);   color: var(--warn); }
+  .kind[data-variant="danger"] { background: var(--danger-soft); color: var(--danger); }
+  .kind[data-variant="info"]   { background: var(--info-soft);   color: var(--info); }
+
+  .text { display: flex; flex-direction: column; min-width: 0; }
+  .label {
+    color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .detail {
+    color: var(--fg-subtle);
+    font-size: var(--fs-xs);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
   .empty {
-    padding: 24px; color: #7A7A85;
-    text-align: center; font-size: 12px;
+    padding: 24px;
+    color: var(--fg-muted);
+    text-align: center;
+    font-size: var(--fs-sm);
+  }
+
+  .paused-banner {
+    position: absolute;
+    bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
+    box-shadow: var(--shadow);
   }
 </style>

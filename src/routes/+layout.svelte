@@ -1,8 +1,15 @@
 <script lang="ts">
+  import "@fontsource-variable/inter";
+  import "@fontsource-variable/jetbrains-mono";
   import "../app.css";
-  import { ModeWatcher } from "mode-watcher";
+  import { onMount } from "svelte";
+  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
+
   let { children } = $props();
+
+  onMount(() => {
+    uiPrefs.init();
+  });
 </script>
 
-<ModeWatcher defaultMode="dark" />
 {@render children()}

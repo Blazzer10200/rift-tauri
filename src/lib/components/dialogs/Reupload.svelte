@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { Upload, X } from "lucide-svelte";
+
   export type ReuploadChoice = "skip" | "reupload" | "always";
 
   type Props = {
@@ -10,8 +12,13 @@
 
   let { open, fileName, detail = "", onClose }: Props = $props();
 
-  function pick(choice: ReuploadChoice) { onClose(choice); }
-  function dismiss() { onClose(null); }
+  let dontAsk = $state(false);
+
+  function pick(choice: ReuploadChoice) {
+    onClose(choice);
+    dontAsk = false;
+  }
+  function dismiss() { onClose(null); dontAsk = false; }
 
   function onBackdrop(e: MouseEvent) {
     if (e.target === e.currentTarget) dismiss();
@@ -20,64 +27,53 @@
   function onKey(e: KeyboardEvent) {
     if (!open) return;
     if (e.key === "Escape") dismiss();
-    if (e.key === "Enter") pick("reupload");
+    if (e.key === "Enter") pick(dontAsk ? "always" : "reupload");
   }
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 {#if open}
-  <div class="backdrop" onclick={onBackdrop} role="presentation">
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="File saved — re-upload?">
-      <header><h2>File saved — re-upload?</h2></header>
-      <p class="body">'{fileName}' was modified. Push the changes back to the server?</p>
-      {#if detail}<p class="detail">{detail}</p>{/if}
-      <footer>
-        <button class="skip" onclick={() => pick("skip")} type="button">Skip</button>
-        <button class="always" onclick={() => pick("always")} type="button">Always</button>
-        <button class="reupload" onclick={() => pick("reupload")} type="button">Re-upload</button>
-      </footer>
+  <div class="dialog-overlay" onclick={onBackdrop} role="presentation">
+    <div class="dialog-shell" style="width: 460px;" role="dialog" aria-modal="true" aria-label="Re-upload after edit?">
+      <div class="dialog-head">
+        <div class="dialog-icon warn"><Upload size={14}/></div>
+        <div>
+          <div class="dialog-title">Re-upload after edit?</div>
+          <div class="dialog-sub">External editor saved <span class="mono">{fileName}</span>.</div>
+        </div>
+        <button class="dialog-close" type="button" onclick={dismiss} aria-label="Close">
+          <X size={14}/>
+        </button>
+      </div>
+      <div class="dialog-body">
+        <p class="lead">Rift downloaded this file when you opened it. The local copy is now newer.</p>
+        {#if detail}<p class="detail mono">{detail}</p>{/if}
+        <label class="dialog-checkbox">
+          <input type="checkbox" bind:checked={dontAsk}/>
+          <span>Always re-upload for this server</span>
+        </label>
+      </div>
+      <div class="dialog-foot">
+        <button class="btn ghost" type="button" onclick={() => pick("skip")}>Skip</button>
+        <div class="dialog-foot-spacer"></div>
+        <button class="btn primary" type="button" onclick={() => pick(dontAsk ? "always" : "reupload")}>
+          <Upload size={11}/> Re-upload
+        </button>
+      </div>
     </div>
   </div>
 {/if}
 
 <style>
-  .backdrop {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.55);
-    display: flex; align-items: center; justify-content: center;
-    z-index: 200;
-  }
-  .dialog {
-    background: #17171C;
-    border: 1px solid #3A2A66;
-    border-radius: 6px;
-    width: 440px; max-width: 92vw;
-    box-shadow: 0 18px 50px rgba(0,0,0,0.6);
-    padding: 18px 20px;
-    color: #E8E8EE;
-  }
-  header { margin-bottom: 12px; }
-  h2 { margin: 0; font-size: 14px; font-weight: 600; }
-  .body { font-size: 13px; line-height: 1.5; margin: 0 0 8px; }
+  .lead { color: var(--fg-2); margin: 0 0 8px; font-size: var(--fs-sm); line-height: 1.5; }
   .detail {
-    font-family: Consolas, monospace; font-size: 11px;
-    color: #7A7A85; margin: 0; word-break: break-all;
+    color: var(--fg-subtle); font-size: var(--fs-xs);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    word-break: break-all;
+    margin: 0 0 12px;
   }
-  footer {
-    display: flex; justify-content: flex-end; gap: 6px;
-    margin-top: 16px;
-  }
-  button {
-    background: #1F1F26;
-    border: 1px solid #26262E;
-    color: #E8E8EE;
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  button:hover { background: #26262E; }
-  button.reupload { color: #8B6BE6; border-color: #3A2A66; font-weight: 600; }
-  button.reupload:hover { background: #15101E; }
 </style>
