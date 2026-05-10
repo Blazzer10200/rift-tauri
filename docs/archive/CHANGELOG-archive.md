@@ -2,6 +2,10 @@
 
 Older changelog entries flow here as new versions ship. Live entry stays in `docs/CHANGELOG.md`.
 
+## v0.2.10-alpha-test — 2026-05-10 — Auto-updater rebuild + audit cleanup
+
+See git 35d6a71. Rebuilt updater w/ custom `GithubSource` (REST API + User-Agent), 32px top banner replacing auto-popup dialog, −410 LOC audit cleanup, `.gitattributes` line-ending normalize.
+
 ## v0.2.9-alpha — 2026-05-09 — Sync Inspector + bidirectional sync + bridge URL fix
 
 Closes the sync wheel both directions and ships a one-button diagnostic surface so the next bug doesn't take a full session to triage.
