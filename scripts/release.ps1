@@ -75,7 +75,13 @@ Write-Host '=== tauri build ===' -ForegroundColor Cyan
 npm run tauri build
 if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
-$exePath = 'src-tauri/target/release/rift-tauri.exe'
+# CARGO_TARGET_DIR (if set globally) redirects the exe out of src-tauri/target/.
+# Resolve against $env:CARGO_TARGET_DIR first, then fall back to the in-tree path.
+$exePath = if ($env:CARGO_TARGET_DIR) {
+    Join-Path $env:CARGO_TARGET_DIR 'release/rift-tauri.exe'
+} else {
+    'src-tauri/target/release/rift-tauri.exe'
+}
 if (-not (Test-Path $exePath)) { throw "exe not produced: $exePath" }
 
 # --- Stage a clean directory for vpk pack -------------------------------
