@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Folder, FileCode, File, ChevronRight, Download, FolderOpen, Copy } from "lucide-svelte";
+  import { Folder, FileCode, File, ChevronRight, Download, FolderOpen, Copy, Pencil, Trash2 } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { connection } from "../../state/connection.svelte";
@@ -210,6 +210,38 @@
     try { await navigator.clipboard.writeText(p); } catch (err) { console.warn("clipboard failed", err); }
   }
 
+  async function renameEntry(entry: RemoteEntry) {
+    if (!serverKey) return;
+    const next = window.prompt(`Rename "${entry.name}" to:`, entry.name)?.trim();
+    if (!next || next === entry.name) return;
+    if (next.includes("/")) { error = "name cannot contain '/'"; return; }
+    const parent = entry.full_path.slice(0, entry.full_path.length - entry.name.length);
+    const target = parent + next;
+    try {
+      await invoke("remote_rename_path", { serverKey, from: entry.full_path, to: target });
+      await load();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function deleteEntries(entry: RemoteEntry) {
+    if (!serverKey) return;
+    const paths = selected.has(entry.full_path) && selected.size > 1
+      ? entries.filter((x) => selected.has(x.full_path)).map((x) => x.full_path)
+      : [entry.full_path];
+    const label = paths.length === 1 ? `"${entry.name}"` : `${paths.length} items`;
+    if (!window.confirm(`Permanently delete ${label} on the remote? This cannot be undone.`)) return;
+    try {
+      const results = await invoke<boolean[]>("remote_delete_paths", { serverKey, paths });
+      const failed = results.filter((ok) => !ok).length;
+      if (failed > 0) error = `delete failed for ${failed}/${paths.length} items`;
+      await load();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   function downloadEntry(entry: RemoteEntry) {
     const paths = selected.has(entry.full_path) && selected.size > 1
       ? entries.filter((x) => selected.has(x.full_path)).map((x) => x.full_path)
@@ -352,7 +384,14 @@
       <button type="button" class="ctx-item" onclick={() => { copyPath(target.full_path); closeMenu(); }}>
         <Copy size={13}/><span>Copy path</span>
       </button>
+      <button type="button" class="ctx-item" onclick={() => { renameEntry(target); closeMenu(); }}>
+        <Pencil size={13}/><span>Rename…</span>
+      </button>
     {/if}
+    <div class="ctx-sep"></div>
+    <button type="button" class="ctx-item ctx-danger" onclick={() => { deleteEntries(target); closeMenu(); }}>
+      <Trash2 size={13}/><span>Delete{multi ? ` (${selected.size})` : ""}</span>
+    </button>
   </div>
 {/if}
 
@@ -452,6 +491,8 @@
   .ctx-item :global(svg) { color: var(--fg-subtle); flex-shrink: 0; }
   .ctx-item:hover { background: var(--surface-hover); color: var(--accent); }
   .ctx-item:hover :global(svg) { color: var(--accent); }
+  .ctx-danger:hover { background: var(--danger-soft); color: var(--danger); }
+  .ctx-danger:hover :global(svg) { color: var(--danger); }
   .ctx-sep {
     height: 1px;
     background: var(--border);
