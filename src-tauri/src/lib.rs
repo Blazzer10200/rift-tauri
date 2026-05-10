@@ -730,6 +730,60 @@ async fn cancel_download(dl_state: tauri::State<'_, DownloadState>) -> Result<()
     Ok(())
 }
 
+#[tauri::command]
+async fn remote_rename_path(
+    server_key: String,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    let client = open_sftp_for(&server_key).await?;
+    let result = client.rename(&from, &to).await;
+    client.close().await;
+    result
+}
+
+#[tauri::command]
+async fn remote_delete_paths(
+    server_key: String,
+    paths: Vec<String>,
+) -> Result<Vec<bool>, String> {
+    let client = open_sftp_for(&server_key).await?;
+    let mut out = Vec::with_capacity(paths.len());
+    for p in &paths {
+        out.push(client.delete_recursive(p).await.is_ok());
+    }
+    client.close().await;
+    Ok(out)
+}
+
+#[tauri::command]
+fn local_rename_path(from: String, to: String) -> Result<(), String> {
+    let from_p = std::path::Path::new(&from);
+    let to_p = std::path::Path::new(&to);
+    reject_path_traversal(from_p, "from")?;
+    reject_path_traversal(to_p, "to")?;
+    std::fs::rename(from_p, to_p).map_err(|e| format!("rename {from} -> {to}: {e}"))
+}
+
+#[tauri::command]
+fn local_delete_paths(paths: Vec<String>) -> Result<Vec<bool>, String> {
+    let mut out = Vec::with_capacity(paths.len());
+    for p in &paths {
+        let path = std::path::Path::new(p);
+        if reject_path_traversal(path, "path").is_err() {
+            out.push(false);
+            continue;
+        }
+        let ok = if path.is_dir() {
+            std::fs::remove_dir_all(path).is_ok()
+        } else {
+            std::fs::remove_file(path).is_ok()
+        };
+        out.push(ok);
+    }
+    Ok(out)
+}
+
 // ─── Phase 1j (tail services) — bootstrap detect / keygen / update check ─────
 
 #[tauri::command]
@@ -1040,6 +1094,10 @@ pub fn run() {
             upload_paths,
             download_paths,
             cancel_download,
+            remote_rename_path,
+            remote_delete_paths,
+            local_rename_path,
+            local_delete_paths,
             detect_bootstrap,
             bootstrap_list_files,
             generate_ssh_key,
