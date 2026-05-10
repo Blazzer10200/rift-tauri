@@ -534,6 +534,11 @@ impl SftpClient {
         }
     }
 
+    /// Delete a remote path — file OR directory. Dir deletes recurse depth-first.
+    pub async fn delete_recursive(&self, path: &str) -> Result<(), String> {
+        delete_recursive_via(&self.sftp, path).await
+    }
+
     /// Create remote directory tree (mkdir -p semantics).
     pub async fn mkdir_p(&self, path: &str) -> Result<(), String> {
         mkdir_p_via(&self.sftp, path).await
@@ -830,6 +835,48 @@ async fn list_recursive_via(
         }
     }
     Ok(out)
+}
+
+async fn delete_recursive_via(sftp: &SftpSession, path: &str) -> Result<(), String> {
+    let meta = sftp
+        .metadata(path)
+        .await
+        .map_err(|e| format!("stat {path}: {e}"))?;
+    if !matches!(meta.file_type(), FileType::Dir) {
+        return sftp
+            .remove_file(path)
+            .await
+            .map_err(|e| format!("delete {path}: {e}"));
+    }
+    let mut to_visit: Vec<String> = vec![path.to_string()];
+    let mut to_rmdir: Vec<String> = Vec::new();
+    while let Some(dir) = to_visit.pop() {
+        to_rmdir.push(dir.clone());
+        let entries = sftp
+            .read_dir(&dir)
+            .await
+            .map_err(|e| format!("readdir {dir}: {e}"))?;
+        for entry in entries {
+            let name = entry.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
+            let full = format!("{}/{}", dir.trim_end_matches('/'), name);
+            if matches!(entry.metadata().file_type(), FileType::Dir) {
+                to_visit.push(full);
+            } else {
+                sftp.remove_file(&full)
+                    .await
+                    .map_err(|e| format!("delete {full}: {e}"))?;
+            }
+        }
+    }
+    while let Some(d) = to_rmdir.pop() {
+        sftp.remove_dir(&d)
+            .await
+            .map_err(|e| format!("rmdir {d}: {e}"))?;
+    }
+    Ok(())
 }
 
 async fn rename_via(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {
