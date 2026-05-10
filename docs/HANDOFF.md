@@ -1,6 +1,6 @@
 # rift-tauri — Handoff
 
-> Live handoff = current session block. Older sessions flow to `archive/HANDOFF-archive.md`.
+> Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
 ## Session 21 — 2026-05-10 — Audit cleanup + auto-updater rebuild
 
@@ -35,17 +35,10 @@
 **Current state (post S21):** v0.2.9-alpha shipped. Auto-updater rebuilt w/ proper `GithubSource` (the old `AutoSource` path was silently 404'ing — that's why "set up wrong" was the right hunch). Top banner replaces auto-popup dialog. Codebase trimmed by ~410 LOC of dead surface. All uncommitted on `main` — ready to commit + ship a test version next session.
 
 ## CRITICAL DON'T-TOUCH
-- russh `ring` backend (NASM blocker on aws-lc-rs)
-- reqwest `rustls` features only
-- npm runner, NOT pnpm
+- russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
 - `~/.rift/*.json` file-format compat — never change rename rules; never drop `serde(flatten) extra` on `RiftConfig`
 - `VelopackApp::build().run()` first call in `lib.rs::run()`
 - `bundle.targets: ["nsis"]` while versions carry `-alpha`/`-beta` (MSI rejects non-numeric semver)
-- Tauri 2: `core:default` lacks `window:allow-*` — explicit perms required for custom titlebar
-- WPF fingerprint format: `<keytype> <bits> <b64>` w/o `SHA256:` — substring match strips the prefix
-- russh-sftp `session::write()` is WRITE-only; use `session::create()` for any "write a new file" path
 - DriftWatcher conflict-rename guard MUST stay — never overwrite a dirty local file
 - `.rift-trail.jsonl` ignore rule MUST stay — pull→push loop reappears instantly without it
-- `bridgePort: 30120` in profile — `SetHttpHandler` resources route through FXServer's main HTTP port
-- `GITHUB_OWNER`/`GITHUB_REPO` consts in `update_service.rs` point at the public `rift-releases` repo, NOT the source repo (private)
-- `ureq` direct dep is required — velopack pulls ureq transitively but w/o User-Agent which github API rejects
+- `GITHUB_OWNER`/`GITHUB_REPO` in `update_service.rs` point at public `rift-releases`, NOT source repo (private)
