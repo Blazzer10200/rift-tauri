@@ -230,14 +230,6 @@ pub struct AutoSyncEngine {
 }
 
 impl AutoSyncEngine {
-    pub async fn start(
-        sftp: Arc<SftpClient>,
-        profile: ServerProfile,
-        app: AppHandle,
-    ) -> Result<Arc<Self>, String> {
-        Self::start_with(sftp, profile, app, None, None).await
-    }
-
     pub async fn start_with(
         sftp: Arc<SftpClient>,
         profile: ServerProfile,
@@ -479,7 +471,7 @@ impl AutoSyncEngine {
         Ok(true)
     }
 
-    pub async fn stop_watch(&self, remote_root: &str) {
+    async fn stop_watch(&self, remote_root: &str) {
         let Some((_, fw)) = self.folders.remove(remote_root) else { return };
         if let Some(w) = self.watcher.lock().await.as_mut() {
             let _ = w.unwatch(&fw.local_root);

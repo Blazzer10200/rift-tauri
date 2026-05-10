@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.2.9-alpha"
+version = "0.2.10-alpha-test"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -36,6 +36,9 @@ notify = "8"
 
 # Auto-updater — same Velopack ecosystem we use on the WPF side
 velopack = "=0.0.1298"
+# HTTP client for our custom GithubSource (velopack-rust 0.0.1298 has no
+# GithubSource type; we implement UpdateSource against the GitHub REST API).
+ureq = "3"
 
 # Logging
 log = "0.4"

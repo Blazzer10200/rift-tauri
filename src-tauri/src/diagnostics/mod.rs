@@ -92,24 +92,6 @@ pub struct DiagEvent {
     pub fields: serde_json::Value,
 }
 
-/// Snapshot of pipeline state, emitted periodically. Read-mostly aggregate —
-/// individual events still flow through the bus.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct DiagState {
-    pub at: Option<DateTime<Utc>>,
-    pub watcher_count: usize,
-    pub queue_pending: usize,
-    pub queue_failed: usize,
-    pub queue_dropped_total: u64,
-    pub ignored_total: u64,
-    pub conflicts: usize,
-    pub locks_count: usize,
-    pub last_drift_scan_at: Option<DateTime<Utc>>,
-    pub last_rescan_signal_at: Option<DateTime<Utc>>,
-    pub bus_lag_total: u64,
-    pub events_emitted_total: u64,
-}
-
 pub struct DiagBus {
     tx: broadcast::Sender<DiagEvent>,
     seq: AtomicU64,

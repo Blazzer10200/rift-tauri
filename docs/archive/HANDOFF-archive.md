@@ -2,6 +2,39 @@
 
 Older session blocks flow here as new sessions land. Live handoff stays in `docs/HANDOFF.md`.
 
+## Session 20 — 2026-05-10 — Browser polish: Ctrl+A, folder-drop, themed context menu
+
+### Completed
+- Ctrl+A select-all on both panes (LocalPane, RemotePane) via tabindex=0; Esc deselects; inputs skip handler.
+- Drag-drop INTO folder rows (dashed accent outline highlights drop target); body drop still uses current dir.
+- Themed right-click menu w/ Lucide icons + sep dividers. Local: Upload, Reveal in Explorer, Open in new tab. Remote: Download, Copy path, Open in new tab. Multi-select shows count, hides single-target actions. Empty-pane right-click suppresses native browser menu.
+
+### Key Decisions
+- No Rename/Delete ctx items — backend cmds don't exist yet, stubs would only flash "unsupported."
+
+### Files Modified
+- `src/lib/components/browser/{LocalPane,RemotePane,TwoPane}.svelte`
+
+## Session 19 — 2026-05-09 — v0.2.9-alpha: Sync Inspector + bidirectional sync + bridge fix
+
+### Completed
+- **Sync Inspector** (Diagnostics.svelte + diagnostics.svelte.ts + diagnostics/mod.rs): hidden tab via Ctrl+Shift+D, 14 live state tiles, virtualized event stream w/ expandable JSON rows, one-button "Copy diagnostic report" bundling state + last 200 diag events + last 100 activity rows + sanitized profile + locks + conflicts + ignored-by-rule histogram.
+- **Bidirectional sync** (sync/drift_watcher.rs): periodic remote-scan loop on engine start, ticks every 30s. Auto-pulls ToPull entries, registers Conflict entries, sidesteps to `<file>.rift-conflict.<user>@<host>-<ts>.<ext>` if local is dirty (Syncthing safety model). Respects cross-dev LockPresence.
+- **Rescan handler**: `notify::Event::need_rescan()` auto-fires drift reconcile.
+- **Bridge URL fix** (bridge/mod.rs): URLs now correctly include `/rift_bridge/` path prefix. Profile `bridgePort` 30121 → 30120 (FXServer game port — `SetHttpHandler` doesn't bind separate port).
+- **Trail-loop fix** (sync/ignore.rs): `.rift-trail.jsonl` added to ignore patterns. Stops pull→notify→push→trail-rewrite loop.
+- 20+ new diag emit points across UploadStart/Done/Fail, LockHeldByOther, BridgePing/Ack, RemoteScan, RemotePull.
+- v0.2.9-alpha bumped + shipped.
+
+### Key Decisions
+- Bidirectional polling (30s) is architecturally correct — verified via WinSCP docs (SFTP has no notify channel) and Syncthing's design.
+- Conflict-rename safety net non-negotiable — NEVER overwrite a dirty local file.
+- Stuck w/ `log` crate, not `tracing`. LogForwarder mirrors every log macro into bus + chains to env_logger.
+
+### Files Modified
+- New: `src-tauri/src/diagnostics/mod.rs`, `src-tauri/src/sync/drift_watcher.rs`, `src/lib/components/diagnostics/Diagnostics.svelte`, `src/lib/state/diagnostics.svelte.ts`
+- Modified: `auto_sync.rs`, `sync/ignore.rs`, `sync/mod.rs`, `bridge/mod.rs`, `lib.rs`, `AppShell.svelte`, `TabRail.svelte`, `package.json`, `Cargo.toml`, `tauri.conf.json`
+
 ## Session 18 — 2026-05-09 — v0.2.8-alpha shipped; two-repo split live
 
 ### Completed

@@ -27,7 +27,7 @@ pub struct BridgeClient {
 }
 
 impl BridgeClient {
-    pub fn new(host: &str, port: u16, token: &str) -> Result<Self, String> {
+    fn new(host: &str, port: u16, token: &str) -> Result<Self, String> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(8))
             .build()

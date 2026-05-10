@@ -221,16 +221,6 @@ impl EditInPlaceManager {
         Ok(local_path)
     }
 
-    /// True when the local tmp file's mtime/size diverges from the last-saved
-    /// baseline. Cheap stat — does not touch SFTP.
-    pub async fn is_dirty(&self, remote_path: &str) -> bool {
-        let g = self.watched.lock().await;
-        let Some(w) = g.get(remote_path) else { return false };
-        let Ok(meta) = std::fs::metadata(&w.tmp_path) else { return false };
-        let mtime = meta.modified().unwrap_or(SystemTime::now());
-        mtime > w.last_saved_mtime || meta.len() != w.last_saved_size
-    }
-
     /// Reupload the watched local file. Emits `edit://reuploaded` w/
     /// {remotePath, success, error} so the UI can refresh its drift baseline.
     pub async fn save(&self, remote_path: &str) -> Result<(), String> {

@@ -7,7 +7,6 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use crate::sftp::SftpClient;
 use crate::transport::env::{current_user, hostname, short_id};
@@ -71,34 +70,6 @@ impl<'a> EditTrail<'a> {
         }
         let trimmed = trim_to_tail(&buf, MAX_LINES);
         self.sftp.upload_bytes(trimmed.as_bytes(), &trail).await
-    }
-
-    /// Read trail and return the latest entry per path.
-    pub async fn read_latest_per_path(
-        &self,
-        watched_root: &str,
-    ) -> Result<HashMap<String, Entry>, String> {
-        let trail = Self::trail_path(watched_root);
-        let raw = self.read_raw(&trail).await.unwrap_or_default();
-        let mut out: HashMap<String, Entry> = HashMap::new();
-        for line in raw.split('\n') {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let Ok(e) = serde_json::from_str::<Entry>(line) else {
-                continue;
-            };
-            if e.path.is_empty() {
-                continue;
-            }
-            match out.get(&e.path) {
-                Some(prior) if prior.ts >= e.ts => {}
-                _ => {
-                    out.insert(e.path.clone(), e);
-                }
-            }
-        }
-        Ok(out)
     }
 
     async fn read_raw(&self, remote_path: &str) -> Option<String> {

@@ -17,8 +17,6 @@
 //   - Worker-aware `list_recursive_batch` w/ belt-and-braces empty-root retry
 //     on main session (mirrors WPF v13.55.1 fix for the false-push regression
 //     where a worker breaking mid-walk silently returned 0 entries).
-//   - `discover_manifest_folders` — pruned BFS w/ worker fan-out for FXServer
-//     manifest scanning. ~20× speedup vs full-walk + filter.
 //   - `list_directory` (single-level, sorted dirs-first), `ensure_remote_parent_dir`
 //     (walk-up), `get_remote_folder_size` (server-side `find -prune` exec).
 //
@@ -242,7 +240,7 @@ impl SftpClient {
     }
 
     /// Count of opened-and-still-live worker sessions.
-    pub async fn live_worker_count(&self) -> usize {
+    async fn live_worker_count(&self) -> usize {
         self.workers.lock().await.len()
     }
 
@@ -385,121 +383,6 @@ impl SftpClient {
         }
 
         Ok(out)
-    }
-
-    /// FXServer manifest discovery — walks the tree under `root` looking for
-    /// directories that contain any of `manifest_names` (typically
-    /// `fxmanifest.lua` / `__resource.lua`). Two optimizations vs naive recurse:
-    ///
-    ///   1. **Prune at first manifest** — once a dir has a manifest it's a
-    ///      resource boundary; we don't recurse further. ~80% fewer readdirs
-    ///      on a typical 200-resource Qbox tree.
-    ///   2. **Parallel subtree fan-out** — list root's immediate children once,
-    ///      then dispatch each child to a worker session for pruned recursion.
-    ///      Workers use independent SFTP connections so subtree walks overlap
-    ///      on the wire.
-    ///
-    /// Combined w/ pruning: ~20× speedup vs single-session full-walk + filter.
-    /// Falls back to a serial pruned walk on main session if pool open fails.
-    pub async fn discover_manifest_folders(
-        &self,
-        root: &str,
-        manifest_names: &[&str],
-        max_depth: usize,
-        parallelism: usize,
-    ) -> Vec<String> {
-        if root.is_empty() || manifest_names.is_empty() {
-            return Vec::new();
-        }
-        let manifest_set: Arc<std::collections::HashSet<String>> = Arc::new(
-            manifest_names
-                .iter()
-                .map(|s| s.to_lowercase())
-                .collect(),
-        );
-
-        // Top-level listing of root. If root itself has a manifest, return it.
-        let top = match self.sftp.read_dir(trim_slash(root).as_str()).await {
-            Ok(e) => e,
-            Err(_) => return Vec::new(),
-        };
-        let mut subroots: Vec<String> = Vec::new();
-        let root_trim = trim_slash(root);
-        for entry in top {
-            let name = entry.file_name();
-            if name == "." || name == ".." {
-                continue;
-            }
-            let meta = entry.metadata();
-            let full = format!("{}/{}", root_trim, name);
-            if matches!(meta.file_type(), FileType::Dir) {
-                subroots.push(full);
-            } else if manifest_set.contains(&name.to_lowercase()) {
-                return vec![root_trim];
-            }
-        }
-        if subroots.is_empty() {
-            return Vec::new();
-        }
-
-        // Subroots cost depth 1; remaining budget for the recursive walk = max_depth - 1.
-        let child_depth = max_depth.saturating_sub(1).max(1);
-
-        self.ensure_workers(parallelism).await;
-        let live = self.live_worker_count().await;
-        let mut all: Vec<String> = Vec::new();
-
-        if live == 0 {
-            for s in &subroots {
-                let hits = walk_pruned_via(&self.sftp, s, &manifest_set, child_depth).await;
-                all.extend(hits);
-            }
-        } else {
-            let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            for s in &subroots {
-                let _ = tx.send(s.clone());
-            }
-            drop(tx);
-            let rx = Arc::new(tokio::sync::Mutex::new(rx));
-
-            let workers: Vec<Arc<Worker>> = {
-                let g = self.workers.lock().await;
-                g.iter().take(live).cloned().collect()
-            };
-            let results_arc = Arc::new(tokio::sync::Mutex::new(Vec::<String>::new()));
-            let mut tasks = Vec::with_capacity(workers.len());
-            for worker in workers {
-                let rx = rx.clone();
-                let results_arc = results_arc.clone();
-                let manifest_set = manifest_set.clone();
-                tasks.push(tokio::spawn(async move {
-                    loop {
-                        let job = {
-                            let mut rxg = rx.lock().await;
-                            rxg.recv().await
-                        };
-                        let Some(sub) = job else { break };
-                        let _g = worker.gate.lock().await;
-                        let hits =
-                            walk_pruned_via(&worker.sftp, &sub, &manifest_set, child_depth).await;
-                        if !hits.is_empty() {
-                            let mut acc = results_arc.lock().await;
-                            acc.extend(hits);
-                        }
-                    }
-                }));
-            }
-            let _ = futures::future::join_all(tasks).await;
-            all = Arc::try_unwrap(results_arc)
-                .map(|m| m.into_inner())
-                .unwrap_or_default();
-        }
-
-        // Dedup (case-insensitive) — workers shouldn't overlap given we
-        // distribute subroots, but a degenerate root w/ symlinks could trip it.
-        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        all.retain(|p| seen.insert(p.to_lowercase()));
-        all
     }
 
     /// Single-level listing — entries sorted dirs-first then alphabetical
@@ -947,49 +830,6 @@ async fn list_recursive_via(
         }
     }
     Ok(out)
-}
-
-/// Pruned BFS — recurse into subdirs UNTIL a manifest file is found, then
-/// stop descending (resource boundary). Used by `discover_manifest_folders`.
-async fn walk_pruned_via(
-    sftp: &SftpSession,
-    root: &str,
-    manifest_names: &std::collections::HashSet<String>,
-    max_depth: usize,
-) -> Vec<String> {
-    let mut results = Vec::new();
-    let mut bfs: std::collections::VecDeque<(String, usize)> = std::collections::VecDeque::new();
-    bfs.push_back((trim_slash(root), 0));
-    while let Some((cur, depth)) = bfs.pop_front() {
-        let entries = match sftp.read_dir(&cur).await {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-        let mut has_manifest = false;
-        let mut subdirs: Vec<String> = Vec::new();
-        for entry in entries {
-            let name = entry.file_name();
-            if name == "." || name == ".." {
-                continue;
-            }
-            let meta = entry.metadata();
-            if matches!(meta.file_type(), FileType::Dir) {
-                if depth + 1 < max_depth {
-                    subdirs.push(format!("{}/{}", cur, name));
-                }
-            } else if manifest_names.contains(&name.to_lowercase()) {
-                has_manifest = true;
-            }
-        }
-        if has_manifest {
-            results.push(cur);
-            continue; // prune — don't recurse
-        }
-        for s in subdirs {
-            bfs.push_back((s, depth + 1));
-        }
-    }
-    results
 }
 
 async fn rename_via(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {

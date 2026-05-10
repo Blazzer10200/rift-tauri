@@ -8,7 +8,6 @@
 //
 // Last-writer-wins (no atomic CAS over SFTP) — fine for advisory awareness.
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -240,10 +239,6 @@ impl LockPresence {
         serde_json::from_str::<LockBody>(&text).ok()
     }
 
-    /// Used by Drop-style explicit teardown when LockPresence is held by Arc.
-    pub fn local_paths_owned(&self) -> Vec<PathBuf> {
-        self.my_locks.iter().map(|s| PathBuf::from(s.as_str())).collect()
-    }
 }
 
 #[cfg(test)]

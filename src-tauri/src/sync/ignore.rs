@@ -12,8 +12,6 @@
 //
 // Returns the matched rule label (stable string) so callers can log + bucket.
 
-use std::path::Path;
-
 const IGNORE_EXTS: &[&str] = &[
     ".swp", ".tmp", ".bak", ".backup", ".pyc", ".rift-tmp", ".rift-lock",
 ];
@@ -197,10 +195,6 @@ pub fn classify(path: &str) -> Option<&'static str> {
 
 pub fn should_ignore(path: &str) -> bool {
     classify(path).is_some()
-}
-
-pub fn should_ignore_path(path: &Path) -> bool {
-    classify(&path.to_string_lossy()).is_some()
 }
 
 /// Names that are pure dir-names (no brackets) — exposed for remote `find -name`

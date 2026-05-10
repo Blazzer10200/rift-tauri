@@ -2,21 +2,19 @@
 
 > Live changelog = current version only. Older entries archive to `archive/CHANGELOG-archive.md` on bump.
 
-## v0.2.9-alpha — 2026-05-09 — Sync Inspector + bidirectional sync + bridge URL fix
+## v0.2.10-alpha-test — 2026-05-10 — Auto-updater rebuild + audit cleanup
 
-Closes the sync wheel both directions and ships a one-button diagnostic surface so the next bug doesn't take a full session to triage.
+Live test of the rebuilt updater. The old velopack `AutoSource` path was silently 404'ing on real GitHub releases (it just hits `<url>/releases.win.json` as a flat static path); installed `0.2.9-alpha` clients should pick this build up via the new GitHub-API source.
 
 ### Landed
 
-- **Sync Inspector** — new hidden tab at Ctrl+Shift+D. 14 live state tiles (autosync, queue, ignored, locks, conflicts, last remote scan, pulled, last drift, bus lag, total emitted, …). Live event stream w/ expandable JSON rows. One big "Copy diagnostic report" button bundles state + last 200 diag events + last 100 activity rows + profile (sanitized) + locks + conflicts + ignored-by-rule histogram into clipboard JSON. Inline scan-interval picker. ([Diagnostics.svelte](../src/lib/components/diagnostics/Diagnostics.svelte), [diagnostics.svelte.ts](../src/lib/state/diagnostics.svelte.ts), [diagnostics/mod.rs](../src-tauri/src/diagnostics/mod.rs))
-- **Bidirectional sync** — new `DriftWatcher` task on the engine, ticks every 30s (configurable 15s/30s/1m/2m/5m/off). Auto-pulls `ToPull` entries, registers `Conflict` entries in the existing UI, **never overwrites a dirty local file** — sidesteps to `<file>.rift-conflict.<user>@<host>-<ts>.<ext>` per Syncthing's safety model. Respects cross-dev `LockPresence`. ([sync/drift_watcher.rs](../src-tauri/src/sync/drift_watcher.rs))
-- **Rescan handler** — `notify::Event::need_rescan()` now auto-fires a drift reconcile. Kernel/FSEvents drops are no longer silent.
-- **Bridge URL fix** — `BridgeClient` URLs now correctly prefix `/rift_bridge/` (FXServer `SetHttpHandler` routes under the resource name). Profile `bridgePort` corrected 30121 → 30120 (FXServer game port). Hot-reload pings stop failing. ([bridge/mod.rs](../src-tauri/src/bridge/mod.rs))
-- **Trail-loop fix** — `.rift-trail.jsonl` added to ignore patterns. Stops the pull → notify → push → EditTrail-rewrite-trail → drift-sees-newer → loop.
-- **20+ new diag emit points** across upload/lock/bridge/remote-scan/remote-pull paths; every step traceable in the panel.
+- **Auto-updater rebuilt** — custom `GithubSource` impls velopack's `UpdateSource` trait. Hits the GitHub REST API w/ `User-Agent` header (required), picks newest non-draft release w/ `allow_prerelease=true`, caches asset `browser_download_url`s by filename so nupkg downloads resolve. `ureq = "3"` added as direct dep (velopack pulls it transitively but w/o UA, which github API rejects). ([update_service.rs](../src-tauri/src/update_service.rs))
+- **Update banner UI** — auto-popup-on-launch dialog replaced w/ 32px accent-tinted top banner (Details / Install / Dismiss). Dialog kept as Details surface. `updates.svelte.ts` dropped `launchPopupShown`, added `bannerDismissed`. ([UpdateBanner.svelte](../src/lib/components/UpdateBanner.svelte), [updates.svelte.ts](../src/lib/state/updates.svelte.ts), [AppShell.svelte](../src/lib/components/AppShell.svelte))
+- **Audit cleanup — net −410 LOC.** Deleted orphan `ui/button` island, `utils.ts` + test, `__mocks__/`, scaffold SVGs, `state/discovery.rs` (Phase-6 reservation never wired), `DiagState` struct (replaced by inline `DiagStateDto` in lib.rs). Removed 11 dead `pub` fns, downgraded 6 to private. Touched `bootstrap`, `bridge`, `diagnostics`, `edit/in_place`, `local_fs`, `sftp`, `state/mod`, `sync/{auto_sync, edit_trail, ignore, lock_presence}`, `transport/ssh_handler`.
 
 ### Verify
 
-- `cargo check`: clean. `svelte-check`: 0 errors. Bidirectional pull tested live against homelab FXServer.
+- `cargo check`: clean. `svelte-check`: 0 errors.
+- `ALLOW_PRERELEASE=true` matches WPF `GithubSource(prerelease:true)` — drop to false later for stable channel.
 
-v0.2.8-alpha archived.
+v0.2.9-alpha archived.

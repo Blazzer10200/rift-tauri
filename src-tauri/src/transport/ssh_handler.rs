@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use std::sync::{Arc, Mutex};
 
 /// Compute OpenSSH-style fingerprint from a public key.
-pub fn pubkey_fingerprint(pk: &ssh_key::PublicKey) -> Option<String> {
+fn pubkey_fingerprint(pk: &ssh_key::PublicKey) -> Option<String> {
     let blob = pk.to_bytes().ok()?;
     let mut h = Sha256::new();
     h.update(&blob);
