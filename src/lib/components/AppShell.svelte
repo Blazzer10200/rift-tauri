@@ -22,7 +22,6 @@
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
-  import UpdateBanner from "./UpdateBanner.svelte";
   import { updates } from "../state/updates.svelte";
 
   type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings" | "diagnostics";
@@ -254,10 +253,6 @@
     onEditCurrent={(s) => openAddServer(s)}
   />
 
-  <div class="banner-slot">
-    <UpdateBanner />
-  </div>
-
   <div class="body">
     <TabRail {active} onChange={(t) => (active = t)} />
 
@@ -369,16 +364,10 @@
 <style>
   .shell {
     display: grid;
-    grid-template-rows: 32px 44px auto 1fr 22px;
+    grid-template-rows: 32px 44px 1fr 22px;
     height: 100vh;
     background: var(--bg);
     color: var(--fg);
-  }
-  .banner-slot {
-    /* Wrapper exists so the grid track is reserved; row is `auto` so when the
-       banner returns nothing the slot collapses to 0px and visually disappears. */
-    min-height: 0;
-    overflow: hidden;
   }
   .body {
     display: grid;
