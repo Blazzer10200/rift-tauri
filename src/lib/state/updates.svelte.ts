@@ -1,6 +1,6 @@
 // Global update store. One instance per session: triggers a launch-time check,
-// caches the result, drives the top banner + the popup dialog, and lets
-// Settings/About + TabRail/Sidebar all reach into the same state.
+// caches the result, drives the popup dialog + sidebar pill, and lets
+// Settings/About + TabRail all reach into the same state.
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -13,8 +13,6 @@ class UpdateStore {
   error = $state("");
   currentVersion = $state("?");
   dialogOpen = $state(false);
-  /** Banner-only dismissal — state stays "available" so dialog can still open. */
-  bannerDismissed = $state(false);
 
   async refresh() {
     this.state = "checking";
@@ -22,7 +20,7 @@ class UpdateStore {
     try { this.currentVersion = await invoke<string>("app_version"); } catch {}
     try {
       const res = await invoke<UpdateInfo | null>("check_for_updates");
-      if (res) { this.info = res; this.state = "available"; this.bannerDismissed = false; }
+      if (res) { this.info = res; this.state = "available"; }
       else     { this.info = null; this.state = "uptodate"; }
     } catch (e) {
       this.error = String(e);
@@ -47,14 +45,13 @@ class UpdateStore {
     }
   }
 
-  /** Called once on app launch from AppShell.onMount. Banner shows on its own. */
+  /** Called once on app launch from AppShell.onMount. Sidebar pill shows on its own. */
   async checkOnLaunch() {
     await this.refresh();
   }
 
   open()  { this.dialogOpen = true; }
   close() { this.dialogOpen = false; }
-  dismissBanner() { this.bannerDismissed = true; }
 }
 
 export const updates = new UpdateStore();

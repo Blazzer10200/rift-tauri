@@ -2,6 +2,10 @@
 
 Older changelog entries flow here as new versions ship. Live entry stays in `docs/CHANGELOG.md`.
 
+## v0.2.11-alpha-test — 2026-05-10 — Auto-update UI verification bump
+
+Pure version bump. Confirmed live: installed `0.2.10-alpha-test` client picked up the release via the rebuilt `GithubSource` and rendered the update affordances correctly.
+
 ## v0.2.10-alpha-test — 2026-05-10 — Auto-updater rebuild + audit cleanup
 
 See git 35d6a71. Rebuilt updater w/ custom `GithubSource` (REST API + User-Agent), 32px top banner replacing auto-popup dialog, −410 LOC audit cleanup, `.gitattributes` line-ending normalize.
