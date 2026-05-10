@@ -75,13 +75,12 @@
     return idx === -1 ? norm : norm.slice(idx + 1);
   }
 
-  async function uploadLocalsToRemote(localPaths: string[]) {
+  async function uploadLocalsToRemoteDir(localPaths: string[], targetRemoteDir: string) {
     const s = connection.selected;
-    const t = browserTabs.active;
-    if (!s || !t || localPaths.length === 0) return;
+    if (!s || localPaths.length === 0) return;
     const jobs: [string, string][] = localPaths
       .filter((lp) => !!basename(lp))
-      .map((lp) => [lp, joinRemote(t.remotePath, basename(lp))]);
+      .map((lp) => [lp, joinRemote(targetRemoteDir, basename(lp))]);
     if (jobs.length === 0) return;
     flash(`Uploading ${jobs.length}…`, "info");
     try {
@@ -93,13 +92,18 @@
     }
   }
 
-  async function downloadRemotesToLocal(remotePaths: string[]) {
-    const s = connection.selected;
+  async function uploadLocalsToRemote(localPaths: string[]) {
     const t = browserTabs.active;
-    if (!s || !t || remotePaths.length === 0) return;
+    if (!t) return;
+    await uploadLocalsToRemoteDir(localPaths, t.remotePath);
+  }
+
+  async function downloadRemotesToLocalDir(remotePaths: string[], targetLocalDir: string) {
+    const s = connection.selected;
+    if (!s || remotePaths.length === 0) return;
     const jobs: [string, string][] = remotePaths
       .filter((rp) => !!basename(rp))
-      .map((rp) => [rp, joinLocal(t.localPath, basename(rp))]);
+      .map((rp) => [rp, joinLocal(targetLocalDir, basename(rp))]);
     if (jobs.length === 0) return;
     flash(`Downloading ${jobs.length}…`, "info");
     try {
@@ -109,6 +113,12 @@
     } catch (e) {
       flash(`Download failed: ${e}`, "err");
     }
+  }
+
+  async function downloadRemotesToLocal(remotePaths: string[]) {
+    const t = browserTabs.active;
+    if (!t) return;
+    await downloadRemotesToLocalDir(remotePaths, t.localPath);
   }
 
   // Op rail actions
@@ -151,6 +161,8 @@
         onPathChange={(p: string) => setLocalPath(idx, p)}
         onOpenInNewTab={(e: LocalEntry) => openLocalNewTab(e)}
         onDropPaths={(remotePaths: string[]) => downloadRemotesToLocal(remotePaths)}
+        onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
+        onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
         onSelectionChange={(paths) => (localSel = paths)}
       />
       <OpRail
@@ -171,6 +183,8 @@
         onPathChange={(p: string) => setRemotePath(idx, p)}
         onOpenInNewTab={(e: RemoteEntry) => openRemoteNewTab(e)}
         onDropPaths={(localPaths: string[]) => uploadLocalsToRemote(localPaths)}
+        onDropPathsToFolder={(localPaths, targetDir) => uploadLocalsToRemoteDir(localPaths, targetDir)}
+        onDownloadPaths={(remotePaths) => downloadRemotesToLocal(remotePaths)}
         onSelectionChange={(paths) => (remoteSel = paths)}
       />
     </div>

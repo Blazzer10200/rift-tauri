@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Folder, FileCode, File, ChevronRight } from "lucide-svelte";
+  import { Folder, FileCode, File, ChevronRight, Download, FolderOpen, Copy } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { connection } from "../../state/connection.svelte";
@@ -19,9 +19,11 @@
     onPathChange: (next: string) => void;
     onOpenInNewTab: (entry: RemoteEntry) => void;
     onDropPaths?: (localPaths: string[]) => void;
+    onDropPathsToFolder?: (localPaths: string[], targetRemoteDir: string) => void;
+    onDownloadPaths?: (remotePaths: string[]) => void;
     onSelectionChange?: (paths: string[]) => void;
   };
-  let { serverKey, path, onPathChange, onOpenInNewTab, onDropPaths, onSelectionChange }: Props = $props();
+  let { serverKey, path, onPathChange, onOpenInNewTab, onDropPaths, onDropPathsToFolder, onDownloadPaths, onSelectionChange }: Props = $props();
 
   let entries = $state<RemoteEntry[]>([]);
   let filter = $state("");
@@ -116,8 +118,15 @@
 
   function onContextMenu(e: MouseEvent, entry: RemoteEntry) {
     e.preventDefault();
+    e.stopPropagation();
+    if (!selected.has(entry.full_path)) selected = new Set([entry.full_path]);
     menuFor = entry;
     menuPos = { x: e.clientX, y: e.clientY };
+  }
+
+  function onBodyContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    menuFor = null;
   }
 
   function closeMenu() { menuFor = null; }
@@ -153,11 +162,72 @@
       console.warn("RemotePane: drop payload parse failed", err);
     }
   }
+
+  let dropTarget = $state<string | null>(null);
+
+  function onFolderDragOver(e: DragEvent, entry: RemoteEntry) {
+    if (!entry.is_dir) return;
+    if (e.dataTransfer?.types.includes("application/x-rift-local")) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = "copy";
+      dropTarget = entry.full_path;
+    }
+  }
+
+  function onFolderDragLeave(entry: RemoteEntry) {
+    if (dropTarget === entry.full_path) dropTarget = null;
+  }
+
+  function onFolderDrop(e: DragEvent, entry: RemoteEntry) {
+    if (!entry.is_dir) return;
+    const data = e.dataTransfer?.getData("application/x-rift-local");
+    if (!data) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dropTarget = null;
+    try {
+      const localPaths = JSON.parse(data) as string[];
+      onDropPathsToFolder?.(localPaths, entry.full_path);
+    } catch (err) {
+      console.warn("RemotePane: folder drop parse failed", err);
+    }
+  }
+
+  function onPaneKeyDown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
+      e.preventDefault();
+      selected = new Set(filtered.map((x) => x.full_path));
+    } else if (e.key === "Escape") {
+      selected = new Set();
+      menuFor = null;
+    }
+  }
+
+  async function copyPath(p: string) {
+    try { await navigator.clipboard.writeText(p); } catch (err) { console.warn("clipboard failed", err); }
+  }
+
+  function downloadEntry(entry: RemoteEntry) {
+    const paths = selected.has(entry.full_path) && selected.size > 1
+      ? entries.filter((x) => selected.has(x.full_path)).map((x) => x.full_path)
+      : [entry.full_path];
+    onDownloadPaths?.(paths);
+  }
 </script>
 
 <svelte:window onclick={closeMenu} />
 
-<section class="pane" data-side="remote">
+<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+<section
+  class="pane"
+  data-side="remote"
+  tabindex="0"
+  aria-label="Remote file browser"
+  onkeydown={onPaneKeyDown}
+>
   <PathBreadcrumbs
     side="remote"
     {path}
@@ -181,6 +251,7 @@
     role="presentation"
     ondragover={onDragOver}
     ondrop={onDrop}
+    oncontextmenu={onBodyContextMenu}
   >
     {#if loading}
       <div class="empty">Loading…</div>
@@ -211,8 +282,12 @@
             class="row"
             data-selected={selected.has(e.full_path)}
             data-status={status}
+            data-droptarget={dropTarget === e.full_path}
             draggable="true"
             ondragstart={(ev) => onDragStart(ev, e)}
+            ondragover={(ev) => onFolderDragOver(ev, e)}
+            ondragleave={() => onFolderDragLeave(e)}
+            ondrop={(ev) => onFolderDrop(ev, e)}
             onclick={(ev) => onRowClick(ev, e)}
             ondblclick={() => onRowDblClick(e)}
             oncontextmenu={(ev) => onContextMenu(ev, e)}
@@ -253,14 +328,29 @@
 </section>
 
 {#if menuFor}
+  {@const target = menuFor}
+  {@const multi = selected.size > 1 && selected.has(target.full_path)}
+  <!-- svelte-ignore a11y_interactive_supports_focus a11y_click_events_have_key_events -->
   <div
     class="ctxmenu"
     role="menu"
+    tabindex="-1"
     style="left:{menuPos.x}px; top:{menuPos.y}px"
+    onclick={(ev) => ev.stopPropagation()}
   >
-    {#if menuFor.is_dir}
-      <button type="button" onclick={() => { if (menuFor) onOpenInNewTab(menuFor); closeMenu(); }}>
-        Open in new tab
+    {#if target.is_dir && !multi}
+      <button type="button" class="ctx-item" onclick={() => { onOpenInNewTab(target); closeMenu(); }}>
+        <FolderOpen size={13}/><span>Open in new tab</span>
+      </button>
+      <div class="ctx-sep"></div>
+    {/if}
+    <button type="button" class="ctx-item" onclick={() => { downloadEntry(target); closeMenu(); }}>
+      <Download size={13}/><span>Download to local{multi ? ` (${selected.size})` : ""}</span>
+    </button>
+    {#if !multi}
+      <div class="ctx-sep"></div>
+      <button type="button" class="ctx-item" onclick={() => { copyPath(target.full_path); closeMenu(); }}>
+        <Copy size={13}/><span>Copy path</span>
       </button>
     {/if}
   </div>
@@ -313,6 +403,11 @@
     background: var(--accent-soft);
     border-left-color: var(--accent);
   }
+  .row[data-droptarget="true"] {
+    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    outline: 1px dashed var(--accent);
+    outline-offset: -2px;
+  }
   .row[data-status="conflict"] .row-label { color: var(--danger); }
   .up-row {
     width: 100%;
@@ -344,14 +439,22 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
-    min-width: 160px; padding: 4px;
+    min-width: 200px; padding: 4px;
   }
-  .ctxmenu button {
-    display: block; width: 100%; text-align: left;
+  .ctx-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; text-align: left;
     background: transparent; border: 0;
     color: var(--fg); font-size: var(--fs-sm);
     padding: 6px 10px; border-radius: var(--radius-xs);
     cursor: pointer;
   }
-  .ctxmenu button:hover { background: var(--surface-hover); color: var(--accent); }
+  .ctx-item :global(svg) { color: var(--fg-subtle); flex-shrink: 0; }
+  .ctx-item:hover { background: var(--surface-hover); color: var(--accent); }
+  .ctx-item:hover :global(svg) { color: var(--accent); }
+  .ctx-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 2px;
+  }
 </style>
