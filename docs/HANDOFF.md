@@ -2,29 +2,30 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
-## Session 21 — 2026-05-10 — Audit cleanup + auto-updater rebuild
+## Session 22 — 2026-05-10 — Queue audit + rename/delete
 
 ### Completed
-- **Audit cleanup pass.** Deleted orphan `ui/button` island + `utils.ts` + `__mocks__/` + scaffold SVGs + `state/discovery.rs` (Phase-6 reservation never wired) + `DiagState` struct (replaced by inline DiagStateDto in lib.rs). Removed 11 dead pub fns, downgraded 6 to private. Net **−410 LOC**.
-- **Auto-updater REBUILT.** Discovered velopack-rust 0.0.1298's `AutoSource` for github URLs just hits `<url>/releases.win.json` as a flat static path — that 404s on real github releases. Wrote custom `GithubSource` (impls `UpdateSource` trait) that uses the GitHub REST API w/ `User-Agent` header, picks newest non-draft release w/ `allow_prerelease=true`, caches asset `browser_download_url`s by filename so nupkg downloads resolve. Added `ureq = "3"` as direct dep.
-- **Banner UI.** Auto-popup-on-launch dialog → 32px top banner (`UpdateBanner.svelte`, accent-tinted, Details/Install/Dismiss). `updates.svelte.ts` dropped `launchPopupShown`, added `bannerDismissed`. Dialog kept as Details surface.
+- **Queue audit.** Verified all S21 next-steps against live code. bridge_ack was already wired (false-positive in triage — `DiagStage::BridgeAck` at `auto_sync.rs:1060`). rename/delete stubs never existed — feature needed from scratch.
+- **Doc-doctrine cleanup committed** (0562c4f). Dropped `docs/archive/` entirely; `git log -- docs/HANDOFF.md` is the history.
+- **3 stale `.rift-lock` orphans** on FXServer CT 120 (`[endure]/endure_skills/`) — cleared via `pct exec 120`. `find` now returns empty.
+- **Rename + Delete shipped** (0e7a48b). 4 new Tauri cmds (`remote_rename_path`, `remote_delete_paths`, `local_rename_path`, `local_delete_paths`) + recursive SFTP `delete_recursive_via`. Both browser panes wired w/ ctx menu entries + danger-hover styling. Multi-select delete works. cargo check + svelte-check clean.
+- **Code-signing (audit H4) permanently dropped.** User decision 2026-05-10 — not deferred, gone. Saved to memory.
 
 ### Key Decisions
-- `ALLOW_PRERELEASE=true` matches WPF `GithubSource(prerelease:true)`. Drop to false later for stable channel.
-- `ureq` for the github API (User-Agent required); velopack's `download_url_to_file` for the asset download (works w/o UA on github asset CDN).
+- `delete_recursive_via`: stack-based (files first, then `remove_dir` in reverse), avoids async recursion stack overflow on deep trees.
+- Rename uses `window.prompt()`, delete uses `window.confirm()` — native dialogs, no custom modal needed.
 
 ### Next Steps
-1. **Test the new updater path live.** Local-feed dry-run via `RIFT_UPDATE_FEED` first, then ship a `0.2.10-alpha-test` and watch installed `0.2.9-alpha` pick it up.
-2. Bridge fix verify (carried from S19) — `bridge_ack: success` on save.
-3. Stale `.rift-lock` orphans (3 on FXServer from prior crashes).
-4. Buddy-system bidirectional sync test.
-5. Code-signing cert (audit H4) — pre-public-ship blocker.
-6. Wire backend `rename_path` / `delete_paths` Tauri cmds for the ctx menu stubs.
+1. **Field-test rename/delete** — dev was launched but user signed off before clicking. Next session: launch dev, right-click any throwaway file in both local + remote panes, verify rename + single/multi/dir delete all refresh correctly.
+2. **Field-test bridge_ack** — open Sync Inspector diag panel, save a watched Lua file, confirm `bridge_ping` → `bridge_ack` row w/ `success: true`. If warn-level, bridge resource isn't running in FXServer.
+3. Buddy-system bidirectional sync test (explicitly deferred by user).
 
 ### Files Modified
-- `src-tauri/Cargo.toml` (ureq=3), `update_service.rs` (full rewrite), `Cargo.lock`
-- 13 backend cleanups: `bootstrap`, `bridge`, `diagnostics`, `edit/in_place`, `local_fs`, `sftp`, `state/{mod,discovery}` (discovery deleted), `sync/{auto_sync,edit_trail,ignore,lock_presence}`, `transport/ssh_handler`
-- Frontend: `AppShell.svelte`, `state/updates.svelte.ts`; new `UpdateBanner.svelte`; deleted `ui/button/`, `utils.{ts,test.ts}`, `__mocks__/`, scaffold SVGs
+- `src-tauri/src/sftp/mod.rs` — `delete_recursive` method + `delete_recursive_via` helper
+- `src-tauri/src/lib.rs` — 4 new Tauri cmds + handler registration
+- `src/lib/components/browser/RemotePane.svelte` — rename/delete fns + ctx menu items + `.ctx-danger` style
+- `src/lib/components/browser/LocalPane.svelte` — same
+- `CLAUDE.md`, `docs/HANDOFF.md`, `docs/archive/*` (deleted), `src-tauri/Cargo.lock` — doc cleanup commit
 
 ---
 
@@ -32,7 +33,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09. Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S21):** v0.2.9-alpha shipped. Auto-updater rebuilt w/ proper `GithubSource` (the old `AutoSource` path was silently 404'ing — that's why "set up wrong" was the right hunch). Top banner replaces auto-popup dialog. Codebase trimmed by ~410 LOC of dead surface. All uncommitted on `main` — ready to commit + ship a test version next session.
+**Current state (post S22):** v0.2.12-alpha-test on main. 2 commits unpushed. Rename/delete ctx menus shipped but not field-tested — that's next session's first task. Code-signing permanently off roadmap. All locks clean.
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
