@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.2.16-alpha-test"
+version = "0.2.17-alpha-test"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
