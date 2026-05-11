@@ -1,5 +1,6 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { connection, type ConflictRecord } from "../../state/connection.svelte";
 
   type Props = {
@@ -8,10 +9,36 @@
   };
   let { selected, onSelect }: Props = $props();
 
+  let busy = $state(false);
+  let bulkError = $state<string | null>(null);
+
   function basename(p: string): string {
     const norm = p.replaceAll("\\", "/").replace(/\/+$/, "");
     const i = norm.lastIndexOf("/");
     return i === -1 ? norm : norm.slice(i + 1);
+  }
+
+  async function bulkResolve(resolution: "force_local" | "accept_remote") {
+    const n = connection.conflicts.length;
+    if (n === 0) return;
+    const label = resolution === "force_local" ? "Use Local" : "Use Remote";
+    if (!window.confirm(`Apply "${label}" to all ${n} conflicts? This cannot be undone.`)) return;
+    busy = true; bulkError = null;
+    const paths = connection.conflicts.map((c) => c.local_path);
+    try {
+      const res = await invoke<boolean[]>("resolve_conflicts_bulk", {
+        localPaths: paths,
+        resolution,
+      });
+      const ok = res.filter(Boolean).length;
+      if (ok < paths.length) {
+        bulkError = `Resolved ${ok}/${paths.length} — check Activity tab for failures.`;
+      }
+    } catch (e) {
+      bulkError = String(e);
+    } finally {
+      busy = false;
+    }
   }
 </script>
 
@@ -25,6 +52,17 @@
   {#if connection.conflicts.length === 0}
     <p class="empty">No conflicts.</p>
   {:else}
+    <div class="bulk-bar">
+      <button type="button" class="btn ghost sm" disabled={busy} onclick={() => bulkResolve("accept_remote")}>
+        Use Remote for all
+      </button>
+      <button type="button" class="btn ghost sm" disabled={busy} onclick={() => bulkResolve("force_local")}>
+        Use Local for all
+      </button>
+    </div>
+    {#if bulkError}
+      <p class="bulk-error">{bulkError}</p>
+    {/if}
     <div class="rows">
       {#each connection.conflicts as c (c.local_path)}
         <button
@@ -65,6 +103,18 @@
   .empty {
     padding: 16px; color: var(--fg-muted);
     font-size: var(--fs-sm); text-align: center;
+  }
+  .bulk-bar {
+    display: flex; gap: 6px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev-1);
+  }
+  .bulk-error {
+    margin: 0; padding: 6px 14px;
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-size: var(--fs-xs);
   }
   .rows { overflow: auto; flex: 1; padding: 4px; }
   .row {

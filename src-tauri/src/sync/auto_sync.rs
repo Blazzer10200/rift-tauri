@@ -215,6 +215,13 @@ pub struct AutoSyncEngine {
     ignored_total: AtomicU64,
     ignored_by_rule: DashMap<String, u64>,
 
+    /// Paths Rift just wrote to via download_file_atomic. The Windows
+    /// atomic-replace pattern fires Delete+Modify fs-events on the real
+    /// path that aren't covered by the `.rift-tmp` ignore rule, causing
+    /// a pull → upload → pull loop. We suppress events for ~5s after
+    /// every successful pull. Lazy-evicted in queue_path.
+    recently_written: DashMap<PathBuf, std::time::Instant>,
+
     // notify Watcher is !Send-friendly via a Mutex; held to keep watching alive.
     watcher: Mutex<Option<RecommendedWatcher>>,
     flush_task: Mutex<Option<JoinHandle<()>>>,
@@ -260,6 +267,7 @@ impl AutoSyncEngine {
             state: Mutex::new((AutoSyncState::Idle, String::new())),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
+            recently_written: DashMap::new(),
             watcher: Mutex::new(None),
             flush_task: Mutex::new(None),
             event_task: Mutex::new(None),
@@ -654,8 +662,10 @@ impl AutoSyncEngine {
                 self.log_activity(&c.resource_name, file_name(local_path), "conflict skipped");
             }
             ConflictResolution::AcceptRemote => {
+                self.mark_recently_written(local_path);
                 let r = self.sftp.download_file_atomic(&c.remote_path, local_path).await;
                 if r.success {
+                    self.mark_recently_written(local_path);
                     self.update_snapshot_after_sync(local_path, &c.remote_path).await;
                     self.log_activity(&c.resource_name, file_name(local_path), "conflict\u{2192}accept-remote");
                 } else {
@@ -688,8 +698,10 @@ impl AutoSyncEngine {
                         return Err(msg);
                     }
                 }
+                self.mark_recently_written(local_path);
                 let r = self.sftp.download_file_atomic(&c.remote_path, local_path).await;
                 if r.success {
+                    self.mark_recently_written(local_path);
                     self.update_snapshot_after_sync(local_path, &c.remote_path).await;
                     self.log_activity(&c.resource_name, file_name(local_path),
                         &format!("conflict\u{2192}savecopy ({})", aside_name));
@@ -796,8 +808,53 @@ impl AutoSyncEngine {
         self.track_background(h);
     }
 
+    /// Mark a path as just-written by Rift so the next ~5s of fs-events
+    /// for it get suppressed. Closes the pull→push loop caused by the
+    /// Windows atomic-replace Delete+Modify burst that the `.rift-tmp`
+    /// ignore rule doesn't cover (the real-file events, not the tmp).
+    pub fn mark_recently_written(&self, path: &std::path::Path) {
+        self.recently_written
+            .insert(path.to_path_buf(), std::time::Instant::now());
+    }
+
+    /// Returns true if `path` was marked via `mark_recently_written`
+    /// within the suppression window. Side-effect: lazily evicts the
+    /// entry on a hit so the map doesn't grow unbounded.
+    fn is_recently_written(&self, path: &std::path::Path) -> bool {
+        const WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+        let Some(entry) = self.recently_written.get(path) else {
+            return false;
+        };
+        let fresh = entry.elapsed() < WINDOW;
+        drop(entry);
+        if !fresh {
+            self.recently_written.remove(path);
+        }
+        fresh
+    }
+
     fn queue_path(&self, path: PathBuf, kind: ChangeKind) {
         let path_str = path.to_string_lossy().to_string();
+        if self.is_recently_written(&path) {
+            self.log(&format!(
+                "fs ignore [recent-pull]: {kind:?} {}",
+                path.display()
+            ));
+            self.ignored_total.fetch_add(1, Ordering::Relaxed);
+            self.ignored_by_rule
+                .entry("recent-pull".to_string())
+                .and_modify(|n| *n += 1)
+                .or_insert(1);
+            diagnostics::emit_with_fields(
+                DiagStage::Ignored,
+                DiagLevel::Debug,
+                None,
+                Some(&path_str),
+                "ignored [recent-pull]",
+                serde_json::json!({ "rule": "recent-pull", "kind": format!("{kind:?}") }),
+            );
+            return;
+        }
         if let Some(rule) = ignore::classify(&path_str) {
             self.log(&format!("fs ignore [{rule}]: {kind:?} {}", path.display()));
             self.ignored_total.fetch_add(1, Ordering::Relaxed);
