@@ -476,6 +476,61 @@ async fn resolve_conflict(
     Ok(())
 }
 
+/// Bulk variant of resolve_conflict — applies the same resolution to many paths.
+/// Returns one bool per input path. Emits an activity row per attempt so the
+/// Activity tab shows progress even for large batches.
+#[tauri::command]
+async fn resolve_conflicts_bulk(
+    app: tauri::AppHandle,
+    local_paths: Vec<String>,
+    resolution: ConflictResolution,
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<Vec<bool>, String> {
+    use tauri::Emitter;
+    let g = state.0.lock().await;
+    let engine = match g.as_ref() {
+        Some(e) => e,
+        None => return Err("autosync not running".to_string()),
+    };
+    let mut out = Vec::with_capacity(local_paths.len());
+    for p in &local_paths {
+        let buf = PathBuf::from(p);
+        if reject_path_traversal(&buf, "local_path").is_err() {
+            let _ = app.emit("autosync://activity", &ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "bulk".to_string(),
+                file: basename_for_log(p),
+                action: "conflict resolve blocked: path traversal".to_string(),
+                kind: ActivityKind::Block,
+            });
+            out.push(false);
+            continue;
+        }
+        let res = engine.resolve_conflict(&buf, resolution).await;
+        let ok = res.is_ok();
+        let row = if ok {
+            ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "bulk".to_string(),
+                file: basename_for_log(p),
+                action: format!("conflict resolved as {:?}", resolution).to_lowercase(),
+                kind: ActivityKind::ConflictResolved,
+            }
+        } else {
+            ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "bulk".to_string(),
+                file: basename_for_log(p),
+                action: format!("conflict resolve failed: {}", res.err().unwrap_or_default()),
+                kind: ActivityKind::Error,
+            }
+        };
+        let _ = app.emit("autosync://activity", &row);
+        out.push(ok);
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 async fn retry_failed(state: tauri::State<'_, AutoSyncState>) -> Result<(), String> {
     let g = state.0.lock().await;
@@ -1322,6 +1377,7 @@ pub fn run() {
             get_autosync_status,
             enqueue_for_flush_batch,
             resolve_conflict,
+            resolve_conflicts_bulk,
             retry_failed,
             list_servers,
             get_last_selected,
