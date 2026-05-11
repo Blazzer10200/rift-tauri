@@ -18,6 +18,8 @@
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
   let localSel = $state<string[]>([]);
   let remoteSel = $state<string[]>([]);
+  let localRefreshKey = $state(0);
+  let remoteRefreshKey = $state(0);
 
   onMount(() => {
     const s = connection.selected;
@@ -87,6 +89,7 @@
       const res = await invoke<boolean[]>("upload_paths", { serverKey: s.key, jobs });
       const ok = res.filter(Boolean).length;
       flash(`Uploaded ${ok}/${jobs.length}`, ok === jobs.length ? "ok" : "err");
+      remoteRefreshKey++;
     } catch (e) {
       flash(`Upload failed: ${e}`, "err");
     }
@@ -110,6 +113,7 @@
       const res = await invoke<boolean[]>("download_paths", { serverKey: s.key, jobs });
       const ok = res.filter(Boolean).length;
       flash(`Downloaded ${ok}/${jobs.length}`, ok === jobs.length ? "ok" : "err");
+      localRefreshKey++;
     } catch (e) {
       flash(`Download failed: ${e}`, "err");
     }
@@ -131,7 +135,31 @@
   }
   function onEdit() { flash("Open files by double-clicking to edit in place.", "info"); }
   function onDiff() { flash("Diff view: pick a file in the Conflicts tab.", "info"); }
-  function onDelete() { flash("Delete is not yet wired — coming in a backend follow-up.", "info"); }
+  async function onDelete() {
+    const total = localSel.length + remoteSel.length;
+    if (total === 0) { flash("Select files on either side first.", "info"); return; }
+    const parts = [];
+    if (remoteSel.length > 0) parts.push(`${remoteSel.length} remote`);
+    if (localSel.length > 0) parts.push(`${localSel.length} local`);
+    if (!window.confirm(`Permanently delete ${parts.join(" + ")} item(s)? This cannot be undone.`)) return;
+    const s = connection.selected;
+    let okCount = 0;
+    try {
+      if (remoteSel.length > 0 && s) {
+        const res = await invoke<boolean[]>("remote_delete_paths", { serverKey: s.key, paths: remoteSel });
+        okCount += res.filter(Boolean).length;
+        remoteRefreshKey++;
+      }
+      if (localSel.length > 0) {
+        const res = await invoke<boolean[]>("local_delete_paths", { paths: localSel });
+        okCount += res.filter(Boolean).length;
+        localRefreshKey++;
+      }
+      flash(`Deleted ${okCount}/${total}`, okCount === total ? "ok" : "err");
+    } catch (e) {
+      flash(`Delete failed: ${e}`, "err");
+    }
+  }
 </script>
 
 <div class="two-pane">
@@ -164,6 +192,7 @@
         onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
         onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
         onSelectionChange={(paths) => (localSel = paths)}
+        refreshKey={localRefreshKey}
       />
       <OpRail
         canUpload={localSel.length > 0}
@@ -186,6 +215,7 @@
         onDropPathsToFolder={(localPaths, targetDir) => uploadLocalsToRemoteDir(localPaths, targetDir)}
         onDownloadPaths={(remotePaths) => downloadRemotesToLocal(remotePaths)}
         onSelectionChange={(paths) => (remoteSel = paths)}
+        refreshKey={remoteRefreshKey}
       />
     </div>
   {:else}
