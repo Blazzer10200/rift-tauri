@@ -33,7 +33,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09. Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S22):** v0.2.12-alpha-test on main. 2 commits unpushed. Rename/delete ctx menus shipped but not field-tested — that's next session's first task. Code-signing permanently off roadmap. All locks clean.
+**Current state (post S22/S23 ship-prep):** v0.2.13-alpha-test built locally — NSIS + Velopack artifacts staged in `Releases/`. Awaiting `gh auth login` then `pwsh ./scripts/release.ps1` to publish to `rift-releases`. Rename/delete shipped (S22) — field test happens implicitly when buddy uses the build. Code-signing permanently off roadmap. All locks clean.
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
