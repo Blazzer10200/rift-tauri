@@ -33,7 +33,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09. Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S23 buddy handoff):** v0.2.14-alpha-test on `rift-releases`. Treyday onboarded as second client — tailscale share + SSH key auth + Rift profile working. Op-rail Delete + auto-refresh-after-ops fixed (was a stale stub from before S22). Code-signing permanently off roadmap. All locks clean.
+**Current state (post S23 buddy handoff):** v0.2.15-alpha-test on `rift-releases`. Treyday onboarded as second client over tailscale. S23 caught 3 ship-blocking bugs in fast succession: op-rail Delete stub (v0.2.14), upload/download dir-blindness (v0.2.15). All ship-front bugs land via Velopack auto-update. Code-signing permanently off roadmap.
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)

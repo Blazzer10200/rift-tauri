@@ -88,7 +88,8 @@
     try {
       const res = await invoke<boolean[]>("upload_paths", { serverKey: s.key, jobs });
       const ok = res.filter(Boolean).length;
-      flash(`Uploaded ${ok}/${jobs.length}`, ok === jobs.length ? "ok" : "err");
+      const total = res.length || jobs.length;
+      flash(`Uploaded ${ok}/${total} files`, ok === total ? "ok" : "err");
       remoteRefreshKey++;
     } catch (e) {
       flash(`Upload failed: ${e}`, "err");
@@ -112,7 +113,8 @@
     try {
       const res = await invoke<boolean[]>("download_paths", { serverKey: s.key, jobs });
       const ok = res.filter(Boolean).length;
-      flash(`Downloaded ${ok}/${jobs.length}`, ok === jobs.length ? "ok" : "err");
+      const total = res.length || jobs.length;
+      flash(`Downloaded ${ok}/${total} files`, ok === total ? "ok" : "err");
       localRefreshKey++;
     } catch (e) {
       flash(`Download failed: ${e}`, "err");
