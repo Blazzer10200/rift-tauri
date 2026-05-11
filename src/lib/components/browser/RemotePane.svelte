@@ -22,8 +22,9 @@
     onDropPathsToFolder?: (localPaths: string[], targetRemoteDir: string) => void;
     onDownloadPaths?: (remotePaths: string[]) => void;
     onSelectionChange?: (paths: string[]) => void;
+    refreshKey?: number;
   };
-  let { serverKey, path, onPathChange, onOpenInNewTab, onDropPaths, onDropPathsToFolder, onDownloadPaths, onSelectionChange }: Props = $props();
+  let { serverKey, path, onPathChange, onOpenInNewTab, onDropPaths, onDropPathsToFolder, onDownloadPaths, onSelectionChange, refreshKey = 0 }: Props = $props();
 
   let entries = $state<RemoteEntry[]>([]);
   let filter = $state("");
@@ -42,7 +43,7 @@
   );
 
   $effect(() => {
-    void path; void serverKey;
+    void path; void serverKey; void refreshKey;
     void load();
   });
 
