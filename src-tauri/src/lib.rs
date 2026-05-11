@@ -673,19 +673,102 @@ async fn remote_list_dir(
     entries
 }
 
+/// Expand a job list so directory inputs become recursive file jobs. File
+/// inputs pass through unchanged. Remote parent dirs are created by
+/// `upload_files_batch` per-file, so no separate mkdir pass needed here.
+fn expand_upload_jobs(jobs: Vec<(String, String)>) -> Vec<(PathBuf, String)> {
+    let mut expanded: Vec<(PathBuf, String)> = Vec::new();
+    for (local, remote) in jobs {
+        let local_path = PathBuf::from(&local);
+        if local_path.is_dir() {
+            let remote_root = remote.trim_end_matches('/').to_string();
+            for entry in walkdir::WalkDir::new(&local_path).into_iter().filter_map(|e| e.ok()) {
+                if !entry.file_type().is_file() {
+                    continue;
+                }
+                let rel = match entry.path().strip_prefix(&local_path) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                let rel_posix: String = rel
+                    .components()
+                    .map(|c| c.as_os_str().to_string_lossy().to_string())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if rel_posix.is_empty() {
+                    continue;
+                }
+                let remote_target = format!("{}/{}", remote_root, rel_posix);
+                expanded.push((entry.path().to_path_buf(), remote_target));
+            }
+        } else if local_path.is_file() {
+            expanded.push((local_path, remote));
+        }
+    }
+    expanded
+}
+
 #[tauri::command]
 async fn upload_paths(
     server_key: String,
     jobs: Vec<(String, String)>,
 ) -> Result<Vec<bool>, String> {
     let client = open_sftp_for(&server_key).await?;
-    let mapped: Vec<(PathBuf, String)> = jobs
-        .into_iter()
-        .map(|(local, remote)| (PathBuf::from(local), remote))
-        .collect();
+    let mapped = expand_upload_jobs(jobs);
+    if mapped.is_empty() {
+        client.close().await;
+        return Ok(vec![]);
+    }
     let result = client.upload_files_batch(&mapped, 4).await;
     client.close().await;
     Ok(result)
+}
+
+/// Expand a job list so directory inputs become recursive file jobs. File
+/// inputs pass through unchanged. Creates parent local dirs eagerly so
+/// `download_files_batch` can write nested files without per-file mkdir.
+async fn expand_download_jobs(
+    client: &sftp::SftpClient,
+    jobs: Vec<(String, String)>,
+) -> Vec<(String, PathBuf)> {
+    let mut expanded: Vec<(String, PathBuf)> = Vec::new();
+    for (remote, local) in jobs {
+        let info = client.remote_stat(&remote).await;
+        if !info.exists {
+            continue;
+        }
+        let local_path = PathBuf::from(&local);
+        if info.is_directory {
+            let _ = std::fs::create_dir_all(&local_path);
+            let files = client
+                .list_recursive(&remote, 32, None)
+                .await
+                .unwrap_or_default();
+            let prefix = format!("{}/", remote.trim_end_matches('/'));
+            for f in files {
+                if f.is_dir {
+                    continue;
+                }
+                let rel = f.full_path.strip_prefix(&prefix).unwrap_or(&f.full_path);
+                let mut dest = local_path.clone();
+                for part in rel.split('/') {
+                    if !part.is_empty() {
+                        dest.push(part);
+                    }
+                }
+                if let Some(p) = dest.parent() {
+                    let _ = std::fs::create_dir_all(p);
+                }
+                expanded.push((f.full_path.clone(), dest));
+            }
+        } else {
+            if let Some(p) = local_path.parent() {
+                let _ = std::fs::create_dir_all(p);
+            }
+            expanded.push((remote, local_path));
+        }
+    }
+    expanded
 }
 
 #[tauri::command]
@@ -700,10 +783,11 @@ async fn download_paths(
         *g = Some(ct.clone());
     }
     let client = open_sftp_for(&server_key).await?;
-    let mapped: Vec<(String, PathBuf)> = jobs
-        .into_iter()
-        .map(|(remote, local)| (remote, PathBuf::from(local)))
-        .collect();
+    let mapped = expand_download_jobs(&client, jobs).await;
+    if mapped.is_empty() {
+        client.close().await;
+        return Ok(vec![]);
+    }
     let result = tokio::select! {
         r = client.download_files_batch(&mapped, 4, ct.clone()) => r,
         _ = ct.cancelled() => {

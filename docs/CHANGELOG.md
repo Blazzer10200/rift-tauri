@@ -2,19 +2,20 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.14-alpha-test — 2026-05-11 — Op-rail Delete + auto-refresh
+## v0.2.15-alpha-test — 2026-05-11 — Directory upload/download recursion
 
-Caught two UX bugs while wiring buddy onboarding. Op-rail `Delete` button was a stale stub from before S22 (`flash("Delete is not yet wired — coming in a backend follow-up")`), even though the underlying `remote_delete_paths` / `local_delete_paths` cmds already existed and were wired into the right-click ctx menus. Also, upload/download didn't refresh the destination pane — every transfer required a manual refresh-circle click to see the new files.
+Treyday hit it first: right-click "Download to local" on a bracket directory failed because `download_paths` only ever supported file-shaped jobs. Adding a remote bracket directly to a fresh workspace was the most natural first move, and the app silently broke for it. Same blind spot existed on the upload side. Both fixed.
 
 ### Landed
 
-- Op-rail `Delete` now invokes the same delete cmds the ctx menu uses, with confirm dialog + flash result. Handles mixed local + remote selection in one shot (`src/lib/components/browser/TwoPane.svelte`).
-- New `refreshKey: number` prop on `LocalPane` + `RemotePane`. Bumping it triggers a fresh `load()` via the existing `$effect`.
-- TwoPane bumps `remoteRefreshKey` after successful upload, `localRefreshKey` after successful download, both after delete. No more manual refresh after transfers.
+- `expand_download_jobs` helper — stats every job; for directories, walks via `list_recursive` (max_depth 32) and emits one file-shaped job per leaf, with parent local dirs pre-created so the batch writer doesn't race on `create_dir_all` per file.
+- `expand_upload_jobs` helper — local-side mirror using `walkdir`. Remote parent dirs auto-created by `upload_files_batch`'s existing per-file `mkdir_p`.
+- Both `download_paths` and `upload_paths` now route through the expansion before dispatching to the batch transfer.
+- Flash messages updated to report `N/M files` from the expanded count, not the original (now-meaningless) job count.
 
 ### Verify
 
+- `cargo check --release`: clean (3.85s incremental).
 - `svelte-check`: 0 errors, 5 pre-existing a11y warnings unrelated.
-- `cargo check --release`: no Rust changes this version.
 
-v0.2.13-alpha-test archived to git log.
+v0.2.14-alpha-test archived to git log.
