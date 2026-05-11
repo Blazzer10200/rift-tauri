@@ -25,6 +25,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::sync::{AutoSyncEngine, AutoSyncStatus, ConflictResolution, FolderSpec};
+use crate::sync::auto_sync::{ActivityKind, ActivityRow};
 
 /// Tauri-managed handle to the active AutoSync engine. None until start_autosync.
 pub struct AutoSyncState(pub AsyncMutex<Option<Arc<AutoSyncEngine>>>);
@@ -710,17 +711,34 @@ fn expand_upload_jobs(jobs: Vec<(String, String)>) -> Vec<(PathBuf, String)> {
 
 #[tauri::command]
 async fn upload_paths(
+    app: tauri::AppHandle,
     server_key: String,
     jobs: Vec<(String, String)>,
 ) -> Result<Vec<bool>, String> {
+    use tauri::Emitter;
     let client = open_sftp_for(&server_key).await?;
     let mapped = expand_upload_jobs(jobs);
     if mapped.is_empty() {
         client.close().await;
         return Ok(vec![]);
     }
+    let _ = app.emit("autosync://activity", &ActivityRow {
+        at: chrono::Utc::now(),
+        resource: "manual".to_string(),
+        file: format!("{} files", mapped.len()),
+        action: "upload started".to_string(),
+        kind: ActivityKind::Sync,
+    });
     let result = client.upload_files_batch(&mapped, 4).await;
     client.close().await;
+    let ok = result.iter().filter(|b| **b).count();
+    let _ = app.emit("autosync://activity", &ActivityRow {
+        at: chrono::Utc::now(),
+        resource: "manual".to_string(),
+        file: format!("{}/{} files", ok, result.len()),
+        action: if ok == result.len() { "upload complete".to_string() } else { "upload partial".to_string() },
+        kind: if ok == result.len() { ActivityKind::Sync } else { ActivityKind::Error },
+    });
     Ok(result)
 }
 
@@ -773,26 +791,56 @@ async fn expand_download_jobs(
 
 #[tauri::command]
 async fn download_paths(
+    app: tauri::AppHandle,
     server_key: String,
     jobs: Vec<(String, String)>,
     dl_state: tauri::State<'_, DownloadState>,
 ) -> Result<Vec<bool>, String> {
+    use tauri::Emitter;
     let ct = CancellationToken::new();
     {
         let mut g = dl_state.0.lock().await;
         *g = Some(ct.clone());
     }
     let client = open_sftp_for(&server_key).await?;
+    let _ = app.emit("autosync://activity", &ActivityRow {
+        at: chrono::Utc::now(),
+        resource: "manual".to_string(),
+        file: "expanding job list".to_string(),
+        action: "download started".to_string(),
+        kind: ActivityKind::Pull,
+    });
     let mapped = expand_download_jobs(&client, jobs).await;
     if mapped.is_empty() {
         client.close().await;
+        let _ = app.emit("autosync://activity", &ActivityRow {
+            at: chrono::Utc::now(),
+            resource: "manual".to_string(),
+            file: "0 files".to_string(),
+            action: "download empty".to_string(),
+            kind: ActivityKind::System,
+        });
         return Ok(vec![]);
     }
+    let _ = app.emit("autosync://activity", &ActivityRow {
+        at: chrono::Utc::now(),
+        resource: "manual".to_string(),
+        file: format!("{} files", mapped.len()),
+        action: "downloading".to_string(),
+        kind: ActivityKind::Pull,
+    });
     let result = tokio::select! {
         r = client.download_files_batch(&mapped, 4, ct.clone()) => r,
         _ = ct.cancelled() => {
             client.close().await;
             // Return all-false — caller treats as aborted batch.
+            let _ = app.emit("autosync://activity", &ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: format!("{} files", mapped.len()),
+                action: "download cancelled".to_string(),
+                kind: ActivityKind::Error,
+            });
             return Ok(vec![false; mapped.len()]);
         }
     };
@@ -801,6 +849,14 @@ async fn download_paths(
         let mut g = dl_state.0.lock().await;
         *g = None;
     }
+    let ok = result.iter().filter(|b| **b).count();
+    let _ = app.emit("autosync://activity", &ActivityRow {
+        at: chrono::Utc::now(),
+        resource: "manual".to_string(),
+        file: format!("{}/{} files", ok, result.len()),
+        action: if ok == result.len() { "download complete".to_string() } else { "download partial".to_string() },
+        kind: if ok == result.len() { ActivityKind::Pull } else { ActivityKind::Error },
+    });
     Ok(result)
 }
 
