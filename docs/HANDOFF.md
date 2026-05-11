@@ -33,7 +33,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09. Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S22/S23 ship-prep):** v0.2.13-alpha-test built locally — NSIS + Velopack artifacts staged in `Releases/`. Awaiting `gh auth login` then `pwsh ./scripts/release.ps1` to publish to `rift-releases`. Rename/delete shipped (S22) — field test happens implicitly when buddy uses the build. Code-signing permanently off roadmap. All locks clean.
+**Current state (post S23 buddy handoff):** v0.2.14-alpha-test on `rift-releases`. Treyday onboarded as second client — tailscale share + SSH key auth + Rift profile working. Op-rail Delete + auto-refresh-after-ops fixed (was a stale stub from before S22). Code-signing permanently off roadmap. All locks clean.
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
