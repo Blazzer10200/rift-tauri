@@ -33,7 +33,7 @@
 
 **Project:** rift-tauri IS Rift. WPF predecessor retired 2026-05-09. Path: `C:/AI Workflow/rift-tauri/`.
 
-**Current state (post S23 buddy handoff):** v0.2.17-alpha-test on `rift-releases`. Treyday onboarded as second client over tailscale. S23 caught 5 ship-blocking bugs in one night: op-rail Delete stub (v0.2.14), upload/download dir-blindness (v0.2.15), manual-transfer-silence in Activity feed (v0.2.16), rename/delete error-swallowing (v0.2.17). All ship-front bugs land via Velopack auto-update. Code-signing permanently off roadmap.
+**Current state (post S23 buddy handoff):** v0.2.18-alpha-test on `rift-releases`. Treyday onboarded as second client over tailscale. S23 caught 6 ship-blocking bugs: op-rail Delete stub (v0.2.14), upload/download dir-blindness (v0.2.15), manual-transfer-silence in Activity feed (v0.2.16), rename/delete error-swallowing (v0.2.17), pull→push loop from atomic-replace fs-events + bulk conflict resolve (v0.2.18). Loop fix: `AutoSyncEngine.recently_written` 5s suppression window covers the Delete+Modify fs-event burst that the `.rift-tmp` rule never caught. All ship-front bugs land via Velopack auto-update. Code-signing permanently off roadmap.
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)

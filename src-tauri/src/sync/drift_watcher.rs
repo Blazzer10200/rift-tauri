@@ -219,11 +219,19 @@ async fn pull_one(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) 
     }
 
     let started = std::time::Instant::now();
+    // Mark BEFORE the write so any fs-event the watcher catches mid-write
+    // (Windows fires events as soon as the .rift-tmp rename starts) is
+    // suppressed. The window is re-stamped post-success below.
+    engine.mark_recently_written(&target_local);
     let r = engine
         .sftp()
         .download_file_atomic(&remote_path, &target_local)
         .await;
     let elapsed_ms = started.elapsed().as_millis() as u64;
+    if r.success {
+        // Re-stamp so the 5s window starts from completion, not start.
+        engine.mark_recently_written(&target_local);
+    }
     if !r.success {
         diagnostics::emit_with_fields(
             DiagStage::RemotePullFail,
