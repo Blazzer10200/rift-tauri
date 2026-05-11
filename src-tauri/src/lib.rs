@@ -870,55 +870,154 @@ async fn cancel_download(dl_state: tauri::State<'_, DownloadState>) -> Result<()
     Ok(())
 }
 
+fn basename_for_log(p: &str) -> String {
+    let norm = p.replace('\\', "/");
+    norm.rsplit('/').next().unwrap_or(p).to_string()
+}
+
 #[tauri::command]
 async fn remote_rename_path(
+    app: tauri::AppHandle,
     server_key: String,
     from: String,
     to: String,
 ) -> Result<(), String> {
+    use tauri::Emitter;
     let client = open_sftp_for(&server_key).await?;
     let result = client.rename(&from, &to).await;
     client.close().await;
+    let row = match &result {
+        Ok(()) => ActivityRow {
+            at: chrono::Utc::now(),
+            resource: "manual".to_string(),
+            file: format!("{} → {}", basename_for_log(&from), basename_for_log(&to)),
+            action: "remote rename".to_string(),
+            kind: ActivityKind::Sync,
+        },
+        Err(e) => ActivityRow {
+            at: chrono::Utc::now(),
+            resource: "manual".to_string(),
+            file: basename_for_log(&from),
+            action: format!("remote rename failed: {e}"),
+            kind: ActivityKind::Error,
+        },
+    };
+    let _ = app.emit("autosync://activity", &row);
     result
 }
 
 #[tauri::command]
 async fn remote_delete_paths(
+    app: tauri::AppHandle,
     server_key: String,
     paths: Vec<String>,
 ) -> Result<Vec<bool>, String> {
+    use tauri::Emitter;
     let client = open_sftp_for(&server_key).await?;
     let mut out = Vec::with_capacity(paths.len());
     for p in &paths {
-        out.push(client.delete_recursive(p).await.is_ok());
+        let res = client.delete_recursive(p).await;
+        let ok = res.is_ok();
+        let row = if ok {
+            ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: basename_for_log(p),
+                action: "remote delete".to_string(),
+                kind: ActivityKind::Delete,
+            }
+        } else {
+            ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: basename_for_log(p),
+                action: format!("remote delete failed: {}", res.err().unwrap_or_default()),
+                kind: ActivityKind::Error,
+            }
+        };
+        let _ = app.emit("autosync://activity", &row);
+        out.push(ok);
     }
     client.close().await;
     Ok(out)
 }
 
 #[tauri::command]
-fn local_rename_path(from: String, to: String) -> Result<(), String> {
+fn local_rename_path(
+    app: tauri::AppHandle,
+    from: String,
+    to: String,
+) -> Result<(), String> {
+    use tauri::Emitter;
     let from_p = std::path::Path::new(&from);
     let to_p = std::path::Path::new(&to);
     reject_path_traversal(from_p, "from")?;
     reject_path_traversal(to_p, "to")?;
-    std::fs::rename(from_p, to_p).map_err(|e| format!("rename {from} -> {to}: {e}"))
+    let result = std::fs::rename(from_p, to_p).map_err(|e| format!("rename {from} -> {to}: {e}"));
+    let row = match &result {
+        Ok(()) => ActivityRow {
+            at: chrono::Utc::now(),
+            resource: "manual".to_string(),
+            file: format!("{} → {}", basename_for_log(&from), basename_for_log(&to)),
+            action: "local rename".to_string(),
+            kind: ActivityKind::Sync,
+        },
+        Err(e) => ActivityRow {
+            at: chrono::Utc::now(),
+            resource: "manual".to_string(),
+            file: basename_for_log(&from),
+            action: format!("local rename failed: {e}"),
+            kind: ActivityKind::Error,
+        },
+    };
+    let _ = app.emit("autosync://activity", &row);
+    result
 }
 
 #[tauri::command]
-fn local_delete_paths(paths: Vec<String>) -> Result<Vec<bool>, String> {
+fn local_delete_paths(
+    app: tauri::AppHandle,
+    paths: Vec<String>,
+) -> Result<Vec<bool>, String> {
+    use tauri::Emitter;
     let mut out = Vec::with_capacity(paths.len());
     for p in &paths {
         let path = std::path::Path::new(p);
-        if reject_path_traversal(path, "path").is_err() {
+        if let Err(e) = reject_path_traversal(path, "path") {
+            let _ = app.emit("autosync://activity", &ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: basename_for_log(p),
+                action: format!("local delete blocked: {e}"),
+                kind: ActivityKind::Block,
+            });
             out.push(false);
             continue;
         }
-        let ok = if path.is_dir() {
-            std::fs::remove_dir_all(path).is_ok()
+        let res = if path.is_dir() {
+            std::fs::remove_dir_all(path)
         } else {
-            std::fs::remove_file(path).is_ok()
+            std::fs::remove_file(path)
         };
+        let ok = res.is_ok();
+        let row = if ok {
+            ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: basename_for_log(p),
+                action: "local delete".to_string(),
+                kind: ActivityKind::Delete,
+            }
+        } else {
+            ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: basename_for_log(p),
+                action: format!("local delete failed: {}", res.err().map(|e| e.to_string()).unwrap_or_default()),
+                kind: ActivityKind::Error,
+            }
+        };
+        let _ = app.emit("autosync://activity", &row);
         out.push(ok);
     }
     Ok(out)
