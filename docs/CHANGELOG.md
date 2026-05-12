@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
+## v0.2.24-alpha-test — 2026-05-12 — Pull Now: actually fast (cache-based, no scan)
+
+v0.2.21-v0.2.23 Pull Now re-ran the full drift scan before dispatching pulls — so it felt identical to Reconcile (the 30s SFTP batch listing was the slow part, not the pulls). Trey confirmed it: "same exact task and taking just as long if not longer."
+
+**Real fix:** `last_scan_entries` cache on AutoSyncEngine. drift_watcher's 10s tick + every kick_drift_reconcile run now write their scan entries into the cache. `force_pull_now` dispatches pulls directly from the cache — NO scan. Sub-second.
+
+Modal gets a new `mode: "scan" | "pull"` axis. In pull mode the status line says "Pulling cached changes… (no scan needed)" instead of "Listing remote files…" so the user sees what's happening. Activity feed shows "pull-now started" + individual file pulls as they land.
+
+Edge case: if drift_watcher hasn't ticked yet (very first second post-connect), cache is empty → Pull Now shows "nothing pending" with 0 counts. Hit Reconcile to populate.
+
 ## v0.2.23-alpha-test — 2026-05-12 — Auto-snap browser tabs to profile root
 
 Fixes "not a directory" left-pane error after a profile's local_root (or remote_root) changes — e.g. user moved their FiveM dir and updated Settings. Browser tabs persist their navigation across sessions in localStorage, so old paths survived the root change and the pane errored out against folders that no longer exist at the new location.

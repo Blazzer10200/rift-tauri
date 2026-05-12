@@ -219,6 +219,12 @@ pub struct AutoSyncEngine {
     /// `kick_drift_reconcile` is sync (notify event handler can call it).
     current_scan_cancel: std::sync::Mutex<Option<CancellationToken>>,
 
+    /// Cached entries from the most recent scan (drift_watcher tick OR
+    /// kick_drift_reconcile). `force_pull_now` dispatches from this cache
+    /// instead of re-scanning — drift_watcher runs every 10s so cache is
+    /// almost always fresh. Empty = "no scan yet, fall back to full scan."
+    last_scan_entries: std::sync::Mutex<Vec<crate::sync::DriftEntry>>,
+
     state: Mutex<(AutoSyncState, String)>,
     ignored_total: AtomicU64,
     ignored_by_rule: DashMap<String, u64>,
@@ -274,6 +280,7 @@ impl AutoSyncEngine {
             conflicts: DashMap::new(),
             manual_delete_suppress_until: DashMap::new(),
             current_scan_cancel: std::sync::Mutex::new(None),
+            last_scan_entries: std::sync::Mutex::new(Vec::new()),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
@@ -844,6 +851,12 @@ impl AutoSyncEngine {
                 })
                 .collect();
             let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
+            // Cache entries for force_pull_now's fast path.
+            if !result.cancelled {
+                if let Ok(mut g) = engine.last_scan_entries.lock() {
+                    *g = result.entries.clone();
+                }
+            }
             let mut to_push = 0u32;
             let mut to_pull = 0u32;
             let mut conflicts = 0u32;
@@ -895,56 +908,42 @@ impl AutoSyncEngine {
         self.track_background(h);
     }
 
-    /// Force-pull cycle. Same scan + push-enqueue flow as `kick_drift_reconcile`
-    /// but ALSO dispatches `pull_one` for every ToPull entry — closes the
-    /// "buddy pushed but my Rift hasn't ticked yet" gap. Emits the same
-    /// DriftScanStart/Result events the modal listens for; pull progress
-    /// surfaces via RemotePullStart/Done into the activity feed.
+    /// Cache the most recent scan result entries (called from drift_watcher
+    /// run_tick AND kick_drift_reconcile). `force_pull_now` dispatches from
+    /// this cache — drift_watcher's 10s cadence keeps it fresh.
+    pub(crate) fn cache_scan_entries(&self, entries: Vec<crate::sync::DriftEntry>) {
+        if let Ok(mut g) = self.last_scan_entries.lock() {
+            *g = entries;
+        }
+    }
+
+    /// Force-pull NOW — uses cached ToPull entries from drift_watcher's last
+    /// tick. NO scan. Dispatches `pull_one` for each cached ToPull entry and
+    /// emits an immediate DriftScanResult so the modal jumps to "complete"
+    /// without the 30s scan. Pull progress surfaces via RemotePullStart/Done
+    /// into the activity feed.
     pub fn force_pull_now(self: &Arc<Self>) {
-        let folders: Vec<FolderWatch> = self
-            .folders
-            .iter()
-            .map(|kv| kv.value().clone())
-            .collect();
-        if folders.is_empty() {
-            return;
-        }
-        let sftp = self.sftp.clone();
-        let snapshot = self.snapshot.clone();
+        let entries = {
+            let g = match self.last_scan_entries.lock() {
+                Ok(g) => g,
+                Err(_) => return,
+            };
+            g.clone()
+        };
         let engine = self.clone();
-        let ct = CancellationToken::new();
-        let ct_for_task = ct.clone();
-        if let Ok(mut g) = self.current_scan_cancel.lock() {
-            *g = Some(ct);
-        }
         let h = tokio::spawn(async move {
             diagnostics::emit(
                 DiagStage::DriftScanStart,
                 DiagLevel::Info,
-                format!("pull-now across {} folder(s)", folders.len()),
+                "pull-now (from cache)",
             );
-            let scanner = crate::sync::DriftScanner::new(&sftp, Some(&snapshot));
-            let targets: Vec<crate::sync::FolderTarget> = folders
-                .iter()
-                .map(|fw| crate::sync::FolderTarget {
-                    resource_name: fw.resource_name.clone(),
-                    local_root: fw.local_root.to_string_lossy().to_string(),
-                    remote_root: fw.remote_root.clone(),
-                })
-                .collect();
-            let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
-            let entries_count = result.entries.len();
-            let mut to_push = 0u32;
             let mut to_pull = 0u32;
+            let mut to_push = 0u32;
             let mut conflicts = 0u32;
-            let mut push_paths: Vec<PathBuf> = Vec::new();
             let mut pull_entries: Vec<crate::sync::DriftEntry> = Vec::new();
-            for e in result.entries {
+            for e in entries {
                 match e.bucket {
-                    crate::sync::DriftBucket::ToPush => {
-                        to_push += 1;
-                        push_paths.push(PathBuf::from(&e.local_path));
-                    }
+                    crate::sync::DriftBucket::ToPush => to_push += 1,
                     crate::sync::DriftBucket::ToPull => {
                         to_pull += 1;
                         pull_entries.push(e);
@@ -954,46 +953,37 @@ impl AutoSyncEngine {
                 }
             }
             let mut pull_dispatched = 0u32;
-            if !result.cancelled {
-                for entry in pull_entries {
-                    let task_engine = engine.clone();
-                    let h = tokio::spawn(async move {
-                        crate::sync::drift_watcher::pull_one(&task_engine, entry).await;
-                    });
-                    engine.track_pull_handle(h);
-                    pull_dispatched += 1;
-                }
+            for entry in pull_entries {
+                let task_engine = engine.clone();
+                let h = tokio::spawn(async move {
+                    crate::sync::drift_watcher::pull_one(&task_engine, entry).await;
+                });
+                engine.track_pull_handle(h);
+                pull_dispatched += 1;
             }
-            let enqueued = if !result.cancelled && !push_paths.is_empty() {
-                engine.enqueue_for_flush_batch(push_paths, false, false).await
-            } else {
-                0
-            };
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
                 None,
                 None,
-                if result.cancelled { "pull-now cancelled" } else { "pull-now complete" },
+                if pull_dispatched > 0 {
+                    format!("pull-now: dispatched {pull_dispatched} pull(s) from cached scan")
+                } else {
+                    "pull-now: nothing pending (drift watcher already caught up)".to_string()
+                },
                 serde_json::json!({
-                    "entries": entries_count,
+                    "entries": 0,
                     "to_push": to_push,
                     "to_pull": to_pull,
                     "conflicts": conflicts,
-                    "enqueued_for_push": enqueued,
+                    "enqueued_for_push": 0,
                     "pull_dispatched": pull_dispatched,
-                    "missing_remote_folders": result.remote_folders_missing.len(),
-                    "listing_error": result.last_batch_listing_error,
-                    "cancelled": result.cancelled,
+                    "missing_remote_folders": 0,
+                    "listing_error": null,
+                    "cancelled": false,
+                    "from_cache": true,
                 }),
             );
-            if let Ok(mut g) = engine.current_scan_cancel.lock() {
-                if let Some(stored) = g.as_ref() {
-                    if stored.is_cancelled() == ct_for_task.is_cancelled() {
-                        *g = None;
-                    }
-                }
-            }
         });
         self.track_background(h);
     }
