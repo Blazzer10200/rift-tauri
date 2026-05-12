@@ -100,6 +100,40 @@ pub struct ActivityRow {
     pub file: String,
     pub action: String,
     pub kind: ActivityKind,
+    // v0.2.35 enrichment — drives the master/detail Activity panel. All five
+    // are optional so unrelated emission sites (system events, errors, etc.)
+    // can stay near-empty via `..Default::default()`. Skip-serializing keeps
+    // the IPC payload compact on the wire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
+}
+
+impl Default for ActivityRow {
+    fn default() -> Self {
+        Self {
+            at: DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_else(Utc::now),
+            resource: String::new(),
+            file: String::new(),
+            action: String::new(),
+            kind: ActivityKind::System,
+            rel_path: None,
+            local_path: None,
+            size_bytes: None,
+            latency_ms: None,
+            sha: None,
+            actor: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,7 +215,7 @@ fn classify_action(a: &str) -> ActivityKind {
         ActivityKind::Conflict
     } else if lower.contains("drift") || lower.contains("scan") {
         ActivityKind::Drift
-    } else if lower.contains("delete") {
+    } else if lower.contains("delete") || lower.contains("removed locally") {
         ActivityKind::Delete
     } else if lower.contains("synced") {
         ActivityKind::Sync
@@ -248,6 +282,12 @@ pub struct AutoSyncEngine {
     background_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     stop_tx: watch::Sender<bool>,
     disposed: AtomicBool,
+    /// v0.2.37 manual-mode flag. TRUE = traditional auto-sync (watcher
+    /// flushes on debounce + drift_watcher auto-pulls every tick). FALSE =
+    /// manual mode (watcher still detects changes into `dirty`, but
+    /// flush_cycle and drift_watcher::run_tick skip their work. User drives
+    /// pushes/pulls via force_push_now / force_pull_now buttons).
+    auto_flush_enabled: AtomicBool,
 }
 
 impl AutoSyncEngine {
@@ -295,6 +335,7 @@ impl AutoSyncEngine {
             background_tasks: std::sync::Mutex::new(Vec::new()),
             stop_tx,
             disposed: AtomicBool::new(false),
+            auto_flush_enabled: AtomicBool::new(true),
         });
 
         // Channel for FS events from the notify thread → tokio runtime.
@@ -587,6 +628,119 @@ impl AutoSyncEngine {
     }
     pub fn is_disposed(&self) -> bool { self.disposed.load(Ordering::SeqCst) }
     pub fn track_pull_handle(&self, h: JoinHandle<()>) { self.track_background(h); }
+
+    /// v0.2.37 manual-mode setter. Off = no auto-flush + no auto-pull;
+    /// user must use force_push_now / force_pull_now. On = traditional
+    /// watcher-driven behavior. Returns the new state.
+    pub fn set_auto_flush_enabled(&self, on: bool) -> bool {
+        self.auto_flush_enabled.store(on, Ordering::SeqCst);
+        on
+    }
+    pub fn auto_flush_enabled(&self) -> bool {
+        self.auto_flush_enabled.load(Ordering::SeqCst)
+    }
+
+    /// Drain every dirty entry NOW, regardless of debounce timer. Used by
+    /// `force_push_now` to give the user a "GitHub-style" manual push button.
+    /// Bypasses next_flush gating but still respects the mass-delete guard
+    /// inside flush_batch.
+    pub async fn flush_all_now(&self) -> u32 {
+        if self.disposed.load(Ordering::SeqCst) {
+            return 0;
+        }
+        let ready: Vec<DirtyEntry> = self.dirty
+            .iter()
+            .map(|kv| kv.value().clone())
+            .collect();
+        for e in &ready {
+            self.dirty.remove(&e.path);
+        }
+        let mut by_watch: HashMap<String, Vec<DirtyEntry>> = HashMap::new();
+        for e in ready.iter() {
+            by_watch.entry(e.watch_key.clone()).or_default().push(e.clone());
+        }
+        let mut count = 0u32;
+        for (watch_key, entries) in by_watch {
+            let Some(fw) = self.folders.get(&watch_key).map(|v| v.value().clone()) else {
+                continue;
+            };
+            count += entries.len() as u32;
+            self.flush_batch(&fw, entries).await;
+        }
+        count
+    }
+
+    /// Force-push NOW — drains every dirty entry regardless of debounce.
+    /// Cancel-aware. Emits drift_scan_start / drift_scan_result so the
+    /// SyncModal jumps through scanning→complete the same way force_pull_now
+    /// does. The modal renders push mode (purple Upload icon) via the
+    /// matching frontend handler.
+    pub fn force_push_now(self: &Arc<Self>) {
+        let ct = CancellationToken::new();
+        let ct_for_task = ct.clone();
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            *g = Some(ct);
+        }
+        let engine = self.clone();
+        let h = tokio::spawn(async move {
+            diagnostics::emit(
+                DiagStage::DriftScanStart,
+                DiagLevel::Info,
+                "push-now",
+            );
+            let started = std::time::Instant::now();
+            // flush_all_now respects the mass-delete guard inside flush_batch.
+            // We treat cancel as "stop accepting new dispatches" — in-flight
+            // pushes within flush_batch run to completion (russh streams).
+            let dispatched = if ct_for_task.is_cancelled() {
+                0
+            } else {
+                engine.flush_all_now().await
+            };
+            let cancelled = ct_for_task.is_cancelled();
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            diagnostics::emit_with_fields(
+                DiagStage::DriftScanResult,
+                DiagLevel::Info,
+                None,
+                None,
+                if cancelled {
+                    format!("push-now cancelled after {dispatched} flushed")
+                } else if dispatched > 0 {
+                    format!("push-now: flushed {dispatched} entries")
+                } else {
+                    "push-now: nothing pending".to_string()
+                },
+                serde_json::json!({
+                    "entries": 0,
+                    "to_push": dispatched,
+                    "to_pull": 0,
+                    "to_delete": 0,
+                    "conflicts": 0,
+                    "enqueued_for_push": dispatched,
+                    "pull_dispatched": 0,
+                    "missing_remote_folders": 0,
+                    "listing_error": null,
+                    "cancelled": cancelled,
+                    "elapsed_ms": elapsed_ms,
+                    "from_cache": true,
+                }),
+            );
+        });
+        self.track_background(h);
+    }
+
+    /// Scaled mass-delete threshold for a given local root. Returns
+    /// `(threshold, total_file_count)`. Mirrors the push-side guard formula
+    /// (base 25 ceiling, 30% of file count, floor 5) so local-delete and
+    /// remote-delete blocks behave symmetrically. Called by drift_watcher
+    /// before dispatching ToDelete entries; if N ≥ threshold, the batch is
+    /// blocked with a `[guard]` activity row.
+    pub async fn scaled_delete_threshold(&self, local_root: &Path) -> (usize, usize) {
+        let n = safe_count_files(local_root).await;
+        let threshold = ((n as f64 * 0.30) as usize).clamp(5, MASS_DELETE_THRESHOLD);
+        (threshold, n)
+    }
 
     pub fn reject_remote_locked(&self, remote_path: &str) -> Result<(), String> {
         if let Some(locks) = &self.locks {
@@ -960,15 +1114,8 @@ impl AutoSyncEngine {
     /// without the 30s scan. Pull progress surfaces via RemotePullStart/Done
     /// into the activity feed.
     pub fn force_pull_now(self: &Arc<Self>) {
-        let entries = {
-            let g = match self.last_scan_entries.lock() {
-                Ok(g) => g,
-                Err(_) => return,
-            };
-            g.clone()
-        };
         // Register a cancellation token so the modal's Cancel button can stop
-        // the dispatch mid-flight. Replaces any prior token — kick_drift_reconcile
+        // the operation mid-flight. Replaces any prior token — kick_drift_reconcile
         // sharing the same slot means the user's "cancel" always hits the latest
         // long-running op, whichever it is.
         let ct = CancellationToken::new();
@@ -981,8 +1128,63 @@ impl AutoSyncEngine {
             diagnostics::emit(
                 DiagStage::DriftScanStart,
                 DiagLevel::Info,
-                "pull-now (from cache)",
+                "pull-now",
             );
+
+            // Pull from cache when available; otherwise run an inline scan
+            // first so Pull Now isn't a silent no-op on a cold session. The
+            // drift_watcher's first periodic tick can be 30-60s out on slow
+            // links — making the user wait was the "Pull Now does nothing"
+            // bug Blazzer reported. Inline scan respects the cancel token.
+            let cached: Vec<crate::sync::DriftEntry> = {
+                let g = match engine.last_scan_entries.lock() {
+                    Ok(g) => g,
+                    Err(_) => return,
+                };
+                g.clone()
+            };
+            let entries = if cached.is_empty() {
+                diagnostics::emit(
+                    DiagStage::DriftScanStart,
+                    DiagLevel::Info,
+                    "pull-now: cache empty — inline scan first",
+                );
+                let folders = engine.folders_clone();
+                let targets: Vec<crate::sync::drift_scanner::FolderTarget> = folders
+                    .iter()
+                    .map(|fw| crate::sync::drift_scanner::FolderTarget {
+                        resource_name: fw.resource_name.clone(),
+                        local_root: fw.local_root.to_string_lossy().to_string(),
+                        remote_root: fw.remote_root.clone(),
+                    })
+                    .collect();
+                let snap = engine.snapshot();
+                let sftp = engine.sftp();
+                let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap));
+                let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
+                if !result.cancelled {
+                    engine.cache_scan_entries(result.entries.clone());
+                }
+                if result.cancelled {
+                    diagnostics::emit_with_fields(
+                        DiagStage::DriftScanResult,
+                        DiagLevel::Info,
+                        None, None,
+                        "pull-now cancelled during scan",
+                        serde_json::json!({
+                            "entries": 0, "to_push": 0, "to_pull": 0, "to_delete": 0,
+                            "conflicts": 0, "enqueued_for_push": 0, "pull_dispatched": 0,
+                            "missing_remote_folders": 0, "listing_error": null,
+                            "cancelled": true,
+                        }),
+                    );
+                    return;
+                }
+                result.entries
+            } else {
+                cached
+            };
+
             let mut to_pull = 0u32;
             let mut to_push = 0u32;
             let mut to_delete = 0u32;
@@ -1007,11 +1209,15 @@ impl AutoSyncEngine {
             }
             // Cap concurrent pulls so a slow uplink doesn't drown the SFTP
             // session with N parallel downloads. 4 was the sweet spot for
-            // Trey's Tailscale link; tunable later. Deletes are local-only
-            // fs ops — cheap — but share the slot to keep ordering sane.
+            // Trey's Tailscale link; tunable later.
             let sem = Arc::new(tokio::sync::Semaphore::new(4));
             let mut pull_dispatched = 0u32;
             let mut cancelled = false;
+            // Track handles locally so we can await them before emitting the
+            // final result. Prior code spawned + emitted instantly, so Cancel
+            // never reached in-flight pulls and the modal had no way to know
+            // when work actually stopped.
+            let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
             for (bucket, entry) in pending {
                 if ct_for_task.is_cancelled() {
                     cancelled = true;
@@ -1019,8 +1225,13 @@ impl AutoSyncEngine {
                 }
                 let task_engine = engine.clone();
                 let permit_sem = sem.clone();
+                let ct_inner = ct_for_task.clone();
                 let h = tokio::spawn(async move {
                     let _permit = permit_sem.acquire_owned().await.ok();
+                    // Second cancel check — N tasks queue on the 4-permit
+                    // semaphore; without this, cancelling mid-burst still
+                    // drains the entire queue once permits free up.
+                    if ct_inner.is_cancelled() { return; }
                     match bucket {
                         crate::sync::DriftBucket::ToDelete => {
                             crate::sync::drift_watcher::delete_local_one(&task_engine, entry).await;
@@ -1030,9 +1241,18 @@ impl AutoSyncEngine {
                         }
                     }
                 });
-                engine.track_pull_handle(h);
+                handles.push(h);
                 pull_dispatched += 1;
             }
+
+            // If cancel arrives after the dispatch loop completes naturally,
+            // surface it. Either way, wait for in-flight work to settle so
+            // the final emit reflects reality.
+            if ct_for_task.is_cancelled() { cancelled = true; }
+            for h in handles {
+                let _ = h.await;
+            }
+            if ct_for_task.is_cancelled() { cancelled = true; }
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
@@ -1238,6 +1458,11 @@ impl AutoSyncEngine {
         if self.disposed.load(Ordering::SeqCst) {
             return;
         }
+        // Manual mode short-circuit. Dirty queue keeps building so a
+        // subsequent force_push_now drains everything at once.
+        if !self.auto_flush_enabled.load(Ordering::SeqCst) {
+            return;
+        }
         let now = Utc::now();
 
         // Drain failed → dirty when backoff elapsed.
@@ -1403,6 +1628,9 @@ impl AutoSyncEngine {
                             format!("restart failed: HTTP {}", r.status)
                         },
                         kind: ActivityKind::Bridge,
+                        latency_ms: Some(elapsed_ms),
+                        actor: Some(crate::transport::env::current_user()),
+                        ..Default::default()
                     };
                     let _ = app.emit("autosync://activity", &row);
                     diagnostics::emit_with_fields(
@@ -1459,7 +1687,16 @@ impl AutoSyncEngine {
                 self.failed.remove(&entry.path);
                 self.cache.forget(&remote);
                 self.snapshot.forget(&remote);
-                self.log_activity(&fw.resource_name, file_name(&entry.path), "deleted");
+                let rel = rel_of(fw, &entry.path);
+                self.log_activity_rich(
+                    &fw.resource_name,
+                    file_name(&entry.path),
+                    "pushed delete",
+                    Some(rel.clone()),
+                    Some(entry.path.to_string_lossy().to_string()),
+                    None,
+                    None,
+                );
                 diagnostics::emit_for(
                     DiagStage::UploadDone,
                     DiagLevel::Info,
@@ -1467,7 +1704,6 @@ impl AutoSyncEngine {
                     Some(&remote),
                     "deleted",
                 );
-                let rel = rel_of(fw, &entry.path);
                 EntryResult::Ok(Some(rel), "deleted".into())
             } else {
                 self.mark_failed(&entry);
@@ -1662,7 +1898,16 @@ impl AutoSyncEngine {
                     let h = tokio::spawn(async move { locks.release(&r).await });
                     self.track_background(h);
                 }
-                self.log_activity(&fw.resource_name, file_name(&entry.path), "synced");
+                let rel = rel_of(fw, &entry.path);
+                self.log_activity_rich(
+                    &fw.resource_name,
+                    file_name(&entry.path),
+                    "synced",
+                    Some(rel.clone()),
+                    Some(entry.path.to_string_lossy().to_string()),
+                    Some(local_size as i64),
+                    Some(elapsed_ms),
+                );
                 diagnostics::emit_with_fields(
                     DiagStage::UploadDone,
                     DiagLevel::Info,
@@ -1671,7 +1916,6 @@ impl AutoSyncEngine {
                     "synced",
                     serde_json::json!({ "size": local_size, "elapsed_ms": elapsed_ms }),
                 );
-                let rel = rel_of(fw, &entry.path);
                 EntryResult::Ok(Some(rel), "synced".into())
             } else {
                 self.mark_failed(&entry);
@@ -1821,6 +2065,34 @@ impl AutoSyncEngine {
         log::info!("{msg}");
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn log_activity_rich(
+        &self,
+        resource: &str,
+        file: &str,
+        action: &str,
+        rel_path: Option<String>,
+        local_path: Option<String>,
+        size_bytes: Option<i64>,
+        latency_ms: Option<u64>,
+    ) {
+        let row = ActivityRow {
+            at: Utc::now(),
+            resource: resource.to_string(),
+            file: file.to_string(),
+            action: action.to_string(),
+            kind: classify_action(action),
+            rel_path,
+            local_path,
+            size_bytes,
+            latency_ms,
+            sha: None,
+            actor: Some(crate::transport::env::current_user()),
+        };
+        use tauri::Emitter;
+        let _ = self.app.emit("autosync://activity", &row);
+    }
+
     fn log_activity(&self, resource: &str, file: &str, action: &str) {
         let row = ActivityRow {
             at: Utc::now(),
@@ -1828,6 +2100,8 @@ impl AutoSyncEngine {
             file: file.to_string(),
             action: action.to_string(),
             kind: classify_action(action),
+            actor: Some(crate::transport::env::current_user()),
+            ..Default::default()
         };
         let _ = self.app.emit("autosync://activity", &row);
         log::info!("[{resource}] {file}: {action}");

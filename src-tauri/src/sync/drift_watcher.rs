@@ -84,6 +84,11 @@ pub fn spawn(
 }
 
 async fn run_tick(engine: &Arc<AutoSyncEngine>) {
+    // Manual-mode short-circuit (v0.2.37). User opted out of auto-pulls.
+    // Force-pull-now still works regardless — that's a separate codepath.
+    if !engine.auto_flush_enabled() {
+        return;
+    }
     let folders = engine.folders_clone();
     if folders.is_empty() {
         return;
@@ -149,8 +154,74 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
         }),
     );
 
-    // Dispatch pulls + delete-propagation + conflict registration.
+    // ── Mass local-delete guard (v0.2.36) ─────────────────────────────────
+    // Mirror of the push-side circuit breaker. When auto-sync sees a teammate
+    // (or anyone) deleted a large batch of files remotely, the tombstone path
+    // would silently nuke the same files on this machine. Block per-resource
+    // batches that cross the scaled threshold and surface ONE prominent row
+    // per resource. User has to take explicit action (toggle off, restore
+    // remote, or — once manual mode lands — approve via review UI).
+    use std::collections::HashMap;
+    let mut deletes_by_resource: HashMap<String, Vec<crate::sync::DriftEntry>> = HashMap::new();
+    let mut other: Vec<crate::sync::DriftEntry> = Vec::new();
     for entry in result.entries {
+        if matches!(entry.bucket, DriftBucket::ToDelete) {
+            deletes_by_resource
+                .entry(entry.resource_name.clone())
+                .or_default()
+                .push(entry);
+        } else {
+            other.push(entry);
+        }
+    }
+    let folders = engine.folders_clone();
+    let mut approved_deletes: Vec<crate::sync::DriftEntry> = Vec::new();
+    for (resource, entries) in deletes_by_resource {
+        let fw = folders.iter().find(|f| f.resource_name == resource);
+        let (threshold, total) = match fw {
+            Some(f) => engine.scaled_delete_threshold(&f.local_root).await,
+            None => (5, 0),
+        };
+        let count = entries.len();
+        if count >= threshold {
+            let reason = format!(
+                "{count} local-deletes in one batch (≥ scaled threshold {threshold} of {total} files)"
+            );
+            diagnostics::emit_with_fields(
+                DiagStage::RemoteScanResult,
+                DiagLevel::Warn,
+                Some(&resource),
+                None,
+                format!("BLOCKED — {reason}"),
+                serde_json::json!({
+                    "guard": "local_delete_mass",
+                    "resource": resource,
+                    "count": count,
+                    "threshold": threshold,
+                    "total_files": total,
+                }),
+            );
+            let row = crate::sync::ActivityRow {
+                at: Utc::now(),
+                resource: resource.clone(),
+                file: "[guard]".into(),
+                action: format!("BLOCKED — {reason}"),
+                kind: crate::sync::ActivityKind::Block,
+                actor: Some(crate::transport::env::current_user()),
+                ..Default::default()
+            };
+            use tauri::Emitter;
+            let _ = engine.app().emit("autosync://activity", &row);
+            // Drop the entries — next tick will re-evaluate. If remote still
+            // missing those files, the guard re-fires. User has to act.
+        } else {
+            approved_deletes.extend(entries);
+        }
+    }
+
+    // Dispatch pulls + (approved) deletes + conflicts.
+    let final_entries: Vec<_> = other.into_iter().chain(approved_deletes).collect();
+    for entry in final_entries {
         if engine.is_disposed() {
             break;
         }
@@ -316,12 +387,19 @@ pub(crate) async fn pull_one(engine: &Arc<AutoSyncEngine>, entry: crate::sync::D
     );
 
     // Activity row for the user-facing feed.
+    let pulled_size = std::fs::metadata(&target_local).ok().map(|m| m.len() as i64);
     let row = crate::sync::ActivityRow {
         at: Utc::now(),
         resource: resource.clone(),
         file: file_name_or(&target_local),
         action: if dirty { "pulled (conflict copy)".into() } else { "pulled".into() },
         kind: if dirty { crate::sync::ActivityKind::Conflict } else { crate::sync::ActivityKind::Pull },
+        rel_path: Some(entry.rel_path.clone()),
+        local_path: Some(target_local.to_string_lossy().to_string()),
+        size_bytes: pulled_size,
+        latency_ms: Some(elapsed_ms),
+        actor: Some(crate::transport::env::current_user()),
+        ..Default::default()
     };
     use tauri::Emitter;
     let _ = engine.app().emit("autosync://activity", &row);
@@ -403,6 +481,8 @@ pub(crate) async fn delete_local_one(engine: &Arc<AutoSyncEngine>, entry: crate:
     }
 
     engine.mark_recently_written(&local_path);
+    // Stat before delete so the activity row can carry the size that vanished.
+    let deleted_size = std::fs::metadata(&local_path).ok().map(|m| m.len() as i64);
     let started = std::time::Instant::now();
     let r = std::fs::remove_file(&local_path);
     let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -454,8 +534,14 @@ pub(crate) async fn delete_local_one(engine: &Arc<AutoSyncEngine>, entry: crate:
         at: Utc::now(),
         resource,
         file: file_name_or(&local_path),
-        action: "deleted (remote removed)".into(),
+        action: "removed locally".into(),
         kind: crate::sync::ActivityKind::Delete,
+        rel_path: Some(entry.rel_path.clone()),
+        local_path: Some(local_path.to_string_lossy().to_string()),
+        size_bytes: deleted_size,
+        latency_ms: Some(elapsed_ms),
+        actor: Some(crate::transport::env::current_user()),
+        ..Default::default()
     };
     use tauri::Emitter;
     let _ = engine.app().emit("autosync://activity", &row);

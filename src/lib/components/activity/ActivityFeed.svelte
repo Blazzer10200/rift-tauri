@@ -2,8 +2,10 @@
   import {
     RefreshCw, Download, Trash2, AlertTriangle, Check,
     GitBranch, Network, Lock, XCircle, Info, Pause, Play,
+    ChevronRight, ChevronDown, Copy, Folder, ExternalLink,
   } from "lucide-svelte";
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
+  import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
   type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "error" | "system";
 
@@ -11,6 +13,24 @@
   let group = $state<Group>("all");
   let paused = $state(false);
   let frozen = $state<ActivityRow[]>([]);
+  let selectedKey = $state<string | null>(null);
+  let expandedGroups = $state<Set<string>>(new Set());
+
+  // Burst-mode + sticky-scroll state. When new events arrive faster than
+  // BURST_THRESHOLD events/window, freeze the rendered list and show a single
+  // ticker banner. When the user has scrolled away from the top, hold the
+  // scroll position so new rows don't shove their reading point — surface a
+  // "N new" jump-to-top pip instead.
+  let tbody: HTMLDivElement | undefined = $state();
+  let bufferedFeed = $state<ActivityRow[]>([]);
+  let bursting = $state(false);
+  let burstCount = $state(0);
+  let userScrolledAway = $state(false);
+  let newSinceScroll = $state(0);
+  let lastFeedLen = 0;
+  let recentArrivals: number[] = [];
+  const BURST_WINDOW_MS = 1_000;
+  const BURST_THRESHOLD = 5;
 
   const groups: { id: Group; label: string }[] = [
     { id: "all", label: "All" },
@@ -24,7 +44,86 @@
     { id: "system", label: "System" },
   ];
 
-  const source = $derived(paused ? frozen : connection.activityFeed);
+  const liveMode = $derived(!paused && !bursting && !userScrolledAway);
+  const source = $derived(
+    paused ? frozen
+    : liveMode ? connection.activityFeed
+    : bufferedFeed
+  );
+
+  function flushBuffer() {
+    bufferedFeed = connection.activityFeed.slice();
+    newSinceScroll = 0;
+    bursting = false;
+    recentArrivals = [];
+  }
+
+  function jumpToTop() {
+    flushBuffer();
+    userScrolledAway = false;
+    if (tbody) tbody.scrollTop = 0;
+  }
+
+  // Watch the feed length — push arrival timestamps, detect bursts, and grow
+  // newSinceScroll when the display is frozen (burst OR user-scrolled-away).
+  $effect(() => {
+    const len = connection.activityFeed.length;
+    const delta = Math.max(0, len - lastFeedLen);
+    if (delta > 0) {
+      const now = Date.now();
+      for (let i = 0; i < delta; i++) recentArrivals.push(now);
+      const cutoff = now - BURST_WINDOW_MS;
+      recentArrivals = recentArrivals.filter((t) => t >= cutoff);
+      if (recentArrivals.length > BURST_THRESHOLD) {
+        if (!bursting && !userScrolledAway) {
+          // Entering burst — snapshot what's visible right now so the list
+          // doesn't lurch when we flip to bufferedFeed.
+          bufferedFeed = connection.activityFeed.slice(delta);
+        }
+        bursting = true;
+      }
+      burstCount = recentArrivals.length;
+      if (!liveMode) newSinceScroll += delta;
+    }
+    lastFeedLen = len;
+  });
+
+  // Heartbeat — prune the arrival window + exit burst mode once quiet. Without
+  // this, bursting would stick forever after the first flood.
+  $effect(() => {
+    const id = setInterval(() => {
+      const cutoff = Date.now() - BURST_WINDOW_MS;
+      recentArrivals = recentArrivals.filter((t) => t >= cutoff);
+      burstCount = recentArrivals.length;
+      if (bursting && recentArrivals.length === 0 && !userScrolledAway) {
+        flushBuffer();
+      }
+    }, 400);
+    return () => clearInterval(id);
+  });
+
+  // Scroll handler — sticky position when the user has scrolled past the top.
+  // Returning to ~top auto-flushes so they don't have to click the pip.
+  $effect(() => {
+    if (!tbody) return;
+    const el = tbody;
+    const onScroll = () => {
+      const top = el.scrollTop;
+      if (top > 32) {
+        if (!userScrolledAway) {
+          bufferedFeed = connection.activityFeed.slice();
+          userScrolledAway = true;
+        }
+      } else if (top <= 4) {
+        if (userScrolledAway) {
+          userScrolledAway = false;
+          newSinceScroll = 0;
+        }
+      }
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  });
 
   function inGroup(r: ActivityRow, g: Group): boolean {
     if (g === "all") return true;
@@ -36,52 +135,141 @@
     return connection.activityFeed.filter((r) => inGroup(r, g)).length;
   }
 
+  function rowKey(r: ActivityRow): string {
+    return `${r.at}_${r.resource}_${r.file}_${r.action}`;
+  }
+
+  // Backend prepends newest to activityFeed[0]. Render order = backend order
+  // → newest stays at the top. No reverse here (the prior reverse was a bug
+  // that flipped the feed to oldest-first).
   const filtered = $derived.by(() => {
     const q = filter.trim().toLowerCase();
     return source.filter((r) => {
       if (!inGroup(r, group)) return false;
       if (!q) return true;
-      return (
-        r.resource.toLowerCase().includes(q) ||
-        r.file.toLowerCase().includes(q) ||
-        r.action.toLowerCase().includes(q)
-      );
+      const hay = `${r.resource} ${r.file} ${r.rel_path ?? ""} ${r.action}`.toLowerCase();
+      return hay.includes(q);
     });
   });
 
-  // Windowed virtualization
-  const ROW_H = 36;
-  const OVERSCAN = 6;
-  let scroller: HTMLDivElement | undefined = $state();
-  let scrollTop = $state(0);
-  let viewport = $state(600);
+  // Collapse consecutive runs of the SAME (resource, kind, action) within a
+  // 10-second window into a single expandable group row. Singles + short runs
+  // (<3) pass through unchanged.
+  type Rendered =
+    | { type: "single"; row: ActivityRow; key: string }
+    | { type: "groupHeader"; key: string; rows: ActivityRow[]; expanded: boolean }
+    | { type: "groupChild"; key: string; parentKey: string; row: ActivityRow };
 
-  $effect(() => {
-    if (!scroller) return;
-    const el = scroller;
-    const onScroll = () => { scrollTop = el.scrollTop; };
-    const ro = new ResizeObserver(() => { viewport = el.clientHeight; });
-    el.addEventListener("scroll", onScroll, { passive: true });
-    ro.observe(el);
-    viewport = el.clientHeight;
-    return () => {
-      el.removeEventListener("scroll", onScroll);
-      ro.disconnect();
-    };
+  // Aggressive grouping kills the row-shoving flicker during sync bursts.
+  // 2 events in 5s window means runs collapse immediately — the visual rhythm
+  // settles into one growing group instead of dozens of new rows shoving older
+  // ones down.
+  const GROUP_WINDOW_MS = 5_000;
+  const GROUP_MIN_RUN = 2;
+
+  // Longest common prefix across rel_paths in a run. Drives the "path" column
+  // of a group header — beats "9 items" because the user wants to see WHICH
+  // dir was operated on.
+  function commonPathPrefix(rows: ActivityRow[]): string {
+    const paths = rows
+      .map((r) => r.rel_path ?? r.file ?? "")
+      .filter((p) => p.length > 0);
+    if (paths.length === 0) return "";
+    const split = paths.map((p) => p.split("/").filter(Boolean));
+    const out: string[] = [];
+    const minLen = Math.min(...split.map((s) => s.length));
+    for (let i = 0; i < minLen; i++) {
+      const seg = split[0][i];
+      if (split.every((s) => s[i] === seg)) out.push(seg);
+      else break;
+    }
+    if (out.length === 0) return paths[0].split("/")[0] ?? "";
+    return out.join("/");
+  }
+
+  const rendered = $derived.by<Rendered[]>(() => {
+    const out: Rendered[] = [];
+    let i = 0;
+    while (i < filtered.length) {
+      const head = filtered[i];
+      let j = i + 1;
+      while (
+        j < filtered.length &&
+        filtered[j].resource === head.resource &&
+        filtered[j].kind === head.kind &&
+        filtered[j].action === head.action &&
+        Math.abs(new Date(filtered[j].at).getTime() - new Date(filtered[j - 1].at).getTime()) <= GROUP_WINDOW_MS
+      ) {
+        j++;
+      }
+      const run = filtered.slice(i, j);
+      if (run.length >= GROUP_MIN_RUN) {
+        const key = `g_${head.resource}_${head.kind}_${head.action}_${head.at}`;
+        const expanded = expandedGroups.has(key);
+        out.push({ type: "groupHeader", key, rows: run, expanded });
+        if (expanded) {
+          for (const r of run) {
+            out.push({ type: "groupChild", key: rowKey(r), parentKey: key, row: r });
+          }
+        }
+      } else {
+        for (const r of run) {
+          out.push({ type: "single", row: r, key: rowKey(r) });
+        }
+      }
+      i = j;
+    }
+    return out;
   });
 
-  const startIdx = $derived(Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN));
-  const endIdx = $derived(
-    Math.min(filtered.length, Math.ceil((scrollTop + viewport) / ROW_H) + OVERSCAN),
-  );
-  const slice = $derived(filtered.slice(startIdx, endIdx));
-  const padTop = $derived(startIdx * ROW_H);
-  const padBot = $derived(Math.max(0, (filtered.length - endIdx) * ROW_H));
+  const selectedRow = $derived.by<ActivityRow | null>(() => {
+    if (!selectedKey) return null;
+    return filtered.find((r) => rowKey(r) === selectedKey) ?? null;
+  });
 
   function fmtTime(iso: string): string {
     try {
       return new Date(iso).toLocaleTimeString([], { hour12: true });
     } catch { return iso; }
+  }
+
+  function fmtFullTime(iso: string): string {
+    try {
+      return new Date(iso).toLocaleString([], { hour12: true });
+    } catch { return iso; }
+  }
+
+  function fmtSize(n: number | null | undefined): string {
+    if (n == null) return "—";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`;
+    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  }
+
+  function fmtLatency(ms: number | null | undefined): string {
+    if (ms == null) return "—";
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(2)}s`;
+  }
+
+  function shortSha(s: string | null | undefined): string {
+    if (!s) return "—";
+    return s.length > 12 ? `${s.slice(0, 12)}…` : s;
+  }
+
+  // Resource string from the backend is the bare folder name (`endure`, `ox`)
+  // OR is already bracketed by the user's own resource naming (`[ox]` in
+  // FiveM). Wrap in single `[…]` only when not already wrapped — kills the
+  // `[[ox]]` double-bracket bug from v0.2.35.
+  function fmtResource(r: string): string {
+    if (!r) return "—";
+    if (r.startsWith("[") && r.endsWith("]")) return r;
+    return `[${r}]`;
+  }
+
+  function pathOf(r: ActivityRow): string {
+    return r.rel_path ?? r.file ?? "";
   }
 
   type Variant = "ok" | "warn" | "danger" | "info" | "muted";
@@ -124,6 +312,47 @@
       frozen = [...connection.activityFeed];
       paused = true;
     }
+  }
+
+  function toggleGroup(key: string) {
+    const next = new Set(expandedGroups);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    expandedGroups = next;
+  }
+
+  function selectRow(key: string) {
+    selectedKey = selectedKey === key ? null : key;
+  }
+
+  function resolveLocalPath(r: ActivityRow): string | null {
+    return r.local_path ?? null;
+  }
+
+  let actionFlash = $state<string | null>(null);
+  function flash(msg: string) {
+    actionFlash = msg;
+    setTimeout(() => { actionFlash = null; }, 1500);
+  }
+
+  async function copyPath(r: ActivityRow) {
+    const p = resolveLocalPath(r);
+    if (!p) { flash("path unknown"); return; }
+    try { await navigator.clipboard.writeText(p); flash("path copied"); }
+    catch { flash("copy failed"); }
+  }
+
+  async function openFile(r: ActivityRow) {
+    const p = resolveLocalPath(r);
+    if (!p) { flash("path unknown"); return; }
+    try { await openPath(p); flash("opened"); }
+    catch (e) { flash(`open failed: ${e}`); }
+  }
+
+  async function revealInFolder(r: ActivityRow) {
+    const p = resolveLocalPath(r);
+    if (!p) { flash("path unknown"); return; }
+    try { await revealItemInDir(p); flash("revealed in OS"); }
+    catch (e) { flash(`reveal failed: ${e}`); }
   }
 </script>
 
@@ -172,31 +401,137 @@
     </div>
   </div>
 
-  <div class="list" bind:this={scroller}>
-    {#if filtered.length === 0}
-      <div class="empty">
-        {connection.activityFeed.length === 0
-          ? "No activity yet — start auto-sync to see events."
-          : "No matches."}
-      </div>
-    {:else}
-      <div style="height:{padTop}px"></div>
-      {#each slice as r (r.at + "_" + r.resource + "_" + r.file + "_" + r.action)}
-        {@const Icon = kindIcon(r.kind)}
-        {@const v = kindVariant(r.kind)}
-        <div class="row" style="height:{ROW_H}px">
-          <span class="time mono">{fmtTime(r.at)}</span>
-          <span class="kind" data-variant={v} title={r.kind}>
-            <Icon size={12}/>
-          </span>
-          <div class="text">
-            <span class="label">{r.action}</span>
-            <span class="detail mono" title={r.file}>{r.resource}{r.file ? ` · ${r.file}` : ""}</span>
-          </div>
+  <div class="table">
+    <div class="thead">
+      <div class="th time">Time</div>
+      <div class="th kind"></div>
+      <div class="th resource">Resource</div>
+      <div class="th path">Path</div>
+      <div class="th action">Action</div>
+      <div class="th size">Size</div>
+      <div class="th dur">Dur</div>
+      <div class="th actor">Actor</div>
+    </div>
+
+    <div class="tbody" bind:this={tbody}>
+      {#if bursting || newSinceScroll > 0}
+        <button
+          type="button"
+          class="burst-pip mono"
+          onclick={jumpToTop}
+          title={bursting ? "Burst in progress — click to resume + jump to top" : "Jump to top"}
+        >
+          {#if bursting}
+            <span class="dot live"></span>
+            live · {burstCount}/s · click to resume
+          {:else}
+            ↑ {newSinceScroll} new · click to jump to top
+          {/if}
+        </button>
+      {/if}
+      {#if rendered.length === 0}
+        <div class="empty">
+          {connection.activityFeed.length === 0
+            ? "No activity yet — start auto-sync to see events."
+            : "No matches."}
         </div>
-      {/each}
-      <div style="height:{padBot}px"></div>
-    {/if}
+      {:else}
+        {#each rendered as item (item.key + (item.type === "groupHeader" ? `_${item.expanded ? "x" : "c"}_${item.rows.length}` : ""))}
+          {#if item.type === "groupHeader"}
+            {@const r0 = item.rows[0]}
+            {@const Icon = kindIcon(r0.kind)}
+            {@const v = kindVariant(r0.kind)}
+            {@const prefix = commonPathPrefix(item.rows)}
+            <div
+              class="tr group"
+              data-expanded={item.expanded}
+              onclick={() => toggleGroup(item.key)}
+              onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(item.key); } }}
+              role="button"
+              tabindex="0"
+            >
+              <div class="td time mono">{fmtTime(r0.at)}</div>
+              <div class="td kind">
+                <span class="kchip" data-variant={v}>
+                  <Icon size={11}/>
+                </span>
+                <span class="count-chip mono">{item.rows.length}×</span>
+              </div>
+              <div class="td resource mono">{fmtResource(r0.resource)}</div>
+              <div class="td path mono" title={prefix}>{prefix || "—"}</div>
+              <div class="td action">
+                <span class="chev" data-expanded={item.expanded}>
+                  {#if item.expanded}<ChevronDown size={11}/>{:else}<ChevronRight size={11}/>{/if}
+                </span>
+                {r0.action}
+              </div>
+              <div class="td size mono">—</div>
+              <div class="td dur mono">—</div>
+              <div class="td actor mono">{r0.actor ?? "—"}</div>
+            </div>
+          {:else if item.type === "groupChild"}
+            {@const r = item.row}
+            {@const Icon = kindIcon(r.kind)}
+            {@const v = kindVariant(r.kind)}
+            {@const isSelected = selectedKey === item.key}
+            <div
+              class="tr child"
+              data-selected={isSelected}
+              onclick={() => selectRow(item.key)}
+              onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectRow(item.key); } }}
+              role="button"
+              tabindex="0"
+            >
+              <div class="td time mono">{fmtTime(r.at)}</div>
+              <div class="td kind">
+                <span class="kchip sm" data-variant={v}>
+                  <Icon size={10}/>
+                </span>
+              </div>
+              <div class="td resource mono">{fmtResource(r.resource)}</div>
+              <div class="td path mono" title={pathOf(r)}>{pathOf(r) || "—"}</div>
+              <div class="td action" title={r.action}>{r.action}</div>
+              <div class="td size mono">{fmtSize(r.size_bytes)}</div>
+              <div class="td dur mono">{fmtLatency(r.latency_ms)}</div>
+              <div class="td actor mono">{r.actor ?? "—"}</div>
+            </div>
+            {#if isSelected}
+              {@render detailStrip(r)}
+            {/if}
+          {:else}
+            {@const r = item.row}
+            {@const Icon = kindIcon(r.kind)}
+            {@const v = kindVariant(r.kind)}
+            {@const isSelected = selectedKey === item.key}
+            <div
+              class="tr"
+              data-selected={isSelected}
+              data-variant={v}
+              onclick={() => selectRow(item.key)}
+              onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectRow(item.key); } }}
+              role="button"
+              tabindex="0"
+            >
+              <div class="td time mono">{fmtTime(r.at)}</div>
+              <div class="td kind">
+                <span class="kchip" data-variant={v}>
+                  <Icon size={11}/>
+                </span>
+              </div>
+              <div class="td resource mono">{fmtResource(r.resource)}</div>
+              <div class="td path mono" title={pathOf(r)}>{pathOf(r) || "—"}</div>
+              <div class="td action" title={r.action}>{r.action}</div>
+              <div class="td size mono">{fmtSize(r.size_bytes)}</div>
+              <div class="td dur mono">{fmtLatency(r.latency_ms)}</div>
+              <div class="td actor mono">{r.actor ?? "—"}</div>
+            </div>
+            {#if isSelected}
+              {@render detailStrip(r)}
+            {/if}
+          {/if}
+        {/each}
+      {/if}
+    </div>
   </div>
 
   {#if paused}
@@ -204,7 +539,62 @@
       Feed paused — {Math.max(0, connection.activityFeed.length - frozen.length)} new since pause
     </div>
   {/if}
+  {#if actionFlash}
+    <div class="action-flash mono">{actionFlash}</div>
+  {/if}
 </section>
+
+{#snippet detailStrip(r: ActivityRow)}
+  {@const localPath = resolveLocalPath(r)}
+  <div class="strip" role="region" aria-label="Event details">
+    <div class="strip-meta">
+      <div class="meta-row">
+        <span class="meta-k">When</span>
+        <span class="meta-v mono">{fmtFullTime(r.at)}</span>
+      </div>
+      {#if r.sha}
+        <div class="meta-row">
+          <span class="meta-k">SHA</span>
+          <span class="meta-v mono" title={r.sha}>{shortSha(r.sha)}</span>
+        </div>
+      {/if}
+      {#if localPath}
+        <div class="meta-row path-row">
+          <span class="meta-k">Path</span>
+          <span class="meta-v mono" title={localPath}>{localPath}</span>
+        </div>
+      {/if}
+    </div>
+    <div class="strip-actions">
+      <button
+        class="btn ghost sm"
+        type="button"
+        onclick={(e) => { e.stopPropagation(); openFile(r); }}
+        disabled={!localPath}
+        title={localPath ?? "Path unknown"}
+      >
+        <ExternalLink size={11}/> Open
+      </button>
+      <button
+        class="btn ghost sm"
+        type="button"
+        onclick={(e) => { e.stopPropagation(); copyPath(r); }}
+        disabled={!localPath}
+      >
+        <Copy size={11}/> Copy
+      </button>
+      <button
+        class="btn ghost sm"
+        type="button"
+        onclick={(e) => { e.stopPropagation(); revealInFolder(r); }}
+        disabled={!localPath}
+        title="Reveal in OS file browser"
+      >
+        <Folder size={11}/> Reveal
+      </button>
+    </div>
+  </div>
+{/snippet}
 
 <style>
   .feed {
@@ -274,56 +664,192 @@
 
   .actions { display: inline-flex; gap: 6px; }
 
-  .list {
-    flex: 1; min-height: 0; overflow: auto;
+  /* Table-style layout. Single source of truth for column widths lives on
+     `.thead` and is mirrored on every `.tr` via display: grid. Keeps headers
+     and rows aligned without per-cell width hacks. */
+  .table {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
+    overflow: hidden;
   }
-
-  .row {
+  .thead, .tr {
     display: grid;
-    grid-template-columns: 78px 28px 1fr;
-    gap: 10px;
+    grid-template-columns:
+      96px              /* time   */
+      54px              /* kind   */
+      120px             /* res    */
+      minmax(160px, 1fr)/* path   */
+      minmax(140px, 200px) /* action */
+      72px              /* size   */
+      64px              /* dur    */
+      90px;             /* actor  */
     align-items: center;
+    column-gap: 12px;
     padding: 0 12px;
-    border-bottom: 1px solid var(--border);
     font-size: var(--fs-sm);
   }
-  .row:last-child { border-bottom: 0; }
-  .row:hover { background: var(--surface-hover); }
+  .thead {
+    height: 30px;
+    background: var(--bg-elev-2);
+    border-bottom: 1px solid var(--border);
+    color: var(--fg-subtle);
+    font-size: var(--fs-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    position: sticky; top: 0; z-index: 1;
+  }
+  .th { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .th.size, .th.dur { text-align: right; }
 
-  .time { color: var(--fg-subtle); font-size: var(--fs-xs); }
-  .kind {
+  .tbody {
+    flex: 1; min-height: 0; overflow: auto;
+  }
+
+  .tr {
+    height: 32px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .tr:last-child { border-bottom: 0; }
+  .tr:hover { background: var(--surface-hover); }
+  .tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .tr[data-selected="true"] { background: var(--accent-soft); }
+  .tr[data-variant="danger"] .td.action { color: var(--danger); }
+  .tr[data-variant="warn"] .td.action { color: var(--warn); }
+
+  .tr.group {
+    background: color-mix(in oklch, var(--surface) 92%, var(--accent-soft));
+    font-weight: 500;
+  }
+  .tr.group:hover { background: color-mix(in oklch, var(--surface-hover) 85%, var(--accent-soft)); }
+  .tr.child {
+    background: color-mix(in oklch, var(--surface) 95%, var(--bg-elev-2));
+  }
+  .tr.child .td.resource { padding-left: 14px; opacity: 0.7; }
+
+  .td {
+    min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg);
+  }
+  .td.time { color: var(--fg-subtle); font-size: var(--fs-xs); }
+  .td.kind { display: inline-flex; align-items: center; gap: 6px; }
+  .td.resource { color: var(--fg-muted); }
+  .td.path { color: var(--fg); }
+  .td.action { display: inline-flex; align-items: center; gap: 4px; }
+  .td.size, .td.dur { text-align: right; color: var(--fg-muted); font-size: var(--fs-xs); }
+  .td.actor { color: var(--fg-subtle); font-size: var(--fs-xs); }
+
+  .kchip {
     width: 22px; height: 22px;
     border-radius: var(--radius-xs);
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg-elev-2); color: var(--fg-muted);
+    flex-shrink: 0;
   }
-  .kind[data-variant="ok"]     { background: var(--ok-soft);     color: var(--ok); }
-  .kind[data-variant="warn"]   { background: var(--warn-soft);   color: var(--warn); }
-  .kind[data-variant="danger"] { background: var(--danger-soft); color: var(--danger); }
-  .kind[data-variant="info"]   { background: var(--info-soft);   color: var(--info); }
+  .kchip.sm { width: 18px; height: 18px; }
+  .kchip[data-variant="ok"]     { background: var(--ok-soft);     color: var(--ok); }
+  .kchip[data-variant="warn"]   { background: var(--warn-soft);   color: var(--warn); }
+  .kchip[data-variant="danger"] { background: var(--danger-soft); color: var(--danger); }
+  .kchip[data-variant="info"]   { background: var(--info-soft);   color: var(--info); }
 
-  .text { display: flex; flex-direction: column; min-width: 0; }
-  .label {
+  .count-chip {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 7px;
+    background: var(--bg-elev-3);
+    color: var(--fg-muted);
+    font-size: 10px; line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chev {
+    color: var(--fg-subtle);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+
+  /* Inline detail strip — renders directly beneath the selected row. Spans
+     the whole row width (NOT grid-aware) for legibility, indented to align
+     with the path column visually. */
+  .strip {
+    padding: 8px 12px 10px;
+    background: color-mix(in oklch, var(--accent-soft) 30%, var(--surface));
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 16px; align-items: flex-start;
+    flex-wrap: wrap;
+    /* No entry animation — during sync bursts the flicker was nauseating. */
+  }
+  .strip-meta {
+    display: flex; gap: 10px 18px; flex-wrap: wrap;
+    flex: 1; min-width: 0;
+  }
+  .meta-row {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    font-size: var(--fs-xs);
+    min-width: 0;
+  }
+  .meta-row.path-row { flex-basis: 100%; }
+  .meta-k {
+    color: var(--fg-subtle);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 10px;
+  }
+  .meta-v {
     color: var(--fg);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
   }
-  .detail {
-    color: var(--fg-subtle);
-    font-size: var(--fs-xs);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .strip-actions {
+    display: inline-flex; gap: 6px;
+    flex-shrink: 0;
   }
 
   .empty {
-    padding: 24px;
+    padding: 32px;
     color: var(--fg-muted);
     text-align: center;
     font-size: var(--fs-sm);
   }
 
-  .paused-banner {
+  /* Top-of-feed pip — visible only when bursting or scrolled-away. Sticky so
+     it stays pinned even as the list scrolls beneath it. */
+  .burst-pip {
+    position: sticky; top: 0; z-index: 2;
+    display: inline-flex; align-items: center; gap: 6px;
+    margin: 4px auto;
+    padding: 4px 10px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    /* Center it across the tbody width. */
+    align-self: center;
+    width: fit-content;
+    left: 50%; transform: translateX(-50%);
+  }
+  .burst-pip:hover { background: color-mix(in oklch, var(--accent-soft) 60%, var(--accent)); }
+  .burst-pip .dot.live {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--danger);
+    box-shadow: 0 0 6px var(--danger);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .paused-banner, .action-flash {
     position: absolute;
     bottom: 22px; left: 50%; transform: translateX(-50%);
     background: var(--bg-elev-2);
@@ -333,5 +859,17 @@
     color: var(--fg-muted);
     font-size: var(--fs-xs);
     box-shadow: var(--shadow);
+    z-index: 2;
+  }
+  .action-flash { bottom: 56px; }
+
+  /* Hide the Actor column on narrower viewports — keeps the table readable
+     when the window is shrunk near min-width (1280px). */
+  @media (max-width: 1400px) {
+    .thead, .tr {
+      grid-template-columns:
+        96px 54px 120px minmax(160px, 1fr) minmax(140px, 200px) 72px 64px;
+    }
+    .th.actor, .td.actor { display: none; }
   }
 </style>

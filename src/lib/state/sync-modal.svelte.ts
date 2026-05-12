@@ -5,7 +5,7 @@
 // reconcile, and the old 30s hard timeout was the v0.2.19 false-alarm bug.
 
 export type SyncPhase = "scanning" | "complete" | "cancelled" | "error";
-export type SyncMode = "scan" | "pull";
+export type SyncMode = "scan" | "pull" | "push";
 
 export type SyncActivityKind =
   | "drift" | "sync" | "pull" | "push" | "delete" | "error" | "block" | "system";

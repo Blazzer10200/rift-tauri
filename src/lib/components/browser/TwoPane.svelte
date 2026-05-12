@@ -159,8 +159,9 @@
   // reconcile took ~45s). Modal stays patient as long as events keep arriving.
   const syncing = $derived(syncModal.open && syncModal.phase === "scanning");
   let pulling = $state(false);
+  let pushing = $state(false);
   async function onSync() {
-    if (syncing || pulling) return;
+    if (syncing || pulling || pushing) return;
     syncModal.start();
     try {
       const fired = await invoke<boolean>("diag_force_drift_scan");
@@ -172,7 +173,7 @@
     }
   }
   async function onPullNow() {
-    if (syncing || pulling) return;
+    if (syncing || pulling || pushing) return;
     pulling = true;
     syncModal.start("pull");
     try {
@@ -182,6 +183,19 @@
       syncModal.fail(String(e));
     } finally {
       pulling = false;
+    }
+  }
+  async function onPushNow() {
+    if (syncing || pulling || pushing) return;
+    pushing = true;
+    syncModal.start("push");
+    try {
+      const fired = await invoke<boolean>("diag_force_push_now");
+      if (!fired) syncModal.fail("Not connected — start auto-sync first.");
+    } catch (e) {
+      syncModal.fail(String(e));
+    } finally {
+      pushing = false;
     }
   }
 </script>
@@ -222,10 +236,12 @@
         canDownload={remoteSel.length > 0}
         {syncing}
         {pulling}
+        {pushing}
         {onUpload}
         {onDownload}
         {onSync}
         {onPullNow}
+        {onPushNow}
       />
       <RemotePane
         serverKey={connection.selectedKey}

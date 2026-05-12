@@ -53,6 +53,21 @@ const IGNORE_SEGMENTS: &[&str] = &[
     "target",
     ".venv",
     "venv",
+    // Rift's own FiveM bridge resource — server-side daemon rewrites
+    // `snapshot.json` + `devbridge.jsonl` every few seconds as runtime state.
+    // Pre-ignore the entire folder: same self-loop pathology as
+    // `.rift-trail.jsonl` (pull → watcher event → push → server rewrites →
+    // drift → pull forever). User pulled+synced these every 10s in v0.2.35.
+    // If the bridge resource itself ever needs an update, do it manually
+    // outside the watch pipeline. See v0.2.36 post-mortem.
+    "endure_devbridge",
+];
+
+/// Suffix-matched folder names — catches the bridge under any prefix
+/// (`<server>_devbridge`) without needing per-server entries. Matched against
+/// each path segment; `endure_devbridge` and `qbx_devbridge` both hit.
+const IGNORE_SEGMENT_SUFFIXES: &[&str] = &[
+    "_devbridge",
 ];
 
 /// Returns the ignore-rule label that matched, or None if eligible for sync.
@@ -186,8 +201,22 @@ pub fn classify(path: &str) -> Option<&'static str> {
             "target" => "seg:target",
             ".venv" => "seg:.venv",
             "venv" => "seg:venv",
+            "endure_devbridge" => "seg:endure_devbridge",
             _ => "seg:?",
         });
+    }
+
+    // Suffix-matched segments (e.g. `qbx_devbridge`, `world_devbridge` — any
+    // bridge variant). Walk each path segment and check the suffix list.
+    for seg in lower.split('/').filter(|s| !s.is_empty()) {
+        for suffix in IGNORE_SEGMENT_SUFFIXES {
+            if seg.ends_with(suffix) && seg.len() > suffix.len() {
+                return Some(match *suffix {
+                    "_devbridge" => "seg-suffix:_devbridge",
+                    _ => "seg-suffix:?",
+                });
+            }
+        }
     }
 
     None

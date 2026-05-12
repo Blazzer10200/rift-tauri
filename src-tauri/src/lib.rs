@@ -159,6 +159,41 @@ async fn diag_force_pull_now(
     Ok(true)
 }
 
+/// v0.2.37 manual mode — drain every dirty queue entry NOW, regardless of
+/// debounce. Returns false if not connected (no engine bound). Emits the same
+/// DriftScanStart/Result events as force_pull_now so the SyncModal renders.
+#[tauri::command]
+async fn diag_force_push_now(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else { return Ok(false) };
+    engine.force_push_now();
+    Ok(true)
+}
+
+/// v0.2.37 manual-mode toggle. Returns current state when called with None.
+/// When `on=false`: flush_cycle + drift_watcher run_tick skip their work,
+/// user drives sync via Push Now / Pull Now buttons.
+#[tauri::command]
+async fn set_auto_flush(
+    state: tauri::State<'_, AutoSyncState>,
+    on: bool,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else { return Ok(true) };
+    Ok(engine.set_auto_flush_enabled(on))
+}
+
+#[tauri::command]
+async fn get_auto_flush(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else { return Ok(true) };
+    Ok(engine.auto_flush_enabled())
+}
+
 /// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
 /// when a sync isn't behaving. Keys are stable rule labels from
 /// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
@@ -531,6 +566,7 @@ async fn resolve_conflicts_bulk(
                 file: basename_for_log(p),
                 action: "conflict resolve blocked: path traversal".to_string(),
                 kind: ActivityKind::Block,
+                ..Default::default()
             });
             out.push(false);
             continue;
@@ -544,6 +580,7 @@ async fn resolve_conflicts_bulk(
                 file: basename_for_log(p),
                 action: format!("conflict resolved as {:?}", resolution).to_lowercase(),
                 kind: ActivityKind::ConflictResolved,
+                ..Default::default()
             }
         } else {
             ActivityRow {
@@ -552,6 +589,7 @@ async fn resolve_conflicts_bulk(
                 file: basename_for_log(p),
                 action: format!("conflict resolve failed: {}", res.err().unwrap_or_default()),
                 kind: ActivityKind::Error,
+                ..Default::default()
             }
         };
         let _ = app.emit("autosync://activity", &row);
@@ -823,6 +861,7 @@ async fn upload_paths(
         file: format!("{} files", mapped.len()),
         action: "upload started".to_string(),
         kind: ActivityKind::Sync,
+        ..Default::default()
     });
     let result = client.upload_files_batch(&mapped, 4).await;
     client.close().await;
@@ -833,6 +872,7 @@ async fn upload_paths(
         file: format!("{}/{} files", ok, result.len()),
         action: if ok == result.len() { "upload complete".to_string() } else { "upload partial".to_string() },
         kind: if ok == result.len() { ActivityKind::Sync } else { ActivityKind::Error },
+        ..Default::default()
     });
     Ok(result)
 }
@@ -915,6 +955,7 @@ async fn download_paths(
         file: "expanding job list".to_string(),
         action: "download started".to_string(),
         kind: ActivityKind::Pull,
+        ..Default::default()
     });
     let mapped = expand_download_jobs(&client, jobs).await;
     if mapped.is_empty() {
@@ -925,6 +966,7 @@ async fn download_paths(
             file: "0 files".to_string(),
             action: "download empty".to_string(),
             kind: ActivityKind::System,
+            ..Default::default()
         });
         return Ok(vec![]);
     }
@@ -934,6 +976,7 @@ async fn download_paths(
         file: format!("{} files", mapped.len()),
         action: "downloading".to_string(),
         kind: ActivityKind::Pull,
+        ..Default::default()
     });
     let result = tokio::select! {
         r = client.download_files_batch(&mapped, 4, ct.clone()) => r,
@@ -946,6 +989,7 @@ async fn download_paths(
                 file: format!("{} files", mapped.len()),
                 action: "download cancelled".to_string(),
                 kind: ActivityKind::Error,
+                ..Default::default()
             });
             return Ok(vec![false; mapped.len()]);
         }
@@ -962,6 +1006,7 @@ async fn download_paths(
         file: format!("{}/{} files", ok, result.len()),
         action: if ok == result.len() { "download complete".to_string() } else { "download partial".to_string() },
         kind: if ok == result.len() { ActivityKind::Pull } else { ActivityKind::Error },
+        ..Default::default()
     });
     Ok(result)
 }
@@ -999,6 +1044,7 @@ async fn remote_rename_path(
             file: format!("{} → {}", basename_for_log(&from), basename_for_log(&to)),
             action: "remote rename".to_string(),
             kind: ActivityKind::Sync,
+            ..Default::default()
         },
         Err(e) => ActivityRow {
             at: chrono::Utc::now(),
@@ -1006,6 +1052,7 @@ async fn remote_rename_path(
             file: basename_for_log(&from),
             action: format!("remote rename failed: {e}"),
             kind: ActivityKind::Error,
+            ..Default::default()
         },
     };
     let _ = app.emit("autosync://activity", &row);
@@ -1031,6 +1078,7 @@ async fn remote_delete_paths(
                 file: basename_for_log(p),
                 action: "remote delete".to_string(),
                 kind: ActivityKind::Delete,
+                ..Default::default()
             }
         } else {
             ActivityRow {
@@ -1039,6 +1087,7 @@ async fn remote_delete_paths(
                 file: basename_for_log(p),
                 action: format!("remote delete failed: {}", res.err().unwrap_or_default()),
                 kind: ActivityKind::Error,
+                ..Default::default()
             }
         };
         let _ = app.emit("autosync://activity", &row);
@@ -1067,6 +1116,7 @@ fn local_rename_path(
             file: format!("{} → {}", basename_for_log(&from), basename_for_log(&to)),
             action: "local rename".to_string(),
             kind: ActivityKind::Sync,
+            ..Default::default()
         },
         Err(e) => ActivityRow {
             at: chrono::Utc::now(),
@@ -1074,6 +1124,7 @@ fn local_rename_path(
             file: basename_for_log(&from),
             action: format!("local rename failed: {e}"),
             kind: ActivityKind::Error,
+            ..Default::default()
         },
     };
     let _ = app.emit("autosync://activity", &row);
@@ -1096,6 +1147,7 @@ fn local_delete_paths(
                 file: basename_for_log(p),
                 action: format!("local delete blocked: {e}"),
                 kind: ActivityKind::Block,
+                ..Default::default()
             });
             out.push(false);
             continue;
@@ -1113,6 +1165,7 @@ fn local_delete_paths(
                 file: basename_for_log(p),
                 action: "local delete".to_string(),
                 kind: ActivityKind::Delete,
+                ..Default::default()
             }
         } else {
             ActivityRow {
@@ -1121,6 +1174,7 @@ fn local_delete_paths(
                 file: basename_for_log(p),
                 action: format!("local delete failed: {}", res.err().map(|e| e.to_string()).unwrap_or_default()),
                 kind: ActivityKind::Error,
+                ..Default::default()
             }
         };
         let _ = app.emit("autosync://activity", &row);
@@ -1464,6 +1518,9 @@ pub fn run() {
             diag_force_drift_scan,
             diag_cancel_drift_scan,
             diag_force_pull_now,
+            diag_force_push_now,
+            set_auto_flush,
+            get_auto_flush,
             diag_ignored_breakdown,
             set_remote_scan_interval,
             get_remote_scan_interval,

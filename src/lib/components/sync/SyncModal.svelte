@@ -2,7 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
-  import { X, Loader2, AlertTriangle, CheckCircle2, Ban, Download } from "lucide-svelte";
+  import { X, Loader2, AlertTriangle, CheckCircle2, Ban, Download, Upload } from "lucide-svelte";
   import { syncModal, type SyncActivityKind } from "../../state/sync-modal.svelte";
   import { connection } from "../../state/connection.svelte";
 
@@ -32,6 +32,7 @@
   let watchdogTimer: ReturnType<typeof setInterval> | null = null;
   let cancelling = $state(false);
   let pulling = $state(false);
+  let pushing = $state(false);
 
   function basename(p: string): string {
     const norm = p.replaceAll("\\", "/").replace(/\/+$/, "");
@@ -163,6 +164,20 @@
     }
   }
 
+  async function onPushNow() {
+    if (pushing) return;
+    pushing = true;
+    syncModal.start("push");
+    try {
+      const fired = await invoke<boolean>("diag_force_push_now");
+      if (!fired) syncModal.fail("Not connected — start auto-sync first.");
+    } catch (err) {
+      syncModal.fail(String(err));
+    } finally {
+      pushing = false;
+    }
+  }
+
   function onDismiss() {
     syncModal.dismiss();
   }
@@ -198,21 +213,29 @@
       role="presentation"
       onclick={syncModal.phase === "scanning" ? undefined : onDismiss}
     ></div>
-    <div class="card">
+    <div class="card" data-mode={syncModal.mode}>
       <header class="card-head">
         <div class="title-row">
           {#if syncModal.phase === "scanning"}
-            <Loader2 size={16} class="spin"/>
-            <h2 id="sync-modal-title">Syncing {profileName}</h2>
+            {#if syncModal.mode === "pull"}
+              <Download size={16} class="pulse-down"/>
+              <h2 id="sync-modal-title">Pulling from {profileName}</h2>
+            {:else if syncModal.mode === "push"}
+              <Upload size={16} class="pulse-up"/>
+              <h2 id="sync-modal-title">Pushing to {profileName}</h2>
+            {:else}
+              <Loader2 size={16} class="spin"/>
+              <h2 id="sync-modal-title">Scanning {profileName}</h2>
+            {/if}
           {:else if syncModal.phase === "complete"}
             <CheckCircle2 size={16}/>
-            <h2 id="sync-modal-title">Sync complete</h2>
+            <h2 id="sync-modal-title">{syncModal.mode === "pull" ? "Pull complete" : syncModal.mode === "push" ? "Push complete" : "Scan complete"}</h2>
           {:else if syncModal.phase === "cancelled"}
             <Ban size={16}/>
-            <h2 id="sync-modal-title">Sync cancelled</h2>
+            <h2 id="sync-modal-title">{syncModal.mode === "pull" ? "Pull cancelled" : syncModal.mode === "push" ? "Push cancelled" : "Scan cancelled"}</h2>
           {:else}
             <AlertTriangle size={16}/>
-            <h2 id="sync-modal-title">Sync error</h2>
+            <h2 id="sync-modal-title">{syncModal.mode === "pull" ? "Pull error" : syncModal.mode === "push" ? "Push error" : "Scan error"}</h2>
           {/if}
         </div>
         <button
@@ -233,6 +256,8 @@
           {#if syncModal.phase === "scanning"}
             {#if syncModal.mode === "pull"}
               Pulling cached changes… (no scan needed)
+            {:else if syncModal.mode === "push"}
+              Pushing pending local edits…
             {:else if syncModal.totalFolders > 0}
               Scanning {syncModal.resource || "…"} — {syncModal.currentFolder} / {syncModal.totalFolders} folders
             {:else}
@@ -253,18 +278,20 @@
         {/if}
       </section>
 
-      <section class="counts">
-        <div class="count-cell" data-tone="push">
-          <div class="cell-num mono">{syncModal.result?.push ?? 0}</div>
-          <div class="cell-label">To Push</div>
-        </div>
+      <section class="counts" data-cols={syncModal.mode === "pull" ? 3 : 4}>
+        {#if syncModal.mode !== "pull"}
+          <div class="count-cell" data-tone="push">
+            <div class="cell-num mono">{syncModal.result?.push ?? 0}</div>
+            <div class="cell-label">To Push</div>
+          </div>
+        {/if}
         <div class="count-cell" data-tone="pull">
           <div class="cell-num mono">{syncModal.result?.pull ?? 0}</div>
-          <div class="cell-label">To Pull</div>
+          <div class="cell-label">{syncModal.mode === "pull" ? "Pulled" : "To Pull"}</div>
         </div>
-        <div class="count-cell" data-tone="pull">
+        <div class="count-cell" data-tone="warn">
           <div class="cell-num mono">{syncModal.result?.deletes ?? 0}</div>
-          <div class="cell-label">To Delete</div>
+          <div class="cell-label">{syncModal.mode === "pull" ? "Removed" : "To Delete"}</div>
         </div>
         <div class="count-cell" data-tone={(syncModal.result?.conflicts ?? 0) > 0 ? "danger" : "ok"}>
           <div class="cell-num mono">{syncModal.result?.conflicts ?? 0}</div>
@@ -291,13 +318,21 @@
       <footer class="card-foot">
         {#if syncModal.phase === "scanning"}
           <button type="button" class="btn btn-danger" onclick={onCancel} disabled={cancelling}>
-            {cancelling ? "Cancelling…" : "Cancel scan"}
+            {cancelling
+              ? "Cancelling…"
+              : (syncModal.mode === "pull" ? "Stop pull" : syncModal.mode === "push" ? "Stop push" : "Cancel scan")}
           </button>
         {:else}
           {#if syncModal.phase === "complete" && (syncModal.result?.pull ?? 0) > 0}
             <button type="button" class="btn btn-accent" onclick={onPullNow} disabled={pulling}>
               <Download size={13}/>
               {pulling ? "Pulling…" : `Pull Now (${syncModal.result?.pull ?? 0})`}
+            </button>
+          {/if}
+          {#if syncModal.phase === "complete" && (syncModal.result?.push ?? 0) > 0}
+            <button type="button" class="btn btn-accent" onclick={onPushNow} disabled={pushing}>
+              <Upload size={13}/>
+              {pushing ? "Pushing…" : `Push Now (${syncModal.result?.push ?? 0})`}
             </button>
           {/if}
           <button type="button" class="btn btn-primary" onclick={onDismiss}>Dismiss</button>
@@ -359,6 +394,36 @@
     background: var(--accent);
     transition: width 220ms ease-out;
   }
+  /* Pull mode: lean into the app's purple accent (oklch hue 275). Was blue
+     earlier — clashed w/ the rest of the chrome. The differentiation from
+     the Scan modal comes from the title copy + icon + count layout, not a
+     palette swap. */
+  .card[data-mode="pull"] .bar-fill,
+  .card[data-mode="push"] .bar-fill { background: var(--accent); }
+  .card[data-mode="pull"] .card-head,
+  .card[data-mode="push"] .card-head {
+    background: color-mix(in oklch, var(--accent-soft) 80%, transparent);
+    border-bottom-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+  }
+  .card[data-mode="pull"] .title-row :global(svg),
+  .card[data-mode="push"] .title-row :global(svg) { color: var(--accent); }
+  /* Subtle downward bob on the download icon — reads as "files flowing in"
+     without the spinning-arrow nonsense that read as a loader. ~1.6s cycle,
+     2px travel, opacity dip to imply motion w/o being distracting. */
+  :global(.pulse-down) {
+    animation: pulse-down 1.6s ease-in-out infinite;
+  }
+  :global(.pulse-up) {
+    animation: pulse-up 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse-down {
+    0%, 100% { transform: translateY(0); opacity: 0.95; }
+    50%      { transform: translateY(2px); opacity: 0.65; }
+  }
+  @keyframes pulse-up {
+    0%, 100% { transform: translateY(0); opacity: 0.95; }
+    50%      { transform: translateY(-2px); opacity: 0.65; }
+  }
   .status-line {
     margin-top: 8px;
     font-size: var(--fs-xs);
@@ -380,6 +445,7 @@
     gap: 8px;
     padding: 6px 16px 14px;
   }
+  .counts[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
   .count-cell {
     background: var(--bg-elev-1);
     border: 1px solid var(--border);
