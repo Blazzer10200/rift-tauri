@@ -394,13 +394,14 @@
 {#if menuFor}
   {@const target = menuFor}
   {@const multi = selected.size > 1 && selected.has(target.path)}
-  <!-- svelte-ignore a11y_interactive_supports_focus a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_interactive_supports_focus -->
   <div
     class="ctxmenu"
     role="menu"
     tabindex="-1"
     style="left:{menuPos.x}px; top:{menuPos.y}px"
     onclick={(ev) => ev.stopPropagation()}
+    onkeydown={(ev) => { if (ev.key === "Escape") { ev.preventDefault(); closeMenu(); } }}
   >
     {#if target.is_dir && !multi}
       <button type="button" class="ctx-item" onclick={() => { onOpenInNewTab(target); closeMenu(); }}>

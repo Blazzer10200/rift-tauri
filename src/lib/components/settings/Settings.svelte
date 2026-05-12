@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
@@ -16,7 +16,11 @@
     onLaunchKeygen: () => void;
   } = $props();
 
-  let section = $state<Section>(initialSection);
+  // Section is meant to be initialized once from the prop; subsequent prop
+  // changes shouldn't override the user's in-app navigation. `untrack` makes
+  // Svelte stop flagging the prop read as a "captures only initial value"
+  // hazard — capturing once is the intent.
+  let section = $state<Section>(untrack(() => initialSection));
   let appVersion = $state("?");
   let copied = $state(false);
 

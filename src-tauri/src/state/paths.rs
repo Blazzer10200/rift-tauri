@@ -74,6 +74,6 @@ pub fn atomic_write_json(path: &std::path::Path, json: &str) -> std::io::Result<
     }
     let _ = std::fs::remove_file(&tmp);
     Err(last_err.unwrap_or_else(|| {
-        std::io::Error::new(std::io::ErrorKind::Other, "atomic_write_json: rename failed")
+        std::io::Error::other("atomic_write_json: rename failed")
     }))
 }

@@ -2,58 +2,28 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
-## Session 27 — 2026-05-12 — v0.2.26: perms-recurrence killer + working Cancel
+## Session 28 — 2026-05-12 — v0.2.27-v0.2.30: data-loss recovery + WAN scan speedup + cleanup sweep
 
-Continuation of S26 after Trey's chmod-fix wasn't sticking. Root cause: umask 0022 on the FiveM server kept making every NEW file 0644, so v0.2.25's one-time chgrp/chmod cycle had to be re-run after every push. Fix moved into Rift itself.
-
-### Ship trail
-- **v0.2.26** —
-  - **SFTP `set_metadata(perms=0o664)` after each `upload_atomic_via` rename** ([sftp/mod.rs](src-tauri/src/sftp/mod.rs#L1013)). Combined w/ existing setgid on parent dirs, every Rift-uploaded file is group-writable on the fly. Permanent fix for the recurring teammate EACCES.
-  - **Cancel button works for `force_pull_now` AND `drift_watcher::run_tick`.** Both now register `CancellationToken`s in the shared `current_scan_cancel` slot via new `pub(crate)` helpers `register_scan_cancel`/`clear_scan_cancel` on `AutoSyncEngine`. force_pull_now checks token between dispatched pulls + emits `DriftScanResult { cancelled: true }` on abort.
-  - **`tokio::sync::Semaphore` (4 permits)** caps concurrent pulls in `force_pull_now` — was flooding SFTP session on Trey's Tailscale link.
-  - **SyncModal drops `drift_scan_progress` when `mode === "pull"`** — parallel drift_watcher ticks were leaking `scanning [ox] (8/8)` rows into Pull Now's activity feed.
-
-### Server-side (out-of-band)
-- Ran `chmod -R g+w` across all `blazzer`-owned files under `/opt/fxserver/.../resources/` for backlog cleanup. New uploads self-chmod via v0.2.26.
-- `setfacl` not available on the server (no `acl` package). Considered but skipped — Rift-side chmod is cleaner anyway.
-
-### Verify
-- `cargo check`: clean (1.71s). `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
-- Tag pushed: `60db799` → `Blazzer10200/rift-tauri` + Velopack release at `rift-releases/releases/tag/v0.2.26-alpha-test`.
-
-### Flagged for v0.2.27+
-- **Token-slot race** — `register_scan_cancel` replaces the slot, so an overlapping `run_tick` mid-`force_pull_now` could shadow the user op. Move to `Vec<CancellationToken>` w/ `cancel_all` if it bites.
-- **Per-folder streaming during initial SFTP `list_recursive_batch`** — still emits no progress during the 30s+ listing. Instrument per-root completion.
-- **Pre-flight write probe** on autosync start (catch EACCES at connect time).
-- **5 a11y warnings** in Settings/LocalPane/RemotePane — pre-existing, UX sweep.
-
-### Investigation captured for future reference
-The "Pull Now feels stuck for 5 min on Trey's end" mystery had multiple overlapping causes — all addressed by v0.2.26's four edits combined: (1) every push failing → file landed 0644 → next push fails → loop, (2) Cancel did nothing → user couldn't escape, (3) N parallel SFTP pulls saturated his uplink, (4) modal showed misleading "scanning" progress from background ticks. Belt-and-suspenders fix.
-
----
-
-## Session 26 — 2026-05-12 — Sync modal + rapid-iteration pull-side polish (v0.2.20 → v0.2.25)
-
-Single-session ship streak. v0.2.20 introduced SyncModal + scan cancel; v0.2.21-v0.2.25 are post-field-test polish driven by Blazzer + Trey using Rift live for a real FiveM/Endure RP sync workflow.
+Post-S27 compaction continuation. Four ships, escalating from emergency (data-loss fix) to feature (server-side `find` listing) to UX (folder-delete) to hygiene (warnings sweep). All driven by Trey running on residential Tailscale uplink — every bug surfaced because WAN latency exposed assumptions that LAN testing hid.
 
 ### Ship trail (newest first)
-- **v0.2.25** — Actionable SFTP errors. Russh-sftp double "Permission denied: Permission denied" collapsed via new `format_sftp_err` helper in [sftp/mod.rs](src-tauri/src/sftp/mod.rs). EACCES on tmp-create/write/rename now appends the server-side fix command (chgrp + chmod g+w + setgid). Trey's permission errors triggered this — files were Blazzer-owned in 0755 dirs.
-- **v0.2.24** — **Pull Now actually fast.** v0.2.21's force_pull_now re-ran the full 30s drift scan before dispatching, so it felt identical to Reconcile (the SFTP batch listing IS the slow part). Fixed by caching `last_scan_entries: std::sync::Mutex<Vec<DriftEntry>>` on AutoSyncEngine. drift_watcher tick (every 10s) + kick_drift_reconcile both write the cache. force_pull_now dispatches from the cache — sub-second. SyncModal gained a `mode: "scan" | "pull"` axis; pull mode shows "Pulling cached changes… (no scan needed)" instead of the misleading "Listing remote files…".
-- **v0.2.23** — Auto-snap browser tabs to new profile root. After Trey moved his FiveM dir + edited Settings, the left pane stuck on `C:\fivem server\[endure]` (old path) because `browser-tabs.svelte.ts` persists tab navigation in localStorage. New `$effect` in TwoPane normalizes paths (lowercase, fwd slashes) and snaps any tab whose path doesn't start with the active profile's root back to that root.
-- **v0.2.22** — Pull Now button promoted to OpRail (middle column) for discoverability. v0.2.21 buried it in the modal footer where you had to scan first to find it. New `DownloadCloud` icon (distinct from Download arrow + Reconcile circle).
-- **v0.2.21** — Snappier auto-pull cadence (30s → 10s, [drift_watcher.rs:41](src-tauri/src/sync/drift_watcher.rs#L41)) + initial Pull Now button (modal-internal only) + listing-phase hint.
-- **v0.2.20** — SyncModal (center-stage overlay, replaces ScanProgressChip), scan cancel (CancellationToken between folders, `current_scan_cancel: std::sync::Mutex` because kick_drift_reconcile is sync), path-guards re-applied on upload/download, Open-in-editor ctx menu, dead `just_pulled_suppress_until` purged.
+- **v0.2.30** — Whole-codebase audit pass. Clippy → 0 warnings (was 1, `io_other_error` in [paths.rs](src-tauri/src/state/paths.rs)). Svelte-check → 2 warnings (was 5). Fixed `state_referenced_locally` in [Settings.svelte](src/lib/components/settings/Settings.svelte) via `untrack(() => initialSection)`. Added `onkeydown` Escape handler to ctxmenu wrappers in LocalPane/RemotePane — closes the menu + clears `a11y_click_events_have_key_events`. The 2 remaining `<section>` warnings persist b/c the `svelte-ignore a11y_no_noninteractive_element_interactions` directive doesn't suppress in current svelte-check — known quirk, not a defect. Zero TODO/FIXME/HACK. One legitimate `#[allow(dead_code)]` (SSH session-keeper, documented). No orphan modules.
+- **v0.2.29** — Folder-delete fix. Deleting a FiveM resource dir locally surfaced `delete failed: ...: No such file` b/c `SftpClient::delete` only called `remove_file` (SFTP-spec: rejects dirs). Now probes `remote_stat` first; dirs → `delete_recursive_via`; missing remote → success (avoids re-queue loop).
+- **v0.2.28** — Server-side `find`-exec listing in [sftp/mod.rs](src-tauri/src/sftp/mod.rs) `list_via_exec`. One SSH-exec round-trip per root vs N round-trips per directory in SFTP. On Trey's link (verified direct Tailscale, 25ms DERP-fallback only) scans dropped from 30-60s → ~1-3s. Prunes match `sync::ignore::ignored_directory_names()`. Falls back to SFTP worker path on per-root failure (no `find` on PATH, non-POSIX shell). Exit 0+1 both tolerated (mid-walk ENOENT shouldn't fail the whole scan).
+- **v0.2.27** — **CRITICAL data-loss fix.** v0.2.26's post-rename `set_metadata(0o664)` was using `russh_sftp::protocol::FileAttributes::default()` which (in russh-sftp 2.1.2) returns `size: Some(0), mtime: Some(0), atime: Some(0), uid/gid: Some(0)`. SETSTAT honored those → every Trey upload truncated to 0 bytes + epoch-1970 mtime the instant rename completed. Three real files (`fxmanifest.lua`, `server/server.lua`, `client/client.lua` in `[endure]/endure_shooting/`) were zeroed in the live FiveM tree — Blazzer restored them via FiveM session. Fix: `FileAttributes::empty()` (all `None`) so SETSTAT only carries `permissions`. Bonus: scan Cancel now races `list_recursive_batch` via `tokio::select!` so clicking Cancel during the listing returns immediately instead of waiting 30-60s.
 
-### Verify (post-v0.2.25)
-- `cargo check`: clean. `svelte-check`: 0 errors, 5 a11y warnings (all pre-existing in Settings/LocalPane/RemotePane).
-- Working tree clean. All 6 commits pushed (`84caea6` → `5747fce`). Releases v0.2.20-v0.2.25 on `rift-releases`.
-- Field-validated: push direction works (Blazzer added `endure_shooting`, Rift auto-detected + synced to fxserver). Pull direction works post-v0.2.21 (10s tick) + manual Pull Now. Remaining blocker is Linux-side perms (Blazzer-owned files in 0755 → Trey can't write tmps); user is fixing via chgrp + chmod g+w + setgid on the server.
+### Tailscale diagnostic (capture for future ref)
+Trey's `tailscale status` confirmed `direct 69.50.245.28:41641, tx 285M rx 533M` — direct P2P, not DERP-relayed. `netcheck`: `UDP: true`, `MappingVariesByDestIP: false`, `PortMapping: UPnP+NAT-PMP+PCP`. His router is permissive; SFTP protocol overhead was the entire bottleneck. v0.2.28's exec-listing addresses that root cause.
 
-### Flagged for v0.2.26+
-- **Per-folder streaming during initial SFTP listing.** Backend's `SftpClient::list_recursive_batch` is the slow part of a scan (~30s deep trees), emits no progress events. v0.2.20 mitigated with "Listing remote files…" hint. Real fix: instrument the batch to emit per-root completion. ~30-40min, touches [sftp/mod.rs](src-tauri/src/sftp/mod.rs).
-- **Pre-flight write probe** on autosync start — catch EACCES at connect time instead of first push. ~15min.
-- **Review Pull button in modal** when result.pull > 0 → opens DriftReview. Lower urgency now that Pull Now exists.
-- **5 a11y warnings** — Settings/LocalPane/RemotePane. Pre-existing patterns; UX-only sweep.
+### Verify (post-v0.2.30)
+- `cargo check`: clean. `cargo clippy --no-deps`: clean. `svelte-check`: 0 errors, 2 warnings (svelte-ignore quirk, documented).
+- Releases v0.2.27-v0.2.30 on `rift-releases`. All source commits pushed.
+
+### Flagged for v0.2.31+
+- **Token-slot race** in `register_scan_cancel` — overlapping `run_tick` mid-`force_pull_now` can shadow user op. Move to `Vec<CancellationToken>` w/ `cancel_all` if it bites.
+- **Per-folder streaming during scan listing** — v0.2.28 collapsed listing time to ~1s on WAN, but if it grows large, instrument per-root completion for progress.
+- **Pre-flight write probe** on autosync start (catch EACCES at connect time, not first push).
+- **`svelte-ignore` non-suppression** on `<section>` a11y warnings — investigate svelte-kit/svelte-check version bump.
 
 ---
 
@@ -61,11 +31,11 @@ Single-session ship streak. v0.2.20 introduced SyncModal + scan cancel; v0.2.21-
 
 **Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`.
 
-**Current state (post S26):** **v0.2.25-alpha-test SHIPPED** to `rift-releases`. 6 ships this session (v0.2.20-v0.2.25). Blazzer + Trey running it live on Endure RP FiveM server. Outstanding non-Rift task: Blazzer fixing server-side Linux perms (chgrp fxserver + chmod g+w + setgid on `/opt/fxserver/.../resources/`). Once that's done, push/pull bidirectional works without permission errors.
+**Current state (post S28):** **v0.2.30-alpha-test SHIPPED** to `rift-releases`. 4 ships this session (v0.2.27-v0.2.30). Trey running on Tailscale direct path; bidirectional sync verified working post-v0.2.27. Scan latency on his link dropped 30-60s → ~1-3s w/ v0.2.28. Folder deletes work post-v0.2.29. Codebase clean post-v0.2.30 (clippy 0, svelte-check 2 warnings).
 
 **Next session likely entry points:**
-1. Confirm chmod fix landed + bidirectional push works on Trey's end.
-2. Pick next item: per-folder listing streaming (cleanest pickup), pre-flight write probe, brainstorm #4 (per-resource sync mode), or brainstorm #2 (buddy presence).
+1. Confirm Trey's v0.2.30 update landed + sync stays stable.
+2. Pick next item from v0.2.31+ flagged list, or move to brainstorm items (per-resource sync mode, buddy presence).
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
@@ -79,4 +49,6 @@ Single-session ship streak. v0.2.20 introduced SyncModal + scan cancel; v0.2.21-
 - `rename_via` is strict (user-facing); `rename_overwriting_via` is ONLY for atomic upload tmp-swap
 - **Source `.secrets/env.sh` first on ship/auth tasks** — Claude Code bash is non-interactive, won't auto-load
 - **`current_scan_cancel` + `last_scan_entries` are std::sync::Mutex** (NOT tokio) — `kick_drift_reconcile` is sync and called from notify event handler; tokio Mutex `blocking_lock` panics there. Don't "fix" it.
-- **`force_pull_now` dispatches from cache, NOT a fresh scan** — re-scanning makes it identical to Reconcile (30s SFTP batch listing is the cost). drift_watcher's 10s tick keeps cache fresh.
+- **`force_pull_now` dispatches from cache, NOT a fresh scan** — re-scanning makes it identical to Reconcile (SFTP listing is the cost). drift_watcher's 10s tick keeps cache fresh.
+- **NEVER use `FileAttributes::default()` for SETSTAT** — it sends `size: Some(0)`, `mtime: Some(0)`, `atime: Some(0)`, `uid/gid: Some(0)` which the server honors → file truncation + epoch mtime. Always use `FileAttributes::empty()` and explicitly set only the fields you want to change. See v0.2.27 post-mortem.
+- **`SftpClient::delete` routes by remote stat** — dirs go through `delete_recursive_via`. Don't shortcut back to `remove_file` for "files only" — the push pipeline can't distinguish file from dir deletes ahead of time. See v0.2.29.
