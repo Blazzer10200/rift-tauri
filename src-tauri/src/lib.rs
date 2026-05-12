@@ -807,7 +807,7 @@ async fn remote_list_dir(
         .find(&server_key)
         .ok_or_else(|| format!("no server with key '{server_key}'"))?
         .clone();
-    let path = path_guard::validate_remote_child(&server, &path)
+    let path = path_guard::validate_remote_listable(&server, &path)
         .map_err(|e| format!("remote list guard: {e}"))?;
     let client = open_sftp_for(&server_key).await?;
     let entries = client.list_directory(&path).await;

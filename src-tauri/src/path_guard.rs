@@ -66,6 +66,49 @@ pub fn validate_remote_child(profile: &ServerProfile, path: &str) -> Result<Stri
     Ok(normalized)
 }
 
+/// Permissive variant for read-only navigation (list/browse). Allows `path ==
+/// remote_root` since the browser's entry point IS the root. Still rejects
+/// `..` / backslash / drive-root escapes. Use `validate_remote_child` for
+/// destructive ops (rename/delete/upload/edit) where root must be refused.
+pub fn validate_remote_listable(profile: &ServerProfile, path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("remote path is empty".into());
+    }
+    if trimmed.contains('\\') {
+        return Err("remote path contains backslash".into());
+    }
+    let mut clean: Vec<&str> = Vec::new();
+    for seg in trimmed.split('/') {
+        match seg {
+            "" | "." => continue,
+            ".." => return Err("remote path contains '..'".into()),
+            s => clean.push(s),
+        }
+    }
+    let normalized = if clean.is_empty() { "/".to_string() } else { format!("/{}", clean.join("/")) };
+
+    let root_raw = profile.remote_root.trim();
+    if root_raw.is_empty() {
+        return Err("profile.remote_root is empty".into());
+    }
+    let root_trim = root_raw.trim_end_matches('/');
+    let root_norm = if root_trim.starts_with('/') {
+        root_trim.to_string()
+    } else {
+        format!("/{root_trim}")
+    };
+    if normalized == root_norm {
+        return Ok(normalized);
+    }
+    if !normalized.starts_with(&format!("{root_norm}/")) {
+        return Err(format!(
+            "remote path '{normalized}' escapes remote_root '{root_norm}'"
+        ));
+    }
+    Ok(normalized)
+}
+
 /// Validate a local path stays strictly under `profile.local_root`. Canonicalizes
 /// the target (or its parent, for not-yet-existing rename targets) before the
 /// containment check so symlinks can't smuggle escapes.
