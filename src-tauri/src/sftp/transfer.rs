@@ -240,7 +240,15 @@ async fn upload_atomic_via(
         Err(e) => return OpResult::err(format!("read local {}: {e}", local_path.display())),
     };
     if let Some(parent) = super::ops::remote_parent(remote_path) {
-        let _ = super::ops::mkdir_p_via(sftp, parent).await;
+        // Strict mkdir — surface failure instead of silently swallowing.
+        // Without this, a failed parent-dir create caused `sftp.create(&tmp)`
+        // to return "No such file" downstream, but only as one of many fail
+        // counts in a batch — files appeared "dropped" with no actionable
+        // error. Strict mode disambiguates "exists as dir" (idempotent ok)
+        // from "real failure" via a metadata probe on each create_dir miss.
+        if let Err(e) = super::ops::mkdir_p_strict_via(sftp, parent).await {
+            return OpResult::err(format_sftp_err("mkdir parent", parent, e));
+        }
     }
     let tmp = format!("{remote_path}.rift-tmp");
     // Best-effort cleanup of any abandoned tmp from a prior crashed upload

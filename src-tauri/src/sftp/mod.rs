@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 use crate::transport::ssh_handler::PinningHandler;
 
 mod list;
-mod ops;
+pub(crate) mod ops;
 mod remote_exec;
 mod transfer;
 

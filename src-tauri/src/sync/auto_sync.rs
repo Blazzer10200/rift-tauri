@@ -1677,17 +1677,28 @@ impl AutoSyncEngine {
         );
 
         // Drop a presence lock fire-and-forget on the FIRST dirty event for this
-        // path in a cycle. Released on flush success (release inside process_entry)
-        // or on Deleted (release here so renamed-old-path locks don't leak).
+        // path in a cycle. Released on flush (process_entry wrapper releases on
+        // every terminal result — Ok or Fail) or on Deleted (release here so
+        // renamed-old-path locks don't leak).
+        //
+        // Gate acquire on `path.is_file()` — never acquire a lock for a
+        // directory path. notify can emit Modified events with dir paths on
+        // Windows when child files change; previously these queued, the
+        // upload step failed (read-dir-as-file), and the orphan `<dir>.rift-
+        // lock` was never released. Pattern observed 2026-05-12 with
+        // `[depend]/oxmysql.rift-lock`, `[community]/illenium-appearance/sql.
+        // rift-lock`, etc. Directories never need presence locks anyway —
+        // their constituent files each get one.
         if first_dirty || kind == ChangeKind::Deleted {
             if let Some(locks) = self.locks.clone() {
             if let Some(fw) = self.folders.get(&watch_key_for_lock).map(|v| v.value().clone()) {
                 if let Some(remote) = map_local_to_remote(&path, &fw) {
                     let kind_at_queue = kind;
+                    let path_for_check = path.clone();
                     let h = tokio::spawn(async move {
                         if kind_at_queue == ChangeKind::Deleted {
                             locks.release(&remote).await;
-                        } else {
+                        } else if path_for_check.is_file() {
                             locks.acquire(&remote).await;
                         }
                     });
@@ -1740,6 +1751,53 @@ impl AutoSyncEngine {
             format!("{} · {} file(s)", fw.resource_name, entries.len()),
         )
         .await;
+
+        // ── Pre-create unique parent dirs on the main session ────────────
+        // Per-file `mkdir_p_strict` inside `upload_atomic_via` is the inner
+        // fallback, but when N workers race the same fresh parent tree
+        // (50-file new bracket) any transient mkdir miss can desync the
+        // workers. Serializing here = single authoritative mkdir per unique
+        // parent, errors surface immediately, and the parallel upload loop
+        // runs against a known-good tree. Fixes Bug 2/4 from the 2026-05-12
+        // Endure RP report (entire `[depend]/oxmysql/` directory missing
+        // after Push). Symmetric with `upload_files_batch` at
+        // sftp/transfer.rs:116-128 which already did this for its codepath.
+        {
+            let mut unique_parents: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
+            for e in &entries {
+                if e.kind == ChangeKind::Deleted {
+                    continue;
+                }
+                if let Some(remote) = map_local_to_remote(&e.path, fw) {
+                    if let Some(p) = crate::sftp::ops::remote_parent(&remote) {
+                        if p != "/" && !p.is_empty() {
+                            unique_parents.insert(p.to_string());
+                        }
+                    }
+                }
+            }
+            for parent in &unique_parents {
+                if let Err(err) = self.sftp.mkdir_p_strict(parent).await {
+                    self.log_activity(
+                        &fw.resource_name,
+                        "[mkdir]",
+                        &format!("pre-create {parent} failed: {err}"),
+                    );
+                    diagnostics::emit_with_fields(
+                        DiagStage::UploadFail,
+                        DiagLevel::Warn,
+                        Some(&fw.resource_name),
+                        Some(parent),
+                        format!("pre-mkdir failed: {err}"),
+                        serde_json::json!({ "op": "pre_mkdir", "error": err }),
+                    );
+                    // Don't bail the batch — children may still succeed
+                    // (network blip, race-with-other-worker). The per-file
+                    // strict mkdir is the safety net; this is the fast path.
+                }
+            }
+        }
 
         // Bounded concurrency.
         use futures::stream::{FuturesUnordered, StreamExt};
@@ -1876,20 +1934,40 @@ impl AutoSyncEngine {
         let entry_for_requeue = entry.clone();
         let fw_name = fw.resource_name.clone();
         let file_for_log = file_name(&entry_for_requeue.path).to_string();
+        let entry_path_for_release = entry.path.clone();
+        let fw_for_release = fw.clone();
         let work = self.process_entry_body(fw, entry, cancel.clone());
-        if let Some(ct) = cancel {
+        let result = if let Some(ct) = cancel {
             tokio::select! {
                 biased;
                 _ = ct.cancelled() => {
                     self.dirty.insert(entry_for_requeue.path.clone(), entry_for_requeue);
                     self.log_activity(&fw_name, &file_for_log,
                         "cancelled mid-flight — requeued");
-                    return EntryResult::Requeued;
+                    EntryResult::Requeued
                 }
-                r = work => return r,
+                r = work => r,
+            }
+        } else {
+            work.await
+        };
+        // Release the presence lock on every terminal result. Without this,
+        // any non-Ok exit (Fail, conflict, vanish, read-error) leaked the
+        // `<file>.rift-lock` on the remote because release only fired in the
+        // success branch of process_entry_body. Pattern observed 2026-05-12
+        // — 44 orphan locks across the prod tree. Requeued is intentionally
+        // skipped: the entry is still pending, keep the lock until it
+        // terminally succeeds or fails. Release is idempotent so the inner
+        // success-path release is harmless.
+        if !matches!(result, EntryResult::Requeued) {
+            if let Some(locks) = self.locks.clone() {
+                if let Some(remote) = map_local_to_remote(&entry_path_for_release, &fw_for_release) {
+                    let h = tokio::spawn(async move { locks.release(&remote).await });
+                    self.track_background(h);
+                }
             }
         }
-        work.await
+        result
     }
 
     async fn process_entry_body(

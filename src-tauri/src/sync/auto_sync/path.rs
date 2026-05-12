@@ -67,11 +67,19 @@ pub(super) fn stat_local(p: &Path) -> Option<(i64, DateTime<Utc>)> {
 
 
 pub(super) async fn wait_for_readable(path: &Path) -> bool {
-    for _ in 0..4 {
+    // Exponential backoff: 50, 100, 200, 400, 800, 1600 ms — ~3.2 s total.
+    // Previously 4 × 50 ms = 200 ms total which was far too short for hot
+    // mass-push where the IDE / FXServer is touching files simultaneously
+    // (Endure RP session 2026-05-12 produced 48 "skipped: file locked or
+    // unreadable" rows for live-edited Lua/JSON files). 3 s matches typical
+    // editor atomic-save windows on Windows w/ Defender real-time scan.
+    let mut delay_ms: u64 = 50;
+    for _ in 0..6 {
         if tokio::fs::File::open(path).await.is_ok() {
             return true;
         }
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        delay_ms = (delay_ms * 2).min(1600);
     }
     false
 }

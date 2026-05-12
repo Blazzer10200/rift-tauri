@@ -2,6 +2,50 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 50 — 2026-05-12 — Push reliability + orphan-lock fix → ship v0.2.46-alpha
+
+### Trigger
+Cross-session report from Endure RP FiveM server work: 4 production bugs after a 16-resource bulk-replace + `[depend]/` bracket reorg via Push-all:
+1. Push doesn't propose remote-deletes for local-orphans (UX/intent).
+2. Push **silently drops files** — `[depend]/oxmysql/` (~50 files) missing entirely; `ox_doorlock/fxmanifest.lua`, `ox_fuel/{config,client/init,data/stations}.lua`, `qbx_seatbelt/data/seatbelt_sounds.dat54.rel` all dropped without surfacing the failure path-by-path.
+3. 44 orphan `.rift-lock` files across the prod tree (Pattern A tmp-locks, B dir-locks, C stream-locks).
+4. Directory-creation has a separate broken path — new `[depend]/oxmysql/` left an orphan `.rift-lock` and zero files.
+
+User did manual SSH cleanup; needed code fix to prevent recurrence.
+
+### Completed (file:line)
+- **F1 — Strict mkdir** [sftp/ops.rs:185-220](src-tauri/src/sftp/ops.rs#L185) — `mkdir_p_strict_via` probes metadata after each failed `create_dir`. Real failures propagate; "already exists as dir" stays idempotent.
+- **F1.b — Upload uses strict** [sftp/transfer.rs:242-252](src-tauri/src/sftp/transfer.rs#L242) — `upload_atomic_via` surfaces parent-mkdir failure as `OpResult::err("mkdir parent X: ...")` instead of letting downstream `sftp.create(&tmp)` mask it.
+- **F2 — Lock release on every terminal result** [sync/auto_sync.rs:1876-1925](src-tauri/src/sync/auto_sync.rs#L1876) — `process_entry` wrapper releases on Ok AND Fail; Requeued preserves it. Inner success-path release stays a no-op (idempotent). Kills the 44-orphan-lock leak vector.
+- **F3 — No locks for directory paths** [sync/auto_sync.rs:1685-1710](src-tauri/src/sync/auto_sync.rs#L1685) — `queue_path` gates `locks.acquire(...)` on `path.is_file()`. Windows `notify` firing Modified on parent dirs no longer leaks `<dir>.rift-lock`.
+- **F4 — Batch pre-mkdir** [sync/auto_sync.rs:1755-1800](src-tauri/src/sync/auto_sync.rs#L1755) — `flush_batch` collects unique parents and serializes mkdir on main session BEFORE the parallel upload loop. Eliminates the 50-worker race on fresh `[depend]/oxmysql/` tree.
+- **F7 — `wait_for_readable` 3.2 s exp backoff** [sync/auto_sync/path.rs:69-87](src-tauri/src/sync/auto_sync/path.rs#L69) — 200 ms → 6 × 50/100/200/400/800/1600 ms. Fixes the 48-skipped-file pattern from v0.2.45 mass-push.
+- **`pub(crate) mod ops`** [sftp/mod.rs:41](src-tauri/src/sftp/mod.rs#L41) — exposes `remote_parent` to flush_batch.
+- `cargo check` clean 4.22s.
+
+### Files Modified (S50)
+- `src-tauri/src/sftp/ops.rs` — `mkdir_p_strict_via` + `mkdir_p_inner` + `pub(crate)` on `remote_parent`
+- `src-tauri/src/sftp/transfer.rs` — `upload_atomic_via` uses strict mkdir, surfaces error
+- `src-tauri/src/sftp/mod.rs` — `pub(crate) mod ops;`
+- `src-tauri/src/sync/auto_sync.rs` — F2 wrapper release, F3 is_file gate, F4 batch pre-mkdir
+- `src-tauri/src/sync/auto_sync/path.rs` — wait_for_readable exp backoff
+- `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` — 0.2.45 → 0.2.46-alpha
+- `docs/CHANGELOG.md` — v0.2.46 entry (v0.2.45 falls to git log)
+
+### Deferred to v0.2.47
+- **Mirror mode for Push-all** (Bug 1) — needs new drift bucket for `local-missing + remote-has + baseline-exists` → propose-remote-delete, plus UI toggle. Significant classification + frontend work.
+- **Stale-lock sweep UI button** — existing `sweep_stale_mine` (180 s threshold) already catches own-user stale locks on watcher attach. Manual UI is nice-to-have.
+
+### Next session priorities
+1. Smoke v0.2.46 on Blazzer + Treyday over Tailscale. Specifically: create new bracket dir w/ ≥50 fresh files, push, verify every file lands. Concurrent edit-during-push to validate lock-release fix.
+2. Mirror mode design — UX decision: dedicated "Mirror" mode toggle vs always-show-remote-orphans-as-ToDelete?
+3. v0.2.45's mass-delete guard fine-tune (still open from S49).
+
+### Audit notes — Treyday safety
+All v0.2.45 safety preserved: foreign-lock check, dirty-local check, setgid 2775 mkdir mode for shared-group teammate pushes, 20s × 3 keepalive on both russh sessions, conflict-rename guard in `pull_one`. New strict mkdir applies setgid 2775 same as before. New `is_file()` gate doesn't affect file uploads.
+
+---
+
 ## Session 49 — 2026-05-12 — Partial-listing root-cause + ship v0.2.45-alpha
 
 ### Completed
