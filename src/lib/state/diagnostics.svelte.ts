@@ -244,9 +244,9 @@ class DiagnosticsStore {
 
   async forceDriftScan(): Promise<boolean> {
     try {
-      return await invoke<boolean>("diag_force_drift_scan");
+      return await invoke<boolean>("sync_reconcile");
     } catch (e) {
-      console.error("diag_force_drift_scan failed", e);
+      console.error("sync_reconcile failed", e);
       return false;
     }
   }

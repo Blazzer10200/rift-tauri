@@ -29,6 +29,11 @@ const ACTIVITY_CAP = 100;
 
 class SyncModalStore {
   open = $state(false);
+  // `busy` tracks the backend op lifecycle. Set true on start(), cleared by
+  // complete/cancelled/fail. Independent of `open` — user can dismiss the
+  // modal via "Run in background" while the op continues. Drives the
+  // TabRail Quick Actions disabled state and the modal's own listener gate.
+  busy = $state(false);
   phase = $state<SyncPhase>("scanning");
   mode = $state<SyncMode>("scan");
   currentFolder = $state(0);
@@ -41,6 +46,7 @@ class SyncModalStore {
 
   start(mode: SyncMode = "scan") {
     this.open = true;
+    this.busy = true;
     this.phase = "scanning";
     this.mode = mode;
     this.currentFolder = 0;
@@ -63,16 +69,19 @@ class SyncModalStore {
 
   complete(result: SyncResult) {
     this.phase = "complete";
+    this.busy = false;
     this.result = result;
   }
 
   cancelled(result: SyncResult | null) {
     this.phase = "cancelled";
+    this.busy = false;
     this.result = result;
   }
 
   fail(msg: string) {
     this.phase = "error";
+    this.busy = false;
     this.errorMsg = msg;
   }
 
@@ -80,6 +89,13 @@ class SyncModalStore {
     const next = [...this.activity, row];
     if (next.length > ACTIVITY_CAP) next.splice(0, next.length - ACTIVITY_CAP);
     this.activity = next;
+  }
+
+  // Hide the modal but leave the op running. Backend events keep landing in
+  // connection.activityFeed via its own long-lived listener — user sees
+  // progress in the Activity tab.
+  runInBackground() {
+    this.open = false;
   }
 
   dismiss() {

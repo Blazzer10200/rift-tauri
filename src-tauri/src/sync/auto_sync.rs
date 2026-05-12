@@ -554,7 +554,10 @@ impl AutoSyncEngine {
     /// manual "push everything" button. Promotes any backoff-elapsed failed
     /// entries into dirty first so transient SFTP failures still retry on
     /// the next click. Mass-delete circuit breaker fires inside `flush_batch`.
-    pub async fn flush_all_now(&self) -> u32 {
+    /// `cancel` propagates into flush_batch's dispatch loop — clicking Stop
+    /// during a push bails between entries, leaving un-dispatched ones in
+    /// the dirty queue for the next click to pick up.
+    pub async fn flush_all_now(&self, cancel: Option<CancellationToken>) -> u32 {
         if self.disposed.load(Ordering::SeqCst) {
             return 0;
         }
@@ -589,24 +592,30 @@ impl AutoSyncEngine {
             self.dirty.insert(k, e);
         }
 
+        // Lazy-pop: clone entries into ready but DON'T remove from dirty here.
+        // flush_batch removes each entry just before it dispatches; on cancel,
+        // un-dispatched entries stay in dirty so the next Push picks them up.
+        // Up-front pop would've lost queued work on cancel.
         let ready: Vec<DirtyEntry> = self.dirty
             .iter()
             .map(|kv| kv.value().clone())
             .collect();
-        for e in &ready {
-            self.dirty.remove(&e.path);
-        }
         let mut by_watch: HashMap<String, Vec<DirtyEntry>> = HashMap::new();
         for e in ready.iter() {
             by_watch.entry(e.watch_key.clone()).or_default().push(e.clone());
         }
         let mut count = 0u32;
         for (watch_key, entries) in by_watch {
+            if let Some(ct) = &cancel {
+                if ct.is_cancelled() {
+                    break;
+                }
+            }
             let Some(fw) = self.folders.get(&watch_key).map(|v| v.value().clone()) else {
                 continue;
             };
-            count += entries.len() as u32;
-            self.flush_batch(&fw, entries).await;
+            let dispatched = self.flush_batch(&fw, entries, cancel.clone()).await;
+            count += dispatched;
         }
         count
     }
@@ -630,14 +639,12 @@ impl AutoSyncEngine {
                 "push-now",
             );
             let started = std::time::Instant::now();
-            // flush_all_now respects the mass-delete guard inside flush_batch.
-            // We treat cancel as "stop accepting new dispatches" — in-flight
-            // pushes within flush_batch run to completion (russh streams).
-            let dispatched = if ct_for_task.is_cancelled() {
-                0
-            } else {
-                engine.flush_all_now().await
-            };
+            // flush_all_now + flush_batch both honor the cancel token: between
+            // resources in flush_all_now, between entries in flush_batch's
+            // dispatch loop. In-flight russh streams (1-4 per batch) finish
+            // naturally — we can't abort mid-stream w/o leaving partial files.
+            // Un-dispatched entries stay in the dirty queue.
+            let dispatched = engine.flush_all_now(Some(ct_for_task.clone())).await;
             let cancelled = ct_for_task.is_cancelled();
             let elapsed_ms = started.elapsed().as_millis() as u64;
             diagnostics::emit_with_fields(
@@ -919,8 +926,8 @@ impl AutoSyncEngine {
     }
 
     /// Fire a one-shot drift reconcile across every watched folder. Used by
-    /// the rescan-signal path AND callable from the Diagnostics panel via the
-    /// `diag_force_drift_scan` Tauri command. Background-spawned so the
+    /// the rescan-signal path AND callable from the Quick Actions panel via the
+    /// `sync_reconcile` Tauri command. Background-spawned so the
     /// notify handler isn't stalled by SFTP latency.
     pub fn kick_drift_reconcile(self: &Arc<Self>) {
         let folders: Vec<FolderWatch> = self
@@ -1209,14 +1216,23 @@ impl AutoSyncEngine {
                 pull_dispatched += 1;
             }
 
-            // If cancel arrives after the dispatch loop completes naturally,
-            // surface it. Either way, wait for in-flight work to settle so
-            // the final emit reflects reality.
-            if ct_for_task.is_cancelled() { cancelled = true; }
-            for h in handles {
-                let _ = h.await;
+            // On cancel, orphan in-flight downloads into the background-task
+            // tracker so the modal closes immediately. Awaiting handles here
+            // was the "Stop pull does nothing visible" lie — modal hung at
+            // "Pulling…" until the last in-flight download finished (could
+            // be minutes on a slow link). In-flight downloads still complete,
+            // they just don't block the result emit.
+            if ct_for_task.is_cancelled() {
+                cancelled = true;
+                for h in handles {
+                    engine.track_background(h);
+                }
+            } else {
+                for h in handles {
+                    let _ = h.await;
+                }
+                if ct_for_task.is_cancelled() { cancelled = true; }
             }
-            if ct_for_task.is_cancelled() { cancelled = true; }
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
@@ -1416,7 +1432,12 @@ impl AutoSyncEngine {
         }
     }
 
-    async fn flush_batch(&self, fw: &FolderWatch, entries: Vec<DirtyEntry>) {
+    async fn flush_batch(
+        &self,
+        fw: &FolderWatch,
+        entries: Vec<DirtyEntry>,
+        cancel: Option<CancellationToken>,
+    ) -> u32 {
         // ── Mass-delete circuit breaker ───────────────────────────────────
         let delete_count = entries.iter().filter(|e| e.kind == ChangeKind::Deleted).count();
         let local_root_gone = !fw.local_root.exists();
@@ -1445,7 +1466,7 @@ impl AutoSyncEngine {
                 format!("BLOCKED · {} · {reason}", fw.resource_name),
             )
             .await;
-            return;
+            return 0;
         }
 
         self.set_state(
@@ -1454,26 +1475,35 @@ impl AutoSyncEngine {
         )
         .await;
 
-        // Pop entries from dirty up front so re-dirty during upload creates a new entry.
-        for e in &entries {
-            self.dirty.remove(&e.path);
-        }
-
         // Bounded concurrency.
         use futures::stream::{FuturesUnordered, StreamExt};
         let mut futs = FuturesUnordered::new();
         let mut iter = entries.into_iter();
         let mut active = 0usize;
+        let mut dispatched = 0u32;
         let mut ok = 0u32;
         let mut fail = 0u32;
         let mut trail_items: Vec<(String, String)> = Vec::new();
 
         loop {
             while active < UPLOAD_CONCURRENCY {
+                // Check cancel BEFORE popping the next entry from dirty. On
+                // bail, remaining items stay in the dirty map so the next
+                // Push click resumes where this one left off.
+                if let Some(ct) = &cancel {
+                    if ct.is_cancelled() {
+                        break;
+                    }
+                }
                 let Some(entry) = iter.next() else { break };
+                // Lazy pop: only remove from dirty once we've committed to
+                // dispatching this entry. A re-dirty during upload still
+                // creates a new entry (path no longer in map).
+                self.dirty.remove(&entry.path);
                 let fw = fw.clone();
                 futs.push(async move { self.process_entry(&fw, entry).await });
                 active += 1;
+                dispatched += 1;
             }
             let Some(out) = futs.next().await else { break };
             active -= 1;
@@ -1561,6 +1591,8 @@ impl AutoSyncEngine {
             });
             self.track_background(h);
         }
+
+        dispatched
     }
 
     async fn process_entry(&self, fw: &FolderWatch, entry: DirtyEntry) -> EntryResult {

@@ -124,7 +124,7 @@ fn diag_snapshot_path(server_key: String) -> Result<String, String> {
 /// folder for the active autosync engine. No-op if not connected. Emits
 /// DriftScanStart/Result diag events the panel surfaces.
 #[tauri::command]
-async fn diag_force_drift_scan(
+async fn sync_reconcile(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
     let g = state.0.lock().await;
@@ -138,7 +138,7 @@ async fn diag_force_drift_scan(
 /// running scan then bails between folders and emits `drift_scan_result` w/
 /// `cancelled: true`.
 #[tauri::command]
-async fn diag_cancel_drift_scan(
+async fn sync_cancel(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
     let g = state.0.lock().await;
@@ -152,7 +152,7 @@ async fn diag_cancel_drift_scan(
 /// Emits standard DriftScanStart/Result so SyncModal walks the same state
 /// machine; pull activity flows through RemotePullStart/Done.
 #[tauri::command]
-async fn diag_force_pull_now(
+async fn sync_pull_pending(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
     let g = state.0.lock().await;
@@ -165,7 +165,7 @@ async fn diag_force_pull_now(
 /// debounce. Returns false if not connected (no engine bound). Emits the same
 /// DriftScanStart/Result events as force_pull_now so the SyncModal renders.
 #[tauri::command]
-async fn diag_force_push_now(
+async fn sync_push_pending(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
     let g = state.0.lock().await;
@@ -1606,10 +1606,10 @@ pub fn run() {
             list_watched_edits,
             diag_get_state,
             diag_snapshot_path,
-            diag_force_drift_scan,
-            diag_cancel_drift_scan,
-            diag_force_pull_now,
-            diag_force_push_now,
+            sync_reconcile,
+            sync_cancel,
+            sync_pull_pending,
+            sync_push_pending,
             diag_ignored_breakdown,
             terminal::term_list_shells,
             terminal::term_spawn,

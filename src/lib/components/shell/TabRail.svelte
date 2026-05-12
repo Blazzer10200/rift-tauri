@@ -23,53 +23,45 @@
   const watcherOn = $derived(
     connection.status?.state === "watching" || connection.status?.state === "idle" || connection.status?.state === "syncing"
   );
-  const canSync = $derived(watcherOn && !syncModal.open);
+  // Gate on the real op-lifecycle flag (syncModal.busy), not modal visibility.
+  // Local pulling/pushing/scanning flags were lies — they flipped back to
+  // false the instant invoke() returned (engine dispatches fire-and-forget),
+  // long before the actual sync work finished.
+  const canSync = $derived(watcherOn && !syncModal.busy);
+  const busyMode = $derived(syncModal.busy ? syncModal.mode : null);
   const activeIdx = $derived(tabs.findIndex((t) => t.id === active));
   const indicatorVisible = $derived(activeIdx >= 0);
 
-  let pulling = $state(false);
-  let pushing = $state(false);
-  let scanning = $state(false);
-
   async function reconcile() {
-    if (!canSync || pulling || pushing || scanning) return;
-    scanning = true;
-    syncModal.start();
+    if (!canSync) return;
+    syncModal.start("scan");
     try {
-      const fired = await invoke<boolean>("diag_force_drift_scan");
+      const fired = await invoke<boolean>("sync_reconcile");
       if (!fired) syncModal.fail("Not connected — start watcher first.");
     } catch (e) {
       syncModal.fail(String(e));
-    } finally {
-      scanning = false;
     }
   }
 
-  async function pullAll() {
-    if (!canSync || pulling || pushing || scanning) return;
-    pulling = true;
+  async function pullPending() {
+    if (!canSync) return;
     syncModal.start("pull");
     try {
-      const fired = await invoke<boolean>("diag_force_pull_now");
+      const fired = await invoke<boolean>("sync_pull_pending");
       if (!fired) syncModal.fail("Not connected — start watcher first.");
     } catch (e) {
       syncModal.fail(String(e));
-    } finally {
-      pulling = false;
     }
   }
 
-  async function pushAll() {
-    if (!canSync || pulling || pushing || scanning) return;
-    pushing = true;
+  async function pushPending() {
+    if (!canSync) return;
     syncModal.start("push");
     try {
-      const fired = await invoke<boolean>("diag_force_push_now");
+      const fired = await invoke<boolean>("sync_push_pending");
       if (!fired) syncModal.fail("Not connected — start watcher first.");
     } catch (e) {
       syncModal.fail(String(e));
-    } finally {
-      pushing = false;
     }
   }
 </script>
@@ -119,39 +111,39 @@
         <div class="qa-label">Quick actions</div>
         <button
           class="qa-btn"
-          data-tone="accent"
+          data-tone="neutral"
           type="button"
           onclick={(e) => { reconcile(); (e.currentTarget as HTMLButtonElement).blur(); }}
-          disabled={!canSync || pulling || pushing || scanning}
-          title={watcherOn ? "Reconcile — scan both sides for drift" : "Connect a server first"}
+          disabled={!canSync}
+          title={watcherOn ? "Scan both sides for drift (read-only)" : "Connect a server first"}
         >
           <span class="qa-icon"><RefreshCw size={16}/></span>
-          <span>Reconcile</span>
-          {#if scanning}<span class="qa-spin"></span>{/if}
+          <span>Scan drift</span>
+          {#if busyMode === "scan"}<span class="qa-spin"></span>{/if}
         </button>
         <button
           class="qa-btn"
           data-tone="info"
           type="button"
-          onclick={(e) => { pullAll(); (e.currentTarget as HTMLButtonElement).blur(); }}
-          disabled={!canSync || pulling || pushing || scanning}
-          title={watcherOn ? "Pull all changes from remote" : "Connect a server first"}
+          onclick={(e) => { pullPending(); (e.currentTarget as HTMLButtonElement).blur(); }}
+          disabled={!canSync}
+          title={watcherOn ? "Pull remote changes detected in last scan" : "Connect a server first"}
         >
           <span class="qa-icon"><DownloadCloud size={16}/></span>
-          <span>Pull all</span>
-          {#if pulling}<span class="qa-spin"></span>{/if}
+          <span>Pull pending</span>
+          {#if busyMode === "pull"}<span class="qa-spin"></span>{/if}
         </button>
         <button
           class="qa-btn"
-          data-tone="warn"
+          data-tone="accent"
           type="button"
-          onclick={(e) => { pushAll(); (e.currentTarget as HTMLButtonElement).blur(); }}
-          disabled={!canSync || pulling || pushing || scanning}
-          title={watcherOn ? "Push all local changes to remote" : "Connect a server first"}
+          onclick={(e) => { pushPending(); (e.currentTarget as HTMLButtonElement).blur(); }}
+          disabled={!canSync}
+          title={watcherOn ? "Push local dirty-queue edits to remote" : "Connect a server first"}
         >
           <span class="qa-icon"><UploadCloud size={16}/></span>
-          <span>Push all</span>
-          {#if pushing}<span class="qa-spin"></span>{/if}
+          <span>Push pending</span>
+          {#if busyMode === "push"}<span class="qa-spin"></span>{/if}
         </button>
       </div>
     </div>
@@ -332,9 +324,9 @@
     overflow: hidden;
     white-space: nowrap;
   }
-  .qa-btn[data-tone="info"]   { --tone: var(--info); }
-  .qa-btn[data-tone="warn"]   { --tone: var(--warn); }
-  .qa-btn[data-tone="accent"] { --tone: var(--accent); }
+  .qa-btn[data-tone="info"]    { --tone: var(--info); }
+  .qa-btn[data-tone="accent"]  { --tone: var(--accent); }
+  .qa-btn[data-tone="neutral"] { --tone: var(--fg-muted); }
   .qa-btn > span:not(.qa-spin):not(.qa-icon) { flex: 1; text-align: left; }
   .qa-icon {
     display: inline-flex; align-items: center; justify-content: center;

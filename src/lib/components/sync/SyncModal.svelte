@@ -125,15 +125,22 @@
     if (watchdogTimer !== null) { clearInterval(watchdogTimer); watchdogTimer = null; }
   }
 
+  // Listeners stay attached while the backend op is `busy`, even after the
+  // user dismisses the modal via "Run in background". This way the busy flag
+  // clears when drift_scan_result fires, and TabRail can re-enable.
   $effect(() => {
-    if (syncModal.open) {
-      lastEventAt = Date.now();
-      attachListeners();
-      watchdogTimer = setInterval(() => {
-        if (syncModal.phase !== "scanning") return;
-        const silent = Date.now() - lastEventAt;
-        if (silent > 30000) syncModal.setStalled();
-      }, 5000);
+    if (syncModal.busy || syncModal.open) {
+      if (!unlistenDiag && !unlistenActivity) {
+        lastEventAt = Date.now();
+        attachListeners();
+      }
+      if (watchdogTimer === null && syncModal.open) {
+        watchdogTimer = setInterval(() => {
+          if (syncModal.phase !== "scanning") return;
+          const silent = Date.now() - lastEventAt;
+          if (silent > 30000) syncModal.setStalled();
+        }, 5000);
+      }
     } else {
       detachListeners();
     }
@@ -145,9 +152,9 @@
     if (cancelling) return;
     cancelling = true;
     try {
-      await invoke<boolean>("diag_cancel_drift_scan");
+      await invoke<boolean>("sync_cancel");
     } catch (err) {
-      console.warn("cancel scan failed", err);
+      console.warn("cancel failed", err);
       cancelling = false;
     }
   }
@@ -157,7 +164,7 @@
     pulling = true;
     syncModal.start("pull");
     try {
-      const fired = await invoke<boolean>("diag_force_pull_now");
+      const fired = await invoke<boolean>("sync_pull_pending");
       if (!fired) syncModal.fail("Not connected — start auto-sync first.");
     } catch (err) {
       syncModal.fail(String(err));
@@ -171,7 +178,7 @@
     pushing = true;
     syncModal.start("push");
     try {
-      const fired = await invoke<boolean>("diag_force_push_now");
+      const fired = await invoke<boolean>("sync_push_pending");
       if (!fired) syncModal.fail("Not connected — start auto-sync first.");
     } catch (err) {
       syncModal.fail(String(err));
@@ -182,6 +189,10 @@
 
   function onDismiss() {
     syncModal.dismiss();
+  }
+
+  function onRunInBackground() {
+    syncModal.runInBackground();
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -322,6 +333,9 @@
 
       <footer class="card-foot">
         {#if syncModal.phase === "scanning"}
+          <button type="button" class="btn btn-ghost" onclick={onRunInBackground}>
+            Run in background
+          </button>
           <button type="button" class="btn btn-danger" onclick={onCancel} disabled={cancelling}>
             {cancelling
               ? "Cancelling…"
@@ -548,6 +562,15 @@
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-primary { background: var(--accent); color: oklch(0.99 0 0); border-color: var(--accent); }
   .btn-danger { background: var(--danger); color: oklch(0.99 0 0); border-color: var(--danger); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--fg-muted);
+    border-color: var(--border);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--fg);
+  }
   .btn-accent {
     background: color-mix(in oklch, var(--accent) 18%, transparent);
     color: var(--accent);
