@@ -22,10 +22,12 @@
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
+  import TerminalPanel from "./terminal/TerminalPanel.svelte";
   import { updates } from "../state/updates.svelte";
+  import { terminal } from "../state/terminal.svelte";
 
   type Tab = "browse" | "activity" | "conflicts" | "settings" | "diagnostics";
-  type SettingsSection = "appearance" | "tokens" | "servers" | "keys" | "sync" | "editor" | "about";
+  type SettingsSection = "appearance" | "servers" | "keys" | "about";
 
   let active = $state<Tab>("browse");
   let settingsSection = $state<SettingsSection>("appearance");
@@ -125,6 +127,12 @@
   function onGlobalKey(e: KeyboardEvent) {
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
+    // Ctrl+` toggles the embedded terminal — global so it works on every tab.
+    if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
+      e.preventDefault();
+      terminal.toggle();
+      return;
+    }
     const k = e.key.toLowerCase();
     if (e.shiftKey && k === "d") { e.preventDefault(); active = "diagnostics"; return; }
     if (e.shiftKey) return;
@@ -324,6 +332,8 @@
       {/key}
     </main>
   </div>
+
+  <TerminalPanel />
   </div>
 
   <StatusBar />

@@ -15,13 +15,6 @@
   let error = $state<string | null>(null);
   let info = $state<string | null>(null);
 
-  $effect(() => {
-    void conflict.local_path;
-    pick = null;
-    error = null;
-    info = null;
-  });
-
   function fmtSize(n: number): string {
     if (n < 0) return "—";
     if (n < 1024) return `${n} B`;
@@ -40,6 +33,8 @@
   }
 
   const sizeDelta = $derived(conflict.local_size - conflict.remote_size);
+  const localLarger = $derived(sizeDelta > 0);
+  const remoteLarger = $derived(sizeDelta < 0);
 
   async function applyPick() {
     if (!pick) return;
@@ -106,7 +101,7 @@
       </div>
     </div>
     <div class="head-r">
-      <button class="btn ghost sm" type="button" onclick={editInPlace} disabled={busy}>
+      <button class="btn ghost sm info" type="button" onclick={editInPlace} disabled={busy}>
         <Terminal size={11}/> Editor
       </button>
       <button class="btn ghost sm" type="button" onclick={copyPath}>
@@ -124,16 +119,14 @@
       onclick={() => (pick = "local")}
     >
       <div class="meta-side-l">
-        <AppWindow size={11}/>
+        <AppWindow size={13} class="side-ico"/>
         <span class="side-label">Local</span>
+        {#if pick === "local"}<span class="pick-pip"><Check size={10}/> picked</span>{/if}
       </div>
       <div class="meta-side-r mono">
-        <span>{fmtSize(conflict.local_size)}</span>
+        <span class="sz" class:bigger={localLarger}>{fmtSize(conflict.local_size)}</span>
         <span class="dim">·</span>
         <span>{fmtMtime(conflict.local_mtime_utc)}</span>
-      </div>
-      <div class="pick-indicator">
-        {#if pick === "local"}<Check size={11}/> selected{/if}
       </div>
     </button>
     <button
@@ -144,16 +137,14 @@
       onclick={() => (pick = "remote")}
     >
       <div class="meta-side-l">
-        <Server size={11}/>
+        <Server size={13} class="side-ico"/>
         <span class="side-label">Remote</span>
+        {#if pick === "remote"}<span class="pick-pip"><Check size={10}/> picked</span>{/if}
       </div>
       <div class="meta-side-r mono">
-        <span>{fmtSize(conflict.remote_size)}</span>
+        <span class="sz" class:bigger={remoteLarger}>{fmtSize(conflict.remote_size)}</span>
         <span class="dim">·</span>
         <span>{fmtMtime(conflict.remote_mtime_utc)}</span>
-      </div>
-      <div class="pick-indicator">
-        {#if pick === "remote"}<Check size={11}/> selected{/if}
       </div>
     </button>
   </div>
@@ -165,14 +156,6 @@
     </div>
     <div class="diff-summary mono">
       <div class="ds-row">
-        <span class="ds-k">paths</span>
-        <span class="ds-v">L <span class="dim">{conflict.local_path}</span></span>
-      </div>
-      <div class="ds-row">
-        <span class="ds-k"></span>
-        <span class="ds-v">R <span class="dim">{conflict.remote_path}</span></span>
-      </div>
-      <div class="ds-row">
         <span class="ds-k">size delta</span>
         <span class="ds-v" data-delta={sizeDelta > 0 ? "plus" : sizeDelta < 0 ? "minus" : "zero"}>
           {sizeDelta > 0 ? `+${fmtSize(sizeDelta)} (local larger)` : sizeDelta < 0 ? `−${fmtSize(-sizeDelta)} (remote larger)` : "identical size"}
@@ -181,6 +164,14 @@
       <div class="ds-row">
         <span class="ds-k">last sync</span>
         <span class="ds-v">{fmtSize(conflict.last_known_size)} · {fmtMtime(conflict.last_known_mtime_utc)}</span>
+      </div>
+      <div class="ds-row">
+        <span class="ds-k">paths</span>
+        <span class="ds-v">L <span class="dim">{conflict.local_path}</span></span>
+      </div>
+      <div class="ds-row">
+        <span class="ds-k"></span>
+        <span class="ds-v">R <span class="dim">{conflict.remote_path}</span></span>
       </div>
     </div>
   </div>
@@ -245,10 +236,8 @@
     gap: 10px;
   }
   .meta-side {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 8px 10px;
-    padding: 10px 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 12px 14px;
     background: var(--bg-elev-1);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
@@ -256,23 +245,44 @@
     text-align: left;
     font: inherit;
     color: var(--fg);
-    transition: border-color 80ms, background 80ms;
+    box-shadow: inset 2px 0 transparent;
+    transition: border-color 100ms, background 100ms, box-shadow 100ms;
   }
   .meta-side:hover { background: var(--surface-hover); }
-  .meta-side[data-side="local"][data-pick="true"] { border-color: var(--info); background: var(--info-soft); }
-  .meta-side[data-side="remote"][data-pick="true"] { border-color: var(--warn); background: var(--warn-soft); }
-  .meta-side-l { display: inline-flex; align-items: center; gap: 6px; grid-column: 1 / 2; }
-  .meta-side-r { font-size: var(--fs-xs); color: var(--fg-2); display: inline-flex; gap: 6px; align-items: center; grid-column: 2 / 3; }
-  .side-label { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
-  .pick-indicator {
-    grid-column: 1 / 3;
-    font-size: var(--fs-xs);
-    color: var(--accent);
-    display: inline-flex; align-items: center; gap: 4px;
-    min-height: 14px;
+  .meta-side[data-side="local"][data-pick="true"] {
+    border-color: color-mix(in oklch, var(--info) 45%, var(--border));
+    background: var(--info-soft);
+    box-shadow: inset 2px 0 var(--info);
   }
-  .meta-side[data-side="local"][data-pick="true"] .pick-indicator { color: var(--info); }
-  .meta-side[data-side="remote"][data-pick="true"] .pick-indicator { color: var(--warn); }
+  .meta-side[data-side="remote"][data-pick="true"] {
+    border-color: color-mix(in oklch, var(--warn) 45%, var(--border));
+    background: var(--warn-soft);
+    box-shadow: inset 2px 0 var(--warn);
+  }
+  .meta-side-l { display: inline-flex; align-items: center; gap: 8px; }
+  .meta-side-r { font-size: var(--fs-xs); color: var(--fg-2); display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .meta-side :global(.side-ico) {
+    color: var(--fg-muted);
+    transition: transform 140ms cubic-bezier(0.34, 1.56, 0.64, 1), color 100ms;
+  }
+  .meta-side[data-side="local"][data-pick="true"] :global(.side-ico) { color: var(--info); }
+  .meta-side[data-side="remote"][data-pick="true"] :global(.side-ico) { color: var(--warn); }
+  @media (prefers-reduced-motion: no-preference) {
+    .meta-side:hover :global(.side-ico) { transform: scale(1.15); }
+  }
+  .side-label { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
+  .sz.bigger { color: var(--fg); font-weight: 600; }
+  .pick-pip {
+    margin-left: 6px;
+    font-size: var(--fs-xs);
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in oklch, currentColor 14%, transparent);
+    color: inherit;
+  }
+  .meta-side[data-side="local"][data-pick="true"] .pick-pip { color: var(--info); }
+  .meta-side[data-side="remote"][data-pick="true"] .pick-pip { color: var(--warn); }
 
   .hunks-placeholder {
     background: var(--surface);

@@ -20,10 +20,69 @@
 
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
 
+  const SPLIT_KEY = "rift.browser.splitFrac";
+  const SPLIT_MIN = 0.15;
+  const SPLIT_MAX = 0.85;
+  let splitFrac = $state(0.5);
+  let splitEl = $state<HTMLDivElement | undefined>();
+  let dragging = $state(false);
+
   onMount(() => {
     const s = connection.selected;
     browserTabs.hydrate(s?.localRoot ?? "", s?.remoteRoot ?? "/");
+    try {
+      const saved = localStorage.getItem(SPLIT_KEY);
+      if (saved) {
+        const v = parseFloat(saved);
+        if (!isNaN(v) && v >= SPLIT_MIN && v <= SPLIT_MAX) splitFrac = v;
+      }
+    } catch { /* localStorage unavailable */ }
   });
+
+  function persistSplit() {
+    try { localStorage.setItem(SPLIT_KEY, splitFrac.toFixed(4)); } catch { /* noop */ }
+  }
+
+  function onDividerPointerDown(e: PointerEvent) {
+    e.preventDefault();
+    dragging = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onDividerPointerMove(e: PointerEvent) {
+    if (!dragging || !splitEl) return;
+    const rect = splitEl.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const x = e.clientX - rect.left;
+    let frac = x / rect.width;
+    if (frac < SPLIT_MIN) frac = SPLIT_MIN;
+    else if (frac > SPLIT_MAX) frac = SPLIT_MAX;
+    splitFrac = frac;
+  }
+  function onDividerPointerUp(e: PointerEvent) {
+    if (!dragging) return;
+    dragging = false;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    persistSplit();
+  }
+  function resetSplit() {
+    splitFrac = 0.5;
+    try { localStorage.removeItem(SPLIT_KEY); } catch { /* noop */ }
+  }
+  function onDividerKey(e: KeyboardEvent) {
+    const step = e.shiftKey ? 0.05 : 0.02;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      splitFrac = Math.max(SPLIT_MIN, splitFrac - step);
+      persistSplit();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      splitFrac = Math.min(SPLIT_MAX, splitFrac + step);
+      persistSplit();
+    } else if (e.key === "Home" || e.key === "Enter") {
+      e.preventDefault();
+      resetSplit();
+    }
+  }
 
   $effect(() => {
     const s = connection.selected;
@@ -191,8 +250,9 @@
 </script>
 
 <div class="two-pane">
-  <div class="tabstrip">
-    {#each browserTabs.tabs as t, i (t.id)}
+  <div class="tabstrip-wrap">
+    <div class="tabstrip">
+      {#each browserTabs.tabs as t, i (t.id)}
       <div
         class="tab"
         data-active={i === browserTabs.activeIdx}
@@ -216,18 +276,24 @@
         {/if}
       </div>
     {/each}
-    <button
-      type="button" class="tab-new"
-      onclick={newTab}
-      title="New tab (Ctrl+T)"
-      aria-label="New tab"
-    ><Plus size={14}/></button>
+      <button
+        type="button" class="tab-new"
+        onclick={newTab}
+        title="New tab (Ctrl+T)"
+        aria-label="New tab"
+      ><Plus size={14}/></button>
+    </div>
   </div>
 
   {#if browserTabs.active}
     {@const t = browserTabs.active}
     {@const idx = browserTabs.activeIdx}
-    <div class="split">
+    <div
+      class="split"
+      bind:this={splitEl}
+      data-dragging={dragging}
+      style="grid-template-columns: {splitFrac}fr 6px {1 - splitFrac}fr;"
+    >
       <LocalPane
         path={t.localPath}
         onPathChange={(p: string) => setLocalPath(idx, p)}
@@ -236,6 +302,25 @@
         onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
         onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
       />
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div
+        class="divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize panes (drag, or use arrow keys; double-click or Home to reset)"
+        aria-valuenow={Math.round(splitFrac * 100)}
+        aria-valuemin={Math.round(SPLIT_MIN * 100)}
+        aria-valuemax={Math.round(SPLIT_MAX * 100)}
+        tabindex="0"
+        title="Drag to resize · double-click to reset"
+        onpointerdown={onDividerPointerDown}
+        onpointermove={onDividerPointerMove}
+        onpointerup={onDividerPointerUp}
+        onpointercancel={onDividerPointerUp}
+        ondblclick={resetSplit}
+        onkeydown={onDividerKey}
+      ><span class="divider-grip" aria-hidden="true"></span></div>
       <RemotePane
         serverKey={connection.selectedKey}
         path={t.remotePath}
@@ -266,14 +351,30 @@
     background: var(--bg);
     position: relative;
   }
+  .tabstrip-wrap {
+    position: relative;
+    background: var(--bg-elev-1);
+    border-bottom: 1px solid var(--border);
+    height: 38px;
+    /* Mask fades both edges; transparent when tabs don't overflow. */
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 20px,
+      #000 calc(100% - 20px),
+      transparent 100%
+    );
+  }
   .tabstrip {
     display: flex; align-items: flex-end; gap: 2px;
     padding: 6px 8px 0;
-    background: var(--bg-elev-1);
-    border-bottom: 1px solid var(--border);
-    overflow: clip;
-    height: 38px;
+    height: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
   }
+  .tabstrip::-webkit-scrollbar { display: none; }
+  .tab { flex-shrink: 0; }
   .tab {
     display: flex; align-items: center;
     background: transparent;
@@ -338,11 +439,56 @@
   .split {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr 6px 1fr;
     min-height: 0; min-width: 0;
   }
-  .split > :global(:first-child) {
-    border-right: 1px solid var(--border);
+  .split[data-dragging="true"] {
+    cursor: col-resize;
+    user-select: none;
+  }
+  .split[data-dragging="true"] :global(*) {
+    user-select: none !important;
+    pointer-events: none;
+  }
+  .split[data-dragging="true"] > .divider {
+    pointer-events: auto;
+  }
+
+  .divider {
+    position: relative;
+    background: var(--bg-elev-3);
+    cursor: col-resize;
+    display: flex; align-items: center; justify-content: center;
+    align-self: stretch;
+    height: 100%;
+    transition: background 100ms ease;
+    touch-action: none;
+  }
+  .divider::before {
+    content: "";
+    position: absolute;
+    inset: 0 -3px;
+  }
+  .divider:hover,
+  .split[data-dragging="true"] > .divider {
+    background: var(--accent);
+  }
+  .divider:focus-visible {
+    outline: none;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+  .divider-grip {
+    width: 2px; height: 28px;
+    background: var(--fg-faint);
+    border-radius: 1px;
+    opacity: 0.6;
+    transition: opacity 100ms ease, background 100ms ease;
+  }
+  .divider:hover .divider-grip,
+  .split[data-dragging="true"] .divider-grip {
+    opacity: 1;
+    background: oklch(0.99 0 0);
   }
 
   .placeholder {

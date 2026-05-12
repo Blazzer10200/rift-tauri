@@ -320,9 +320,9 @@ mod tests {
     }
 
     #[test]
-    fn short_id_is_8_hex() {
+    fn short_id_is_16_hex() {
         let s = short_id();
-        assert_eq!(s.len(), 8);
+        assert_eq!(s.len(), 16);
         assert!(s.chars().all(|c| c.is_ascii_hexdigit()));
     }
 

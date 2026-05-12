@@ -43,6 +43,16 @@ use crate::state::{RemoteStateCache, SyncSnapshot};
 use crate::sync::ignore;
 use crate::sync::lock_presence::LockPresence;
 
+mod path;
+#[path = "auto_sync/watch.rs"]
+mod watch_mod;
+mod flush;
+
+use path::{
+    classify_action, file_name, map_local_to_remote, rel_of, safe_count_files, stat_local,
+    wait_for_readable,
+};
+
 // ─── Tunables (port from WPF) ────────────────────────────────────────────────
 const DEBOUNCE_MS: u64 = 700;
 const CEILING_MS: u64 = 3000;
@@ -198,31 +208,6 @@ fn merge_kind(a: ChangeKind, b: ChangeKind) -> ChangeKind {
         return ChangeKind::Created;
     }
     b
-}
-
-fn classify_action(a: &str) -> ActivityKind {
-    let lower = a.to_ascii_lowercase();
-    if lower.contains("blocked") {
-        ActivityKind::Block
-    } else if lower.contains("conflict\u{2192}") || lower.contains("conflict skipped") {
-        ActivityKind::ConflictResolved
-    } else if lower.contains("conflict") {
-        ActivityKind::Conflict
-    } else if lower.contains("drift") || lower.contains("scan") {
-        ActivityKind::Drift
-    } else if lower.contains("delete") || lower.contains("removed locally") {
-        ActivityKind::Delete
-    } else if lower.contains("synced") {
-        ActivityKind::Sync
-    } else if lower.contains("pull") {
-        ActivityKind::Pull
-    } else if lower.contains("[bridge]") || lower.contains("restart") || lower.contains("watching") {
-        ActivityKind::Bridge
-    } else if lower.contains("fail") || lower.contains("error") || lower.contains("rejected") {
-        ActivityKind::Error
-    } else {
-        ActivityKind::System
-    }
 }
 
 // ─── Engine ──────────────────────────────────────────────────────────────────
@@ -450,6 +435,17 @@ impl AutoSyncEngine {
         };
         self.folders.insert(remote_root.clone(), watch);
         self.log(&format!("watching {} ({})", spec.resource_name, local_root.display()));
+        if let Some(locks) = self.locks.clone() {
+            let root_for_sweep = remote_root.clone();
+            let h = tokio::spawn(async move {
+                match locks.sweep_stale_mine(&root_for_sweep, 4).await {
+                    Ok(n) if n > 0 => log::info!("removed {n} stale own .rift-lock file(s) under {root_for_sweep}"),
+                    Err(e) => log::warn!("stale .rift-lock sweep failed under {root_for_sweep}: {e}"),
+                    _ => {}
+                }
+            });
+            self.track_background(h);
+        }
 
         // Fire-and-forget perm-heal: chmod 2775 on every dir we own under this
         // root. Backlog cleanup for dirs Rift created pre-v0.2.31 (umask 0022
@@ -547,8 +543,10 @@ impl AutoSyncEngine {
     pub fn locks(&self) -> Option<Arc<LockPresence>> { self.locks.clone() }
     pub fn app(&self) -> AppHandle { self.app.clone() }
     pub fn profile_key(&self) -> &str { &self.profile.key }
-    pub fn resource_name_for(&self, remote_root: &str) -> Option<String> {
-        self.folders.get(remote_root).map(|fw| fw.resource_name.clone())
+    pub fn owns_local_path(&self, local_path: &Path) -> bool {
+        self.folders
+            .iter()
+            .any(|kv| local_path.starts_with(&kv.value().local_root))
     }
     pub fn is_disposed(&self) -> bool { self.disposed.load(Ordering::SeqCst) }
 
@@ -1871,6 +1869,10 @@ impl AutoSyncEngine {
                 &format!("FAILED — gave up after {} attempts", e.attempts),
             );
         }
+        if e.attempts as usize > RETRY_BACKOFFS_SECS.len() {
+            self.failed.remove(&entry.path);
+            return;
+        }
         let idx = std::cmp::min(e.attempts as usize - 1, RETRY_BACKOFFS_SECS.len() - 1);
         e.next_retry = Utc::now() + chrono::Duration::seconds(RETRY_BACKOFFS_SECS[idx] as i64);
         self.failed.insert(entry.path.clone(), e);
@@ -2018,125 +2020,3 @@ enum EntryResult {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-fn map_local_to_remote(local: &Path, fw: &FolderWatch) -> Option<String> {
-    let rel = local.strip_prefix(&fw.local_root).ok()?;
-    let rel_s = rel.to_string_lossy().replace('\\', "/");
-    if rel_s == "." || rel_s.is_empty() {
-        return Some(fw.remote_root.clone());
-    }
-    if rel_s.starts_with("../") || rel_s.starts_with('/') {
-        return None;
-    }
-    Some(format!("{}/{}", fw.remote_root.trim_end_matches('/'), rel_s))
-}
-
-fn rel_of(fw: &FolderWatch, local: &Path) -> String {
-    local
-        .strip_prefix(&fw.local_root)
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default()
-}
-
-fn file_name(p: &Path) -> &str {
-    p.file_name().and_then(|s| s.to_str()).unwrap_or("?")
-}
-
-/// Read local size + mtime. Returns None on metadata error so callers can
-/// skip baseline writes rather than poisoning the snapshot with `(0, now())`.
-fn stat_local(p: &Path) -> Option<(i64, DateTime<Utc>)> {
-    let m = std::fs::metadata(p).ok()?;
-    let size = m.len() as i64;
-    let mtime = m
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .and_then(|d| chrono::DateTime::<Utc>::from_timestamp(d.as_secs() as i64, 0))
-        .unwrap_or_else(Utc::now);
-    Some((size, mtime))
-}
-
-async fn wait_for_readable(path: &Path) -> bool {
-    for _ in 0..4 {
-        if tokio::fs::File::open(path).await.is_ok() {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    false
-}
-
-/// Bounded recursive count — caps at 5000 enumerations to bound latency.
-/// Walked off the tokio runtime via `spawn_blocking` so the flush task isn't
-/// stalled by a multi-thousand-file resource folder.
-async fn safe_count_files(root: &Path) -> usize {
-    let root = root.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let mut count = 0usize;
-        for entry in walkdir::WalkDir::new(&root).into_iter().filter_map(Result::ok) {
-            if entry.file_type().is_file() {
-                count += 1;
-                if count >= 5000 {
-                    break;
-                }
-            }
-        }
-        count
-    })
-    .await
-    .unwrap_or(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::path::PathBuf;
-
-    #[test]
-    fn merge_kind_delete_wins() {
-        assert_eq!(merge_kind(ChangeKind::Created, ChangeKind::Deleted), ChangeKind::Deleted);
-        assert_eq!(merge_kind(ChangeKind::Modified, ChangeKind::Deleted), ChangeKind::Deleted);
-    }
-
-    #[test]
-    fn merge_kind_create_sticks() {
-        assert_eq!(merge_kind(ChangeKind::Created, ChangeKind::Modified), ChangeKind::Created);
-    }
-
-    #[test]
-    fn merge_kind_default_takes_b() {
-        assert_eq!(merge_kind(ChangeKind::Modified, ChangeKind::Created), ChangeKind::Created);
-    }
-
-    #[test]
-    fn map_local_to_remote_basic() {
-        let fw = FolderWatch {
-            local_root: PathBuf::from("/srv/local/qbx_core"),
-            remote_root: "/opt/server/[qbx]/qbx_core".into(),
-            resource_name: "qbx_core".into(),
-        };
-        let out = map_local_to_remote(Path::new("/srv/local/qbx_core/server/main.lua"), &fw);
-        assert_eq!(out.as_deref(), Some("/opt/server/[qbx]/qbx_core/server/main.lua"));
-    }
-
-    #[test]
-    fn map_local_to_remote_outside_returns_none() {
-        let fw = FolderWatch {
-            local_root: PathBuf::from("/srv/local/qbx_core"),
-            remote_root: "/opt/server/[qbx]/qbx_core".into(),
-            resource_name: "qbx_core".into(),
-        };
-        let out = map_local_to_remote(Path::new("/srv/other/main.lua"), &fw);
-        assert!(out.is_none());
-    }
-
-    #[test]
-    fn classify_action_buckets() {
-        assert_eq!(classify_action("synced"), ActivityKind::Sync);
-        assert_eq!(classify_action("deleted"), ActivityKind::Delete);
-        assert_eq!(classify_action("BLOCKED — 30 deletes"), ActivityKind::Block);
-        assert_eq!(classify_action("CONFLICT — remote changed"), ActivityKind::Conflict);
-        assert_eq!(classify_action("conflict→accept-remote"), ActivityKind::ConflictResolved);
-        assert_eq!(classify_action("[bridge] restart triggered"), ActivityKind::Bridge);
-        assert_eq!(classify_action("sync failed: timeout"), ActivityKind::Error);
-    }
-}

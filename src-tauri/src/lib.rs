@@ -15,6 +15,7 @@ pub mod profile;
 pub mod sftp;
 pub mod state;
 pub mod sync;
+pub mod terminal;
 pub mod transport;
 pub mod tunnel;
 pub mod update_service;
@@ -22,6 +23,7 @@ pub mod update_service;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 
@@ -75,9 +77,9 @@ struct DiagStateDto {
 async fn diag_get_state(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<DiagStateDto, String> {
-    let g = state.0.lock().await;
+    let engine = { state.0.lock().await.clone() };
     let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts) =
-        if let Some(engine) = g.as_ref() {
+        if let Some(engine) = engine.as_ref() {
             let s = engine.status().await;
             (
                 Some(s.state),
@@ -201,9 +203,9 @@ async fn diag_state_pump(app: tauri::AppHandle) {
         // Pull current autosync status off the managed engine (None if not
         // connected). Mirrors `diag_get_state` w/o the command-handler boilerplate.
         let st = app.state::<AutoSyncState>();
-        let g = st.0.lock().await;
+        let engine = { st.0.lock().await.clone() };
         let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts) =
-            if let Some(engine) = g.as_ref() {
+            if let Some(engine) = engine.as_ref() {
                 let s = engine.status().await;
                 (
                     Some(s.state),
@@ -217,7 +219,6 @@ async fn diag_state_pump(app: tauri::AppHandle) {
             } else {
                 (None, String::new(), 0, 0, 0, 0, 0)
             };
-        drop(g);
         let bus = diagnostics::bus();
         let dto = DiagStateDto {
             at: chrono::Utc::now().to_rfc3339(),
@@ -267,6 +268,7 @@ async fn scan_drift(
         user: &server.user,
         key_path: &key_path,
         trusted_fingerprint: server.fingerprint.as_deref(),
+        write_probe_root: Some(&server.remote_root),
     })
     .await?;
     if server.fingerprint.as_deref().unwrap_or("").is_empty() {
@@ -325,6 +327,7 @@ async fn start_autosync(
         user: &server.user,
         key_path: &key_path,
         trusted_fingerprint: server.fingerprint.as_deref(),
+        write_probe_root: Some(&server.remote_root),
     })
     .await?;
     if server.fingerprint.as_deref().unwrap_or("").is_empty() {
@@ -453,12 +456,47 @@ async fn stop_autosync(
 async fn get_autosync_status(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<Option<AutoSyncStatus>, String> {
-    let g = state.0.lock().await;
-    if let Some(engine) = g.as_ref() {
+    let engine = { state.0.lock().await.clone() };
+    if let Some(engine) = engine.as_ref() {
         Ok(Some(engine.status().await))
     } else {
         Ok(None)
     }
+}
+
+async fn validate_watched_local_path(
+    state: &tauri::State<'_, AutoSyncState>,
+    path: &str,
+    label: &str,
+) -> Result<PathBuf, String> {
+    let p = PathBuf::from(path);
+    reject_path_traversal(&p, label)?;
+    let canon = if p.exists() {
+        p.canonicalize()
+            .map_err(|e| format!("canonicalize {label} '{}': {e}", p.display()))?
+    } else {
+        let parent = p
+            .parent()
+            .ok_or_else(|| format!("{label}: '{}' has no parent", p.display()))?;
+        let name = p
+            .file_name()
+            .ok_or_else(|| format!("{label}: '{}' has no filename", p.display()))?;
+        let parent = parent
+            .canonicalize()
+            .map_err(|e| format!("canonicalize {label} parent '{}': {e}", parent.display()))?;
+        parent.join(name)
+    };
+    if canon.parent().is_none() {
+        return Err(format!("{label}: refusing filesystem root '{}'", canon.display()));
+    }
+    let engine = { state.0.lock().await.clone() };
+    let Some(engine) = engine.as_ref() else {
+        return Err(format!("{label}: local operation requires an active watch"));
+    };
+    if !engine.owns_local_path(&canon) {
+        return Err(format!("{label}: '{}' is outside watched roots", canon.display()));
+    }
+    Ok(canon)
 }
 
 #[tauri::command]
@@ -473,8 +511,13 @@ async fn enqueue_for_flush_batch(
     for p in &bufs {
         reject_path_traversal(p, "enqueue path")?;
     }
-    let g = state.0.lock().await;
-    let Some(engine) = g.as_ref() else { return Ok(0) };
+    let engine = { state.0.lock().await.clone() };
+    let Some(engine) = engine.as_ref() else { return Ok(0) };
+    for p in &bufs {
+        if !engine.owns_local_path(p) {
+            return Err(format!("enqueue path outside watched roots: {}", p.display()));
+        }
+    }
     Ok(engine.enqueue_for_flush_batch(bufs, deleted, bypass_preflight).await)
 }
 
@@ -486,8 +529,11 @@ async fn resolve_conflict(
 ) -> Result<(), String> {
     let buf = PathBuf::from(local_path);
     reject_path_traversal(&buf, "local_path")?;
-    let g = state.0.lock().await;
-    if let Some(engine) = g.as_ref() {
+    let engine = { state.0.lock().await.clone() };
+    if let Some(engine) = engine.as_ref() {
+        if !engine.owns_local_path(&buf) {
+            return Err(format!("local_path outside watched roots: {}", buf.display()));
+        }
         engine.resolve_conflict(&buf, resolution).await?;
     }
     Ok(())
@@ -504,8 +550,8 @@ async fn resolve_conflicts_bulk(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<Vec<bool>, String> {
     use tauri::Emitter;
-    let g = state.0.lock().await;
-    let engine = match g.as_ref() {
+    let engine = { state.0.lock().await.clone() };
+    let engine = match engine.as_ref() {
         Some(e) => e,
         None => return Err("autosync not running".to_string()),
     };
@@ -518,6 +564,18 @@ async fn resolve_conflicts_bulk(
                 resource: "bulk".to_string(),
                 file: basename_for_log(p),
                 action: "conflict resolve blocked: path traversal".to_string(),
+                kind: ActivityKind::Block,
+                ..Default::default()
+            });
+            out.push(false);
+            continue;
+        }
+        if !engine.owns_local_path(&buf) {
+            let _ = app.emit("autosync://activity", &ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "bulk".to_string(),
+                file: basename_for_log(p),
+                action: "conflict resolve blocked: outside watched roots".to_string(),
                 kind: ActivityKind::Block,
                 ..Default::default()
             });
@@ -729,6 +787,7 @@ async fn open_sftp_for(server_key: &str) -> Result<sftp::SftpClient, String> {
         user: &server.user,
         key_path: &key_path,
         trusted_fingerprint: server.fingerprint.as_deref(),
+        write_probe_root: Some(&server.remote_root),
     })
     .await?;
     // 1i TOFU close — first-connect captures fingerprint, persist it.
@@ -743,6 +802,13 @@ async fn remote_list_dir(
     server_key: String,
     path: String,
 ) -> Result<Vec<sftp::RemoteEntry>, String> {
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?
+        .clone();
+    let path = path_guard::validate_remote_child(&server, &path)
+        .map_err(|e| format!("remote list guard: {e}"))?;
     let client = open_sftp_for(&server_key).await?;
     let entries = client.list_directory(&path).await;
     client.close().await;
@@ -985,8 +1051,25 @@ async fn remote_rename_path(
     server_key: String,
     from: String,
     to: String,
+    state: tauri::State<'_, AutoSyncState>,
 ) -> Result<(), String> {
     use tauri::Emitter;
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?
+        .clone();
+    let from = path_guard::validate_remote_child(&server, &from)
+        .map_err(|e| format!("remote rename from guard: {e}"))?;
+    let to = path_guard::validate_remote_child(&server, &to)
+        .map_err(|e| format!("remote rename to guard: {e}"))?;
+    if let Some(engine) = { state.0.lock().await.clone() } {
+        if let Some(locks) = engine.locks() {
+            if let Some(lock) = locks.find_lock_by_other(&from) {
+                return Err(format!("remote rename blocked by {}@{}", lock.user, lock.host));
+            }
+        }
+    }
     let client = open_sftp_for(&server_key).await?;
     let result = client.rename(&from, &to).await;
     client.close().await;
@@ -1017,13 +1100,40 @@ async fn remote_delete_paths(
     app: tauri::AppHandle,
     server_key: String,
     paths: Vec<String>,
-) -> Result<Vec<bool>, String> {
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<Vec<path_guard::OpStatus>, String> {
     use tauri::Emitter;
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?
+        .clone();
+    let engine = { state.0.lock().await.clone() };
     let client = open_sftp_for(&server_key).await?;
     let mut out = Vec::with_capacity(paths.len());
     for p in &paths {
-        let res = client.delete_recursive(p).await;
+        let guarded = path_guard::validate_remote_child(&server, p)
+            .map_err(|e| format!("remote delete guard: {e}"));
+        let res = match guarded {
+            Ok(remote) => {
+                if let Some(engine) = engine.as_ref() {
+                    if let Some(locks) = engine.locks() {
+                        if let Some(lock) = locks.find_lock_by_other(&remote) {
+                            Err(format!("blocked by {}@{}", lock.user, lock.host))
+                        } else {
+                            client.delete_recursive(&remote).await
+                        }
+                    } else {
+                        client.delete_recursive(&remote).await
+                    }
+                } else {
+                    client.delete_recursive(&remote).await
+                }
+            }
+            Err(e) => Err(e),
+        };
         let ok = res.is_ok();
+        let err = res.err();
         let row = if ok {
             ActivityRow {
                 at: chrono::Utc::now(),
@@ -1038,30 +1148,40 @@ async fn remote_delete_paths(
                 at: chrono::Utc::now(),
                 resource: "manual".to_string(),
                 file: basename_for_log(p),
-                action: format!("remote delete failed: {}", res.err().unwrap_or_default()),
+                action: format!("remote delete failed: {}", err.clone().unwrap_or_default()),
                 kind: ActivityKind::Error,
                 ..Default::default()
             }
         };
         let _ = app.emit("autosync://activity", &row);
-        out.push(ok);
+        out.push(if ok {
+            path_guard::OpStatus::ok()
+        } else {
+            path_guard::OpStatus::err(err.unwrap_or_else(|| "remote delete failed".into()))
+        });
     }
     client.close().await;
     Ok(out)
 }
 
 #[tauri::command]
-fn local_rename_path(
+async fn local_rename_path(
     app: tauri::AppHandle,
     from: String,
     to: String,
+    state: tauri::State<'_, AutoSyncState>,
 ) -> Result<(), String> {
     use tauri::Emitter;
-    let from_p = std::path::Path::new(&from);
-    let to_p = std::path::Path::new(&to);
-    reject_path_traversal(from_p, "from")?;
-    reject_path_traversal(to_p, "to")?;
-    let result = std::fs::rename(from_p, to_p).map_err(|e| format!("rename {from} -> {to}: {e}"));
+    let result = async {
+        let from_p = validate_watched_local_path(&state, &from, "from").await?;
+        let to_p = validate_watched_local_path(&state, &to, "to").await?;
+        if to_p.exists() {
+            return Err(format!("target already exists: {}", to_p.display()));
+        }
+        std::fs::rename(&from_p, &to_p)
+            .map_err(|e| format!("rename {} -> {}: {e}", from_p.display(), to_p.display()))
+    }
+    .await;
     let row = match &result {
         Ok(()) => ActivityRow {
             at: chrono::Utc::now(),
@@ -1085,15 +1205,18 @@ fn local_rename_path(
 }
 
 #[tauri::command]
-fn local_delete_paths(
+async fn local_delete_paths(
     app: tauri::AppHandle,
     paths: Vec<String>,
-) -> Result<Vec<bool>, String> {
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<Vec<path_guard::OpStatus>, String> {
     use tauri::Emitter;
     let mut out = Vec::with_capacity(paths.len());
     for p in &paths {
-        let path = std::path::Path::new(p);
-        if let Err(e) = reject_path_traversal(path, "path") {
+        let guarded = validate_watched_local_path(&state, p, "path").await;
+        let path = match guarded {
+            Ok(path) => path,
+            Err(e) => {
             let _ = app.emit("autosync://activity", &ActivityRow {
                 at: chrono::Utc::now(),
                 resource: "manual".to_string(),
@@ -1102,15 +1225,17 @@ fn local_delete_paths(
                 kind: ActivityKind::Block,
                 ..Default::default()
             });
-            out.push(false);
+            out.push(path_guard::OpStatus::err(e));
             continue;
-        }
-        let res = if path.is_dir() {
-            std::fs::remove_dir_all(path)
+            }
+        };
+        let res = if path.symlink_metadata().map(|m| m.is_dir()).unwrap_or(false) {
+            std::fs::remove_dir_all(&path)
         } else {
-            std::fs::remove_file(path)
+            std::fs::remove_file(&path)
         };
         let ok = res.is_ok();
+        let err = res.err().map(|e| e.to_string());
         let row = if ok {
             ActivityRow {
                 at: chrono::Utc::now(),
@@ -1125,13 +1250,17 @@ fn local_delete_paths(
                 at: chrono::Utc::now(),
                 resource: "manual".to_string(),
                 file: basename_for_log(p),
-                action: format!("local delete failed: {}", res.err().map(|e| e.to_string()).unwrap_or_default()),
+                action: format!("local delete failed: {}", err.clone().unwrap_or_default()),
                 kind: ActivityKind::Error,
                 ..Default::default()
             }
         };
         let _ = app.emit("autosync://activity", &row);
-        out.push(ok);
+        out.push(if ok {
+            path_guard::OpStatus::ok()
+        } else {
+            path_guard::OpStatus::err(err.unwrap_or_else(|| "local delete failed".into()))
+        });
     }
     Ok(out)
 }
@@ -1159,7 +1288,7 @@ async fn detect_bootstrap(
 #[tauri::command]
 async fn bootstrap_list_files(
     server_key: String,
-    local_root: String,
+    _local_root: String,
 ) -> Result<Vec<(String, String)>, String> {
     let cfg = profile::RiftConfig::load()?;
     let server = cfg
@@ -1174,7 +1303,7 @@ async fn bootstrap_list_files(
         .map_err(|e| format!("list recursive: {e}"))?;
     client.close().await;
 
-    let local_root_path = std::path::PathBuf::from(&local_root);
+    let local_root_path = std::path::PathBuf::from(&server.local_root);
     let mut jobs = Vec::with_capacity(entries.len());
     for e in entries {
         if e.is_dir { continue; }
@@ -1257,6 +1386,7 @@ async fn probe_server_fingerprint(server_key: String) -> Result<String, String> 
         user: &server.user,
         key_path: &key_path,
         trusted_fingerprint: None,
+        write_probe_root: Some(&server.remote_root),
     })
     .await?;
     let fp = client.fingerprint().to_string();
@@ -1418,6 +1548,14 @@ pub fn run() {
         .manage(TunnelState(AsyncMutex::new(None)))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
+        .manage(terminal::TerminalState::default())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                if let Some(state) = window.app_handle().try_state::<terminal::TerminalState>() {
+                    terminal::kill_all(&state);
+                }
+            }
+        })
         .setup(|app| {
             // Diagnostics: stream bus events to the frontend (`diag://event`)
             // and emit a periodic pipeline-state snapshot (`diag://state`)
@@ -1473,6 +1611,12 @@ pub fn run() {
             diag_force_pull_now,
             diag_force_push_now,
             diag_ignored_breakdown,
+            terminal::term_list_shells,
+            terminal::term_spawn,
+            terminal::term_write,
+            terminal::term_resize,
+            terminal::term_kill,
+            terminal::term_default_cwd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

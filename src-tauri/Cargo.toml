@@ -67,3 +67,8 @@ base64 = "0.22"
 # russh::keys; rand 0.10 provides `rand::rng()` for `PrivateKey::random`
 # (russh 0.60 dropped the rand_core 0.6 OsRng path in favor of rand_core 0.10).
 rand = "0.10"
+
+# S37: embedded terminal (Path A — generic PTY-backed shell panel; user types
+# `claude` themselves to launch Claude Code, no SDK / API-key plumbing on our
+# side). WezTerm-backed, ConPTY on Win10+. v0.9.0 released 2026-02.
+portable-pty = "0.9"

@@ -14,6 +14,8 @@
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
+    // Fire-and-forget: events emitted before wire() resolves are not captured.
+    // Ring buffer (1000 entries) on the backend covers the gap.
     void diagnostics.wire();
   });
 

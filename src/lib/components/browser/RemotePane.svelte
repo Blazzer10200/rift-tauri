@@ -1,9 +1,10 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { Folder, FileCode, File, ChevronRight, Download, FolderOpen, Copy, Pencil, Trash2 } from "lucide-svelte";
+  import { Folder, FileCode, File, Download, FolderOpen, Copy, Pencil, Trash2 } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
-  import { fade } from "svelte/transition";
+  import { fade, scale } from "svelte/transition";
+  import { quintOut } from "svelte/easing";
   import { connection } from "../../state/connection.svelte";
   import { fmtRelative, fmtAbsolute } from "../../utils/time";
 
@@ -75,7 +76,7 @@
   }
 
   function fmtSize(n: number, isDir: boolean): string {
-    if (isDir) return "—";
+    if (isDir) return "";
     if (n < 1024) return `${n} B`;
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
     if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -131,12 +132,27 @@
     e.stopPropagation();
     if (!selected.has(entry.full_path)) selected = new Set([entry.full_path]);
     menuFor = entry;
-    menuPos = { x: e.clientX, y: e.clientY };
+    const MENU_W = 240;
+    const MENU_H = 320;
+    const PAD = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + MENU_W > vw) x = Math.max(PAD, vw - MENU_W - PAD);
+    if (y + MENU_H > vh) y = Math.max(PAD, vh - MENU_H - PAD);
+    menuPos = { x, y };
   }
 
   function onBodyContextMenu(e: MouseEvent) {
     e.preventDefault();
     menuFor = null;
+  }
+
+  function onBodyClick(e: MouseEvent) {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest(".row")) return;
+    selected = new Set();
   }
 
   function closeMenu() { menuFor = null; }
@@ -204,12 +220,36 @@
     }
   }
 
+  function isEditableTarget(t: EventTarget | null): boolean {
+    const el = t as HTMLElement | null;
+    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+  }
   function onPaneKeyDown(e: KeyboardEvent) {
+    if (isEditableTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
-      const tgt = e.target as HTMLElement | null;
-      if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "TEXTAREA")) return;
       e.preventDefault();
+      menuFor = null;
       selected = new Set(filtered.map((x) => x.full_path));
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+      if (selected.size === 0) return;
+      e.preventDefault();
+      menuFor = null;
+      const text = [...selected].join("\n");
+      try { void navigator.clipboard.writeText(text); } catch (err) { console.warn("clipboard failed", err); }
+    } else if (e.key === "F2") {
+      if (selected.size !== 1) return;
+      e.preventDefault();
+      menuFor = null;
+      const [p] = selected;
+      const ent = entries.find((x) => x.full_path === p);
+      if (ent) void renameEntry(ent);
+    } else if (e.key === "Delete") {
+      if (selected.size === 0) return;
+      e.preventDefault();
+      menuFor = null;
+      const firstPath = [...selected][0];
+      const ent = entries.find((x) => x.full_path === firstPath);
+      if (ent) void deleteEntries(ent);
     } else if (e.key === "Escape") {
       selected = new Set();
       menuFor = null;
@@ -270,7 +310,8 @@
 
 <svelte:window onclick={closeMenu} />
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <section
   class="pane"
   data-side="remote"
@@ -301,6 +342,7 @@
     role="presentation"
     ondragover={onDragOver}
     ondrop={onDrop}
+    onclick={onBodyClick}
     oncontextmenu={onBodyContextMenu}
   >
     {#if loading}
@@ -318,10 +360,10 @@
             disabled={!parentOf(path)}
             onclick={() => { const p = parentOf(path); if (p) onPathChange(p); }}
           >
-            <span class="row-name"><span class="twirl"></span>↑ ..</span>
+            <span class="row-name up-name">↑ ..</span>
             <span class="row-status"></span>
-            <span class="row-size mono">—</span>
-            <span class="row-mtime mono">—</span>
+            <span class="row-size mono"></span>
+            <span class="row-mtime mono"></span>
           </button>
           {#if filtered.length === 0}
             <div class="empty">
@@ -353,11 +395,9 @@
               >
                 <span class="row-name">
                   {#if e.is_dir}
-                    <span class="twirl"><ChevronRight size={10}/></span>
-                    <Folder size={13}/>
+                    <Folder size={14} class="row-icon row-icon-dir"/>
                   {:else}
-                    <span class="twirl"></span>
-                    <Icon size={13}/>
+                    <Icon size={13} class="row-icon"/>
                   {/if}
                   <span class="row-label mono">{e.name}</span>
                   {#if lk}
@@ -367,8 +407,6 @@
                 <span class="row-status" title={status}>
                   {#if status === "conflict"}
                     <span class="sym danger">▲</span>
-                  {:else}
-                    <span class="sym muted">·</span>
                   {/if}
                 </span>
                 <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
@@ -394,30 +432,31 @@
     role="menu"
     tabindex="-1"
     style="left:{menuPos.x}px; top:{menuPos.y}px"
+    transition:scale={{ start: 0.94, duration: 110, easing: quintOut }}
     onclick={(ev) => ev.stopPropagation()}
     onkeydown={(ev) => { if (ev.key === "Escape") { ev.preventDefault(); closeMenu(); } }}
   >
     {#if target.is_dir && !multi}
-      <button type="button" class="ctx-item" onclick={() => { onOpenInNewTab(target); closeMenu(); }}>
-        <FolderOpen size={13}/><span>Open in new tab</span>
+      <button type="button" class="ctx-item" data-tone="accent" onclick={() => { onOpenInNewTab(target); closeMenu(); }}>
+        <FolderOpen size={13}/><span class="ctx-label">Open in new tab</span>
       </button>
       <div class="ctx-sep"></div>
     {/if}
-    <button type="button" class="ctx-item" onclick={() => { downloadEntry(target); closeMenu(); }}>
-      <Download size={13}/><span>Download to local{multi ? ` (${selected.size})` : ""}</span>
+    <button type="button" class="ctx-item" data-tone="info" onclick={() => { downloadEntry(target); closeMenu(); }}>
+      <Download size={13}/><span class="ctx-label">Download to local{multi ? ` (${selected.size})` : ""}</span>
     </button>
     {#if !multi}
       <div class="ctx-sep"></div>
-      <button type="button" class="ctx-item" onclick={() => { copyPath(target.full_path); closeMenu(); }}>
-        <Copy size={13}/><span>Copy path</span>
+      <button type="button" class="ctx-item" data-tone="neutral" onclick={() => { copyPath(target.full_path); closeMenu(); }}>
+        <Copy size={13}/><span class="ctx-label">Copy path</span><span class="ctx-kbd">Ctrl+C</span>
       </button>
-      <button type="button" class="ctx-item" onclick={() => { renameEntry(target); closeMenu(); }}>
-        <Pencil size={13}/><span>Rename…</span>
+      <button type="button" class="ctx-item" data-tone="neutral" onclick={() => { renameEntry(target); closeMenu(); }}>
+        <Pencil size={13}/><span class="ctx-label">Rename…</span><span class="ctx-kbd">F2</span>
       </button>
     {/if}
     <div class="ctx-sep"></div>
-    <button type="button" class="ctx-item ctx-danger" onclick={() => { deleteEntries(target); closeMenu(); }}>
-      <Trash2 size={13}/><span>Delete{multi ? ` (${selected.size})` : ""}</span>
+    <button type="button" class="ctx-item" data-tone="danger" onclick={() => { deleteEntries(target); closeMenu(); }}>
+      <Trash2 size={13}/><span class="ctx-label">Delete{multi ? ` (${selected.size})` : ""}</span><span class="ctx-kbd">Del</span>
     </button>
   </div>
 {/if}
@@ -465,7 +504,19 @@
     text-align: left;
     transition: background 100ms ease, transform 80ms ease;
   }
+  .row[data-dir="true"] {
+    background: color-mix(in oklch, var(--accent) 4%, transparent);
+  }
+  .row[data-dir="true"] .row-label {
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .row :global(.row-icon) { color: var(--fg-muted); flex-shrink: 0; }
+  .row :global(.row-icon-dir) { color: var(--accent); opacity: 0.95; }
   .row:hover { background: var(--surface-hover); }
+  .row[data-dir="true"]:hover {
+    background: color-mix(in oklch, var(--accent) 11%, var(--surface-hover));
+  }
   @media (prefers-reduced-motion: no-preference) {
     .row[data-dir="true"]:hover { transform: translateX(2px); }
   }
@@ -488,13 +539,12 @@
   }
   .up-row:hover:not(:disabled) { background: var(--surface-hover); }
   .up-row:disabled { opacity: 0.4; cursor: not-allowed; }
-  .row-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+  .row-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
   .row-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .twirl { display: inline-flex; width: 12px; color: var(--fg-faint); }
+  .up-name { color: var(--fg-muted); padding-left: 2px; letter-spacing: 0.04em; }
   .row-status { text-align: center; }
   .sym { font-size: 11px; }
   .sym.danger { color: var(--danger); }
-  .sym.muted { color: var(--fg-faint); }
   .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); white-space: nowrap; }
 
   .empty {
@@ -518,21 +568,47 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
-    min-width: 200px; padding: 4px;
+    min-width: 224px; padding: 4px;
+    transform-origin: top left;
   }
   .ctx-item {
-    display: flex; align-items: center; gap: 8px;
+    --ctx-tone: var(--fg-muted);
+    position: relative;
+    display: flex; align-items: center; gap: 10px;
     width: 100%; text-align: left;
     background: transparent; border: 0;
     color: var(--fg); font-size: var(--fs-sm);
-    padding: 6px 10px; border-radius: var(--radius-xs);
+    padding: 7px 10px; border-radius: var(--radius-xs);
     cursor: pointer;
+    transition: background 100ms ease, color 100ms ease, box-shadow 100ms ease;
   }
-  .ctx-item :global(svg) { color: var(--fg-subtle); flex-shrink: 0; }
-  .ctx-item:hover { background: var(--surface-hover); color: var(--accent); }
-  .ctx-item:hover :global(svg) { color: var(--accent); }
-  .ctx-danger:hover { background: var(--danger-soft); color: var(--danger); }
-  .ctx-danger:hover :global(svg) { color: var(--danger); }
+  .ctx-item[data-tone="accent"] { --ctx-tone: var(--accent); }
+  .ctx-item[data-tone="info"]   { --ctx-tone: var(--info); }
+  .ctx-item[data-tone="danger"] { --ctx-tone: var(--danger); }
+  .ctx-item :global(svg) { color: var(--ctx-tone); opacity: 0.85; flex-shrink: 0; }
+  .ctx-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctx-kbd {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 10px;
+    color: var(--fg-faint);
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+  .ctx-item:hover {
+    background: color-mix(in oklch, var(--ctx-tone) 14%, var(--surface-hover));
+    color: var(--ctx-tone);
+    box-shadow: inset 2px 0 var(--ctx-tone);
+  }
+  .ctx-item:hover :global(svg) { opacity: 1; }
+  .ctx-item:hover .ctx-kbd {
+    color: var(--ctx-tone);
+    border-color: color-mix(in oklch, var(--ctx-tone) 45%, var(--border));
+    background: color-mix(in oklch, var(--ctx-tone) 8%, var(--bg-elev-1));
+  }
   .ctx-sep {
     height: 1px;
     background: var(--border);

@@ -1,7 +1,28 @@
 <script lang="ts">
   import { AlertTriangle } from "lucide-svelte";
+  import { fly } from "svelte/transition";
+  import { flip } from "svelte/animate";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ConflictRecord } from "../../state/connection.svelte";
+
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  let mounted = $state(false);
+  $effect(() => {
+    mounted = true;
+  });
+
+  function rowIn(i: number) {
+    if (reducedMotion) return { duration: 0 };
+    return {
+      x: -14,
+      opacity: 0,
+      duration: 260,
+      delay: mounted ? 0 : Math.min(i, 7) * 40,
+    };
+  }
 
   type Props = {
     selected: ConflictRecord | null;
@@ -45,31 +66,39 @@
 <aside class="list">
   <header>
     <h3>Conflicts</h3>
-    <span class="count-pip" class:danger={connection.conflicts.length > 0}>
-      {connection.conflicts.length}
-    </span>
+    {#if connection.conflicts.length > 0}
+      <span class="count-pip danger">{connection.conflicts.length}</span>
+    {/if}
   </header>
   {#if connection.conflicts.length === 0}
-    <p class="empty">No conflicts.</p>
+    <div class="empty">
+      <span class="empty-title">No conflicts</span>
+      <span class="empty-hint">Both sides agree — anything that diverges lands here.</span>
+    </div>
   {:else}
     <div class="bulk-bar">
-      <button type="button" class="btn ghost sm" disabled={busy} onclick={() => bulkResolve("accept_remote")}>
-        Use Remote for all
-      </button>
-      <button type="button" class="btn ghost sm" disabled={busy} onclick={() => bulkResolve("force_local")}>
-        Use Local for all
-      </button>
+      <span class="bulk-label">Resolve all <span class="bulk-count">({connection.conflicts.length})</span></span>
+      <div class="bulk-actions">
+        <button type="button" class="btn ghost sm warn" disabled={busy} onclick={() => bulkResolve("accept_remote")}>
+          Take Remote
+        </button>
+        <button type="button" class="btn ghost sm info" disabled={busy} onclick={() => bulkResolve("force_local")}>
+          Take Local
+        </button>
+      </div>
     </div>
     {#if bulkError}
       <p class="bulk-error">{bulkError}</p>
     {/if}
     <div class="rows">
-      {#each connection.conflicts as c (c.local_path)}
+      {#each connection.conflicts as c, i (c.local_path)}
         <button
           type="button"
           class="row"
           data-active={selected?.local_path === c.local_path}
           onclick={() => onSelect(c)}
+          in:fly={rowIn(i)}
+          animate:flip={{ duration: reducedMotion ? 0 : 240 }}
         >
           <div class="row-head">
             <AlertTriangle size={11} class="ico"/>
@@ -101,46 +130,68 @@
   }
   header h3 { margin: 0; font-size: var(--fs-sm); font-weight: 600; }
   .empty {
-    padding: 16px; color: var(--fg-muted);
-    font-size: var(--fs-sm); text-align: center;
+    padding: 28px 16px;
+    display: flex; flex-direction: column; gap: 4px;
+    align-items: center; text-align: center;
   }
+  .empty-title { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
+  .empty-hint { color: var(--fg-muted); font-size: var(--fs-xs); max-width: 240px; line-height: 1.45; }
   .bulk-bar {
-    display: flex; gap: 6px;
+    display: flex; flex-direction: column; gap: 6px;
     padding: 8px 10px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-elev-1);
   }
+  .bulk-label {
+    font-size: var(--fs-xs);
+    color: var(--fg-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .bulk-count { color: var(--fg-faint); }
+  .bulk-actions { display: flex; gap: 6px; }
+  .bulk-actions .btn { flex: 1; }
   .bulk-error {
     margin: 0; padding: 6px 14px;
     background: var(--danger-soft);
     color: var(--danger);
     font-size: var(--fs-xs);
   }
-  .rows { overflow: auto; flex: 1; padding: 4px; }
+  .rows { overflow: auto; flex: 1; padding: 6px 4px; display: flex; flex-direction: column; gap: 2px; }
   .row {
     display: flex; flex-direction: column; gap: 2px;
     width: 100%;
     background: transparent; border: 0;
     color: var(--fg);
-    padding: 8px 12px;
-    margin-bottom: 2px;
+    padding: 9px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     text-align: left;
     font: inherit;
-    border-left: 2px solid transparent;
+    box-shadow: inset 2px 0 transparent;
+    transition: background 100ms, box-shadow 100ms;
   }
   .row:hover { background: var(--surface-hover); }
   .row[data-active="true"] {
-    background: var(--danger-soft);
-    border-left-color: var(--danger);
+    background: color-mix(in oklch, var(--danger) 10%, var(--surface));
+    box-shadow: inset 2px 0 var(--danger);
+  }
+  .row[data-active="true"]:hover {
+    background: color-mix(in oklch, var(--danger) 14%, var(--surface));
   }
   .row-head { display: inline-flex; align-items: center; gap: 6px; }
-  .row-head :global(.ico) { color: var(--danger); }
-  .file { color: var(--fg); font-size: var(--fs-sm); }
+  .row-head :global(.ico) {
+    color: var(--danger);
+    transition: transform 120ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .row:hover .row-head :global(.ico) { transform: scale(1.15); }
+  }
+  .file { color: var(--fg); font-size: var(--fs-sm); font-weight: 500; }
   .resource { color: var(--accent); font-size: var(--fs-xs); }
   .path {
     font-size: var(--fs-xs);
+    color: var(--fg-faint);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .emptyhint {

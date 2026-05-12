@@ -90,8 +90,8 @@ fn trim_to_tail(content: &str, max_lines: usize) -> String {
     // append cycles (consumers split on '\n' and an absent terminator can
     // confuse line-based tooling).
     let had_trailing_newline = content.ends_with('\n');
-    let body = content.trim_end_matches('\n');
-    let lines: Vec<&str> = body.split('\n').collect();
+    let body = content.trim_end_matches(['\r', '\n']);
+    let lines: Vec<&str> = body.lines().collect();
     let mut out = if lines.len() <= max_lines {
         body.to_string()
     } else {
