@@ -137,7 +137,7 @@ body {
 }
 
 .btn {
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 26px; padding: 0 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
@@ -145,17 +145,24 @@ body {
   color: var(--fg);
   font: inherit; font-size: var(--fs-sm);
   cursor: pointer;
-  transition: background 80ms ease, border-color 80ms ease;
+  transition: background 100ms ease, border-color 100ms ease, box-shadow 120ms ease, transform 80ms ease, color 100ms ease;
 }
 .btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-.btn:active { background: var(--surface-active); }
+.btn:active { background: var(--surface-active); transform: translateY(1px); }
+.btn:disabled { cursor: not-allowed; opacity: 0.55; }
+.btn:disabled:hover { background: var(--surface); border-color: var(--border); transform: none; }
 .btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
-.btn.primary:hover { background: var(--accent-hover); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
+.btn.primary:hover { background: var(--accent-hover); box-shadow: 0 4px 14px color-mix(in oklch, var(--accent) 22%, transparent); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--fg-muted); }
 .btn.ghost:hover { background: var(--surface-hover); color: var(--fg); }
 .btn.danger { color: var(--danger); border-color: var(--border); }
-.btn.danger:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+.btn.danger:hover { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); box-shadow: 0 4px 14px color-mix(in oklch, var(--danger) 18%, transparent); }
+.btn.warn { color: var(--warn); border-color: var(--border); }
+.btn.warn:hover { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.btn.info { color: var(--info); border-color: var(--border); }
+.btn.info:hover { background: var(--info-soft); border-color: var(--info); color: var(--info); }
+.btn.lg { height: 38px; padding: 0 16px; font-size: var(--fs-md); font-weight: 600; }
 .btn.sm { height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
 .btn.xs { height: 20px; padding: 0 6px; font-size: var(--fs-xs); }
 

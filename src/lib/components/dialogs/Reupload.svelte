@@ -58,10 +58,14 @@
         </label>
       </div>
       <div class="dialog-foot">
-        <button class="btn ghost" type="button" onclick={() => pick("skip")}>Skip</button>
+        <button class="btn ghost" type="button" onclick={() => pick("skip")}>
+          Skip
+          <span class="kbd dim">Esc</span>
+        </button>
         <div class="dialog-foot-spacer"></div>
         <button class="btn primary" type="button" onclick={() => pick(dontAsk ? "always" : "reupload")}>
           <Upload size={11}/> Re-upload
+          <span class="kbd dim">↵</span>
         </button>
       </div>
     </div>
