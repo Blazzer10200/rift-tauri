@@ -47,7 +47,7 @@
   <div class="dialog-overlay" onclick={onBackdrop} role="presentation">
     <div class="dialog-shell" style="width: 440px;" role="alertdialog" aria-modal="true" aria-label={title}>
       <div class="dialog-head">
-        <div class="dialog-icon" class:danger={isDanger}>
+        <div class="dialog-icon" class:danger={isDanger} class:info={!isDanger}>
           {#if isDanger}<Trash2 size={14}/>{:else}<Check size={14}/>{/if}
         </div>
         <div>
@@ -67,7 +67,10 @@
         </div>
       {/if}
       <div class="dialog-foot">
-        <button class="btn ghost" type="button" onclick={() => decide(false)}>{cancelLabel}</button>
+        <button class="btn ghost" type="button" onclick={() => decide(false)}>
+          {cancelLabel}
+          <span class="kbd dim">Esc</span>
+        </button>
         <div class="dialog-foot-spacer"></div>
         <button
           class="btn"
@@ -75,7 +78,10 @@
           class:danger={isDanger}
           type="button"
           onclick={() => decide(true)}
-        >{confirmLabel}</button>
+        >
+          {confirmLabel}
+          <span class="kbd dim">↵</span>
+        </button>
       </div>
     </div>
   </div>

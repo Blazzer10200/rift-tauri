@@ -2,6 +2,19 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 34 — 2026-05-12 — UI polish pass 4 (Tier 1 — dialog skeleton + small dialogs)
+
+Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped. Map at `docs/UI-POLISH-MAP.md`.
+
+### What landed
+- **`.btn` skeleton lifted in `app.css`** — `:active` translateY(1px) micro-bounce universal, `:disabled` consistent (cursor + opacity, no hover transform), `.btn.primary` font-weight 600 + accent-tinted hover shadow, `.btn.danger` danger-tinted hover shadow, added `.btn.warn` + `.btn.info` tone variants (canon completes), added `.btn.lg` 38px primary-CTA size. Every button in the app inherits.
+- **Confirm dialog** — non-danger icon now `.info` (was neutral bg-elev-2). Esc/Enter kbd affordance hints in foot.
+- **Reupload dialog** — Esc/Enter kbd affordance hints in foot.
+
+### Verify
+- svelte-check: no new errors.
+- Toasts (FlashToast, ActivityToast) audited as already on-canon — no edits.
+
 ## Session 33 — 2026-05-12 — UI polish pass 3 (StatusHero + StatusBar dedup)
 
 Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
