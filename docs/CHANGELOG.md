@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
+## v0.2.22-alpha-test — 2026-05-12 — Pull Now in OpRail (discoverability fix)
+
+v0.2.21 put the Pull Now button only inside the SyncModal footer, which meant you had to scan first to see it — defeats the purpose. v0.2.22 adds the button to the OpRail (middle column) right below the Reconcile button, always visible. New `DownloadCloud` icon to distinguish from regular Download (single-arrow) and Reconcile (refresh circle). Tooltip: "Pull Now — fetch any remote changes immediately (auto-pulls every 10s otherwise)."
+
+Modal-internal Pull Now button retained for the case where the user clicked Reconcile and now sees a pull count.
+
 ## v0.2.21-alpha-test — 2026-05-12 — Snappier auto-pull + Pull Now button
 
 Closes the "buddy pushed but my Rift hasn't ticked yet" UX gap. Tested by Blazzer + Trey: push direction was instant, pull direction needed a manual Sync click to feel timely. Two changes fix it.
