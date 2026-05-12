@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.2.29-alpha-test",
+  "version": "0.2.30-alpha-test",
   "description": "",
   "type": "module",
   "scripts": {

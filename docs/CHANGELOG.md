@@ -2,17 +2,23 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.29-alpha-test — 2026-05-12 — Folder-delete fix (was failing on FiveM resource removals)
+## v0.2.30-alpha-test — 2026-05-12 — Codebase sweep: clippy clean + svelte warnings down 5→2
 
-Deleting a FiveM resource directory locally (e.g. `rm -rf gt_zombies_qb`) was surfacing `delete failed: /opt/.../[endure]/gt_zombies_qb: No such file: No such file` in both Blazzer's and Trey's activity feeds. Local removal worked; remote did not — folder stayed orphaned server-side, drift queued the delete forever, never resolved.
-
-Root cause: `SftpClient::delete` only called `remove_file`. SFTP's `remove_file` rejects directories (NO_SUCH_FILE / FAILURE depending on server), russh-sftp surfaces it as "No such file." The push pipeline doesn't distinguish file deletes from directory deletes — both arrive via the same `notify::Remove` event.
+Whole-codebase audit pass — no functional changes, no behavioral risk. Sets a clean baseline for future feature work.
 
 ### Landed
-- **`SftpClient::delete` now probes `remote_stat` first.** If the remote path is a directory, routes to `delete_recursive_via` (which already existed for explicit folder-tree deletes). Files still go straight to `remove_file` as before — no extra round-trip on the common case if the stat hits the directory branch first.
-- **Non-existent remote = success.** If `remote_stat` returns `!exists` (local already deleted, remote already gone), report success so the local delete reconciles. Previously this could re-queue forever in some race orderings.
+- **`paths.rs`:** `std::io::Error::new(ErrorKind::Other, msg)` → `std::io::Error::other(msg)`. Picks up the `clippy::io_other_error` lint suggestion (Rust 1.95 idiom).
+- **`Settings.svelte`:** `let section = $state<Section>(initialSection)` raised `state_referenced_locally` because the prop read happens inside `$state(...)`. Wrapped the prop in `untrack(() => initialSection)` — captures once on mount, doesn't shadow the prop name. Warning gone.
+- **`LocalPane.svelte` + `RemotePane.svelte` ctxmenu:** added `onkeydown` handler on the `role="menu"` wrappers that fires `closeMenu()` on Escape. Removes the `a11y_click_events_have_key_events` warning AND gives users a real keyboard escape from the right-click menu — UX win in passing.
+
+### Audit results (whole repo)
+- **`cargo clippy --no-deps`:** clean, 0 warnings (was 1).
+- **`svelte-check`:** 0 errors, **2 warnings** (was 5). Both remaining are the `<section tabindex>` non-interactive-element warnings on the file-browser panes; the `svelte-ignore` directive does not suppress `a11y_no_noninteractive_element_interactions` in current svelte-check despite the documented syntax. Tracked as a known svelte-check quirk, not a real defect.
+- **`TODO/FIXME/HACK/XXX` grep:** zero hits across all `src/` and `src-tauri/src/`.
+- **`#[allow(dead_code)]`:** one occurrence in `sftp/mod.rs` — the SSH session-keeper, intentional and documented.
+- **Module wiring:** all `src-tauri/src/**/*.rs` files reachable through `lib.rs` `pub mod` declarations; no orphan modules.
 
 ### Verify
-- `cargo check`: clean (0.48s). `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
+- `cargo check`: clean. `cargo clippy --no-deps`: clean. `svelte-check`: 0 errors / 2 warnings.
 
-v0.2.28 archived to git log.
+v0.2.29 archived to git log.
