@@ -69,13 +69,18 @@ impl SftpClient {
             std::process::id(),
             chrono::Utc::now().timestamp_millis()
         );
+        // Create proves write access. Cleanup is best-effort: if it fails
+        // (ENOENT from a sweep, or transient SFTP error) we'd rather declare
+        // the session healthy than reject the connection. A stray probe file
+        // is harmless; failing to connect because of one is not.
         self.upload_bytes(b"rift-probe\n", &probe)
             .await
             .map_err(|e| format!("write probe create failed under {root}: {e}"))?;
-        self.sftp
-            .remove_file(&probe)
-            .await
-            .map_err(|e| format!("write probe cleanup failed under {root}: {e}"))?;
+        if let Err(e) = self.sftp.remove_file(&probe).await {
+            eprintln!(
+                "[rift] write probe cleanup left {probe} on server (non-fatal): {e}"
+            );
+        }
         Ok(())
     }}
 

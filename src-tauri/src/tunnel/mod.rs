@@ -61,7 +61,13 @@ impl SshTunnel {
         let key_path: PathBuf = args.key_path.to_path_buf();
         let key_pair = load_secret_key(&key_path, None)
             .map_err(|e| format!("load key {}: {e}", key_path.display()))?;
-        let config = Arc::new(client::Config::default());
+        // Keepalive parity w/ sftp::open_session — 20s x 3 = ~60s to detect
+        // a stalled server side instead of indefinite half-dead socket.
+        let config = Arc::new(client::Config {
+            keepalive_interval: Some(std::time::Duration::from_secs(20)),
+            keepalive_max: 3,
+            ..client::Config::default()
+        });
         let addr = format!("{}:{}", args.host, args.port);
         let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
         let handler = PinningHandler {
