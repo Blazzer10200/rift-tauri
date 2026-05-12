@@ -82,7 +82,7 @@
 
   function fmtTime(iso: string): string {
     if (!iso) return "—";
-    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+    try { return new Date(iso).toLocaleString([], { hour12: true }); } catch { return iso; }
   }
 
   function parentOf(p: string): string | null {

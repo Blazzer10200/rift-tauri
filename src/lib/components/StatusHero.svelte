@@ -8,7 +8,7 @@
   const detail = $derived(connection.status?.detail ?? "Not watching");
   const lastTs = $derived(
     connection.lastActivity
-      ? new Date(connection.lastActivity.at).toLocaleTimeString([], { hour12: false })
+      ? new Date(connection.lastActivity.at).toLocaleTimeString([], { hour12: true })
       : "—",
   );
 
