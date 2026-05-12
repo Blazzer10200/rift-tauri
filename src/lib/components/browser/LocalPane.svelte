@@ -343,7 +343,10 @@
             <span class="row-mtime mono">—</span>
           </button>
           {#if filtered.length === 0}
-            <div class="empty">{filter ? "No matches." : "Empty."}</div>
+            <div class="empty">
+              <span class="empty-title">{filter ? "No matches" : "Empty folder"}</span>
+              <span class="empty-hint">{filter ? `Nothing matches "${filter}".` : "Drop files here, or use ↑ to go up."}</span>
+            </div>
           {:else}
             {#each filtered as e (e.path)}
               {@const status = rowStatus(e)}
@@ -521,7 +524,13 @@
   .sym.muted { color: var(--fg-faint); }
   .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); white-space: nowrap; }
 
-  .empty { padding: 22px; color: var(--fg-muted); font-size: var(--fs-sm); text-align: center; }
+  .empty {
+    padding: 28px 22px;
+    display: flex; flex-direction: column; gap: 6px;
+    color: var(--fg-muted); font-size: var(--fs-sm); text-align: center;
+  }
+  .empty-title { color: var(--fg); font-weight: 500; }
+  .empty-hint { color: var(--fg-subtle); font-size: var(--fs-xs); }
 
   .foot {
     padding: 4px 12px;
