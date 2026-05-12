@@ -1,252 +1,33 @@
-//! Remote-side scan loop — closes the bidirectional sync loop.
+//! Remote-side helpers — `pull_one`, `delete_local_one`, `register_conflict`.
 //!
-//! Rift's local watcher (`auto_sync.rs`) handles `local → remote`. SFTP/FTP
-//! protocols expose no push-notify channel for the reverse direction
-//! (verified by WinSCP docs + Syncthing scanning model), so we poll: every
-//! `interval_secs` we run a `DriftScanner::scan()` against the watched
-//! folders. Files in the `ToPull` bucket are downloaded; `Conflict` entries
-//! get rendered into the existing ConflictRecord set surfaced in the UI.
+//! v0.2.38 ripped the auto-poll loop (`spawn` / `run_tick`) and the per-tick
+//! mass-delete guard out of this module. Sync is now manual-only: the user
+//! clicks Push Now / Pull Now in the UI, which routes through
+//! `AutoSyncEngine::force_push_now` / `force_pull_now`. Those callers
+//! dispatch the helpers below for each `DriftEntry`.
 //!
-//! Safety guarantees (in priority order):
+//! Safety guarantees preserved (still enforced in `pull_one` /
+//! `delete_local_one`):
 //! 1. **Never overwrite an unflushed local edit.** If a `ToPull` target is
 //!    currently in the dirty queue, we sidestep — we download to
 //!    `<file>.rift-conflict.<remote-user>-<ts>.<ext>` and emit a
-//!    ConflictRecord. The user's bytes stay put. Inspired by Syncthing's
-//!    `<file>.sync-conflict-<ts>-<who>.<ext>` model.
-//! 2. **Don't fight the local pusher.** When the engine reports `is_pushing`
-//!    we skip the tick entirely. We'd just be racing our own uploads.
-//! 3. **Respect cross-dev locks.** If `LockPresence` knows another developer
-//!    is mid-edit on a file, defer the pull until they release.
-//! 4. **Snapshot is the source of truth.** Every successful pull writes the
+//!    ConflictRecord.
+//! 2. **Respect cross-dev locks.** If `LockPresence` knows another developer
+//!    is mid-edit on a file, defer the pull/delete until they release.
+//! 3. **Snapshot is the source of truth.** Every successful pull writes the
 //!    `(local_size, local_mtime, remote_size, remote_mtime, sha1)` tuple
-//!    back so the next tick won't re-flag the same file.
+//!    back so the next scan won't re-flag the same file.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::Utc;
-use tokio::task::JoinHandle;
 
 use crate::diagnostics::{self, DiagLevel, DiagStage};
 use crate::state::sync_snapshot::SHA1_MAX_BYTES;
 use crate::state::SyncSnapshot;
 use crate::sync::auto_sync::AutoSyncEngine;
-use crate::sync::drift_scanner::{DriftBucket, DriftScanner, FolderTarget};
 use crate::sync::ConflictRecord;
-
-/// Default tick interval (seconds). Configurable per-session via
-/// `AutoSyncEngine::set_remote_scan_interval`. Lowered 30 → 10 in v0.2.21 so
-/// remote changes pulled by buddies feel live (≤10s lag) instead of "did this
-/// even work?" (≤30s lag). 3x more SFTP listings, ~2s each on typical trees.
-pub const DEFAULT_SCAN_INTERVAL_SECS: u64 = 10;
-
-/// Sentinel — set the interval to this and the watcher pauses entirely
-/// (Settings: "Off"). Loop still runs but every tick is a no-op.
-pub const SCAN_INTERVAL_DISABLED: u64 = 0;
-
-/// Spawns the remote-scan loop. Returns the task handle so the engine can
-/// abort on stop. The interval is shared so Settings UI can change it live.
-pub fn spawn(
-    engine: Arc<AutoSyncEngine>,
-    interval_secs: Arc<AtomicU64>,
-) -> JoinHandle<()> {
-    tokio::spawn(async move {
-        // Initial delay — let the local watcher attach + first push settle
-        // before we start polling. Avoids a thundering-herd scan on connect.
-        tokio::time::sleep(Duration::from_secs(5)).await;
-
-        loop {
-            if engine.is_disposed() {
-                break;
-            }
-            let secs = interval_secs.load(Ordering::Relaxed);
-            if secs == SCAN_INTERVAL_DISABLED {
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            tokio::time::sleep(Duration::from_secs(secs.max(5))).await;
-            if engine.is_disposed() {
-                break;
-            }
-            if engine.is_pushing() {
-                diagnostics::emit(
-                    DiagStage::RemoteScanStart,
-                    DiagLevel::Debug,
-                    "skipped — local push in flight",
-                );
-                continue;
-            }
-            run_tick(&engine).await;
-        }
-    })
-}
-
-async fn run_tick(engine: &Arc<AutoSyncEngine>) {
-    // Manual-mode short-circuit (v0.2.37). User opted out of auto-pulls.
-    // Force-pull-now still works regardless — that's a separate codepath.
-    if !engine.auto_flush_enabled() {
-        return;
-    }
-    let folders = engine.folders_clone();
-    if folders.is_empty() {
-        return;
-    }
-    let started = std::time::Instant::now();
-    diagnostics::emit_with_fields(
-        DiagStage::RemoteScanStart,
-        DiagLevel::Debug,
-        None,
-        None,
-        "remote scan",
-        serde_json::json!({ "folders": folders.len() }),
-    );
-
-    let snapshot = engine.snapshot();
-    let sftp = engine.sftp();
-    let scanner = DriftScanner::new(&sftp, Some(&snapshot));
-    let targets: Vec<FolderTarget> = folders
-        .iter()
-        .map(|fw| FolderTarget {
-            resource_name: fw.resource_name.clone(),
-            local_root: fw.local_root.to_string_lossy().to_string(),
-            remote_root: fw.remote_root.clone(),
-        })
-        .collect();
-    // Register the tick's cancel token in the shared slot so the modal's
-    // Cancel button can stop a slow background scan (30s+ SFTP listing on
-    // Trey's Tailscale link was the trigger). Replaces any prior token.
-    let ct = tokio_util::sync::CancellationToken::new();
-    engine.register_scan_cancel(ct.clone());
-    let result = scanner.scan_with_cancel(&targets, Some(&ct)).await;
-    engine.clear_scan_cancel(&ct);
-    let scan_ms = started.elapsed().as_millis() as u64;
-    // Cache entries so SyncModal's Pull Now button can dispatch from this
-    // without re-scanning. Drift_watcher ticks every 10s → cache stays fresh.
-    engine.cache_scan_entries(result.entries.clone());
-
-    let mut to_pull = 0usize;
-    let mut to_delete = 0usize;
-    let mut conflicts = 0usize;
-    for entry in &result.entries {
-        match entry.bucket {
-            DriftBucket::ToPull => to_pull += 1,
-            DriftBucket::ToDelete => to_delete += 1,
-            DriftBucket::Conflict => conflicts += 1,
-            _ => {}
-        }
-    }
-
-    diagnostics::emit_with_fields(
-        DiagStage::RemoteScanResult,
-        DiagLevel::Info,
-        None,
-        None,
-        format!("scan: {to_pull} to-pull, {to_delete} to-delete, {conflicts} conflict, {} entries total", result.entries.len()),
-        serde_json::json!({
-            "elapsed_ms": scan_ms,
-            "to_pull": to_pull,
-            "to_delete": to_delete,
-            "conflicts": conflicts,
-            "entries": result.entries.len(),
-            "listing_error": result.last_batch_listing_error,
-        }),
-    );
-
-    // ── Mass local-delete guard (v0.2.36) ─────────────────────────────────
-    // Mirror of the push-side circuit breaker. When auto-sync sees a teammate
-    // (or anyone) deleted a large batch of files remotely, the tombstone path
-    // would silently nuke the same files on this machine. Block per-resource
-    // batches that cross the scaled threshold and surface ONE prominent row
-    // per resource. User has to take explicit action (toggle off, restore
-    // remote, or — once manual mode lands — approve via review UI).
-    use std::collections::HashMap;
-    let mut deletes_by_resource: HashMap<String, Vec<crate::sync::DriftEntry>> = HashMap::new();
-    let mut other: Vec<crate::sync::DriftEntry> = Vec::new();
-    for entry in result.entries {
-        if matches!(entry.bucket, DriftBucket::ToDelete) {
-            deletes_by_resource
-                .entry(entry.resource_name.clone())
-                .or_default()
-                .push(entry);
-        } else {
-            other.push(entry);
-        }
-    }
-    let folders = engine.folders_clone();
-    let mut approved_deletes: Vec<crate::sync::DriftEntry> = Vec::new();
-    for (resource, entries) in deletes_by_resource {
-        let fw = folders.iter().find(|f| f.resource_name == resource);
-        let (threshold, total) = match fw {
-            Some(f) => engine.scaled_delete_threshold(&f.local_root).await,
-            None => (5, 0),
-        };
-        let count = entries.len();
-        if count >= threshold {
-            let reason = format!(
-                "{count} local-deletes in one batch (≥ scaled threshold {threshold} of {total} files)"
-            );
-            diagnostics::emit_with_fields(
-                DiagStage::RemoteScanResult,
-                DiagLevel::Warn,
-                Some(&resource),
-                None,
-                format!("BLOCKED — {reason}"),
-                serde_json::json!({
-                    "guard": "local_delete_mass",
-                    "resource": resource,
-                    "count": count,
-                    "threshold": threshold,
-                    "total_files": total,
-                }),
-            );
-            let row = crate::sync::ActivityRow {
-                at: Utc::now(),
-                resource: resource.clone(),
-                file: "[guard]".into(),
-                action: format!("BLOCKED — {reason}"),
-                kind: crate::sync::ActivityKind::Block,
-                actor: Some(crate::transport::env::current_user()),
-                ..Default::default()
-            };
-            use tauri::Emitter;
-            let _ = engine.app().emit("autosync://activity", &row);
-            // Drop the entries — next tick will re-evaluate. If remote still
-            // missing those files, the guard re-fires. User has to act.
-        } else {
-            approved_deletes.extend(entries);
-        }
-    }
-
-    // Dispatch pulls + (approved) deletes + conflicts.
-    let final_entries: Vec<_> = other.into_iter().chain(approved_deletes).collect();
-    for entry in final_entries {
-        if engine.is_disposed() {
-            break;
-        }
-        match entry.bucket {
-            DriftBucket::ToPull => {
-                let task_engine = engine.clone();
-                let h = tokio::spawn(async move {
-                    pull_one(&task_engine, entry).await;
-                });
-                engine.track_pull_handle(h);
-            }
-            DriftBucket::ToDelete => {
-                let task_engine = engine.clone();
-                let h = tokio::spawn(async move {
-                    delete_local_one(&task_engine, entry).await;
-                });
-                engine.track_pull_handle(h);
-            }
-            DriftBucket::Conflict => {
-                register_conflict(engine, entry);
-            }
-            _ => {}
-        }
-    }
-}
 
 /// Pull a single ToPull entry. Three paths:
 ///   * Path is dirty (unflushed local edit) → conflict-rename.
@@ -547,7 +328,7 @@ pub(crate) async fn delete_local_one(engine: &Arc<AutoSyncEngine>, entry: crate:
     let _ = engine.app().emit("autosync://activity", &row);
 }
 
-fn register_conflict(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) {
+pub(crate) fn register_conflict(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) {
     // ToConflict from the scanner — both sides changed since baseline.
     // Build a ConflictRecord and surface in the existing UI.
     let local_path = PathBuf::from(&entry.local_path);

@@ -120,9 +120,6 @@ class ConnectionStore {
   watchedEdits = $state<WatchedEdit[]>([]);
   dirtyEdits = $state<Set<string>>(new Set());
   pendingReuploads = $state<EditChangedEvent[]>([]);
-  /** v0.2.37: manual-mode toggle. TRUE = traditional auto-sync. FALSE =
-   *  user drives sync via Push/Pull buttons. Refreshed on connect. */
-  autoFlush = $state<boolean>(true);
 
   selected = $derived(
     this.selectedKey
@@ -248,7 +245,6 @@ class ConnectionStore {
       folders,
     });
     this.status = status;
-    await this.refreshAutoFlush();
   }
 
   async deleteServer(key: string) {
@@ -375,20 +371,6 @@ class ConnectionStore {
   clearActivity() {
     this.activityFeed = [];
     this.lastActivity = null;
-  }
-
-  async setAutoFlush(on: boolean): Promise<boolean> {
-    const next = await invoke<boolean>("set_auto_flush", { on });
-    this.autoFlush = next;
-    return next;
-  }
-
-  async refreshAutoFlush(): Promise<void> {
-    try {
-      this.autoFlush = await invoke<boolean>("get_auto_flush");
-    } catch {
-      this.autoFlush = true;
-    }
   }
 
   popReuploadPrompt() {

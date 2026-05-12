@@ -44,13 +44,8 @@ use crate::sync::ignore;
 use crate::sync::lock_presence::LockPresence;
 
 // ─── Tunables (port from WPF) ────────────────────────────────────────────────
-//
-// Worst-case file-change → flush latency is `DEBOUNCE_MS + LOOP_TICK_MS` (today
-// 700 + 150 = 850ms). Mirrors WPF — surface as per-server config in Phase 6 if
-// users start asking.
 const DEBOUNCE_MS: u64 = 700;
 const CEILING_MS: u64 = 3000;
-const LOOP_TICK_MS: u64 = 150;
 const LOCK_HOLD_RETRY_SEC: u64 = 30;
 const MASS_DELETE_THRESHOLD: usize = 25;
 const UPLOAD_CONCURRENCY: usize = 4;
@@ -272,22 +267,13 @@ pub struct AutoSyncEngine {
 
     // notify Watcher is !Send-friendly via a Mutex; held to keep watching alive.
     watcher: Mutex<Option<RecommendedWatcher>>,
-    flush_task: Mutex<Option<JoinHandle<()>>>,
     event_task: Mutex<Option<JoinHandle<()>>>,
-    drift_watcher_task: Mutex<Option<JoinHandle<()>>>,
-    remote_scan_interval_secs: Arc<AtomicU64>,
     /// Tracker for fire-and-forget background tasks (lock acquire/release,
     /// bridge ping, edit-trail append). Aborted in `stop()` so they can't
     /// outlive the engine and hold stale `Arc<SftpClient>` clones.
     background_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     stop_tx: watch::Sender<bool>,
     disposed: AtomicBool,
-    /// v0.2.37 manual-mode flag. TRUE = traditional auto-sync (watcher
-    /// flushes on debounce + drift_watcher auto-pulls every tick). FALSE =
-    /// manual mode (watcher still detects changes into `dirty`, but
-    /// flush_cycle and drift_watcher::run_tick skip their work. User drives
-    /// pushes/pulls via force_push_now / force_pull_now buttons).
-    auto_flush_enabled: AtomicBool,
 }
 
 impl AutoSyncEngine {
@@ -326,16 +312,10 @@ impl AutoSyncEngine {
             ignored_by_rule: DashMap::new(),
             recently_written: DashMap::new(),
             watcher: Mutex::new(None),
-            flush_task: Mutex::new(None),
             event_task: Mutex::new(None),
-            drift_watcher_task: Mutex::new(None),
-            remote_scan_interval_secs: Arc::new(AtomicU64::new(
-                crate::sync::drift_watcher::DEFAULT_SCAN_INTERVAL_SECS,
-            )),
             background_tasks: std::sync::Mutex::new(Vec::new()),
             stop_tx,
             disposed: AtomicBool::new(false),
-            auto_flush_enabled: AtomicBool::new(true),
         });
 
         // Channel for FS events from the notify thread → tokio runtime.
@@ -380,55 +360,9 @@ impl AutoSyncEngine {
         });
         *engine.event_task.lock().await = Some(event_task);
 
-        // Flush loop.
-        let flush_engine = engine.clone();
-        let mut flush_stop = engine.stop_tx.subscribe();
-        let flush_task = tokio::spawn(async move {
-            let mut tick = tokio::time::interval(Duration::from_millis(LOOP_TICK_MS));
-            loop {
-                tokio::select! {
-                    _ = flush_stop.changed() => {
-                        if *flush_stop.borrow() { break; }
-                    }
-                    _ = tick.tick() => {
-                        flush_engine.flush_cycle().await;
-                    }
-                }
-            }
-        });
-        *engine.flush_task.lock().await = Some(flush_task);
-
         engine.set_state(AutoSyncState::Watching, "0 folder(s)".into()).await;
 
-        // DriftWatcher — closes the bidirectional sync loop. Polls the remote
-        // every `remote_scan_interval_secs` seconds, pulls files that drifted
-        // remotely, surfaces conflicts. Same Arc the public API holds, so it
-        // sees the same `disposed` flag and shuts down on `stop()`.
-        let dw_engine = engine.clone();
-        let dw_interval = engine.remote_scan_interval_secs.clone();
-        let dw_handle = crate::sync::drift_watcher::spawn(dw_engine, dw_interval);
-        *engine.drift_watcher_task.lock().await = Some(dw_handle);
-
         Ok(engine)
-    }
-
-    /// Update the DriftWatcher tick interval live (Settings > Sync surfaces
-    /// this). 0 = pause the watcher entirely; minimum effective tick is 5s
-    /// to avoid SFTP roundtrip stampedes on small folders.
-    pub fn set_remote_scan_interval(&self, secs: u64) {
-        self.remote_scan_interval_secs.store(secs, Ordering::Relaxed);
-        diagnostics::emit_with_fields(
-            DiagStage::System,
-            DiagLevel::Info,
-            None,
-            None,
-            format!("remote scan interval = {secs}s"),
-            serde_json::json!({ "interval_secs": secs }),
-        );
-    }
-
-    pub fn remote_scan_interval(&self) -> u64 {
-        self.remote_scan_interval_secs.load(Ordering::Relaxed)
     }
 
     pub async fn stop(&self) {
@@ -436,21 +370,11 @@ impl AutoSyncEngine {
             return;
         }
         let _ = self.stop_tx.send(true);
-        if let Some(h) = self.flush_task.lock().await.take() {
-            let _ = h.await;
-        }
         // event_task is aborted (vs awaited) because on_fs_event futures may
         // park on the dirty DashMap shard locks under heavy churn — we don't
         // want stop() to block on user-driven event flow. The DashMap ops are
         // atomic so an aborted future never leaves the map in a torn state.
         if let Some(h) = self.event_task.lock().await.take() {
-            h.abort();
-        }
-        // Drift watcher pulls and remote scans don't hold critical state — we
-        // abort rather than await; an in-flight pull may leave a partial
-        // `.rift-tmp` next to the destination but `download_file_atomic`
-        // cleans those up on the next attempt.
-        if let Some(h) = self.drift_watcher_task.lock().await.take() {
             h.abort();
         }
         // Abort any in-flight fire-and-forget tasks (lock release, bridge ping,
@@ -627,27 +551,46 @@ impl AutoSyncEngine {
         self.folders.get(remote_root).map(|fw| fw.resource_name.clone())
     }
     pub fn is_disposed(&self) -> bool { self.disposed.load(Ordering::SeqCst) }
-    pub fn track_pull_handle(&self, h: JoinHandle<()>) { self.track_background(h); }
 
-    /// v0.2.37 manual-mode setter. Off = no auto-flush + no auto-pull;
-    /// user must use force_push_now / force_pull_now. On = traditional
-    /// watcher-driven behavior. Returns the new state.
-    pub fn set_auto_flush_enabled(&self, on: bool) -> bool {
-        self.auto_flush_enabled.store(on, Ordering::SeqCst);
-        on
-    }
-    pub fn auto_flush_enabled(&self) -> bool {
-        self.auto_flush_enabled.load(Ordering::SeqCst)
-    }
-
-    /// Drain every dirty entry NOW, regardless of debounce timer. Used by
-    /// `force_push_now` to give the user a "GitHub-style" manual push button.
-    /// Bypasses next_flush gating but still respects the mass-delete guard
-    /// inside flush_batch.
+    /// Drain every dirty entry NOW. Used by `force_push_now` — the user's
+    /// manual "push everything" button. Promotes any backoff-elapsed failed
+    /// entries into dirty first so transient SFTP failures still retry on
+    /// the next click. Mass-delete circuit breaker fires inside `flush_batch`.
     pub async fn flush_all_now(&self) -> u32 {
         if self.disposed.load(Ordering::SeqCst) {
             return 0;
         }
+        // Promote failed → dirty when backoff elapsed (used to live in the
+        // killed flush_cycle loop; without this, transient failures never
+        // retry on manual Push).
+        let now = Utc::now();
+        let mut promote: Vec<(PathBuf, DirtyEntry)> = Vec::new();
+        let mut drop_failed: Vec<PathBuf> = Vec::new();
+        for kv in self.failed.iter() {
+            let e = kv.value();
+            if e.attempts as usize >= RETRY_BACKOFFS_SECS.len() {
+                continue;
+            }
+            if e.next_retry > now {
+                continue;
+            }
+            if e.kind != ChangeKind::Deleted && !e.path.exists() {
+                drop_failed.push(kv.key().clone());
+                continue;
+            }
+            let mut promoted = e.clone();
+            promoted.next_flush = now;
+            promote.push((kv.key().clone(), promoted));
+        }
+        for k in drop_failed {
+            self.failed.remove(&k);
+        }
+        for (k, e) in promote {
+            self.failed.remove(&k);
+            self.log(&format!("manual-retry attempt {}/3: {}", e.attempts + 1, e.path.display()));
+            self.dirty.insert(k, e);
+        }
+
         let ready: Vec<DirtyEntry> = self.dirty
             .iter()
             .map(|kv| kv.value().clone())
@@ -1027,26 +970,17 @@ impl AutoSyncEngine {
             let mut to_pull = 0u32;
             let mut to_delete = 0u32;
             let mut conflicts = 0u32;
-            let mut push_paths: Vec<PathBuf> = Vec::new();
             for e in &result.entries {
                 match e.bucket {
-                    crate::sync::DriftBucket::ToPush => {
-                        to_push += 1;
-                        push_paths.push(PathBuf::from(&e.local_path));
-                    }
+                    crate::sync::DriftBucket::ToPush => to_push += 1,
                     crate::sync::DriftBucket::ToPull => to_pull += 1,
                     crate::sync::DriftBucket::ToDelete => to_delete += 1,
                     crate::sync::DriftBucket::Conflict => conflicts += 1,
                     crate::sync::DriftBucket::Synced => {}
                 }
             }
-            // On cancel: do NOT auto-enqueue partial push set — the user just
-            // asked to stop. Leave the rows for the modal to surface manually.
-            let enqueued = if !result.cancelled && !push_paths.is_empty() {
-                engine.enqueue_for_flush_batch(push_paths, false, false).await
-            } else {
-                0
-            };
+            // Reconcile is read-only: it refreshes the cached scan result.
+            // User must click Push Now / Pull Now to act on the findings.
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
@@ -1059,7 +993,7 @@ impl AutoSyncEngine {
                     "to_pull": to_pull,
                     "to_delete": to_delete,
                     "conflicts": conflicts,
-                    "enqueued_for_push": enqueued,
+                    "enqueued_for_push": 0,
                     "missing_remote_folders": result.remote_folders_missing.len(),
                     "listing_error": result.last_batch_listing_error,
                     "cancelled": result.cancelled,
@@ -1086,33 +1020,12 @@ impl AutoSyncEngine {
         }
     }
 
-    /// Store a cancellation token in the shared scan-cancel slot. Used by
-    /// drift_watcher::run_tick so the modal's Cancel button cancels its slow
-    /// background SFTP listing. Replaces any prior token.
-    pub(crate) fn register_scan_cancel(&self, ct: CancellationToken) {
-        if let Ok(mut g) = self.current_scan_cancel.lock() {
-            *g = Some(ct);
-        }
-    }
-
-    /// Clear the scan-cancel slot if it still holds `ct` (no-op if a newer
-    /// op replaced it). Match by `is_cancelled()` parity — same pattern as
-    /// kick_drift_reconcile uses.
-    pub(crate) fn clear_scan_cancel(&self, ct: &CancellationToken) {
-        if let Ok(mut g) = self.current_scan_cancel.lock() {
-            if let Some(stored) = g.as_ref() {
-                if stored.is_cancelled() == ct.is_cancelled() {
-                    *g = None;
-                }
-            }
-        }
-    }
-
-    /// Force-pull NOW — uses cached ToPull entries from drift_watcher's last
-    /// tick. NO scan. Dispatches `pull_one` for each cached ToPull entry and
-    /// emits an immediate DriftScanResult so the modal jumps to "complete"
-    /// without the 30s scan. Pull progress surfaces via RemotePullStart/Done
-    /// into the activity feed.
+    /// Force-pull NOW — runs an inline drift scan and dispatches pulls +
+    /// approved-deletes against the result. Uses cached ToPull entries
+    /// when populated by a prior `kick_drift_reconcile` so back-to-back
+    /// clicks don't re-scan; otherwise an inline scan runs first. Mass
+    /// local-delete circuit breaker fires before dispatch. Pull progress
+    /// surfaces via RemotePullStart/Done into the activity feed.
     pub fn force_pull_now(self: &Arc<Self>) {
         // Register a cancellation token so the modal's Cancel button can stop
         // the operation mid-flight. Replaces any prior token — kick_drift_reconcile
@@ -1192,6 +1105,8 @@ impl AutoSyncEngine {
             // Each pending entry tagged with its bucket so the dispatcher can
             // route ToPull → pull_one vs ToDelete → delete_local_one.
             let mut pending: Vec<(crate::sync::DriftBucket, crate::sync::DriftEntry)> = Vec::new();
+            let mut delete_buckets: std::collections::HashMap<String, Vec<crate::sync::DriftEntry>> =
+                std::collections::HashMap::new();
             for e in entries {
                 match e.bucket {
                     crate::sync::DriftBucket::ToPush => to_push += 1,
@@ -1201,10 +1116,61 @@ impl AutoSyncEngine {
                     }
                     crate::sync::DriftBucket::ToDelete => {
                         to_delete += 1;
-                        pending.push((crate::sync::DriftBucket::ToDelete, e));
+                        delete_buckets.entry(e.resource_name.clone()).or_default().push(e);
                     }
-                    crate::sync::DriftBucket::Conflict => conflicts += 1,
+                    crate::sync::DriftBucket::Conflict => {
+                        conflicts += 1;
+                        crate::sync::drift_watcher::register_conflict(&engine, e);
+                    }
                     crate::sync::DriftBucket::Synced => {}
+                }
+            }
+            // Mass local-delete circuit breaker — mirrors push-side guard.
+            // If a resource's pending delete batch crosses the scaled
+            // threshold, drop the batch + emit one [guard] activity row.
+            // Without this, a teammate's mass-delete or server cleanup
+            // would silently nuke local files when the user clicks Pull.
+            let folders_snap = engine.folders_clone();
+            for (resource, deletes) in delete_buckets {
+                let fw = folders_snap.iter().find(|f| f.resource_name == resource);
+                let (threshold, total) = match fw {
+                    Some(f) => engine.scaled_delete_threshold(&f.local_root).await,
+                    None => (5usize, 0usize),
+                };
+                let count = deletes.len();
+                if count >= threshold {
+                    let reason = format!(
+                        "{count} local-deletes in one batch (\u{2265} scaled threshold {threshold} of {total} files)"
+                    );
+                    diagnostics::emit_with_fields(
+                        DiagStage::DriftScanResult,
+                        DiagLevel::Warn,
+                        Some(&resource),
+                        None,
+                        format!("BLOCKED — {reason}"),
+                        serde_json::json!({
+                            "guard": "local_delete_mass",
+                            "resource": resource,
+                            "count": count,
+                            "threshold": threshold,
+                            "total_files": total,
+                        }),
+                    );
+                    let row = crate::sync::ActivityRow {
+                        at: Utc::now(),
+                        resource: resource.clone(),
+                        file: "[guard]".into(),
+                        action: format!("BLOCKED — {reason}"),
+                        kind: crate::sync::ActivityKind::Block,
+                        actor: Some(crate::transport::env::current_user()),
+                        ..Default::default()
+                    };
+                    use tauri::Emitter;
+                    let _ = engine.app().emit("autosync://activity", &row);
+                } else {
+                    for d in deletes {
+                        pending.push((crate::sync::DriftBucket::ToDelete, d));
+                    }
                 }
             }
             // Cap concurrent pulls so a slow uplink doesn't drown the SFTP
@@ -1449,70 +1415,6 @@ impl AutoSyncEngine {
                 }
             }
             }
-        }
-    }
-
-    // ─── Flush loop ──────────────────────────────────────────────────────────
-
-    async fn flush_cycle(&self) {
-        if self.disposed.load(Ordering::SeqCst) {
-            return;
-        }
-        // Manual mode short-circuit. Dirty queue keeps building so a
-        // subsequent force_push_now drains everything at once.
-        if !self.auto_flush_enabled.load(Ordering::SeqCst) {
-            return;
-        }
-        let now = Utc::now();
-
-        // Drain failed → dirty when backoff elapsed.
-        let mut promote: Vec<(PathBuf, DirtyEntry)> = Vec::new();
-        let mut drop_failed: Vec<PathBuf> = Vec::new();
-        for kv in self.failed.iter() {
-            let e = kv.value();
-            if e.attempts as usize >= RETRY_BACKOFFS_SECS.len() {
-                continue;
-            }
-            if e.next_retry > now {
-                continue;
-            }
-            if e.kind != ChangeKind::Deleted && !e.path.exists() {
-                drop_failed.push(kv.key().clone());
-                continue;
-            }
-            let mut promoted = e.clone();
-            promoted.next_flush = now;
-            promote.push((kv.key().clone(), promoted));
-        }
-        for k in drop_failed {
-            self.failed.remove(&k);
-        }
-        for (k, e) in promote {
-            self.failed.remove(&k);
-            self.log(&format!("auto-retry attempt {}/3: {}", e.attempts + 1, e.path.display()));
-            self.dirty.insert(k, e);
-        }
-
-        // Pick ready entries.
-        let mut ready: Vec<DirtyEntry> = Vec::new();
-        for kv in self.dirty.iter() {
-            if kv.value().next_flush <= now {
-                ready.push(kv.value().clone());
-            }
-        }
-        if ready.is_empty() {
-            return;
-        }
-        // Group by watch.
-        let mut by_watch: HashMap<String, Vec<DirtyEntry>> = HashMap::new();
-        for e in ready {
-            by_watch.entry(e.watch_key.clone()).or_default().push(e);
-        }
-        for (watch_key, entries) in by_watch {
-            let Some(fw) = self.folders.get(&watch_key).map(|v| v.value().clone()) else {
-                continue;
-            };
-            self.flush_batch(&fw, entries).await;
         }
     }
 
@@ -1956,7 +1858,7 @@ impl AutoSyncEngine {
         let mut e = entry.clone();
         e.attempts += 1;
         if e.attempts as usize > RETRY_BACKOFFS_SECS.len() {
-            // Permanent drop — flush_cycle's promote loop will skip it next tick.
+            // Permanent drop — `flush_all_now`'s promote loop will skip it.
             // Surface to logs so the file doesn't disappear silently.
             log::warn!(
                 "auto-sync giving up on {} after {} attempts",

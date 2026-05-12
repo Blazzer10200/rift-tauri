@@ -97,9 +97,14 @@
   .op:disabled { opacity: 0.35; cursor: not-allowed; }
   .op:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
-  .op.spinning :global(svg) { animation: spin 900ms linear infinite; }
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+  /* Matches SyncModal's pulse-spin — 2.4s ease-in-out, no frantic linear loop. */
+  .op.spinning :global(svg) {
+    animation: pulse-spin 2.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+  @keyframes pulse-spin {
+    0%   { transform: rotate(0deg);   opacity: 0.95; }
+    50%  { transform: rotate(180deg); opacity: 0.65; }
+    100% { transform: rotate(360deg); opacity: 0.95; }
   }
 </style>
