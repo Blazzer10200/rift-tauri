@@ -5,6 +5,7 @@
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { connection } from "../../state/connection.svelte";
+  import { fmtRelative, fmtAbsolute } from "../../utils/time";
 
   type LocalEntry = {
     name: string;
@@ -82,8 +83,11 @@
 
   function fmtTime(secs: number): string {
     if (!secs) return "—";
-    const d = new Date(secs * 1000);
-    return d.toLocaleString([], { hour12: true });
+    return fmtRelative(new Date(secs * 1000));
+  }
+  function fmtTimeAbs(secs: number): string {
+    if (!secs) return "";
+    return fmtAbsolute(new Date(secs * 1000));
   }
 
   function parentOf(p: string): string | null {
@@ -380,7 +384,7 @@
               {/if}
             </span>
             <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
-            <span class="row-mtime mono">{fmtTime(e.mtime)}</span>
+            <span class="row-mtime mono" title={fmtTimeAbs(e.mtime)}>{fmtTime(e.mtime)}</span>
           </div>
         {/each}
       {/if}
@@ -502,7 +506,7 @@
   .sym { font-size: 11px; }
   .sym.danger { color: var(--danger); }
   .sym.muted { color: var(--fg-faint); }
-  .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); }
+  .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); white-space: nowrap; }
 
   .empty { padding: 22px; color: var(--fg-muted); font-size: var(--fs-sm); text-align: center; }
 

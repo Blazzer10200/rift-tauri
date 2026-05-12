@@ -37,11 +37,11 @@
 
   // Audit M18: wrap in $derived.by so detail strings re-evaluate when the
   // underlying state changes (fingerprint, status.detail).
-  const connCfg = $derived.by<Record<ConnState, { cls: string; label: string; detail: string }>>(() => ({
-    connected:  { cls: "ok",     label: "Connected",  detail: connection.selected?.fingerprint ? `ed25519 · ${connection.selected.fingerprint.slice(0, 18)}…` : "ed25519" },
-    connecting: { cls: "info",   label: "Connecting", detail: "handshake" },
-    error:      { cls: "danger", label: "Error",      detail: connection.status?.detail ?? "auth failed" },
-    offline:    { cls: "muted",  label: "Offline",    detail: "not connected" },
+  const connCfg = $derived.by<Record<ConnState, { cls: string; label: string; detail: string; title: string }>>(() => ({
+    connected:  { cls: "ok",     label: "Connected",  detail: "ed25519",  title: connection.selected?.fingerprint ? `ed25519 · ${connection.selected.fingerprint}` : "ed25519" },
+    connecting: { cls: "info",   label: "Connecting", detail: "handshake", title: "handshake in progress" },
+    error:      { cls: "danger", label: "Error",      detail: connection.status?.detail ?? "auth failed", title: connection.status?.detail ?? "auth failed" },
+    offline:    { cls: "muted",  label: "Offline",    detail: "not connected", title: "not connected" },
   }));
 
   const sel = $derived(connection.selected);
@@ -95,7 +95,7 @@
       {/if}
     </div>
 
-    <div class="pill {connCfg[connState].cls}" title={connCfg[connState].detail}>
+    <div class="pill {connCfg[connState].cls}" title={connCfg[connState].title}>
       <span class="dot"></span>
       <span>{connCfg[connState].label}</span>
       <span class="mono detail">{connCfg[connState].detail}</span>

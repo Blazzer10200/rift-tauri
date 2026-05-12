@@ -4,6 +4,7 @@
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { connection } from "../../state/connection.svelte";
+  import { fmtRelative, fmtAbsolute } from "../../utils/time";
 
   type RemoteEntry = {
     full_path: string;
@@ -82,7 +83,11 @@
 
   function fmtTime(iso: string): string {
     if (!iso) return "—";
-    try { return new Date(iso).toLocaleString([], { hour12: true }); } catch { return iso; }
+    return fmtRelative(iso);
+  }
+  function fmtTimeAbs(iso: string): string {
+    if (!iso) return "";
+    return fmtAbsolute(iso);
   }
 
   function parentOf(p: string): string | null {
@@ -360,7 +365,7 @@
               {/if}
             </span>
             <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
-            <span class="row-mtime mono">{fmtTime(e.last_modified)}</span>
+            <span class="row-mtime mono" title={fmtTimeAbs(e.last_modified)}>{fmtTime(e.last_modified)}</span>
           </div>
         {/each}
       {/if}
@@ -474,7 +479,7 @@
   .sym { font-size: 11px; }
   .sym.danger { color: var(--danger); }
   .sym.muted { color: var(--fg-faint); }
-  .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); }
+  .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); white-space: nowrap; }
 
   .empty { padding: 22px; color: var(--fg-muted); font-size: var(--fs-sm); text-align: center; }
 

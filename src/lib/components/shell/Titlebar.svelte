@@ -1,7 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { Search, Cog, Minus, Square, X } from "lucide-svelte";
-  import { connection } from "../../state/connection.svelte";
 
   let { onOpenPalette, onOpenSettings }: {
     onOpenPalette: () => void;
@@ -9,24 +8,12 @@
   } = $props();
 
   const win = getCurrentWindow();
-
-  const docName = $derived(connection.selected?.name ?? "no server");
-  const docPath = $derived(connection.selected?.remoteRoot ?? "—");
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
   <div class="left" data-tauri-drag-region>
-    <div class="logo" aria-hidden="true">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M4 3h8a4.5 4.5 0 0 1 1.6 8.7L19 21"/>
-        <path d="M4 12h8"/>
-        <path d="M4 3v18"/>
-      </svg>
-    </div>
+    <img class="logo" src="/favicon.png" alt="" aria-hidden="true" draggable="false"/>
     <span class="app">Rift</span>
-    <span class="sep">—</span>
-    <span class="doc mono">{docName} · {docPath}</span>
   </div>
 
   <div class="right">
@@ -64,14 +51,11 @@
   .left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 100%; }
   .logo {
     width: 18px; height: 18px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--accent) 55%, var(--bg)));
-    color: var(--accent-fg);
-    border-radius: var(--radius-xs);
+    object-fit: contain;
+    flex-shrink: 0;
+    -webkit-user-drag: none;
   }
   .app { font-weight: 600; letter-spacing: -0.01em; color: var(--fg); }
-  .sep { color: var(--fg-faint); }
-  .doc { color: var(--fg-muted); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .right { display: flex; align-items: center; gap: 4px; height: 100%; }
   .cmdk {

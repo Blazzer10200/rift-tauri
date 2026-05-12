@@ -1,15 +1,25 @@
 <script lang="ts">
-  import {
-    Eye, Lock, AlertTriangle, Clock, XCircle, Activity,
-  } from "lucide-svelte";
+  import { AlertTriangle, Clock, XCircle, Activity } from "lucide-svelte";
+  import { slide, fade } from "svelte/transition";
+  import { quintOut } from "svelte/easing";
   import { connection } from "../state/connection.svelte";
 
   const stateLabel = $derived(connection.status?.state ?? "idle");
   const detail = $derived(connection.status?.detail ?? "Not watching");
+  const watches = $derived(connection.status?.watches ?? 0);
+  const pending = $derived(connection.status?.pending ?? 0);
+  const failed = $derived(connection.status?.failed ?? 0);
   const lastTs = $derived(
     connection.lastActivity
       ? new Date(connection.lastActivity.at).toLocaleTimeString([], { hour12: true })
-      : "—",
+      : null,
+  );
+
+  const isQuiet = $derived(
+    connection.lockCount === 0 &&
+    connection.conflictCount === 0 &&
+    pending === 0 &&
+    failed === 0,
   );
 
   type Variant = "default" | "ok" | "warn" | "danger" | "info";
@@ -17,10 +27,18 @@
     if (!connection.status) return "default";
     if (connection.conflictCount > 0) return "danger";
     if (connection.status.state === "error") return "danger";
-    if ((connection.status.failed ?? 0) > 0) return "warn";
+    if (failed > 0) return "warn";
     if (connection.lockCount > 0) return "warn";
     if (connection.status.state === "watching" || connection.status.state === "syncing") return "ok";
     return "info";
+  });
+
+  const quietSummary = $derived.by(() => {
+    if (!connection.selected) return "No server selected.";
+    if (!connection.status) return "Not watching.";
+    const folderText = watches === 1 ? "1 folder" : `${watches} folders`;
+    const tail = lastTs ? ` · last activity ${lastTs}` : "";
+    return `All quiet — ${folderText} watched${tail}.`;
   });
 </script>
 
@@ -33,32 +51,36 @@
     <div class="led" data-variant={heroVariant}><span class="dot"></span></div>
   </div>
 
-  <div class="counts">
-    <div class="card">
-      <span class="label"><Eye size={11}/> watches</span>
-      <span class="value">{connection.status?.watches ?? 0}</span>
+  {#if isQuiet}
+    <div class="quiet" transition:slide={{ duration: 160, easing: quintOut }}>
+      <span class="quiet-text">{quietSummary}</span>
     </div>
-    <div class="card" data-tone={connection.lockCount > 0 ? "warn" : "default"}>
-      <span class="label"><Lock size={11}/> active locks</span>
-      <span class="value">{connection.lockCount}</span>
+  {:else}
+    <div class="counts" transition:slide={{ duration: 200, easing: quintOut }}>
+      {#if connection.conflictCount > 0}
+        <div class="card" data-tone="danger" in:fade={{ duration: 120 }}>
+          <span class="label"><AlertTriangle size={11}/> conflicts</span>
+          <span class="value">{connection.conflictCount}</span>
+        </div>
+      {/if}
+      {#if pending > 0}
+        <div class="card" in:fade={{ duration: 120 }}>
+          <span class="label"><Clock size={11}/> queued</span>
+          <span class="value">{pending}</span>
+        </div>
+      {/if}
+      {#if failed > 0}
+        <div class="card" data-tone="danger" in:fade={{ duration: 120 }}>
+          <span class="label"><XCircle size={11}/> errors</span>
+          <span class="value">{failed}</span>
+        </div>
+      {/if}
+      <div class="card" in:fade={{ duration: 120 }}>
+        <span class="label"><Activity size={11}/> last activity</span>
+        <span class="value mono small">{lastTs ?? "—"}</span>
+      </div>
     </div>
-    <div class="card" data-tone={connection.conflictCount > 0 ? "danger" : "default"}>
-      <span class="label"><AlertTriangle size={11}/> conflicts</span>
-      <span class="value">{connection.conflictCount}</span>
-    </div>
-    <div class="card">
-      <span class="label"><Clock size={11}/> pending</span>
-      <span class="value">{connection.status?.pending ?? 0}</span>
-    </div>
-    <div class="card" data-tone={(connection.status?.failed ?? 0) > 0 ? "danger" : "default"}>
-      <span class="label"><XCircle size={11}/> failed</span>
-      <span class="value">{connection.status?.failed ?? 0}</span>
-    </div>
-    <div class="card">
-      <span class="label"><Activity size={11}/> last activity</span>
-      <span class="value mono small">{lastTs}</span>
-    </div>
-  </div>
+  {/if}
 </section>
 
 <style>
@@ -77,7 +99,7 @@
 
   .head {
     display: flex; justify-content: space-between; align-items: start;
-    gap: 12px; margin-bottom: 12px;
+    gap: 12px; margin-bottom: 10px;
   }
   .head-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   h1 { margin: 0; color: var(--fg); font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
@@ -105,6 +127,13 @@
     .led[data-variant="danger"] .dot { animation: pulse-soft 2.4s ease-in-out infinite; }
   }
 
+  .quiet {
+    color: var(--fg-muted);
+    font-size: var(--fs-sm);
+    padding: 2px 0 0;
+  }
+  .quiet-text { color: var(--fg-muted); }
+
   .counts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
@@ -118,7 +147,6 @@
     display: flex; flex-direction: column; gap: 4px;
     transition: border-color 80ms;
   }
-  .card[data-tone="warn"]   { border-color: color-mix(in oklch, var(--warn)   30%, var(--border)); }
   .card[data-tone="danger"] { border-color: color-mix(in oklch, var(--danger) 30%, var(--border)); }
   .label {
     display: inline-flex; align-items: center; gap: 5px;
@@ -135,6 +163,5 @@
     font-variant-numeric: tabular-nums;
   }
   .value.small { font-size: var(--fs-md); }
-  .card[data-tone="warn"]   .value { color: var(--warn); }
   .card[data-tone="danger"] .value { color: var(--danger); }
 </style>
