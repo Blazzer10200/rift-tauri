@@ -2,145 +2,65 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
-## Session 36 — 2026-05-12 — Activity page polish (Tier 5 first hit)
+## Session 36-37 — 2026-05-12 — Activity page polish + audit (Tier 5 done)
 
 Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped. Map at `docs/UI-POLISH-MAP.md`.
 
-Activity page (875-line `ActivityFeed.svelte`) was the largest unpolished surface. Full canon pass:
+`ActivityFeed.svelte` was the largest unpolished surface (875 lines). Full canon pass landed in 5 commits:
 
-- **Filter chip strip tone-coded** — was 9 identical neutral chips. Now each carries `data-tone`: All=neutral, Sync=ok, Pull=info, Delete=warn, Drift=warn, Conflicts=danger, Bridge=info, Errors=danger, System=neutral. Active chip gets tone-tinted bg (18% mix), tone fg, `inset 2px 0 var(--tone)` stripe, weight 600. Hover gets 10% tone-mix bg. Neutral active falls back to surface + fg-muted stripe to avoid clashing.
-- **Count pips inherit tone** — non-zero pips show tone-soft bg + tone fg (red Conflicts/Errors pip pops, ok Sync pip etc.). Zero pips stay muted at 0.45 opacity.
-- **Filter input** — was a one-off `.filter`, now matches canon globals: 26px height, border-strong rest, accent border + 3px ring on focus, placeholder fg-faint.
-- **Pause button** — used `.btn ghost` regardless of state. Now `.btn ghost` when running, `.btn warn` when paused. Visual reminder feed is frozen.
-- **Empty state** title+hint pair per canon ("No activity yet" / "Sync, pull, and bridge events will appear here as they fire. Click Reconcile in the sidebar to trigger a scan."). Same for filter-empty case.
-- **Selected row inset stripe** — was just accent-soft bg. Now also `box-shadow: inset 2px 0 var(--accent)` per canon.
-- **Group row bg tone-keyed** by `data-variant` — burst patterns visually scannable at a glance instead of monochrome "color-mix surface + accent-soft" everywhere.
-- **Detail strip bg + stripe tone-keyed** by selected row's variant — opening a danger row gets a danger-tinted strip w/ danger left stripe, opens an info row gets info-tinted, etc.
-- **Paused banner warn-tinted** (was neutral bg-elev-2 — easy to miss).
+- **Filter chip strip tone-coded** — was 9 neutral chips. Now `data-tone` per group (All/System=neutral, Sync=ok, Pull/Bridge=info, Delete/Drift=warn, Conflicts/Errors=danger). Active = tone-tinted bg 18% + tone fg + inset 2px tone stripe + weight 600. Count pips inherit tone when non-zero.
+- **Filter input** — bumped to canon: 26px height, border-strong rest, accent border + 3px ring on focus.
+- **Pause button** — `.btn warn` when paused (was always `.btn ghost`). Visual cue feed is frozen.
+- **Empty state** title+hint pair ("No activity yet" / "Sync, pull, and bridge events will appear here…"). Same for filter-empty.
+- **Rows + groups** — `data-variant={kindVariant(r.kind)}` drives: selected row tone-keyed bg + inset stripe matches the kind (clicking a warn row gets warn selection + warn strip, not jarring accent), group row bg tone-keyed at 72/28 amplitude w/ soft tone stripe so burst patterns cluster visually, detail strip bg + stripe tone-keyed to selected variant.
+- **Column widths** — action col bumped 200 → 360px max so long messages no longer truncate mid-word ("BLOCKED — foreign lock held by trey@DESKTOP" fits clean). Time col 96 → 124px to fit relative format.
+- **Time format** — `fmtTime` swapped from raw `toLocaleTimeString` to shared `fmtRelative` helper (Today/Yesterday/Mon/MM-DD). Tooltip carries the full localized timestamp via title attr.
+- **Paused banner warn-tinted** (was neutral, easy to miss).
+
+S37 stripped the dev seed (Sparkles button + IS_DEV gate + 11-row sample array) — was only there to preview tones during S36 polish. Wiring audited clean: every interactive handler traced to real backend or state (Pause/Clear/filter/chips/row-select/group-toggle/strip Open-Copy-Reveal/burst-pip).
 
 ### Verify
-- svelte-check: no new errors.
+- svelte-check: 0 errors. Warnings unchanged from S35 (the 2 extra vs S33-baseline are from the parallel dashboard session's edits on LocalPane/RemotePane/TwoPane, not Activity).
 - Zero Rust changes.
 
 ## Session 35 — 2026-05-12 — Browser page audit (canon plumbing check)
 
-Blazzer asked for one more thorough pass of the Browser page before moving to Activity. Audit found 3 things off-canon, all surgical:
+Re-audit pass on Browser before moving on. 3 surgical fixes: PathBreadcrumbs filter button had `data-active` attr w/o CSS rule (was silent bug — looked identical open vs closed); LocalPane + RemotePane empty states upgraded from `Empty.` to title+hint pair per canon. Rest of Browser audited as on-canon.
 
-- **PathBreadcrumbs filter button had `data-active={showFilter}` but no CSS rule for it** — when the filter input was open the button looked identical to closed. Added `.actions :global(button[data-active="true"])` rule → accent-tinted bg + accent fg when active. Real bug, not just cosmetic.
-- **LocalPane empty state** — was single line `Empty.` / `No matches.`. Now title+hint pair per canon (`Empty folder` + `Drop files here, or use ↑ to go up.` / `No matches` + `Nothing matches "{filter}".`).
-- **RemotePane empty state** — same upgrade as LocalPane.
+## Session 31-34 — compressed
 
-Everything else verified on-canon: TabRail (tone system, inset stripe indicator, click-blur, container queries), Titlebar (single chrome row, server picker, txAdmin pill), TwoPane (Win11 tabstrip w/ fly-in/scale-out + `overflow: clip`), LocalPane/RemotePane row styles (inset 2px accent selected, translateX hover, conflict label danger), PathBreadcrumbs (RTL trick, 34px height, tooltip), LockBadge (warn pill w/ tone-border + initials), StatusHero + StatusBar (deduped in S33), CommandPalette (tone-keyed rows, query-match highlight, group breaks).
-
-### Verify
-- svelte-check: no new errors.
-- Zero Rust changes.
-
-## Session 34 — 2026-05-12 — UI polish pass 4 (Tier 1 — dialog skeleton + small dialogs)
-
-Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped. Map at `docs/UI-POLISH-MAP.md`.
-
-### What landed
-- **`.btn` skeleton lifted in `app.css`** — `:active` translateY(1px) micro-bounce universal, `:disabled` consistent (cursor + opacity, no hover transform), `.btn.primary` font-weight 600 + accent-tinted hover shadow, `.btn.danger` danger-tinted hover shadow, added `.btn.warn` + `.btn.info` tone variants (canon completes), added `.btn.lg` 38px primary-CTA size. Every button in the app inherits.
-- **Confirm dialog** — non-danger icon now `.info` (was neutral bg-elev-2). Esc/Enter kbd affordance hints in foot.
-- **Reupload dialog** — Esc/Enter kbd affordance hints in foot.
-
-### Verify
-- svelte-check: no new errors.
-- Toasts (FlashToast, ActivityToast) audited as already on-canon — no edits.
-
-## Session 33 — 2026-05-12 — UI polish pass 3 (StatusHero + StatusBar dedup)
-
-Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
-
-### What landed
-- **StatusHero quiet row** — dropped duplicate "watching" word. Was `● Watching · 7 folders watching · all quiet` (Watching twice). Now `● Watching · 7 folders · all quiet`. State label already conveys the verb.
-- **StatusBar state+watcher merged into one cell** — was `● watching | ↻ watcher on` (two cells saying the same thing). Now single clickable `● watching` cell that toggles connect/disconnect. Title attr explains the click. Dropped `RefreshCw` import + the duplicate `.watcher` button. `connecting` state spelled out instead of `…`.
-
-### Verify
-- svelte-check: no new errors (LocalPane/RemotePane :294 `<section>` warnings remain pre-existing backlog).
-- Zero Rust changes.
-
-## Session 32 — 2026-05-12 — UI polish pass 2 (sidebar collapse, panes touch, slim hero, Win11 tabs, nav animations)
-
-Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
-
-### What landed (continued in late-session burst)
-- **Quick Actions buttons stand out** — TabRail bottom panel. Tone-keyed via `data-tone="accent|info|warn"`, 38px height (up from 32), `--tone` CSS var per button, surface bg at 8% tone-mix idle / 22% on hover, border tone-tinted, icon scales 1.1x on hover, colored glow shadow underneath. Reconcile=accent (purple), Pull all=info (cyan), Push all=warn (amber). Section header bumped weight 500→600, letter-spacing 0.06→0.08em.
-- **Sidebar tab icons tone-coded** — Browser=accent, Activity=info, Conflicts=danger, Settings=neutral. Icons at opacity 0.75 idle, 1.0 hover, `scale(1.18)` overshoot via `cubic-bezier(0.34, 1.56, 0.64, 1)`. Hover bg `color-mix(in oklch, var(--tone) 10%, var(--surface-hover))`, active bg 14% tone-mix. Active indicator stripe (`.rail-indicator`) also gets `data-tone` so the stripe color matches the active tab.
-- **Sidebar kbd hints dropped** — `⌘1`–`⌘4` removed from rail buttons (visual noise; tooltip still mentions Ctrl+N, command palette still lists them, AppShell still routes the shortcuts).
-- **Sidebar focus-within bugfix** — clicking a tab/qa-btn kept focus → `:focus-within` held rail open. Fixed by wrapping all sidebar onclicks with `(e) => { handler(); e.currentTarget.blur(); }`. Keyboard-Tab into rail still expands+holds via legit focus-within (intentional accessibility).
-- **Titlebar + TopBar merged into single 44px chrome row** — `TopBar.svelte` deleted, its server-picker dropdown + connection pill + txAdmin bridge pill absorbed into `Titlebar.svelte`. Left: Rift logo + server picker + connection pill (the "identity group"). Center: empty drag-region. Right: txAdmin pill (when bridge configured) + search/Ctrl+K cmdK pill + window controls. Settings gear dropped from titlebar (sidebar Settings tab is canonical, command palette still has it, Ctrl+4 still routes). AppShell grid `32px 44px 1fr 22px → 44px 1fr 22px`, reclaimed ~32px vertical.
-- **Command palette polish** — `CommandPalette.svelte`. `data-tone` per row by group (Servers=accent, Sync=info, Go to=neutral, default=accent). Active row: tone-tinted `color-mix` bg + `inset 2px 0 var(--tone)` left stripe + group label brightens to tone color + title weight 500→600. Input bottom-border + caret turn accent on focus-within. Query-match highlight: typed substrings get wrapped in `<mark>` tone-tinted at 22%, weight 600. Group-break separator: adjacent rows with different groups get 6px top-margin + 1px hairline divider. Empty state: "No matches for '{query}' · Try a different keyword, or press esc to close." Footer gets elevated bg.
-
-### What landed (initial S32 push)
-- **Sidebar collapses to 48px gutter, hover-expands to 220px overlay** — `TabRail.svelte` rewrite. Pure CSS: `:hover` / `:focus-within` widens `.rail-panel` (absolute-positioned inside 48px outer), container queries hide labels/kbd-hints/Quick-Actions caption when narrow. Pane doesn't reflow (overlay, not push). Active indicator stripe flush-left in both states, count pips become corner badges when collapsed. `AppShell.body` grid `200px 1fr → 48px 1fr`, `.middle` + `.body` overflow `hidden → visible` so the rail can extend right.
-- **OpRail eliminated** — middle Upload/Download column killed entirely; panes now touch w/ 1px divider. Drag-drop between panes was already wired (`onDropPaths`/`onUploadPaths`/`onDownloadPaths` in `TwoPane`). `OpRail.svelte` deleted, selection-tracking state dropped from TwoPane, grid `1fr 72px 1fr → 1fr 1fr`. Sync/Pull/Push moved to TabRail Quick Actions as 3rd button (Reconcile/Pull all/Push all).
-- **StatusHero auto-hide** — quiet state = 28px slim row (`● idle · 7 folders watching · all quiet · last activity HH:MM`). Active state expands to colored chip-row (conflicts/queued/errors as pills, last-activity right-anchored). Big H1 + LED right-side card dropped (server name already in TopBar pill). Variant LED dot pulses for ok/warn/danger. ~120px vertical reclaimed when quiet.
-- **Breadcrumb crookedness fix** — `PathBreadcrumbs.svelte` locked to `height: 34px`, single-line. `.path-scroll` uses RTL-direction wrapper trick (parent `direction: rtl`, inner `direction: ltr`) so long paths fade off the LEFT side, current dir always visible at right. Full path in hover tooltip. `overflow: clip` (both axes, NOT mixed — `clip` + `hidden` mismatch falls back to scroll-container per spec → was the phantom scrollbar root cause). Same `clip` fix applied to `.bcrumbs` and `.tabstrip`.
-- **Win11-style tab strip** — `TwoPane.svelte`. Tabs auto-rename live to current local folder basename (navigate into `[ox]/ox_lib` → tab label becomes `ox_lib`). `+` button at end clones current location. Active tab pops out of elevated `bg-elev-1` strip w/ rounded top corners. Hover state on inactives. `in:fly(x:-10, 180ms)` add, `out:scale(0.85, 140ms)` remove. Tab height 32px, font-size `--fs-sm` centered, weight 500 (active 600). Tabstrip `overflow: clip` + locked `height: 38px` + dropped `+` button's 2px bottom margin (was causing vertical scroll-container). Keyboard: Ctrl+T new, Ctrl+W close, Ctrl+Tab cycle.
-- **StatusBar `⌘K` pip removed** — pointless decoration (TopBar pill already shows the shortcut).
-- **Pane folder-nav cross-fade** — `LocalPane.svelte` + `RemotePane.svelte` rows region wrapped in `{#key path}` w/ `in:fade={{ duration: 140 }}`. No more flash/snap when changing folders. Only the rows region keyed (header/breadcrumb stay mounted).
-- **Row hover polish** — folder rows get `transform: translateX(2px)` on hover (`prefers-reduced-motion` guarded). Selected row uses `box-shadow: inset 2px 0 var(--accent)` instead of border-left swap. Up-arrow `↑ ..` row gets matching subtle treatment.
-
-### Verify
-- svelte-check: 0 errors, 2 pre-existing `<section>` a11y warnings (still backlog).
-- File count: 3990 → 3989 (OpRail.svelte gone).
-- Zero Rust changes.
-
-### Flagged for v0.2.39+ (carried)
-- Pre-flight write probe on connect.
-- Activity-feed row grouping for bulk reconciles.
-- Remote `.rift-lock` cruft sweep on watch attach.
-- Many-tabs horizontal scroll (currently `overflow: clip` — fine for ≤6 tabs; add fade-edge + arrow buttons Win11-style when >10 expected).
-- `<section>` a11y warnings on LocalPane/RemotePane:294 — wrap event handlers properly or convert to role-button.
-
-### Design system canon (use this on every remaining page)
-
-Blazzer's directive: keep the rhythm post-compaction. When polishing remaining pages (ActivityFeed, ConflictList, ConflictResolver, Settings sub-views, Diagnostics, Bootstrap, AddServer dialogs, Confirm, Reupload, Keygen, UpdateDialog), apply this pattern:
-
-**Tone system** — every interactive surface that conveys category/meaning gets a `data-tone` attr with a `--tone` CSS var. Mapping: `accent` (brand purple) = primary/Servers/Browser, `info` (cyan) = Sync/Pull/Activity/secondary action, `warn` (amber) = Push/destructive-pending, `danger` (red) = Conflicts/errors, `neutral` (fg-muted) = Settings/utility. Same colors mean the same thing everywhere.
-
-**Surface fills** — at rest: `color-mix(in oklch, var(--tone) 8-14%, var(--surface))`. On hover: bump to 22%. Border: `color-mix(in oklch, var(--tone) 28%, var(--border))` rest, 55% hover. Drop shadow on hover: `0 4px 12px color-mix(in oklch, var(--tone) 18%, transparent)` for prominent buttons.
-
-**Icons** — at rest opacity 0.75 (when category-coded) or `var(--fg-muted)`. On hover/active: opacity 1.0 + `transform: scale(1.1-1.18)` w/ `cubic-bezier(0.34, 1.56, 0.64, 1)` slight overshoot. `prefers-reduced-motion: no-preference` guard for transforms.
-
-**Active/selected indicator** — `box-shadow: inset 2px 0 var(--tone)` for left-stripe (file rows, palette rows). Sliding accent stripe pattern (the rail-indicator) for nav.
-
-**Animations** — entries fade ~140-180ms quintOut, exits scale or fade 90-140ms. Folder-nav cross-fade pattern: `{#key path}<div in:fade={{ duration: 140 }}>`. Page transitions in AppShell: `in:fly(y:6, 180ms, delay:90, quintOut)` + `out:fade(90ms)`.
-
-**Buttons** — primary CTA 38px tall, weight 600, tone-keyed. Secondary 28-32px, surface bg + border, weight 500. Always `transition: background/border/color/transform 100-140ms ease`, `:active` translateY(1px).
-
-**Click-blur pattern** — any button INSIDE a `:focus-within`-driven overlay (like the sidebar) MUST blur on click: `onclick={(e) => { handler(); e.currentTarget.blur(); }}`. Otherwise the overlay sticks open after the click.
-
-**Layout principles** — single source of truth for any datum (server name lives ONLY in Titlebar pill, conflict count ONLY in StatusBar + Conflicts tab pip). When in doubt, hide-when-zero. Empty states get a "title + hint" pair, not just "No data". Tooltips on truncated/abbreviated content (e.g. SHA fingerprints → tooltip only).
-
-**Don't reintroduce:** the deleted OpRail, the merged-back TopBar, the kbd hints in rail (`⌘1`), the StatusBar `⌘K` pip, the titlebar Settings gear, the big H1 in StatusHero. All intentional kills.
+S31-S32: post-WPF-retirement structural cleanup + initial canon push (sidebar overlay collapse, OpRail kill, Win11 tabstrip, StatusHero auto-hide, RTL breadcrumbs, Titlebar+TopBar merge, command palette polish, tone-coded TabRail). S33: StatusHero + StatusBar "watching" dedup. S34: `.btn` skeleton lifted in `app.css` (`.btn:active` translateY universal, `.btn.primary` weight 600 + accent hover shadow, `.btn.warn` + `.btn.info` tones, `.btn.lg` 38px CTA size) + Confirm/Reupload kbd hints. Full session diffs preserved in `git log -- docs/HANDOFF.md`.
 
 ---
 
-## Session 31 — 2026-05-12 — sync verification, structural cleanup, UI consolidation
+## RESUME HERE — first read every new session
 
-Three workstreams, all frontend/ops — no Rust changes, no version bump (still on `v0.2.38-alpha-test`).
+**Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`. Version still **v0.2.38-alpha-test** (post-S37 work is frontend-only — no bump).
 
-### What landed
-- **Sync verification** — diffed remote ↔ local on `endure-rp`. 4130/4130 file-match post-fix. 33 missing locally were all stock `[ox]/ox_lib/web/build/fonts/*.ttf` + `index.html` (library build output, NOT user data). Pulled via direct `ssh+tar` (bypassed rift mid-dev). 3 stale `.rift-lock` files in `[endure]/endure_skills/` cleaned. Zero user data lost from v0.2.38 ping-pong incident.
-- **Structural cleanup of `[world]`** — Found 558 files of FiveM map content nested wrongly inside `[endure]/endure_skills/[world]/`. Moved 2 unique resources (`evo_apy_motel` 18 files, `mlo-deadoralive` 266 files) up to top-level `[world]/`. Merged 3 partial-duplicate resources (mlo-destruction +11, pillbox +17, postapo-interior +12). Dropped `[endure]/endure_skills` entirely (was just a test resource per user). Final: `[world]/` = mapping resources only (6 dirs). 3890/3890 file-match. Per-side `mv` + `cp -rn` for no-clobber merge.
-- **UI consolidation pass** (10 files + 1 new helper) — Logo: replaced inline SVG in Titlebar with `<img src="/favicon.png">` sourced from `src-tauri/icons/icon.png` so browser tab + in-app + desktop installer share one asset. Duplicates killed across Titlebar/TopBar/TabRail/StatusHero/StatusBar: server name 3→2, locks 3→1 (StatusBar only, hide-when-zero), watcher 2→1, user@host 2→1, pending/failed 2→1 each. TopBar's pill trims SHA fingerprint to tooltip only. TabRail's old foot stats (Watching/Watcher/Locks) replaced with **Quick Actions** panel (chunky Pull all / Push all buttons calling `diag_force_pull_now`/`diag_force_push_now`). StatusHero collapses to a single line when idle (*"All quiet — N folders watched · last activity HH:MM"*), expands to conflict/queued/error/last-activity cards only when state warrants. StatusBar cells hide-when-zero, watcher is now a clickable pill. LocalPane + RemotePane MODIFIED column uses relative time helper (`src/lib/utils/time.ts`: Today/Yesterday/Mon/MM-DD format) + `white-space: nowrap` — killed the wrap bug. Trey-friendly relabels: pending→queued, failed→errors.
-- **Animation polish** — TabRail active-tab indicator is now a single sliding `.rail-indicator` div with `z-index: 1` (transforms 220ms cubic-bezier between rows; fades to opacity 0 when active tab not in visible list, e.g. Diagnostics). Connected dot in TopBar pill breathes 2.6s ease (CSS in app.css, `prefers-reduced-motion` guarded). Page transitions in AppShell wrapped in `{#key active}` with `in:fly(y:6, duration:180, delay:90, quintOut)` + `out:fade(90)` for sequential drawer-slide-up between Browser/Activity/Conflicts/Settings.
-- **Drift tab removed** — user confirmed nobody uses it (and the bucket-string-mismatch bug from S30 backlog had been silently broken). Deleted `DriftReview.svelte`, dropped tab entry from TabRail, removed branch from AppShell, removed Ctrl+3 mapping, renumbered Ctrl shortcuts (Browser=1, Activity=2, Conflicts=3, Settings=4). Drift ENGINE (`drift_scanner.rs`, `diag_force_drift_scan`, snapshot baseline, per-row Browser indicators, Sync modal results) all preserved — only the UI page is gone.
+**Current state:** `origin/main` includes S31 → S37 UI overhaul. **NOT shipped** — Blazzer is dev-testing. No-release directive holds: don't trigger `/git-ship` or Velopack publish until cleared.
 
-### Verify
-- `svelte-check`: 0 errors, 2 pre-existing `<section>` a11y warnings (still on backlog).
-- File count: 3991 → 3990 (DriftReview gone).
-- No `cargo` rebuild needed — zero Rust changes this session.
+**Rhythm directive:** keep applying the Design system canon (codified in `docs/UI-POLISH-MAP.md`) to every remaining unpolished page. Tone system w/ `data-tone` attr + `--tone` CSS var (accent/info/warn/danger/neutral), surface fills 8-14% rest / 22% hover, hover-icon scale 1.1-1.18 w/ cubic-bezier overshoot + reduced-motion guard, active-state inset-stripe `box-shadow: inset 2px 0 var(--tone)`, click-blur on any focus-within overlay button, single-source-of-truth for any datum, hide-when-zero, title+hint pair on empty states, tooltips on truncated content.
 
-### Flagged for v0.2.39+ (updated)
-- **Pre-flight write probe** on connect — cheapest carry-over.
-- **Activity-feed row grouping** — bulk reconciles spam 30+ identical rows.
-- **`svelte-ignore` non-suppression** on `<section>` a11y warnings.
-- **Remote `.rift-lock` cruft sweep** — `heal_owned_dirs`-style mirror on watch attach.
-- **DELETED**: DriftReview bucket-string mismatch (page gone, bug moot).
+**Polish state (per UI-POLISH-MAP.md):**
+- ✅ Done: AppShell, Titlebar, TabRail, StatusHero, StatusBar, CommandPalette, TwoPane, LocalPane, RemotePane, PathBreadcrumbs, LockBadge, Confirm, Reupload, FlashToast, ActivityToast, ActivityFeed (Tier 5 done), `.btn` skeleton in app.css.
+- ⬜ Pending — Tier 2 ConflictList + ConflictResolver; Tier 3 login flow Bootstrap + AddServer + Keygen; Tier 4 SyncModal + UpdateDialog; Tier 5 remainder Settings + Diagnostics.
+
+**Parallel session note:** A separate Claude session has in-flight edits on `src/lib/components/browser/{LocalPane,RemotePane,TwoPane}.svelte` (the "dashboard" branch of work). Don't touch those 3 files until that session merges, to avoid stomping. svelte-check shows 8 warnings (6 pre-existing baseline + 2 from that session's edits) — not actionable here.
+
+**Don't reintroduce:** OpRail, TopBar (merged into Titlebar), rail kbd hints `⌘1`, StatusBar `⌘K` pip, titlebar Settings gear, StatusHero big H1, S33 duplicate "watching" words, S37 dev seed (Sparkles button).
+
+**Orphan file** `scripts/bg-backlog.sh` is from an accidental cross-chat — left untracked locally, NOT committed. Safe to delete if Blazzer doesn't want it.
+
+### Flagged for v0.2.39+
+- Pre-flight write probe on connect.
+- Activity-feed row grouping for bulk reconciles (partial — group collapse landed S36).
+- Remote `.rift-lock` cruft sweep on watch attach.
+- Many-tabs horizontal scroll (currently `overflow: clip` — add fade-edge + arrow buttons when >10 tabs expected).
+- `<section>` a11y warnings on LocalPane/RemotePane — backlog.
+
+## Session 31-33 — pruned
+
+Earlier UI overhaul + sync verification + structural cleanup. Full session diffs preserved in `git log -- docs/HANDOFF.md`. Design system canon now lives in `docs/UI-POLISH-MAP.md` (single source of truth, not duplicated here).
 
 ---
 
