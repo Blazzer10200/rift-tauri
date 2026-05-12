@@ -298,15 +298,62 @@ impl SftpClient {
             return Ok(std::collections::HashMap::new());
         }
 
+        // FAST PATH: server-side `find` over an SSH exec channel.
+        //
+        // Recursive SFTP listing is O(N) round-trips per directory (open-dir,
+        // read-dir, close-dir, plus a stat per entry). On high-latency links
+        // (Tailscale-tunneled WAN, ~30-80ms RTT) a moderate tree takes 30-60s.
+        // `find <root> -printf '%p\t%s\t%T@\n'` returns the whole tree in a
+        // single round-trip with streamed output — sub-second on the same link.
+        //
+        // We dispatch one exec channel per root in parallel (cheap — exec
+        // channels are lightweight compared to full SFTP sessions). Any root
+        // whose exec fails (no `find` on PATH, non-POSIX shell, perms) falls
+        // through to the SFTP worker path below, so behavior degrades safely.
+        let mut out: std::collections::HashMap<String, Vec<RemoteEntry>> =
+            std::collections::HashMap::new();
+        {
+            // russh's `Handle` is not Clone (it's an internal channel-sender
+            // wrapper held by the connection task), so we can't `tokio::spawn`
+            // tasks that own a copy. `join_all` over async blocks that *borrow*
+            // `&self.handle` gives us parallelism w/o the Clone constraint —
+            // each block opens its own exec channel via the shared Handle,
+            // which is the supported concurrency model in russh.
+            let futs = roots.iter().map(|r| {
+                let root = r.clone();
+                let filter = owned_filter.clone();
+                let handle_ref = &self.handle;
+                async move {
+                    let res =
+                        list_via_exec(handle_ref, &root, max_depth, filter.as_deref()).await;
+                    (root, res)
+                }
+            });
+            let results = futures::future::join_all(futs).await;
+            for (root, res) in results {
+                if let Ok(v) = res {
+                    out.insert(root, v);
+                }
+            }
+            // If every root succeeded via exec, skip the SFTP worker spin-up.
+            if out.len() == roots.len() {
+                return Ok(out);
+            }
+        }
+
         self.ensure_workers(parallelism).await;
         let live = self.live_worker_count().await;
 
-        let mut out: std::collections::HashMap<String, Vec<RemoteEntry>> =
-            std::collections::HashMap::new();
+        // Only process roots the exec fast path didn't already cover.
+        let missing: Vec<String> = roots
+            .iter()
+            .filter(|r| !out.contains_key(*r))
+            .cloned()
+            .collect();
 
         if live == 0 {
             // Fallback: serial listing on the main session.
-            for r in roots {
+            for r in &missing {
                 let v = list_recursive_via(&self.sftp, r, max_depth, owned_filter.as_deref())
                     .await
                     .unwrap_or_default();
@@ -314,7 +361,7 @@ impl SftpClient {
             }
         } else {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            for r in roots {
+            for r in &missing {
                 let _ = tx.send(r.clone());
             }
             drop(tx);
@@ -362,16 +409,20 @@ impl SftpClient {
                 }));
             }
             let _ = futures::future::join_all(tasks).await;
-            out = Arc::try_unwrap(results_arc)
+            // Merge worker results into out (preserving exec-fast-path entries).
+            let worker_results = Arc::try_unwrap(results_arc)
                 .map(|m| m.into_inner())
                 .unwrap_or_default();
+            for (k, v) in worker_results {
+                out.insert(k, v);
+            }
 
             // Belt-and-braces: retry only roots the worker pool failed to
             // populate (vec absent). Worker can return 0 entries silently if
             // its session breaks mid-walk; main retry confirms before
             // propagating. Genuinely-empty roots (worker returned `Some(vec![])`)
             // do NOT retry — that's a serial round-trip per empty folder.
-            for r in roots {
+            for r in &missing {
                 if !out.contains_key(r) {
                     if let Ok(retry) = list_recursive_via(
                         &self.sftp,
@@ -800,6 +851,132 @@ impl SftpClient {
 }
 
 // ─── Session-agnostic helpers (callable on main + worker SftpSessions) ──────
+
+/// Server-side recursive listing via a single SSH-exec `find` invocation.
+///
+/// On high-latency links (Tailscale-tunneled WAN, ~30-80ms RTT) the per-dir
+/// round-trips of SFTP recursive listing dominate scan time (30-60s for a
+/// moderate FXserver resource tree). `find -printf` returns the entire tree
+/// in one round-trip with streamed output, collapsing scans to sub-second.
+///
+/// Output format per line: `<full_path>\t<size>\t<mtime_epoch_seconds>`.
+/// Anything that fails to parse is logged + skipped (we'd rather under-report
+/// than crash the scan on one mangled line).
+///
+/// Returns Err on any infrastructure failure (channel open, exec start,
+/// non-zero exit, no output) so `list_recursive_batch` falls back to the
+/// SFTP worker path. POSIX `find` w/ `-printf` is GNU-find; required on the
+/// fxserver hosts we target (Debian/Ubuntu/Alpine all ship it).
+async fn list_via_exec(
+    handle: &Handle<PinningHandler>,
+    root: &str,
+    max_depth: usize,
+    ext_filter: Option<&[String]>,
+) -> Result<Vec<RemoteEntry>, String> {
+    let trimmed_root = trim_slash(root);
+    let quoted_root = shell_quote(&trimmed_root)?;
+
+    // Prune dirs that match our ignore segments — saves the server from
+    // walking node_modules etc., which on busy resource trees can be larger
+    // than the actual code. Keep in sync w/ sync::ignore::ignored_directory_names.
+    let prune_names = crate::sync::ignore::ignored_directory_names();
+    let prune_clause = if prune_names.is_empty() {
+        String::new()
+    } else {
+        let parts: Vec<String> = prune_names
+            .iter()
+            .filter_map(|n| shell_quote(n).ok())
+            .map(|q| format!("-name {q}"))
+            .collect();
+        format!("-type d \\( {} \\) -prune -o", parts.join(" -o "))
+    };
+
+    // `%T@` = mtime as seconds-since-epoch (fractional). `%p` = full path.
+    // Suppress stderr so transient ENOENT on vanished files doesn't poison
+    // stdout parsing.
+    let cmd = format!(
+        "find {quoted_root} -maxdepth {max_depth} {prune_clause} -type f -printf '%p\\t%s\\t%T@\\n' 2>/dev/null"
+    );
+
+    let channel = handle
+        .channel_open_session()
+        .await
+        .map_err(|e| format!("open exec channel: {e}"))?;
+    channel
+        .exec(true, cmd)
+        .await
+        .map_err(|e| format!("exec find: {e}"))?;
+    let mut stdout = String::new();
+    let mut exit: Option<u32> = None;
+    let mut chan = channel;
+    while let Some(msg) = chan.wait().await {
+        match msg {
+            russh::ChannelMsg::Data { data } => {
+                stdout.push_str(&String::from_utf8_lossy(&data));
+            }
+            russh::ChannelMsg::ExitStatus { exit_status } => {
+                exit = Some(exit_status);
+                break;
+            }
+            _ => {}
+        }
+    }
+    // find returns exit 1 for "some files failed" but still streams the rest;
+    // accept 0 and 1, fail anything else so we fall back.
+    match exit {
+        Some(0) | Some(1) => {}
+        Some(c) => return Err(format!("find exit {c}")),
+        None => return Err("find: no exit status".into()),
+    }
+
+    let filter_lower: Option<Vec<String>> = ext_filter.map(|f| {
+        f.iter()
+            .map(|e| {
+                let s = e.to_ascii_lowercase();
+                if s.starts_with('.') { s } else { format!(".{s}") }
+            })
+            .collect()
+    });
+
+    let mut out = Vec::new();
+    for line in stdout.lines() {
+        let mut parts = line.splitn(3, '\t');
+        let (Some(path), Some(size_s), Some(mtime_s)) =
+            (parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let size: u64 = match size_s.parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        // mtime is fractional seconds. Floor to whole seconds for chrono.
+        let mtime_secs: i64 = mtime_s
+            .split('.')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        if let Some(ref exts) = filter_lower {
+            let lower = path.to_ascii_lowercase();
+            if !exts.iter().any(|e| lower.ends_with(e)) {
+                continue;
+            }
+        }
+        let name = path.rsplit('/').next().unwrap_or(path).to_string();
+        out.push(RemoteEntry {
+            full_path: path.to_string(),
+            name,
+            is_dir: false,
+            size,
+            last_modified: Utc
+                .timestamp_opt(mtime_secs, 0)
+                .single()
+                .unwrap_or_else(Utc::now),
+        });
+    }
+
+    Ok(out)
+}
 
 async fn list_recursive_via(
     sftp: &SftpSession,
