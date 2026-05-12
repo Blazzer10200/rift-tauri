@@ -2,6 +2,35 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 46 — 2026-05-12 — Push parity + stale-cache + critical-event rate-limit bypass (v0.2.43)
+
+### Completed
+- Live-dev debug session — user reported "modal hangs at 0 PUSHED" repeatedly across v0.2.40-42 ship cycles. Switched to `npm run tauri dev` for rapid iteration with console traces.
+- **Root cause 1** — `force_push_now` drained only the watcher dirty queue. Files in `last_scan_entries` ToPush bucket were invisible. Added `promote_scan_pushes_to_dirty()` + auto-scan fallback when both dirty + cache are empty. Symmetric w/ `force_pull_now`.
+- **Root cause 2** — Stale `last_scan_entries` cache. After push, cache still showed pushed entries as ToPush. Re-click re-pushed forever (SHA-collapse hid it). Both `force_push_now` + `force_pull_now` now clear cache after non-cancelled ops.
+- **Root cause 3** — `spawn_frontend_pump` rate-limited at 200 events/sec. 192-file push generated 800+ events, dropping the terminal `DriftScanResult` event. Modal hung forever. Critical lifecycle stages (DriftScanStart/Result, RescanSignal, SftpConnect/Disconnect, RemoteScanResult, BridgeAck, System) now bypass the cap.
+- Activity-feed orphan-row guards: every early-return in `process_entry` now emits an activity row (cancel-at-top, file-vanished, file-unreadable, phantom-conflict-collapse, outer-cancel-select).
+- `eprintln!` breadcrumbs through `sync_*_pending` cmds + `force_pull/push_now` task bodies — instant dev-console diagnosis on hang.
+- Shipped v0.2.43-alpha-test — cargo check clean, svelte-check 0/0/3994, vitest 6/6.
+
+### Key Decisions
+- Critical events bypass rate limit individually (allowlist) rather than disabling rate limit entirely — FsEvent bursts still need throttling, just not lifecycle events.
+- Cache clear is unconditional post-op (only when dispatched > 0) rather than selective per-bucket — simpler, cheap re-scan covers next click.
+- Kept outer + inner `tokio::select!` cancel guards in `process_entry` (belt + suspenders).
+
+### Files Modified
+- `src-tauri/src/sync/auto_sync.rs` — promote_scan_pushes_to_dirty, auto-scan, cache clear, orphan-row emits, eprintln breadcrumbs, outer process_entry wrap
+- `src-tauri/src/diagnostics/mod.rs` — critical-event rate-limit bypass
+- `src-tauri/src/lib.rs` — command-level eprintln breadcrumbs
+- `src/lib/components/sync/SyncModal.svelte` — 60s hard watchdog, 3s force-close, X-button works while cancelling
+
+### Next Steps
+1. User in-app verification w/ v0.2.43 — Qbox connection (write-probe warn is non-fatal), Push pending with file edits, Stop button mid-push, repeat-click Push (cache clear should make it instant "0 pushed")
+2. Delete-direction visibility: local-delete watcher events emit "deleting…" / "pushed delete" activity rows now (verified path). Remote-delete via pull's ToDelete bucket emits via `delete_local_one` — visually fine per user testimony.
+3. The connect-time write probe cleanup ENOENT is non-fatal but spams stderr — could investigate further (likely russh-sftp shutdown ordering) but low priority.
+
+---
+
 ## Session 45 — 2026-05-12 — Connection liveness + real in-flight cancel + ship v0.2.42
 
 ### Completed
@@ -81,7 +110,7 @@ Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixe
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.42-alpha-test** — connection liveness (russh keepalive), write-probe shutdown fix, real in-flight upload cancel via tokio::select, push activity parity, StatusBar sync pill. Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
+**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.43-alpha-test** — push parity (promote scan-cache ToPush into dirty + auto-scan fallback), stale-cache clear after push/pull, critical-event rate-limit bypass on the diag bus (was silently dropping DriftScanResult, causing modal hangs). Live-dev verified. Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
 
 **Rhythm:** apply canon (`docs/UI-POLISH-MAP.md`) to remaining unpolished pages. Tone via `data-tone` + `--tone` var, surface 8-14% rest / 22% hover, hover icon scale 1.1-1.18 w/ overshoot + reduced-motion guard, active inset-stripe `inset 2px 0 var(--tone)`, focus-within blur, hide-when-zero, title+hint empty states, truncation tooltips, `hour12: true` everywhere.
 
