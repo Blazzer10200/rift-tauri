@@ -60,7 +60,7 @@
   function fmtTime(iso: string): string {
     try {
       const d = new Date(iso);
-      return d.toLocaleTimeString([], { hour12: false }) +
+      return d.toLocaleTimeString([], { hour12: true }) +
         "." + String(d.getMilliseconds()).padStart(3, "0");
     } catch { return iso; }
   }

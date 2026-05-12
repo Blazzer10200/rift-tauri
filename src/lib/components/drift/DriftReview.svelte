@@ -257,7 +257,7 @@
   }
   function fmtMtime(s: string | null): string {
     if (!s) return "—";
-    try { return new Date(s).toLocaleString(); } catch { return s; }
+    try { return new Date(s).toLocaleString([], { hour12: true }); } catch { return s; }
   }
 
   function basename(p: string): string {

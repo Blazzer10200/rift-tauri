@@ -80,7 +80,7 @@
 
   function fmtTime(iso: string): string {
     try {
-      return new Date(iso).toLocaleTimeString([], { hour12: false });
+      return new Date(iso).toLocaleTimeString([], { hour12: true });
     } catch { return iso; }
   }
 

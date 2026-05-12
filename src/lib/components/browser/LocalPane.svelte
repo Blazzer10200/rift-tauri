@@ -83,7 +83,7 @@
   function fmtTime(secs: number): string {
     if (!secs) return "—";
     const d = new Date(secs * 1000);
-    return d.toLocaleString();
+    return d.toLocaleString([], { hour12: true });
   }
 
   function parentOf(p: string): string | null {
