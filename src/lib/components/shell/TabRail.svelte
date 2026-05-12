@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { FolderOpen, Activity, GitPullRequestArrow, TriangleAlert, Cog, Download } from "lucide-svelte";
+  import { FolderOpen, Activity, TriangleAlert, Cog, Download, DownloadCloud, UploadCloud } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { connection } from "../../state/connection.svelte";
   import { updates } from "../../state/updates.svelte";
+  import { syncModal } from "../../state/sync-modal.svelte";
 
-  type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings" | "diagnostics";
+  type Tab = "browse" | "activity" | "conflicts" | "settings" | "diagnostics";
 
   let { active, onChange }: {
     active: Tab;
@@ -11,29 +13,54 @@
   } = $props();
 
   const tabs: { id: Tab; label: string; icon: typeof FolderOpen; kbd: string; count?: () => number; countCls?: string }[] = [
-    { id: "browse",    label: "Browser",   icon: FolderOpen,           kbd: "1" },
-    { id: "activity",  label: "Activity",  icon: Activity,             kbd: "2", count: () => connection.activityFeed.length, countCls: "" },
-    { id: "drift",     label: "Drift",     icon: GitPullRequestArrow,  kbd: "3" },
-    { id: "conflicts", label: "Conflicts", icon: TriangleAlert,        kbd: "4", count: () => connection.conflictCount, countCls: "danger" },
-    { id: "settings",  label: "Settings",  icon: Cog,                  kbd: "5" },
+    { id: "browse",    label: "Browser",   icon: FolderOpen,    kbd: "1" },
+    { id: "activity",  label: "Activity",  icon: Activity,      kbd: "2", count: () => connection.activityFeed.length, countCls: "" },
+    { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "3", count: () => connection.conflictCount, countCls: "danger" },
+    { id: "settings",  label: "Settings",  icon: Cog,           kbd: "4" },
   ];
 
-  const watchingPath = $derived(connection.selected?.localRoot ?? "—");
   const watcherOn = $derived(
     connection.status?.state === "watching" || connection.status?.state === "idle" || connection.status?.state === "syncing"
   );
+  const canSync = $derived(watcherOn && !syncModal.open);
+  const activeIdx = $derived(tabs.findIndex((t) => t.id === active));
+  const indicatorVisible = $derived(activeIdx >= 0);
 
-  async function toggleWatcher() {
-    if (watcherOn) {
-      await connection.disconnect();
-    } else {
-      try { await connection.connect(); } catch (e) { console.error(e); }
+  let pulling = $state(false);
+  let pushing = $state(false);
+
+  async function pullAll() {
+    if (!canSync || pulling) return;
+    pulling = true;
+    syncModal.start("pull");
+    try {
+      const fired = await invoke<boolean>("diag_force_pull_now");
+      if (!fired) syncModal.fail("Not connected — start watcher first.");
+    } catch (e) {
+      syncModal.fail(String(e));
+    } finally {
+      pulling = false;
+    }
+  }
+
+  async function pushAll() {
+    if (!canSync || pushing) return;
+    pushing = true;
+    syncModal.start("push");
+    try {
+      const fired = await invoke<boolean>("diag_force_push_now");
+      if (!fired) syncModal.fail("Not connected — start watcher first.");
+    } catch (e) {
+      syncModal.fail(String(e));
+    } finally {
+      pushing = false;
     }
   }
 </script>
 
 <div class="rail">
-  <div class="group">
+  <div class="group" style="--active-y: {Math.max(0, activeIdx) * 31}px">
+    <div class="rail-indicator" aria-hidden="true" data-visible={indicatorVisible}></div>
     {#each tabs as t (t.id)}
       {@const Icon = t.icon}
       {@const c = t.count ? t.count() : 0}
@@ -54,48 +81,47 @@
     {/each}
   </div>
 
-  {#if updates.state === "available" && updates.info}
-    <button
-      class="update-pill"
-      type="button"
-      onclick={() => updates.open()}
-      title="Update {updates.info.version} available — click for details"
-    >
-      <span class="up-dot"></span>
-      <Download size={12}/>
-      <span class="up-text">
-        <span class="up-l">Update available</span>
-        <span class="up-v mono">{updates.info.version}</span>
-      </span>
-    </button>
-  {/if}
-
-  <div class="foot">
-    <div class="stat">
-      <span class="stat-label">Watching</span>
-      <span class="stat-val mono">{watchingPath}</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Watcher</span>
+  <div class="bottom">
+    {#if updates.state === "available" && updates.info}
       <button
-        class="autosync-toggle"
+        class="update-pill"
         type="button"
-        onclick={toggleWatcher}
-        disabled={!connection.selected || connection.connecting}
-        title={watcherOn ? "Click to stop watching" : connection.connecting ? "Connecting…" : "Click to start watching"}
+        onclick={() => updates.open()}
+        title="Update {updates.info.version} available — click for details"
       >
-        {#if connection.connecting}
-          <span class="pill info"><span class="dot"></span>connecting…</span>
-        {:else if watcherOn}
-          <span class="pill ok"><span class="dot"></span>on</span>
-        {:else}
-          <span class="pill muted"><span class="dot"></span>off</span>
-        {/if}
+        <span class="up-dot"></span>
+        <Download size={12}/>
+        <span class="up-text">
+          <span class="up-l">Update available</span>
+          <span class="up-v mono">{updates.info.version}</span>
+        </span>
       </button>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Locks</span>
-      <span class="stat-val mono">{connection.lockCount}</span>
+    {/if}
+
+    <div class="qa">
+      <div class="qa-label">Quick actions</div>
+      <button
+        class="qa-btn"
+        type="button"
+        onclick={pullAll}
+        disabled={!canSync || pulling}
+        title={watcherOn ? "Pull all changes from remote" : "Connect a server first"}
+      >
+        <DownloadCloud size={14}/>
+        <span>Pull all</span>
+        {#if pulling}<span class="qa-spin"></span>{/if}
+      </button>
+      <button
+        class="qa-btn"
+        type="button"
+        onclick={pushAll}
+        disabled={!canSync || pushing}
+        title={watcherOn ? "Push all local changes to remote" : "Connect a server first"}
+      >
+        <UploadCloud size={14}/>
+        <span>Push all</span>
+        {#if pushing}<span class="qa-spin"></span>{/if}
+      </button>
     </div>
   </div>
 </div>
@@ -109,7 +135,20 @@
     min-height: 0;
     width: 200px;
   }
-  .group { display: flex; flex-direction: column; gap: 1px; }
+  .group { display: flex; flex-direction: column; gap: 1px; position: relative; }
+  .rail-indicator {
+    position: absolute;
+    left: 0; top: 0;
+    width: 2px; height: 30px;
+    background: var(--accent);
+    border-radius: 2px;
+    transform: translateY(var(--active-y, 0px));
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease;
+    pointer-events: none;
+    opacity: 0;
+    z-index: 1;
+  }
+  .rail-indicator[data-visible="true"] { opacity: 1; }
   .rail-btn {
     display: flex; align-items: center; gap: 9px;
     width: 100%; height: 30px; padding: 0 10px;
@@ -119,11 +158,11 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     position: relative;
+    transition: background 100ms ease, color 100ms ease;
   }
   .rail-btn:hover { background: var(--surface-hover); color: var(--fg); }
   .rail-btn[data-active="true"] {
     background: var(--surface); color: var(--fg);
-    box-shadow: inset 2px 0 0 var(--accent);
   }
   .label { flex: 1; }
   .rail-kbd {
@@ -134,8 +173,11 @@
   .rail-btn:hover .rail-kbd { opacity: 1; }
   .rail-btn[data-active="true"] .rail-kbd { opacity: 0.7; }
 
-  .update-pill {
+  .bottom {
     margin-top: auto;
+    display: flex; flex-direction: column;
+  }
+  .update-pill {
     margin-bottom: 8px;
     display: flex; align-items: center; gap: 8px;
     padding: 8px 10px;
@@ -167,14 +209,48 @@
   .up-l { color: var(--fg); }
   .up-v { color: var(--fg-muted); font-size: var(--fs-xs); }
 
-  .foot {
-    display: flex; flex-direction: column; gap: 2px;
-    padding: 8px 6px 4px;
+  .qa {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 10px 4px 4px;
     border-top: 1px solid var(--border);
-    font-size: var(--fs-xs);
   }
-  .stat { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; gap: 8px; min-width: 0; }
-  .stat-label { color: var(--fg-subtle); white-space: nowrap; }
-  .stat-val { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 120px; }
-  .pill { height: 18px; }
+  .qa-label {
+    padding: 0 6px 4px;
+    color: var(--fg-faint);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 500;
+  }
+  .qa-btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    width: 100%; height: 32px; padding: 0 10px;
+    background: var(--surface);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font: inherit; font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: background 100ms ease, border-color 100ms ease, color 100ms ease, transform 100ms ease;
+    position: relative;
+  }
+  .qa-btn > span:not(.qa-spin) { flex: 1; text-align: left; }
+  .qa-btn:hover:not(:disabled) {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    color: var(--accent);
+  }
+  .qa-btn:active:not(:disabled) { transform: translateY(1px); }
+  .qa-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .qa-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .qa-spin {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent);
+    animation: qa-pulse 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes qa-pulse {
+    0%, 100% { opacity: 0.4; transform: scale(0.85); }
+    50%      { opacity: 1;   transform: scale(1.15); }
+  }
 </style>

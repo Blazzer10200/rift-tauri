@@ -196,6 +196,13 @@ body {
   border: 1px solid transparent;
 }
 .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .pill.ok .dot { animation: pill-breathe 2.6s ease-in-out infinite; }
+}
+@keyframes pill-breathe {
+  0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); }
+  50%      { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 14%, transparent); }
+}
 .pill.ok    { color: var(--ok);    background: var(--ok-soft);    border-color: color-mix(in oklch, var(--ok) 30%, transparent); }
 .pill.warn  { color: var(--warn);  background: var(--warn-soft);  border-color: color-mix(in oklch, var(--warn) 30%, transparent); }
 .pill.danger{ color: var(--danger);background: var(--danger-soft);border-color: color-mix(in oklch, var(--danger) 30%, transparent); }

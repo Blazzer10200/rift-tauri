@@ -27,4 +27,4 @@ Watcher still runs locally to populate the dirty queue (so user sees pending cou
 ### Verify
 `cargo check`: clean (1.55s). `svelte-check`: 0 errors, 2 pre-existing a11y warnings.
 
-**NOT YET COMMITTED OR SHIPPED** — Blazzer testing in dev. v0.2.36 + v0.2.37 archived to git log.
+**Committed (`11a5b6f`) + pushed to origin. Not yet published to `rift-releases`** — Blazzer testing in dev first. v0.2.35-v0.2.37 archived to git log.

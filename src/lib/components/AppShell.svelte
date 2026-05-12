@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
+  import { fly, fade } from "svelte/transition";
+  import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile, type ConflictRecord } from "../state/connection.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
@@ -12,7 +14,6 @@
   import TwoPane from "./browser/TwoPane.svelte";
   import ActivityFeed from "./activity/ActivityFeed.svelte";
   import Diagnostics from "./diagnostics/Diagnostics.svelte";
-  import DriftReview from "./drift/DriftReview.svelte";
   import ConflictList from "./conflicts/ConflictList.svelte";
   import ConflictResolver from "./conflicts/ConflictResolver.svelte";
   import AddServer from "./dialogs/AddServer.svelte";
@@ -24,7 +25,7 @@
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import { updates } from "../state/updates.svelte";
 
-  type Tab = "browse" | "activity" | "drift" | "conflicts" | "settings" | "diagnostics";
+  type Tab = "browse" | "activity" | "conflicts" | "settings" | "diagnostics";
   type SettingsSection = "appearance" | "tokens" | "servers" | "keys" | "sync" | "editor" | "about";
 
   let active = $state<Tab>("browse");
@@ -71,9 +72,8 @@
       run: () => openBootstrap() },
     { id: "tab-browse",   group: "Go to", title: "Browser",  shortcut: "Ctrl+1", run: () => (active = "browse")   },
     { id: "tab-activity", group: "Go to", title: "Activity", shortcut: "Ctrl+2", run: () => (active = "activity") },
-    { id: "tab-drift",    group: "Go to", title: "Drift",    shortcut: "Ctrl+3", run: () => (active = "drift")    },
-    { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
-    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+5", run: () => (active = "settings") },
+    { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+3", run: () => (active = "conflicts")},
+    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+4", run: () => (active = "settings") },
     { id: "tab-diagnostics", group: "Go to", title: "Sync Inspector", subtitle: "Live diagnostics for the sync pipeline", shortcut: "Ctrl+Shift+D",
       run: () => (active = "diagnostics") },
     { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
@@ -134,7 +134,7 @@
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
     if (/^[1-5]$/.test(e.key)) {
       e.preventDefault();
-      const tab = (["browse", "activity", "drift", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
+      const tab = (["browse", "activity", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
       active = tab;
     }
   }
@@ -285,42 +285,48 @@
     <TabRail {active} onChange={(t) => (active = t)} />
 
     <main class="pane">
-      {#if active === "browse"}
-        <div class="browse-stack">
-          <StatusHero />
-          <TwoPane />
-        </div>
-      {:else if active === "activity"}
-        <ActivityFeed />
-      {:else if active === "drift"}
-        <DriftReview />
-      {:else if active === "conflicts"}
-        <div class="conflicts-pane">
-          <ConflictList
-            selected={selectedConflict}
-            onSelect={(c: ConflictRecord) => (selectedConflict = c)}
-          />
-          {#if selectedConflict}
-            {#key selectedConflict.local_path}
-              <ConflictResolver conflict={selectedConflict} />
+      {#key active}
+        <div
+          class="page-shell"
+          in:fly={{ y: 6, duration: 180, delay: 90, easing: quintOut }}
+          out:fade={{ duration: 90 }}
+        >
+          {#if active === "browse"}
+            <div class="browse-stack">
+              <StatusHero />
+              <TwoPane />
+            </div>
+          {:else if active === "activity"}
+            <ActivityFeed />
+          {:else if active === "conflicts"}
+            <div class="conflicts-pane">
+              <ConflictList
+                selected={selectedConflict}
+                onSelect={(c: ConflictRecord) => (selectedConflict = c)}
+              />
+              {#if selectedConflict}
+                {#key selectedConflict.local_path}
+                  <ConflictResolver conflict={selectedConflict} />
+                {/key}
+              {:else}
+                <div class="placeholder"><h2>Conflicts</h2><p class="help">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
+              {/if}
+            </div>
+          {:else if active === "settings"}
+            {#key settingsSection}
+              <Settings
+                initialSection={settingsSection}
+                onAddServer={() => openAddServer(null)}
+                onEditServer={(s) => openAddServer(s)}
+                onDeleteServer={(s) => deleteServer(s)}
+                onLaunchKeygen={() => (keygenOpen = true)}
+              />
             {/key}
-          {:else}
-            <div class="placeholder"><h2>Conflicts</h2><p class="help">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
+          {:else if active === "diagnostics"}
+            <Diagnostics />
           {/if}
         </div>
-      {:else if active === "settings"}
-        {#key settingsSection}
-          <Settings
-            initialSection={settingsSection}
-            onAddServer={() => openAddServer(null)}
-            onEditServer={(s) => openAddServer(s)}
-            onDeleteServer={(s) => deleteServer(s)}
-            onLaunchKeygen={() => (keygenOpen = true)}
-          />
-        {/key}
-      {:else if active === "diagnostics"}
-        <Diagnostics />
-      {/if}
+      {/key}
     </main>
   </div>
   </div>
@@ -435,6 +441,10 @@
   .pane {
     min-height: 0; min-width: 0;
     overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .page-shell {
+    flex: 1; min-height: 0; min-width: 0;
     display: flex; flex-direction: column;
   }
   .conflicts-pane { display: flex; flex: 1; min-height: 0; }
