@@ -41,6 +41,28 @@
     }
   });
 
+  // Snap tab paths back to the profile root when the profile's root changes
+  // (e.g. user moved their FiveM dir + edited Settings). Without this the
+  // tab keeps its old navigation in localStorage and the pane errors out
+  // with "not a directory" against a path that no longer exists.
+  function normPath(p: string): string {
+    return (p ?? "").replaceAll("\\", "/").toLowerCase().replace(/\/+$/, "");
+  }
+  $effect(() => {
+    const s = connection.selected;
+    if (!s) return;
+    const lroot = normPath(s.localRoot);
+    const rroot = normPath(s.remoteRoot);
+    browserTabs.tabs.forEach((t, i) => {
+      if (lroot && !normPath(t.localPath).startsWith(lroot)) {
+        browserTabs.updateLocalPath(i, s.localRoot);
+      }
+      if (rroot && !normPath(t.remotePath).startsWith(rroot)) {
+        browserTabs.updateRemotePath(i, s.remoteRoot);
+      }
+    });
+  });
+
   let toastTimer: ReturnType<typeof setTimeout> | null = null;
   function flash(msg: string, kind: "ok" | "err" | "info" = "info") {
     toast = { msg, kind };

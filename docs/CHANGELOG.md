@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
+## v0.2.23-alpha-test — 2026-05-12 — Auto-snap browser tabs to profile root
+
+Fixes "not a directory" left-pane error after a profile's local_root (or remote_root) changes — e.g. user moved their FiveM dir and updated Settings. Browser tabs persist their navigation across sessions in localStorage, so old paths survived the root change and the pane errored out against folders that no longer exist at the new location.
+
+New `$effect` in TwoPane: when profile.localRoot / remoteRoot changes, walks every tab; if a tab's current path doesn't start with the new root (normalized: lowercase, forward slashes), snaps that tab back to the new root. Belt-and-suspenders for the move-your-server-dir flow.
+
 ## v0.2.22-alpha-test — 2026-05-12 — Pull Now in OpRail (discoverability fix)
 
 v0.2.21 put the Pull Now button only inside the SyncModal footer, which meant you had to scan first to see it — defeats the purpose. v0.2.22 adds the button to the OpRail (middle column) right below the Reconcile button, always visible. New `DownloadCloud` icon to distinguish from regular Download (single-arrow) and Reconcile (refresh circle). Tooltip: "Pull Now — fetch any remote changes immediately (auto-pulls every 10s otherwise)."
