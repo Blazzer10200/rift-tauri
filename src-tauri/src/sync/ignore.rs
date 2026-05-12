@@ -70,6 +70,17 @@ const IGNORE_SEGMENT_SUFFIXES: &[&str] = &[
     "_devbridge",
 ];
 
+/// Prefix-matched folder names — catches user "park" dirs created out-of-band
+/// (`_disabled_extras`, `_disabled_bracket_dupes_<date>`, etc). The exact-
+/// match `_disabled_archive` above stays as a stable label; the prefix here
+/// covers free-form park-dir names users invent during cleanup sessions.
+/// Endure RP 2026-05-12 used `_disabled_extras/bracket_dupes_20260512/` to
+/// park bracket dupes inside the resources tree; the live SFTP scan kept
+/// surfacing those as ToPull until the prefix rule landed.
+const IGNORE_SEGMENT_PREFIXES: &[&str] = &[
+    "_disabled_",
+];
+
 /// Returns the ignore-rule label that matched, or None if eligible for sync.
 /// Stable label so the UI summary buckets by it.
 pub fn classify(path: &str) -> Option<&'static str> {
@@ -207,14 +218,33 @@ pub fn classify(path: &str) -> Option<&'static str> {
     }
 
     // Suffix-matched segments (e.g. `qbx_devbridge`, `world_devbridge` — any
-    // bridge variant). Walk each path segment and check the suffix list.
-    for seg in lower.split('/').filter(|s| !s.is_empty()) {
+    // bridge variant) — applied to ALL segments incl. filenames since
+    // `_devbridge` is always a dir name.
+    // Prefix-matched (`_disabled_extras`, `_disabled_dupes`) — applied ONLY
+    // to non-terminal segments (directories), so a legitimate file named
+    // `_disabled_for_review.lua` is not falsely ignored.
+    let segs: Vec<&str> = lower.split('/').filter(|s| !s.is_empty()).collect();
+    let last_idx = segs.len().saturating_sub(1);
+    for (i, seg) in segs.iter().enumerate() {
         for suffix in IGNORE_SEGMENT_SUFFIXES {
             if seg.ends_with(suffix) && seg.len() > suffix.len() {
                 return Some(match *suffix {
                     "_devbridge" => "seg-suffix:_devbridge",
                     _ => "seg-suffix:?",
                 });
+            }
+        }
+        // Prefix matching skips the terminal segment — that's typically a
+        // file, and we don't want `_disabled_*` prefix on filenames to
+        // false-trip. Directory segments at any depth do trip.
+        if i < last_idx {
+            for prefix in IGNORE_SEGMENT_PREFIXES {
+                if seg.starts_with(prefix) && seg.len() > prefix.len() {
+                    return Some(match *prefix {
+                        "_disabled_" => "seg-prefix:_disabled_",
+                        _ => "seg-prefix:?",
+                    });
+                }
             }
         }
     }
@@ -276,6 +306,26 @@ mod tests {
         assert_eq!(classify("a/node_modules/x/index.js"), Some("seg:node_modules"));
         assert_eq!(classify("a/[disabled]/qbx_core/main.lua"), Some("seg:[disabled]"));
         assert_eq!(classify("a/target/debug/foo"), Some("seg:target"));
+    }
+
+    #[test]
+    fn disabled_prefix_segments() {
+        // Park dirs created via `mv` during cleanup sessions.
+        assert_eq!(
+            classify("resources/_disabled_extras/bracket_dupes_20260512/[ox]/ox_lib/init.lua"),
+            Some("seg-prefix:_disabled_"),
+        );
+        assert_eq!(
+            classify("resources/_disabled_dupes/foo.lua"),
+            Some("seg-prefix:_disabled_"),
+        );
+        // Existing exact `_disabled_archive` still matches via the segment list.
+        assert_eq!(
+            classify("resources/_disabled_archive/qbx_core/main.lua"),
+            Some("seg:_disabled_archive"),
+        );
+        // Doesn't trip on legitimate-name files w/ unrelated prefix.
+        assert_eq!(classify("resources/qbx_core/_disabled_for_review.lua"), None);
     }
 
     #[test]
