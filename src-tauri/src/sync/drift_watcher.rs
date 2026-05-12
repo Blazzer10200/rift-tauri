@@ -37,8 +37,10 @@ use crate::sync::drift_scanner::{DriftBucket, DriftScanner, FolderTarget};
 use crate::sync::ConflictRecord;
 
 /// Default tick interval (seconds). Configurable per-session via
-/// `AutoSyncEngine::set_remote_scan_interval`.
-pub const DEFAULT_SCAN_INTERVAL_SECS: u64 = 30;
+/// `AutoSyncEngine::set_remote_scan_interval`. Lowered 30 → 10 in v0.2.21 so
+/// remote changes pulled by buddies feel live (≤10s lag) instead of "did this
+/// even work?" (≤30s lag). 3x more SFTP listings, ~2s each on typical trees.
+pub const DEFAULT_SCAN_INTERVAL_SECS: u64 = 10;
 
 /// Sentinel — set the interval to this and the watcher pauses entirely
 /// (Settings: "Off"). Loop still runs but every tick is a no-op.
@@ -161,7 +163,7 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
 ///   * Path is foreign-locked → skip (next tick retries; lock release will
 ///     unblock).
 ///   * Otherwise → atomic download + snapshot baseline write.
-async fn pull_one(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) {
+pub(crate) async fn pull_one(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) {
     let local_path = PathBuf::from(&entry.local_path);
     let remote_path = entry.remote_path.clone();
     let resource = entry.resource_name.clone();

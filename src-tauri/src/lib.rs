@@ -145,6 +145,20 @@ async fn diag_cancel_drift_scan(
     Ok(true)
 }
 
+/// Force-pull: scan + dispatch pulls for every ToPull entry. Bypasses the
+/// drift_watcher tick wait when the user wants buddy-pushed changes NOW.
+/// Emits standard DriftScanStart/Result so SyncModal walks the same state
+/// machine; pull activity flows through RemotePullStart/Done.
+#[tauri::command]
+async fn diag_force_pull_now(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else { return Ok(false) };
+    engine.force_pull_now();
+    Ok(true)
+}
+
 /// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
 /// when a sync isn't behaving. Keys are stable rule labels from
 /// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
@@ -1449,6 +1463,7 @@ pub fn run() {
             diag_snapshot_path,
             diag_force_drift_scan,
             diag_cancel_drift_scan,
+            diag_force_pull_now,
             diag_ignored_breakdown,
             set_remote_scan_interval,
             get_remote_scan_interval,

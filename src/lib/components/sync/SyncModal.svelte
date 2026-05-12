@@ -2,7 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
-  import { X, Loader2, AlertTriangle, CheckCircle2, Ban } from "lucide-svelte";
+  import { X, Loader2, AlertTriangle, CheckCircle2, Ban, Download } from "lucide-svelte";
   import { syncModal, type SyncActivityKind } from "../../state/sync-modal.svelte";
   import { connection } from "../../state/connection.svelte";
 
@@ -15,6 +15,7 @@
     conflicts?: number;
     listing_error?: string | null;
     cancelled?: boolean;
+    pull_dispatched?: number;
   };
   type ActivityRow = {
     at: string;
@@ -29,6 +30,7 @@
   let lastEventAt = 0;
   let watchdogTimer: ReturnType<typeof setInterval> | null = null;
   let cancelling = $state(false);
+  let pulling = $state(false);
 
   function basename(p: string): string {
     const norm = p.replaceAll("\\", "/").replace(/\/+$/, "");
@@ -135,6 +137,20 @@
     } catch (err) {
       console.warn("cancel scan failed", err);
       cancelling = false;
+    }
+  }
+
+  async function onPullNow() {
+    if (pulling) return;
+    pulling = true;
+    syncModal.start();
+    try {
+      const fired = await invoke<boolean>("diag_force_pull_now");
+      if (!fired) syncModal.fail("Not connected — start auto-sync first.");
+    } catch (err) {
+      syncModal.fail(String(err));
+    } finally {
+      pulling = false;
     }
   }
 
@@ -263,6 +279,12 @@
             {cancelling ? "Cancelling…" : "Cancel scan"}
           </button>
         {:else}
+          {#if syncModal.phase === "complete" && (syncModal.result?.pull ?? 0) > 0}
+            <button type="button" class="btn btn-accent" onclick={onPullNow} disabled={pulling}>
+              <Download size={13}/>
+              {pulling ? "Pulling…" : `Pull Now (${syncModal.result?.pull ?? 0})`}
+            </button>
+          {/if}
           <button type="button" class="btn btn-primary" onclick={onDismiss}>Dismiss</button>
         {/if}
       </footer>
@@ -430,4 +452,13 @@
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
   .btn-primary { background: var(--accent); color: oklch(0.99 0 0); border-color: var(--accent); }
   .btn-danger { background: var(--danger); color: oklch(0.99 0 0); border-color: var(--danger); }
+  .btn-accent {
+    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    color: var(--accent);
+    border-color: var(--accent);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-accent:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--accent) 30%, transparent);
+  }
 </style>
