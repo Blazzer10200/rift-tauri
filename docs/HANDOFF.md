@@ -6,7 +6,15 @@
 
 Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
 
-### What landed
+### What landed (continued in late-session burst)
+- **Quick Actions buttons stand out** — TabRail bottom panel. Tone-keyed via `data-tone="accent|info|warn"`, 38px height (up from 32), `--tone` CSS var per button, surface bg at 8% tone-mix idle / 22% on hover, border tone-tinted, icon scales 1.1x on hover, colored glow shadow underneath. Reconcile=accent (purple), Pull all=info (cyan), Push all=warn (amber). Section header bumped weight 500→600, letter-spacing 0.06→0.08em.
+- **Sidebar tab icons tone-coded** — Browser=accent, Activity=info, Conflicts=danger, Settings=neutral. Icons at opacity 0.75 idle, 1.0 hover, `scale(1.18)` overshoot via `cubic-bezier(0.34, 1.56, 0.64, 1)`. Hover bg `color-mix(in oklch, var(--tone) 10%, var(--surface-hover))`, active bg 14% tone-mix. Active indicator stripe (`.rail-indicator`) also gets `data-tone` so the stripe color matches the active tab.
+- **Sidebar kbd hints dropped** — `⌘1`–`⌘4` removed from rail buttons (visual noise; tooltip still mentions Ctrl+N, command palette still lists them, AppShell still routes the shortcuts).
+- **Sidebar focus-within bugfix** — clicking a tab/qa-btn kept focus → `:focus-within` held rail open. Fixed by wrapping all sidebar onclicks with `(e) => { handler(); e.currentTarget.blur(); }`. Keyboard-Tab into rail still expands+holds via legit focus-within (intentional accessibility).
+- **Titlebar + TopBar merged into single 44px chrome row** — `TopBar.svelte` deleted, its server-picker dropdown + connection pill + txAdmin bridge pill absorbed into `Titlebar.svelte`. Left: Rift logo + server picker + connection pill (the "identity group"). Center: empty drag-region. Right: txAdmin pill (when bridge configured) + search/Ctrl+K cmdK pill + window controls. Settings gear dropped from titlebar (sidebar Settings tab is canonical, command palette still has it, Ctrl+4 still routes). AppShell grid `32px 44px 1fr 22px → 44px 1fr 22px`, reclaimed ~32px vertical.
+- **Command palette polish** — `CommandPalette.svelte`. `data-tone` per row by group (Servers=accent, Sync=info, Go to=neutral, default=accent). Active row: tone-tinted `color-mix` bg + `inset 2px 0 var(--tone)` left stripe + group label brightens to tone color + title weight 500→600. Input bottom-border + caret turn accent on focus-within. Query-match highlight: typed substrings get wrapped in `<mark>` tone-tinted at 22%, weight 600. Group-break separator: adjacent rows with different groups get 6px top-margin + 1px hairline divider. Empty state: "No matches for '{query}' · Try a different keyword, or press esc to close." Footer gets elevated bg.
+
+### What landed (initial S32 push)
 - **Sidebar collapses to 48px gutter, hover-expands to 220px overlay** — `TabRail.svelte` rewrite. Pure CSS: `:hover` / `:focus-within` widens `.rail-panel` (absolute-positioned inside 48px outer), container queries hide labels/kbd-hints/Quick-Actions caption when narrow. Pane doesn't reflow (overlay, not push). Active indicator stripe flush-left in both states, count pips become corner badges when collapsed. `AppShell.body` grid `200px 1fr → 48px 1fr`, `.middle` + `.body` overflow `hidden → visible` so the rail can extend right.
 - **OpRail eliminated** — middle Upload/Download column killed entirely; panes now touch w/ 1px divider. Drag-drop between panes was already wired (`onDropPaths`/`onUploadPaths`/`onDownloadPaths` in `TwoPane`). `OpRail.svelte` deleted, selection-tracking state dropped from TwoPane, grid `1fr 72px 1fr → 1fr 1fr`. Sync/Pull/Push moved to TabRail Quick Actions as 3rd button (Reconcile/Pull all/Push all).
 - **StatusHero auto-hide** — quiet state = 28px slim row (`● idle · 7 folders watching · all quiet · last activity HH:MM`). Active state expands to colored chip-row (conflicts/queued/errors as pills, last-activity right-anchored). Big H1 + LED right-side card dropped (server name already in TopBar pill). Variant LED dot pulses for ok/warn/danger. ~120px vertical reclaimed when quiet.
@@ -27,6 +35,28 @@ Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
 - Remote `.rift-lock` cruft sweep on watch attach.
 - Many-tabs horizontal scroll (currently `overflow: clip` — fine for ≤6 tabs; add fade-edge + arrow buttons Win11-style when >10 expected).
 - `<section>` a11y warnings on LocalPane/RemotePane:294 — wrap event handlers properly or convert to role-button.
+
+### Design system canon (use this on every remaining page)
+
+Blazzer's directive: keep the rhythm post-compaction. When polishing remaining pages (ActivityFeed, ConflictList, ConflictResolver, Settings sub-views, Diagnostics, Bootstrap, AddServer dialogs, Confirm, Reupload, Keygen, UpdateDialog), apply this pattern:
+
+**Tone system** — every interactive surface that conveys category/meaning gets a `data-tone` attr with a `--tone` CSS var. Mapping: `accent` (brand purple) = primary/Servers/Browser, `info` (cyan) = Sync/Pull/Activity/secondary action, `warn` (amber) = Push/destructive-pending, `danger` (red) = Conflicts/errors, `neutral` (fg-muted) = Settings/utility. Same colors mean the same thing everywhere.
+
+**Surface fills** — at rest: `color-mix(in oklch, var(--tone) 8-14%, var(--surface))`. On hover: bump to 22%. Border: `color-mix(in oklch, var(--tone) 28%, var(--border))` rest, 55% hover. Drop shadow on hover: `0 4px 12px color-mix(in oklch, var(--tone) 18%, transparent)` for prominent buttons.
+
+**Icons** — at rest opacity 0.75 (when category-coded) or `var(--fg-muted)`. On hover/active: opacity 1.0 + `transform: scale(1.1-1.18)` w/ `cubic-bezier(0.34, 1.56, 0.64, 1)` slight overshoot. `prefers-reduced-motion: no-preference` guard for transforms.
+
+**Active/selected indicator** — `box-shadow: inset 2px 0 var(--tone)` for left-stripe (file rows, palette rows). Sliding accent stripe pattern (the rail-indicator) for nav.
+
+**Animations** — entries fade ~140-180ms quintOut, exits scale or fade 90-140ms. Folder-nav cross-fade pattern: `{#key path}<div in:fade={{ duration: 140 }}>`. Page transitions in AppShell: `in:fly(y:6, 180ms, delay:90, quintOut)` + `out:fade(90ms)`.
+
+**Buttons** — primary CTA 38px tall, weight 600, tone-keyed. Secondary 28-32px, surface bg + border, weight 500. Always `transition: background/border/color/transform 100-140ms ease`, `:active` translateY(1px).
+
+**Click-blur pattern** — any button INSIDE a `:focus-within`-driven overlay (like the sidebar) MUST blur on click: `onclick={(e) => { handler(); e.currentTarget.blur(); }}`. Otherwise the overlay sticks open after the click.
+
+**Layout principles** — single source of truth for any datum (server name lives ONLY in Titlebar pill, conflict count ONLY in StatusBar + Conflicts tab pip). When in doubt, hide-when-zero. Empty states get a "title + hint" pair, not just "No data". Tooltips on truncated/abbreviated content (e.g. SHA fingerprints → tooltip only).
+
+**Don't reintroduce:** the deleted OpRail, the merged-back TopBar, the kbd hints in rail (`⌘1`), the StatusBar `⌘K` pip, the titlebar Settings gear, the big H1 in StatusHero. All intentional kills.
 
 ---
 
@@ -59,13 +89,15 @@ Three workstreams, all frontend/ops — no Rust changes, no version bump (still 
 
 **Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`. Version still **v0.2.38-alpha-test** (S31 + S32 were frontend-only, no Rust changes, no bump).
 
-**Current state (post S32):** v0.2.38 source on `origin/main` w/ S31 + S32 UI overhauls committed. **NOT shipped** — Blazzer still dev-testing. No-release directive holds: don't trigger `/git-ship` or Velopack publish until cleared.
+**Current state (post S32):** v0.2.38 source on `origin/main` w/ S31 + S32 UI overhauls committed (multiple commits, last was command palette polish). **NOT shipped** — Blazzer still dev-testing. No-release directive holds: don't trigger `/git-ship` or Velopack publish until cleared.
+
+**Rhythm directive (Blazzer's explicit ask):** keep applying the "Design system canon" section above to every remaining unpolished page. The pages we DIDN'T touch yet in S32: `ActivityFeed.svelte`, `ConflictList.svelte`, `ConflictResolver.svelte`, `Diagnostics.svelte`, `Settings/*.svelte` sub-views (Appearance/Tokens/Servers/Keys/Sync/Editor/About), and the dialog stack (`AddServer.svelte`, `Bootstrap.svelte`, `Keygen.svelte`, `Confirm.svelte`, `Reupload.svelte`, `UpdateDialog.svelte`). Same tone-coding, same hover scale, same active-stripe pattern, same blur-on-click for any focus-within-driven overlay.
 
 **Next session likely entry points:**
-1. Blazzer dev-tests S32 UI — feedback on hover-expand sidebar feel, drag-drop between panes, pane cross-fade timing, tab animations.
-2. v0.2.38 dev-test continues — does the auto-sync rip kill the `[world]` ping-pongs in real use?
-3. If both hold: bump to v0.2.39 + ship pipeline (`/git-ship` user-invoked only).
-4. Else: pick next backlog item.
+1. Pick the next unpolished page from the list above, apply the canon.
+2. Blazzer feedback on S32 fine-tuning — sometimes screenshots arrive w/ specific spots that "don't feel right" — same approach: identify, propose, polish.
+3. v0.2.38 dev-test continues — does the auto-sync rip kill the `[world]` ping-pongs in real use?
+4. If both hold + Blazzer signs off on visual pass: bump to v0.2.39 + ship pipeline (`/git-ship` user-invoked only).
 
 **Orphan file** `scripts/bg-backlog.sh` is from an accidental cross-chat — left untracked locally, NOT committed. Safe to delete if Blazzer doesn't want it.
 

@@ -99,6 +99,37 @@
     if (g === "go to")   return "neutral";
     return "accent";
   }
+
+  // Highlight contiguous matches of any query token inside a title.
+  // Returns segments with `.hl=true` for matched ranges so the template
+  // can wrap them in <mark>. Case-insensitive, non-overlapping ranges.
+  function highlight(text: string, q: string): { s: string; hl: boolean }[] {
+    const tokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) return [{ s: text, hl: false }];
+    const lower = text.toLowerCase();
+    const ranges: [number, number][] = [];
+    for (const t of tokens) {
+      const i = lower.indexOf(t);
+      if (i >= 0) ranges.push([i, i + t.length]);
+    }
+    if (ranges.length === 0) return [{ s: text, hl: false }];
+    ranges.sort((a, b) => a[0] - b[0]);
+    const merged: [number, number][] = [];
+    for (const r of ranges) {
+      const last = merged[merged.length - 1];
+      if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+      else merged.push([...r]);
+    }
+    const out: { s: string; hl: boolean }[] = [];
+    let cursor = 0;
+    for (const [a, b] of merged) {
+      if (a > cursor) out.push({ s: text.slice(cursor, a), hl: false });
+      out.push({ s: text.slice(a, b), hl: true });
+      cursor = b;
+    }
+    if (cursor < text.length) out.push({ s: text.slice(cursor), hl: false });
+    return out;
+  }
 </script>
 
 {#if open}
@@ -118,9 +149,12 @@
 
       <div class="palette-list" bind:this={listEl}>
         {#each filtered as cmd, i (cmd.id)}
+          {@const prevGroup = i > 0 ? filtered[i - 1].group : null}
+          {@const groupChanged = prevGroup !== undefined && prevGroup !== cmd.group && i > 0}
           <button
             type="button"
             class="row"
+            class:group-break={groupChanged}
             data-idx={i}
             data-active={i === selectedIdx}
             data-tone={toneFor(cmd.group)}
@@ -129,7 +163,11 @@
           >
             <span class="grp mono">{cmd.group ?? "Action"}</span>
             <span class="cmd-text">
-              <span class="title">{cmd.title}</span>
+              <span class="title">
+                {#each highlight(cmd.title, query) as seg}
+                  {#if seg.hl}<mark>{seg.s}</mark>{:else}{seg.s}{/if}
+                {/each}
+              </span>
               {#if cmd.subtitle}<span class="subtitle">{cmd.subtitle}</span>{/if}
             </span>
             {#if cmd.shortcut}
@@ -140,7 +178,10 @@
           </button>
         {/each}
         {#if filtered.length === 0}
-          <div class="empty">No matches.</div>
+          <div class="empty">
+            <span class="empty-title">No matches for “{query}”</span>
+            <span class="empty-hint">Try a different keyword, or press <span class="kbd">esc</span> to close.</span>
+          </div>
         {/if}
       </div>
 
@@ -245,6 +286,22 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .row[data-active="true"] .title { font-weight: 600; }
+  .row.group-break { margin-top: 6px; position: relative; }
+  .row.group-break::before {
+    content: "";
+    position: absolute;
+    top: -3px; left: 12px; right: 12px;
+    height: 1px;
+    background: var(--border);
+    opacity: 0.5;
+  }
+  .title mark {
+    background: color-mix(in oklch, var(--tone) 22%, transparent);
+    color: var(--tone);
+    padding: 0 2px;
+    border-radius: 2px;
+    font-weight: 600;
+  }
   .subtitle {
     font-size: var(--fs-xs);
     color: var(--fg-subtle);
@@ -253,11 +310,14 @@
   .shortcut { display: inline-flex; gap: 3px; }
 
   .empty {
-    padding: 24px;
+    padding: 28px 24px;
     color: var(--fg-muted);
     font-size: var(--fs-sm);
     text-align: center;
+    display: flex; flex-direction: column; gap: 6px;
   }
+  .empty-title { color: var(--fg); font-weight: 500; }
+  .empty-hint { color: var(--fg-subtle); font-size: var(--fs-xs); }
 
   .palette-foot {
     display: flex; align-items: center; gap: 14px;
