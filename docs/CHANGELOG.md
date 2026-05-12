@@ -2,23 +2,19 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.30-alpha-test — 2026-05-12 — Codebase sweep: clippy clean + svelte warnings down 5→2
+## v0.2.31-alpha-test — 2026-05-12 — Directory perms parity (the other half of v0.2.26)
 
-Whole-codebase audit pass — no functional changes, no behavioral risk. Sets a clean baseline for future feature work.
+v0.2.26 chmod'd uploaded **files** to 0664. It never chmod'd uploaded **directories** — they were left at umask 0022 default (0755, group has no write). When one teammate created a resource folder, the other teammate couldn't push files into it because the dir itself wasn't group-writable. Symptom on Blazzer's screen: cascading "sync failed: create tmp ...rift-tmp: permission denied" rows pointing at `endure_zombies/client.lua` (a Trey-created dir).
 
 ### Landed
-- **`paths.rs`:** `std::io::Error::new(ErrorKind::Other, msg)` → `std::io::Error::other(msg)`. Picks up the `clippy::io_other_error` lint suggestion (Rust 1.95 idiom).
-- **`Settings.svelte`:** `let section = $state<Section>(initialSection)` raised `state_referenced_locally` because the prop read happens inside `$state(...)`. Wrapped the prop in `untrack(() => initialSection)` — captures once on mount, doesn't shadow the prop name. Warning gone.
-- **`LocalPane.svelte` + `RemotePane.svelte` ctxmenu:** added `onkeydown` handler on the `role="menu"` wrappers that fires `closeMenu()` on Escape. Removes the `a11y_click_events_have_key_events` warning AND gives users a real keyboard escape from the right-click menu — UX win in passing.
-
-### Audit results (whole repo)
-- **`cargo clippy --no-deps`:** clean, 0 warnings (was 1).
-- **`svelte-check`:** 0 errors, **2 warnings** (was 5). Both remaining are the `<section tabindex>` non-interactive-element warnings on the file-browser panes; the `svelte-ignore` directive does not suppress `a11y_no_noninteractive_element_interactions` in current svelte-check despite the documented syntax. Tracked as a known svelte-check quirk, not a real defect.
-- **`TODO/FIXME/HACK/XXX` grep:** zero hits across all `src/` and `src-tauri/src/`.
-- **`#[allow(dead_code)]`:** one occurrence in `sftp/mod.rs` — the SSH session-keeper, intentional and documented.
-- **Module wiring:** all `src-tauri/src/**/*.rs` files reachable through `lib.rs` `pub mod` declarations; no orphan modules.
+- **`mkdir_p_via` chmods each segment to 2775** after creating it ([sftp/mod.rs](src-tauri/src/sftp/mod.rs)). Setgid (2___) + group-writable (_775) makes new dirs immediately usable by everyone in the shared group. `FileAttributes::empty()` (NOT `default()` — that bug shipped in v0.2.26, fixed in v0.2.27) so SETSTAT only carries `permissions`. Best-effort: SETSTAT on a dir you don't own fails silently — no harm, no error toast.
+- **`SftpClient::heal_owned_dirs(root)` SSH-exec sweep**: `find <root> -type d -user "$(id -un)" -exec chmod 2775 {} +`. One round-trip per watched root, fixes the entire backlog of dirs Rift created at the old 0755 default. Fires fire-and-forget every time `AutoSyncEngine::add_folder_watch` attaches a root — async, doesn't block watch setup, swallows errors.
+- **Convergence model:** going-forward NEW dirs land at 2775 via mkdir_p (everyone's pushes work). EXISTING broken dirs get healed by whichever teammate owns them when their Rift attaches a watch on that resource. After both Blazzer + Trey relaunch on v0.2.31, the whole tree is at 2775.
 
 ### Verify
-- `cargo check`: clean. `cargo clippy --no-deps`: clean. `svelte-check`: 0 errors / 2 warnings.
+- `cargo check`: clean (1.69s). `svelte-check`: 0 errors, 2 warnings (svelte-ignore quirk, documented).
 
-v0.2.29 archived to git log.
+### What user needs to do
+- Both teammates relaunch Rift after v0.2.31 installs. Each side's heal sweep then chmods every dir they own under all watched roots.
+
+v0.2.30 archived to git log.
