@@ -264,7 +264,6 @@
 <div class="shell">
   <Titlebar
     onOpenPalette={() => (paletteOpen = true)}
-    onOpenSettings={() => (active = "settings")}
     onAddServer={() => openAddServer(null)}
     onEditCurrent={(s) => openAddServer(s)}
   />

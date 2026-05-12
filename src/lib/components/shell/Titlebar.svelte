@@ -1,11 +1,10 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Search, Cog, Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable } from "lucide-svelte";
+  import { Search, Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable } from "lucide-svelte";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
 
-  let { onOpenPalette, onOpenSettings, onAddServer, onEditCurrent }: {
+  let { onOpenPalette, onAddServer, onEditCurrent }: {
     onOpenPalette: () => void;
-    onOpenSettings: () => void;
     onAddServer: () => void;
     onEditCurrent: (s: ServerProfile) => void;
   } = $props();
@@ -121,9 +120,6 @@
       <Search size={12}/>
       <span>Search or run a command</span>
       <span class="kbd">Ctrl</span><span class="kbd">K</span>
-    </button>
-    <button class="iconbtn" onclick={onOpenSettings} title="Settings" type="button" aria-label="Settings">
-      <Cog size={14}/>
     </button>
     <div class="winctl">
       <button class="wb" onclick={() => win.minimize()} title="Minimize" type="button" aria-label="Minimize">
@@ -248,15 +244,6 @@
   }
   .cmdk > span:nth-child(2) { flex: 1; text-align: left; }
   .cmdk :global(.kbd) { background: var(--bg-elev-3); }
-
-  .iconbtn {
-    width: 26px; height: 26px; border-radius: var(--radius-sm);
-    background: transparent; border: 1px solid transparent;
-    color: var(--fg-muted); cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    transition: background 100ms ease, color 100ms ease;
-  }
-  .iconbtn:hover { background: var(--bg-elev-2); color: var(--fg); }
 
   .winctl { display: flex; height: 100%; margin-left: 4px; }
   .wb {
