@@ -2,6 +2,20 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 35 — 2026-05-12 — Browser page audit (canon plumbing check)
+
+Blazzer asked for one more thorough pass of the Browser page before moving to Activity. Audit found 3 things off-canon, all surgical:
+
+- **PathBreadcrumbs filter button had `data-active={showFilter}` but no CSS rule for it** — when the filter input was open the button looked identical to closed. Added `.actions :global(button[data-active="true"])` rule → accent-tinted bg + accent fg when active. Real bug, not just cosmetic.
+- **LocalPane empty state** — was single line `Empty.` / `No matches.`. Now title+hint pair per canon (`Empty folder` + `Drop files here, or use ↑ to go up.` / `No matches` + `Nothing matches "{filter}".`).
+- **RemotePane empty state** — same upgrade as LocalPane.
+
+Everything else verified on-canon: TabRail (tone system, inset stripe indicator, click-blur, container queries), Titlebar (single chrome row, server picker, txAdmin pill), TwoPane (Win11 tabstrip w/ fly-in/scale-out + `overflow: clip`), LocalPane/RemotePane row styles (inset 2px accent selected, translateX hover, conflict label danger), PathBreadcrumbs (RTL trick, 34px height, tooltip), LockBadge (warn pill w/ tone-border + initials), StatusHero + StatusBar (deduped in S33), CommandPalette (tone-keyed rows, query-match highlight, group breaks).
+
+### Verify
+- svelte-check: no new errors.
+- Zero Rust changes.
+
 ## Session 34 — 2026-05-12 — UI polish pass 4 (Tier 1 — dialog skeleton + small dialogs)
 
 Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped. Map at `docs/UI-POLISH-MAP.md`.

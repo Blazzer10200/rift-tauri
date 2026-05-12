@@ -116,5 +116,9 @@
   .crumb:hover { background: var(--surface-hover); color: var(--accent); }
   .sep { color: var(--fg-faint); padding: 0 1px; }
   .actions { display: flex; gap: 2px; }
+  .actions :global(button[data-active="true"]) {
+    background: color-mix(in oklch, var(--accent) 14%, var(--surface));
+    color: var(--accent);
+  }
   .filter { width: 160px; height: 24px; }
 </style>
