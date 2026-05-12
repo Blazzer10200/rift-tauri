@@ -19,7 +19,7 @@ Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixe
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.38-alpha-test**. NOT shipped — no `/git-ship` or Velopack publish until cleared.
+**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.39-alpha-test** — **SHIPPED** 2026-05-12 via Velopack to `Blazzer10200/rift-releases` (prerelease, unsigned). Delta from 0.2.32 (5 files: 3 patched, 2 unchanged). Auto-update wired for existing clients.
 
 **Rhythm:** apply canon (`docs/UI-POLISH-MAP.md`) to remaining unpolished pages. Tone via `data-tone` + `--tone` var, surface 8-14% rest / 22% hover, hover icon scale 1.1-1.18 w/ overshoot + reduced-motion guard, active inset-stripe `inset 2px 0 var(--tone)`, focus-within blur, hide-when-zero, title+hint empty states, truncation tooltips, `hour12: true` everywhere.
 
