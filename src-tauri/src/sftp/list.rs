@@ -1,5 +1,15 @@
 use super::*;
 use std::sync::Arc;
+use std::time::Duration;
+
+// v0.2.50: list-op ceiling. Large remote trees over a wedged-but-not-dead
+// link could hang the worker indefinitely (russh keepalive detects truly-
+// dead sessions but not stalled ones). 120 s gives generous headroom for
+// honest big-tree scans over WAN while still surfacing a stall as a
+// recognizable error the engine can fail+reconnect on. Server-side
+// `find -printf` listings are sub-second on healthy links (v0.2.28), so
+// 120 s is ~100× the healthy baseline.
+const LIST_T: u64 = 120;
 
 impl SftpClient {
     pub async fn list_recursive(
@@ -54,8 +64,15 @@ impl SftpClient {
                 let filter = owned_filter.clone();
                 let handle_ref = &self.handle;
                 async move {
-                    let res =
-                        list_via_exec(handle_ref, &root, max_depth, filter.as_deref()).await;
+                    let res = match tokio::time::timeout(
+                        Duration::from_secs(LIST_T),
+                        list_via_exec(handle_ref, &root, max_depth, filter.as_deref()),
+                    ).await {
+                        Ok(r) => r,
+                        Err(_) => Err(format!(
+                            "list-exec {root}: timeout after {LIST_T}s — connection wedged"
+                        )),
+                    };
                     (root, res)
                 }
             });
@@ -84,9 +101,13 @@ impl SftpClient {
         if live == 0 {
             // Fallback: serial listing on the main session.
             for r in &missing {
-                let v = list_recursive_via(&self.sftp, r, max_depth, owned_filter.as_deref())
-                    .await
-                    .unwrap_or_default();
+                let v = match tokio::time::timeout(
+                    Duration::from_secs(LIST_T),
+                    list_recursive_via(&self.sftp, r, max_depth, owned_filter.as_deref()),
+                ).await {
+                    Ok(Ok(v)) => v,
+                    _ => Vec::new(),
+                };
                 out.insert(r.clone(), v);
             }
         } else {
@@ -121,19 +142,22 @@ impl SftpClient {
                         };
                         let Some(root) = job else { break };
                         let _g = worker.gate.lock().await;
-                        let res = list_recursive_via(
-                            &worker.sftp,
-                            &root,
-                            max_depth,
-                            (*filter).as_deref(),
-                        )
-                        .await;
+                        let res = tokio::time::timeout(
+                            Duration::from_secs(LIST_T),
+                            list_recursive_via(
+                                &worker.sftp,
+                                &root,
+                                max_depth,
+                                (*filter).as_deref(),
+                            ),
+                        ).await;
                         match res {
-                            Ok(v) => {
+                            Ok(Ok(v)) => {
                                 let mut r = results_arc.lock().await;
                                 r.insert(root, v);
                             }
-                            Err(e) => log::warn!("list_recursive worker failed for {root}: {e}"),
+                            Ok(Err(e)) => log::warn!("list_recursive worker failed for {root}: {e}"),
+                            Err(_) => log::warn!("list_recursive worker timeout ({LIST_T}s) for {root}"),
                         }
                     }
                 }));

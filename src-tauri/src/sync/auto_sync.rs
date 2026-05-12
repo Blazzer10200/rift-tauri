@@ -409,6 +409,29 @@ impl AutoSyncEngine {
         self.folders.iter().map(|kv| kv.value().remote_root.clone()).collect()
     }
 
+    /// v0.2.50: walk every watched root and reclaim stale `.rift-lock` files
+    /// owned by this user. Returns the total count of locks swept. The
+    /// underlying `LockPresence::sweep_stale_mine` already gates on
+    /// `body.user == my_user` + `since older than STALE_SEC` so this is safe
+    /// to run any time; it just won't sweep locks held by OTHER users (those
+    /// stay visible via badges until naturally aging out or being released).
+    /// Exposed as `sync_sweep_stale_locks` Tauri command for the user's
+    /// manual recovery path when the poll-task got behind (e.g. after a
+    /// connection wedge).
+    pub async fn sweep_stale_locks(&self) -> Result<usize, String> {
+        let Some(locks) = self.locks.as_ref() else {
+            return Ok(0);
+        };
+        let mut total = 0usize;
+        for root in self.watched_remote_roots() {
+            match locks.sweep_stale_mine(&root, 12).await {
+                Ok(n) => total += n,
+                Err(e) => log::warn!("sweep_stale_locks {root}: {e}"),
+            }
+        }
+        Ok(total)
+    }
+
     pub async fn try_watch(&self, spec: FolderSpec) -> Result<bool, String> {
         if self.disposed.load(Ordering::SeqCst) {
             return Err("engine disposed".into());
@@ -2152,11 +2175,23 @@ impl AutoSyncEngine {
         // skipped: the entry is still pending, keep the lock until it
         // terminally succeeds or fails. Release is idempotent so the inner
         // success-path release is harmless.
+        //
+        // v0.2.50: switched from `tokio::spawn` + `track_background` to
+        // inline-await w/ 5 s timeout. The previous spawn could be aborted
+        // by engine `stop()` before the SFTP delete fired, leaving orphan
+        // `.rift-lock` files on remote (observed in probe2.txt sanity test:
+        // engine flipped to Error on the same batch, aborted the spawned
+        // release task before it ran). Inline await blocks this worker for
+        // up to 5 s on the release; lock release is a single SFTP delete,
+        // typically <100 ms, so the worst-case cost is negligible. The
+        // 5 s timeout caps cost on a hung session.
         if !matches!(result, EntryResult::Requeued) {
             if let Some(locks) = self.locks.clone() {
                 if let Some(remote) = map_local_to_remote(&entry_path_for_release, &fw_for_release) {
-                    let h = tokio::spawn(async move { locks.release(&remote).await });
-                    self.track_background(h);
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        locks.release(&remote),
+                    ).await;
                 }
             }
         }

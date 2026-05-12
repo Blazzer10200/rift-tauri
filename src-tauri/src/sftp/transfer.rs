@@ -1,7 +1,45 @@
 use super::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
+
+// v0.2.50 op-level timeouts. Pre-v0.2.50 a wedged-but-not-dead TCP socket
+// (NAT timeout, server stall, half-closed connection) caused uploads/lists
+// to hang forever — russh's keepalive (~60s) detects truly dead sessions
+// but not stalled ones. These timeouts cap any single SFTP op and convert
+// a hang into a recognizable error string so the engine can fail-then-
+// reconnect rather than freezing the worker.
+const T_QUICK: u64 = 10;   // cleanup, set_metadata, small ops
+const T_NORMAL: u64 = 30;  // mkdir, rename, create-tmp
+const T_BODY: u64 = 120;   // write_all / read on a file body (large files over WAN)
+
+/// Run an SFTP future under a timeout. On timeout returns a wedged-connection
+/// error string AND emits a `ConnectionWedged` diag event so the UI can
+/// surface a Reconnect affordance instead of just another "upload fail".
+async fn with_t<F, T, E>(secs: u64, op: &str, target: &str, fut: F) -> Result<T, String>
+where
+    F: std::future::Future<Output = Result<T, E>>,
+    E: std::fmt::Display,
+{
+    match tokio::time::timeout(Duration::from_secs(secs), fut).await {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(e)) => Err(format_sftp_err(op, target, e)),
+        Err(_) => {
+            let msg = format!(
+                "{op} {target}: timeout after {secs}s — connection wedged or remote unresponsive"
+            );
+            crate::diagnostics::emit_for(
+                crate::diagnostics::DiagStage::ConnectionWedged,
+                crate::diagnostics::DiagLevel::Error,
+                None,
+                Some(target),
+                &msg,
+            );
+            Err(msg)
+        }
+    }
+}
 
 impl SftpClient {
     pub async fn upload_file_atomic(
@@ -173,17 +211,9 @@ impl SftpClient {
         // server-side. Without it the close races with subsequent ops —
         // probe_write_access hit "remove_file: No such file" because the file
         // hadn't materialized server-side before cleanup ran.
-        let mut f = self
-            .sftp
-            .create(remote_path)
-            .await
-            .map_err(|e| format!("create {remote_path}: {e}"))?;
-        f.write_all(bytes)
-            .await
-            .map_err(|e| format!("write {remote_path}: {e}"))?;
-        f.shutdown()
-            .await
-            .map_err(|e| format!("close {remote_path}: {e}"))
+        let mut f = with_t(T_NORMAL, "create", remote_path, self.sftp.create(remote_path)).await?;
+        with_t(T_BODY, "write", remote_path, f.write_all(bytes)).await?;
+        with_t(T_QUICK, "close", remote_path, f.shutdown()).await
     }
 
 
@@ -198,11 +228,7 @@ impl SftpClient {
             .map(|(_, n)| n)
             .unwrap_or(remote_path);
         let local_path = local_dir.join(name);
-        let buf = self
-            .sftp
-            .read(remote_path)
-            .await
-            .map_err(|e| format!("read {remote_path}: {e}"))?;
+        let buf = with_t(T_BODY, "read", remote_path, self.sftp.read(remote_path)).await?;
         std::fs::write(&local_path, &buf).map_err(|e| format!("write local: {e}"))?;
         Ok(local_path)
     }}
@@ -246,8 +272,10 @@ async fn upload_atomic_via(
         // counts in a batch — files appeared "dropped" with no actionable
         // error. Strict mode disambiguates "exists as dir" (idempotent ok)
         // from "real failure" via a metadata probe on each create_dir miss.
-        if let Err(e) = super::ops::mkdir_p_strict_via(sftp, parent).await {
-            return OpResult::err(format_sftp_err("mkdir parent", parent, e));
+        if let Err(msg) = with_t(T_NORMAL, "mkdir parent", parent,
+            super::ops::mkdir_p_strict_via(sftp, parent)).await
+        {
+            return OpResult::err(msg);
         }
     }
     let tmp = format!("{remote_path}.rift-tmp");
@@ -256,25 +284,27 @@ async fn upload_atomic_via(
     // write, so this clears foreign-owned tmps when the dir is group-writable.
     // Ignore the result — if it doesn't exist, or we can't unlink, `create()`
     // below will surface the real error.
-    let _ = sftp.remove_file(&tmp).await;
+    let _ = tokio::time::timeout(Duration::from_secs(T_QUICK), sftp.remove_file(&tmp)).await;
     // russh-sftp's `write()` uses OpenFlags::WRITE only — no CREATE/TRUNCATE,
     // so it fails NO_SUCH_FILE on a fresh tmp. `create()` is WRITE|CREATE|TRUNCATE.
     // Wrap in a scope so the file handle drops (and the SFTP close packet
     // is sent) before we attempt the rename.
     {
-        let mut f = match sftp.create(&tmp).await {
+        let mut f = match with_t(T_NORMAL, "create tmp", &tmp, sftp.create(&tmp)).await {
             Ok(f) => f,
-            Err(e) => return OpResult::err(format_sftp_err("create tmp", &tmp, e)),
+            Err(msg) => return OpResult::err(msg),
         };
-        if let Err(e) = f.write_all(&bytes).await {
+        if let Err(msg) = with_t(T_BODY, "write tmp", &tmp, f.write_all(&bytes)).await {
             drop(f);
-            let _ = sftp.remove_file(&tmp).await;
-            return OpResult::err(format_sftp_err("write tmp", &tmp, e));
+            let _ = tokio::time::timeout(Duration::from_secs(T_QUICK), sftp.remove_file(&tmp)).await;
+            return OpResult::err(msg);
         }
     }
-    if let Err(e) = super::ops::rename_overwriting_via(sftp, &tmp, remote_path).await {
-        let _ = sftp.remove_file(&tmp).await;
-        return OpResult::err(format_sftp_err("rename", remote_path, e));
+    if let Err(msg) = with_t(T_NORMAL, "rename", remote_path,
+        super::ops::rename_overwriting_via(sftp, &tmp, remote_path)).await
+    {
+        let _ = tokio::time::timeout(Duration::from_secs(T_QUICK), sftp.remove_file(&tmp)).await;
+        return OpResult::err(msg);
     }
     // Force mode 0664 on the uploaded file so other users in the shared
     // group can overwrite-rename it on their next push. Default umask 0022
@@ -291,7 +321,10 @@ async fn upload_atomic_via(
     // SFTP spec semantics are "update only present fields".
     let mut attrs = russh_sftp::protocol::FileAttributes::empty();
     attrs.permissions = Some(0o664);
-    let _ = sftp.set_metadata(remote_path, attrs).await;
+    let _ = tokio::time::timeout(
+        Duration::from_secs(T_QUICK),
+        sftp.set_metadata(remote_path, attrs),
+    ).await;
     OpResult::ok()
 }
 
@@ -301,9 +334,9 @@ async fn download_atomic_via(
     remote_path: &str,
     local_path: &Path,
 ) -> OpResult {
-    let bytes = match sftp.read(remote_path).await {
+    let bytes = match with_t(T_BODY, "read", remote_path, sftp.read(remote_path)).await {
         Ok(b) => b,
-        Err(e) => return OpResult::err(format!("read {remote_path}: {e}")),
+        Err(msg) => return OpResult::err(msg),
     };
     if let Some(parent) = local_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
