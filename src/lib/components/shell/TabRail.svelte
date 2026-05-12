@@ -30,6 +30,14 @@
       try { await connection.connect(); } catch (e) { console.error(e); }
     }
   }
+
+  async function toggleManualMode() {
+    try {
+      await connection.setAutoFlush(!connection.autoFlush);
+    } catch (e) {
+      console.error("set_auto_flush failed", e);
+    }
+  }
 </script>
 
 <div class="rail">
@@ -90,6 +98,24 @@
           <span class="pill ok"><span class="dot"></span>on</span>
         {:else}
           <span class="pill muted"><span class="dot"></span>off</span>
+        {/if}
+      </button>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Mode</span>
+      <button
+        class="autosync-toggle"
+        type="button"
+        onclick={toggleManualMode}
+        disabled={!autosyncOn}
+        title={connection.autoFlush
+          ? "Auto-flush is ON — watcher pushes + drift watcher pulls every tick. Click for manual mode."
+          : "Manual mode — buttons only. Click to re-enable auto-sync."}
+      >
+        {#if connection.autoFlush}
+          <span class="pill ok"><span class="dot"></span>auto</span>
+        {:else}
+          <span class="pill warn"><span class="dot"></span>manual</span>
         {/if}
       </button>
     </div>
