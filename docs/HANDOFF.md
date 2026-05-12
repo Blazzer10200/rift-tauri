@@ -2,37 +2,28 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
-## Session 26 — 2026-05-12 — Sync modal + scan cancel + Pull Now (v0.2.20 + v0.2.21)
+## Session 26 — 2026-05-12 — Sync modal + rapid-iteration pull-side polish (v0.2.20 → v0.2.25)
 
-### v0.2.21 — Snappier pull + Pull Now button (post-v0.2.20 field test)
-- Blazzer + Trey tested v0.2.20: push side instant (notify watcher → auto-flush). Pull side needed manual Sync click because drift_watcher's default 30s tick made remote changes feel sluggish. Two-part fix:
-  - **`DEFAULT_SCAN_INTERVAL_SECS` 30 → 10** ([drift_watcher.rs:41](src-tauri/src/sync/drift_watcher.rs#L41)). Buddy-side pushes now auto-pull within ~10s. 3x more SFTP listings but ~2s each on typical trees — fine.
-  - **Pull Now button** — new `engine.force_pull_now()` re-scans AND dispatches `pull_one` for every ToPull entry. `drift_watcher::pull_one` exposed as `pub(crate)` for cross-module call. New `diag_force_pull_now` Tauri cmd. Modal footer shows the button when `phase=="complete" && result.pull > 0` with download icon + count. Uses new `.btn-accent` style matching the rest of the UI.
-- Also rolled in: SyncModal listing-phase hint ("Listing remote files…") so the silent ~30s pre-batch-listing window no longer looks frozen.
+Single-session ship streak. v0.2.20 introduced SyncModal + scan cancel; v0.2.21-v0.2.25 are post-field-test polish driven by Blazzer + Trey using Rift live for a real FiveM/Endure RP sync workflow.
 
-### v0.2.20 — Sync modal + scan cancel (initial)
+### Ship trail (newest first)
+- **v0.2.25** — Actionable SFTP errors. Russh-sftp double "Permission denied: Permission denied" collapsed via new `format_sftp_err` helper in [sftp/mod.rs](src-tauri/src/sftp/mod.rs). EACCES on tmp-create/write/rename now appends the server-side fix command (chgrp + chmod g+w + setgid). Trey's permission errors triggered this — files were Blazzer-owned in 0755 dirs.
+- **v0.2.24** — **Pull Now actually fast.** v0.2.21's force_pull_now re-ran the full 30s drift scan before dispatching, so it felt identical to Reconcile (the SFTP batch listing IS the slow part). Fixed by caching `last_scan_entries: std::sync::Mutex<Vec<DriftEntry>>` on AutoSyncEngine. drift_watcher tick (every 10s) + kick_drift_reconcile both write the cache. force_pull_now dispatches from the cache — sub-second. SyncModal gained a `mode: "scan" | "pull"` axis; pull mode shows "Pulling cached changes… (no scan needed)" instead of the misleading "Listing remote files…".
+- **v0.2.23** — Auto-snap browser tabs to new profile root. After Trey moved his FiveM dir + edited Settings, the left pane stuck on `C:\fivem server\[endure]` (old path) because `browser-tabs.svelte.ts` persists tab navigation in localStorage. New `$effect` in TwoPane normalizes paths (lowercase, fwd slashes) and snaps any tab whose path doesn't start with the active profile's root back to that root.
+- **v0.2.22** — Pull Now button promoted to OpRail (middle column) for discoverability. v0.2.21 buried it in the modal footer where you had to scan first to find it. New `DownloadCloud` icon (distinct from Download arrow + Reconcile circle).
+- **v0.2.21** — Snappier auto-pull cadence (30s → 10s, [drift_watcher.rs:41](src-tauri/src/sync/drift_watcher.rs#L41)) + initial Pull Now button (modal-internal only) + listing-phase hint.
+- **v0.2.20** — SyncModal (center-stage overlay, replaces ScanProgressChip), scan cancel (CancellationToken between folders, `current_scan_cancel: std::sync::Mutex` because kick_drift_reconcile is sync), path-guards re-applied on upload/download, Open-in-editor ctx menu, dead `just_pulled_suppress_until` purged.
 
-### Completed
-- **SyncModal** ([src/lib/components/sync/SyncModal.svelte](src/lib/components/sync/SyncModal.svelte) + [state/sync-modal.svelte.ts](src/lib/state/sync-modal.svelte.ts)). Center-stage overlay replaces the corner `ScanProgressChip`. Listens to `diag://event` (drift_scan_start/progress/result) + `autosync://activity` directly; manages its own state machine (scanning → complete | cancelled | error). Watchdog: 30s of silence shows a "scan may be slow" banner but doesn't auto-fail (fixes v0.2.19's false-alarm timeout where the backend kept running after the toast fired). Backdrop blur disables clicks during scan; Esc cancels mid-scan or dismisses afterwards.
-- **Scan cancel plumbing** ([drift_scanner.rs:scan_with_cancel](src-tauri/src/sync/drift_scanner.rs) + [auto_sync.rs:cancel_drift_reconcile](src-tauri/src/sync/auto_sync.rs) + new `diag_cancel_drift_scan` Tauri cmd). `CancellationToken` checked between folders; on bail returns partial `ScanResult` w/ `cancelled: true`. `current_scan_cancel: std::sync::Mutex<Option<CancellationToken>>` on engine (sync mutex because `kick_drift_reconcile` is called from the notify event handler, no async context). On cancel: partial push set is NOT auto-enqueued — user asked to stop.
-- **Path-guards re-applied** ([lib.rs:upload_paths/download_paths](src-tauri/src/lib.rs)). Each job's local + remote target now validated against `profile.local_root` / `profile.remote_root` via `path_guard::validate_local_child` / `validate_remote_child`. Closes the v0.2.19 rebase gap (took origin's --ours, lost the guards).
-- **Open in default editor** ([LocalPane.svelte](src/lib/components/browser/LocalPane.svelte)). New context menu item (files only) calls `openPath()` from `@tauri-apps/plugin-opener`. No Rust cmd needed — opener plugin already in `default.json` capabilities. Closes the v0.2.19 UX gap.
-- **Dead code removal.** `auto_sync.rs::just_pulled_suppress_until` (field, init, fn, callsite, getter) — all 5 sites. Superseded by v0.2.18's `recently_written` (5s post-write window). Also dropped `ScanProgressChip.svelte` + `scan-progress.svelte.ts` (replaced by SyncModal); unwired from `AppShell.svelte`.
+### Verify (post-v0.2.25)
+- `cargo check`: clean. `svelte-check`: 0 errors, 5 a11y warnings (all pre-existing in Settings/LocalPane/RemotePane).
+- Working tree clean. All 6 commits pushed (`84caea6` → `5747fce`). Releases v0.2.20-v0.2.25 on `rift-releases`.
+- Field-validated: push direction works (Blazzer added `endure_shooting`, Rift auto-detected + synced to fxserver). Pull direction works post-v0.2.21 (10s tick) + manual Pull Now. Remaining blocker is Linux-side perms (Blazzer-owned files in 0755 → Trey can't write tmps); user is fixing via chgrp + chmod g+w + setgid on the server.
 
-### Verify
-- `cargo check`: clean (3.32s incremental).
-- `svelte-check`: 0 errors, 6 a11y warnings (all pre-existing patterns).
-- **Trey's v0.2.19 diag** (saved here for context): healthy state, 0 locks/conflicts/pending, drift_scan took 894 entries / 8 folders in ~45s → tripped the v0.2.19 30s frontend timeout. v0.2.20 modal will sit patient and surface the full result.
-
-### Flagged for future
-- **Pull-side modal action.** Modal shows "Pull X" count but doesn't yet have a "Review Pull" button that opens the existing DriftReview screen. Trey hit this — sees 894 ToPull, no obvious path to act on them from the modal. ~20min: add footer button when `result.pull > 0`, route through existing DriftReview component.
-- **Per-folder streaming during initial listing** (v0.2.21 target). Backend's `SftpClient::list_recursive_batch` is the slow part of a scan (~30s on a deep tree) and emits no progress events while it runs — per-folder `drift_scan_progress` events only fire AFTER the batch completes, so the activity feed dumps all 8 in rapid succession at the end. v0.2.20 mitigates with a "Listing remote files…" status-line + activity hint on `drift_scan_start`. Real fix: instrument `list_recursive_batch` to emit a per-root completion event as each folder's listing finishes. ~30-40min, touches `sftp/mod.rs`.
-- **a11y warnings** — 5 leftover (`Settings`/`LocalPane`/`RemotePane`). Pre-existing patterns; sweep in a UX-only pass.
-
-### Next Steps (post-ship)
-1. Trey field-tests v0.2.20: sync button → modal opens → scan completes cleanly → counts visible. Hit Cancel mid-scan to verify the cancel button stops the reconcile.
-2. Next brainstorm pick — recommend **#4 per-resource Live vs Manual sync mode** (highest day-to-day value) or **#2 buddy presence indicators** (good ride-along with the modal's activity feed since both surface "who's doing what").
-3. **Deferred:** #3 bridge realtime (multi-day), #5 DPAPI, "Review Pull" button in modal.
+### Flagged for v0.2.26+
+- **Per-folder streaming during initial SFTP listing.** Backend's `SftpClient::list_recursive_batch` is the slow part of a scan (~30s deep trees), emits no progress events. v0.2.20 mitigated with "Listing remote files…" hint. Real fix: instrument the batch to emit per-root completion. ~30-40min, touches [sftp/mod.rs](src-tauri/src/sftp/mod.rs).
+- **Pre-flight write probe** on autosync start — catch EACCES at connect time instead of first push. ~15min.
+- **Review Pull button in modal** when result.pull > 0 → opens DriftReview. Lower urgency now that Pull Now exists.
+- **5 a11y warnings** — Settings/LocalPane/RemotePane. Pre-existing patterns; UX-only sweep.
 
 ---
 
@@ -40,11 +31,11 @@
 
 **Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`.
 
-**Current state (post S26):** **v0.2.21-alpha-test SHIPPED** to `rift-releases`. v0.2.20 (modal + cancel + Open-in-editor + path-guards) shipped earlier same session and was field-tested live; v0.2.21 = polish pass (10s auto-pull cadence + Pull Now button + listing-phase hint).
+**Current state (post S26):** **v0.2.25-alpha-test SHIPPED** to `rift-releases`. 6 ships this session (v0.2.20-v0.2.25). Blazzer + Trey running it live on Endure RP FiveM server. Outstanding non-Rift task: Blazzer fixing server-side Linux perms (chgrp fxserver + chmod g+w + setgid on `/opt/fxserver/.../resources/`). Once that's done, push/pull bidirectional works without permission errors.
 
-**Known leftover (cleanup for v0.2.22):**
-- Per-folder streaming during initial SFTP listing — instrument `SftpClient::list_recursive_batch` to emit per-root completion events. ~30-40min, touches `sftp/mod.rs`.
-- Sweep pre-existing a11y warnings (Settings/LocalPane/RemotePane).
+**Next session likely entry points:**
+1. Confirm chmod fix landed + bidirectional push works on Trey's end.
+2. Pick next item: per-folder listing streaming (cleanest pickup), pre-flight write probe, brainstorm #4 (per-resource sync mode), or brainstorm #2 (buddy presence).
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
@@ -56,5 +47,6 @@
 - `GITHUB_OWNER`/`GITHUB_REPO` point at public `rift-releases`, NOT source repo
 - `path_guard.rs` API frozen (`validate_remote_child`, `validate_local_child`) — `edit/in_place.rs` + lib cmds depend
 - `rename_via` is strict (user-facing); `rename_overwriting_via` is ONLY for atomic upload tmp-swap
-- **Source `.secrets/env.sh` first on ship/auth tasks** — Claude Code bash is non-interactive, won't auto-load. Past miss: spent 20min suggesting `gh auth login` when token was already there.
-- **`current_scan_cancel` is std::sync::Mutex** (NOT tokio) — `kick_drift_reconcile` is sync and called from notify event handler; `blocking_lock` on a tokio Mutex there panics. Don't "fix" it.
+- **Source `.secrets/env.sh` first on ship/auth tasks** — Claude Code bash is non-interactive, won't auto-load
+- **`current_scan_cancel` + `last_scan_entries` are std::sync::Mutex** (NOT tokio) — `kick_drift_reconcile` is sync and called from notify event handler; tokio Mutex `blocking_lock` panics there. Don't "fix" it.
+- **`force_pull_now` dispatches from cache, NOT a fresh scan** — re-scanning makes it identical to Reconcile (30s SFTP batch listing is the cost). drift_watcher's 10s tick keeps cache fresh.
