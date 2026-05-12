@@ -6,6 +6,7 @@
   } from "lucide-svelte";
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { fmtRelative } from "../../utils/time";
 
   const IS_DEV = import.meta.env.DEV;
 
@@ -23,7 +24,7 @@
       { at: t(16), resource: "[system]",  file: "txAdmin :30120",                  action: "bridge connected",  kind: "bridge", rel_path: null,                          local_path: null, size_bytes: null,   latency_ms: 41,  sha: null, actor: null },
       { at: t(19), resource: "[ox]",      file: "ox_inventory/data.lua",           action: "BLOCKED — foreign lock held by trey@DESKTOP", kind: "block", rel_path: "ox_inventory/data.lua", local_path: null, size_bytes: null, latency_ms: null, sha: null, actor: "blazzer@LOCAL" },
       { at: t(22), resource: "[qbx]",     file: "qbx_core/server.lua",             action: "upload failed — connection reset", kind: "error", rel_path: "qbx_core/server.lua", local_path: null, size_bytes: 14_802, latency_ms: 1842, sha: null, actor: "blazzer@LOCAL" },
-      { at: t(26), resource: "[system]",  file: "rift",                            action: "watcher attached to 7 folders", kind: "system", rel_path: null,            local_path: null, size_bytes: null,   latency_ms: null, sha: null, actor: null },
+      { at: t(26), resource: "[system]",  file: "",                                action: "watcher attached to 7 folders", kind: "system", rel_path: null,            local_path: null, size_bytes: null,   latency_ms: null, sha: null, actor: null },
     ];
     connection.activityFeed = [...samples, ...connection.activityFeed].slice(0, 200);
   }
@@ -251,7 +252,7 @@
 
   function fmtTime(iso: string): string {
     try {
-      return new Date(iso).toLocaleTimeString([], { hour12: true });
+      return fmtRelative(iso);
     } catch { return iso; }
   }
 
@@ -495,7 +496,7 @@
               role="button"
               tabindex="0"
             >
-              <div class="td time mono">{fmtTime(r0.at)}</div>
+              <div class="td time mono" title={fmtFullTime(r0.at)}>{fmtTime(r0.at)}</div>
               <div class="td kind">
                 <span class="kchip" data-variant={v}>
                   <Icon size={11}/>
@@ -528,7 +529,7 @@
               role="button"
               tabindex="0"
             >
-              <div class="td time mono">{fmtTime(r.at)}</div>
+              <div class="td time mono" title={fmtFullTime(r.at)}>{fmtTime(r.at)}</div>
               <div class="td kind">
                 <span class="kchip sm" data-variant={v}>
                   <Icon size={10}/>
@@ -558,7 +559,7 @@
               role="button"
               tabindex="0"
             >
-              <div class="td time mono">{fmtTime(r.at)}</div>
+              <div class="td time mono" title={fmtFullTime(r.at)}>{fmtTime(r.at)}</div>
               <div class="td kind">
                 <span class="kchip" data-variant={v}>
                   <Icon size={11}/>
@@ -744,7 +745,7 @@
   .thead, .tr {
     display: grid;
     grid-template-columns:
-      96px                 /* time   */
+      124px                /* time   */
       54px                 /* kind   */
       110px                /* res    */
       minmax(160px, 1fr)   /* path   */
@@ -958,7 +959,7 @@
   @media (max-width: 1400px) {
     .thead, .tr {
       grid-template-columns:
-        96px 54px 110px minmax(160px, 1fr) minmax(220px, 320px) 72px 64px;
+        124px 54px 110px minmax(160px, 1fr) minmax(220px, 320px) 72px 64px;
     }
     .th.actor, .td.actor { display: none; }
   }
