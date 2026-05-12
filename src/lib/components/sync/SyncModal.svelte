@@ -56,16 +56,18 @@
         syncModal.pushActivity({
           at: new Date().toISOString(),
           kind: "drift",
-          text: "reconcile started",
+          text: syncModal.mode === "pull" ? "pull-now started" : "reconcile started",
         });
-        // First-stage listing is one big SFTP batch call that can take 20-40s
-        // on a deep tree before any per-folder progress event fires. Without
-        // this hint the modal looks frozen for the duration.
-        syncModal.pushActivity({
-          at: new Date().toISOString(),
-          kind: "drift",
-          text: "listing remote files (this can take a moment)…",
-        });
+        // Scan mode does a slow SFTP batch listing before per-folder progress
+        // events fire — hint avoids the "is this frozen?" feel. Pull mode
+        // skips the scan entirely (uses cached drift_watcher results).
+        if (syncModal.mode !== "pull") {
+          syncModal.pushActivity({
+            at: new Date().toISOString(),
+            kind: "drift",
+            text: "listing remote files (this can take a moment)…",
+          });
+        }
       } else if (stage === "drift_scan_progress") {
         const f = (fields as DriftProgressFields) ?? {};
         syncModal.progress(f.current ?? 0, f.total ?? 0, f.resource ?? "");
@@ -143,7 +145,7 @@
   async function onPullNow() {
     if (pulling) return;
     pulling = true;
-    syncModal.start();
+    syncModal.start("pull");
     try {
       const fired = await invoke<boolean>("diag_force_pull_now");
       if (!fired) syncModal.fail("Not connected — start auto-sync first.");
@@ -222,7 +224,9 @@
         </div>
         <div class="status-line mono">
           {#if syncModal.phase === "scanning"}
-            {#if syncModal.totalFolders > 0}
+            {#if syncModal.mode === "pull"}
+              Pulling cached changes… (no scan needed)
+            {:else if syncModal.totalFolders > 0}
               Scanning {syncModal.resource || "…"} — {syncModal.currentFolder} / {syncModal.totalFolders} folders
             {:else}
               Listing remote files… (this may take a moment on the first scan)

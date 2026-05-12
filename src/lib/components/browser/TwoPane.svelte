@@ -174,7 +174,7 @@
   async function onPullNow() {
     if (syncing || pulling) return;
     pulling = true;
-    syncModal.start();
+    syncModal.start("pull");
     try {
       const fired = await invoke<boolean>("diag_force_pull_now");
       if (!fired) syncModal.fail("Not connected — start auto-sync first.");

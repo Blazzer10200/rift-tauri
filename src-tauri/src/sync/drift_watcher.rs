@@ -111,6 +111,9 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
         .collect();
     let result = scanner.scan(&targets).await;
     let scan_ms = started.elapsed().as_millis() as u64;
+    // Cache entries so SyncModal's Pull Now button can dispatch from this
+    // without re-scanning. Drift_watcher ticks every 10s → cache stays fresh.
+    engine.cache_scan_entries(result.entries.clone());
 
     let mut to_pull = 0usize;
     let mut conflicts = 0usize;

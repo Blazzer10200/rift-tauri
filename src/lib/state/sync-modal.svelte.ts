@@ -5,6 +5,7 @@
 // reconcile, and the old 30s hard timeout was the v0.2.19 false-alarm bug.
 
 export type SyncPhase = "scanning" | "complete" | "cancelled" | "error";
+export type SyncMode = "scan" | "pull";
 
 export type SyncActivityKind =
   | "drift" | "sync" | "pull" | "push" | "delete" | "error" | "block" | "system";
@@ -28,6 +29,7 @@ const ACTIVITY_CAP = 100;
 class SyncModalStore {
   open = $state(false);
   phase = $state<SyncPhase>("scanning");
+  mode = $state<SyncMode>("scan");
   currentFolder = $state(0);
   totalFolders = $state(0);
   resource = $state("");
@@ -36,9 +38,10 @@ class SyncModalStore {
   result = $state<SyncResult | null>(null);
   activity = $state<SyncActivityRow[]>([]);
 
-  start() {
+  start(mode: SyncMode = "scan") {
     this.open = true;
     this.phase = "scanning";
+    this.mode = mode;
     this.currentFolder = 0;
     this.totalFolders = 0;
     this.resource = "";
