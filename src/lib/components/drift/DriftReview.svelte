@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import {
     ChevronRight, Folder, FileCode, Upload, Download, X, Check,
     AppWindow, Server, RefreshCw, AlertTriangle, List, FolderTree,
   } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
+  import FlashToast from "../FlashToast.svelte";
 
   type DriftBucket = "Synced" | "ToPush" | "ToPull" | "Conflict";
   type DriftEntry = {
@@ -142,6 +144,11 @@
   // Audit M21: prune `selected` to entries that are still selectable when
   // sideFilter / grouping / filtered list changes — otherwise applyPushPull
   // operates on entries the user can no longer see.
+  //
+  // INVARIANT: this effect writes `selected` based on `selectableIds`
+  // ($derived). `selectableIds` MUST NOT depend (transitively) on `selected` —
+  // any future dep closure between them creates an infinite reactive loop.
+  // If you extend `selectableIds`, audit its chain.
   $effect(() => {
     const valid = new Set(selectableIds);
     let changed = false;
@@ -237,6 +244,9 @@
     if (toastTimer !== null) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { toast = null; toastTimer = null; }, 4500);
   }
+  onDestroy(() => {
+    if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null; }
+  });
 
   function fmtSize(n: number): string {
     if (n < 0) return "—";
@@ -475,7 +485,9 @@
   {/if}
 
   {#if toast}
-    <div class="toast">{toast}</div>
+    <div class="toast-anchor">
+      <FlashToast message={toast} kind="ok" onDismiss={() => (toast = null)} />
+    </div>
   {/if}
 </section>
 
@@ -648,15 +660,9 @@
     font-size: var(--fs-sm); text-align: center;
   }
 
-  .toast {
+  .toast-anchor {
     position: absolute;
     bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--ok);
-    border-radius: var(--radius);
-    padding: 8px 14px;
-    color: var(--fg);
-    font-size: var(--fs-sm);
-    box-shadow: var(--shadow);
+    z-index: 50;
   }
 </style>

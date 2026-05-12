@@ -60,29 +60,24 @@ impl SyncSnapshot {
         remote_mtime_utc: DateTime<Utc>,
         sha1: Option<String>,
     ) {
-        {
-            let mut g = lock(&self.data);
-            g.insert(
-                remote_path.to_string(),
-                Entry {
-                    local_size,
-                    local_mtime_utc,
-                    remote_size,
-                    remote_mtime_utc,
-                    sha1,
-                },
-            );
-        }
-        let _ = self.save();
+        let mut g = lock(&self.data);
+        g.insert(
+            remote_path.to_string(),
+            Entry {
+                local_size,
+                local_mtime_utc,
+                remote_size,
+                remote_mtime_utc,
+                sha1,
+            },
+        );
+        let _ = self.save_locked(&g);
     }
 
     pub fn forget(&self, remote_path: &str) {
-        let removed = {
-            let mut g = lock(&self.data);
-            g.remove(remote_path).is_some()
-        };
-        if removed {
-            let _ = self.save();
+        let mut g = lock(&self.data);
+        if g.remove(remote_path).is_some() {
+            let _ = self.save_locked(&g);
         }
     }
 
@@ -109,14 +104,8 @@ impl SyncSnapshot {
         Some(hex_upper(&hasher.finalize()))
     }
 
-    /// Last-write-wins under concurrent `set()` — the in-memory map is locked
-    /// only for the clone; serialize + write happen lock-free. Two parallel
-    /// callers may both clone-then-overwrite each other's disk snapshot. Fine
-    /// for this cache (next successful sync repopulates) but not for content
-    /// where every set must persist.
-    fn save(&self) -> std::io::Result<()> {
-        let snapshot = lock(&self.data).clone();
-        let json = serde_json::to_string(&snapshot)
+    fn save_locked(&self, snapshot: &HashMap<String, Entry>) -> std::io::Result<()> {
+        let json = serde_json::to_string(snapshot)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         atomic_write_json(&self.path, &json)
     }

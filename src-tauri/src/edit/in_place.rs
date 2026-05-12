@@ -77,6 +77,18 @@ fn now_stamp() -> String {
 }
 
 impl EditInPlaceManager {
+    /// Containment guard for both begin_edit + save. Loads the profile fresh
+    /// each call so user edits to ~/.rift/rift.json take effect immediately.
+    /// Without this, the `remote_path` argument flows straight to SFTP and
+    /// can step outside `profile.remote_root` (audit scan-transport row 7).
+    fn guard_remote_path(&self, remote_path: &str) -> Result<(), String> {
+        let cfg = crate::profile::RiftConfig::load()?;
+        let prof = cfg
+            .find(&self.server_key)
+            .ok_or_else(|| format!("unknown server: {}", self.server_key))?;
+        crate::path_guard::validate_remote_child(prof, remote_path).map(|_| ())
+    }
+
     pub fn new(server_key: String, sftp: Arc<SftpClient>, app: AppHandle) -> Result<Self, String> {
         let home = dirs_home().map_err(|e| format!("home dir: {e}"))?;
         let tmp_root = home
@@ -101,6 +113,7 @@ impl EditInPlaceManager {
         if remote_path.is_empty() {
             return Err("empty remote_path".into());
         }
+        self.guard_remote_path(remote_path)?;
 
         {
             let g = self.watched.lock().await;
@@ -224,6 +237,7 @@ impl EditInPlaceManager {
     /// Reupload the watched local file. Emits `edit://reuploaded` w/
     /// {remotePath, success, error} so the UI can refresh its drift baseline.
     pub async fn save(&self, remote_path: &str) -> Result<(), String> {
+        self.guard_remote_path(remote_path)?;
         let (tmp_path, _display) = {
             let g = self.watched.lock().await;
             let w = g

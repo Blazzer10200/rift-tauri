@@ -10,6 +10,7 @@ pub mod bridge;
 pub mod diagnostics;
 pub mod edit;
 pub mod local_fs;
+pub mod path_guard;
 pub mod profile;
 pub mod sftp;
 pub mod state;

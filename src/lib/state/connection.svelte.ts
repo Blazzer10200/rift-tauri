@@ -13,6 +13,8 @@ export type ServerProfile = {
   fingerprint?: string | null;
   txAdminUrl?: string | null;
   bridgePort?: number | null;
+  bridgeToken?: string | null;
+  addedAt?: string | null;
 };
 
 export type AutoSyncState = "idle" | "syncing" | "error" | "disabled" | "watching";
@@ -101,6 +103,7 @@ class ConnectionStore {
   status = $state<AutoSyncStatus | null>(null);
   connecting = $state<boolean>(false);
   lastConnectError = $state<string | null>(null);
+  wireError = $state<string | null>(null);
   /** Audit C2: captured fingerprint awaiting user confirmation. UI listens
    *  for this and shows the trust-on-first-use modal. */
   pendingFingerprint = $state<string | null>(null);
@@ -249,6 +252,7 @@ class ConnectionStore {
   async wireEvents() {
     if (this.wiring || this.unlisteners.length) return;
     this.wiring = true;
+    this.wireError = null;
     try {
       this.unlisteners.push(
         await listen<AutoSyncStatus>("autosync://status", (e) => {
@@ -315,6 +319,7 @@ class ConnectionStore {
     } catch (e) {
       console.error("wireEvents partial-init failure, rolling back", e);
       this.disposeEvents();
+      this.wireError = String(e);
       throw e;
     } finally {
       this.wiring = false;
@@ -350,18 +355,6 @@ class ConnectionStore {
     const rel = norm.slice(root.length + 1);
     if (!rel) return null;
     return sel.remoteRoot.replace(/\/+$/, "") + "/" + rel;
-  }
-
-  /** @deprecated false-positive across dirs; use remoteForLocalPath + lockForRemotePath */
-  lockForBasename(name: string): LockEntry | null {
-    if (!name) return null;
-    return (
-      this.locks.find((l) => {
-        const i = l.file_path.lastIndexOf("/");
-        const base = i === -1 ? l.file_path : l.file_path.slice(i + 1);
-        return base === name;
-      }) ?? null
-    );
   }
 
   disposeEvents() {

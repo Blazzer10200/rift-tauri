@@ -42,6 +42,8 @@
       : entries.filter((e) => e.name.toLowerCase().includes(filter.toLowerCase())),
   );
 
+  let loadToken = 0;
+
   $effect(() => {
     void path; void refreshKey;
     void load();
@@ -52,17 +54,21 @@
   });
 
   async function load() {
+    const token = ++loadToken;
     if (!path) { entries = []; return; }
     loading = true;
     error = null;
     try {
-      entries = await invoke<LocalEntry[]>("local_list_dir", { path });
+      const result = await invoke<LocalEntry[]>("local_list_dir", { path });
+      if (token !== loadToken) return;
+      entries = result;
       selected = new Set();
     } catch (e) {
+      if (token !== loadToken) return;
       error = String(e);
       entries = [];
     } finally {
-      loading = false;
+      if (token === loadToken) loading = false;
     }
   }
 
@@ -93,8 +99,10 @@
   function rowStatus(e: LocalEntry): "conflict" | "synced" {
     if (e.is_dir) return "synced";
     const inConflict = connection.conflicts.some((c) => {
-      const cBase = c.local_path.replace(/[\\/]+$/, "").split(/[\\/]/).pop();
-      return cBase === e.name;
+      // Normalize OS separators for cross-platform path equality.
+      const cNorm = c.local_path.replaceAll("\\", "/");
+      const eNorm = e.path.replaceAll("\\", "/");
+      return cNorm === eNorm;
     });
     return inConflict ? "conflict" : "synced";
   }
@@ -221,13 +229,15 @@
   }
 
   async function renameEntry(entry: LocalEntry) {
+    const serverKey = connection.selectedKey;
+    if (!serverKey) { error = "no server selected"; return; }
     const next = window.prompt(`Rename "${entry.name}" to:`, entry.name)?.trim();
     if (!next || next === entry.name) return;
     if (next.includes("\\") || next.includes("/")) { error = "name cannot contain '\\' or '/'"; return; }
     const parent = entry.path.slice(0, entry.path.length - entry.name.length);
     const target = parent + next;
     try {
-      await invoke("local_rename_path", { from: entry.path, to: target });
+      await invoke("local_rename_path", { serverKey, from: entry.path, to: target });
       await load();
     } catch (e) {
       error = String(e);
@@ -235,15 +245,25 @@
   }
 
   async function deleteEntries(entry: LocalEntry) {
+    const serverKey = connection.selectedKey;
+    if (!serverKey) { error = "no server selected"; return; }
     const paths = selected.has(entry.path) && selected.size > 1
       ? entries.filter((x) => selected.has(x.path)).map((x) => x.path)
       : [entry.path];
     const label = paths.length === 1 ? `"${entry.name}"` : `${paths.length} items`;
     if (!window.confirm(`Permanently delete ${label} on disk? This cannot be undone.`)) return;
     try {
-      const results = await invoke<boolean[]>("local_delete_paths", { paths });
-      const failed = results.filter((ok) => !ok).length;
-      if (failed > 0) error = `delete failed for ${failed}/${paths.length} items`;
+      const results = await invoke<{ ok: boolean; error: string | null }[]>(
+        "local_delete_paths",
+        { serverKey, paths },
+      );
+      const failures = results.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        const first = failures[0].error ?? "unknown error";
+        error = failures.length === 1
+          ? `delete failed: ${first}`
+          : `delete failed for ${failures.length}/${paths.length} items — first: ${first}`;
+      }
       await load();
     } catch (e) {
       error = String(e);

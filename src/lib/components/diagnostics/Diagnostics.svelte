@@ -42,7 +42,6 @@
     const ro = new ResizeObserver(() => { viewport = el.clientHeight; });
     el.addEventListener("scroll", onScroll, { passive: true });
     ro.observe(el);
-    viewport = el.clientHeight;
     return () => {
       el.removeEventListener("scroll", onScroll);
       ro.disconnect();

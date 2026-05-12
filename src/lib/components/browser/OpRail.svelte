@@ -1,22 +1,15 @@
 <script lang="ts">
-  import { ArrowRight, ArrowLeft, RefreshCw, FileEdit, FileCode, Trash2 } from "lucide-svelte";
+  import { ArrowRight, ArrowLeft, RefreshCw } from "lucide-svelte";
 
   type Props = {
     canUpload: boolean;
     canDownload: boolean;
-    canEdit: boolean;
-    canDelete: boolean;
+    syncing: boolean;
     onUpload: () => void;
     onDownload: () => void;
     onSync: () => void;
-    onEdit: () => void;
-    onDiff: () => void;
-    onDelete: () => void;
   };
-  let {
-    canUpload, canDownload, canEdit, canDelete,
-    onUpload, onDownload, onSync, onEdit, onDiff, onDelete,
-  }: Props = $props();
+  let { canUpload, canDownload, syncing, onUpload, onDownload, onSync }: Props = $props();
 </script>
 
 <div class="oprail">
@@ -29,21 +22,16 @@
     </button>
   </div>
   <div class="grp">
-    <button class="op accent" onclick={onSync} title="Sync both sides" aria-label="Sync" type="button">
+    <button
+      class="op accent"
+      class:spinning={syncing}
+      disabled={syncing}
+      onclick={onSync}
+      title="Reconcile both sides — compare local vs remote, find conflicts"
+      aria-label="Reconcile"
+      type="button"
+    >
       <RefreshCw size={14}/>
-    </button>
-  </div>
-  <div class="grp">
-    <button class="op" disabled={!canEdit} onclick={onEdit} title="Open in editor" aria-label="Edit" type="button">
-      <FileEdit size={13}/>
-    </button>
-    <button class="op" disabled={!canEdit} onclick={onDiff} title="Diff" aria-label="Diff" type="button">
-      <FileCode size={13}/>
-    </button>
-  </div>
-  <div class="grp foot">
-    <button class="op danger" disabled={!canDelete} onclick={onDelete} title="Delete" aria-label="Delete" type="button">
-      <Trash2 size={13}/>
     </button>
   </div>
 </div>
@@ -60,7 +48,6 @@
     width: 36px;
   }
   .grp { display: flex; flex-direction: column; gap: 4px; align-items: center; }
-  .grp.foot { margin-top: auto; }
 
   .op {
     width: 28px; height: 28px;
@@ -82,14 +69,12 @@
     background: var(--accent-soft);
     border-color: color-mix(in oklch, var(--accent) 40%, transparent);
   }
-  .op.danger:hover:not(:disabled) {
-    background: var(--danger-soft);
-    color: var(--danger);
-    border-color: color-mix(in oklch, var(--danger) 40%, transparent);
-  }
-  .op:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
-  }
+  .op:disabled { opacity: 0.35; cursor: not-allowed; }
   .op:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+  .op.spinning :global(svg) { animation: spin 900ms linear infinite; }
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
 </style>

@@ -26,6 +26,7 @@ use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::transport::ssh_handler::PinningHandler;
 
@@ -48,6 +49,10 @@ pub struct SshTunnel {
     pub local_port: u16,
     stop_tx: Option<oneshot::Sender<()>>,
     accept_task: Option<JoinHandle<()>>,
+    /// Cancels in-flight per-conn `copy_bidirectional` tasks on stop. Without
+    /// this, a stalled copy holds an `Arc<Handle>` clone indefinitely and the
+    /// russh session can't tear down (audit scan-transport-2026-05-11.md).
+    conn_cancel: CancellationToken,
 }
 
 impl SshTunnel {
@@ -96,6 +101,8 @@ impl SshTunnel {
         let handle_arc = Arc::new(handle);
         let remote_host = args.remote_host.to_string();
         let remote_port = args.remote_port as u32;
+        let conn_cancel = CancellationToken::new();
+        let conn_cancel_for_loop = conn_cancel.clone();
 
         let accept_task = tokio::spawn(async move {
             loop {
@@ -114,6 +121,7 @@ impl SshTunnel {
                         };
                         let handle = handle_arc.clone();
                         let remote_host = remote_host.clone();
+                        let conn_cancel = conn_cancel_for_loop.clone();
                         tokio::spawn(async move {
                             let channel = match handle
                                 .channel_open_direct_tcpip(
@@ -133,10 +141,15 @@ impl SshTunnel {
                                 }
                             };
                             let mut stream = channel.into_stream();
-                            if let Err(e) =
-                                tokio::io::copy_bidirectional(&mut tcp, &mut stream).await
-                            {
-                                log::debug!("ssh tunnel: copy ended for {peer}: {e}");
+                            tokio::select! {
+                                _ = conn_cancel.cancelled() => {
+                                    log::debug!("ssh tunnel: conn for {peer} cancelled on stop");
+                                }
+                                r = tokio::io::copy_bidirectional(&mut tcp, &mut stream) => {
+                                    if let Err(e) = r {
+                                        log::debug!("ssh tunnel: copy ended for {peer}: {e}");
+                                    }
+                                }
                             }
                         });
                     }
@@ -152,12 +165,14 @@ impl SshTunnel {
             local_port,
             stop_tx: Some(stop_tx),
             accept_task: Some(accept_task),
+            conn_cancel,
         })
     }
 
-    /// Stop accepting + tear down the SSH session. In-flight conn tasks finish
-    /// on their own (channel close → EOF on copy_bidirectional).
+    /// Stop accepting + tear down the SSH session. Cancels in-flight per-conn
+    /// `copy_bidirectional` tasks so a stalled copy can't pin the russh Handle.
     pub async fn stop(mut self) {
+        self.conn_cancel.cancel();
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
         }
@@ -170,6 +185,7 @@ impl SshTunnel {
 impl Drop for SshTunnel {
     fn drop(&mut self) {
         // Best-effort cleanup if the caller forgot `.stop().await`.
+        self.conn_cancel.cancel();
         if let Some(tx) = self.stop_tx.take() {
             let _ = tx.send(());
         }

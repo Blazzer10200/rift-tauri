@@ -12,3 +12,6 @@ Releases/
 src-tauri/src/state/*.json
 src-tauri/src/state/*.log
 src-tauri/src/state/rift-edits/
+
+# Claude Code workspace-local agent state (worktrees, transient).
+.claude/

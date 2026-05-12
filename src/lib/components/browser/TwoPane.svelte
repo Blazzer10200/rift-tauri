@@ -1,12 +1,15 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { onMount } from "svelte";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { onDestroy, onMount } from "svelte";
   import { X } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { browserTabs } from "../../state/browser-tabs.svelte";
+  import { scanProgress } from "../../state/scan-progress.svelte";
   import LocalPane from "./LocalPane.svelte";
   import RemotePane from "./RemotePane.svelte";
   import OpRail from "./OpRail.svelte";
+  import FlashToast from "../FlashToast.svelte";
 
   type LocalEntry = {
     name: string; path: string; is_dir: boolean; size: number; mtime: number;
@@ -18,8 +21,6 @@
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
   let localSel = $state<string[]>([]);
   let remoteSel = $state<string[]>([]);
-  let localRefreshKey = $state(0);
-  let remoteRefreshKey = $state(0);
 
   onMount(() => {
     const s = connection.selected;
@@ -46,6 +47,9 @@
     if (toastTimer !== null) clearTimeout(toastTimer);
     toastTimer = setTimeout(() => { toast = null; toastTimer = null; }, 4500);
   }
+  onDestroy(() => {
+    if (toastTimer !== null) { clearTimeout(toastTimer); toastTimer = null; }
+  });
 
   function setLocalPath(idx: number, p: string) { browserTabs.updateLocalPath(idx, p); }
   function setRemotePath(idx: number, p: string) { browserTabs.updateRemotePath(idx, p); }
@@ -88,9 +92,7 @@
     try {
       const res = await invoke<boolean[]>("upload_paths", { serverKey: s.key, jobs });
       const ok = res.filter(Boolean).length;
-      const total = res.length || jobs.length;
-      flash(`Uploaded ${ok}/${total} files`, ok === total ? "ok" : "err");
-      remoteRefreshKey++;
+      flash(`Uploaded ${ok}/${jobs.length}`, ok === jobs.length ? "ok" : "err");
     } catch (e) {
       flash(`Upload failed: ${e}`, "err");
     }
@@ -113,9 +115,7 @@
     try {
       const res = await invoke<boolean[]>("download_paths", { serverKey: s.key, jobs });
       const ok = res.filter(Boolean).length;
-      const total = res.length || jobs.length;
-      flash(`Downloaded ${ok}/${total} files`, ok === total ? "ok" : "err");
-      localRefreshKey++;
+      flash(`Downloaded ${ok}/${jobs.length}`, ok === jobs.length ? "ok" : "err");
     } catch (e) {
       flash(`Download failed: ${e}`, "err");
     }
@@ -130,36 +130,66 @@
   // Op rail actions
   function onUpload() { uploadLocalsToRemote(localSel); }
   function onDownload() { downloadRemotesToLocal(remoteSel); }
-  function onSync() {
-    if (localSel.length > 0) uploadLocalsToRemote(localSel);
-    if (remoteSel.length > 0) downloadRemotesToLocal(remoteSel);
-    if (localSel.length === 0 && remoteSel.length === 0) flash("Select files on either side first.", "info");
-  }
-  function onEdit() { flash("Open files by double-clicking to edit in place.", "info"); }
-  function onDiff() { flash("Diff view: pick a file in the Conflicts tab.", "info"); }
-  async function onDelete() {
-    const total = localSel.length + remoteSel.length;
-    if (total === 0) { flash("Select files on either side first.", "info"); return; }
-    const parts = [];
-    if (remoteSel.length > 0) parts.push(`${remoteSel.length} remote`);
-    if (localSel.length > 0) parts.push(`${localSel.length} local`);
-    if (!window.confirm(`Permanently delete ${parts.join(" + ")} item(s)? This cannot be undone.`)) return;
-    const s = connection.selected;
-    let okCount = 0;
+
+  type DriftResultFields = {
+    entries?: number;
+    to_push?: number;
+    to_pull?: number;
+    conflicts?: number;
+    listing_error?: string | null;
+  };
+  type DriftProgressFields = {
+    current?: number;
+    total?: number;
+    resource?: string;
+  };
+  type DiagEventLite = { stage: string; fields: unknown };
+
+  let syncing = $state(false);
+  async function onSync() {
+    if (syncing) return;
+    syncing = true;
+    scanProgress.start();
+    let resolveResult: (v: DriftResultFields | null) => void = () => {};
+    const resultPromise = new Promise<DriftResultFields | null>((resolve) => {
+      resolveResult = resolve;
+    });
+    const unlisten: UnlistenFn = await listen<DiagEventLite>("diag://event", (e) => {
+      const stage = e.payload.stage;
+      if (stage === "drift_scan_progress") {
+        const f = (e.payload.fields as DriftProgressFields) ?? {};
+        scanProgress.progress(f.current ?? 0, f.total ?? 0, f.resource ?? "");
+      } else if (stage === "drift_scan_result") {
+        resolveResult((e.payload.fields as DriftResultFields) ?? {});
+      }
+    });
+    const timeoutId = setTimeout(() => resolveResult(null), 30000);
     try {
-      if (remoteSel.length > 0 && s) {
-        const res = await invoke<boolean[]>("remote_delete_paths", { serverKey: s.key, paths: remoteSel });
-        okCount += res.filter(Boolean).length;
-        remoteRefreshKey++;
+      const fired = await invoke<boolean>("diag_force_drift_scan");
+      if (!fired) {
+        scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: "Not connected — start auto-sync first." });
+        return;
       }
-      if (localSel.length > 0) {
-        const res = await invoke<boolean[]>("local_delete_paths", { paths: localSel });
-        okCount += res.filter(Boolean).length;
-        localRefreshKey++;
+      const r = await resultPromise;
+      if (!r) {
+        scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: "Scan timed out (30s)." });
+        return;
       }
-      flash(`Deleted ${okCount}/${total}`, okCount === total ? "ok" : "err");
+      if (r.listing_error) {
+        scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: r.listing_error });
+        return;
+      }
+      scanProgress.finish({
+        push: r.to_push ?? 0,
+        pull: r.to_pull ?? 0,
+        conflicts: r.conflicts ?? 0,
+      });
     } catch (e) {
-      flash(`Delete failed: ${e}`, "err");
+      scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: String(e) });
+    } finally {
+      clearTimeout(timeoutId);
+      unlisten();
+      syncing = false;
     }
   }
 </script>
@@ -194,19 +224,14 @@
         onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
         onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
         onSelectionChange={(paths) => (localSel = paths)}
-        refreshKey={localRefreshKey}
       />
       <OpRail
         canUpload={localSel.length > 0}
         canDownload={remoteSel.length > 0}
-        canEdit={localSel.length === 1 || remoteSel.length === 1}
-        canDelete={localSel.length > 0 || remoteSel.length > 0}
+        {syncing}
         {onUpload}
         {onDownload}
         {onSync}
-        {onEdit}
-        {onDiff}
-        {onDelete}
       />
       <RemotePane
         serverKey={connection.selectedKey}
@@ -217,7 +242,6 @@
         onDropPathsToFolder={(localPaths, targetDir) => uploadLocalsToRemoteDir(localPaths, targetDir)}
         onDownloadPaths={(remotePaths) => downloadRemotesToLocal(remotePaths)}
         onSelectionChange={(paths) => (remoteSel = paths)}
-        refreshKey={remoteRefreshKey}
       />
     </div>
   {:else}
@@ -225,7 +249,9 @@
   {/if}
 
   {#if toast}
-    <div class="toast" data-kind={toast.kind}>{toast.msg}</div>
+    <div class="toast-anchor">
+      <FlashToast message={toast.msg} kind={toast.kind} onDismiss={() => (toast = null)} />
+    </div>
   {/if}
 </div>
 
@@ -289,18 +315,9 @@
     color: var(--fg-muted); font-size: var(--fs-sm);
   }
 
-  .toast {
+  .toast-anchor {
     position: absolute;
     bottom: 16px; left: 50%; transform: translateX(-50%);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    padding: 8px 14px;
-    color: var(--fg);
-    font-size: var(--fs-sm);
-    box-shadow: var(--shadow);
     z-index: 50;
   }
-  .toast[data-kind="ok"]  { border-color: color-mix(in oklch, var(--ok) 50%, transparent); color: var(--ok); }
-  .toast[data-kind="err"] { border-color: color-mix(in oklch, var(--danger) 50%, transparent); color: var(--danger); }
 </style>
