@@ -250,6 +250,14 @@ async fn list_via_exec(
     let mut stdout = String::new();
     let mut exit: Option<u32> = None;
     let mut chan = channel;
+    // CRITICAL: do NOT break on ExitStatus. SSH does not guarantee that
+    // ExitStatus arrives after all Data messages — for fast `find` runs over
+    // deep trees the server can send ExitStatus while trailing Data chunks
+    // are still in flight on the channel. Breaking early discards those
+    // chunks, producing a non-deterministic short listing that classifies
+    // legitimate remote files as ToDelete (the v0.2.44 phantom-delete bug).
+    // Drain the channel until it closes (`wait()` returns None) — guaranteed
+    // to follow Eof + Close per the SSH-CONNECTION spec.
     while let Some(msg) = chan.wait().await {
         match msg {
             russh::ChannelMsg::Data { data } => {
@@ -257,7 +265,6 @@ async fn list_via_exec(
             }
             russh::ChannelMsg::ExitStatus { exit_status } => {
                 exit = Some(exit_status);
-                break;
             }
             _ => {}
         }

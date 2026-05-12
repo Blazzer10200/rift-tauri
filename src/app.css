@@ -101,6 +101,7 @@
 /* ─── Reset + base ─── */
 * { box-sizing: border-box; }
 html, body, #app, #svelte { height: 100%; margin: 0; }
+html, body { overflow: hidden; overscroll-behavior: none; }
 body {
   font-family: var(--font-ui);
   font-size: var(--fs-md);

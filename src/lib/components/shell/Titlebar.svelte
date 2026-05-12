@@ -139,15 +139,21 @@
   .titlebar {
     display: flex; align-items: center;
     height: 44px;
+    width: 100%;
+    min-width: 0;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
     font-size: var(--fs-xs);
     user-select: none;
     padding-left: 12px;
   }
-  .left  { display: flex; align-items: center; gap: 10px; flex-shrink: 0; height: 100%; }
-  .right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 100%; }
-  .drag-fill { flex: 1; height: 100%; }
+  /* Layout priority:
+     - .right (window controls + cmdk) stays flex-shrink:0 — always clickable.
+     - .drag-fill takes ALL leftover space — that's the window-drag handle.
+     - .left can shrink (server picker truncates) but doesn't grow past content. */
+  .left      { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; height: 100%; overflow: hidden; }
+  .drag-fill { flex: 1 1 auto; min-width: 24px; height: 100%; }
+  .right     { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 100%; }
 
   .brand {
     display: inline-flex; align-items: center; gap: 8px;

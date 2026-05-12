@@ -63,9 +63,13 @@ impl SshTunnel {
             .map_err(|e| format!("load key {}: {e}", key_path.display()))?;
         // Keepalive parity w/ sftp::open_session — 20s x 3 = ~60s to detect
         // a stalled server side instead of indefinite half-dead socket.
+        // Window/packet parity w/ sftp::open_session — see that comment for
+        // the v0.2.45 truncation post-mortem.
         let config = Arc::new(client::Config {
             keepalive_interval: Some(std::time::Duration::from_secs(20)),
             keepalive_max: 3,
+            window_size: 2 * 1024 * 1024,
+            maximum_packet_size: 32 * 1024,
             ..client::Config::default()
         });
         let addr = format!("{}:{}", args.host, args.port);

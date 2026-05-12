@@ -1169,6 +1169,117 @@ impl AutoSyncEngine {
         }
     }
 
+    /// Snapshot the cached drift entries for the Sync page. Read-only —
+    /// returns a clone so the frontend can render without holding the lock.
+    pub fn drift_snapshot(&self) -> Vec<crate::sync::DriftEntry> {
+        match self.last_scan_entries.lock() {
+            Ok(g) => g.clone(),
+            Err(_) => Vec::new(),
+        }
+    }
+
+    /// Dispatch a user-selected subset of cached drift entries. Each path is
+    /// matched against `last_scan_entries`; the entry's bucket determines the
+    /// action (ToPull → pull_one, ToDelete → delete_local_one, ToPush →
+    /// enqueue dirty). Circuit breaker runs per-resource on the selected
+    /// deletes — same formula as force_pull_now. Returns (dispatched, blocked).
+    pub fn apply_selected(self: &Arc<Self>, local_paths: Vec<String>) {
+        let engine = self.clone();
+        let h = tokio::spawn(async move {
+            let cache: Vec<crate::sync::DriftEntry> = engine.drift_snapshot();
+            let want: std::collections::HashSet<String> = local_paths.into_iter().collect();
+            let selected: Vec<crate::sync::DriftEntry> = cache
+                .into_iter()
+                .filter(|e| want.contains(&e.local_path))
+                .collect();
+
+            let mut delete_buckets: std::collections::HashMap<String, Vec<crate::sync::DriftEntry>> =
+                std::collections::HashMap::new();
+            let mut pulls: Vec<crate::sync::DriftEntry> = Vec::new();
+            let mut pushes: Vec<crate::sync::DriftEntry> = Vec::new();
+            for e in selected {
+                match e.bucket {
+                    crate::sync::DriftBucket::ToDelete => {
+                        delete_buckets.entry(e.resource_name.clone()).or_default().push(e);
+                    }
+                    crate::sync::DriftBucket::ToPull => pulls.push(e),
+                    crate::sync::DriftBucket::ToPush => pushes.push(e),
+                    _ => {}
+                }
+            }
+
+            // Policy change (v0.2.45): explicit user selection from the Sync
+            // page IS the override for the mass-delete circuit breaker. The
+            // breaker exists to catch SCAN-DRIVEN runaways (auto-pull,
+            // tombstone propagation in force_pull_now) — those still hard-block.
+            // When the user ticks checkboxes and clicks Apply, that's
+            // informed consent: they saw each path. We log a WARN to the
+            // activity feed when threshold is exceeded so the action is still
+            // visible/auditable, but dispatch the deletes.
+            let folders_snap = engine.folders_clone();
+            let mut to_dispatch_deletes: Vec<crate::sync::DriftEntry> = Vec::new();
+            for (resource, deletes) in delete_buckets {
+                let fw = folders_snap.iter().find(|f| f.resource_name == resource);
+                let (threshold, total) = match fw {
+                    Some(f) => engine.scaled_delete_threshold(&f.local_root).await,
+                    None => (5usize, 0usize),
+                };
+                let count = deletes.len();
+                if count >= threshold {
+                    let reason = format!(
+                        "{count} local-deletes (\u{2265} scaled threshold {threshold} of {total} files) — user-selected, dispatching anyway"
+                    );
+                    let row = crate::sync::ActivityRow {
+                        at: Utc::now(),
+                        resource: resource.clone(),
+                        file: "[guard-override]".into(),
+                        action: format!("WARN — {reason}"),
+                        kind: crate::sync::ActivityKind::Drift,
+                        actor: Some(crate::transport::env::current_user()),
+                        ..Default::default()
+                    };
+                    use tauri::Emitter;
+                    let _ = engine.app().emit("autosync://activity", &row);
+                }
+                to_dispatch_deletes.extend(deletes);
+            }
+
+            let sem = Arc::new(tokio::sync::Semaphore::new(4));
+            let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+            for entry in pulls {
+                let e = engine.clone();
+                let s = sem.clone();
+                handles.push(tokio::spawn(async move {
+                    let _p = s.acquire_owned().await.ok();
+                    crate::sync::drift_watcher::pull_one(&e, entry).await;
+                }));
+            }
+            for entry in to_dispatch_deletes {
+                let e = engine.clone();
+                let s = sem.clone();
+                handles.push(tokio::spawn(async move {
+                    let _p = s.acquire_owned().await.ok();
+                    crate::sync::drift_watcher::delete_local_one(&e, entry).await;
+                }));
+            }
+            let mut enqueued_push = false;
+            for entry in pushes {
+                let path = PathBuf::from(&entry.local_path);
+                if path.exists() {
+                    engine.queue_path(path, ChangeKind::Modified);
+                    enqueued_push = true;
+                }
+            }
+            for h in handles {
+                let _ = h.await;
+            }
+            if enqueued_push {
+                engine.flush_all_now(None).await;
+            }
+        });
+        self.track_background(h);
+    }
+
     /// Force-pull NOW — runs an inline drift scan and dispatches pulls +
     /// approved-deletes against the result. Uses cached ToPull entries
     /// when populated by a prior `kick_drift_reconcile` so back-to-back

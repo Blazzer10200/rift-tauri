@@ -214,6 +214,43 @@ impl<'a> DriftScanner<'a> {
             }
         }
 
+        // Suspicious-shrink guard (v0.2.45 defense-in-depth): if the snapshot
+        // had a substantial baseline for this prefix but the listing returned
+        // less than half of it, assume the remote listing was truncated (russh
+        // window/packet pressure, or any remaining edge case the exec-channel
+        // drain fix didn't catch). Bail rather than emit phantom ToDeletes.
+        // Threshold chosen conservatively — baseline ≥10 files AND listing
+        // dropped >50% — so a legitimate workflow that bulk-deletes <50% of a
+        // resource still propagates correctly.
+        if let Some(snap) = self.snapshot {
+            let baseline_n = snap.count_under(&f.remote_root);
+            // Count just the file entries from remote_hits — dirs returned by
+            // some listing paths (worker SFTP) inflate the count otherwise.
+            let listing_files = remote_hits.iter().filter(|r| !r.is_dir).count();
+            if baseline_n >= 10 && listing_files * 2 < baseline_n {
+                eprintln!(
+                    "[rift] drift scan: suspicious shrink for resource {} (baseline {} files, listing returned {} files) — aborting folder to prevent phantom deletes",
+                    f.resource_name, baseline_n, listing_files,
+                );
+                crate::diagnostics::emit_with_fields(
+                    crate::diagnostics::DiagStage::DriftScanProgress,
+                    crate::diagnostics::DiagLevel::Warn,
+                    Some(&f.resource_name),
+                    None,
+                    format!(
+                        "suspicious listing shrink: baseline {baseline_n} files, listing {listing_files} — aborting"
+                    ),
+                    serde_json::json!({
+                        "resource": f.resource_name,
+                        "baseline_count": baseline_n,
+                        "listing_count": listing_files,
+                        "reason": "suspicious_shrink",
+                    }),
+                );
+                return FolderScan::SuspiciousEmptyAborted;
+            }
+        }
+
         let remote_root = f.remote_root.trim_end_matches('/');
         let mut remote_map: HashMap<String, RemoteStat> = HashMap::new();
         for r in remote_hits {

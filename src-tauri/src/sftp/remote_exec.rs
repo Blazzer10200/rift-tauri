@@ -32,6 +32,9 @@ impl SftpClient {
         let mut out = String::new();
         let mut err = String::new();
         let mut chan = channel;
+        // Drain to channel close, NOT to ExitStatus — SSH does not order
+        // ExitStatus after final Data. Breaking early can truncate the hash.
+        // See `list_via_exec` comment for full v0.2.44 post-mortem.
         while let Some(msg) = chan.wait().await {
             match msg {
                 russh::ChannelMsg::Data { data } => {
@@ -40,7 +43,7 @@ impl SftpClient {
                 russh::ChannelMsg::ExtendedData { data, ext: 1 } => {
                     err.push_str(&String::from_utf8_lossy(&data));
                 }
-                russh::ChannelMsg::ExitStatus { .. } => break,
+                russh::ChannelMsg::ExitStatus { .. } => {}
                 _ => {}
             }
         }
