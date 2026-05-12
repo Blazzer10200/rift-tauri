@@ -917,6 +917,28 @@ impl AutoSyncEngine {
         }
     }
 
+    /// Store a cancellation token in the shared scan-cancel slot. Used by
+    /// drift_watcher::run_tick so the modal's Cancel button cancels its slow
+    /// background SFTP listing. Replaces any prior token.
+    pub(crate) fn register_scan_cancel(&self, ct: CancellationToken) {
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            *g = Some(ct);
+        }
+    }
+
+    /// Clear the scan-cancel slot if it still holds `ct` (no-op if a newer
+    /// op replaced it). Match by `is_cancelled()` parity — same pattern as
+    /// kick_drift_reconcile uses.
+    pub(crate) fn clear_scan_cancel(&self, ct: &CancellationToken) {
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            if let Some(stored) = g.as_ref() {
+                if stored.is_cancelled() == ct.is_cancelled() {
+                    *g = None;
+                }
+            }
+        }
+    }
+
     /// Force-pull NOW — uses cached ToPull entries from drift_watcher's last
     /// tick. NO scan. Dispatches `pull_one` for each cached ToPull entry and
     /// emits an immediate DriftScanResult so the modal jumps to "complete"
@@ -930,6 +952,15 @@ impl AutoSyncEngine {
             };
             g.clone()
         };
+        // Register a cancellation token so the modal's Cancel button can stop
+        // the dispatch mid-flight. Replaces any prior token — kick_drift_reconcile
+        // sharing the same slot means the user's "cancel" always hits the latest
+        // long-running op, whichever it is.
+        let ct = CancellationToken::new();
+        let ct_for_task = ct.clone();
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            *g = Some(ct);
+        }
         let engine = self.clone();
         let h = tokio::spawn(async move {
             diagnostics::emit(
@@ -952,10 +983,21 @@ impl AutoSyncEngine {
                     crate::sync::DriftBucket::Synced => {}
                 }
             }
+            // Cap concurrent pulls so a slow uplink doesn't drown the SFTP
+            // session with N parallel downloads. 4 was the sweet spot for
+            // Trey's Tailscale link; tunable later.
+            let sem = Arc::new(tokio::sync::Semaphore::new(4));
             let mut pull_dispatched = 0u32;
+            let mut cancelled = false;
             for entry in pull_entries {
+                if ct_for_task.is_cancelled() {
+                    cancelled = true;
+                    break;
+                }
                 let task_engine = engine.clone();
+                let permit_sem = sem.clone();
                 let h = tokio::spawn(async move {
+                    let _permit = permit_sem.acquire_owned().await.ok();
                     crate::sync::drift_watcher::pull_one(&task_engine, entry).await;
                 });
                 engine.track_pull_handle(h);
@@ -966,7 +1008,9 @@ impl AutoSyncEngine {
                 DiagLevel::Info,
                 None,
                 None,
-                if pull_dispatched > 0 {
+                if cancelled {
+                    format!("pull-now cancelled after {pull_dispatched} dispatched")
+                } else if pull_dispatched > 0 {
                     format!("pull-now: dispatched {pull_dispatched} pull(s) from cached scan")
                 } else {
                     "pull-now: nothing pending (drift watcher already caught up)".to_string()
@@ -980,10 +1024,18 @@ impl AutoSyncEngine {
                     "pull_dispatched": pull_dispatched,
                     "missing_remote_folders": 0,
                     "listing_error": null,
-                    "cancelled": false,
+                    "cancelled": cancelled,
                     "from_cache": true,
                 }),
             );
+            // Clear token slot if it's still ours.
+            if let Ok(mut g) = engine.current_scan_cancel.lock() {
+                if let Some(stored) = g.as_ref() {
+                    if stored.is_cancelled() == ct_for_task.is_cancelled() {
+                        *g = None;
+                    }
+                }
+            }
         });
         self.track_background(h);
     }

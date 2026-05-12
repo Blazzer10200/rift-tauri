@@ -1010,6 +1010,15 @@ async fn upload_atomic_via(
         let _ = sftp.remove_file(&tmp).await;
         return OpResult::err(format_sftp_err("rename", remote_path, e));
     }
+    // Force mode 0664 on the uploaded file so other users in the shared
+    // group can overwrite-rename it on their next push. Default umask 0022
+    // would leave new files at 0644 and re-trigger the EACCES tmp-rename
+    // failure that drove the v0.2.25 error-message work. Best-effort:
+    // ignore errors (e.g. server doesn't honor setstat, or stricter perms
+    // policy) — the file is already uploaded.
+    let mut attrs = russh_sftp::protocol::FileAttributes::default();
+    attrs.permissions = Some(0o664);
+    let _ = sftp.set_metadata(remote_path, attrs).await;
     OpResult::ok()
 }
 

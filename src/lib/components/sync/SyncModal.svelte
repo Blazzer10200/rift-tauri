@@ -69,6 +69,11 @@
           });
         }
       } else if (stage === "drift_scan_progress") {
+        // In pull mode, the user is dispatching from a cached scan — there's
+        // no scan in flight. Any drift_scan_progress events arriving here are
+        // from a parallel drift_watcher tick (background) and confuse the UI
+        // ("scanning [ox] (8/8)" alongside "Pulling cached changes…"). Drop.
+        if (syncModal.mode === "pull") return;
         const f = (fields as DriftProgressFields) ?? {};
         syncModal.progress(f.current ?? 0, f.total ?? 0, f.resource ?? "");
         if (f.resource) {
