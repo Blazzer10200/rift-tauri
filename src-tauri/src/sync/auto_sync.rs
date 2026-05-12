@@ -1101,6 +1101,32 @@ impl AutoSyncEngine {
                     crate::sync::DriftBucket::Synced => {}
                 }
             }
+            // Per-resource breakdown for diagnosability — without this, a scan
+            // result like "430 to_delete" gives no hint which resources are
+            // affected. Helps root-cause partial-listing issues (e.g. deep
+            // ox_lib paths or bracket-encoded dirs dropping files silently).
+            let mut by_resource: std::collections::HashMap<String, (u32, u32, u32, u32)> =
+                std::collections::HashMap::new();
+            for e in &result.entries {
+                let row = by_resource.entry(e.resource_name.clone()).or_insert((0, 0, 0, 0));
+                match e.bucket {
+                    crate::sync::DriftBucket::ToPush   => row.0 += 1,
+                    crate::sync::DriftBucket::ToPull   => row.1 += 1,
+                    crate::sync::DriftBucket::ToDelete => row.2 += 1,
+                    crate::sync::DriftBucket::Conflict => row.3 += 1,
+                    crate::sync::DriftBucket::Synced   => {}
+                }
+            }
+            let breakdown: serde_json::Value = serde_json::Value::Object(
+                by_resource.iter().map(|(k, v)| {
+                    (k.clone(), serde_json::json!({
+                        "to_push": v.0, "to_pull": v.1,
+                        "to_delete": v.2, "conflicts": v.3,
+                    }))
+                }).collect()
+            );
+            eprintln!("[rift] reconcile complete: to_push={to_push} to_pull={to_pull} to_delete={to_delete} conflicts={conflicts} by_resource={breakdown}");
+
             // Reconcile is read-only: it refreshes the cached scan result.
             // User must click Push Now / Pull Now to act on the findings.
             diagnostics::emit_with_fields(
@@ -1119,6 +1145,7 @@ impl AutoSyncEngine {
                     "missing_remote_folders": result.remote_folders_missing.len(),
                     "listing_error": result.last_batch_listing_error,
                     "cancelled": result.cancelled,
+                    "by_resource": breakdown,
                 }),
             );
             // Clear token slot if it's still ours (another kick could have replaced it).
