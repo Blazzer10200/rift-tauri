@@ -2,32 +2,11 @@
   import {
     RefreshCw, Download, Trash2, AlertTriangle, Check,
     GitBranch, Network, Lock, XCircle, Info, Pause, Play,
-    ChevronRight, ChevronDown, Copy, Folder, ExternalLink, Sparkles,
+    ChevronRight, ChevronDown, Copy, Folder, ExternalLink,
   } from "lucide-svelte";
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { fmtRelative } from "../../utils/time";
-
-  const IS_DEV = import.meta.env.DEV;
-
-  function seedDemo() {
-    const now = Date.now();
-    const t = (offset: number) => new Date(now - offset * 1000).toISOString();
-    const samples: ActivityRow[] = [
-      { at: t(1),  resource: "[ox]",      file: "ox_lib/init.lua",                action: "uploaded",          kind: "sync",   rel_path: "ox_lib/init.lua",         local_path: null, size_bytes: 4821,    latency_ms: 142, sha: "a3f9c2d1b4e8", actor: "blazzer@LOCAL" },
-      { at: t(3),  resource: "[ox]",      file: "ox_lib/web/build/index.html",    action: "uploaded",          kind: "sync",   rel_path: "ox_lib/web/build/index.html", local_path: null, size_bytes: 12_408, latency_ms: 233, sha: null, actor: "blazzer@LOCAL" },
-      { at: t(5),  resource: "[endure]",  file: "endure_skills/main.lua",         action: "pulled from remote", kind: "pull",   rel_path: "endure_skills/main.lua",    local_path: null, size_bytes: 7322,    latency_ms: 412, sha: null, actor: "trey@DESKTOP" },
-      { at: t(7),  resource: "[world]",   file: "evo_apy_motel/stream/yft.ydr",    action: "deleted locally",   kind: "delete", rel_path: "evo_apy_motel/stream/yft.ydr",  local_path: null, size_bytes: null,   latency_ms: null, sha: null, actor: "trey@DESKTOP" },
-      { at: t(9),  resource: "[ox]",      file: "ox_target/client.lua",            action: "drift detected",    kind: "drift",  rel_path: "ox_target/client.lua",          local_path: null, size_bytes: 2104,    latency_ms: null, sha: null, actor: null },
-      { at: t(12), resource: "[endure]",  file: "endure_jobs/server.lua",          action: "conflict — local + remote both modified", kind: "conflict", rel_path: "endure_jobs/server.lua", local_path: null, size_bytes: 9100, latency_ms: null, sha: null, actor: null },
-      { at: t(14), resource: "[endure]",  file: "endure_jobs/server.lua",          action: "conflict resolved (used local)", kind: "conflict_resolved", rel_path: "endure_jobs/server.lua", local_path: null, size_bytes: 9100, latency_ms: 88, sha: null, actor: "blazzer@LOCAL" },
-      { at: t(16), resource: "[system]",  file: "txAdmin :30120",                  action: "bridge connected",  kind: "bridge", rel_path: null,                          local_path: null, size_bytes: null,   latency_ms: 41,  sha: null, actor: null },
-      { at: t(19), resource: "[ox]",      file: "ox_inventory/data.lua",           action: "BLOCKED — foreign lock held by trey@DESKTOP", kind: "block", rel_path: "ox_inventory/data.lua", local_path: null, size_bytes: null, latency_ms: null, sha: null, actor: "blazzer@LOCAL" },
-      { at: t(22), resource: "[qbx]",     file: "qbx_core/server.lua",             action: "upload failed — connection reset", kind: "error", rel_path: "qbx_core/server.lua", local_path: null, size_bytes: 14_802, latency_ms: 1842, sha: null, actor: "blazzer@LOCAL" },
-      { at: t(26), resource: "[system]",  file: "",                                action: "watcher attached to 7 folders", kind: "system", rel_path: null,            local_path: null, size_bytes: null,   latency_ms: null, sha: null, actor: null },
-    ];
-    connection.activityFeed = [...samples, ...connection.activityFeed].slice(0, 200);
-  }
 
   type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "error" | "system";
 
@@ -406,16 +385,6 @@
     />
 
     <div class="actions">
-      {#if IS_DEV}
-        <button
-          class="btn info sm"
-          type="button"
-          onclick={seedDemo}
-          title="Seed demo events (dev only — 11 sample rows covering all 9 kinds)"
-        >
-          <Sparkles size={11}/> Seed
-        </button>
-      {/if}
       <button
         class="btn sm"
         class:warn={paused}
