@@ -2,21 +2,17 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.28-alpha-test — 2026-05-12 — Server-side `find`-exec listing (30-60s → sub-second scans on WAN)
+## v0.2.29-alpha-test — 2026-05-12 — Folder-delete fix (was failing on FiveM resource removals)
 
-The slow part of every scan was `list_recursive_batch` walking the remote tree over SFTP — open-dir/read-dir/close-dir is O(N) round-trips per directory. On Blazzer's LAN (<1ms RTT) that's invisible; on Trey's Tailscale-tunneled WAN (30-80ms RTT, confirmed direct path via `tailscale status`/`netcheck`) it's 30-60s per scan. Diagnostic ruled out DERP relay + symmetric NAT — pure SFTP protocol overhead.
+Deleting a FiveM resource directory locally (e.g. `rm -rf gt_zombies_qb`) was surfacing `delete failed: /opt/.../[endure]/gt_zombies_qb: No such file: No such file` in both Blazzer's and Trey's activity feeds. Local removal worked; remote did not — folder stayed orphaned server-side, drift queued the delete forever, never resolved.
+
+Root cause: `SftpClient::delete` only called `remove_file`. SFTP's `remove_file` rejects directories (NO_SUCH_FILE / FAILURE depending on server), russh-sftp surfaces it as "No such file." The push pipeline doesn't distinguish file deletes from directory deletes — both arrive via the same `notify::Remove` event.
 
 ### Landed
-- **`list_via_exec` helper** in [sftp/mod.rs](src-tauri/src/sftp/mod.rs) — runs `find <root> -maxdepth N <prune> -type f -printf '%p\t%s\t%T@\n'` over a single SSH exec channel. One round-trip per root vs N per directory. Prune list mirrors `sync::ignore::ignored_directory_names()` so we don't waste server-side traversal on `node_modules`/`target`/`.git`/etc.
-- **`list_recursive_batch` tries exec first.** One exec channel per root in parallel (channels are cheap vs full SFTP sessions). Roots that exec succeeds on short-circuit before any SFTP worker spin-up. Roots that fail (no `find` on PATH, non-POSIX shell, perms) fall through to the existing SFTP worker path → existing belt-and-braces retry. Behavior degrades safely; no profile flag needed.
-- **Exec exit-1 tolerated.** `find` returns 1 for "some files failed" (e.g. transient ENOENT mid-walk on a churning dir) but still streams the rest. We accept 0 and 1, fail other codes so fallback kicks in.
-
-### Expected impact
-- Reconcile/auto-pull scan time on Trey's link: ~30-60s → ~1-3s.
-- Blazzer's LAN: unchanged (already <1s).
-- Pull throughput is a separate axis (his uplink caps it); won't improve from this work alone.
+- **`SftpClient::delete` now probes `remote_stat` first.** If the remote path is a directory, routes to `delete_recursive_via` (which already existed for explicit folder-tree deletes). Files still go straight to `remove_file` as before — no extra round-trip on the common case if the stat hits the directory branch first.
+- **Non-existent remote = success.** If `remote_stat` returns `!exists` (local already deleted, remote already gone), report success so the local delete reconciles. Previously this could re-queue forever in some race orderings.
 
 ### Verify
-- `cargo check`: clean. `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
+- `cargo check`: clean (0.48s). `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
 
-v0.2.27 archived to git log.
+v0.2.28 archived to git log.

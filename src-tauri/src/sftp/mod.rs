@@ -589,9 +589,29 @@ impl SftpClient {
         rename_via(&self.sftp, from, to).await
     }
 
-    /// Delete a remote file. Returns OpResult so AutoSync can surface error
-    /// strings into the activity row without losing the success/fail bit.
+    /// Delete a remote path — files OR directories. Returns OpResult so
+    /// AutoSync can surface error strings into the activity row without
+    /// losing the success/fail bit.
+    ///
+    /// FiveM resource trees mean "delete a folder" is a real user op: rm-rf
+    /// the resource dir locally → notify::Remove on the dir → push pipeline
+    /// queues the delete → reaches here w/ a path that's a *directory*
+    /// server-side. `remove_file` returns NO_SUCH_FILE / FAILURE on a dir,
+    /// surfaced to the user as a confusing "delete failed: No such file".
+    /// Probe the remote stat; route to recursive dir-delete when needed.
     pub async fn delete(&self, path: &str) -> OpResult {
+        let info = self.remote_stat(path).await;
+        if !info.exists {
+            // Nothing to delete server-side — treat as success so the local
+            // delete is reconciled (otherwise drift would re-queue forever).
+            return OpResult::ok();
+        }
+        if info.is_directory {
+            return match delete_recursive_via(&self.sftp, path).await {
+                Ok(_) => OpResult::ok(),
+                Err(e) => OpResult::err(format!("delete dir {path}: {e}")),
+            };
+        }
         match self.sftp.remove_file(path).await {
             Ok(_) => OpResult::ok(),
             Err(e) => OpResult::err(format!("delete {path}: {e}")),
