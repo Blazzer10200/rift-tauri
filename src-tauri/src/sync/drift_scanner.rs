@@ -67,11 +67,21 @@ pub struct FolderTarget {
     pub remote_root: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AbortedShrunkFolder {
+    pub resource_name: String,
+    pub remote_root: String,
+    pub baseline_count: u32,
+    pub listing_count: u32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanResult {
     pub entries: Vec<DriftEntry>,
     pub last_batch_listing_error: Option<String>,
     pub remote_folders_missing: Vec<String>,
+    #[serde(default)]
+    pub aborted_shrunk: Vec<AbortedShrunkFolder>,
     #[serde(default)]
     pub cancelled: bool,
 }
@@ -101,6 +111,7 @@ impl<'a> DriftScanner<'a> {
         let mut entries = Vec::new();
         let mut last_batch_error: Option<String> = None;
         let mut remote_folders_missing = Vec::new();
+        let mut aborted_shrunk: Vec<AbortedShrunkFolder> = Vec::new();
         let mut cancelled = false;
 
         let roots: Vec<String> = folders.iter().map(|f| f.remote_root.clone()).collect();
@@ -122,6 +133,7 @@ impl<'a> DriftScanner<'a> {
                         entries,
                         last_batch_listing_error: None,
                         remote_folders_missing,
+                        aborted_shrunk,
                         cancelled: true,
                     };
                 }
@@ -169,8 +181,13 @@ impl<'a> DriftScanner<'a> {
                 FolderScan::RemoteMissing => {
                     remote_folders_missing.push(f.remote_root.clone());
                 }
-                FolderScan::SuspiciousEmptyAborted => {
-                    // documented data-safety bail — no entries surfaced
+                FolderScan::SuspiciousEmptyAborted { baseline_count, listing_count } => {
+                    aborted_shrunk.push(AbortedShrunkFolder {
+                        resource_name: f.resource_name.clone(),
+                        remote_root: f.remote_root.clone(),
+                        baseline_count,
+                        listing_count,
+                    });
                 }
             }
         }
@@ -179,6 +196,7 @@ impl<'a> DriftScanner<'a> {
             entries,
             last_batch_listing_error: last_batch_error,
             remote_folders_missing,
+            aborted_shrunk,
             cancelled,
         }
     }
@@ -210,7 +228,14 @@ impl<'a> DriftScanner<'a> {
                 return FolderScan::RemoteMissing;
             } else {
                 // Listing failed silently. Bail rather than false-push every local file.
-                return FolderScan::SuspiciousEmptyAborted;
+                let baseline_count = self
+                    .snapshot
+                    .map(|s| s.count_under(&f.remote_root) as u32)
+                    .unwrap_or(0);
+                return FolderScan::SuspiciousEmptyAborted {
+                    baseline_count,
+                    listing_count: 0,
+                };
             }
         }
 
@@ -247,7 +272,10 @@ impl<'a> DriftScanner<'a> {
                         "reason": "suspicious_shrink",
                     }),
                 );
-                return FolderScan::SuspiciousEmptyAborted;
+                return FolderScan::SuspiciousEmptyAborted {
+                    baseline_count: baseline_n as u32,
+                    listing_count: listing_files as u32,
+                };
             }
         }
 
@@ -439,10 +467,11 @@ impl<'a> DriftScanner<'a> {
     }
 }
 
+#[allow(clippy::large_enum_variant)]
 enum FolderScan {
     Drift(Vec<DriftEntry>),
     RemoteMissing,
-    SuspiciousEmptyAborted,
+    SuspiciousEmptyAborted { baseline_count: u32, listing_count: u32 },
 }
 
 struct LocalStat {

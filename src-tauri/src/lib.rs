@@ -205,6 +205,34 @@ async fn sync_get_drift_snapshot(
     })
 }
 
+/// Folders the last reconcile aborted via the suspicious-shrink guard.
+/// Frontend uses this to render the rebaseline banner. v0.2.49.
+#[tauri::command]
+async fn sync_get_aborted_shrunk(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<Vec<crate::sync::AbortedShrunkFolder>, String> {
+    let g = state.0.lock().await;
+    Ok(match g.as_ref() {
+        Some(engine) => engine.aborted_shrunk(),
+        None => Vec::new(),
+    })
+}
+
+/// Rebaseline a single bracket: re-list remote, walk local, re-hash, atomic
+/// snapshot replace, kick reconcile. Returns (old_count, new_count,
+/// local_only_queued_for_push). v0.2.49.
+#[tauri::command]
+async fn sync_rebaseline_folder(
+    state: tauri::State<'_, AutoSyncState>,
+    remote_subpath: String,
+) -> Result<(usize, usize, usize), String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else {
+        return Err("not connected".into());
+    };
+    engine.rebaseline_folder(&remote_subpath).await
+}
+
 /// Dispatch a user-selected subset of drift entries by local_path. Backend
 /// resolves each path to its cached entry and routes by bucket (ToPull →
 /// pull, ToDelete → delete, ToPush → enqueue). Mass-delete circuit breaker
@@ -1659,6 +1687,8 @@ pub fn run() {
             sync_pull_pending,
             sync_push_pending,
             sync_get_drift_snapshot,
+            sync_get_aborted_shrunk,
+            sync_rebaseline_folder,
             sync_apply_selected,
             diag_ignored_breakdown,
             terminal::term_list_shells,

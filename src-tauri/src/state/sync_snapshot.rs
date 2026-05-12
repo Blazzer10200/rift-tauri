@@ -92,14 +92,38 @@ impl SyncSnapshot {
         let prefix = remote_root_prefix.trim_end_matches('/');
         let g = lock(&self.data);
         g.keys()
-            .filter(|k| {
-                if let Some(rest) = k.strip_prefix(prefix) {
-                    rest.is_empty() || rest.starts_with('/')
-                } else {
-                    false
-                }
-            })
+            .filter(|k| Self::path_under(k, prefix))
             .count()
+    }
+
+    fn path_under(key: &str, prefix: &str) -> bool {
+        if let Some(rest) = key.strip_prefix(prefix) {
+            rest.is_empty() || rest.starts_with('/')
+        } else {
+            false
+        }
+    }
+
+    /// Atomically replace every snapshot row under `remote_root_prefix` with
+    /// `new_entries` (keyed by full remote_path). Caller is responsible for
+    /// constructing entries that reflect current ground truth — see
+    /// `lib::sync_rebaseline_folder`. Returns the count delta (new − old) so
+    /// the UI can report what changed.
+    pub fn replace_under(
+        &self,
+        remote_root_prefix: &str,
+        new_entries: HashMap<String, Entry>,
+    ) -> std::io::Result<(usize, usize)> {
+        let prefix = remote_root_prefix.trim_end_matches('/');
+        let mut g = lock(&self.data);
+        let old_count = g.keys().filter(|k| Self::path_under(k, prefix)).count();
+        g.retain(|k, _| !Self::path_under(k, prefix));
+        for (k, v) in new_entries {
+            g.insert(k, v);
+        }
+        let new_count = g.keys().filter(|k| Self::path_under(k, prefix)).count();
+        self.save_locked(&g)?;
+        Ok((old_count, new_count))
     }
 
     pub fn local_matches(e: &Entry, size: i64, mtime_utc: DateTime<Utc>) -> bool {

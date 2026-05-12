@@ -2,26 +2,25 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.48-alpha — 2026-05-12 — FiveM web/build false-deletes + new-resource debounce
+## v0.2.49-alpha — 2026-05-12 — Rebaseline UX + listing-accuracy instrumentation
 
-### Bug 7 — Phantom `ToDelete-local` on FiveM `web/build/` + `web/dist/` trees
+### Bug 5 real fix — Suspicious-shrink rebaseline path
 
-Endure RP stress-test 2026-05-12 surfaced 45 false "remote deleted — removing local" rows covering ox_lib/web/build (32 fonts + index.html + assets), ox_inventory/web/build (index + LICENSE + assets), oxmysql/web/build (index + vite.svg + assets), illenium-appearance/web/dist (index + assets/index.b8e72b46.js). User SSH-verified every flagged file existed on prod intact — the diff was wrong, and applying would have erased local ui_page bundles + propagated the erasure on next Push.
+S52's "Created+Dir debounce" closed the wrong layer. Real root cause: `drift_scanner::SuspiciousEmptyAborted` (v0.2.45 data-safety guard) trips on every bracket where the snapshot baseline is much larger than the current remote listing — by design, to prevent phantom mass-deletes after a transient SFTP failure. After Session 7's intentional cleanup (mass-rebuild + bracket-dupe park to `_disabled_extras/`), four [endure]/[ox]/[voice]/[cfx-default] baselines were frozen at 600+ files while real remote shrunk to 56–90. Guard correctly bailed each bracket — but the bail is bracket-wide, so new resources dropped in (e.g., `endure_rifttest`) and unsynced local files (7 .ogg sounds for xsound) were invisible to Rift. Twice diagnosed as a watcher bug in v0.2.47/48; actually a baseline-staleness bug.
 
-Root cause: asymmetric filter between local + remote walkers. `sftp/list.rs::list_via_exec` builds `find ... -type d ( -name build -o -name dist ... ) -prune -o -type f ...` from `ignored_directory_names()` — server-side `find` can't see path context, so it prunes every `build/` and `dist/` dir regardless of whether it's the FiveM-special `<resource>/web/build/`. Local walker uses path-aware `classify()` which correctly bypasses the FiveM trees, so local_map has the files, remote_map has zero — drift = ToDelete.
+Fix: rebaseline UX. Backend `auto_sync::rebaseline_folder` re-lists remote authoritatively, walks local with same ignore rules, re-hashes every local file from disk (no SHA trust — Session 7 included real edits), atomically replaces snapshot rows under the bracket prefix via `sync_snapshot::replace_under`. Both-sides-present → fresh Synced baseline; local-only → row dropped → next scan buckets as ToPush; remote-only → row dropped → next scan buckets as ToPull. Frontend: warn-toned banner per aborted bracket above the Sync totals strip with baseline-vs-listing counts, "Why this matters" tooltip explaining new resources will be invisible until rebaselined, inline confirm card warning about re-hash cost, success banner with delta + ToPush count. Diagnostics emit `BaselineShrinkDetected` (per aborted folder) + `BaselineRebaselined` (post-replace). New Tauri commands `sync_get_aborted_shrunk` + `sync_rebaseline_folder`.
 
-Fix in `sync/ignore.rs::ignored_directory_names()`: exclude `build` and `dist` from the server-prune list. Path-aware `should_ignore(rel)` in drift_scanner's remote_map construction still filters generic `app/build/foo` paths client-side. Cost: ~32 fonts of extra `find` traffic per FiveM web build, trivial. New unit assertions in `ignored_dir_names_excludes_brackets`.
+### Listing-accuracy instrumentation
 
-### Bug 5 — Created+Dir → 500 ms-delayed coalesced reconcile
-
-v0.2.47's immediate `kick_drift_reconcile` on Create(Dir) was firing BEFORE Windows had finished writing the files inside the new dir — scan walked an empty tree, surfaced nothing. v0.2.48 wraps the kick in `tokio::spawn` + `tokio::time::sleep(Duration::from_millis(500))` + `AtomicBool pending_dir_reconcile` coalesce flag. 50 rapid Create(Dir) events inside one new subtree collapse to one delayed reconcile that fires after the file writes land. compare_exchange owns the dispatch slot; lost-race events skip (the winner picks up their files).
+[endure] cross-check on 2026-05-12: real remote `find -type f` returned 61 files; `list_via_exec` emitted 56. Five files vanishing inside the SFTP parse loop. Cause not yet known — instrumentation lands now to name them. `sftp/list.rs::list_via_exec` counts raw_lines vs emitted, buckets skips into `skipped_short` (splitn malformed), `skipped_bad_size` (size parse fail), `skipped_by_ext` (filter mismatch), captures up to 5 sample skipped lines verbatim. Emits `RemoteScanResult` Warn diag + `eprintln!` whenever raw≠emitted. Fix lands next release once the 5 dropped lines are characterized.
 
 ### Verify
 
-`cargo check` clean 2.89s · `cargo test --lib sync::ignore` 11 pass / 0 fail. All prior fixes preserved (v0.2.46 push-reliability stack, v0.2.47 prefix-ignore + Created+Dir base path).
+`cargo check` clean 3.81s · `svelte-check` 0 errors / 0 warnings across 3996 files. v0.2.48 fixes preserved (web/build prune, Created+Dir debounce, push-reliability stack).
 
-### Still deferred to v0.2.49
+### Deferred to v0.2.50
 
-- Mirror mode for Push-all (Bug 1) — new drift bucket for `local-missing + remote-has + baseline-exists` → propose remote-delete + UI toggle.
-- Stale-lock sweep UI button.
-- Mass-delete guard fine-tune.
+- Listing-accuracy targeted fix (item 2 finish, instrumentation-driven)
+- Integration test suite (phase 1: new-resource, single-edit, single-delete, mass-edit, ignore-edges) — gates Mirror mode
+- Mirror mode for Push-all (Bug 1)
+- Stale-lock sweep UI button, mass-delete guard tune, Terminal Settings, Appearance controls

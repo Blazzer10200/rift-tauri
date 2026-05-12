@@ -287,16 +287,39 @@ async fn list_via_exec(
     });
 
     let mut out = Vec::new();
+    // v0.2.49 listing-accuracy instrumentation: count raw lines vs emitted
+    // entries + capture skip reasons. Item 2 of the foundation pass — the
+    // Endure RP 2026-05-12 audit caught 5 files vanishing in this loop on a
+    // 61-file remote tree. Buckets help name the dropped lines.
+    let mut raw_lines: u32 = 0;
+    let mut skipped_short: u32 = 0;
+    let mut skipped_bad_size: u32 = 0;
+    let mut skipped_by_ext: u32 = 0;
+    let mut samples_skipped: Vec<String> = Vec::new();
     for line in stdout.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        raw_lines += 1;
         let mut parts = line.splitn(3, '\t');
         let (Some(path), Some(size_s), Some(mtime_s)) =
             (parts.next(), parts.next(), parts.next())
         else {
+            skipped_short += 1;
+            if samples_skipped.len() < 5 {
+                samples_skipped.push(format!("short:{line}"));
+            }
             continue;
         };
         let size: u64 = match size_s.parse() {
             Ok(n) => n,
-            Err(_) => continue,
+            Err(_) => {
+                skipped_bad_size += 1;
+                if samples_skipped.len() < 5 {
+                    samples_skipped.push(format!("bad_size:{line}"));
+                }
+                continue;
+            }
         };
         // mtime is fractional seconds. Floor to whole seconds for chrono.
         let mtime_secs: i64 = mtime_s
@@ -307,6 +330,7 @@ async fn list_via_exec(
         if let Some(ref exts) = filter_lower {
             let lower = path.to_ascii_lowercase();
             if !exts.iter().any(|e| lower.ends_with(e)) {
+                skipped_by_ext += 1;
                 continue;
             }
         }
@@ -321,6 +345,32 @@ async fn list_via_exec(
                 .single()
                 .unwrap_or_else(Utc::now),
         });
+    }
+    let total_skipped = skipped_short + skipped_bad_size + skipped_by_ext;
+    if total_skipped > 0 || raw_lines != out.len() as u32 {
+        eprintln!(
+            "[rift] list_via_exec {root}: raw_lines={raw_lines} emitted={} skipped_short={skipped_short} skipped_bad_size={skipped_bad_size} skipped_by_ext={skipped_by_ext} samples={samples_skipped:?}",
+            out.len(),
+        );
+        crate::diagnostics::emit_with_fields(
+            crate::diagnostics::DiagStage::RemoteScanResult,
+            if total_skipped > 0 { crate::diagnostics::DiagLevel::Warn } else { crate::diagnostics::DiagLevel::Debug },
+            None,
+            Some(root),
+            format!(
+                "list_via_exec parse: raw={raw_lines} emitted={} skipped={total_skipped}",
+                out.len(),
+            ),
+            serde_json::json!({
+                "root": root,
+                "raw_lines": raw_lines,
+                "emitted": out.len(),
+                "skipped_short": skipped_short,
+                "skipped_bad_size": skipped_bad_size,
+                "skipped_by_ext": skipped_by_ext,
+                "samples_skipped": samples_skipped,
+            }),
+        );
     }
 
     Ok(out)

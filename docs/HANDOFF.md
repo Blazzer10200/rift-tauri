@@ -2,6 +2,44 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 53 — 2026-05-12 — v0.2.49 foundation pass (in progress, not shipped)
+
+**Status: Backend + frontend complete, builds green. Validation + ship queued for next session.**
+
+### Root cause nailed (Bug 5 regression)
+`SuspiciousEmptyAborted` guard fires on every [endure]/[ox]/[voice]/[cfx-default] bracket because Session 7's mass-cleanup left snapshot baselines frozen at ~600+ files while real remote now has 56–90. Guard correctly prevents phantom deletes — it just can't distinguish intentional cleanup from transient SFTP failure. Every new resource dropped into these brackets is invisible to Rift until rebaselined.
+
+### Shipped this session (not yet versioned/committed)
+
+**Item 1 — Rebaseline UX:**
+- `sync_snapshot.rs` — `replace_under()` atomic rewrite
+- `drift_scanner.rs` — `AbortedShrunkFolder` struct + `aborted_shrunk: Vec<...>` on `ScanResult`; `SuspiciousEmptyAborted { baseline_count, listing_count }` carries counts
+- `sync/mod.rs` — re-exported `AbortedShrunkFolder`
+- `auto_sync.rs` — `last_aborted_shrunk` engine state; reconcile caches + emits `BaselineShrinkDetected`; `aborted_shrunk()` accessor; `rebaseline_folder()` method + `walk_local_rebaseline` helper
+- `diagnostics/mod.rs` — `BaselineShrinkDetected` + `BaselineRebaselined` stages
+- `lib.rs` — `sync_get_aborted_shrunk` + `sync_rebaseline_folder` Tauri commands registered
+- `sync-page.svelte.ts` — `AbortedShrunkFolder` type, state, `visibleAbortedShrunk`, `rebaseline()` / `confirm` / `dismiss` actions
+- `SyncPage.svelte` — shrink banner per aborted bracket (warn-toned), "Why this matters" tooltip, inline confirm card, ok-banner w/ result delta
+
+**Item 2 — Listing accuracy instrumentation:**
+- `sftp/list.rs` — `list_via_exec` counts raw_lines vs emitted, skipped_short/bad_size/by_ext, samples; emits `RemoteScanResult` Warn diag + `eprintln!` when raw≠emitted. Surfaces the 5 dropped lines from [endure] for item 2 fix.
+
+### Validation fixture
+`endure_rifttest_diag1/test.lua` stays on local disk as the test target. After rebaseline, it + any other local-only files in the 4 shrunk brackets surface as ToPush.
+
+### Files modified
+- `src-tauri/src/state/sync_snapshot.rs`
+- `src-tauri/src/sync/drift_scanner.rs`
+- `src-tauri/src/sync/mod.rs`
+- `src-tauri/src/sync/auto_sync.rs`
+- `src-tauri/src/diagnostics/mod.rs`
+- `src-tauri/src/lib.rs`
+- `src-tauri/src/sftp/list.rs`
+- `src/lib/state/sync-page.svelte.ts`
+- `src/lib/components/sync/SyncPage.svelte`
+
+---
+
 ## Session 52 — 2026-05-12 — Push-reliability arc shipped + validated (v0.2.46 → v0.2.48)
 
 **Status: VALIDATED end-to-end.** Cross-session Rescan after v0.2.48 confirmed full sync, zero pending, zero false deletes; `[endure]/endure_rifttest` (7 files local, 0 remote) surfaced + pushed cleanly. Quote: "Rift is now trustworthy enough that I can stop reaching for SSH on this codebase."
@@ -14,13 +52,22 @@
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.48-alpha**. Tauri 2 + Svelte 5 + Rust + russh/russh-sftp. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri (Rift). Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.48-alpha** (v0.2.49 work landed, not yet bumped/committed). Tauri 2 + Svelte 5 + Rust + russh/russh-sftp. Velopack updater, NSIS perUser installer.
 
-**State:** sync engine is now trustworthy on the data-integrity axis. Push uploads no longer drop files silently, orphan locks no longer leak, FiveM web bundles diff correctly, new resource subtrees surface within 500 ms.
+**State:** v0.2.49 foundation pass is code-complete + builds green. NOT yet shipped (no version bump, no CHANGELOG, no commit). Validation before ship.
 
-**Top-of-queue for v0.2.49:** Mirror mode for Push-all (Bug 1) — needs new drift bucket for `local-missing + remote-has + baseline-exists` → propose remote-delete + Mirror toggle in Sync hero + confirm-deletes step pre-dispatch. Twice-bitten in this arc by Push not propagating deletes. Significant classification change + frontend work.
+**FIRST ACTION next session:**
+1. Launch Rift dev (`scripts/run-dev.bat`), connect Endure RP, Rescan
+2. Confirm 4 shrunk-bracket banners appear: [endure], [ox], [voice], [cfx-default]
+3. Rebaseline [endure] — confirm `endure_rifttest_diag1/test.lua` surfaces as ToPush
+4. Check Diagnostics panel for `remote_scan_result` Warn event naming the 5 dropped lines (item 2 data)
+5. If all good → `/git-ship` v0.2.49
 
-**Smaller queued:** stale-lock sweep UI button (existing `sweep_stale_mine` handles own-user on watcher attach, manual button is DX polish). Mass-delete guard fine-tune (still open from v0.2.45). Terminal Settings sub-view (APIs ready on `terminal.svelte.ts`). Density/font/accent-tint Appearance controls.
+**Item 2 (listing accuracy):** 5 files vanish inside `list_via_exec` parse loop on [endure]. Instrumentation now logs raw_lines vs emitted. Root cause not yet known (tab-in-filename or newline most likely). Fix after validation confirms item 1 working — same release.
+
+**v0.2.50:** Mirror mode (Bug 1) — `local-missing + remote-has + baseline-exists` → remote-delete bucket, Mirror toggle, confirm-deletes prestep. Integration test suite (phase 1) gates this.
+
+**Smaller queued:** stale-lock sweep button, mass-delete guard tune, Terminal Settings sub-view, Appearance controls.
 
 **Don't reintroduce:** OpRail, TopBar (merged), rail kbd hints, StatusBar ⌘K pip, titlebar gear, StatusHero big H1, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design/Sync/Editor sections, `.btn.lg`/`.pill.warn`/`.vdivider` dead CSS, `bg-backlog.sh`, `diag_*` cmd names (renamed to `sync_*` in S44), `drift_watcher::spawn` / `run_tick` / `flush_cycle` (deleted v0.2.38 — auto-path ping-ponged; Push/Pull buttons only).
 

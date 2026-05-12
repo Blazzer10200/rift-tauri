@@ -11,6 +11,6 @@ pub use auto_sync::{
     AutoSyncEngine, AutoSyncState, AutoSyncStatus, ActivityRow, ActivityKind,
     ConflictRecord, ConflictResolution, FolderSpec,
 };
-pub use drift_scanner::{DriftBucket, DriftEntry, DriftScanner, FolderTarget, ScanResult};
+pub use drift_scanner::{AbortedShrunkFolder, DriftBucket, DriftEntry, DriftScanner, FolderTarget, ScanResult};
 pub use edit_trail::EditTrail;
 pub use lock_presence::{LockPresence, RemoteLock};
