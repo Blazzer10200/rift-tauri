@@ -73,11 +73,7 @@
       <span class="lbl">conflicts</span>
       <span class="mono val danger">{conflicts}</span>
     </div>
-    <div class="sep"></div>
   {/if}
-  <div class="grp" title="Press Ctrl+K">
-    <span class="kbd">⌘</span><span class="kbd">K</span>
-  </div>
 </div>
 
 <style>

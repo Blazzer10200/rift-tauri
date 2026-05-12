@@ -3,6 +3,7 @@
   import { Folder, FileCode, File, ChevronRight, Download, FolderOpen, Copy, Pencil, Trash2 } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
+  import { fade } from "svelte/transition";
   import { connection } from "../../state/connection.svelte";
   import { fmtRelative, fmtAbsolute } from "../../utils/time";
 
@@ -309,66 +310,71 @@
     {:else if !path}
       <div class="empty">No remote root.</div>
     {:else}
-      <button
-        type="button"
-        class="row up-row"
-        disabled={!parentOf(path)}
-        onclick={() => { const p = parentOf(path); if (p) onPathChange(p); }}
-      >
-        <span class="row-name"><span class="twirl"></span>↑ ..</span>
-        <span class="row-status"></span>
-        <span class="row-size mono">—</span>
-        <span class="row-mtime mono">—</span>
-      </button>
-      {#if filtered.length === 0}
-        <div class="empty">{filter ? "No matches." : "Empty."}</div>
-      {:else}
-        {#each filtered as e (e.full_path)}
-          {@const status = rowStatus(e)}
-          {@const lk = !e.is_dir ? connection.lockForRemotePath(e.full_path) : null}
-          {@const Icon = pickIcon(e)}
-          <div
-            class="row"
-            data-selected={selected.has(e.full_path)}
-            data-status={status}
-            data-droptarget={dropTarget === e.full_path}
-            draggable="true"
-            ondragstart={(ev) => onDragStart(ev, e)}
-            ondragover={(ev) => onFolderDragOver(ev, e)}
-            ondragleave={() => onFolderDragLeave(e)}
-            ondrop={(ev) => onFolderDrop(ev, e)}
-            onclick={(ev) => onRowClick(ev, e)}
-            ondblclick={() => onRowDblClick(e)}
-            oncontextmenu={(ev) => onContextMenu(ev, e)}
-            role="row"
-            tabindex="0"
-            onkeydown={(ev) => { if (ev.key === "Enter") onRowDblClick(e); }}
+      {#key path}
+        <div in:fade={{ duration: 140 }}>
+          <button
+            type="button"
+            class="row up-row"
+            disabled={!parentOf(path)}
+            onclick={() => { const p = parentOf(path); if (p) onPathChange(p); }}
           >
-            <span class="row-name">
-              {#if e.is_dir}
-                <span class="twirl"><ChevronRight size={10}/></span>
-                <Folder size={13}/>
-              {:else}
-                <span class="twirl"></span>
-                <Icon size={13}/>
-              {/if}
-              <span class="row-label mono">{e.name}</span>
-              {#if lk}
-                <LockBadge holder={`${lk.user}@${lk.host}`} tooltip={`Locked by ${lk.user}@${lk.host}`} />
-              {/if}
-            </span>
-            <span class="row-status" title={status}>
-              {#if status === "conflict"}
-                <span class="sym danger">▲</span>
-              {:else}
-                <span class="sym muted">·</span>
-              {/if}
-            </span>
-            <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
-            <span class="row-mtime mono" title={fmtTimeAbs(e.last_modified)}>{fmtTime(e.last_modified)}</span>
-          </div>
-        {/each}
-      {/if}
+            <span class="row-name"><span class="twirl"></span>↑ ..</span>
+            <span class="row-status"></span>
+            <span class="row-size mono">—</span>
+            <span class="row-mtime mono">—</span>
+          </button>
+          {#if filtered.length === 0}
+            <div class="empty">{filter ? "No matches." : "Empty."}</div>
+          {:else}
+            {#each filtered as e (e.full_path)}
+              {@const status = rowStatus(e)}
+              {@const lk = !e.is_dir ? connection.lockForRemotePath(e.full_path) : null}
+              {@const Icon = pickIcon(e)}
+              <div
+                class="row"
+                data-selected={selected.has(e.full_path)}
+                data-status={status}
+                data-droptarget={dropTarget === e.full_path}
+                data-dir={e.is_dir}
+                draggable="true"
+                ondragstart={(ev) => onDragStart(ev, e)}
+                ondragover={(ev) => onFolderDragOver(ev, e)}
+                ondragleave={() => onFolderDragLeave(e)}
+                ondrop={(ev) => onFolderDrop(ev, e)}
+                onclick={(ev) => onRowClick(ev, e)}
+                ondblclick={() => onRowDblClick(e)}
+                oncontextmenu={(ev) => onContextMenu(ev, e)}
+                role="row"
+                tabindex="0"
+                onkeydown={(ev) => { if (ev.key === "Enter") onRowDblClick(e); }}
+              >
+                <span class="row-name">
+                  {#if e.is_dir}
+                    <span class="twirl"><ChevronRight size={10}/></span>
+                    <Folder size={13}/>
+                  {:else}
+                    <span class="twirl"></span>
+                    <Icon size={13}/>
+                  {/if}
+                  <span class="row-label mono">{e.name}</span>
+                  {#if lk}
+                    <LockBadge holder={`${lk.user}@${lk.host}`} tooltip={`Locked by ${lk.user}@${lk.host}`} />
+                  {/if}
+                </span>
+                <span class="row-status" title={status}>
+                  {#if status === "conflict"}
+                    <span class="sym danger">▲</span>
+                  {:else}
+                    <span class="sym muted">·</span>
+                  {/if}
+                </span>
+                <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
+                <span class="row-mtime mono" title={fmtTimeAbs(e.last_modified)}>{fmtTime(e.last_modified)}</span>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      {/key}
     {/if}
   </div>
   <div class="foot mono dim">
@@ -454,11 +460,16 @@
     border-left: 2px solid transparent;
     background: transparent;
     text-align: left;
+    transition: background 100ms ease, transform 80ms ease;
   }
   .row:hover { background: var(--surface-hover); }
+  @media (prefers-reduced-motion: no-preference) {
+    .row[data-dir="true"]:hover { transform: translateX(2px); }
+  }
   .row[data-selected="true"] {
     background: var(--accent-soft);
-    border-left-color: var(--accent);
+    box-shadow: inset 2px 0 var(--accent);
+    border-left-color: transparent;
   }
   .row[data-droptarget="true"] {
     background: color-mix(in oklch, var(--accent) 18%, transparent);
@@ -470,7 +481,9 @@
     width: 100%;
     border: 0;
     font: inherit;
+    transition: background 100ms ease;
   }
+  .up-row:hover:not(:disabled) { background: var(--surface-hover); }
   .up-row:disabled { opacity: 0.4; cursor: not-allowed; }
   .row-name { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
   .row-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

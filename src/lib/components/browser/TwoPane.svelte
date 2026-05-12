@@ -1,13 +1,13 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onDestroy, onMount } from "svelte";
-  import { X } from "lucide-svelte";
+  import { X, Plus } from "lucide-svelte";
+  import { fly, scale } from "svelte/transition";
+  import { quintOut } from "svelte/easing";
   import { connection } from "../../state/connection.svelte";
   import { browserTabs } from "../../state/browser-tabs.svelte";
-  import { syncModal } from "../../state/sync-modal.svelte";
   import LocalPane from "./LocalPane.svelte";
   import RemotePane from "./RemotePane.svelte";
-  import OpRail from "./OpRail.svelte";
   import FlashToast from "../FlashToast.svelte";
   import SyncModal from "../sync/SyncModal.svelte";
 
@@ -19,8 +19,6 @@
   };
 
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
-  let localSel = $state<string[]>([]);
-  let remoteSel = $state<string[]>([]);
 
   onMount(() => {
     const s = connection.selected;
@@ -103,6 +101,47 @@
     return idx === -1 ? norm : norm.slice(idx + 1);
   }
 
+  function tabDisplay(t: { name: string; localPath: string; remotePath: string }): string {
+    const p = t.localPath || t.remotePath;
+    if (p) {
+      const b = basename(p);
+      if (b) return b;
+    }
+    return t.name || "tab";
+  }
+
+  function newTab() {
+    const s = connection.selected;
+    if (!s) return;
+    const t = browserTabs.active;
+    const lroot = t?.localPath || s.localRoot;
+    const rroot = t?.remotePath || s.remoteRoot;
+    browserTabs.open(basename(lroot) || "tab", lroot, rroot);
+  }
+
+  function onTabKey(e: KeyboardEvent) {
+    if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    const k = e.key.toLowerCase();
+    if (k === "t") { e.preventDefault(); newTab(); return; }
+    if (k === "w") {
+      e.preventDefault();
+      if (browserTabs.tabs.length > 1) browserTabs.close(browserTabs.activeIdx);
+      return;
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const n = browserTabs.tabs.length;
+      if (n <= 1) return;
+      const next = (browserTabs.activeIdx + 1) % n;
+      browserTabs.setActive(next);
+    }
+  }
+
+  $effect(() => {
+    window.addEventListener("keydown", onTabKey);
+    return () => window.removeEventListener("keydown", onTabKey);
+  });
+
   async function uploadLocalsToRemoteDir(localPaths: string[], targetRemoteDir: string) {
     const s = connection.selected;
     if (!s || localPaths.length === 0) return;
@@ -149,73 +188,40 @@
     await downloadRemotesToLocalDir(remotePaths, t.localPath);
   }
 
-  // Op rail actions
-  function onUpload() { uploadLocalsToRemote(localSel); }
-  function onDownload() { downloadRemotesToLocal(remoteSel); }
-
-  // Sync button: open the modal, fire backend scan. SyncModal handles diag
-  // events + activity feed + watchdog itself — no hardcoded timeout here.
-  // v0.2.19's 30s frontend timeout false-alarmed on >30s scans (894-entry
-  // reconcile took ~45s). Modal stays patient as long as events keep arriving.
-  const syncing = $derived(syncModal.open && syncModal.phase === "scanning");
-  let pulling = $state(false);
-  let pushing = $state(false);
-  async function onSync() {
-    if (syncing || pulling || pushing) return;
-    syncModal.start();
-    try {
-      const fired = await invoke<boolean>("diag_force_drift_scan");
-      if (!fired) {
-        syncModal.fail("Not connected — start auto-sync first.");
-      }
-    } catch (e) {
-      syncModal.fail(String(e));
-    }
-  }
-  async function onPullNow() {
-    if (syncing || pulling || pushing) return;
-    pulling = true;
-    syncModal.start("pull");
-    try {
-      const fired = await invoke<boolean>("diag_force_pull_now");
-      if (!fired) syncModal.fail("Not connected — start auto-sync first.");
-    } catch (e) {
-      syncModal.fail(String(e));
-    } finally {
-      pulling = false;
-    }
-  }
-  async function onPushNow() {
-    if (syncing || pulling || pushing) return;
-    pushing = true;
-    syncModal.start("push");
-    try {
-      const fired = await invoke<boolean>("diag_force_push_now");
-      if (!fired) syncModal.fail("Not connected — start auto-sync first.");
-    } catch (e) {
-      syncModal.fail(String(e));
-    } finally {
-      pushing = false;
-    }
-  }
 </script>
 
 <div class="two-pane">
   <div class="tabstrip">
     {#each browserTabs.tabs as t, i (t.id)}
-      <div class="tab" data-active={i === browserTabs.activeIdx}>
-        <button type="button" class="tab-label mono" onclick={() => browserTabs.setActive(i)}>
-          {t.name}
+      <div
+        class="tab"
+        data-active={i === browserTabs.activeIdx}
+        in:fly={{ x: -10, duration: 180, easing: quintOut }}
+        out:scale={{ start: 0.85, duration: 140, easing: quintOut }}
+      >
+        <button
+          type="button" class="tab-label"
+          onclick={() => browserTabs.setActive(i)}
+          title={t.localPath || t.remotePath}
+        >
+          {tabDisplay(t)}
         </button>
         {#if browserTabs.tabs.length > 1}
           <button
             type="button" class="tab-x"
             onclick={() => browserTabs.close(i)}
             aria-label="Close tab"
+            title="Close tab (Ctrl+W)"
           ><X size={10}/></button>
         {/if}
       </div>
     {/each}
+    <button
+      type="button" class="tab-new"
+      onclick={newTab}
+      title="New tab (Ctrl+T)"
+      aria-label="New tab"
+    ><Plus size={14}/></button>
   </div>
 
   {#if browserTabs.active}
@@ -229,19 +235,6 @@
         onDropPaths={(remotePaths: string[]) => downloadRemotesToLocal(remotePaths)}
         onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
         onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
-        onSelectionChange={(paths) => (localSel = paths)}
-      />
-      <OpRail
-        canUpload={localSel.length > 0}
-        canDownload={remoteSel.length > 0}
-        {syncing}
-        {pulling}
-        {pushing}
-        {onUpload}
-        {onDownload}
-        {onSync}
-        {onPullNow}
-        {onPushNow}
       />
       <RemotePane
         serverKey={connection.selectedKey}
@@ -251,7 +244,6 @@
         onDropPaths={(localPaths: string[]) => uploadLocalsToRemote(localPaths)}
         onDropPathsToFolder={(localPaths, targetDir) => uploadLocalsToRemoteDir(localPaths, targetDir)}
         onDownloadPaths={(remotePaths) => downloadRemotesToLocal(remotePaths)}
-        onSelectionChange={(paths) => (remoteSel = paths)}
       />
     </div>
   {:else}
@@ -275,51 +267,82 @@
     position: relative;
   }
   .tabstrip {
-    display: flex; gap: 2px;
-    padding: 4px 8px 0;
-    background: var(--bg);
+    display: flex; align-items: flex-end; gap: 2px;
+    padding: 6px 8px 0;
+    background: var(--bg-elev-1);
     border-bottom: 1px solid var(--border);
-    overflow-x: auto;
+    overflow: clip;
+    height: 38px;
   }
   .tab {
     display: flex; align-items: center;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border); border-bottom: 0;
-    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 0;
+    border-radius: 8px 8px 0 0;
     padding: 0 4px 0 0;
     color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    max-width: 220px;
+    font-size: var(--fs-sm);
+    max-width: 240px;
+    min-width: 120px;
+    height: 32px;
+    transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
   }
+  .tab:hover { background: var(--surface-hover); color: var(--fg); }
   .tab[data-active="true"] {
     background: var(--bg);
     color: var(--fg);
-    border-color: var(--border-strong);
-    border-bottom-color: var(--bg);
+    border-color: var(--border);
     margin-bottom: -1px;
   }
   .tab-label {
+    flex: 1;
     background: transparent; border: 0;
     color: inherit;
-    padding: 5px 10px;
+    padding: 0 12px;
+    height: 100%;
     cursor: pointer;
     font: inherit;
+    font-weight: 500;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-align: center;
+    letter-spacing: 0.01em;
   }
+  .tab[data-active="true"] .tab-label { font-weight: 600; }
   .tab-x {
     background: transparent; border: 0;
     color: var(--fg-muted); cursor: pointer;
     width: 18px; height: 18px;
     border-radius: var(--radius-xs);
     display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background 100ms ease, color 100ms ease;
   }
   .tab-x:hover { background: var(--danger); color: oklch(0.99 0 0); }
+  .tab-new {
+    background: transparent;
+    border: 0;
+    color: var(--fg-muted);
+    width: 28px; height: 28px;
+    margin: 0 0 0 4px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: background 120ms ease, color 120ms ease, transform 120ms ease;
+  }
+  .tab-new:hover { background: var(--surface-hover); color: var(--fg); transform: scale(1.08); }
+  .tab-new:active { transform: scale(0.94); }
+  .tab-new:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
   .split {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 36px 1fr;
+    grid-template-columns: 1fr 1fr;
     min-height: 0; min-width: 0;
+  }
+  .split > :global(:first-child) {
+    border-right: 1px solid var(--border);
   }
 
   .placeholder {
