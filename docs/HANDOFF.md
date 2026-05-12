@@ -2,6 +2,36 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 52 — 2026-05-12 — FiveM web/build false-deletes + Created+Dir debounce → ship v0.2.48-alpha
+
+### Trigger
+v0.2.47 stress test surfaced two issues. Bug 7: 45 phantom ToDelete-local rows on FiveM `web/build/` + `web/dist/` trees, SSH-verified files existed on prod intact — destructive on apply. Bug 5 still unresolved: `endure_rifttest` (7 files) never appeared in any push diff even after Modified-event touches + Rescans.
+
+### Diagnosis
+Bug 7 = filter asymmetry. `sftp/list.rs::list_via_exec` builds `find ... -name build -o -name dist ... -prune` from `ignored_directory_names()`; server-side prune can't see path context, kills FiveM web bundles. Local walker uses path-aware `classify()` which bypasses `/web/build/` + `/web/dist/`. Remote_map has zero, local_map has files, drift = ToDelete.
+
+Bug 5 = v0.2.47's immediate `kick_drift_reconcile` on Create(Dir) fires BEFORE Windows finishes writing the files inside the new tree. Scan walks an empty dir, surfaces nothing. Modified events afterward never re-trigger reconcile because the dir's already-known to the watcher.
+
+### Completed (file:line)
+- **Bug 7 fix** [sync/ignore.rs::ignored_directory_names()](src-tauri/src/sync/ignore.rs) — exclude `build` and `dist` from server-prune list. Drift scanner's post-listing `should_ignore(rel)` filter handles generic `app/build/foo` paths client-side w/ path context. ~32 fonts of extra find traffic per FiveM web build; trivial.
+- **Bug 5 fix** [sync/auto_sync.rs::on_fs_event](src-tauri/src/sync/auto_sync.rs) — wrap kick_drift_reconcile in 500 ms tokio::sleep + new `pending_dir_reconcile: AtomicBool` coalesce flag. compare_exchange owns dispatch slot; lost-race events skip. 50 rapid Create(Dir) events collapse to one delayed scan.
+- **Tests** — new assertions on `ignored_dir_names_excludes_brackets` confirm `build` + `dist` excluded. `cargo test --lib sync::ignore` 11 pass / 0 fail. `cargo check` clean 2.89s.
+
+### Files Modified (S52)
+`src-tauri/src/sync/ignore.rs` — `ignored_directory_names` excludes build/dist + test asserts. `src-tauri/src/sync/auto_sync.rs` — `pending_dir_reconcile` AtomicBool field + 500 ms delayed dispatch in on_fs_event. `package.json` + `Cargo.toml` + `tauri.conf.json` 0.2.47 → 0.2.48. `docs/CHANGELOG.md` v0.2.48 entry.
+
+### Validation gates user will check
+1. Rescan post-update → 45 web/build false-deletes gone.
+2. `endure_rifttest` (7 files local, 0 remote) finally surfaces as 7 ToPush under [endure] after a fresh Rescan or after recreating the dir.
+
+### Still deferred to v0.2.49
+Mirror mode (Bug 1) — new drift bucket for `local-missing + remote-has + baseline-exists` → propose remote-delete + Mirror toggle in Sync hero. Stale-lock sweep UI button. Mass-delete guard fine-tune.
+
+### Audit notes — Treyday safety
+Bug 7 fix is read-side only; never causes deletes. Bug 5 fix is read-side scan trigger; never destructive. setgid 2775 mkdir, foreign-lock check, dirty-local guard, keepalive 20s×3, conflict-rename guard all preserved.
+
+---
+
 ## Session 51 — 2026-05-12 — New-resource discovery + park-dir ignore → ship v0.2.47-alpha
 
 ### Trigger

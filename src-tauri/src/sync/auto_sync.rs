@@ -259,6 +259,15 @@ pub struct AutoSyncEngine {
     background_tasks: std::sync::Mutex<Vec<JoinHandle<()>>>,
     stop_tx: watch::Sender<bool>,
     disposed: AtomicBool,
+    /// Coalesce flag for the Created+Dir → kick_drift_reconcile path. Set
+    /// when a 500 ms-delayed reconcile is already queued; new Create(Dir)
+    /// events during the window dedupe to no-op. Cleared by the delayed
+    /// task right before it dispatches the reconcile. Fixes Bug 5
+    /// 2026-05-12: a brand-new subtree like `[endure]/endure_rifttest/`
+    /// fires dir-Create BEFORE its files exist on disk, so an immediate
+    /// scan returns empty. 500 ms lets Windows finish writing the files,
+    /// then one scan picks the whole tree up.
+    pending_dir_reconcile: AtomicBool,
 }
 
 impl AutoSyncEngine {
@@ -301,6 +310,7 @@ impl AutoSyncEngine {
             background_tasks: std::sync::Mutex::new(Vec::new()),
             stop_tx,
             disposed: AtomicBool::new(false),
+            pending_dir_reconcile: AtomicBool::new(false),
         });
 
         // Channel for FS events from the notify thread → tokio runtime.
@@ -1039,18 +1049,37 @@ impl AutoSyncEngine {
                 format!("{kind:?}"),
             );
             // Belt-and-suspenders for Bug 5 (Endure RP 2026-05-12): when a new
-            // directory subtree is created under a watched bracket (e.g.
-            // `[endure]/endure_rifttest/`), Windows ReadDirectoryChangesW can
-            // race the subtree registration — Create events for files nested
-            // INSIDE the new dir before it fully registers get dropped. The
-            // dir-Create event itself reaches us, but queue_path discards dir
-            // events (children are supposed to fire their own). So we fire a
-            // drift reconcile as the safety net: the scan walks local
-            // recursively, lists remote, and surfaces the entire new tree as
-            // ToPush. kick_drift_reconcile is debounced via its cancel-replace
-            // semantics, so rapid mkdir bursts collapse to one scan.
+            // directory subtree is created under a watched bracket, Windows
+            // ReadDirectoryChangesW races the subtree registration — Create
+            // events for files nested inside a freshly-created dir BEFORE
+            // it fully registers get dropped. The dir-Create event itself
+            // reaches us, but queue_path discards dir events.
+            //
+            // v0.2.47 fired kick_drift_reconcile immediately on Create(Dir),
+            // but the files don't exist on disk yet — scan walked an empty
+            // tree and surfaced nothing. v0.2.48 adds a 500 ms delay + an
+            // AtomicBool coalesce so 50 rapid Create(Dir) events inside one
+            // new tree collapse to one delayed reconcile that fires AFTER
+            // Windows finishes writing the files. compare_exchange takes
+            // ownership of the dispatch slot; if another Create(Dir) lost
+            // the race, it skips (delayed task will pick up the new files).
             if kind == ChangeKind::Created && path.is_dir() {
-                self.kick_drift_reconcile();
+                if self
+                    .pending_dir_reconcile
+                    .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    let engine = self.clone();
+                    let h = tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                        engine.pending_dir_reconcile.store(false, Ordering::Release);
+                        if engine.disposed.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        engine.kick_drift_reconcile();
+                    });
+                    self.track_background(h);
+                }
             }
             self.queue_path(path, kind);
         }

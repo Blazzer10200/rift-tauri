@@ -258,11 +258,24 @@ pub fn should_ignore(path: &str) -> bool {
 
 /// Names that are pure dir-names (no brackets) — exposed for remote `find -name`
 /// pruning callers. Mirrors WPF `IgnoredDirectoryNames()`.
+///
+/// Excludes `build` and `dist`: the generic-segment ignore for those is
+/// path-aware (FiveM `web/build/` and `web/dist/` carry ui_page bundles and
+/// MUST sync), but `find -prune` on the server can't see the path context
+/// — it would prune every `build/`/`dist/` including the FiveM ones,
+/// returning zero remote files for those subtrees while the local walker
+/// keeps them, producing phantom `ToDelete-local` rows on each scan. Bug 7
+/// 2026-05-12: 45 false deletes flagged across ox_lib/web/build, ox_inventory/
+/// web/build, oxmysql/web/build, illenium-appearance/web/dist. Server-side
+/// prune cost is ~32 fonts of extra `find` per FiveM web build — trivial.
+/// Client-side `should_ignore(rel)` in drift_scanner / walk_local still
+/// filters non-FiveM `build/`/`dist/` paths.
 pub fn ignored_directory_names() -> Vec<&'static str> {
     IGNORE_SEGMENTS
         .iter()
         .copied()
         .filter(|s| !s.starts_with('['))
+        .filter(|s| *s != "build" && *s != "dist")
         .collect()
 }
 
@@ -355,6 +368,10 @@ mod tests {
         assert!(names.contains(&"node_modules"));
         assert!(names.contains(&"target"));
         assert!(!names.iter().any(|n| n.starts_with('[')));
+        // build + dist excluded from server-prune list — see fn docs.
+        // FiveM web/build, web/dist carry ui_page bundles and MUST sync.
+        assert!(!names.contains(&"build"));
+        assert!(!names.contains(&"dist"));
     }
 
     /// Guards the `pre-lower needle` optimization in `classify` — if anyone
