@@ -2,22 +2,22 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.41-alpha-test — 2026-05-12 — Quick Actions accuracy + real cancel + background mode
+## v0.2.42-alpha-test — 2026-05-12 — Connection liveness + real in-flight cancel + push visibility
 
-Stop buttons used to lie. `force_push_now` checked cancel once before handing control to `flush_all_now` — after that, in-flight pushes ran to completion (minutes) regardless of clicks. Pull awaited every in-flight handle before emitting the result event, so the modal hung at "Pulling…" until the last download settled. Labels lied too: "Reconcile" only scanned, "Pull/Push all" only drained the drift bucket + dirty queue. `diag_*` command prefix leaked the dev-era origin.
+Fixes the connection error you hit on Qbox, the hung pushes, and the dark Activity feed during pushes.
 
 ### Backend
-- Cancel token plumbed through `flush_all_now` → `flush_batch` (`auto_sync.rs:560,1435`). Dispatch loop checks the token before each entry; on bail, un-dispatched stay in the dirty queue for the next Push to pick up.
-- **Lazy-pop from dirty:** entries pop at dispatch time, not up-front. Cancel mid-batch no longer loses queued work. Re-dirty during in-flight upload still creates a new entry (path is already out of the map).
-- `force_pull_now` orphans in-flight handles into the background-task tracker on cancel (`auto_sync.rs:1212`). Modal closes within ~1s; the 1–4 active russh streams finish naturally.
-- Commands renamed (`lib.rs:127-175`): `diag_force_drift_scan` → `sync_reconcile`, `diag_force_pull_now` → `sync_pull_pending`, `diag_force_push_now` → `sync_push_pending`, `diag_cancel_drift_scan` → `sync_cancel`.
+- **Write probe bug fixed** (`sftp/transfer.rs:upload_bytes`): `create()` + `write_all()` never closed the SFTP file handle, so probe content didn't materialize server-side before `remove_file` ran → ENOENT. Added `f.shutdown().await` to flush + close. Also made probe cleanup best-effort (`sftp/ops.rs:probe_write_access`) — if create succeeded, write access is proven; a leftover probe file is harmless and shouldn't block the connection.
+- **russh keepalive** in both `sftp/mod.rs:open_session` and `tunnel/mod.rs:start`: `keepalive_interval=20s`, `keepalive_max=3` → ~60s to detect a stalled server. Was `Config::default()` (zero keepalive) — half-dead TCP sockets hung indefinitely waiting on Windows' ~2hr OS-level timeout.
+- **Real in-flight cancel** (`auto_sync.rs:process_entry`): each upload races against the cancel token via `tokio::select!`. When Stop fires, the upload future drops, russh stops emitting WRITE packets, the atomic-tmp file is left on the server (rename never ran so target is unchanged), and the entry requeues to dirty.
+- Cancel token passed down `flush_batch → process_entry`. Pre-dispatch cancel check also catches entries queued in `futs` before they touch the socket.
 
 ### Frontend
-- TabRail labels rewritten to match backend: **Scan drift**, **Pull pending**, **Push pending**. Tooltips spell out scope.
-- Tones rebalanced: Reconcile `neutral` (read-only), Pull `info`, Push `accent` (was `warn` — wrong, push isn't a caution op).
-- Dropped dead local `pulling/pushing/scanning` flags — they flipped false within ms of click. Buttons gate on `syncModal.busy` (real op lifecycle).
-- **Run in background** footer button on SyncModal — dismisses modal, op continues, progress lands in `connection.activityFeed` (Activity tab).
-- `SyncModalStore.busy` added; listeners gated on `busy || open`.
+- **Push activity parity**: `process_entry` now emits an "uploading…" / "deleting…" activity row at dispatch time, not just on completion. Hung pushes show a heartbeat per file instead of a dead modal.
+- **StatusBar sync pill**: while `syncModal.busy && !syncModal.open` (i.e. you hit "Run in background"), a pulsing pill appears next to queue/locks showing mode (pulling/pushing/scanning). Click reopens the modal so you can hit Stop. "Run in background" is no longer a one-way trip.
+
+### Research backing
+russh's own `Config` struct exposes `keepalive_interval`, `keepalive_max`, `inactivity_timeout`. `tokio::select!` drops the losing future, which closes russh-sftp's file handle via `Drop` (caveat: in-flight packets already on the wire may still land server-side — atomic rename pattern protects against torn target files).
 
 ### Verify
-`svelte-check` 0/0/3994 · `cargo check` clean · `vitest` 6/6.
+`svelte-check` 0/0 · `cargo check` clean · `vitest` 6/6.

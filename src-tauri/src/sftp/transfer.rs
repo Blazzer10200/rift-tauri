@@ -169,6 +169,10 @@ impl SftpClient {
         // russh-sftp's `write()` is WRITE-only (no CREATE/TRUNCATE) — fails on
         // first creation and leaves trailing garbage if the new payload is
         // shorter than the existing file. `create()` is WRITE|CREATE|TRUNCATE.
+        // shutdown() flushes pending writes + closes the SFTP file handle
+        // server-side. Without it the close races with subsequent ops —
+        // probe_write_access hit "remove_file: No such file" because the file
+        // hadn't materialized server-side before cleanup ran.
         let mut f = self
             .sftp
             .create(remote_path)
@@ -176,7 +180,10 @@ impl SftpClient {
             .map_err(|e| format!("create {remote_path}: {e}"))?;
         f.write_all(bytes)
             .await
-            .map_err(|e| format!("write {remote_path}: {e}"))
+            .map_err(|e| format!("write {remote_path}: {e}"))?;
+        f.shutdown()
+            .await
+            .map_err(|e| format!("close {remote_path}: {e}"))
     }
 
 

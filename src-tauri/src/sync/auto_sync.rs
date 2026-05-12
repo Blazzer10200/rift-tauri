@@ -1501,7 +1501,8 @@ impl AutoSyncEngine {
                 // creates a new entry (path no longer in map).
                 self.dirty.remove(&entry.path);
                 let fw = fw.clone();
-                futs.push(async move { self.process_entry(&fw, entry).await });
+                let ct_per_entry = cancel.clone();
+                futs.push(async move { self.process_entry(&fw, entry, ct_per_entry).await });
                 active += 1;
                 dispatched += 1;
             }
@@ -1595,7 +1596,12 @@ impl AutoSyncEngine {
         dispatched
     }
 
-    async fn process_entry(&self, fw: &FolderWatch, entry: DirtyEntry) -> EntryResult {
+    async fn process_entry(
+        &self,
+        fw: &FolderWatch,
+        entry: DirtyEntry,
+        cancel: Option<CancellationToken>,
+    ) -> EntryResult {
         let remote = match map_local_to_remote(&entry.path, fw) {
             Some(r) => r,
             None => {
@@ -1606,7 +1612,18 @@ impl AutoSyncEngine {
             }
         };
 
+        // Cancel before doing real work — if Stop fired while this entry was
+        // queued in the dispatch loop, re-insert into dirty and bail without
+        // touching the SFTP socket.
+        if let Some(ct) = &cancel {
+            if ct.is_cancelled() {
+                self.dirty.insert(entry.path.clone(), entry.clone());
+                return EntryResult::Requeued;
+            }
+        }
+
         if entry.kind == ChangeKind::Deleted {
+            self.log_activity(&fw.resource_name, file_name(&entry.path), "deleting…");
             diagnostics::emit_for(
                 DiagStage::UploadStart,
                 DiagLevel::Debug,
@@ -1798,6 +1815,11 @@ impl AutoSyncEngine {
 
             let upload_started = std::time::Instant::now();
             let local_size = std::fs::metadata(&entry.path).ok().map(|m| m.len()).unwrap_or(0);
+            // Surface a start row in the activity feed so the user sees which
+            // file is in-flight the moment dispatch happens, not after it
+            // completes. Without this, a hung push shows zero activity rows
+            // and the modal looks dead.
+            self.log_activity(&fw.resource_name, file_name(&entry.path), "uploading…");
             diagnostics::emit_with_fields(
                 DiagStage::UploadStart,
                 DiagLevel::Debug,
@@ -1806,7 +1828,27 @@ impl AutoSyncEngine {
                 "upload start",
                 serde_json::json!({ "size": local_size }),
             );
-            let r = self.sftp.upload_file_atomic(&entry.path, &remote).await;
+            // Race the upload against the cancel token — when Stop fires, the
+            // upload future drops, russh stops emitting WRITE packets, the
+            // atomic tmp file is left on the server (rename never happened
+            // so target file is untouched), and we requeue the entry.
+            let r = {
+                let upload_fut = self.sftp.upload_file_atomic(&entry.path, &remote);
+                if let Some(ct) = &cancel {
+                    tokio::select! {
+                        biased;
+                        _ = ct.cancelled() => {
+                            self.dirty.insert(entry.path.clone(), entry.clone());
+                            self.log_activity(&fw.resource_name, file_name(&entry.path),
+                                "upload cancelled — requeued");
+                            return EntryResult::Requeued;
+                        }
+                        result = upload_fut => result,
+                    }
+                } else {
+                    upload_fut.await
+                }
+            };
             let elapsed_ms = upload_started.elapsed().as_millis() as u64;
             if r.success {
                 self.failed.remove(&entry.path);

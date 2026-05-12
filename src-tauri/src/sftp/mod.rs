@@ -126,7 +126,15 @@ pub struct SftpClient {
 async fn open_session(
     args: &OwnedConnectArgs,
 ) -> Result<(Handle<PinningHandler>, SftpSession, String), String> {
-    let config = Arc::new(client::Config::default());
+    // Keepalive + inactivity timeout — without these russh sits on a half-dead
+    // TCP socket indefinitely (Windows OS-level keepalive is ~2hr). 20s ping
+    // x 3 unanswered = ~60s to detect a stalled server, then session closes
+    // cleanly w/ an error instead of hanging the push or remote-list panel.
+    let config = Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(20)),
+        keepalive_max: 3,
+        ..client::Config::default()
+    });
     let addr = format!("{}:{}", args.host, args.port);
     let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let handler = PinningHandler {

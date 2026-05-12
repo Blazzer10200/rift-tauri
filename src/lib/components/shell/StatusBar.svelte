@@ -1,7 +1,23 @@
 <script lang="ts">
   import { connection } from "../../state/connection.svelte";
-  import { Lock } from "lucide-svelte";
+  import { syncModal } from "../../state/sync-modal.svelte";
+  import { Lock, RefreshCw, Download, Upload } from "lucide-svelte";
   import { fade } from "svelte/transition";
+
+  // Background-mode escape hatch: while a sync op is busy but the modal is
+  // dismissed, surface a pill in the status bar so the user can re-open and
+  // hit Stop. Without this, "Run in background" was a one-way trip.
+  const bgSync = $derived(syncModal.busy && !syncModal.open);
+  const bgIcon = $derived(
+    syncModal.mode === "pull" ? Download :
+    syncModal.mode === "push" ? Upload :
+    RefreshCw
+  );
+  const bgLabel = $derived(
+    syncModal.mode === "pull" ? "pulling" :
+    syncModal.mode === "push" ? "pushing" :
+    "scanning"
+  );
 
   const stateText = $derived(connection.status?.state ?? "offline");
   const ledClass = $derived(
@@ -60,6 +76,22 @@
     </div>
   {/if}
 
+  {#if bgSync}
+    {@const Icon = bgIcon}
+    <div class="sep"></div>
+    <button
+      class="grp sync-pill"
+      type="button"
+      onclick={() => (syncModal.open = true)}
+      title="Sync in progress — click to re-open the modal and Stop"
+      transition:fade={{ duration: 100 }}
+    >
+      <span class="sync-dot"></span>
+      <Icon size={11}/>
+      <span class="lbl">{bgLabel}…</span>
+    </button>
+  {/if}
+
   <div class="flex-spacer"></div>
 
   {#if conflicts > 0}
@@ -97,6 +129,30 @@
   .led[data-state="info"]   { background: var(--info); }
   .led[data-state="danger"] { background: var(--danger); }
   .led[data-state="muted"]  { background: var(--fg-faint); }
+  .sync-pill {
+    background: transparent;
+    border: 0;
+    color: var(--info);
+    cursor: pointer;
+    padding: 0;
+    font: inherit;
+    font-size: var(--fs-xs);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .sync-pill:hover { color: var(--fg); }
+  .sync-pill .lbl { color: inherit; }
+  .sync-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--info);
+    animation: sync-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes sync-pulse {
+    0%, 100% { opacity: 0.45; transform: scale(0.85); }
+    50%      { opacity: 1;    transform: scale(1.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sync-dot { animation: none; opacity: 0.85; }
+  }
 
   .state-toggle {
     background: transparent;
