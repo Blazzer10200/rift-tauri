@@ -5,150 +5,49 @@
 ## Session 47 — 2026-05-12 — Per-resource scan breakdown + open partial-listing investigation (v0.2.44)
 
 ### Completed
-- User came back briefly, ran a pull on Endure RP (Qbox). Pulls succeeded cleanly (100+ files, all <5ms latency, snapshot updated). Then exported `/diagnostics` which revealed the next bug.
-- **Open bug**: drift scan after a fresh pull reports `to_delete: 430` on a server that should be fully in sync. Activity feed shows the mass-delete circuit breaker correctly BLOCKED `[depend]` (39 ToDelete vs threshold 25) and `[ox]` (108 ToDelete vs threshold 25). Remaining ~283 ToDelete distribution unknown — could have leaked through resources with under-threshold counts.
-- **Hypothesis**: russh-sftp's `list_recursive_batch` is silently dropping files mid-listing for deeply-nested paths (ox_lib has 4-5 level deep dirs like `imports/getRelativeCoords/shared.lua`) or for `[bracket]`-encoded resource dirs. Snapshot has baselines for these files (just pulled), but recursive listing missed them → scanner classifies as ToDelete (local+snap+no-remote).
-- **Diagnostic added (v0.2.44)**: `drift_scan_result` payload now includes `by_resource: { "[ox]": { to_push, to_pull, to_delete, conflicts }, ... }` map. Also `eprintln!` line with same breakdown. Next user-triggered scan will localize the partial-listing damage.
-- Shipped v0.2.44-alpha-test (cargo check clean, svelte-check 0/0, vitest 6/6).
+- Live-dev session ran v0.2.40 → v0.2.44 (5 ships in one day). Push direction was the focus across all of them; root-caused and verified working at the end. Pulls always worked.
+- **Push fixed end-to-end** (v0.2.43): scan-cache ToPush entries promote into dirty queue (`promote_scan_pushes_to_dirty`), auto-scan fallback when both dirty + cache empty, cache clears after successful push, critical `DriftScanResult` event bypasses the 200/s diag rate limit (was getting dropped during 192-file bursts → modal hung forever).
+- **Cancel bulletproofed**: outer + inner `tokio::select!` in `process_entry`, 60s frontend hard-watchdog, 3s force-close button, X-button works while cancelling, activity rows emit on every early-return path.
+- **Connection liveness** (v0.2.42): russh keepalive 20s × 3 in both `sftp::open_session` + `tunnel::start`, `upload_bytes` shutdown() fixed write-probe ENOENT, cleanup is best-effort.
+- **Open bug** (v0.2.44 diagnostic added, not fixed): after a fresh pull on Endure RP, drift scan reports `to_delete: 430` on a fully-synced server. Mass-delete circuit breaker correctly BLOCKED `[depend]` (39) + `[ox]` (108). Remaining ~283 distribution unknown. Hypothesis: `list_recursive_batch` silently dropping files mid-listing for deeply-nested paths (ox_lib has 4-5 level deep dirs) or `[bracket]`-encoded resource dirs. v0.2.44 adds `by_resource` map to drift_scan_result so next diagnostic localizes which folders are partial.
 
-### Don't yet implemented (TODO next session)
-- Root-cause the partial listing: instrument `list_recursive_batch` to log per-directory results + final count. Compare against the local walk count.
-- Possible fix vectors: increase russh channel `window_size`/`maximum_packet_size`, retry partial listings with smaller depth chunks, or detect "remote count vs snapshot count" mismatch and abort scan as SuspiciousEmptyAborted at the resource level.
-- The mass-delete circuit breaker's ceiling (25) may be too high — small batches across many resources can add up to material data loss. Consider lowering or adding a global "total ToDelete > 30% of all local files" abort.
-
-### Known-good after v0.2.44
-- Push direction: parity with pull, scan-cache aware, auto-scans on cold cache, clears cache post-push
-- Pull direction: cache parity, orphans in-flight handles on cancel
-- Modal lifecycle: rate-limit bypass for critical events, 60s hard watchdog, 3s force-close, X-button works while cancelling
-- Activity feed: orphan-row guards on every process_entry early-return path
-- Connection: russh keepalive 20s × 3 = ~60s dead-socket detection, write-probe cleanup is best-effort
-- Cancel: outer + inner select! in process_entry, propagates through flush_batch dispatch loop
+### Next session priorities
+1. User triggers Sync on v0.2.44, exports `/diagnostics`. The `by_resource` block in drift_scan_result pinpoints which resources have the phantom ToDelete entries.
+2. Root-cause partial listing: instrument `list_recursive_batch` to log per-directory results + final count vs local walk count. Possible fixes — russh `window_size`/`maximum_packet_size` increase, retry partial listings w/ smaller depth chunks, or detect "remote count vs snapshot count" mismatch and abort scan per-resource as SuspiciousEmptyAborted.
+3. Consider lowering mass-delete circuit breaker ceiling from 25 → 10 OR adding a global "total ToDelete > 30% of all local files" abort.
 
 ### Files Modified (S47)
 - `src-tauri/src/sync/auto_sync.rs` — by_resource breakdown in reconcile result emit
-- `docs/CHANGELOG.md`, `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.44-alpha-test
+- Bumped to v0.2.44-alpha-test (package.json + Cargo.toml + tauri.conf.json)
 
----
-
-## Session 46 — 2026-05-12 — Push parity + stale-cache + critical-event rate-limit bypass (v0.2.43)
-
-### Completed
-- Live-dev debug session — user reported "modal hangs at 0 PUSHED" repeatedly across v0.2.40-42 ship cycles. Switched to `npm run tauri dev` for rapid iteration with console traces.
-- **Root cause 1** — `force_push_now` drained only the watcher dirty queue. Files in `last_scan_entries` ToPush bucket were invisible. Added `promote_scan_pushes_to_dirty()` + auto-scan fallback when both dirty + cache are empty. Symmetric w/ `force_pull_now`.
-- **Root cause 2** — Stale `last_scan_entries` cache. After push, cache still showed pushed entries as ToPush. Re-click re-pushed forever (SHA-collapse hid it). Both `force_push_now` + `force_pull_now` now clear cache after non-cancelled ops.
-- **Root cause 3** — `spawn_frontend_pump` rate-limited at 200 events/sec. 192-file push generated 800+ events, dropping the terminal `DriftScanResult` event. Modal hung forever. Critical lifecycle stages (DriftScanStart/Result, RescanSignal, SftpConnect/Disconnect, RemoteScanResult, BridgeAck, System) now bypass the cap.
-- Activity-feed orphan-row guards: every early-return in `process_entry` now emits an activity row (cancel-at-top, file-vanished, file-unreadable, phantom-conflict-collapse, outer-cancel-select).
-- `eprintln!` breadcrumbs through `sync_*_pending` cmds + `force_pull/push_now` task bodies — instant dev-console diagnosis on hang.
-- Shipped v0.2.43-alpha-test — cargo check clean, svelte-check 0/0/3994, vitest 6/6.
-
-### Key Decisions
-- Critical events bypass rate limit individually (allowlist) rather than disabling rate limit entirely — FsEvent bursts still need throttling, just not lifecycle events.
-- Cache clear is unconditional post-op (only when dispatched > 0) rather than selective per-bucket — simpler, cheap re-scan covers next click.
-- Kept outer + inner `tokio::select!` cancel guards in `process_entry` (belt + suspenders).
-
-### Files Modified
-- `src-tauri/src/sync/auto_sync.rs` — promote_scan_pushes_to_dirty, auto-scan, cache clear, orphan-row emits, eprintln breadcrumbs, outer process_entry wrap
-- `src-tauri/src/diagnostics/mod.rs` — critical-event rate-limit bypass
-- `src-tauri/src/lib.rs` — command-level eprintln breadcrumbs
-- `src/lib/components/sync/SyncModal.svelte` — 60s hard watchdog, 3s force-close, X-button works while cancelling
-
-### Next Steps
-1. User in-app verification w/ v0.2.43 — Qbox connection (write-probe warn is non-fatal), Push pending with file edits, Stop button mid-push, repeat-click Push (cache clear should make it instant "0 pushed")
-2. Delete-direction visibility: local-delete watcher events emit "deleting…" / "pushed delete" activity rows now (verified path). Remote-delete via pull's ToDelete bucket emits via `delete_local_one` — visually fine per user testimony.
-3. The connect-time write probe cleanup ENOENT is non-fatal but spams stderr — could investigate further (likely russh-sftp shutdown ordering) but low priority.
-
----
-
-## Session 45 — 2026-05-12 — Connection liveness + real in-flight cancel + ship v0.2.42
-
-### Completed
-- **Write-probe ENOENT root-caused + fixed** (`sftp/transfer.rs:upload_bytes`): `create()` + `write_all()` never closed the SFTP file handle, so probe content didn't materialize server-side before `remove_file` ran. Added `f.shutdown().await`. Also made `probe_write_access` cleanup best-effort — create-proves-write-access; cleanup ENOENT is no longer connection-fatal.
-- **russh keepalive** added to both `sftp/mod.rs:open_session` (line ~129) and `tunnel/mod.rs:start` (line ~64): `keepalive_interval=20s`, `keepalive_max=3` → ~60s dead-detection. Was `Config::default()` (no keepalive) — fixes both indefinite hung pushes and the intermittent remote-panel errors.
-- **Real in-flight cancel** (`auto_sync.rs:process_entry` ~line 1809): `tokio::select!` races the upload future against the cancel token. Drop on cancel → russh stops WRITE packets → atomic-tmp file left server-side (rename never ran, target untouched) → entry requeues to dirty. `process_entry` signature now takes `Option<CancellationToken>`; `flush_batch` clones the token per dispatch.
-- **Push activity parity** (`auto_sync.rs:process_entry`): "uploading…" / "deleting…" rows emit at dispatch start, not just on completion. Hung pushes now show a heartbeat per file in the activity feed instead of a dead modal.
-- **StatusBar sync pill** (`StatusBar.svelte`): pulsing pill renders while `syncModal.busy && !syncModal.open`, click reopens modal so "Run in background" isn't a one-way trip.
-- Shipped v0.2.42-alpha-test — svelte-check 0/0/3994, cargo check clean (3.64s), vitest 6/6, delta 0.2.41→0.2.42 uploaded to `rift-releases`.
-
-### Key Decisions
-- Keepalive over per-file timeout: 60s socket-death detection is cheaper + safer than wrapping every SFTP call in `tokio::time::timeout`. A real long upload on a slow link shouldn't be aborted by Rift; a dead socket should.
-- Cancel token threaded by explicit signature param (not `engine.current_scan_cancel` mutex check) — guarantees each in-flight process_entry honors the SAME token that triggered the op, not whatever the latest replacement is.
-- `tracing` not in deps — used `eprintln!` for the probe-cleanup warn.
-
-### Files Modified
-- `src-tauri/src/sftp/transfer.rs` — upload_bytes shutdown()
-- `src-tauri/src/sftp/ops.rs` — probe cleanup best-effort
-- `src-tauri/src/sftp/mod.rs` — russh keepalive
-- `src-tauri/src/tunnel/mod.rs` — russh keepalive
-- `src-tauri/src/sync/auto_sync.rs` — process_entry sig + tokio::select cancel + start-row activity
-- `src/lib/components/shell/StatusBar.svelte` — sync pill
-- `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.42-alpha-test
-
-### Next Steps
-1. User in-app verification: Qbox connection (write-probe error should be gone), push w/ Stop (modal closes ~1s, in-flight upload drops), StatusBar pill click-to-reopen
-2. If keepalive is too aggressive on slow links (false disconnects), tune to 30s × 4 = 120s detection
-3. Polish backlog (Tier 3 login, Tier 4 modals, Diagnostics) still pending
-
----
-
-## Session 44 — 2026-05-12 — Quick Actions accuracy + real cancel + ship v0.2.41
-
-### Completed
-- TabRail Quick Actions accuracy pass: labels (Reconcile→Scan drift, Pull all→Pull pending, Push all→Push pending), tones (Push: warn→accent, Reconcile: neutral), tooltips scope-explicit
-- Backend cmds renamed `diag_*` → `sync_*` across lib.rs + all frontend invoke sites (SyncModal, TabRail, diagnostics.svelte.ts)
-- Real cancel: `flush_batch` + `flush_all_now` honor CancellationToken between entries; lazy-pop from dirty preserves un-dispatched work across cancel; `force_pull_now` orphans in-flight handles instead of awaiting them (modal closes ~1s after Stop)
-- SyncModal: `busy` flag tracks real op lifecycle independent of modal visibility; "Run in background" button dismisses modal while op continues; listeners gated on `busy || open`
-- TabRail: dropped dead local `pulling/pushing/scanning` flags (they flipped false within ms of click); gated on `syncModal.busy`
-- Shipped v0.2.41-alpha-test — svelte-check 0/0/3994 · cargo check clean · vitest 6/6 · delta 0.2.40→0.2.41 (3 patched, 2 unchanged)
-
-### Key Decisions
-- Lazy-pop over up-front pop: entries stay in dirty until dispatch committed; cancel mid-batch leaves remainder for next Push click
-- Orphan-on-cancel for pull: in-flight russh streams finish naturally, modal closes immediately. Can't abort mid-stream without torn files
-- `busy` flag independent of `open` — background-dismiss path needs lifecycle tracking separate from visibility
-
-### Files Modified
-- `src-tauri/src/lib.rs:127-175,1609-1612` — cmd renames
-- `src-tauri/src/sync/auto_sync.rs:557-617,619-671,1212-1234,1428-1590` — flush cancel + pull orphan
-- `src/lib/components/shell/TabRail.svelte` — labels, tones, busy gating
-- `src/lib/components/sync/SyncModal.svelte` — bg button, listener gate, invoke renames
-- `src/lib/state/sync-modal.svelte.ts` — busy flag, runInBackground
-- `src/lib/state/diagnostics.svelte.ts` — invoke rename
-- `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.41-alpha-test
-
-### Next Steps
-1. Verify delta-update in-app: 0.2.40→0.2.41 auto-update prompt + install
-2. Polish backlog: Tier 3 login (Bootstrap, AddServer, Keygen), Tier 4 modals (SyncModal, UpdateDialog), Diagnostics
-3. `auto_sync/{watch,flush}.rs` stubs still pending (cross-cut private state; flagged S43)
-
----
-
-## Session 43 — 2026-05-12 — Backend hardening + frontend cleanup pass
-
-Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixes-2026-05-12.md`. Symlink-safe `delete_recursive_via` (lstat per child, reject `/`/`.`/empty); rename collision split (`rename_via` preflights existence, only atomic upload calls `rename_overwriting_via`); per-path `OpStatus { ok, error }` on remote/local delete commands; profile-path containment on rename/delete/list/bootstrap/enqueue/conflict-resolve; autosync deadlock avoidance (clone engine before `.await` to drop mutex); retry map drop-after-final-failure; 64-bit transport temp-id entropy; CRLF-safe `edit_trail` trim. Connect-time write probe under `remote_root` before declaring SFTP healthy. `.rift-lock` sweep on watch attach (local-user owned, age-gated). Removed 3 dead pub fns. **File splits:** `sftp/mod.rs` → mod+list+transfer+ops+remote_exec (1348L → 286+373+202+73+320 = 1254L, public API unchanged); `auto_sync/path.rs` extracted (152L); `auto_sync/{watch,flush}.rs` left as 1-line `CODEX-FLAG` stubs — private state cross-cuts notify/queue/lock/cache/bridge/trail, mechanical move judged unsafe. Skipped (with reasons): `local_list_dir` containment (no server_key param — frontend contract change), log redaction / CSP / capability tightening / safe file-count cache / tunnel per-connection cancellation (product or cross-cutting decisions).
-**Frontend (Claude):** 5 new audit fixes from `scan-frontend-2026-05-11.md` (AddServer destroy-guard, ConflictResolver redundant-effect removed, `updates.svelte.ts` swallowed catch surfaced, Diagnostics wire comment, `dirtyEdits` Set-replace invariant). 9 svelte-check warnings → 0 (StatusBar `.val.ok` dead CSS, `splitEl`/`pickerEl`/`panelEl` → `$state`, split compound `<!-- svelte-ignore -->` per rule — Svelte 5 quirk drops 2nd rule from single-line). ConflictList S39 dev seed stripped (HANDOFF flag cleared). TwoPane many-tabs horizontal scroll + 20px edge fade mask. `app.css` dropped 5 unused rules: `.btn.lg` `.pill.warn` `.pill.xs` `.vdivider` `.count-pip.warn` (verified via dynamic-class grep of `connCfg.cls` and `t.countCls`).
-**Repo cleanup:** `scripts/bg-backlog.sh` deleted (stale Session 30 backlog, `--bg` never rolled out); `src-tauri/icons/{android,ios}/` deleted (desktop bundle only); `Releases/` pruned 44 → 10 nupkgs (~194 MB freed, last 5 versions kept).
-**Verify:** `cargo check` 0 errors · `npm run check` 0/0/3994 · `npm test` 6/6.
-
-**Files:** `docs/audit/codex-fixes-2026-05-12.md`, `src-tauri/src/sftp/{mod,list,ops,transfer,remote_exec}.rs`, `src-tauri/src/sync/auto_sync/{path,watch,flush}.rs`, `src-tauri/src/{lib,path_guard}.rs`, `src-tauri/src/sync/{auto_sync,lock_presence,edit_trail}.rs`, `src-tauri/src/transport/env.rs`, frontend: `app.css`, `AddServer.svelte`, `ConflictList.svelte`, `ConflictResolver.svelte`, `TwoPane.svelte`, `TerminalPanel.svelte`, `LocalPane.svelte`, `RemotePane.svelte`, `StatusBar.svelte`, `Diagnostics.svelte`, `state/{updates,connection,diagnostics}.svelte.ts`.
+### Today's known-good (v0.2.44)
+Push parity ✓, Pull cache parity ✓, Cancel 4-layer ✓, russh keepalive ✓, write-probe shutdown ✓, modal rate-limit bypass ✓, activity orphan-row guards ✓, in-app StatusBar sync pill while busy ✓.
 
 ## Earlier sessions — compressed
 
-**S42** Settings rework: 7 sections → 4. Killed Design tokens/Sync/Editor; stripped dead Direction/Mode/Font from Appearance — Density no-op so shipped Sparkles "Coming soon" card. Server-card inset-stripe canon, SSH keys inline header, About updates btn `.btn ghost sm`. Sub-page swap mirrors TabRail (`fly y:6 d:180 delay:90 quintOut` in, `fade 90ms` out, keyed on `section`); `.body` `position:relative overflow:hidden`, `.sub-shell` absolute inset:0. `SettingsSection` narrowed in AppShell. Net: 187 → 54 lines on `Settings.svelte`. **S41** Terminal A.2: panel promoted `TwoPane` → `AppShell` (persists across tabs), Ctrl+\` global. New `state/terminal.svelte.ts` store + `TerminalPanel.svelte` w/ split-button picker dropdown (**Presets** Claude Code/Codex + **Shells** git-bash/pwsh/ps/cmd), per-tab close + close-all trash, collapsed strip dynamic-labels w/ active shell + N-tabs pip. Backend `term_spawn` → `SessionStartInfo { id, shell_id, shell_label }`. Per-user localStorage: open/height/defaultShell/fontSize/autoLaunch/tabs/activeIdx. Per-tab auto-launch (250ms post-spawn `cmd\r` write). Restore dedupes by `(shellId, autoLaunch)` + caps at 4 — testing burst of 14 git-bash tabs collapses to 1 on relaunch. WebView2 cache HRESULT 0x8007139F recovery (rename `EBWebView` dir). `TwoPane` stripped of ~260 LOC terminal code. Store APIs (`setDefaultShell`/`setFontSize`/`setAutoLaunchCommand`/`closeAllTabs`) ready when Settings → Terminal sub-view ships. **S40** Terminal MVP build fixes (PathBuf drop, `use tauri::Manager` for `try_state`), collapsed-state floating-pill→integrated-24px-strip redesign, xterm scrollbar canon, dead CSS sweep. **S39** Conflicts polish (tone-coded bulk bar, inset-stripe selected rows, resolver meta cards, slot-in `animate:flip`). **S38** Browser polish + embedded terminal MVP (portable-pty + xterm.js). **S36-37** ActivityFeed canon. **S31-35** post-WPF cleanup, OpRail kill, Titlebar+TopBar merge, palette, tone-coded TabRail, `.btn` skeleton. Full diffs: `git log -- docs/HANDOFF.md`.
+**S46 (v0.2.43, 3 root causes)** — `promote_scan_pushes_to_dirty()` + auto-scan in `force_push_now` (push couldn't see scan results); both force_push/pull_now clear `last_scan_entries` after non-cancelled ops (was re-pushing same files indefinitely); critical lifecycle stages (DriftScanStart/Result, RescanSignal, SftpConnect/Disconnect, RemoteScanResult, BridgeAck, System) bypass `spawn_frontend_pump`'s 200/s rate cap (was silently dropping DriftScanResult on 192-file bursts → modal hang forever). Plus orphan-row guards on every `process_entry` early-return + `eprintln!` breadcrumbs in `sync_*_pending` cmds + `force_pull/push_now` bodies.
+**S45 (v0.2.42)** — `upload_bytes` shutdown() fix (probe ENOENT root cause), `probe_write_access` cleanup best-effort, russh keepalive 20s × 3 in both Config sites, `process_entry` takes `Option<CancellationToken>` + `tokio::select!` against upload future, push activity start-rows ("uploading…"), StatusBar sync pill while `syncModal.busy && !syncModal.open`.
+**S44 (v0.2.41)** — TabRail Quick Actions accuracy (Reconcile→Scan drift, Pull all→Pull pending, Push all→Push pending; Push warn→accent), backend cmds `diag_*` → `sync_*`, `flush_batch`/`flush_all_now` cancel-aware w/ lazy-pop, `force_pull_now` orphans handles on cancel, SyncModal `busy` flag + Run-in-background button.
+**S43 (v0.2.40)** — Codex audit 15-item backend hardening pass (symlink-safe deletes, rename collision split, OpStatus per-path, profile-path containment, autosync deadlock fix, write-probe at connect, `.rift-lock` sweep), `sftp/mod.rs` split into 5 files (1348L→1254L public API unchanged), `auto_sync/path.rs` extracted. Frontend cleanup: 5 audit fixes, 9 svelte-check warnings → 0, 5 dead CSS rules dropped, TwoPane horizontal-scroll polish.
+**S42 + earlier** — Settings 7→4 sections, Terminal multi-tab w/ AppShell-persistence, OpRail kill, Titlebar/TopBar merge, palette, tone-coded TabRail, `.btn` skeleton. Full diffs in `git log -- docs/HANDOFF.md`.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.44-alpha-test** — adds per-resource ToDelete/ToPush/ToPull breakdown to scan results for diagnosing the open partial-SFTP-listing bug (430 phantom ToDelete after fresh pull, circuit breaker held). Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
+**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.44-alpha-test** — push fully working end-to-end. Open investigation: partial SFTP listing causing phantom 430 ToDelete classifications post-pull (circuit breaker holds). Shipped via Velopack to `Blazzer10200/rift-releases`.
 
 **Rhythm:** apply canon (`docs/UI-POLISH-MAP.md`) to remaining unpolished pages. Tone via `data-tone` + `--tone` var, surface 8-14% rest / 22% hover, hover icon scale 1.1-1.18 w/ overshoot + reduced-motion guard, active inset-stripe `inset 2px 0 var(--tone)`, focus-within blur, hide-when-zero, title+hint empty states, truncation tooltips, `hour12: true` everywhere.
 
-**Polish done:** AppShell, Titlebar, TabRail, StatusHero, StatusBar, CommandPalette, TwoPane, LocalPane, RemotePane, PathBreadcrumbs, LockBadge, Confirm, Reupload, FlashToast, ActivityToast, ActivityFeed, ConflictList+Resolver, Terminal (S40) + TerminalPanel multi-tab (S41), Settings 4 sections (S42), `.btn` skeleton.
+**Polish done:** AppShell, Titlebar, TabRail, StatusHero, StatusBar (+ sync pill S45), CommandPalette, TwoPane, LocalPane, RemotePane, PathBreadcrumbs, LockBadge, Confirm, Reupload, FlashToast, ActivityToast, ActivityFeed, ConflictList+Resolver, Terminal multi-tab, Settings 4 sections, SyncModal (Run-in-bg + Close-anyway + 60s watchdog), `.btn` skeleton.
 
-**Pending:** Tier 3 login flow (Bootstrap, AddServer, Keygen), Tier 4 modals (SyncModal, UpdateDialog), Diagnostics. Carryover: Terminal Settings sub-view (shell picker + font size UI — APIs ready on `terminal.svelte.ts` store, folds into Appearance coming-soon pass). Appearance density/font/accent-tint controls (future). `auto_sync/{watch,flush}.rs` extraction (S43 left stubs; cross-cut private state too risky for mechanical move).
+**Pending:** Tier 3 login (Bootstrap, AddServer, Keygen), Tier 4 modals (UpdateDialog), Diagnostics polish. Carryover: Terminal Settings sub-view (APIs ready on `terminal.svelte.ts` store). Appearance density/font/accent-tint controls. `auto_sync/{watch,flush}.rs` stubs (cross-cut state, mechanical move risky).
 
-**Don't reintroduce:** OpRail, TopBar (merged into Titlebar), rail kbd hints `⌘1`, StatusBar `⌘K` pip, titlebar Settings gear, StatusHero big H1, dupe "watching" words, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design tokens / Sync / Editor sections (S42-killed), `.btn.lg` / `.pill.warn` / `.pill.xs` / `.vdivider` / `.count-pip.warn` (S43-dead CSS), `bg-backlog.sh` (S43-removed).
+**Top-of-queue debug:** the partial-listing root cause (see Session 47 above). Install v0.2.44, click Sync, export diagnostics, read the new `by_resource` field in drift_scan_result.
 
-**Flagged v0.2.40+:** `local_list_dir` profile containment (needs frontend contract change to add server_key), log redaction / CSP / capability tightening (product policy), safe file-count cache (watch-level invalidation design), tunnel per-connection cancellation (cross-cuts task ownership), `commands` `$derived` churn in AppShell (debatable value).
+**Don't reintroduce:** OpRail, TopBar (merged), rail kbd hints, StatusBar `⌘K` pip, titlebar gear, StatusHero big H1, dupe "watching" words, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design tokens/Sync/Editor sections, `.btn.lg`/`.pill.warn`/`.pill.xs`/`.vdivider`/`.count-pip.warn` dead CSS, `bg-backlog.sh`, the `diag_*` Tauri command names (renamed to `sync_*` in S44), local `pulling/pushing/scanning` flags in TabRail (replaced w/ `syncModal.busy`).
+
+**Flagged v0.2.40+:** `local_list_dir` profile containment (needs frontend contract change), log redaction / CSP / capability tightening (product policy), safe file-count cache (watch-level invalidation design), tunnel per-connection cancellation (cross-cuts task ownership).
 
 ---
 
@@ -165,12 +64,15 @@ Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixe
 - `rename_via` is strict; `rename_overwriting_via` ONLY for atomic upload tmp-swap.
 - Source `.secrets/env.sh` first on ship/auth tasks — non-interactive bash won't auto-load.
 - `last_scan_entries` is `std::sync::Mutex` (NOT tokio) — called from sync notify handler; tokio `blocking_lock` panics.
-- `force_pull_now` does inline drift scan + dispatches w/ guard in front (post-v0.2.38). Don't "optimize" to cache-only — stale tombstones fire mass deletes.
-- **NEVER `FileAttributes::default()` for SETSTAT** — sends zeros for size/mtime/atime/uid/gid → file truncation + epoch mtime. Use `FileAttributes::empty()` + set only fields you want. (v0.2.27 post-mortem.)
-- `SftpClient::delete` routes by remote stat — dirs go through `delete_recursive_via`. Don't shortcut to `remove_file` for "files only" — push pipeline can't distinguish ahead of time. (v0.2.29.)
+- `force_pull_now` does inline drift scan + dispatches w/ guard in front. Don't "optimize" to cache-only — stale tombstones fire mass deletes.
+- `force_push_now` (v0.2.43+) promotes scan ToPush → dirty, auto-scans on cold cache, clears cache after non-cancelled push. Don't simplify back to "drain dirty only."
+- **NEVER `FileAttributes::default()` for SETSTAT** — sends zeros → file truncation + epoch mtime. Use `FileAttributes::empty()` + set only fields you want. (v0.2.27 post-mortem.)
+- `SftpClient::delete` routes by remote stat — dirs go through `delete_recursive_via`. Don't shortcut to `remove_file` for "files only." (v0.2.29.)
 - `mkdir_p_via` chmods each segment to 2775 — setgid + group-writable required for shared-group teammate pushes. Don't drop SETSTAT. (v0.2.31.)
-- Upload pre-flight SHA-collapse before raising CONFLICT — sizes match + baseline SHA exists → hash local cheap, remote via SSH exec; if both = baseline, refresh baseline mtime + drop push. (v0.2.31 / v0.2.32 — 53 phantom conflicts.)
-- `DriftBucket::ToDelete` is the tombstone path — `local + no remote + has_baseline` MUST classify as `ToDelete`, NOT `ToPush`. Routes to `delete_local_one` which guards on foreign-lock + dirty-local. Empty-parent walk-up post-delete. (v0.2.33.)
+- Upload pre-flight SHA-collapse before raising CONFLICT — sizes match + baseline SHA → hash local cheap + remote via SSH exec; both = baseline → refresh baseline mtime + drop push. (v0.2.32 — 53 phantom conflicts.)
+- `DriftBucket::ToDelete` = `local + no remote + has_baseline`. Routes to `delete_local_one` (guards on foreign-lock + dirty-local + empty-parent walk-up). (v0.2.33.)
 - All time displays MUST pass `[], { hour12: true }` — locale-default emits 24h on non-US. (v0.2.34.)
-- Mass local-delete circuit breaker lives in `force_pull_now`: `(file_count * 0.30).clamp(5, 25)`, `BLOCKED — N local-deletes`, `kind=block`. Pull is the ONLY tombstone-propagation path post-auto-sync rip. (v0.2.36 / v0.2.38.)
-- DO NOT restore `drift_watcher::spawn` / `run_tick` / `flush_cycle` / `auto_flush_enabled` / `remote_scan_interval_secs` / `drift_watcher_task` / `flush_task` / `LOOP_TICK_MS` / `track_pull_handle` / `register_scan_cancel` / `clear_scan_cancel` — deleted v0.2.38. Auto path ping-ponged `[world]` resources on 10s tick. Push/Pull buttons only. Watcher still runs to populate dirty queue. (v0.2.38 post-mortem.)
+- Mass local-delete circuit breaker: `(file_count * 0.30).clamp(5, 25)`, `BLOCKED — N local-deletes`, `kind=block`. Pull is the ONLY tombstone-propagation path post-auto-sync rip. (v0.2.36 / v0.2.38.)
+- `spawn_frontend_pump` rate-limits at 200/s — critical stages (DriftScanStart/Result, RescanSignal, SftpConnect/Disconnect, RemoteScanResult, BridgeAck, System) ALWAYS bypass. Don't fold them back into the throttled path. (v0.2.43 post-mortem.)
+- russh `Config { keepalive_interval: Some(20s), keepalive_max: 3, .. }` in both `sftp::open_session` + `tunnel::start`. Don't revert to `default()` — half-dead TCP sockets hang Windows ~2hr otherwise. (v0.2.42.)
+- DO NOT restore `drift_watcher::spawn` / `run_tick` / `flush_cycle` / `auto_flush_enabled` / `remote_scan_interval_secs` / `drift_watcher_task` / `flush_task` / `LOOP_TICK_MS` / `track_pull_handle` / `register_scan_cancel` / `clear_scan_cancel` — deleted v0.2.38. Auto path ping-ponged. Push/Pull buttons only. Watcher still runs to populate dirty queue.
