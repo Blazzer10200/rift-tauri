@@ -23,6 +23,13 @@ export type DriftEntry = {
   reason: string;
 };
 
+export type AbortedShrunkFolder = {
+  resource_name: string;
+  remote_root: string;
+  baseline_count: number;
+  listing_count: number;
+};
+
 export type ResourceGroup = {
   resource: string;
   to_push: DriftEntry[];
@@ -38,6 +45,11 @@ class SyncPageStore {
   errorMsg = $state<string | null>(null);
   scannedAt = $state<number | null>(null);
   entries = $state<DriftEntry[]>([]);
+  abortedShrunk = $state<AbortedShrunkFolder[]>([]);
+  dismissedShrunk = $state<Set<string>>(new Set());
+  rebaselining = $state<Set<string>>(new Set());
+  confirmingRebaseline = $state<string | null>(null);
+  lastRebaselineResult = $state<{ resource: string; oldCount: number; newCount: number; localOnly: number } | null>(null);
   expanded = $state<Set<string>>(new Set());
   selected = $state<Set<string>>(new Set());
 
@@ -84,13 +96,79 @@ class SyncPageStore {
     this.loading = true;
     this.errorMsg = null;
     try {
-      const list = await invoke<DriftEntry[]>("sync_get_drift_snapshot");
+      const [list, aborted] = await Promise.all([
+        invoke<DriftEntry[]>("sync_get_drift_snapshot"),
+        invoke<AbortedShrunkFolder[]>("sync_get_aborted_shrunk"),
+      ]);
       this.entries = list;
+      this.abortedShrunk = aborted;
       this.scannedAt = Date.now();
     } catch (e) {
       this.errorMsg = String(e);
     } finally {
       this.loading = false;
+    }
+  }
+
+  /** Visible (non-dismissed) aborted folders. Frontend-only dismissal —
+   *  dismissed folders re-appear on next reconcile if guard still trips. */
+  get visibleAbortedShrunk(): AbortedShrunkFolder[] {
+    return this.abortedShrunk.filter((a) => !this.dismissedShrunk.has(a.remote_root));
+  }
+
+  dismissShrunk(remoteRoot: string) {
+    const next = new Set(this.dismissedShrunk);
+    next.add(remoteRoot);
+    this.dismissedShrunk = next;
+  }
+
+  requestRebaseline(remoteRoot: string) {
+    this.confirmingRebaseline = remoteRoot;
+  }
+
+  cancelRebaseline() {
+    this.confirmingRebaseline = null;
+  }
+
+  /** Resolve the remote_subpath (e.g. "[endure]") from a remote_root by stripping
+   *  the profile remote_root prefix. Backend reconstructs the full path. */
+  private subpathFromRoot(remoteRoot: string, target: AbortedShrunkFolder): string {
+    // resource_name is the bracket label; remote_subpath in detect_bootstrap is
+    // identical. Use resource_name as the subpath — backend joins to profile root.
+    return target.resource_name;
+  }
+
+  async confirmRebaseline() {
+    const remoteRoot = this.confirmingRebaseline;
+    if (!remoteRoot) return;
+    const target = this.abortedShrunk.find((a) => a.remote_root === remoteRoot);
+    if (!target) {
+      this.confirmingRebaseline = null;
+      return;
+    }
+    const subpath = this.subpathFromRoot(remoteRoot, target);
+    const next = new Set(this.rebaselining);
+    next.add(remoteRoot);
+    this.rebaselining = next;
+    this.confirmingRebaseline = null;
+    this.errorMsg = null;
+    try {
+      const result = await invoke<[number, number, number]>("sync_rebaseline_folder", {
+        remoteSubpath: subpath,
+      });
+      this.lastRebaselineResult = {
+        resource: target.resource_name,
+        oldCount: result[0],
+        newCount: result[1],
+        localOnly: result[2],
+      };
+      setTimeout(() => { void this.refresh(); }, 800);
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      const after = new Set(this.rebaselining);
+      after.delete(remoteRoot);
+      this.rebaselining = after;
     }
   }
 

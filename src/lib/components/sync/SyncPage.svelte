@@ -5,7 +5,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import {
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
-    ChevronRight, CheckCircle2, CircleAlert, Inbox,
+    ChevronRight, CheckCircle2, CircleAlert, Inbox, History,
   } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { syncPage, type ResourceGroup, type DriftEntry } from "../../state/sync-page.svelte";
@@ -176,6 +176,57 @@
       <span>{syncPage.errorMsg}</span>
     </div>
   {/if}
+
+  {#if syncPage.lastRebaselineResult}
+    <div class="banner ok" role="status" in:fade={{ duration: 120 }}>
+      <CheckCircle2 size={13}/>
+      <span>
+        Rebaselined <strong>{syncPage.lastRebaselineResult.resource}</strong> —
+        snapshot {syncPage.lastRebaselineResult.oldCount} → {syncPage.lastRebaselineResult.newCount},
+        {syncPage.lastRebaselineResult.localOnly} local-only file{syncPage.lastRebaselineResult.localOnly === 1 ? "" : "s"} now queued for Push.
+      </span>
+      <button class="banner-x" onclick={() => (syncPage.lastRebaselineResult = null)} aria-label="Dismiss">×</button>
+    </div>
+  {/if}
+
+  {#each syncPage.visibleAbortedShrunk as folder (folder.remote_root)}
+    {@const isConfirming = syncPage.confirmingRebaseline === folder.remote_root}
+    {@const isBusy = syncPage.rebaselining.has(folder.remote_root)}
+    <div class="shrink-banner" role="alert" in:fade={{ duration: 120 }}>
+      <div class="shrink-head">
+        <AlertTriangle size={13}/>
+        <span class="shrink-msg">
+          Listing shrink detected — <strong>{folder.resource_name}</strong>:
+          baseline {folder.baseline_count} → scan {folder.listing_count}.
+          Bracket aborted to prevent phantom deletes.
+        </span>
+        <span class="shrink-tip" title="Until rebaselined, new resources or files added inside this bracket will be invisible to Rift — they won't appear in the queue and won't sync to the server. Click Rebaseline if this shrink reflects an intentional cleanup; click Dismiss only if you expect the next scan to catch up.">
+          Why this matters
+        </span>
+      </div>
+      {#if isConfirming}
+        <div class="shrink-confirm" in:fade={{ duration: 100 }}>
+          <span>
+            Replace snapshot rows for <strong>{folder.resource_name}</strong> with current ground truth.
+            Local-only files will queue for Push on next reconcile. Re-hashes every file from disk — slower for large brackets, exact for correctness.
+          </span>
+          <div class="shrink-actions">
+            <button class="primary" disabled={isBusy} onclick={() => syncPage.confirmRebaseline()}>
+              {isBusy ? "Rebaselining…" : "Confirm Rebaseline"}
+            </button>
+            <button onclick={() => syncPage.cancelRebaseline()} disabled={isBusy}>Cancel</button>
+          </div>
+        </div>
+      {:else}
+        <div class="shrink-actions">
+          <button class="primary" disabled={isBusy} onclick={() => syncPage.requestRebaseline(folder.remote_root)}>
+            <History size={12}/> Rebaseline
+          </button>
+          <button onclick={() => syncPage.dismissShrunk(folder.remote_root)}>Dismiss</button>
+        </div>
+      {/if}
+    </div>
+  {/each}
 
   {#if !isEmpty && bucketsActive > 1}
     <div class="totals" in:fade={{ duration: 140 }}>
@@ -378,6 +429,93 @@
     background: var(--danger-soft);
     color: var(--danger);
     border: 1px solid color-mix(in oklch, var(--danger) 30%, transparent);
+  }
+
+  .banner.ok {
+    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    color: var(--fg);
+    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  }
+  .banner-x {
+    margin-left: auto;
+    background: transparent;
+    border: 0;
+    color: var(--fg-muted);
+    cursor: pointer;
+    padding: 0 4px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .banner-x:hover { color: var(--fg); }
+
+  /* ── Suspicious-shrink banner (v0.2.49) ─────────────── */
+  .shrink-banner {
+    margin: 6px 18px 0;
+    padding: 8px 10px;
+    border-radius: var(--radius);
+    font-size: var(--fs-sm);
+    background: var(--warn-soft);
+    color: var(--fg);
+    border: 1px solid color-mix(in oklch, var(--warn) 32%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .shrink-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .shrink-msg { flex: 1; min-width: 240px; }
+  .shrink-tip {
+    font-size: var(--fs-xs);
+    color: var(--warn);
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+    cursor: help;
+    white-space: nowrap;
+  }
+  .shrink-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .shrink-actions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--bg-elev-1);
+    color: var(--fg);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .shrink-actions button:hover:not(:disabled) {
+    background: var(--bg-elev-2);
+  }
+  .shrink-actions button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .shrink-actions button.primary {
+    background: var(--warn);
+    border-color: var(--warn);
+    color: var(--bg);
+  }
+  .shrink-actions button.primary:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+  .shrink-confirm {
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in oklch, var(--warn) 14%, var(--bg-elev-1));
+    border: 1px solid color-mix(in oklch, var(--warn) 24%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
   /* ── Totals strip (hide-when-zero) ──────────────────── */

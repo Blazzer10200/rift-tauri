@@ -239,6 +239,11 @@ pub struct AutoSyncEngine {
     /// almost always fresh. Empty = "no scan yet, fall back to full scan."
     last_scan_entries: std::sync::Mutex<Vec<crate::sync::DriftEntry>>,
 
+    /// Folders that the last reconcile aborted via the suspicious-shrink
+    /// guard. Surfaced to the frontend via `sync_get_aborted_shrunk` so the
+    /// user can rebaseline after a deliberate cleanup. v0.2.49.
+    last_aborted_shrunk: std::sync::Mutex<Vec<crate::sync::AbortedShrunkFolder>>,
+
     state: Mutex<(AutoSyncState, String)>,
     ignored_total: AtomicU64,
     ignored_by_rule: DashMap<String, u64>,
@@ -301,6 +306,7 @@ impl AutoSyncEngine {
             manual_delete_suppress_until: DashMap::new(),
             current_scan_cancel: std::sync::Mutex::new(None),
             last_scan_entries: std::sync::Mutex::new(Vec::new()),
+            last_aborted_shrunk: std::sync::Mutex::new(Vec::new()),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
@@ -1130,6 +1136,27 @@ impl AutoSyncEngine {
                 if let Ok(mut g) = engine.last_scan_entries.lock() {
                     *g = result.entries.clone();
                 }
+                if let Ok(mut g) = engine.last_aborted_shrunk.lock() {
+                    *g = result.aborted_shrunk.clone();
+                }
+                for a in &result.aborted_shrunk {
+                    diagnostics::emit_with_fields(
+                        DiagStage::BaselineShrinkDetected,
+                        DiagLevel::Warn,
+                        Some(&a.resource_name),
+                        None,
+                        format!(
+                            "baseline shrink: {} baseline → {} listing — bracket aborted, files local-only invisible until rebaseline",
+                            a.baseline_count, a.listing_count,
+                        ),
+                        serde_json::json!({
+                            "resource": a.resource_name,
+                            "remote_root": a.remote_root,
+                            "baseline_count": a.baseline_count,
+                            "listing_count": a.listing_count,
+                        }),
+                    );
+                }
             }
             let mut to_push = 0u32;
             let mut to_pull = 0u32;
@@ -1210,6 +1237,129 @@ impl AutoSyncEngine {
         if let Ok(mut g) = self.last_scan_entries.lock() {
             *g = entries;
         }
+    }
+
+    /// Snapshot of folders the last reconcile aborted via the suspicious-shrink
+    /// guard. Surfaced to the frontend rebaseline banner. v0.2.49.
+    pub fn aborted_shrunk(&self) -> Vec<crate::sync::AbortedShrunkFolder> {
+        self.last_aborted_shrunk
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default()
+    }
+
+    /// Rebaseline a single folder: re-list remote authoritatively + walk local,
+    /// re-hash from disk (no SHA trust), atomically replace snapshot rows under
+    /// the remote_root prefix. Files present on both sides → fresh Synced
+    /// baseline. Files local-only → snapshot row dropped → next scan buckets
+    /// as ToPush. Files remote-only → row dropped → next scan buckets as
+    /// ToPull. Clears the matching aborted_shrunk entry + kicks reconcile.
+    /// Returns (old_count, new_count, queued_for_push_estimate).
+    pub async fn rebaseline_folder(
+        self: &Arc<Self>,
+        remote_subpath: &str,
+    ) -> Result<(usize, usize, usize), String> {
+        let remote_root = format!(
+            "{}/{}",
+            self.profile.remote_root.trim_end_matches('/'),
+            remote_subpath.trim_start_matches('/').trim_end_matches('/')
+        );
+        let local_root = Path::new(&self.profile.local_root)
+            .join(remote_subpath.replace('/', std::path::MAIN_SEPARATOR_STR));
+
+        let listings = self
+            .sftp
+            .list_recursive_batch(&[remote_root.clone()], 12, None, 4)
+            .await
+            .map_err(|e| format!("rebaseline list: {e}"))?;
+        let remote_hits = listings.get(&remote_root).cloned().unwrap_or_default();
+
+        let remote_root_trim = remote_root.trim_end_matches('/').to_string();
+        let mut remote_rel: std::collections::HashMap<String, (i64, chrono::DateTime<Utc>)> =
+            std::collections::HashMap::new();
+        for r in &remote_hits {
+            if r.is_dir {
+                continue;
+            }
+            let rel = match r.full_path.strip_prefix(&remote_root_trim) {
+                Some(t) => t.trim_start_matches('/').to_string(),
+                None => r.name.clone(),
+            };
+            if crate::sync::ignore::should_ignore(&rel) {
+                continue;
+            }
+            remote_rel.insert(rel, (r.size as i64, r.last_modified));
+        }
+
+        let local_root_owned = local_root.clone();
+        let local_rel: std::collections::HashMap<String, (i64, chrono::DateTime<Utc>, PathBuf)> =
+            tokio::task::spawn_blocking(move || {
+                let mut m = std::collections::HashMap::new();
+                if local_root_owned.exists() {
+                    walk_local_rebaseline(&local_root_owned, &local_root_owned, &mut m);
+                }
+                m
+            })
+            .await
+            .map_err(|e| format!("local walk: {e}"))?;
+
+        let mut new_entries: std::collections::HashMap<String, crate::state::sync_snapshot::Entry> =
+            std::collections::HashMap::new();
+        let mut local_only = 0usize;
+        for (rel, (rsize, rmtime)) in &remote_rel {
+            if let Some((lsize, lmtime, lpath)) = local_rel.get(rel) {
+                let key = format!("{remote_root_trim}/{rel}");
+                let sha = if *lsize <= crate::state::sync_snapshot::SHA1_MAX_BYTES {
+                    crate::state::SyncSnapshot::compute_sha1(lpath)
+                } else {
+                    None
+                };
+                new_entries.insert(
+                    key,
+                    crate::state::sync_snapshot::Entry {
+                        local_size: *lsize,
+                        local_mtime_utc: *lmtime,
+                        remote_size: *rsize,
+                        remote_mtime_utc: *rmtime,
+                        sha1: sha,
+                    },
+                );
+            }
+        }
+        for rel in local_rel.keys() {
+            if !remote_rel.contains_key(rel) {
+                local_only += 1;
+            }
+        }
+
+        let (old_count, new_count) = self
+            .snapshot
+            .replace_under(&remote_root_trim, new_entries)
+            .map_err(|e| format!("snapshot replace: {e}"))?;
+
+        if let Ok(mut g) = self.last_aborted_shrunk.lock() {
+            g.retain(|a| a.remote_root != remote_root_trim);
+        }
+
+        diagnostics::emit_with_fields(
+            DiagStage::BaselineRebaselined,
+            DiagLevel::Info,
+            Some(remote_subpath),
+            None,
+            format!(
+                "rebaselined {remote_subpath}: snapshot {old_count} → {new_count}, {local_only} local-only queued for push"
+            ),
+            serde_json::json!({
+                "remote_subpath": remote_subpath,
+                "remote_root": remote_root_trim,
+                "old_count": old_count,
+                "new_count": new_count,
+                "local_only": local_only,
+            }),
+        );
+
+        self.kick_drift_reconcile();
+        Ok((old_count, new_count, local_only))
     }
 
     /// Snapshot the cached drift entries for the Sync page. Read-only —
@@ -2519,4 +2669,40 @@ enum EntryResult {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/// Rebaseline-only local walker. Captures rel_path → (size, mtime_utc, full_path)
+/// applying the same ignore rules walk_local in drift_scanner uses. Kept here
+/// (vs. reusing drift_scanner::walk_local) because that one returns its own
+/// LocalStat struct private to drift_scanner.
+fn walk_local_rebaseline(
+    root: &Path,
+    dir: &Path,
+    out: &mut std::collections::HashMap<String, (i64, chrono::DateTime<Utc>, PathBuf)>,
+) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if crate::sync::ignore::should_ignore(name) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            walk_local_rebaseline(root, &path, out);
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(root) else { continue };
+        let rel_s = rel.to_string_lossy().replace('\\', "/");
+        if crate::sync::ignore::should_ignore(&rel_s) {
+            continue;
+        }
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|d| chrono::DateTime::<Utc>::from_timestamp(d.as_secs() as i64, 0))
+            .unwrap_or_else(Utc::now);
+        out.insert(rel_s, (meta.len() as i64, mtime, path));
+    }
+}
 

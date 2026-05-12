@@ -55,6 +55,8 @@ pub enum DiagStage {
     RemotePullStart,
     RemotePullDone,
     RemotePullFail,
+    BaselineShrinkDetected,
+    BaselineRebaselined,
     Log,
     System,
 }
