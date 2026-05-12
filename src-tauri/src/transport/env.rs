@@ -23,12 +23,12 @@ pub fn hostname() -> Option<String> {
     })
 }
 
-/// 8-hex-char OS-randomness id. Used by edit/in-place + lock-presence +
+/// 16-hex-char OS-randomness id. Used by edit/in-place + lock-presence +
 /// edit-trail to disambiguate concurrent temp-dir names. Replaces
 /// `chrono::Utc::now().timestamp_nanos_opt()` which can collide when two
 /// callers fire inside the same nanosecond OR when nanos aren't supported.
 pub fn short_id() -> String {
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 8];
     rand::fill(&mut buf);
-    format!("{:08x}", u32::from_le_bytes(buf))
+    format!("{:016x}", u64::from_le_bytes(buf))
 }

@@ -51,6 +51,9 @@ pub fn validate_remote_child(profile: &ServerProfile, path: &str) -> Result<Stri
     } else {
         format!("/{root_trim}")
     };
+    if root_norm == "/" {
+        return Err("profile.remote_root '/' is not allowed for destructive ops".into());
+    }
 
     if normalized == root_norm {
         return Err(format!("refusing to operate on remote_root itself: {root_norm}"));
@@ -91,7 +94,11 @@ pub fn validate_local_child(profile: &ServerProfile, path: &str) -> Result<PathB
         let canon_parent = parent
             .canonicalize()
             .map_err(|e| format!("canonicalize parent '{}': {e}", parent.display()))?;
-        canon_parent.join(name)
+        let joined = canon_parent.join(name);
+        if joined.parent() != Some(canon_parent.as_path()) {
+            return Err(format!("local path '{}' escapes parent", p.display()));
+        }
+        joined
     };
 
     let local_root = profile.local_root.trim();

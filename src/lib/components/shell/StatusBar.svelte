@@ -83,7 +83,6 @@
   .grp { display: flex; align-items: center; gap: 6px; }
   .lbl { color: var(--fg-subtle); }
   .val { color: var(--fg-2); }
-  .val.ok { color: var(--ok); }
   .val.warn { color: var(--warn); }
   .val.danger { color: var(--danger); }
   .sep { width: 1px; height: 12px; background: var(--border); }

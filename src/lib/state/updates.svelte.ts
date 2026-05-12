@@ -17,7 +17,11 @@ class UpdateStore {
   async refresh() {
     this.state = "checking";
     this.error = "";
-    try { this.currentVersion = await invoke<string>("app_version"); } catch {}
+    try {
+      this.currentVersion = await invoke<string>("app_version");
+    } catch (e) {
+      console.warn("app_version invoke failed", e);
+    }
     try {
       const res = await invoke<UpdateInfo | null>("check_for_updates");
       if (res) { this.info = res; this.state = "available"; }

@@ -118,6 +118,7 @@ class ConnectionStore {
   lastActivity = $state<ActivityRow | null>(null);
   activityFeed = $state<ActivityRow[]>([]);
   watchedEdits = $state<WatchedEdit[]>([]);
+  /** Always replace (new Set(...)) — in-place .add()/.delete() is not reactive in runes mode. */
   dirtyEdits = $state<Set<string>>(new Set());
   pendingReuploads = $state<EditChangedEvent[]>([]);
 

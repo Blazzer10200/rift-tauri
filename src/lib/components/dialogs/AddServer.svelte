@@ -52,20 +52,24 @@
       bridgeToken = "";
       bridgePort = String(editing.bridgePort ?? 30121);
       nameTouched = true;
-    } else {
-      name = ""; host = ""; port = "22"; user = "";
-      keyPath = ""; remoteRoot = ""; localRoot = "";
-      txAdminUrl = ""; bridgeToken = ""; bridgePort = "30121";
-      void (async () => {
-        try {
-          const exists = await invoke<boolean>("default_ssh_key_exists");
-          if (exists && !keyPath) {
-            const path = await invoke<string | null>("default_ssh_key_path");
-            if (path) keyPath = path;
-          }
-        } catch (e) { console.error("default ssh key path lookup failed", e); }
-      })();
+      return;
     }
+    name = ""; host = ""; port = "22"; user = "";
+    keyPath = ""; remoteRoot = ""; localRoot = "";
+    txAdminUrl = ""; bridgeToken = ""; bridgePort = "30121";
+    // Async probe — cancel via the effect cleanup if the dialog closes
+    // before the invokes resolve, so we don't stomp on a fresh dialog.
+    let cancelled = false;
+    void (async () => {
+      try {
+        const exists = await invoke<boolean>("default_ssh_key_exists");
+        if (cancelled || !exists || keyPath) return;
+        const path = await invoke<string | null>("default_ssh_key_path");
+        if (cancelled) return;
+        if (path) keyPath = path;
+      } catch (e) { console.error("default ssh key path lookup failed", e); }
+    })();
+    return () => { cancelled = true; };
   });
 
   $effect(() => {

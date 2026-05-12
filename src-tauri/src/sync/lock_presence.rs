@@ -176,6 +176,37 @@ impl LockPresence {
     /// foreign-sweep threshold. Failed writes leave the lock as-is — next
     /// poll retries; if connectivity is gone the lock goes stale and gets
     /// reclaimed by another Rift, which is the desired behavior.
+    /// Watch-attach cleanup: remove stale `.rift-lock` files created by this
+    /// local user. Foreign stale locks remain poll-owned so badges stay honest.
+    pub async fn sweep_stale_mine(&self, folder: &str, depth: usize) -> Result<usize, String> {
+        let entries = self
+            .sftp
+            .list_recursive(folder, depth, Some(&[".rift-lock"]))
+            .await?;
+        let mut removed = 0usize;
+        for e in entries {
+            if self.my_locks.contains(&e.full_path) {
+                continue;
+            }
+            let Some(body) = self.try_read_lock(&e.full_path).await else { continue };
+            if body.user != self.my_user {
+                continue;
+            }
+            let since = chrono::DateTime::parse_from_rfc3339(&body.since)
+                .map(|d| d.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+            if (Utc::now() - since).num_seconds() <= STALE_SEC {
+                continue;
+            }
+            if self.sftp.delete(&e.full_path).await.success {
+                removed += 1;
+            } else {
+                log::warn!("stale lock cleanup failed for {}", e.full_path);
+            }
+        }
+        Ok(removed)
+    }
+
     async fn refresh_my_locks(&self) {
         let due: Vec<String> = self
             .last_heartbeat

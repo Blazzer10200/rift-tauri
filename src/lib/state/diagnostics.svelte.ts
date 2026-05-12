@@ -263,4 +263,3 @@ class DiagnosticsStore {
 }
 
 export const diagnostics = new DiagnosticsStore();
-export { ALL_STAGES };
