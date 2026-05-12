@@ -109,7 +109,13 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
             remote_root: fw.remote_root.clone(),
         })
         .collect();
-    let result = scanner.scan(&targets).await;
+    // Register the tick's cancel token in the shared slot so the modal's
+    // Cancel button can stop a slow background scan (30s+ SFTP listing on
+    // Trey's Tailscale link was the trigger). Replaces any prior token.
+    let ct = tokio_util::sync::CancellationToken::new();
+    engine.register_scan_cancel(ct.clone());
+    let result = scanner.scan_with_cancel(&targets, Some(&ct)).await;
+    engine.clear_scan_cancel(&ct);
     let scan_ms = started.elapsed().as_millis() as u64;
     // Cache entries so SyncModal's Pull Now button can dispatch from this
     // without re-scanning. Drift_watcher ticks every 10s → cache stays fresh.
