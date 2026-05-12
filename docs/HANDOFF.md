@@ -18,7 +18,8 @@
 
 ### Flagged for future
 - **Pull-side modal action.** Modal shows "Pull X" count but doesn't yet have a "Review Pull" button that opens the existing DriftReview screen. Trey hit this — sees 894 ToPull, no obvious path to act on them from the modal. ~20min: add footer button when `result.pull > 0`, route through existing DriftReview component.
-- **a11y warnings** — 6 leftover (`Settings`/`LocalPane`/`RemotePane`/`SyncModal`). Pre-existing patterns; sweep in a UX-only pass.
+- **Per-folder streaming during initial listing** (v0.2.21 target). Backend's `SftpClient::list_recursive_batch` is the slow part of a scan (~30s on a deep tree) and emits no progress events while it runs — per-folder `drift_scan_progress` events only fire AFTER the batch completes, so the activity feed dumps all 8 in rapid succession at the end. v0.2.20 mitigates with a "Listing remote files…" status-line + activity hint on `drift_scan_start`. Real fix: instrument `list_recursive_batch` to emit a per-root completion event as each folder's listing finishes. ~30-40min, touches `sftp/mod.rs`.
+- **a11y warnings** — 5 leftover (`Settings`/`LocalPane`/`RemotePane`). Pre-existing patterns; sweep in a UX-only pass.
 
 ### Next Steps (post-ship)
 1. Trey field-tests v0.2.20: sync button → modal opens → scan completes cleanly → counts visible. Hit Cancel mid-scan to verify the cancel button stops the reconcile.
