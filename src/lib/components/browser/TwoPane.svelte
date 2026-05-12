@@ -136,8 +136,9 @@
   // v0.2.19's 30s frontend timeout false-alarmed on >30s scans (894-entry
   // reconcile took ~45s). Modal stays patient as long as events keep arriving.
   const syncing = $derived(syncModal.open && syncModal.phase === "scanning");
+  let pulling = $state(false);
   async function onSync() {
-    if (syncing) return;
+    if (syncing || pulling) return;
     syncModal.start();
     try {
       const fired = await invoke<boolean>("diag_force_drift_scan");
@@ -146,6 +147,19 @@
       }
     } catch (e) {
       syncModal.fail(String(e));
+    }
+  }
+  async function onPullNow() {
+    if (syncing || pulling) return;
+    pulling = true;
+    syncModal.start();
+    try {
+      const fired = await invoke<boolean>("diag_force_pull_now");
+      if (!fired) syncModal.fail("Not connected — start auto-sync first.");
+    } catch (e) {
+      syncModal.fail(String(e));
+    } finally {
+      pulling = false;
     }
   }
 </script>
@@ -185,9 +199,11 @@
         canUpload={localSel.length > 0}
         canDownload={remoteSel.length > 0}
         {syncing}
+        {pulling}
         {onUpload}
         {onDownload}
         {onSync}
+        {onPullNow}
       />
       <RemotePane
         serverKey={connection.selectedKey}

@@ -1,15 +1,17 @@
 <script lang="ts">
-  import { ArrowRight, ArrowLeft, RefreshCw } from "lucide-svelte";
+  import { ArrowRight, ArrowLeft, RefreshCw, DownloadCloud } from "lucide-svelte";
 
   type Props = {
     canUpload: boolean;
     canDownload: boolean;
     syncing: boolean;
+    pulling: boolean;
     onUpload: () => void;
     onDownload: () => void;
     onSync: () => void;
+    onPullNow: () => void;
   };
-  let { canUpload, canDownload, syncing, onUpload, onDownload, onSync }: Props = $props();
+  let { canUpload, canDownload, syncing, pulling, onUpload, onDownload, onSync, onPullNow }: Props = $props();
 </script>
 
 <div class="oprail">
@@ -25,13 +27,23 @@
     <button
       class="op accent"
       class:spinning={syncing}
-      disabled={syncing}
+      disabled={syncing || pulling}
       onclick={onSync}
       title="Reconcile both sides — compare local vs remote, find conflicts"
       aria-label="Reconcile"
       type="button"
     >
       <RefreshCw size={14}/>
+    </button>
+    <button
+      class="op accent"
+      disabled={syncing || pulling}
+      onclick={onPullNow}
+      title="Pull Now — fetch any remote changes immediately (auto-pulls every 10s otherwise)"
+      aria-label="Pull Now"
+      type="button"
+    >
+      <DownloadCloud size={14}/>
     </button>
   </div>
 </div>
