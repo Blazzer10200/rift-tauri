@@ -56,6 +56,14 @@
           kind: "drift",
           text: "reconcile started",
         });
+        // First-stage listing is one big SFTP batch call that can take 20-40s
+        // on a deep tree before any per-folder progress event fires. Without
+        // this hint the modal looks frozen for the duration.
+        syncModal.pushActivity({
+          at: new Date().toISOString(),
+          kind: "drift",
+          text: "listing remote files (this can take a moment)…",
+        });
       } else if (stage === "drift_scan_progress") {
         const f = (fields as DriftProgressFields) ?? {};
         syncModal.progress(f.current ?? 0, f.total ?? 0, f.resource ?? "");
@@ -201,7 +209,7 @@
             {#if syncModal.totalFolders > 0}
               Scanning {syncModal.resource || "…"} — {syncModal.currentFolder} / {syncModal.totalFolders} folders
             {:else}
-              Preparing scan…
+              Listing remote files… (this may take a moment on the first scan)
             {/if}
           {:else if syncModal.phase === "cancelled"}
             Cancelled after {syncModal.currentFolder} of {syncModal.totalFolders} folders
