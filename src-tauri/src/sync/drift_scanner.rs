@@ -39,6 +39,7 @@ pub enum DriftBucket {
     Synced,
     ToPush,
     ToPull,
+    ToDelete,
     Conflict,
 }
 
@@ -272,12 +273,17 @@ impl<'a> DriftScanner<'a> {
             let (bucket, reason): (DriftBucket, String) = if l.is_none() && r.is_some() {
                 (DriftBucket::ToPull, "remote-only — pull".into())
             } else if l.is_some() && r.is_none() {
-                let reason = if snap.is_some() {
-                    "remote vanished — re-pushing local".into()
+                // Tombstone semantics: baseline IS the proof we'd previously
+                // agreed this file existed remotely. Now remote doesn't have
+                // it → that's a deletion propagation, NOT a "remote vanished
+                // re-push" disaster. Pre-v0.2.33 this was misclassified as
+                // ToPush, so teammates' deletes left ghost files behind +
+                // risked accidental resurrection on next touch.
+                if snap.is_some() {
+                    (DriftBucket::ToDelete, "remote deleted — removing local".into())
                 } else {
-                    "local-only — push".into()
-                };
-                (DriftBucket::ToPush, reason)
+                    (DriftBucket::ToPush, "local-only — push".into())
+                }
             } else if let (Some(ls), Some(rs), Some(snap_e)) = (l, r, snap.as_ref()) {
                 // Both exist + baseline. Stat → optional hash → bucket.
                 let mut local_changed = !SyncSnapshot::local_matches(snap_e, ls.size, ls.mtime);

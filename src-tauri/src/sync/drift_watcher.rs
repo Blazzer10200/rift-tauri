@@ -122,10 +122,12 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
     engine.cache_scan_entries(result.entries.clone());
 
     let mut to_pull = 0usize;
+    let mut to_delete = 0usize;
     let mut conflicts = 0usize;
     for entry in &result.entries {
         match entry.bucket {
             DriftBucket::ToPull => to_pull += 1,
+            DriftBucket::ToDelete => to_delete += 1,
             DriftBucket::Conflict => conflicts += 1,
             _ => {}
         }
@@ -136,17 +138,18 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
         DiagLevel::Info,
         None,
         None,
-        format!("scan: {to_pull} to-pull, {conflicts} conflict, {} entries total", result.entries.len()),
+        format!("scan: {to_pull} to-pull, {to_delete} to-delete, {conflicts} conflict, {} entries total", result.entries.len()),
         serde_json::json!({
             "elapsed_ms": scan_ms,
             "to_pull": to_pull,
+            "to_delete": to_delete,
             "conflicts": conflicts,
             "entries": result.entries.len(),
             "listing_error": result.last_batch_listing_error,
         }),
     );
 
-    // Dispatch pulls + conflict registration.
+    // Dispatch pulls + delete-propagation + conflict registration.
     for entry in result.entries {
         if engine.is_disposed() {
             break;
@@ -156,6 +159,13 @@ async fn run_tick(engine: &Arc<AutoSyncEngine>) {
                 let task_engine = engine.clone();
                 let h = tokio::spawn(async move {
                     pull_one(&task_engine, entry).await;
+                });
+                engine.track_pull_handle(h);
+            }
+            DriftBucket::ToDelete => {
+                let task_engine = engine.clone();
+                let h = tokio::spawn(async move {
+                    delete_local_one(&task_engine, entry).await;
                 });
                 engine.track_pull_handle(h);
             }
@@ -346,6 +356,109 @@ pub(crate) async fn pull_one(engine: &Arc<AutoSyncEngine>, entry: crate::sync::D
             engine.record_remote_conflict(&local_path, record);
         }
     }
+}
+
+/// Propagate a remote-side delete to local. Triggered when the drift scanner
+/// classifies an entry as `ToDelete` (local has it, remote doesn't, baseline
+/// proves it WAS synced). Three guards:
+///   * Foreign lock → defer (next tick retries after release).
+///   * Dirty local (unflushed edit) → skip; respect user's in-flight work.
+///     If they save+push, the remote delete reverses; if they accept it, the
+///     next scan after the buffer flushes will re-fire and clean up.
+///   * Otherwise → fs::remove_file + snapshot.forget + cache.forget + best-
+///     effort empty-parent-dir cleanup.
+pub(crate) async fn delete_local_one(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) {
+    let local_path = PathBuf::from(&entry.local_path);
+    let remote_path = entry.remote_path.clone();
+    let resource = entry.resource_name.clone();
+
+    if let Some(locks) = engine.locks() {
+        if let Some(foreign) = locks.find_lock_by_other(&remote_path) {
+            diagnostics::emit_with_fields(
+                DiagStage::RemotePullFail,
+                DiagLevel::Warn,
+                Some(&resource),
+                Some(&remote_path),
+                format!("delete-local deferred — locked by {}@{}", foreign.user, foreign.host),
+                serde_json::json!({
+                    "reason": "foreign_lock",
+                    "user": foreign.user,
+                    "host": foreign.host,
+                }),
+            );
+            return;
+        }
+    }
+
+    if engine.is_path_dirty(&local_path) {
+        diagnostics::emit_with_fields(
+            DiagStage::RemotePullFail,
+            DiagLevel::Warn,
+            Some(&resource),
+            Some(&remote_path),
+            "delete-local skipped — local has unflushed edit",
+            serde_json::json!({ "reason": "local_dirty" }),
+        );
+        return;
+    }
+
+    engine.mark_recently_written(&local_path);
+    let started = std::time::Instant::now();
+    let r = std::fs::remove_file(&local_path);
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    if let Err(e) = r {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            diagnostics::emit_with_fields(
+                DiagStage::RemotePullFail,
+                DiagLevel::Error,
+                Some(&resource),
+                Some(&remote_path),
+                format!("delete-local failed: {e}"),
+                serde_json::json!({
+                    "elapsed_ms": elapsed_ms,
+                    "error": e.to_string(),
+                }),
+            );
+            return;
+        }
+    }
+
+    engine.snapshot().forget(&remote_path);
+    engine.cache().forget(&remote_path);
+
+    // Best-effort empty-dir cleanup walks up until a non-empty dir or fs error
+    // halts it. remove_dir only succeeds on empties → safe.
+    if let Some(parent) = local_path.parent() {
+        let mut cur = parent.to_path_buf();
+        while std::fs::remove_dir(&cur).is_ok() {
+            match cur.parent() {
+                Some(p) => cur = p.to_path_buf(),
+                None => break,
+            }
+        }
+    }
+
+    diagnostics::emit_with_fields(
+        DiagStage::RemotePullDone,
+        DiagLevel::Info,
+        Some(&resource),
+        Some(&remote_path),
+        "deleted local (remote removed)",
+        serde_json::json!({
+            "elapsed_ms": elapsed_ms,
+            "local_path": local_path.to_string_lossy().to_string(),
+        }),
+    );
+
+    let row = crate::sync::ActivityRow {
+        at: Utc::now(),
+        resource,
+        file: file_name_or(&local_path),
+        action: "deleted (remote removed)".into(),
+        kind: crate::sync::ActivityKind::Delete,
+    };
+    use tauri::Emitter;
+    let _ = engine.app().emit("autosync://activity", &row);
 }
 
 fn register_conflict(engine: &Arc<AutoSyncEngine>, entry: crate::sync::DriftEntry) {
