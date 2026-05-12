@@ -948,6 +948,30 @@ async fn mkdir_p_via(sftp: &SftpSession, path: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Reformat noisy/duplicated SFTP error strings into something a user can act
+/// on. russh-sftp's Display impl frequently emits "Permission denied: Permission
+/// denied" (status + message both filled). We collapse the double + append a
+/// hint pointing at the actual fix (server-side group write on the parent).
+fn format_sftp_err(op: &str, target: &str, err: impl std::fmt::Display) -> String {
+    let raw = err.to_string();
+    // Collapse "X: X" duplicates russh-sftp emits.
+    let cleaned = match raw.split_once(": ") {
+        Some((a, b)) if a == b => a.to_string(),
+        _ => raw.clone(),
+    };
+    if cleaned.contains("Permission denied") || cleaned.contains("permission denied") {
+        format!(
+            "{op} {target}: permission denied — your SSH user can't write here. \
+Server admin: sudo chgrp -R <shared-group> <parent dir> && sudo chmod -R g+w <parent dir> \
+&& sudo find <parent dir> -type d -exec chmod g+s {{}} \\;"
+        )
+    } else if cleaned.contains("No such file") || cleaned.contains("no such file") {
+        format!("{op} {target}: remote path missing — parent dir may not exist")
+    } else {
+        format!("{op} {target}: {cleaned}")
+    }
+}
+
 async fn upload_atomic_via(
     sftp: &SftpSession,
     local_path: &Path,
@@ -974,17 +998,17 @@ async fn upload_atomic_via(
     {
         let mut f = match sftp.create(&tmp).await {
             Ok(f) => f,
-            Err(e) => return OpResult::err(format!("create tmp {tmp}: {e}")),
+            Err(e) => return OpResult::err(format_sftp_err("create tmp", &tmp, e)),
         };
         if let Err(e) = f.write_all(&bytes).await {
             drop(f);
             let _ = sftp.remove_file(&tmp).await;
-            return OpResult::err(format!("write tmp {tmp}: {e}"));
+            return OpResult::err(format_sftp_err("write tmp", &tmp, e));
         }
     }
     if let Err(e) = rename_overwriting_via(sftp, &tmp, remote_path).await {
         let _ = sftp.remove_file(&tmp).await;
-        return OpResult::err(e);
+        return OpResult::err(format_sftp_err("rename", remote_path, e));
     }
     OpResult::ok()
 }
