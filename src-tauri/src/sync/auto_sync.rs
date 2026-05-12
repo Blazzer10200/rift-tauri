@@ -32,6 +32,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::bridge::BridgeClient;
 use crate::diagnostics::{self, DiagLevel, DiagStage};
@@ -211,10 +212,12 @@ pub struct AutoSyncEngine {
     failed: DashMap<PathBuf, DirtyEntry>,
     conflicts: DashMap<PathBuf, ConflictRecord>,
     manual_delete_suppress_until: DashMap<PathBuf, DateTime<Utc>>,
-    // After a drift_watcher pull writes a file, the atomic rename fires a notify
-    // Modify event which would re-enqueue the file for upload (echo loop).
-    // 2s suppression window matches the manual-delete pattern.
-    just_pulled_suppress_until: DashMap<PathBuf, DateTime<Utc>>,
+
+    /// Cancellation token for the currently in-flight drift reconcile.
+    /// Replaced on each `kick_drift_reconcile`; `cancel_drift_reconcile`
+    /// fires the stored token (no-op when None). std::sync::Mutex because
+    /// `kick_drift_reconcile` is sync (notify event handler can call it).
+    current_scan_cancel: std::sync::Mutex<Option<CancellationToken>>,
 
     state: Mutex<(AutoSyncState, String)>,
     ignored_total: AtomicU64,
@@ -270,7 +273,7 @@ impl AutoSyncEngine {
             failed: DashMap::new(),
             conflicts: DashMap::new(),
             manual_delete_suppress_until: DashMap::new(),
-            just_pulled_suppress_until: DashMap::new(),
+            current_scan_cancel: std::sync::Mutex::new(None),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
@@ -598,14 +601,6 @@ impl AutoSyncEngine {
         self.suppress_local_delete_uploads(&locals);
     }
 
-    /// Suppress the immediate post-pull echo event. Drift-watcher calls this
-    /// after a successful atomic-rename pull so the resulting notify Modify
-    /// event doesn't re-enqueue the file for upload.
-    pub fn suppress_just_pulled(&self, path: &Path) {
-        let until = Utc::now() + chrono::Duration::seconds(2);
-        self.just_pulled_suppress_until.insert(path.to_path_buf(), until);
-    }
-
     pub async fn status(&self) -> AutoSyncStatus {
         let (state, detail) = self.state.lock().await.clone();
         AutoSyncStatus {
@@ -825,6 +820,14 @@ impl AutoSyncEngine {
         let sftp = self.sftp.clone();
         let snapshot = self.snapshot.clone();
         let engine = self.clone();
+        let ct = CancellationToken::new();
+        let ct_for_task = ct.clone();
+        // Replace any prior in-flight token. Old scan keeps its own clone — if it
+        // was mid-folder it will check on the next iteration; if it already
+        // finished the cancel is a harmless no-op.
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            *g = Some(ct);
+        }
         let h = tokio::spawn(async move {
             diagnostics::emit(
                 DiagStage::DriftScanStart,
@@ -840,7 +843,7 @@ impl AutoSyncEngine {
                     remote_root: fw.remote_root.clone(),
                 })
                 .collect();
-            let result = scanner.scan(&targets).await;
+            let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
             let mut to_push = 0u32;
             let mut to_pull = 0u32;
             let mut conflicts = 0u32;
@@ -856,7 +859,9 @@ impl AutoSyncEngine {
                     crate::sync::DriftBucket::Synced => {}
                 }
             }
-            let enqueued = if !push_paths.is_empty() {
+            // On cancel: do NOT auto-enqueue partial push set — the user just
+            // asked to stop. Leave the rows for the modal to surface manually.
+            let enqueued = if !result.cancelled && !push_paths.is_empty() {
                 engine.enqueue_for_flush_batch(push_paths, false, false).await
             } else {
                 0
@@ -866,7 +871,7 @@ impl AutoSyncEngine {
                 DiagLevel::Info,
                 None,
                 None,
-                "reconcile complete",
+                if result.cancelled { "reconcile cancelled" } else { "reconcile complete" },
                 serde_json::json!({
                     "entries": result.entries.len(),
                     "to_push": to_push,
@@ -875,10 +880,30 @@ impl AutoSyncEngine {
                     "enqueued_for_push": enqueued,
                     "missing_remote_folders": result.remote_folders_missing.len(),
                     "listing_error": result.last_batch_listing_error,
+                    "cancelled": result.cancelled,
                 }),
             );
+            // Clear token slot if it's still ours (another kick could have replaced it).
+            if let Ok(mut g) = engine.current_scan_cancel.lock() {
+                if let Some(stored) = g.as_ref() {
+                    if stored.is_cancelled() == ct_for_task.is_cancelled() {
+                        *g = None;
+                    }
+                }
+            }
         });
         self.track_background(h);
+    }
+
+    /// Cancel the in-flight drift reconcile if one is running. No-op otherwise.
+    /// The running scan checks the token between folders and bails with a
+    /// `cancelled: true` ScanResult; the modal surfaces that as "cancelled".
+    pub fn cancel_drift_reconcile(&self) {
+        if let Ok(g) = self.current_scan_cancel.lock() {
+            if let Some(ct) = g.as_ref() {
+                ct.cancel();
+            }
+        }
     }
 
     /// Mark a path as just-written by Rift so the next ~5s of fs-events
@@ -952,16 +977,6 @@ impl AutoSyncEngine {
                 None,
                 Some(&path_str),
                 "ignored [manual-delete-suppression]",
-            );
-            return;
-        }
-        if self.is_just_pulled_suppressed(&path) {
-            diagnostics::emit_for(
-                DiagStage::Ignored,
-                DiagLevel::Debug,
-                None,
-                Some(&path_str),
-                "ignored [post-pull-echo-suppression]",
             );
             return;
         }
@@ -1550,22 +1565,6 @@ impl AutoSyncEngine {
             .any(|kv| path.starts_with(kv.key()) && *kv.value() > now)
     }
 
-    fn is_just_pulled_suppressed(&self, path: &Path) -> bool {
-        let now = Utc::now();
-        let expired: Vec<PathBuf> = self
-            .just_pulled_suppress_until
-            .iter()
-            .filter(|kv| *kv.value() <= now)
-            .map(|kv| kv.key().clone())
-            .collect();
-        for key in expired {
-            self.just_pulled_suppress_until.remove(&key);
-        }
-        self.just_pulled_suppress_until
-            .get(path)
-            .map(|v| *v > now)
-            .unwrap_or(false)
-    }
 
     async fn set_state(&self, s: AutoSyncState, detail: String) {
         {
