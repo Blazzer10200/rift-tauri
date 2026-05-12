@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
+## v0.2.25-alpha-test — 2026-05-12 — Actionable SFTP error messages
+
+Trey hit "Permission denied: Permission denied" upload failures across all his edits — russh-sftp doubles the message AND the literal text doesn't tell the user it's a Linux ownership issue on the FiveM server (Blazzer-owned files in 0755 dirs; Trey's `treyday` user can read but not create new files / tmps in the parent).
+
+New `format_sftp_err` helper applied to all upload_atomic_via failure paths (create-tmp, write-tmp, rename). Collapses "X: X" duplicates and, when the error contains "Permission denied", appends the actual server-side fix:
+
+> Server admin: sudo chgrp -R \<shared-group\> \<parent dir\> && sudo chmod -R g+w \<parent dir\> && sudo find \<parent dir\> -type d -exec chmod g+s {} \;
+
+Also catches "No such file" for the missing-parent-dir case.
+
 ## v0.2.24-alpha-test — 2026-05-12 — Pull Now: actually fast (cache-based, no scan)
 
 v0.2.21-v0.2.23 Pull Now re-ran the full drift scan before dispatching pulls — so it felt identical to Reconcile (the 30s SFTP batch listing was the slow part, not the pulls). Trey confirmed it: "same exact task and taking just as long if not longer."
