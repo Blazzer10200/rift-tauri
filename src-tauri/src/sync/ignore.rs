@@ -14,6 +14,7 @@
 
 const IGNORE_EXTS: &[&str] = &[
     ".swp", ".tmp", ".bak", ".backup", ".pyc", ".rift-tmp", ".rift-lock",
+    ".crswap", ".crdownload",
 ];
 
 const IGNORE_FILE_EXACT: &[&str] = &[
@@ -134,6 +135,8 @@ pub fn classify(path: &str) -> Option<&'static str> {
                 ".pyc" => "ext:.pyc",
                 ".rift-tmp" => "ext:.rift-tmp",
                 ".rift-lock" => "ext:.rift-lock",
+                ".crswap" => "ext:.crswap",
+                ".crdownload" => "ext:.crdownload",
                 _ => "ext:?",
             });
         }
@@ -161,6 +164,29 @@ pub fn classify(path: &str) -> Option<&'static str> {
             let tail = &name[idx + 5..];
             if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit() || c == '.') {
                 return Some("editor-tmp(.tmp.<digits>)");
+            }
+            // <base>.tmp.<pid>.<hex> — atomic save w/ PID + hex hash. Source
+            // observed 2026-05-12 on Endure: `client.lua.tmp.9076.310b94f68378`,
+            // `client.lua.tmp.9076.9fb373b75708`. Editor (likely VSCode on
+            // Windows w/ certain extensions, or a Tauri/Vite-side writer)
+            // creates the tmp then renames into place. Watcher used to catch
+            // these → acquire a remote `.rift-lock` → fail to read local
+            // (already renamed away) → orphan lock + "skipped: file locked
+            // or unreadable" rows. v0.2.50 root cause for the recurring
+            // orphan-lock pattern. Tight match: exactly two dot-segments
+            // after `.tmp.`, first all digits, second ≥8 hex chars only.
+            let mut parts = tail.splitn(3, '.');
+            let pid = parts.next().unwrap_or("");
+            let hash = parts.next().unwrap_or("");
+            let extra = parts.next();
+            if extra.is_none()
+                && !pid.is_empty()
+                && pid.len() <= 8
+                && pid.chars().all(|c| c.is_ascii_digit())
+                && hash.len() >= 8
+                && hash.chars().all(|c| c.is_ascii_hexdigit())
+            {
+                return Some("editor-tmp(.tmp.<pid>.<hex>)");
             }
         }
     }
@@ -306,6 +332,35 @@ mod tests {
         );
         // Legit user file w/ non-digit tail — must NOT trip
         assert_eq!(classify("foo/report.tmp.draft.md"), None);
+    }
+
+    #[test]
+    fn editor_tmp_pid_hex() {
+        // Exact patterns observed on Endure 2026-05-12 — caused orphan locks
+        assert_eq!(
+            classify("[endure]/endure_rifttest_diag1/client.lua.tmp.9076.310b94f68378"),
+            Some("editor-tmp(.tmp.<pid>.<hex>)")
+        );
+        assert_eq!(
+            classify("[qbx]/client.lua.tmp.9076.9fb373b75708"),
+            Some("editor-tmp(.tmp.<pid>.<hex>)")
+        );
+        assert_eq!(
+            classify("foo/bar.txt.tmp.24300.fd5e87ae025a"),
+            Some("editor-tmp(.tmp.<pid>.<hex>)")
+        );
+        // Negative: too-short hash, extra segment, non-hex char in hash
+        assert_eq!(classify("foo/a.tmp.123.abc"), None);
+        assert_eq!(classify("foo/a.tmp.123.aaaaaaaa.extra"), None);
+        assert_eq!(classify("foo/a.tmp.123.zzzzzzzz"), None);
+        // Negative: long PID
+        assert_eq!(classify("foo/a.tmp.123456789.aaaaaaaa"), None);
+    }
+
+    #[test]
+    fn cr_swap_and_download() {
+        assert!(should_ignore("foo/state.vscdb.crswap"));
+        assert!(should_ignore("foo/installer.exe.crdownload"));
     }
 
     #[test]

@@ -250,6 +250,20 @@ async fn sync_apply_selected(
     Ok(true)
 }
 
+/// v0.2.50: user-invoked recovery — reclaim our own stale `.rift-lock`
+/// files across every watched remote root. Returns the count swept. Safe
+/// to call anytime; gates on `since > STALE_SEC` + `body.user == me`.
+#[tauri::command]
+async fn sync_sweep_stale_locks(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<usize, String> {
+    let engine = { state.0.lock().await.clone() };
+    let Some(engine) = engine else {
+        return Err("not connected".into());
+    };
+    engine.sweep_stale_locks().await
+}
+
 /// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
 /// when a sync isn't behaving. Keys are stable rule labels from
 /// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
@@ -1690,6 +1704,7 @@ pub fn run() {
             sync_get_aborted_shrunk,
             sync_rebaseline_folder,
             sync_apply_selected,
+            sync_sweep_stale_locks,
             diag_ignored_breakdown,
             terminal::term_list_shells,
             terminal::term_spawn,

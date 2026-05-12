@@ -50,6 +50,11 @@ pub enum DiagStage {
     RescanSignal,
     SftpConnect,
     SftpDisconnect,
+    // v0.2.50: explicit signal that an SFTP op timed out — the session is
+    // wedged (TCP open but no data flowing). Emitted by transfer.rs's
+    // with_t() helper. Distinct from UploadFail so the UI can surface a
+    // "Reconnect?" affordance instead of a generic upload error.
+    ConnectionWedged,
     RemoteScanStart,
     RemoteScanResult,
     RemotePullStart,

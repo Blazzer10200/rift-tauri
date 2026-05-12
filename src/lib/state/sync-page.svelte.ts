@@ -277,6 +277,28 @@ class SyncPageStore {
       this.busy = false;
     }
   }
+
+  /**
+   * v0.2.50 manual recovery: reclaim our own stale `.rift-lock` files
+   * across every watched remote root. Stays disabled while busy/disconnected;
+   * surfaces the swept count in errorMsg as info on success, or the backend
+   * error string on failure.
+   */
+  async sweepStaleLocks() {
+    this.busy = true;
+    this.errorMsg = null;
+    try {
+      const n = await invoke<number>("sync_sweep_stale_locks");
+      this.errorMsg = n > 0
+        ? `Swept ${n} stale lock${n === 1 ? "" : "s"}.`
+        : "No stale locks found.";
+      setTimeout(() => { void this.refresh(); }, 400);
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
 }
 
 export const syncPage = new SyncPageStore();

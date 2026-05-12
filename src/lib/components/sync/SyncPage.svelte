@@ -6,6 +6,7 @@
   import {
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
     ChevronRight, CheckCircle2, CircleAlert, Inbox, History,
+    Wrench,
   } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { syncPage, type ResourceGroup, type DriftEntry } from "../../state/sync-page.svelte";
@@ -148,6 +149,16 @@
       >
         <RefreshCw size={13} class={syncPage.busy ? "spin" : ""} />
         <span>Rescan</span>
+      </button>
+      <button
+        class="btn ghost"
+        type="button"
+        onclick={() => syncPage.sweepStaleLocks()}
+        disabled={!canSync}
+        title="Reclaim our own stale .rift-lock files across every watched root (recovery for connection wedges)"
+      >
+        <Wrench size={13}/>
+        <span>Sweep locks</span>
       </button>
       <button
         class="btn info"
