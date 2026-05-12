@@ -12,18 +12,11 @@
   let copyState = $state<"idle" | "copying" | "ok" | "err">("idle");
   let copySize = $state(0);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
-  let scanInterval = $state<number>(30);
 
   onMount(() => {
     void diagnostics.wire();
-    void diagnostics.getRemoteScanInterval().then((s) => { scanInterval = s; });
   });
 
-  async function onIntervalChange(e: Event) {
-    const v = parseInt((e.target as HTMLSelectElement).value, 10);
-    scanInterval = v;
-    await diagnostics.setRemoteScanInterval(v);
-  }
   onDestroy(() => {
     diagnostics.dispose();
     if (copyTimer) clearTimeout(copyTimer);
@@ -188,17 +181,6 @@
       {/if}
     </button>
     <div class="aux">
-      <label class="interval" title="How often to poll the remote for changes (drift watcher tick)">
-        <span class="interval-label">Pull every</span>
-        <select class="interval-select" value={scanInterval} onchange={onIntervalChange}>
-          <option value={0}>off</option>
-          <option value={15}>15s</option>
-          <option value={30}>30s</option>
-          <option value={60}>1m</option>
-          <option value={120}>2m</option>
-          <option value={300}>5m</option>
-        </select>
-      </label>
       <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} title={diagnostics.paused ? "Resume capture" : "Pause capture"}>
         {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
       </button>
@@ -322,27 +304,6 @@
   .hero-sub { color: var(--fg-muted); font-size: var(--fs-xs); }
 
   .aux { display: inline-flex; gap: 6px; align-items: center; }
-
-  .interval {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 0 6px;
-    height: 26px;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-  }
-  .interval-label { color: var(--fg-subtle); }
-  .interval-select {
-    background: transparent;
-    color: var(--fg);
-    border: 0;
-    font: inherit; font-size: var(--fs-xs);
-    padding: 0;
-    cursor: pointer;
-    outline: 0;
-  }
 
   .list {
     flex: 1; min-height: 0; overflow: auto;

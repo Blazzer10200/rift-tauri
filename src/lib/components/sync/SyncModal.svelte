@@ -2,7 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy } from "svelte";
-  import { X, Loader2, AlertTriangle, CheckCircle2, Ban, Download, Upload } from "lucide-svelte";
+  import { X, RefreshCw, AlertTriangle, CheckCircle2, Ban, Download, Upload } from "lucide-svelte";
   import { syncModal, type SyncActivityKind } from "../../state/sync-modal.svelte";
   import { connection } from "../../state/connection.svelte";
 
@@ -55,15 +55,20 @@
       const stage = e.payload.stage;
       const fields = e.payload.fields;
       if (stage === "drift_scan_start") {
+        const startText = syncModal.mode === "pull"
+          ? "pull-now started"
+          : syncModal.mode === "push"
+            ? "push-now started"
+            : "reconcile started";
         syncModal.pushActivity({
           at: new Date().toISOString(),
           kind: "drift",
-          text: syncModal.mode === "pull" ? "pull-now started" : "reconcile started",
+          text: startText,
         });
-        // Scan mode does a slow SFTP batch listing before per-folder progress
-        // events fire — hint avoids the "is this frozen?" feel. Pull mode
-        // skips the scan entirely (uses cached drift_watcher results).
-        if (syncModal.mode !== "pull") {
+        // Scan + cold-cache Pull both do a slow SFTP batch listing before
+        // per-folder progress events fire. Push has nothing to list — it
+        // just drains the dirty queue.
+        if (syncModal.mode !== "push") {
           syncModal.pushActivity({
             at: new Date().toISOString(),
             kind: "drift",
@@ -71,11 +76,8 @@
           });
         }
       } else if (stage === "drift_scan_progress") {
-        // In pull mode, the user is dispatching from a cached scan — there's
-        // no scan in flight. Any drift_scan_progress events arriving here are
-        // from a parallel drift_watcher tick (background) and confuse the UI
-        // ("scanning [ox] (8/8)" alongside "Pulling cached changes…"). Drop.
-        if (syncModal.mode === "pull") return;
+        // Push mode doesn't scan — any progress events arriving are stale.
+        if (syncModal.mode === "push") return;
         const f = (fields as DriftProgressFields) ?? {};
         syncModal.progress(f.current ?? 0, f.total ?? 0, f.resource ?? "");
         if (f.resource) {
@@ -224,7 +226,7 @@
               <Upload size={16} class="pulse-up"/>
               <h2 id="sync-modal-title">Pushing to {profileName}</h2>
             {:else}
-              <Loader2 size={16} class="spin"/>
+              <RefreshCw size={16} class="pulse-spin"/>
               <h2 id="sync-modal-title">Scanning {profileName}</h2>
             {/if}
           {:else if syncModal.phase === "complete"}
@@ -254,12 +256,10 @@
         </div>
         <div class="status-line mono">
           {#if syncModal.phase === "scanning"}
-            {#if syncModal.mode === "pull"}
-              Pulling cached changes… (no scan needed)
-            {:else if syncModal.mode === "push"}
+            {#if syncModal.mode === "push"}
               Pushing pending local edits…
             {:else if syncModal.totalFolders > 0}
-              Scanning {syncModal.resource || "…"} — {syncModal.currentFolder} / {syncModal.totalFolders} folders
+              {syncModal.mode === "pull" ? "Pulling" : "Scanning"} {syncModal.resource || "…"} — {syncModal.currentFolder} / {syncModal.totalFolders} folders
             {:else}
               Listing remote files… (this may take a moment on the first scan)
             {/if}
@@ -278,25 +278,30 @@
         {/if}
       </section>
 
-      <section class="counts" data-cols={syncModal.mode === "pull" ? 3 : 4}>
-        {#if syncModal.mode !== "pull"}
+      <section class="counts" data-cols={syncModal.mode === "push" ? 1 : syncModal.mode === "pull" ? 3 : 4}>
+        {#if syncModal.mode === "push"}
+          <div class="count-cell" data-tone="push">
+            <div class="cell-num mono">{syncModal.result?.push ?? 0}</div>
+            <div class="cell-label">Pushed</div>
+          </div>
+        {:else}
           <div class="count-cell" data-tone="push">
             <div class="cell-num mono">{syncModal.result?.push ?? 0}</div>
             <div class="cell-label">To Push</div>
           </div>
+          <div class="count-cell" data-tone="pull">
+            <div class="cell-num mono">{syncModal.result?.pull ?? 0}</div>
+            <div class="cell-label">{syncModal.mode === "pull" ? "Pulled" : "To Pull"}</div>
+          </div>
+          <div class="count-cell" data-tone="warn">
+            <div class="cell-num mono">{syncModal.result?.deletes ?? 0}</div>
+            <div class="cell-label">{syncModal.mode === "pull" ? "Removed" : "To Delete"}</div>
+          </div>
+          <div class="count-cell" data-tone={(syncModal.result?.conflicts ?? 0) > 0 ? "danger" : "ok"}>
+            <div class="cell-num mono">{syncModal.result?.conflicts ?? 0}</div>
+            <div class="cell-label">Conflicts</div>
+          </div>
         {/if}
-        <div class="count-cell" data-tone="pull">
-          <div class="cell-num mono">{syncModal.result?.pull ?? 0}</div>
-          <div class="cell-label">{syncModal.mode === "pull" ? "Pulled" : "To Pull"}</div>
-        </div>
-        <div class="count-cell" data-tone="warn">
-          <div class="cell-num mono">{syncModal.result?.deletes ?? 0}</div>
-          <div class="cell-label">{syncModal.mode === "pull" ? "Removed" : "To Delete"}</div>
-        </div>
-        <div class="count-cell" data-tone={(syncModal.result?.conflicts ?? 0) > 0 ? "danger" : "ok"}>
-          <div class="cell-num mono">{syncModal.result?.conflicts ?? 0}</div>
-          <div class="cell-label">Conflicts</div>
-        </div>
       </section>
 
       <section class="activity">
@@ -379,8 +384,17 @@
   }
   .head-x:hover:not(:disabled) { background: var(--danger); color: oklch(0.99 0 0); }
   .head-x:disabled { opacity: 0.35; cursor: not-allowed; }
-  :global(.spin) { animation: spin 1.2s linear infinite; }
-  @keyframes spin { to { transform: rotate(360deg); } }
+  /* Scan mode breathing rotation — 2.4s ease-in-out cycle, no jitter.
+     Replaces the linear 1.2s spin that read as a frantic loader. */
+  :global(.pulse-spin) {
+    animation: pulse-spin 2.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+  @keyframes pulse-spin {
+    0%   { transform: rotate(0deg);   opacity: 0.95; }
+    50%  { transform: rotate(180deg); opacity: 0.65; }
+    100% { transform: rotate(360deg); opacity: 0.95; }
+  }
 
   .progress-section { padding: 14px 16px 10px; }
   .bar-track {
@@ -446,6 +460,7 @@
     padding: 6px 16px 14px;
   }
   .counts[data-cols="3"] { grid-template-columns: repeat(3, 1fr); }
+  .counts[data-cols="1"] { grid-template-columns: minmax(0, 220px); justify-content: center; }
   .count-cell {
     background: var(--bg-elev-1);
     border: 1px solid var(--border);

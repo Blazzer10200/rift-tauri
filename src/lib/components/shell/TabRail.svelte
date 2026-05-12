@@ -19,23 +19,15 @@
   ];
 
   const watchingPath = $derived(connection.selected?.localRoot ?? "—");
-  const autosyncOn = $derived(
+  const watcherOn = $derived(
     connection.status?.state === "watching" || connection.status?.state === "idle" || connection.status?.state === "syncing"
   );
 
-  async function toggleAutoSync() {
-    if (autosyncOn) {
+  async function toggleWatcher() {
+    if (watcherOn) {
       await connection.disconnect();
     } else {
       try { await connection.connect(); } catch (e) { console.error(e); }
-    }
-  }
-
-  async function toggleManualMode() {
-    try {
-      await connection.setAutoFlush(!connection.autoFlush);
-    } catch (e) {
-      console.error("set_auto_flush failed", e);
     }
   }
 </script>
@@ -84,38 +76,20 @@
       <span class="stat-val mono">{watchingPath}</span>
     </div>
     <div class="stat">
-      <span class="stat-label">Auto-sync</span>
+      <span class="stat-label">Watcher</span>
       <button
         class="autosync-toggle"
         type="button"
-        onclick={toggleAutoSync}
+        onclick={toggleWatcher}
         disabled={!connection.selected || connection.connecting}
-        title={autosyncOn ? "Click to stop auto-sync" : connection.connecting ? "Connecting…" : "Click to start auto-sync"}
+        title={watcherOn ? "Click to stop watching" : connection.connecting ? "Connecting…" : "Click to start watching"}
       >
         {#if connection.connecting}
           <span class="pill info"><span class="dot"></span>connecting…</span>
-        {:else if autosyncOn}
+        {:else if watcherOn}
           <span class="pill ok"><span class="dot"></span>on</span>
         {:else}
           <span class="pill muted"><span class="dot"></span>off</span>
-        {/if}
-      </button>
-    </div>
-    <div class="stat">
-      <span class="stat-label">Mode</span>
-      <button
-        class="autosync-toggle"
-        type="button"
-        onclick={toggleManualMode}
-        disabled={!autosyncOn}
-        title={connection.autoFlush
-          ? "Auto-flush is ON — watcher pushes + drift watcher pulls every tick. Click for manual mode."
-          : "Manual mode — buttons only. Click to re-enable auto-sync."}
-      >
-        {#if connection.autoFlush}
-          <span class="pill ok"><span class="dot"></span>auto</span>
-        {:else}
-          <span class="pill warn"><span class="dot"></span>manual</span>
         {/if}
       </button>
     </div>

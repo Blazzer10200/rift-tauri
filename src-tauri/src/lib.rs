@@ -172,28 +172,6 @@ async fn diag_force_push_now(
     Ok(true)
 }
 
-/// v0.2.37 manual-mode toggle. Returns current state when called with None.
-/// When `on=false`: flush_cycle + drift_watcher run_tick skip their work,
-/// user drives sync via Push Now / Pull Now buttons.
-#[tauri::command]
-async fn set_auto_flush(
-    state: tauri::State<'_, AutoSyncState>,
-    on: bool,
-) -> Result<bool, String> {
-    let g = state.0.lock().await;
-    let Some(engine) = g.as_ref() else { return Ok(true) };
-    Ok(engine.set_auto_flush_enabled(on))
-}
-
-#[tauri::command]
-async fn get_auto_flush(
-    state: tauri::State<'_, AutoSyncState>,
-) -> Result<bool, String> {
-    let g = state.0.lock().await;
-    let Some(engine) = g.as_ref() else { return Ok(true) };
-    Ok(engine.auto_flush_enabled())
-}
-
 /// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
 /// when a sync isn't behaving. Keys are stable rule labels from
 /// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
@@ -206,31 +184,6 @@ async fn diag_ignored_breakdown(
         Some(engine) => engine.ignored_by_rule_snapshot(),
         None => std::collections::HashMap::new(),
     })
-}
-
-/// Update DriftWatcher tick interval (seconds). 0 = paused. Settings>Sync
-/// calls this when the user picks a different interval. Persists for the
-/// active autosync session; resets to default on next connect.
-#[tauri::command]
-async fn set_remote_scan_interval(
-    secs: u64,
-    state: tauri::State<'_, AutoSyncState>,
-) -> Result<(), String> {
-    let g = state.0.lock().await;
-    if let Some(engine) = g.as_ref() {
-        engine.set_remote_scan_interval(secs);
-    }
-    Ok(())
-}
-
-#[tauri::command]
-async fn get_remote_scan_interval(
-    state: tauri::State<'_, AutoSyncState>,
-) -> Result<u64, String> {
-    let g = state.0.lock().await;
-    Ok(g.as_ref()
-        .map(|e| e.remote_scan_interval())
-        .unwrap_or(sync::drift_watcher::DEFAULT_SCAN_INTERVAL_SECS))
 }
 
 /// Periodic pipeline-state snapshot emitter. 500ms cadence — fast enough for
@@ -1519,11 +1472,7 @@ pub fn run() {
             diag_cancel_drift_scan,
             diag_force_pull_now,
             diag_force_push_now,
-            set_auto_flush,
-            get_auto_flush,
             diag_ignored_breakdown,
-            set_remote_scan_interval,
-            get_remote_scan_interval,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -260,22 +260,6 @@ class DiagnosticsStore {
     }
   }
 
-  async getRemoteScanInterval(): Promise<number> {
-    try {
-      return await invoke<number>("get_remote_scan_interval");
-    } catch (e) {
-      console.error("get_remote_scan_interval failed", e);
-      return 30;
-    }
-  }
-
-  async setRemoteScanInterval(secs: number): Promise<void> {
-    try {
-      await invoke("set_remote_scan_interval", { secs });
-    } catch (e) {
-      console.error("set_remote_scan_interval failed", e);
-    }
-  }
 }
 
 export const diagnostics = new DiagnosticsStore();

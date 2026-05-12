@@ -2,20 +2,29 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.36 + v0.2.37-alpha-test — 2026-05-12 — Local-delete guard + manual push/pull mode
+## v0.2.38-alpha-test — 2026-05-12 — Auto-sync ripped, manual-only
 
-Two ships in one go. Blazzer saw `BLOCKED — 232 deletes in one batch` on the push side fire correctly, then noticed the tombstone-pull path was silently deleting hundreds of files from his local disk with no equivalent guard. That + the auto-sync cascade fatigue was the trigger to add manual mode.
+v0.2.37's mode toggle wasn't enough. With auto on by default, Blazzer kept seeing `pulled → removed locally → pulled → removed locally` ping-pong cycles on `[world]` resources at 10s tick cadence — drift_watcher classifying entries as ToDelete on one tick and ToPull on the next while the snapshot baseline + bridge devbridge regen raced. The fix is to delete the auto path entirely. Push/Pull buttons only.
 
-### v0.2.36 — Mass local-delete circuit breaker
-Mirrors the existing push-side mass-delete guard. Before drift_watcher's run_tick dispatches any `ToDelete` entries, they're now grouped by resource. Each group is checked against `scaled_delete_threshold(local_root)` — same formula as push side (`(file_count * 0.30).clamp(5, 25)`). If a resource's delete batch ≥ threshold, the entire batch is **blocked**, no files are touched, a single `BLOCKED — N local-deletes in one batch (≥ scaled threshold T of F files)` activity row fires with `kind=block`. Next drift tick re-evaluates; if remote is still missing those files, the guard re-fires but still no deletes. User must take explicit action.
+### Backend
+- `drift_watcher::spawn` + `run_tick` deleted — no more 10s remote-poll loop.
+- `flush_cycle` deleted — no more debounced auto-flush. `flush_all_now` now folds in the failed→dirty backoff-promotion that lived in the killed loop, so transient SFTP failures still retry when the user clicks Push again.
+- `auto_flush_enabled` flag deleted — no longer needed; the loops it gated are gone.
+- `remote_scan_interval_secs` + `set_remote_scan_interval` + `get_remote_scan_interval` deleted — no interval to configure.
+- Mass local-delete circuit breaker moved into `force_pull_now`. Same formula (`(file_count * 0.30).clamp(5, 25)`), same single `BLOCKED — N local-deletes (≥ scaled threshold T of F files)` row, same `kind=block`. Pull is the only path that can propagate tombstones now, so the guard moved with it.
+- `kick_drift_reconcile` (called by notify's `need_rescan` signal + Diagnostics > Force Drift Scan) no longer auto-enqueues the discovered ToPush set. It just refreshes the cached scan result; user must click Push to act on it.
+- Conflicts from a Pull Now scan are now surfaced via `register_conflict` (was only wired from the killed run_tick before).
+- Removed: `track_pull_handle`, `register_scan_cancel`, `clear_scan_cancel`, `drift_watcher_task` + `flush_task` fields, `LOOP_TICK_MS` constant.
 
-### v0.2.37 — Manual push/pull mode
-New `force_push_now` backend command mirrors `force_pull_now` — drains every dirty entry NOW regardless of debounce. SyncModal grew a `mode="push"` rendering with Upload icon, purple accent, `pulse-up` animation, "Pushing to {profile}" title. OpRail gained a third action button (UploadCloud icon) wired to `onPushNow`. New `auto_flush_enabled` atomic flag on AutoSyncEngine — when off, `flush_cycle` + `drift_watcher::run_tick` short-circuit immediately so watcher detection still populates dirty queue but nothing flushes until user clicks. TabRail surfaces a "Mode" toggle (auto | manual) next to the existing Auto-sync toggle. Connection store gained `setAutoFlush`/`refreshAutoFlush` and refreshes on connect.
+### Frontend
+- TabRail "Mode" toggle gone. "Auto-sync on/off" relabeled to "Watcher on/off" (it was always toggling the connection, not an auto-sync flag).
+- `connection.autoFlush` + `setAutoFlush` + `refreshAutoFlush` removed.
+- Diagnostics "Pull every Xs" selector + `getRemoteScanInterval` / `setRemoteScanInterval` removed.
+
+### Behavior
+Watcher still runs locally to populate the dirty queue (so user sees pending count in StatusBar). Push Now drains the queue. Pull Now does an inline drift scan + dispatches with the guard in front. Nothing happens in the background. No more ping-pongs.
 
 ### Verify
-`cargo check`: clean (25.55s). `svelte-check`: 0 errors, 2 pre-existing warnings (section a11y suppressions).
+`cargo check`: clean (1.55s). `svelte-check`: 0 errors, 2 pre-existing a11y warnings.
 
-### Recovery for what was already deleted before the guard
-FiveM session restore (worked for v0.2.27), fresh clone of qbox/ox_* public repos, or Trey pushes his copy back. All paths viable.
-
-v0.2.35 archived to git log. **NOT YET COMMITTED OR SHIPPED** — Blazzer testing in dev.
+**NOT YET COMMITTED OR SHIPPED** — Blazzer testing in dev. v0.2.36 + v0.2.37 archived to git log.
