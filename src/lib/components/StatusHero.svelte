@@ -39,7 +39,7 @@
       <span class="led-dot"></span>
       <span class="state">{stateLabel}</span>
       <span class="sep">·</span>
-      <span>{watches} {watches === 1 ? "folder" : "folders"} watching</span>
+      <span>{watches} {watches === 1 ? "folder" : "folders"}</span>
       <span class="sep">·</span>
       <span class="muted">all quiet</span>
       {#if lastTs}

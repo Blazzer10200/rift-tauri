@@ -2,6 +2,18 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 33 — 2026-05-12 — UI polish pass 3 (StatusHero + StatusBar dedup)
+
+Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
+
+### What landed
+- **StatusHero quiet row** — dropped duplicate "watching" word. Was `● Watching · 7 folders watching · all quiet` (Watching twice). Now `● Watching · 7 folders · all quiet`. State label already conveys the verb.
+- **StatusBar state+watcher merged into one cell** — was `● watching | ↻ watcher on` (two cells saying the same thing). Now single clickable `● watching` cell that toggles connect/disconnect. Title attr explains the click. Dropped `RefreshCw` import + the duplicate `.watcher` button. `connecting` state spelled out instead of `…`.
+
+### Verify
+- svelte-check: no new errors (LocalPane/RemotePane :294 `<section>` warnings remain pre-existing backlog).
+- Zero Rust changes.
+
 ## Session 32 — 2026-05-12 — UI polish pass 2 (sidebar collapse, panes touch, slim hero, Win11 tabs, nav animations)
 
 Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
