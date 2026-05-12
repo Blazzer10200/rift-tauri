@@ -12,6 +12,7 @@
   import ActivityToast from "./ActivityToast.svelte";
   import TwoPane from "./browser/TwoPane.svelte";
   import ActivityFeed from "./activity/ActivityFeed.svelte";
+  import SyncPage from "./sync/SyncPage.svelte";
   import Diagnostics from "./diagnostics/Diagnostics.svelte";
   import ConflictList from "./conflicts/ConflictList.svelte";
   import ConflictResolver from "./conflicts/ConflictResolver.svelte";
@@ -26,7 +27,7 @@
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
 
-  type Tab = "browse" | "activity" | "conflicts" | "settings" | "diagnostics";
+  type Tab = "browse" | "activity" | "sync" | "conflicts" | "settings" | "diagnostics";
   type SettingsSection = "appearance" | "servers" | "keys" | "about";
 
   let active = $state<Tab>("browse");
@@ -73,8 +74,9 @@
       run: () => openBootstrap() },
     { id: "tab-browse",   group: "Go to", title: "Browser",  shortcut: "Ctrl+1", run: () => (active = "browse")   },
     { id: "tab-activity", group: "Go to", title: "Activity", shortcut: "Ctrl+2", run: () => (active = "activity") },
-    { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+3", run: () => (active = "conflicts")},
-    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+4", run: () => (active = "settings") },
+    { id: "tab-sync",     group: "Go to", title: "Sync",     shortcut: "Ctrl+3", run: () => (active = "sync")     },
+    { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
+    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+5", run: () => (active = "settings") },
     { id: "tab-diagnostics", group: "Go to", title: "Sync Inspector", subtitle: "Live diagnostics for the sync pipeline", shortcut: "Ctrl+Shift+D",
       run: () => (active = "diagnostics") },
     { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
@@ -141,7 +143,7 @@
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
     if (/^[1-5]$/.test(e.key)) {
       e.preventDefault();
-      const tab = (["browse", "activity", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
+      const tab = (["browse", "activity", "sync", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
       active = tab;
     }
   }
@@ -301,6 +303,8 @@
             </div>
           {:else if active === "activity"}
             <ActivityFeed />
+          {:else if active === "sync"}
+            <SyncPage />
           {:else if active === "conflicts"}
             <div class="conflicts-pane">
               <ConflictList
@@ -406,6 +410,9 @@
     display: grid;
     grid-template-rows: 44px 1fr 22px;
     height: 100vh;
+    width: 100vw;
+    min-width: 0;
+    overflow: hidden;
     background: var(--bg);
     color: var(--fg);
   }

@@ -1,11 +1,9 @@
 <script lang="ts">
-  import { FolderOpen, Activity, TriangleAlert, Cog, Download, DownloadCloud, UploadCloud, RefreshCw } from "lucide-svelte";
-  import { invoke } from "@tauri-apps/api/core";
+  import { FolderOpen, Activity, TriangleAlert, Cog, Download, RefreshCcw } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { updates } from "../../state/updates.svelte";
-  import { syncModal } from "../../state/sync-modal.svelte";
 
-  type Tab = "browse" | "activity" | "conflicts" | "settings" | "diagnostics";
+  type Tab = "browse" | "activity" | "sync" | "conflicts" | "settings" | "diagnostics";
 
   let { active, onChange }: {
     active: Tab;
@@ -16,54 +14,13 @@
   const tabs: { id: Tab; label: string; icon: typeof FolderOpen; kbd: string; tone: TabTone; count?: () => number; countCls?: string }[] = [
     { id: "browse",    label: "Browser",   icon: FolderOpen,    kbd: "1", tone: "accent" },
     { id: "activity",  label: "Activity",  icon: Activity,      kbd: "2", tone: "info",   count: () => connection.activityFeed.length, countCls: "" },
-    { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "3", tone: "danger", count: () => connection.conflictCount, countCls: "danger" },
-    { id: "settings",  label: "Settings",  icon: Cog,           kbd: "4", tone: "neutral" },
+    { id: "sync",      label: "Sync",      icon: RefreshCcw,    kbd: "3", tone: "accent" },
+    { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "4", tone: "danger", count: () => connection.conflictCount, countCls: "danger" },
+    { id: "settings",  label: "Settings",  icon: Cog,           kbd: "5", tone: "neutral" },
   ];
 
-  const watcherOn = $derived(
-    connection.status?.state === "watching" || connection.status?.state === "idle" || connection.status?.state === "syncing"
-  );
-  // Gate on the real op-lifecycle flag (syncModal.busy), not modal visibility.
-  // Local pulling/pushing/scanning flags were lies — they flipped back to
-  // false the instant invoke() returned (engine dispatches fire-and-forget),
-  // long before the actual sync work finished.
-  const canSync = $derived(watcherOn && !syncModal.busy);
-  const busyMode = $derived(syncModal.busy ? syncModal.mode : null);
   const activeIdx = $derived(tabs.findIndex((t) => t.id === active));
   const indicatorVisible = $derived(activeIdx >= 0);
-
-  async function reconcile() {
-    if (!canSync) return;
-    syncModal.start("scan");
-    try {
-      const fired = await invoke<boolean>("sync_reconcile");
-      if (!fired) syncModal.fail("Not connected — start watcher first.");
-    } catch (e) {
-      syncModal.fail(String(e));
-    }
-  }
-
-  async function pullPending() {
-    if (!canSync) return;
-    syncModal.start("pull");
-    try {
-      const fired = await invoke<boolean>("sync_pull_pending");
-      if (!fired) syncModal.fail("Not connected — start watcher first.");
-    } catch (e) {
-      syncModal.fail(String(e));
-    }
-  }
-
-  async function pushPending() {
-    if (!canSync) return;
-    syncModal.start("push");
-    try {
-      const fired = await invoke<boolean>("sync_push_pending");
-      if (!fired) syncModal.fail("Not connected — start watcher first.");
-    } catch (e) {
-      syncModal.fail(String(e));
-    }
-  }
 </script>
 
 <aside class="rail" aria-label="Primary navigation">
@@ -107,45 +64,6 @@
         </button>
       {/if}
 
-      <div class="qa">
-        <div class="qa-label">Quick actions</div>
-        <button
-          class="qa-btn"
-          data-tone="neutral"
-          type="button"
-          onclick={(e) => { reconcile(); (e.currentTarget as HTMLButtonElement).blur(); }}
-          disabled={!canSync}
-          title={watcherOn ? "Scan both sides for drift (read-only)" : "Connect a server first"}
-        >
-          <span class="qa-icon"><RefreshCw size={16}/></span>
-          <span>Scan drift</span>
-          {#if busyMode === "scan"}<span class="qa-spin"></span>{/if}
-        </button>
-        <button
-          class="qa-btn"
-          data-tone="info"
-          type="button"
-          onclick={(e) => { pullPending(); (e.currentTarget as HTMLButtonElement).blur(); }}
-          disabled={!canSync}
-          title={watcherOn ? "Pull remote changes detected in last scan" : "Connect a server first"}
-        >
-          <span class="qa-icon"><DownloadCloud size={16}/></span>
-          <span>Pull pending</span>
-          {#if busyMode === "pull"}<span class="qa-spin"></span>{/if}
-        </button>
-        <button
-          class="qa-btn"
-          data-tone="accent"
-          type="button"
-          onclick={(e) => { pushPending(); (e.currentTarget as HTMLButtonElement).blur(); }}
-          disabled={!canSync}
-          title={watcherOn ? "Push local dirty-queue edits to remote" : "Connect a server first"}
-        >
-          <span class="qa-icon"><UploadCloud size={16}/></span>
-          <span>Push pending</span>
-          {#if busyMode === "push"}<span class="qa-spin"></span>{/if}
-        </button>
-      </div>
     </div>
   </div>
 </aside>
@@ -292,74 +210,10 @@
   .up-l { color: var(--fg); }
   .up-v { color: var(--fg-muted); font-size: var(--fs-xs); }
 
-  .qa {
-    display: flex; flex-direction: column; gap: 6px;
-    padding: 12px 0 2px;
-    border-top: 1px solid var(--border);
-  }
-  .qa-label {
-    padding: 0 6px 8px;
-    color: var(--fg-faint);
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-  }
-  .qa-btn {
-    --tone: var(--accent);
-    display: inline-flex; align-items: center; gap: 10px;
-    width: 100%; height: 38px;
-    padding: 0 10px;
-    background: color-mix(in oklch, var(--tone) 8%, var(--surface));
-    color: var(--fg);
-    border: 1px solid color-mix(in oklch, var(--tone) 28%, var(--border));
-    border-radius: var(--radius-sm);
-    font: inherit; font-size: var(--fs-sm); font-weight: 600;
-    letter-spacing: 0.01em;
-    cursor: pointer;
-    transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 100ms ease, box-shadow 140ms ease;
-    position: relative;
-    overflow: hidden;
-    white-space: nowrap;
-  }
-  .qa-btn[data-tone="info"]    { --tone: var(--info); }
-  .qa-btn[data-tone="accent"]  { --tone: var(--accent); }
-  .qa-btn[data-tone="neutral"] { --tone: var(--fg-muted); }
-  .qa-btn > span:not(.qa-spin):not(.qa-icon) { flex: 1; text-align: left; }
-  .qa-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    color: var(--tone);
-    transition: transform 140ms ease;
-    flex-shrink: 0;
-  }
-  .qa-btn:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--tone) 22%, var(--surface));
-    border-color: color-mix(in oklch, var(--tone) 55%, var(--border));
-    color: color-mix(in oklch, var(--tone) 90%, var(--fg));
-    box-shadow: 0 4px 12px color-mix(in oklch, var(--tone) 18%, transparent);
-  }
-  .qa-btn:hover:not(:disabled) .qa-icon { transform: scale(1.1); }
-  .qa-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
-  .qa-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-  .qa-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-  .qa-spin {
-    width: 8px; height: 8px; border-radius: 50%;
-    background: var(--tone);
-    animation: qa-pulse 1.4s ease-in-out infinite;
-    flex-shrink: 0;
-  }
-  @keyframes qa-pulse {
-    0%, 100% { opacity: 0.4; transform: scale(0.85); }
-    50%      { opacity: 1;   transform: scale(1.15); }
-  }
-
-  /* Collapsed state: hide labels, kbd hints, qa header, button text. */
+  /* Collapsed state: hide labels, kbd hints, button text. */
   @container (max-width: 130px) {
-    .label, .qa-label, .up-text { display: none; }
-    .qa-btn > span:not(.qa-spin):not(.qa-icon) { display: none; }
-    .rail-btn, .qa-btn { justify-content: center; padding: 0; gap: 0; }
+    .label, .up-text { display: none; }
+    .rail-btn { justify-content: center; padding: 0; gap: 0; }
     .update-pill { justify-content: center; padding: 8px; }
     .count-pip {
       position: absolute; top: 2px; right: 2px;
@@ -368,6 +222,5 @@
       font-size: 9px;
       pointer-events: none;
     }
-    .qa { padding-top: 8px; }
   }
 </style>

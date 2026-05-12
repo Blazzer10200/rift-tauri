@@ -85,6 +85,23 @@ impl SyncSnapshot {
         lock(&self.data).len()
     }
 
+    /// Count baseline entries whose remote_path falls under `remote_root_prefix`.
+    /// Used by drift_scanner's suspicious-shrink guard to detect truncated
+    /// remote listings before classifying missing files as ToDelete.
+    pub fn count_under(&self, remote_root_prefix: &str) -> usize {
+        let prefix = remote_root_prefix.trim_end_matches('/');
+        let g = lock(&self.data);
+        g.keys()
+            .filter(|k| {
+                if let Some(rest) = k.strip_prefix(prefix) {
+                    rest.is_empty() || rest.starts_with('/')
+                } else {
+                    false
+                }
+            })
+            .count()
+    }
+
     pub fn local_matches(e: &Entry, size: i64, mtime_utc: DateTime<Utc>) -> bool {
         size == e.local_size
             && (mtime_utc - e.local_mtime_utc).num_milliseconds().abs()

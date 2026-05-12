@@ -130,9 +130,17 @@ async fn open_session(
     // TCP socket indefinitely (Windows OS-level keepalive is ~2hr). 20s ping
     // x 3 unanswered = ~60s to detect a stalled server, then session closes
     // cleanly w/ an error instead of hanging the push or remote-list panel.
+    // window_size + maximum_packet_size bumped from russh defaults (32 KiB)
+    // to OpenSSH-equivalent 2 MiB / 32 KiB. Default channel-window pressure
+    // caused trailing Data chunks on `find` exec listings to back up against
+    // the channel buffer, which the v0.2.45 drain fix already addresses for
+    // exec, but the same pressure can truncate SFTP `read_dir` responses on
+    // the worker fallback path — bigger window = no truncation under load.
     let config = Arc::new(client::Config {
         keepalive_interval: Some(std::time::Duration::from_secs(20)),
         keepalive_max: 3,
+        window_size: 2 * 1024 * 1024,
+        maximum_packet_size: 32 * 1024,
         ..client::Config::default()
     });
     let addr = format!("{}:{}", args.host, args.port);

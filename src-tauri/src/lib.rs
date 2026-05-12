@@ -191,6 +191,37 @@ async fn sync_push_pending(
     Ok(true)
 }
 
+/// Return the cached drift-scan entries for the Sync page. Empty when no
+/// scan has run yet or no engine is bound. Frontend groups by resource +
+/// bucket itself — backend just hands over the raw entries.
+#[tauri::command]
+async fn sync_get_drift_snapshot(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<Vec<crate::sync::DriftEntry>, String> {
+    let g = state.0.lock().await;
+    Ok(match g.as_ref() {
+        Some(engine) => engine.drift_snapshot(),
+        None => Vec::new(),
+    })
+}
+
+/// Dispatch a user-selected subset of drift entries by local_path. Backend
+/// resolves each path to its cached entry and routes by bucket (ToPull →
+/// pull, ToDelete → delete, ToPush → enqueue). Mass-delete circuit breaker
+/// fires per-resource. No-op return Ok(false) if not connected.
+#[tauri::command]
+async fn sync_apply_selected(
+    state: tauri::State<'_, AutoSyncState>,
+    local_paths: Vec<String>,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else {
+        return Ok(false);
+    };
+    engine.apply_selected(local_paths);
+    Ok(true)
+}
+
 /// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
 /// when a sync isn't behaving. Keys are stable rule labels from
 /// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
@@ -1627,6 +1658,8 @@ pub fn run() {
             sync_cancel,
             sync_pull_pending,
             sync_push_pending,
+            sync_get_drift_snapshot,
+            sync_apply_selected,
             diag_ignored_breakdown,
             terminal::term_list_shells,
             terminal::term_spawn,
