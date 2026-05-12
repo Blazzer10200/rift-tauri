@@ -33,6 +33,22 @@
   let cancelling = $state(false);
   let pulling = $state(false);
   let pushing = $state(false);
+  // After 3s of waiting for backend cancel-ack, surface a force-close
+  // escape (down from 5s — user feedback). Backend keeps bailing in the
+  // background; user gets the modal back via Run-in-background mode.
+  let cancelStartedAt = $state<number | null>(null);
+  let cancelTickMs = $state(0);
+  let cancelTicker: ReturnType<typeof setInterval> | null = null;
+  const canForceClose = $derived(cancelling && cancelTickMs > 3000);
+
+  // Hard watchdog: if 60s pass between op start and the first result event,
+  // the backend is hung/panicked/dead-socket. Force-fail the modal so the
+  // user is never trapped staring at "Pushing pending local edits…" forever.
+  // 60s aligns w/ russh keepalive (20s × 3) — any healthy server replies
+  // way before this.
+  const HARD_WATCHDOG_MS = 60_000;
+  let opStartedAt = $state<number | null>(null);
+  let opWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   function basename(p: string): string {
     const norm = p.replaceAll("\\", "/").replace(/\/+$/, "");
@@ -105,6 +121,12 @@
           syncModal.complete(result);
         }
         cancelling = false;
+        cancelStartedAt = null;
+        cancelTickMs = 0;
+        if (cancelTicker !== null) { clearInterval(cancelTicker); cancelTicker = null; }
+        // Result landed — disarm the hard watchdog.
+        opStartedAt = null;
+        if (opWatchdog !== null) { clearTimeout(opWatchdog); opWatchdog = null; }
       }
     }).then((u) => (unlistenDiag = u));
 
@@ -141,8 +163,25 @@
           if (silent > 30000) syncModal.setStalled();
         }, 5000);
       }
+      // Arm the hard watchdog the first time we transition into busy.
+      if (opStartedAt === null && syncModal.busy) {
+        opStartedAt = Date.now();
+        if (opWatchdog !== null) clearTimeout(opWatchdog);
+        opWatchdog = setTimeout(() => {
+          if (syncModal.phase === "scanning") {
+            console.error(
+              `[rift] Sync hard-watchdog fired after ${HARD_WATCHDOG_MS}ms — backend never emitted drift_scan_result. Forcing modal to error state.`
+            );
+            syncModal.fail(
+              "Backend stopped responding. Op may still be running; check the Activity tab. Reconnect if needed."
+            );
+          }
+        }, HARD_WATCHDOG_MS);
+      }
     } else {
       detachListeners();
+      opStartedAt = null;
+      if (opWatchdog !== null) { clearTimeout(opWatchdog); opWatchdog = null; }
     }
   });
 
@@ -151,12 +190,29 @@
   async function onCancel() {
     if (cancelling) return;
     cancelling = true;
+    cancelStartedAt = Date.now();
+    cancelTickMs = 0;
+    if (cancelTicker === null) {
+      cancelTicker = setInterval(() => {
+        cancelTickMs = Date.now() - (cancelStartedAt ?? Date.now());
+      }, 250);
+    }
     try {
       await invoke<boolean>("sync_cancel");
     } catch (err) {
       console.warn("cancel failed", err);
       cancelling = false;
+      cancelStartedAt = null;
+      cancelTickMs = 0;
+      if (cancelTicker !== null) { clearInterval(cancelTicker); cancelTicker = null; }
     }
+  }
+
+  function onForceClose() {
+    // Demote to background: keep busy true so the StatusBar pill tracks the
+    // op until the backend eventually emits drift_scan_result; just hide the
+    // modal. User gets their UI back instantly.
+    syncModal.runInBackground();
   }
 
   async function onPullNow() {
@@ -254,10 +310,12 @@
         <button
           type="button"
           class="head-x"
-          onclick={onDismiss}
-          disabled={syncModal.phase === "scanning"}
+          onclick={() => (canForceClose ? onForceClose() : onDismiss())}
+          disabled={syncModal.phase === "scanning" && !canForceClose}
           aria-label="Close"
-          title={syncModal.phase === "scanning" ? "Cancel first" : "Close"}
+          title={syncModal.phase === "scanning"
+            ? (canForceClose ? "Close anyway — op continues in background" : "Cancel first")
+            : "Close"}
         ><X size={14}/></button>
       </header>
 
@@ -333,22 +391,33 @@
 
       <footer class="card-foot">
         {#if syncModal.phase === "scanning"}
-          <button type="button" class="btn btn-ghost" onclick={onRunInBackground}>
-            Run in background
-          </button>
+          {#if canForceClose}
+            <button type="button" class="btn btn-ghost" onclick={onForceClose}
+              title="Close the modal — backend will keep bailing in the background. Status bar will track it.">
+              Close anyway
+            </button>
+          {:else}
+            <button type="button" class="btn btn-ghost" onclick={onRunInBackground}>
+              Run in background
+            </button>
+          {/if}
           <button type="button" class="btn btn-danger" onclick={onCancel} disabled={cancelling}>
             {cancelling
               ? "Cancelling…"
               : (syncModal.mode === "pull" ? "Stop pull" : syncModal.mode === "push" ? "Stop push" : "Cancel scan")}
           </button>
         {:else}
-          {#if syncModal.phase === "complete" && (syncModal.result?.pull ?? 0) > 0}
+          <!-- Pull Now / Push Now follow-ups only make sense after a SCAN —
+               they're "I just scanned, now act on it" affordances. After a
+               pull or push completes, the counts represent work that just
+               happened, not pending work — so these would be lies. -->
+          {#if syncModal.phase === "complete" && syncModal.mode === "scan" && (syncModal.result?.pull ?? 0) > 0}
             <button type="button" class="btn btn-accent" onclick={onPullNow} disabled={pulling}>
               <Download size={13}/>
               {pulling ? "Pulling…" : `Pull Now (${syncModal.result?.pull ?? 0})`}
             </button>
           {/if}
-          {#if syncModal.phase === "complete" && (syncModal.result?.push ?? 0) > 0}
+          {#if syncModal.phase === "complete" && syncModal.mode === "scan" && (syncModal.result?.push ?? 0) > 0}
             <button type="button" class="btn btn-accent" onclick={onPushNow} disabled={pushing}>
               <Upload size={13}/>
               {pushing ? "Pushing…" : `Push Now (${syncModal.result?.push ?? 0})`}

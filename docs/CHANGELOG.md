@@ -2,22 +2,19 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.42-alpha-test — 2026-05-12 — Connection liveness + real in-flight cancel + push visibility
+## v0.2.43-alpha-test — 2026-05-12 — Push parity + stale-cache fix + rate-limit bypass for critical events
 
-Fixes the connection error you hit on Qbox, the hung pushes, and the dark Activity feed during pushes.
+Three real root causes for the "modal hangs at 0 PUSHED" complaint, all confirmed in live dev-server tracing.
 
-### Backend
-- **Write probe bug fixed** (`sftp/transfer.rs:upload_bytes`): `create()` + `write_all()` never closed the SFTP file handle, so probe content didn't materialize server-side before `remove_file` ran → ENOENT. Added `f.shutdown().await` to flush + close. Also made probe cleanup best-effort (`sftp/ops.rs:probe_write_access`) — if create succeeded, write access is proven; a leftover probe file is harmless and shouldn't block the connection.
-- **russh keepalive** in both `sftp/mod.rs:open_session` and `tunnel/mod.rs:start`: `keepalive_interval=20s`, `keepalive_max=3` → ~60s to detect a stalled server. Was `Config::default()` (zero keepalive) — half-dead TCP sockets hung indefinitely waiting on Windows' ~2hr OS-level timeout.
-- **Real in-flight cancel** (`auto_sync.rs:process_entry`): each upload races against the cancel token via `tokio::select!`. When Stop fires, the upload future drops, russh stops emitting WRITE packets, the atomic-tmp file is left on the server (rename never ran so target is unchanged), and the entry requeues to dirty.
-- Cancel token passed down `flush_batch → process_entry`. Pre-dispatch cancel check also catches entries queued in `futs` before they touch the socket.
+**Root cause 1 — Push couldn't see scan results.** The `Push pending` button drained the watcher dirty queue only. Files that existed locally but never went through a watcher event (pre-existing drift) lived only in the scan cache's `ToPush` bucket and were invisible to push. New helper `promote_scan_pushes_to_dirty()` converts ToPush drift entries into dirty queue entries before flush, restoring symmetry with `force_pull_now`'s scan-cache dispatch. Adds an inline scan fallback when both dirty queue AND cache are empty so cold-session Push pending no longer dispatches zero against a server full of pending files.
 
-### Frontend
-- **Push activity parity**: `process_entry` now emits an "uploading…" / "deleting…" activity row at dispatch time, not just on completion. Hung pushes show a heartbeat per file instead of a dead modal.
-- **StatusBar sync pill**: while `syncModal.busy && !syncModal.open` (i.e. you hit "Run in background"), a pulsing pill appears next to queue/locks showing mode (pulling/pushing/scanning). Click reopens the modal so you can hit Stop. "Run in background" is no longer a one-way trip.
+**Root cause 2 — Stale scan cache re-pushing same files forever.** After a successful push the cache still held the same ToPush entries, so re-clicking Push promoted+re-pushed them indefinitely. The phantom-conflict SHA-collapse hid the no-op uploads but the count lied. `force_push_now` now clears `last_scan_entries` after a non-cancelled push; same logic added to `force_pull_now` for symmetry. Next click triggers an auto-scan, gets fresh state.
 
-### Research backing
-russh's own `Config` struct exposes `keepalive_interval`, `keepalive_max`, `inactivity_timeout`. `tokio::select!` drops the losing future, which closes russh-sftp's file handle via `Drop` (caveat: in-flight packets already on the wire may still land server-side — atomic rename pattern protects against torn target files).
+**Root cause 3 — DriftScanResult event silently rate-limited.** The diagnostics bus capped frontend emits at 200/sec to absorb FsEvent bursts. A 192-file push generated 800+ events in seconds, overflowing the cap; the terminal `drift_scan_result` event got dropped and the modal hung at "Pushing pending local edits…" forever waiting for it. Critical lifecycle stages (`DriftScanStart`, `DriftScanResult`, `RescanSignal`, `SftpConnect/Disconnect`, `RemoteScanResult`, `BridgeAck`, `System`) now bypass the rate limit unconditionally.
+
+### Other fixes
+- Activity-feed orphan rows: every early-return path in `process_entry` (cancel-at-top, file-vanished, file-unreadable, phantom-conflict collapse, outer-cancel-select) now emits an activity row so the feed never shows an "uploading…" without follow-up.
+- `eprintln!` breadcrumbs added to `sync_push_pending` / `sync_pull_pending` / `sync_reconcile` Tauri commands plus `force_push_now` / `force_pull_now` task bodies for fast diagnosis in dev console.
 
 ### Verify
-`svelte-check` 0/0 · `cargo check` clean · `vitest` 6/6.
+Live-dev tested: edited `[depend]/oxmysql/fxmanifest.lua`, clicked Push pending, observed `dispatched=2 elapsed_ms=253` and modal correctly transitioned to "Push complete · 2 pushed". Cache cleared post-push as expected.

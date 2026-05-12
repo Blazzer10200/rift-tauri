@@ -127,8 +127,13 @@ fn diag_snapshot_path(server_key: String) -> Result<String, String> {
 async fn sync_reconcile(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
+    eprintln!("[rift] sync_reconcile cmd: entry");
     let g = state.0.lock().await;
-    let Some(engine) = g.as_ref() else { return Ok(false) };
+    eprintln!("[rift] sync_reconcile cmd: lock acquired");
+    let Some(engine) = g.as_ref() else {
+        eprintln!("[rift] sync_reconcile cmd: no engine bound");
+        return Ok(false);
+    };
     engine.kick_drift_reconcile();
     Ok(true)
 }
@@ -155,8 +160,13 @@ async fn sync_cancel(
 async fn sync_pull_pending(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
+    eprintln!("[rift] sync_pull_pending cmd: entry");
     let g = state.0.lock().await;
-    let Some(engine) = g.as_ref() else { return Ok(false) };
+    eprintln!("[rift] sync_pull_pending cmd: lock acquired");
+    let Some(engine) = g.as_ref() else {
+        eprintln!("[rift] sync_pull_pending cmd: no engine bound");
+        return Ok(false);
+    };
     engine.force_pull_now();
     Ok(true)
 }
@@ -168,9 +178,16 @@ async fn sync_pull_pending(
 async fn sync_push_pending(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
+    eprintln!("[rift] sync_push_pending cmd: entry");
     let g = state.0.lock().await;
-    let Some(engine) = g.as_ref() else { return Ok(false) };
+    eprintln!("[rift] sync_push_pending cmd: lock acquired");
+    let Some(engine) = g.as_ref() else {
+        eprintln!("[rift] sync_push_pending cmd: no engine bound — returning false");
+        return Ok(false);
+    };
+    eprintln!("[rift] sync_push_pending cmd: calling force_push_now");
     engine.force_push_now();
+    eprintln!("[rift] sync_push_pending cmd: returning Ok(true)");
     Ok(true)
 }
 

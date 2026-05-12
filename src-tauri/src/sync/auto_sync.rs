@@ -506,6 +506,59 @@ impl AutoSyncEngine {
         self.folders.iter().map(|kv| kv.value().clone()).collect()
     }
 
+    /// Walk the last-scan cache and inject every ToPush entry into the dirty
+    /// queue (skipping ones already there, ones whose local file vanished
+    /// since the scan, and ones whose folder watch no longer exists).
+    /// Returns the count of newly-enqueued entries.
+    ///
+    /// Why this exists: the watcher only catches local edits that happen
+    /// AFTER it attaches. A file that existed before the watcher started
+    /// (or whose change-event was missed) lives only in the drift scanner's
+    /// view — `ToPush` bucket in `last_scan_entries`. Push used to drain
+    /// only the watcher dirty queue, so those entries were stranded.
+    fn promote_scan_pushes_to_dirty(&self) -> u32 {
+        let entries: Vec<crate::sync::DriftEntry> = match self.last_scan_entries.lock() {
+            Ok(g) => g
+                .iter()
+                .filter(|e| matches!(e.bucket, crate::sync::DriftBucket::ToPush))
+                .cloned()
+                .collect(),
+            Err(_) => return 0,
+        };
+        if entries.is_empty() {
+            return 0;
+        }
+        let folders = self.folders_clone();
+        let now = Utc::now();
+        let mut added = 0u32;
+        for de in entries {
+            let watch_key = match folders.iter().find(|fw| fw.resource_name == de.resource_name) {
+                Some(fw) => fw.remote_root.clone(),
+                None => continue,
+            };
+            let path = PathBuf::from(&de.local_path);
+            if self.dirty.contains_key(&path) {
+                continue;
+            }
+            if !path.exists() {
+                continue;
+            }
+            let entry = DirtyEntry {
+                watch_key,
+                path: path.clone(),
+                kind: ChangeKind::Modified,
+                first_seen: now,
+                next_flush: now,
+                attempts: 0,
+                next_retry: now,
+                bypass_preflight: false,
+            };
+            self.dirty.insert(path, entry);
+            added += 1;
+        }
+        added
+    }
+
     /// `true` if a local-side push is in flight or queued. The remote-scan
     /// loop pauses while this is set so we don't pull a file we're about to
     /// upload, then re-flag it as drifted on the next tick.
@@ -620,12 +673,15 @@ impl AutoSyncEngine {
         count
     }
 
-    /// Force-push NOW — drains every dirty entry regardless of debounce.
-    /// Cancel-aware. Emits drift_scan_start / drift_scan_result so the
-    /// SyncModal jumps through scanning→complete the same way force_pull_now
-    /// does. The modal renders push mode (purple Upload icon) via the
-    /// matching frontend handler.
+    /// Force-push NOW — drains every dirty entry regardless of debounce, AND
+    /// promotes ToPush drift entries from the last scan into the dirty queue
+    /// first. Without the scan-promotion step, Push only saw files edited
+    /// AFTER the watcher attached — files that existed locally and never got
+    /// a watcher event (pre-existing drift, missed events) showed up in the
+    /// scan as ToPush but the Push button did nothing. Pull was symmetric;
+    /// Push wasn't. This restores parity.
     pub fn force_push_now(self: &Arc<Self>) {
+        eprintln!("[rift] force_push_now: entry");
         let ct = CancellationToken::new();
         let ct_for_task = ct.clone();
         if let Ok(mut g) = self.current_scan_cancel.lock() {
@@ -633,11 +689,61 @@ impl AutoSyncEngine {
         }
         let engine = self.clone();
         let h = tokio::spawn(async move {
+            eprintln!("[rift] force_push_now: task spawned");
             diagnostics::emit(
                 DiagStage::DriftScanStart,
                 DiagLevel::Info,
                 "push-now",
             );
+            eprintln!("[rift] force_push_now: drift_scan_start emitted");
+
+            // Promote ToPush drift entries (from last scan) into the dirty
+            // queue. They're idempotent — flush_all_now's lazy-pop handles
+            // duplicates, and we skip entries already in dirty / vanished
+            // since scan. Without this step a freshly-connected session can
+            // see "78 to push" in the scan and dispatch zero on Push click.
+            let promoted = engine.promote_scan_pushes_to_dirty();
+            eprintln!("[rift] force_push_now: promoted {promoted} from scan cache, dirty queue size = {}",
+                engine.dirty.len());
+
+            // Auto-scan fallback — if after the cache-promote pass both the
+            // dirty queue AND the scan cache are empty (cold session), run
+            // an inline drift scan so Push can find files that exist locally
+            // but never went through the watcher. Parity w/ force_pull_now.
+            if engine.dirty.is_empty() && promoted == 0 {
+                eprintln!("[rift] force_push_now: dirty empty + cache empty → running inline scan");
+                let folders = engine.folders_clone();
+                if folders.is_empty() {
+                    eprintln!("[rift] force_push_now: no watched folders — nothing to scan");
+                } else {
+                    let targets: Vec<crate::sync::drift_scanner::FolderTarget> = folders
+                        .iter()
+                        .map(|fw| crate::sync::drift_scanner::FolderTarget {
+                            resource_name: fw.resource_name.clone(),
+                            local_root: fw.local_root.to_string_lossy().to_string(),
+                            remote_root: fw.remote_root.clone(),
+                        })
+                        .collect();
+                    let snap = engine.snapshot();
+                    let sftp = engine.sftp();
+                    let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap));
+                    let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
+                    eprintln!("[rift] force_push_now: inline scan returned {} entries (cancelled={})",
+                        result.entries.len(), result.cancelled);
+                    if !result.cancelled {
+                        engine.cache_scan_entries(result.entries.clone());
+                        let re_promoted = engine.promote_scan_pushes_to_dirty();
+                        eprintln!("[rift] force_push_now: after inline scan promoted {re_promoted}");
+                    }
+                }
+            }
+
+            if promoted > 0 {
+                engine.log(&format!(
+                    "push-now: promoted {promoted} scan ToPush entries into dirty queue"
+                ));
+            }
+
             let started = std::time::Instant::now();
             // flush_all_now + flush_batch both honor the cancel token: between
             // resources in flush_all_now, between entries in flush_batch's
@@ -647,6 +753,17 @@ impl AutoSyncEngine {
             let dispatched = engine.flush_all_now(Some(ct_for_task.clone())).await;
             let cancelled = ct_for_task.is_cancelled();
             let elapsed_ms = started.elapsed().as_millis() as u64;
+            eprintln!("[rift] force_push_now: flush_all_now returned dispatched={dispatched} cancelled={cancelled} elapsed_ms={elapsed_ms}");
+
+            // Invalidate the scan cache after a successful (non-cancelled)
+            // push. Without this, re-clicking Push re-promotes the same
+            // entries from the stale cache and "uploads" them again (SHA-
+            // collapse hides it, but the count lies). Next Push triggers an
+            // auto-scan via the empty-cache fallback, getting fresh state.
+            if !cancelled && dispatched > 0 {
+                engine.cache_scan_entries(Vec::new());
+                eprintln!("[rift] force_push_now: cleared scan cache (was stale post-push)");
+            }
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
@@ -1032,6 +1149,7 @@ impl AutoSyncEngine {
     /// local-delete circuit breaker fires before dispatch. Pull progress
     /// surfaces via RemotePullStart/Done into the activity feed.
     pub fn force_pull_now(self: &Arc<Self>) {
+        eprintln!("[rift] force_pull_now: entry");
         // Register a cancellation token so the modal's Cancel button can stop
         // the operation mid-flight. Replaces any prior token — kick_drift_reconcile
         // sharing the same slot means the user's "cancel" always hits the latest
@@ -1043,6 +1161,7 @@ impl AutoSyncEngine {
         }
         let engine = self.clone();
         let h = tokio::spawn(async move {
+            eprintln!("[rift] force_pull_now: task spawned");
             diagnostics::emit(
                 DiagStage::DriftScanStart,
                 DiagLevel::Info,
@@ -1232,6 +1351,15 @@ impl AutoSyncEngine {
                     let _ = h.await;
                 }
                 if ct_for_task.is_cancelled() { cancelled = true; }
+            }
+            // Symmetric w/ force_push_now: clear the scan cache after a
+            // non-cancelled pull that actually moved files. Without this,
+            // re-clicking Pull would re-pull the same entries from the
+            // stale cache (sha-collapse hides it, but the count lies).
+            // Next Pull triggers a fresh inline scan.
+            if !cancelled && pull_dispatched > 0 {
+                engine.cache_scan_entries(Vec::new());
+                eprintln!("[rift] force_pull_now: cleared scan cache (was stale post-pull)");
             }
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
@@ -1602,6 +1730,36 @@ impl AutoSyncEngine {
         entry: DirtyEntry,
         cancel: Option<CancellationToken>,
     ) -> EntryResult {
+        // Outer cancel guard wraps the WHOLE function body. Inner awaits
+        // (conflict pre-flight, remote_stat, mkdir, upload) all become
+        // cancellable — whichever await is pending at the moment cancel
+        // fires gets dropped, function returns Requeued. Belt-and-suspenders
+        // with the inner select! around upload_file_atomic.
+        let entry_for_requeue = entry.clone();
+        let fw_name = fw.resource_name.clone();
+        let file_for_log = file_name(&entry_for_requeue.path).to_string();
+        let work = self.process_entry_body(fw, entry, cancel.clone());
+        if let Some(ct) = cancel {
+            tokio::select! {
+                biased;
+                _ = ct.cancelled() => {
+                    self.dirty.insert(entry_for_requeue.path.clone(), entry_for_requeue);
+                    self.log_activity(&fw_name, &file_for_log,
+                        "cancelled mid-flight — requeued");
+                    return EntryResult::Requeued;
+                }
+                r = work => return r,
+            }
+        }
+        work.await
+    }
+
+    async fn process_entry_body(
+        &self,
+        fw: &FolderWatch,
+        entry: DirtyEntry,
+        cancel: Option<CancellationToken>,
+    ) -> EntryResult {
         let remote = match map_local_to_remote(&entry.path, fw) {
             Some(r) => r,
             None => {
@@ -1618,6 +1776,8 @@ impl AutoSyncEngine {
         if let Some(ct) = &cancel {
             if ct.is_cancelled() {
                 self.dirty.insert(entry.path.clone(), entry.clone());
+                self.log_activity(&fw.resource_name, file_name(&entry.path),
+                    "cancelled — requeued");
                 return EntryResult::Requeued;
             }
         }
@@ -1672,10 +1832,14 @@ impl AutoSyncEngine {
             // Wait briefly for the file to be readable (atomic-save mid-rename window).
             if !wait_for_readable(&entry.path).await {
                 self.mark_failed(&entry);
+                self.log_activity(&fw.resource_name, file_name(&entry.path),
+                    "skipped: file locked or unreadable");
                 return EntryResult::Fail;
             }
             if !entry.path.exists() {
                 self.mark_failed(&entry);
+                self.log_activity(&fw.resource_name, file_name(&entry.path),
+                    "skipped: file vanished before upload");
                 return EntryResult::Fail;
             }
 
@@ -1778,6 +1942,9 @@ impl AutoSyncEngine {
                                             Some(&remote),
                                             "phantom-conflict collapsed (SHA-equal)",
                                         );
+                                        self.log_activity(&fw.resource_name,
+                                            file_name(&entry.path),
+                                            "already in sync (mtime jitter)");
                                         let rel = rel_of(fw, &entry.path);
                                         return EntryResult::Ok(
                                             Some(rel),
