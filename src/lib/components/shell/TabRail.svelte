@@ -85,7 +85,7 @@
           class="rail-btn"
           data-active={active === t.id}
           data-tone={t.tone}
-          onclick={() => onChange(t.id)}
+          onclick={(e) => { onChange(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
           title="{t.label} (Ctrl+{t.kbd})"
           type="button"
         >
@@ -103,7 +103,7 @@
         <button
           class="update-pill"
           type="button"
-          onclick={() => updates.open()}
+          onclick={(e) => { updates.open(); (e.currentTarget as HTMLButtonElement).blur(); }}
           title="Update {updates.info.version} available — click for details"
         >
           <span class="up-dot"></span>
@@ -121,7 +121,7 @@
           class="qa-btn"
           data-tone="accent"
           type="button"
-          onclick={reconcile}
+          onclick={(e) => { reconcile(); (e.currentTarget as HTMLButtonElement).blur(); }}
           disabled={!canSync || pulling || pushing || scanning}
           title={watcherOn ? "Reconcile — scan both sides for drift" : "Connect a server first"}
         >
@@ -133,7 +133,7 @@
           class="qa-btn"
           data-tone="info"
           type="button"
-          onclick={pullAll}
+          onclick={(e) => { pullAll(); (e.currentTarget as HTMLButtonElement).blur(); }}
           disabled={!canSync || pulling || pushing || scanning}
           title={watcherOn ? "Pull all changes from remote" : "Connect a server first"}
         >
@@ -145,7 +145,7 @@
           class="qa-btn"
           data-tone="warn"
           type="button"
-          onclick={pushAll}
+          onclick={(e) => { pushAll(); (e.currentTarget as HTMLButtonElement).blur(); }}
           disabled={!canSync || pulling || pushing || scanning}
           title={watcherOn ? "Push all local changes to remote" : "Connect a server first"}
         >
