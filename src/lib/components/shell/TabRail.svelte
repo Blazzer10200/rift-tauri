@@ -92,7 +92,6 @@
           {#if c > 0}
             <span class="count-pip {t.countCls ?? ''}">{c}</span>
           {/if}
-          <span class="rail-kbd kbd">⌘{t.kbd}</span>
         </button>
       {/each}
     </div>
@@ -241,13 +240,6 @@
     background: color-mix(in oklch, var(--danger) 22%, transparent);
     color: var(--danger);
   }
-  .rail-kbd {
-    margin-left: auto;
-    opacity: 0;
-    transition: opacity 80ms;
-  }
-  .rail-btn:hover .rail-kbd { opacity: 1; }
-  .rail-btn[data-active="true"] .rail-kbd { opacity: 0.7; }
 
   .bottom {
     margin-top: auto;
@@ -338,7 +330,7 @@
 
   /* Collapsed state: hide labels, kbd hints, qa header, button text. */
   @container (max-width: 130px) {
-    .label, .rail-kbd, .qa-label, .up-text { display: none; }
+    .label, .qa-label, .up-text { display: none; }
     .qa-btn > span:not(.qa-spin) { display: none; }
     .rail-btn, .qa-btn { justify-content: center; padding: 0; gap: 0; }
     .update-pill { justify-content: center; padding: 8px; }
