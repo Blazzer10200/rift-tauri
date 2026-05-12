@@ -1038,6 +1038,20 @@ impl AutoSyncEngine {
                 Some(&path_str),
                 format!("{kind:?}"),
             );
+            // Belt-and-suspenders for Bug 5 (Endure RP 2026-05-12): when a new
+            // directory subtree is created under a watched bracket (e.g.
+            // `[endure]/endure_rifttest/`), Windows ReadDirectoryChangesW can
+            // race the subtree registration — Create events for files nested
+            // INSIDE the new dir before it fully registers get dropped. The
+            // dir-Create event itself reaches us, but queue_path discards dir
+            // events (children are supposed to fire their own). So we fire a
+            // drift reconcile as the safety net: the scan walks local
+            // recursively, lists remote, and surfaces the entire new tree as
+            // ToPush. kick_drift_reconcile is debounced via its cancel-replace
+            // semantics, so rapid mkdir bursts collapse to one scan.
+            if kind == ChangeKind::Created && path.is_dir() {
+                self.kick_drift_reconcile();
+            }
             self.queue_path(path, kind);
         }
     }

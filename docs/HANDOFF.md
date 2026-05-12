@@ -2,6 +2,44 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 51 — 2026-05-12 — New-resource discovery + park-dir ignore → ship v0.2.47-alpha
+
+### Trigger
+Post-v0.2.46 Endure RP stress test surfaced two new bugs:
+- **Bug 5**: created `[endure]/endure_rifttest/` (7 files / 13 nested dirs) — 0 push entries 10+ min later. Bracket-level `.rift-trail.jsonl` proved Rift WAS watching the bracket; sibling `endure_devbridge` worked.
+- **Bug 6**: after SSH-cleaning prod into `_disabled_extras/`, Rescan still surfaced 183 pull / 43 delete on `[depend]` — out-of-band moves not reconciling.
+
+### Diagnosis
+- Bug 5: bracket DOES get `RecursiveMode::Recursive` watch via `try_watch` at try_watch:427. But on Windows `ReadDirectoryChangesW` can race new-subtree registration — file Create events nested inside a freshly-created dir BEFORE the dir fully registers get silently dropped. The dir-Create event itself reaches us but `queue_path` returns early for dir paths.
+- Bug 6: NOT a snapshot bug. Drift scanner re-walks remote live every Rescan via `list_recursive_batch`. Parking into `_disabled_extras/` under the watched remote_root means the listing still walks them; drift scanner emits ToPull because local doesn't have those files. Working as designed; ignore rules just didn't cover the prefix.
+
+### Completed (file:line)
+- **F5 — Created+Dir kicks reconcile** [sync/auto_sync.rs:1041-1054](src-tauri/src/sync/auto_sync.rs#L1041) — on `Create(Dir)` in `on_fs_event`, fire `kick_drift_reconcile` as Windows-race safety net. Cancel-replace token semantics debounce rapid bursts to one scan.
+- **F6 — Prefix-match `_disabled_*`** [sync/ignore.rs](src-tauri/src/sync/ignore.rs) — new `IGNORE_SEGMENT_PREFIXES = ["_disabled_"]` applied only to non-terminal segments (so a file literally named `_disabled_for_review.lua` doesn't false-trip). Existing `_disabled_archive` exact match preserved.
+- **Tests** — new `disabled_prefix_segments` covers park-dir paths + false-trip guard. `cargo test --lib sync::ignore` → 11 passed / 0 failed.
+- `cargo check` clean 1.44s.
+
+### Files Modified (S51)
+- `src-tauri/src/sync/auto_sync.rs` — `on_fs_event` Created+Dir reconcile dispatch
+- `src-tauri/src/sync/ignore.rs` — IGNORE_SEGMENT_PREFIXES + non-terminal-segment gate + new test
+- `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` — 0.2.46 → 0.2.47-alpha
+- `docs/CHANGELOG.md` — v0.2.47 entry (v0.2.46 falls to git log)
+
+### Still deferred to v0.2.48
+- **Mirror mode** (Bug 1) — new drift bucket for `local-missing + remote-has + baseline-exists` → propose remote-delete + UI toggle.
+- **Stale-lock sweep UI button** — existing `sweep_stale_mine` (180 s) handles own-user stale on watcher attach.
+- **Mass-delete guard fine-tune** — still open from v0.2.45 backlog.
+
+### Next session priorities
+1. Smoke v0.2.47 — create new resource dir under a bracket, verify it appears in push queue within a few seconds (vs 10+ min before).
+2. Smoke park-dir ignore — `mv` some files into a fresh `_disabled_temp/` under watched root, run Rescan, confirm they disappear from the pull queue.
+3. Treyday Tailscale round-trip on v0.2.47.
+
+### Audit notes — Treyday safety
+All v0.2.46 push-reliability + lock-release fixes preserved. Reconcile dispatch on Created+Dir is read-only (drift scan), no destructive ops. Prefix ignore rule is restrictive (non-terminal segments only); won't ignore any file under a non-park dir.
+
+---
+
 ## Session 50 — 2026-05-12 — Push reliability + orphan-lock fix → ship v0.2.46-alpha
 
 ### Trigger
