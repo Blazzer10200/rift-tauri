@@ -2,6 +2,37 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 45 — 2026-05-12 — Connection liveness + real in-flight cancel + ship v0.2.42
+
+### Completed
+- **Write-probe ENOENT root-caused + fixed** (`sftp/transfer.rs:upload_bytes`): `create()` + `write_all()` never closed the SFTP file handle, so probe content didn't materialize server-side before `remove_file` ran. Added `f.shutdown().await`. Also made `probe_write_access` cleanup best-effort — create-proves-write-access; cleanup ENOENT is no longer connection-fatal.
+- **russh keepalive** added to both `sftp/mod.rs:open_session` (line ~129) and `tunnel/mod.rs:start` (line ~64): `keepalive_interval=20s`, `keepalive_max=3` → ~60s dead-detection. Was `Config::default()` (no keepalive) — fixes both indefinite hung pushes and the intermittent remote-panel errors.
+- **Real in-flight cancel** (`auto_sync.rs:process_entry` ~line 1809): `tokio::select!` races the upload future against the cancel token. Drop on cancel → russh stops WRITE packets → atomic-tmp file left server-side (rename never ran, target untouched) → entry requeues to dirty. `process_entry` signature now takes `Option<CancellationToken>`; `flush_batch` clones the token per dispatch.
+- **Push activity parity** (`auto_sync.rs:process_entry`): "uploading…" / "deleting…" rows emit at dispatch start, not just on completion. Hung pushes now show a heartbeat per file in the activity feed instead of a dead modal.
+- **StatusBar sync pill** (`StatusBar.svelte`): pulsing pill renders while `syncModal.busy && !syncModal.open`, click reopens modal so "Run in background" isn't a one-way trip.
+- Shipped v0.2.42-alpha-test — svelte-check 0/0/3994, cargo check clean (3.64s), vitest 6/6, delta 0.2.41→0.2.42 uploaded to `rift-releases`.
+
+### Key Decisions
+- Keepalive over per-file timeout: 60s socket-death detection is cheaper + safer than wrapping every SFTP call in `tokio::time::timeout`. A real long upload on a slow link shouldn't be aborted by Rift; a dead socket should.
+- Cancel token threaded by explicit signature param (not `engine.current_scan_cancel` mutex check) — guarantees each in-flight process_entry honors the SAME token that triggered the op, not whatever the latest replacement is.
+- `tracing` not in deps — used `eprintln!` for the probe-cleanup warn.
+
+### Files Modified
+- `src-tauri/src/sftp/transfer.rs` — upload_bytes shutdown()
+- `src-tauri/src/sftp/ops.rs` — probe cleanup best-effort
+- `src-tauri/src/sftp/mod.rs` — russh keepalive
+- `src-tauri/src/tunnel/mod.rs` — russh keepalive
+- `src-tauri/src/sync/auto_sync.rs` — process_entry sig + tokio::select cancel + start-row activity
+- `src/lib/components/shell/StatusBar.svelte` — sync pill
+- `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.42-alpha-test
+
+### Next Steps
+1. User in-app verification: Qbox connection (write-probe error should be gone), push w/ Stop (modal closes ~1s, in-flight upload drops), StatusBar pill click-to-reopen
+2. If keepalive is too aggressive on slow links (false disconnects), tune to 30s × 4 = 120s detection
+3. Polish backlog (Tier 3 login, Tier 4 modals, Diagnostics) still pending
+
+---
+
 ## Session 44 — 2026-05-12 — Quick Actions accuracy + real cancel + ship v0.2.41
 
 ### Completed
@@ -50,7 +81,7 @@ Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixe
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.41-alpha-test** — real cancel on push/pull + Quick Actions accuracy + background mode. Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`. Delta from 0.2.40 live.
+**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.42-alpha-test** — connection liveness (russh keepalive), write-probe shutdown fix, real in-flight upload cancel via tokio::select, push activity parity, StatusBar sync pill. Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
 
 **Rhythm:** apply canon (`docs/UI-POLISH-MAP.md`) to remaining unpolished pages. Tone via `data-tone` + `--tone` var, surface 8-14% rest / 22% hover, hover icon scale 1.1-1.18 w/ overshoot + reduced-motion guard, active inset-stripe `inset 2px 0 var(--tone)`, focus-within blur, hide-when-zero, title+hint empty states, truncation tooltips, `hour12: true` everywhere.
 
