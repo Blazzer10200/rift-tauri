@@ -2,6 +2,37 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 44 — 2026-05-12 — Quick Actions accuracy + real cancel + ship v0.2.41
+
+### Completed
+- TabRail Quick Actions accuracy pass: labels (Reconcile→Scan drift, Pull all→Pull pending, Push all→Push pending), tones (Push: warn→accent, Reconcile: neutral), tooltips scope-explicit
+- Backend cmds renamed `diag_*` → `sync_*` across lib.rs + all frontend invoke sites (SyncModal, TabRail, diagnostics.svelte.ts)
+- Real cancel: `flush_batch` + `flush_all_now` honor CancellationToken between entries; lazy-pop from dirty preserves un-dispatched work across cancel; `force_pull_now` orphans in-flight handles instead of awaiting them (modal closes ~1s after Stop)
+- SyncModal: `busy` flag tracks real op lifecycle independent of modal visibility; "Run in background" button dismisses modal while op continues; listeners gated on `busy || open`
+- TabRail: dropped dead local `pulling/pushing/scanning` flags (they flipped false within ms of click); gated on `syncModal.busy`
+- Shipped v0.2.41-alpha-test — svelte-check 0/0/3994 · cargo check clean · vitest 6/6 · delta 0.2.40→0.2.41 (3 patched, 2 unchanged)
+
+### Key Decisions
+- Lazy-pop over up-front pop: entries stay in dirty until dispatch committed; cancel mid-batch leaves remainder for next Push click
+- Orphan-on-cancel for pull: in-flight russh streams finish naturally, modal closes immediately. Can't abort mid-stream without torn files
+- `busy` flag independent of `open` — background-dismiss path needs lifecycle tracking separate from visibility
+
+### Files Modified
+- `src-tauri/src/lib.rs:127-175,1609-1612` — cmd renames
+- `src-tauri/src/sync/auto_sync.rs:557-617,619-671,1212-1234,1428-1590` — flush cancel + pull orphan
+- `src/lib/components/shell/TabRail.svelte` — labels, tones, busy gating
+- `src/lib/components/sync/SyncModal.svelte` — bg button, listener gate, invoke renames
+- `src/lib/state/sync-modal.svelte.ts` — busy flag, runInBackground
+- `src/lib/state/diagnostics.svelte.ts` — invoke rename
+- `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.41-alpha-test
+
+### Next Steps
+1. Verify delta-update in-app: 0.2.40→0.2.41 auto-update prompt + install
+2. Polish backlog: Tier 3 login (Bootstrap, AddServer, Keygen), Tier 4 modals (SyncModal, UpdateDialog), Diagnostics
+3. `auto_sync/{watch,flush}.rs` stubs still pending (cross-cut private state; flagged S43)
+
+---
+
 ## Session 43 — 2026-05-12 — Backend hardening + frontend cleanup pass
 
 Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixes-2026-05-12.md`. Symlink-safe `delete_recursive_via` (lstat per child, reject `/`/`.`/empty); rename collision split (`rename_via` preflights existence, only atomic upload calls `rename_overwriting_via`); per-path `OpStatus { ok, error }` on remote/local delete commands; profile-path containment on rename/delete/list/bootstrap/enqueue/conflict-resolve; autosync deadlock avoidance (clone engine before `.await` to drop mutex); retry map drop-after-final-failure; 64-bit transport temp-id entropy; CRLF-safe `edit_trail` trim. Connect-time write probe under `remote_root` before declaring SFTP healthy. `.rift-lock` sweep on watch attach (local-user owned, age-gated). Removed 3 dead pub fns. **File splits:** `sftp/mod.rs` → mod+list+transfer+ops+remote_exec (1348L → 286+373+202+73+320 = 1254L, public API unchanged); `auto_sync/path.rs` extracted (152L); `auto_sync/{watch,flush}.rs` left as 1-line `CODEX-FLAG` stubs — private state cross-cuts notify/queue/lock/cache/bridge/trail, mechanical move judged unsafe. Skipped (with reasons): `local_list_dir` containment (no server_key param — frontend contract change), log redaction / CSP / capability tightening / safe file-count cache / tunnel per-connection cancellation (product or cross-cutting decisions).
@@ -19,7 +50,7 @@ Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixe
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.40-alpha-test** — hotfix for list-on-remote-root regression introduced in 0.2.39. v0.2.39 prerelease stays up (delta-receivers already on 0.2.32 → 0.2.40 still works via fresh delta). Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
+**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.41-alpha-test** — real cancel on push/pull + Quick Actions accuracy + background mode. Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`. Delta from 0.2.40 live.
 
 **Rhythm:** apply canon (`docs/UI-POLISH-MAP.md`) to remaining unpolished pages. Tone via `data-tone` + `--tone` var, surface 8-14% rest / 22% hover, hover icon scale 1.1-1.18 w/ overshoot + reduced-motion guard, active inset-stripe `inset 2px 0 var(--tone)`, focus-within blur, hide-when-zero, title+hint empty states, truncation tooltips, `hour12: true` everywhere.
 
