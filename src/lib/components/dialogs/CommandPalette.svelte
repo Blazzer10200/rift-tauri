@@ -91,6 +91,14 @@
   function shortcutKeys(s: string): string[] {
     return s.split("+").map((k) => k.trim()).filter(Boolean);
   }
+
+  function toneFor(group: string | undefined): "accent" | "info" | "neutral" | "warn" {
+    const g = (group ?? "").toLowerCase();
+    if (g === "servers") return "accent";
+    if (g === "sync")    return "info";
+    if (g === "go to")   return "neutral";
+    return "accent";
+  }
 </script>
 
 {#if open}
@@ -115,6 +123,7 @@
             class="row"
             data-idx={i}
             data-active={i === selectedIdx}
+            data-tone={toneFor(cmd.group)}
             onclick={() => { selectedIdx = i; runSelected(); }}
             onmouseenter={() => (selectedIdx = i)}
           >
@@ -170,9 +179,14 @@
   }
   .palette-input {
     display: flex; align-items: center; gap: 10px;
-    padding: 10px 14px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     color: var(--fg-muted);
+    transition: border-bottom-color 200ms ease;
+  }
+  .palette-input:focus-within {
+    border-bottom-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+    color: var(--accent);
   }
   .palette-input input {
     flex: 1;
@@ -180,6 +194,7 @@
     color: var(--fg);
     font: inherit; font-size: var(--fs-md);
     outline: none;
+    caret-color: var(--accent);
   }
   .palette-input input::placeholder { color: var(--fg-muted); }
 
@@ -188,38 +203,48 @@
     padding: 4px;
   }
   .row {
+    --tone: var(--accent);
     width: 100%;
     display: grid;
     grid-template-columns: 80px 1fr auto;
     gap: 10px;
     align-items: center;
-    padding: 7px 10px;
+    padding: 9px 12px;
     border: 0; background: transparent;
     color: var(--fg);
     border-radius: var(--radius-sm);
     cursor: pointer;
     text-align: left;
     font: inherit;
+    position: relative;
+    transition: background 120ms ease, box-shadow 120ms ease, transform 80ms ease;
   }
-  .row:hover, .row[data-active="true"] {
-    background: var(--surface-hover);
-  }
+  .row[data-tone="info"]    { --tone: var(--info); }
+  .row[data-tone="neutral"] { --tone: var(--fg-muted); }
+  .row[data-tone="warn"]    { --tone: var(--warn); }
   .row[data-active="true"] {
-    background: var(--accent-soft);
+    background: color-mix(in oklch, var(--tone) 14%, var(--surface));
+    box-shadow: inset 2px 0 0 var(--tone);
   }
+  .row[data-active="true"] .grp { color: var(--tone); }
+  .row:active { transform: translateX(1px); }
   .grp {
     font-size: var(--fs-xs);
     color: var(--fg-faint);
     text-transform: uppercase;
     letter-spacing: 0.06em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-weight: 600;
+    transition: color 120ms ease;
   }
   .cmd-text { display: flex; flex-direction: column; min-width: 0; }
   .title {
     font-size: var(--fs-sm);
     color: var(--fg);
+    font-weight: 500;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .row[data-active="true"] .title { font-weight: 600; }
   .subtitle {
     font-size: var(--fs-xs);
     color: var(--fg-subtle);
@@ -235,9 +260,10 @@
   }
 
   .palette-foot {
-    display: flex; align-items: center; gap: 12px;
-    padding: 8px 12px;
+    display: flex; align-items: center; gap: 14px;
+    padding: 9px 14px;
     border-top: 1px solid var(--border);
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
     color: var(--fg-subtle);
     font-size: var(--fs-xs);
   }
