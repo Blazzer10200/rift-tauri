@@ -1,6 +1,6 @@
 <script lang="ts">
   import { connection } from "../../state/connection.svelte";
-  import { RefreshCw, Lock } from "lucide-svelte";
+  import { Lock } from "lucide-svelte";
   import { fade } from "svelte/transition";
 
   const stateText = $derived(connection.status?.state ?? "offline");
@@ -27,21 +27,15 @@
 </script>
 
 <div class="statusbar">
-  <div class="grp">
-    <span class="led" data-state={ledClass}></span>
-    <span class="lbl">{stateText}</span>
-  </div>
-  <div class="sep"></div>
   <button
-    class="grp watcher"
+    class="grp state-toggle"
     type="button"
     onclick={toggleWatcher}
     disabled={!connection.selected || connection.connecting}
     title={connection.connecting ? "Connecting…" : watcherOn ? "Click to stop watching" : "Click to start watching"}
   >
-    <RefreshCw size={11}/>
-    <span class="lbl">watcher</span>
-    <span class="mono val" class:ok={watcherOn}>{connection.connecting ? "…" : watcherOn ? "on" : "off"}</span>
+    <span class="led" data-state={ledClass}></span>
+    <span class="lbl">{connection.connecting ? "connecting" : stateText}</span>
   </button>
   {#if locks > 0}
     <div class="sep"></div>
@@ -105,17 +99,18 @@
   .led[data-state="danger"] { background: var(--danger); }
   .led[data-state="muted"]  { background: var(--fg-faint); }
 
-  .watcher {
+  .state-toggle {
     background: transparent;
     border: 0;
     color: var(--fg-muted);
     font: inherit; font-size: var(--fs-xs);
     cursor: pointer;
-    padding: 0 4px; margin: 0 -4px;
+    padding: 0 6px; margin: 0 -6px;
     border-radius: var(--radius-xs);
-    transition: background 100ms ease;
+    text-transform: capitalize;
+    transition: background 100ms ease, color 100ms ease;
   }
-  .watcher:hover:not(:disabled) { background: var(--surface-hover); }
-  .watcher:disabled { cursor: not-allowed; opacity: 0.6; }
-  .watcher:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .state-toggle:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
+  .state-toggle:disabled { cursor: not-allowed; opacity: 0.6; }
+  .state-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 </style>
