@@ -895,6 +895,109 @@ impl AutoSyncEngine {
         self.track_background(h);
     }
 
+    /// Force-pull cycle. Same scan + push-enqueue flow as `kick_drift_reconcile`
+    /// but ALSO dispatches `pull_one` for every ToPull entry — closes the
+    /// "buddy pushed but my Rift hasn't ticked yet" gap. Emits the same
+    /// DriftScanStart/Result events the modal listens for; pull progress
+    /// surfaces via RemotePullStart/Done into the activity feed.
+    pub fn force_pull_now(self: &Arc<Self>) {
+        let folders: Vec<FolderWatch> = self
+            .folders
+            .iter()
+            .map(|kv| kv.value().clone())
+            .collect();
+        if folders.is_empty() {
+            return;
+        }
+        let sftp = self.sftp.clone();
+        let snapshot = self.snapshot.clone();
+        let engine = self.clone();
+        let ct = CancellationToken::new();
+        let ct_for_task = ct.clone();
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            *g = Some(ct);
+        }
+        let h = tokio::spawn(async move {
+            diagnostics::emit(
+                DiagStage::DriftScanStart,
+                DiagLevel::Info,
+                format!("pull-now across {} folder(s)", folders.len()),
+            );
+            let scanner = crate::sync::DriftScanner::new(&sftp, Some(&snapshot));
+            let targets: Vec<crate::sync::FolderTarget> = folders
+                .iter()
+                .map(|fw| crate::sync::FolderTarget {
+                    resource_name: fw.resource_name.clone(),
+                    local_root: fw.local_root.to_string_lossy().to_string(),
+                    remote_root: fw.remote_root.clone(),
+                })
+                .collect();
+            let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
+            let entries_count = result.entries.len();
+            let mut to_push = 0u32;
+            let mut to_pull = 0u32;
+            let mut conflicts = 0u32;
+            let mut push_paths: Vec<PathBuf> = Vec::new();
+            let mut pull_entries: Vec<crate::sync::DriftEntry> = Vec::new();
+            for e in result.entries {
+                match e.bucket {
+                    crate::sync::DriftBucket::ToPush => {
+                        to_push += 1;
+                        push_paths.push(PathBuf::from(&e.local_path));
+                    }
+                    crate::sync::DriftBucket::ToPull => {
+                        to_pull += 1;
+                        pull_entries.push(e);
+                    }
+                    crate::sync::DriftBucket::Conflict => conflicts += 1,
+                    crate::sync::DriftBucket::Synced => {}
+                }
+            }
+            let mut pull_dispatched = 0u32;
+            if !result.cancelled {
+                for entry in pull_entries {
+                    let task_engine = engine.clone();
+                    let h = tokio::spawn(async move {
+                        crate::sync::drift_watcher::pull_one(&task_engine, entry).await;
+                    });
+                    engine.track_pull_handle(h);
+                    pull_dispatched += 1;
+                }
+            }
+            let enqueued = if !result.cancelled && !push_paths.is_empty() {
+                engine.enqueue_for_flush_batch(push_paths, false, false).await
+            } else {
+                0
+            };
+            diagnostics::emit_with_fields(
+                DiagStage::DriftScanResult,
+                DiagLevel::Info,
+                None,
+                None,
+                if result.cancelled { "pull-now cancelled" } else { "pull-now complete" },
+                serde_json::json!({
+                    "entries": entries_count,
+                    "to_push": to_push,
+                    "to_pull": to_pull,
+                    "conflicts": conflicts,
+                    "enqueued_for_push": enqueued,
+                    "pull_dispatched": pull_dispatched,
+                    "missing_remote_folders": result.remote_folders_missing.len(),
+                    "listing_error": result.last_batch_listing_error,
+                    "cancelled": result.cancelled,
+                }),
+            );
+            if let Ok(mut g) = engine.current_scan_cancel.lock() {
+                if let Some(stored) = g.as_ref() {
+                    if stored.is_cancelled() == ct_for_task.is_cancelled() {
+                        *g = None;
+                    }
+                }
+            }
+        });
+        self.track_background(h);
+    }
+
     /// Cancel the in-flight drift reconcile if one is running. No-op otherwise.
     /// The running scan checks the token between folders and bails with a
     /// `cancelled: true` ScanResult; the modal surfaces that as "cancelled".

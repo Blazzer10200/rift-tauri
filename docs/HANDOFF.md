@@ -2,7 +2,15 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
-## Session 26 — 2026-05-12 — Sync modal + scan cancel + v0.2.20 cleanup
+## Session 26 — 2026-05-12 — Sync modal + scan cancel + Pull Now (v0.2.20 + v0.2.21)
+
+### v0.2.21 — Snappier pull + Pull Now button (post-v0.2.20 field test)
+- Blazzer + Trey tested v0.2.20: push side instant (notify watcher → auto-flush). Pull side needed manual Sync click because drift_watcher's default 30s tick made remote changes feel sluggish. Two-part fix:
+  - **`DEFAULT_SCAN_INTERVAL_SECS` 30 → 10** ([drift_watcher.rs:41](src-tauri/src/sync/drift_watcher.rs#L41)). Buddy-side pushes now auto-pull within ~10s. 3x more SFTP listings but ~2s each on typical trees — fine.
+  - **Pull Now button** — new `engine.force_pull_now()` re-scans AND dispatches `pull_one` for every ToPull entry. `drift_watcher::pull_one` exposed as `pub(crate)` for cross-module call. New `diag_force_pull_now` Tauri cmd. Modal footer shows the button when `phase=="complete" && result.pull > 0` with download icon + count. Uses new `.btn-accent` style matching the rest of the UI.
+- Also rolled in: SyncModal listing-phase hint ("Listing remote files…") so the silent ~30s pre-batch-listing window no longer looks frozen.
+
+### v0.2.20 — Sync modal + scan cancel (initial)
 
 ### Completed
 - **SyncModal** ([src/lib/components/sync/SyncModal.svelte](src/lib/components/sync/SyncModal.svelte) + [state/sync-modal.svelte.ts](src/lib/state/sync-modal.svelte.ts)). Center-stage overlay replaces the corner `ScanProgressChip`. Listens to `diag://event` (drift_scan_start/progress/result) + `autosync://activity` directly; manages its own state machine (scanning → complete | cancelled | error). Watchdog: 30s of silence shows a "scan may be slow" banner but doesn't auto-fail (fixes v0.2.19's false-alarm timeout where the backend kept running after the toast fired). Backdrop blur disables clicks during scan; Esc cancels mid-scan or dismisses afterwards.
@@ -32,10 +40,10 @@
 
 **Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`.
 
-**Current state (post S26):** **v0.2.20-alpha-test SHIPPED** to `rift-releases`. Builds on v0.2.19. Net-new in v0.2.20: SyncModal + scan cancel + path-guard restore + Open-in-editor + v0.2.19 cleanup punchlist. Trey auto-updates via Velopack on next Rift launch.
+**Current state (post S26):** **v0.2.21-alpha-test SHIPPED** to `rift-releases`. v0.2.20 (modal + cancel + Open-in-editor + path-guards) shipped earlier same session and was field-tested live; v0.2.21 = polish pass (10s auto-pull cadence + Pull Now button + listing-phase hint).
 
-**Known leftover (cleanup for v0.2.21):**
-- SyncModal "Review Pull" button — wire to existing DriftReview component when `result.pull > 0`.
+**Known leftover (cleanup for v0.2.22):**
+- Per-folder streaming during initial SFTP listing — instrument `SftpClient::list_recursive_batch` to emit per-root completion events. ~30-40min, touches `sftp/mod.rs`.
 - Sweep pre-existing a11y warnings (Settings/LocalPane/RemotePane).
 
 ## CRITICAL DON'T-TOUCH

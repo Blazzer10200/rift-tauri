@@ -2,19 +2,17 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.20-alpha-test — 2026-05-12 — Sync modal + scan cancel + cleanup
+## v0.2.21-alpha-test — 2026-05-12 — Snappier auto-pull + Pull Now button
 
-Center-stage sync experience replaces the corner chip. Backend now supports mid-scan cancel; frontend trusts progress events instead of a hardcoded timer. v0.2.19's "Scan timed out (30s)" false alarm (backend kept running after the toast fired) is fixed.
+Closes the "buddy pushed but my Rift hasn't ticked yet" UX gap. Tested by Blazzer + Trey: push direction was instant, pull direction needed a manual Sync click to feel timely. Two changes fix it.
 
 ### Landed
-- **SyncModal** — full-overlay modal triggered by the Sync button. Shows live progress bar, per-folder status, push/pull/conflict counts, scrolling activity feed (drift + queue events). Backdrop blur disables other interaction during the scan. Esc cancels (during scan) or dismisses (after).
-- **Scan cancel** — `DriftScanner::scan_with_cancel` checks a `CancellationToken` between folders; new `diag_cancel_drift_scan` Tauri cmd fires it. Partial results (entries collected before bail) are returned w/ `cancelled: true` — no auto-enqueue of the partial push set when the user just asked to stop.
-- **Watchdog, not timeout** — modal trusts progress events. 30s of silence shows a "scan may be slow" banner but does NOT auto-fail. Scales naturally with reconcile size.
-- **Path-guards re-applied** — `upload_paths` / `download_paths` now gate every job's local + remote target through `path_guard::validate_local_child` / `validate_remote_child` against the active server profile. Closes the v0.2.19 gap from the rebase.
-- **Open in default editor** — LocalPane context menu gains "Open in default editor" for files. Uses `@tauri-apps/plugin-opener` directly (already in capabilities). Closes the v0.2.19 UX gap where the chip dropped the Edit button without a replacement.
-- **Dead code removal** — `just_pulled_suppress_until` mechanism in `auto_sync.rs` (field, init, suppress_just_pulled, callsite, is_just_pulled_suppressed) — orphaned during the v0.2.19 rebase; v0.2.18's `recently_written` covers the same window. `ScanProgressChip.svelte` + `scan-progress.svelte.ts` removed (superseded by SyncModal).
+- **Faster auto-pull cycle** — `DEFAULT_SCAN_INTERVAL_SECS` 30 → 10. Drift watcher now polls every 10s instead of 30s, so buddy-side pushes appear within ~10s of upload (was up to 30s). 3x more SFTP listings, ~2s each on a typical tree — negligible. Users who want the old behavior can still set their own interval via Settings.
+- **Pull Now button** — appears in the SyncModal footer when a completed scan reports `To Pull > 0`. New `diag_force_pull_now` Tauri cmd calls `AutoSyncEngine::force_pull_now()`, which re-runs the drift scan AND dispatches `pull_one` for every ToPull entry (vs. plain Sync, which only auto-enqueues ToPush). Modal re-enters scanning phase, activity feed populates with `RemotePullStart/Done` events, completion shows `pull_dispatched` count.
+- **Modal listing-phase hint** — "Listing remote files… (this may take a moment on the first scan)" status line + activity entry on `drift_scan_start`. Closes the silent ~30s pre-listing window where the modal looked frozen.
+- **Pull-button styling** — new `.btn-accent` variant in the modal matches the existing UI language (soft accent fill, accent border, hover swell).
 
 ### Verify
-- `cargo check`: clean. `svelte-check`: 0 errors, 6 a11y warnings (all pre-existing patterns).
+- `cargo check`: clean. `svelte-check`: 0 errors, 5 a11y warnings (all pre-existing).
 
-v0.2.19-alpha-test archived to git log.
+v0.2.20-alpha-test archived to git log.
