@@ -1,6 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { revealItemInDir } from "@tauri-apps/plugin-opener";
+  import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
   import { Folder, FileCode, File, ChevronRight, Upload, FolderOpen, Copy, ExternalLink, Pencil, Trash2 } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
@@ -228,6 +228,12 @@
     try { await revealItemInDir(p); } catch (err) { console.warn("reveal failed", err); }
   }
 
+  async function openInDefault(p: string) {
+    try { await openPath(p); } catch (err) {
+      error = `open failed: ${err}`;
+    }
+  }
+
   async function renameEntry(entry: LocalEntry) {
     const serverKey = connection.selectedKey;
     if (!serverKey) { error = "no server selected"; return; }
@@ -407,6 +413,11 @@
     </button>
     <div class="ctx-sep"></div>
     {#if !multi}
+      {#if !target.is_dir}
+        <button type="button" class="ctx-item" onclick={() => { openInDefault(target.path); closeMenu(); }}>
+          <ExternalLink size={13}/><span>Open in default editor</span>
+        </button>
+      {/if}
       <button type="button" class="ctx-item" onclick={() => { revealInExplorer(target.path); closeMenu(); }}>
         <ExternalLink size={13}/><span>Reveal in Explorer</span>
       </button>

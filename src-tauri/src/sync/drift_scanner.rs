@@ -23,6 +23,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use tokio_util::sync::CancellationToken;
 
 use crate::sftp::{RemoteEntry, SftpClient};
 use crate::state::sync_snapshot::{MTIME_TOLERANCE_SECS, SHA1_MAX_BYTES};
@@ -70,6 +71,8 @@ pub struct ScanResult {
     pub entries: Vec<DriftEntry>,
     pub last_batch_listing_error: Option<String>,
     pub remote_folders_missing: Vec<String>,
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 pub struct DriftScanner<'a> {
@@ -83,9 +86,21 @@ impl<'a> DriftScanner<'a> {
     }
 
     pub async fn scan(&self, folders: &[FolderTarget]) -> ScanResult {
+        self.scan_with_cancel(folders, None).await
+    }
+
+    /// Cancellable scan. When `cancel` fires between folders, returns the
+    /// partial result with `cancelled: true` so callers can decide whether
+    /// to act on whatever was discovered before the abort.
+    pub async fn scan_with_cancel(
+        &self,
+        folders: &[FolderTarget],
+        cancel: Option<&CancellationToken>,
+    ) -> ScanResult {
         let mut entries = Vec::new();
         let mut last_batch_error: Option<String> = None;
         let mut remote_folders_missing = Vec::new();
+        let mut cancelled = false;
 
         let roots: Vec<String> = folders.iter().map(|f| f.remote_root.clone()).collect();
         let listings = match self
@@ -102,6 +117,12 @@ impl<'a> DriftScanner<'a> {
 
         let total = folders.len();
         for (idx, f) in folders.iter().enumerate() {
+            if let Some(ct) = cancel {
+                if ct.is_cancelled() {
+                    cancelled = true;
+                    break;
+                }
+            }
             crate::diagnostics::emit_with_fields(
                 crate::diagnostics::DiagStage::DriftScanProgress,
                 crate::diagnostics::DiagLevel::Debug,
@@ -134,6 +155,7 @@ impl<'a> DriftScanner<'a> {
             entries,
             last_batch_listing_error: last_batch_error,
             remote_folders_missing,
+            cancelled,
         }
     }
 

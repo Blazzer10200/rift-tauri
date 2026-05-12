@@ -131,6 +131,20 @@ async fn diag_force_drift_scan(
     Ok(true)
 }
 
+/// Cancel the in-flight drift reconcile (if any). Returns true if a scan was
+/// active when the cancel fired. SyncModal's Cancel button calls this; the
+/// running scan then bails between folders and emits `drift_scan_result` w/
+/// `cancelled: true`.
+#[tauri::command]
+async fn diag_cancel_drift_scan(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<bool, String> {
+    let g = state.0.lock().await;
+    let Some(engine) = g.as_ref() else { return Ok(false) };
+    engine.cancel_drift_reconcile();
+    Ok(true)
+}
+
 /// Per-rule ignore breakdown — answers "which ignore rule swallowed my file"
 /// when a sync isn't behaving. Keys are stable rule labels from
 /// `sync::ignore::classify` (`seg:.git`, `ext:.tmp`, `editor-lock(~$)`, …).
@@ -772,6 +786,17 @@ async fn upload_paths(
     jobs: Vec<(String, String)>,
 ) -> Result<Vec<bool>, String> {
     use tauri::Emitter;
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?
+        .clone();
+    for (local, remote) in &jobs {
+        path_guard::validate_local_child(&server, local)
+            .map_err(|e| format!("upload local guard: {e}"))?;
+        path_guard::validate_remote_child(&server, remote)
+            .map_err(|e| format!("upload remote guard: {e}"))?;
+    }
     let client = open_sftp_for(&server_key).await?;
     let mapped = expand_upload_jobs(jobs);
     if mapped.is_empty() {
@@ -853,6 +878,17 @@ async fn download_paths(
     dl_state: tauri::State<'_, DownloadState>,
 ) -> Result<Vec<bool>, String> {
     use tauri::Emitter;
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?
+        .clone();
+    for (remote, local) in &jobs {
+        path_guard::validate_remote_child(&server, remote)
+            .map_err(|e| format!("download remote guard: {e}"))?;
+        path_guard::validate_local_child(&server, local)
+            .map_err(|e| format!("download local guard: {e}"))?;
+    }
     let ct = CancellationToken::new();
     {
         let mut g = dl_state.0.lock().await;
@@ -1412,6 +1448,7 @@ pub fn run() {
             diag_get_state,
             diag_snapshot_path,
             diag_force_drift_scan,
+            diag_cancel_drift_scan,
             diag_ignored_breakdown,
             set_remote_scan_interval,
             get_remote_scan_interval,

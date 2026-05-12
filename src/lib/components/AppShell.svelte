@@ -9,7 +9,6 @@
   import Settings from "./settings/Settings.svelte";
   import StatusHero from "./StatusHero.svelte";
   import ActivityToast from "./ActivityToast.svelte";
-  import ScanProgressChip from "./ScanProgressChip.svelte";
   import TwoPane from "./browser/TwoPane.svelte";
   import ActivityFeed from "./activity/ActivityFeed.svelte";
   import Diagnostics from "./diagnostics/Diagnostics.svelte";
@@ -389,7 +388,6 @@
   <UpdateDialog />
 
   <ActivityToast />
-  <ScanProgressChip />
 </div>
 
 <style>

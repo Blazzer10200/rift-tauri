@@ -1,15 +1,15 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
-  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { onDestroy, onMount } from "svelte";
   import { X } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { browserTabs } from "../../state/browser-tabs.svelte";
-  import { scanProgress } from "../../state/scan-progress.svelte";
+  import { syncModal } from "../../state/sync-modal.svelte";
   import LocalPane from "./LocalPane.svelte";
   import RemotePane from "./RemotePane.svelte";
   import OpRail from "./OpRail.svelte";
   import FlashToast from "../FlashToast.svelte";
+  import SyncModal from "../sync/SyncModal.svelte";
 
   type LocalEntry = {
     name: string; path: string; is_dir: boolean; size: number; mtime: number;
@@ -131,65 +131,21 @@
   function onUpload() { uploadLocalsToRemote(localSel); }
   function onDownload() { downloadRemotesToLocal(remoteSel); }
 
-  type DriftResultFields = {
-    entries?: number;
-    to_push?: number;
-    to_pull?: number;
-    conflicts?: number;
-    listing_error?: string | null;
-  };
-  type DriftProgressFields = {
-    current?: number;
-    total?: number;
-    resource?: string;
-  };
-  type DiagEventLite = { stage: string; fields: unknown };
-
-  let syncing = $state(false);
+  // Sync button: open the modal, fire backend scan. SyncModal handles diag
+  // events + activity feed + watchdog itself — no hardcoded timeout here.
+  // v0.2.19's 30s frontend timeout false-alarmed on >30s scans (894-entry
+  // reconcile took ~45s). Modal stays patient as long as events keep arriving.
+  const syncing = $derived(syncModal.open && syncModal.phase === "scanning");
   async function onSync() {
     if (syncing) return;
-    syncing = true;
-    scanProgress.start();
-    let resolveResult: (v: DriftResultFields | null) => void = () => {};
-    const resultPromise = new Promise<DriftResultFields | null>((resolve) => {
-      resolveResult = resolve;
-    });
-    const unlisten: UnlistenFn = await listen<DiagEventLite>("diag://event", (e) => {
-      const stage = e.payload.stage;
-      if (stage === "drift_scan_progress") {
-        const f = (e.payload.fields as DriftProgressFields) ?? {};
-        scanProgress.progress(f.current ?? 0, f.total ?? 0, f.resource ?? "");
-      } else if (stage === "drift_scan_result") {
-        resolveResult((e.payload.fields as DriftResultFields) ?? {});
-      }
-    });
-    const timeoutId = setTimeout(() => resolveResult(null), 30000);
+    syncModal.start();
     try {
       const fired = await invoke<boolean>("diag_force_drift_scan");
       if (!fired) {
-        scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: "Not connected — start auto-sync first." });
-        return;
+        syncModal.fail("Not connected — start auto-sync first.");
       }
-      const r = await resultPromise;
-      if (!r) {
-        scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: "Scan timed out (30s)." });
-        return;
-      }
-      if (r.listing_error) {
-        scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: r.listing_error });
-        return;
-      }
-      scanProgress.finish({
-        push: r.to_push ?? 0,
-        pull: r.to_pull ?? 0,
-        conflicts: r.conflicts ?? 0,
-      });
     } catch (e) {
-      scanProgress.finish({ push: 0, pull: 0, conflicts: 0, error: String(e) });
-    } finally {
-      clearTimeout(timeoutId);
-      unlisten();
-      syncing = false;
+      syncModal.fail(String(e));
     }
   }
 </script>
@@ -253,6 +209,8 @@
       <FlashToast message={toast.msg} kind={toast.kind} onDismiss={() => (toast = null)} />
     </div>
   {/if}
+
+  <SyncModal />
 </div>
 
 <style>
