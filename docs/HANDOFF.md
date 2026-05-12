@@ -4,6 +4,12 @@
 
 ## Session 52 — 2026-05-12 — FiveM web/build false-deletes + Created+Dir debounce → ship v0.2.48-alpha
 
+### Status: VALIDATED end-to-end
+Cross-session post-update Rescan confirmed full sync, zero pending, zero false deletes. `[endure]/endure_rifttest` (7 files local, 0 remote pre-fix) surfaced and pushed cleanly after debounce + bracket-watcher fix landed. Other session quote: "Rift is now trustworthy enough that I can stop reaching for SSH on this codebase."
+
+### Session-arc summary (v0.2.46 → v0.2.48)
+v0.2.46 closed Bugs 2 (silent file drops via strict mkdir + batch pre-mkdir), 3 (orphan locks via release-on-every-terminal-path + no-locks-on-dirs), 4 (dir-create race), plus F7 (wait_for_readable 3.2 s backoff). v0.2.47 attempted Bug 5 via bracket-watcher Created+Dir kick + added `_disabled_*` prefix ignore (Bug 6 turned out a misdiagnosis — divergence was real, not park-dir noise; prefix-ignore is now dormant defensive code). v0.2.48 closed Bug 5 properly via 500 ms debounced + coalesced reconcile, and closed Bug 7 (asymmetric server prune killing FiveM `web/build/` + `web/dist/`).
+
 ### Trigger
 v0.2.47 stress test surfaced two issues. Bug 7: 45 phantom ToDelete-local rows on FiveM `web/build/` + `web/dist/` trees, SSH-verified files existed on prod intact — destructive on apply. Bug 5 still unresolved: `endure_rifttest` (7 files) never appeared in any push diff even after Modified-event touches + Rescans.
 
