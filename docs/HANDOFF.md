@@ -2,6 +2,34 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`.
 
+## Session 47 — 2026-05-12 — Per-resource scan breakdown + open partial-listing investigation (v0.2.44)
+
+### Completed
+- User came back briefly, ran a pull on Endure RP (Qbox). Pulls succeeded cleanly (100+ files, all <5ms latency, snapshot updated). Then exported `/diagnostics` which revealed the next bug.
+- **Open bug**: drift scan after a fresh pull reports `to_delete: 430` on a server that should be fully in sync. Activity feed shows the mass-delete circuit breaker correctly BLOCKED `[depend]` (39 ToDelete vs threshold 25) and `[ox]` (108 ToDelete vs threshold 25). Remaining ~283 ToDelete distribution unknown — could have leaked through resources with under-threshold counts.
+- **Hypothesis**: russh-sftp's `list_recursive_batch` is silently dropping files mid-listing for deeply-nested paths (ox_lib has 4-5 level deep dirs like `imports/getRelativeCoords/shared.lua`) or for `[bracket]`-encoded resource dirs. Snapshot has baselines for these files (just pulled), but recursive listing missed them → scanner classifies as ToDelete (local+snap+no-remote).
+- **Diagnostic added (v0.2.44)**: `drift_scan_result` payload now includes `by_resource: { "[ox]": { to_push, to_pull, to_delete, conflicts }, ... }` map. Also `eprintln!` line with same breakdown. Next user-triggered scan will localize the partial-listing damage.
+- Shipped v0.2.44-alpha-test (cargo check clean, svelte-check 0/0, vitest 6/6).
+
+### Don't yet implemented (TODO next session)
+- Root-cause the partial listing: instrument `list_recursive_batch` to log per-directory results + final count. Compare against the local walk count.
+- Possible fix vectors: increase russh channel `window_size`/`maximum_packet_size`, retry partial listings with smaller depth chunks, or detect "remote count vs snapshot count" mismatch and abort scan as SuspiciousEmptyAborted at the resource level.
+- The mass-delete circuit breaker's ceiling (25) may be too high — small batches across many resources can add up to material data loss. Consider lowering or adding a global "total ToDelete > 30% of all local files" abort.
+
+### Known-good after v0.2.44
+- Push direction: parity with pull, scan-cache aware, auto-scans on cold cache, clears cache post-push
+- Pull direction: cache parity, orphans in-flight handles on cancel
+- Modal lifecycle: rate-limit bypass for critical events, 60s hard watchdog, 3s force-close, X-button works while cancelling
+- Activity feed: orphan-row guards on every process_entry early-return path
+- Connection: russh keepalive 20s × 3 = ~60s dead-socket detection, write-probe cleanup is best-effort
+- Cancel: outer + inner select! in process_entry, propagates through flush_batch dispatch loop
+
+### Files Modified (S47)
+- `src-tauri/src/sync/auto_sync.rs` — by_resource breakdown in reconcile result emit
+- `docs/CHANGELOG.md`, `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.44-alpha-test
+
+---
+
 ## Session 46 — 2026-05-12 — Push parity + stale-cache + critical-event rate-limit bypass (v0.2.43)
 
 ### Completed
@@ -110,7 +138,7 @@ Parallel split. **Backend (Codex):** 15 items applied per `docs/audit/codex-fixe
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.43-alpha-test** — push parity (promote scan-cache ToPush into dirty + auto-scan fallback), stale-cache clear after push/pull, critical-event rate-limit bypass on the diag bus (was silently dropping DriftScanResult, causing modal hangs). Live-dev verified. Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
+**Project:** rift-tauri (Rift). Path: `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.44-alpha-test** — adds per-resource ToDelete/ToPush/ToPull breakdown to scan results for diagnosing the open partial-SFTP-listing bug (430 phantom ToDelete after fresh pull, circuit breaker held). Shipped 2026-05-12 via Velopack to `Blazzer10200/rift-releases`.
 
 **Rhythm:** apply canon (`docs/UI-POLISH-MAP.md`) to remaining unpolished pages. Tone via `data-tone` + `--tone` var, surface 8-14% rest / 22% hover, hover icon scale 1.1-1.18 w/ overshoot + reduced-motion guard, active inset-stripe `inset 2px 0 var(--tone)`, focus-within blur, hide-when-zero, title+hint empty states, truncation tooltips, `hour12: true` everywhere.
 
