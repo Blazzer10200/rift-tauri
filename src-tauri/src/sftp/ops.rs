@@ -59,6 +59,14 @@ impl SftpClient {
     }
 
 
+    /// Strict variant — every `create_dir` failure is verified against a
+    /// metadata probe. If the path doesn't exist as a directory after the
+    /// failed create, the error is surfaced instead of silently swallowed.
+    pub async fn mkdir_p_strict(&self, path: &str) -> Result<(), String> {
+        mkdir_p_strict_via(&self.sftp, path).await
+    }
+
+
     pub async fn probe_write_access(&self, remote_root: &str) -> Result<(), String> {
         let root = remote_root.trim().trim_end_matches('/');
         if root.is_empty() || root == "/" {
@@ -167,6 +175,19 @@ pub(super) async fn rename_overwriting_via(sftp: &SftpSession, from: &str, to: &
 
 
 pub(super) async fn mkdir_p_via(sftp: &SftpSession, path: &str) -> Result<(), String> {
+    mkdir_p_inner(sftp, path, false).await
+}
+
+
+/// Strict mkdir — propagates errors when `create_dir` fails AND a metadata
+/// probe confirms the path is not a directory. Use when a silent mkdir miss
+/// would later cause "No such file" on file create and a phantom Push success.
+pub(crate) async fn mkdir_p_strict_via(sftp: &SftpSession, path: &str) -> Result<(), String> {
+    mkdir_p_inner(sftp, path, true).await
+}
+
+
+async fn mkdir_p_inner(sftp: &SftpSession, path: &str, strict: bool) -> Result<(), String> {
     let parts: Vec<&str> = path.split('/').filter(|p| !p.is_empty()).collect();
     let leading_slash = path.starts_with('/');
     let mut cur = if leading_slash { String::new() } else { String::from(".") };
@@ -177,8 +198,26 @@ pub(super) async fn mkdir_p_via(sftp: &SftpSession, path: &str) -> Result<(), St
             cur.clear();
         }
         cur.push_str(p);
-        // Idempotent: ignore "already exists".
-        let _ = sftp.create_dir(&cur).await;
+        let create_err = sftp.create_dir(&cur).await.err();
+        if strict {
+            if let Some(err) = create_err {
+                // create_dir failed — could be "already exists" (idempotent
+                // success) or a real error. Probe metadata to disambiguate.
+                match sftp.metadata(&cur).await {
+                    Ok(m) if matches!(m.file_type(), FileType::Dir) => {
+                        // Exists as dir — race won by another worker / pre-existing.
+                    }
+                    Ok(_) => {
+                        return Err(format!(
+                            "mkdir {cur}: path exists but is not a directory ({err})"
+                        ));
+                    }
+                    Err(probe_err) => {
+                        return Err(format!("mkdir {cur}: {err} (probe: {probe_err})"));
+                    }
+                }
+            }
+        }
         // Force mode 2775 (setgid + group-writable). Default umask 0022 leaves
         // new dirs at 0755 → only the creator can write inside, so a teammate
         // pushing into a dir the other person created hits EACCES on the
@@ -198,7 +237,7 @@ pub(super) async fn mkdir_p_via(sftp: &SftpSession, path: &str) -> Result<(), St
 }
 
 
-pub(super) fn remote_parent(path: &str) -> Option<&str> {
+pub(crate) fn remote_parent(path: &str) -> Option<&str> {
     let trimmed = path.trim_end_matches('/');
     let idx = trimmed.rfind('/')?;
     if idx == 0 { Some("/") } else { Some(&trimmed[..idx]) }
