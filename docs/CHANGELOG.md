@@ -2,20 +2,18 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
-## v0.2.26-alpha-test — 2026-05-12 — Perms-recurrence killer + working Cancel + capped pulls
+## v0.2.27-alpha-test — 2026-05-12 — Critical data-loss fix + immediate Cancel
 
-Trey kept hitting `Permission denied` on every push even after v0.2.25's server-side chgrp/chmod fix, because each new file Blazzer's Rift uploaded came down as `0644` again (umask 0022 on the server). The fix has to live in Rift, not on the server.
+**CRITICAL:** v0.2.26's post-upload `set_metadata(0o664)` call was silently truncating every uploaded file to zero bytes and clobbering mtime to epoch 1970. Root cause: `russh_sftp::protocol::FileAttributes::default()` returns `size: Some(0)`, `mtime: Some(0)`, `atime: Some(0)`, `uid/gid: Some(0)` — NOT all-None as the name implies. The SETSTAT packet was sending those values to the server, which honored them. Every Trey-side push during v0.2.26 destroyed its own content the moment the rename finished. `fxmanifest.lua`, `server/server.lua`, `client/client.lua` all went to 0 bytes + Jan 1 1970 mtime in the live FiveM tree.
 
 ### Landed
-- **SFTP upload now chmods files to `0664` after rename** — best-effort `set_metadata` call in [sftp/mod.rs](src-tauri/src/sftp/mod.rs) `upload_atomic_via`. Combined with the existing `setgid` bit on parent dirs (`drwxrwsr-x`), every Rift-uploaded file is now group-writable. No more recurring EACCES for teammates in the shared group.
-- **Cancel button actually works for Pull Now AND drift_watcher ticks.** `force_pull_now` now registers a `CancellationToken` in the shared `current_scan_cancel` slot, checks it between dispatched pulls, and emits `DriftScanResult { cancelled: true }` on abort. `drift_watcher::run_tick` also registers its token so the 30s+ SFTP listing on slow links can be aborted from the modal. New `pub(crate)` helpers `register_scan_cancel` / `clear_scan_cancel` on `AutoSyncEngine`.
-- **Concurrent-pull cap (4 permits via `tokio::sync::Semaphore`)** in `force_pull_now`. N parallel downloads was flooding the SFTP session on Trey's Tailscale link; now max 4 in flight, the rest queue.
-- **Modal filters stray `drift_scan_progress` in pull mode** — a parallel `drift_watcher` tick used to leak `scanning [ox] (8/8)` rows into the Pull Now activity feed even though Pull Now doesn't scan. Modal now drops scan progress when `mode === "pull"`.
+- **`FileAttributes::empty()` instead of `default()`** in [sftp/mod.rs](src-tauri/src/sftp/mod.rs) `upload_atomic_via`. `empty()` returns all `None`s so the SETSTAT packet only carries `permissions = 0o664` — partial-update semantics per SFTP spec. Comment-blocked w/ post-mortem to prevent regression.
+- **Cancel scan takes effect immediately on slow links.** `scan_with_cancel` used to only check the cancel token *between folders*, but the slow part (`list_recursive_batch`, 30-60s on Trey's Tailscale) ran *before* the loop. Wrapped the listing in `tokio::select!` against `ct.cancelled()` so clicking Cancel during the listing returns immediately instead of waiting 60s for natural completion. Applies to Reconcile + the 10s background `drift_watcher::run_tick`.
 
-### Server-side (out-of-band this session)
-- `chmod -R g+w` across all `blazzer`-owned files under `/opt/fxserver/.../resources/` to clear the backlog. Future uploads self-chmod via the SFTP fix above.
+### Recovery
+- Three zeroed files (`fxmanifest.lua`, `server/server.lua`, `client/client.lua` in `[endure]/endure_shooting/`) need to be restored from local copies. After v0.2.27 push lands, Blazzer or Trey re-pushing any local non-empty copy fills them correctly.
 
 ### Verify
-- `cargo check`: clean (1.71s incremental). `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
+- `cargo check`: clean. `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
 
-v0.2.20-v0.2.25 archived to git log.
+v0.2.26 archived to git log.

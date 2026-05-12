@@ -103,16 +103,39 @@ impl<'a> DriftScanner<'a> {
         let mut cancelled = false;
 
         let roots: Vec<String> = folders.iter().map(|f| f.remote_root.clone()).collect();
-        let listings = match self
-            .sftp
-            .list_recursive_batch(&roots, MAX_DEPTH, None, 4)
-            .await
-        {
-            Ok(m) => m,
-            Err(e) => {
-                last_batch_error = Some(e);
-                HashMap::new()
-            }
+        // The SFTP batch listing is the slow part of a scan on high-latency
+        // links (30-60s on Trey's Tailscale). Race it against the cancel
+        // token so the modal's Cancel button takes effect immediately
+        // instead of waiting for the listing to complete naturally.
+        let listings = match cancel {
+            Some(ct) => tokio::select! {
+                res = self.sftp.list_recursive_batch(&roots, MAX_DEPTH, None, 4) => match res {
+                    Ok(m) => m,
+                    Err(e) => {
+                        last_batch_error = Some(e);
+                        HashMap::new()
+                    }
+                },
+                _ = ct.cancelled() => {
+                    return ScanResult {
+                        entries,
+                        last_batch_listing_error: None,
+                        remote_folders_missing,
+                        cancelled: true,
+                    };
+                }
+            },
+            None => match self
+                .sftp
+                .list_recursive_batch(&roots, MAX_DEPTH, None, 4)
+                .await
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    last_batch_error = Some(e);
+                    HashMap::new()
+                }
+            },
         };
 
         let total = folders.len();
