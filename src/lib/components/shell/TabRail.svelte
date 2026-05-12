@@ -117,34 +117,37 @@
         <div class="qa-label">Quick actions</div>
         <button
           class="qa-btn"
+          data-tone="accent"
           type="button"
           onclick={reconcile}
           disabled={!canSync || pulling || pushing || scanning}
           title={watcherOn ? "Reconcile — scan both sides for drift" : "Connect a server first"}
         >
-          <RefreshCw size={14}/>
+          <span class="qa-icon"><RefreshCw size={16}/></span>
           <span>Reconcile</span>
           {#if scanning}<span class="qa-spin"></span>{/if}
         </button>
         <button
           class="qa-btn"
+          data-tone="info"
           type="button"
           onclick={pullAll}
           disabled={!canSync || pulling || pushing || scanning}
           title={watcherOn ? "Pull all changes from remote" : "Connect a server first"}
         >
-          <DownloadCloud size={14}/>
+          <span class="qa-icon"><DownloadCloud size={16}/></span>
           <span>Pull all</span>
           {#if pulling}<span class="qa-spin"></span>{/if}
         </button>
         <button
           class="qa-btn"
+          data-tone="warn"
           type="button"
           onclick={pushAll}
           disabled={!canSync || pulling || pushing || scanning}
           title={watcherOn ? "Push all local changes to remote" : "Connect a server first"}
         >
-          <UploadCloud size={14}/>
+          <span class="qa-icon"><UploadCloud size={16}/></span>
           <span>Push all</span>
           {#if pushing}<span class="qa-spin"></span>{/if}
         </button>
@@ -279,47 +282,60 @@
   .up-v { color: var(--fg-muted); font-size: var(--fs-xs); }
 
   .qa {
-    display: flex; flex-direction: column; gap: 4px;
-    padding: 10px 0 0;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 12px 0 2px;
     border-top: 1px solid var(--border);
   }
   .qa-label {
-    padding: 0 6px 6px;
+    padding: 0 6px 8px;
     color: var(--fg-faint);
     font-size: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    font-weight: 500;
+    letter-spacing: 0.08em;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
   }
   .qa-btn {
+    --tone: var(--accent);
     display: inline-flex; align-items: center; gap: 10px;
-    width: 100%; height: 32px;
-    padding: 0 8px;
-    background: var(--surface);
+    width: 100%; height: 38px;
+    padding: 0 10px;
+    background: color-mix(in oklch, var(--tone) 8%, var(--surface));
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid color-mix(in oklch, var(--tone) 28%, var(--border));
     border-radius: var(--radius-sm);
-    font: inherit; font-size: var(--fs-sm);
+    font: inherit; font-size: var(--fs-sm); font-weight: 600;
+    letter-spacing: 0.01em;
     cursor: pointer;
-    transition: background 100ms ease, border-color 100ms ease, color 100ms ease, transform 100ms ease;
+    transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 100ms ease, box-shadow 140ms ease;
     position: relative;
     overflow: hidden;
     white-space: nowrap;
   }
-  .qa-btn > span:not(.qa-spin) { flex: 1; text-align: left; }
-  .qa-btn:hover:not(:disabled) {
-    background: var(--surface-hover);
-    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
-    color: var(--accent);
+  .qa-btn[data-tone="info"]   { --tone: var(--info); }
+  .qa-btn[data-tone="warn"]   { --tone: var(--warn); }
+  .qa-btn[data-tone="accent"] { --tone: var(--accent); }
+  .qa-btn > span:not(.qa-spin):not(.qa-icon) { flex: 1; text-align: left; }
+  .qa-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--tone);
+    transition: transform 140ms ease;
+    flex-shrink: 0;
   }
-  .qa-btn:active:not(:disabled) { transform: translateY(1px); }
+  .qa-btn:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--tone) 22%, var(--surface));
+    border-color: color-mix(in oklch, var(--tone) 55%, var(--border));
+    color: color-mix(in oklch, var(--tone) 90%, var(--fg));
+    box-shadow: 0 4px 12px color-mix(in oklch, var(--tone) 18%, transparent);
+  }
+  .qa-btn:hover:not(:disabled) .qa-icon { transform: scale(1.1); }
+  .qa-btn:active:not(:disabled) { transform: translateY(1px); box-shadow: none; }
   .qa-btn:disabled { opacity: 0.4; cursor: not-allowed; }
   .qa-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
   .qa-spin {
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent);
+    background: var(--tone);
     animation: qa-pulse 1.4s ease-in-out infinite;
     flex-shrink: 0;
   }
@@ -331,7 +347,7 @@
   /* Collapsed state: hide labels, kbd hints, qa header, button text. */
   @container (max-width: 130px) {
     .label, .qa-label, .up-text { display: none; }
-    .qa-btn > span:not(.qa-spin) { display: none; }
+    .qa-btn > span:not(.qa-spin):not(.qa-icon) { display: none; }
     .rail-btn, .qa-btn { justify-content: center; padding: 0; gap: 0; }
     .update-pill { justify-content: center; padding: 8px; }
     .count-pip {
