@@ -12,6 +12,7 @@
     entries?: number;
     to_push?: number;
     to_pull?: number;
+    to_delete?: number;
     conflicts?: number;
     listing_error?: string | null;
     cancelled?: boolean;
@@ -89,6 +90,7 @@
           entries: f.entries ?? 0,
           push: f.to_push ?? 0,
           pull: f.to_pull ?? 0,
+          deletes: f.to_delete ?? 0,
           conflicts: f.conflicts ?? 0,
           listing_error: f.listing_error ?? null,
         };
@@ -260,6 +262,10 @@
           <div class="cell-num mono">{syncModal.result?.pull ?? 0}</div>
           <div class="cell-label">To Pull</div>
         </div>
+        <div class="count-cell" data-tone="pull">
+          <div class="cell-num mono">{syncModal.result?.deletes ?? 0}</div>
+          <div class="cell-label">To Delete</div>
+        </div>
         <div class="count-cell" data-tone={(syncModal.result?.conflicts ?? 0) > 0 ? "danger" : "ok"}>
           <div class="cell-num mono">{syncModal.result?.conflicts ?? 0}</div>
           <div class="cell-label">Conflicts</div>
@@ -370,7 +376,7 @@
 
   .counts {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
     padding: 6px 16px 14px;
   }

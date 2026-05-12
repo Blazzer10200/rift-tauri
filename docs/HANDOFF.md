@@ -2,6 +2,26 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 29 — 2026-05-12 — v0.2.33: deletion propagation (tombstone semantics)
+
+One ship. Blazzer deleted `gt_zombies_qb` locally → remote delete propagated ✅ → Trey refreshed but file lingered on his side. Root cause was a missing tombstone path in the drift scanner: `local + no remote + has baseline` was misclassified as `ToPush` ("remote vanished — re-pushing local"), which left ghost files on teammates' machines AND risked accidental resurrection on next touch (autosync would re-upload, undoing the delete).
+
+### Ship trail
+- **v0.2.33** — Deletion propagation. New `DriftBucket::ToDelete` variant. Scanner classifies `local + no remote + has_baseline` as ToDelete (baseline IS the tombstone). Watcher's `run_tick` + auto_sync's `force_pull_now` dispatch via new `delete_local_one` handler: foreign-lock defer, dirty-local skip+warn (never blow away unflushed edits), else `fs::remove_file` + `snapshot.forget` + `cache.forget` + best-effort empty-parent-dir walk-up cleanup. SyncModal gained "To Delete" count cell.
+
+### Verify (post-v0.2.33)
+- `cargo check`: clean (8.33s). `svelte-check`: 0 errors, 2 warnings (pre-existing svelte-ignore quirk).
+
+### Flagged for v0.2.34+ (carried from S28)
+- **Pre-flight write probe** on autosync start — catch EACCES at connect time, not first push.
+- **Token-slot race** in `register_scan_cancel` — overlapping `run_tick` mid-`force_pull_now` can shadow user op. Move to `Vec<CancellationToken>` w/ `cancel_all` if it bites.
+- **Activity-feed row grouping** — bulk reconciles spam 30+ identical "pulled" rows. Collapse runs of same-resource same-action.
+- **Modal copy update** — still says "Listing remote files…" but post-v0.2.28 the listing is ~1s.
+- **DriftReview bucket-string mismatch** — manual review filters check `"ToPush"`/`"Conflict"` but serde rename_all = snake_case emits `"to_push"`/`"conflict"`. Likely shows all rows incl. Synced. Pre-existing, not in scope for v0.2.33.
+- **`svelte-ignore` non-suppression** on `<section>` a11y warnings — investigate svelte-check version bump.
+
+---
+
 ## Session 28 — 2026-05-12 — v0.2.27-v0.2.32: data-loss recovery → WAN speedup → perms parity → phantom-conflict killer
 
 Post-S27 compaction continuation. **Six ships** this session, all driven by Trey running Rift on residential Tailscale uplink — every bug surfaced because WAN latency + cross-user shared-group semantics exposed assumptions LAN-only testing hid.
@@ -34,11 +54,11 @@ Trey's `tailscale status`: `direct 69.50.245.28:41641, tx 285M rx 533M` — dire
 
 **Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`.
 
-**Current state (post S28):** **v0.2.32-alpha-test SHIPPED** to `rift-releases`. 6 ships this session (v0.2.27 → v0.2.32). Trey on Tailscale direct path; sync working bidirectionally; scans ~1-3s; folder deletes work; perms self-heal; phantom conflicts collapse via SHA. Both teammates need to relaunch Rift to pick up v0.2.31 perm-heal + v0.2.32 phantom-conflict fix.
+**Current state (post S29):** **v0.2.33-alpha-test SHIPPED** to `rift-releases`. Deletion propagation finally closes the loop — `gt_zombies_qb` case is fixed. Both teammates need to relaunch to pick up v0.2.33; first scan tick (≤10s) will auto-delete any ghost files left from pre-v0.2.33 mis-classification.
 
 **Next session likely entry points:**
-1. Confirm both sides updated + verify the 53 phantom conflicts cleared on Trey's relaunch.
-2. Pick next item from v0.2.33+ flagged list, or move to brainstorm items (per-resource sync mode, buddy presence).
+1. Confirm Trey's relaunch + verify ghost files cleared from his tree (he should see "deleted (remote removed)" activity rows).
+2. Pick next item from v0.2.34+ flagged list (pre-flight write probe is cheapest), or move to brainstorm items (per-resource sync mode, buddy presence).
 
 ## CRITICAL DON'T-TOUCH
 - russh `ring` backend + reqwest `rustls` features only (NASM blocks aws-lc-rs)
@@ -57,3 +77,4 @@ Trey's `tailscale status`: `direct 69.50.245.28:41641, tx 285M rx 533M` — dire
 - **`SftpClient::delete` routes by remote stat** — dirs go through `delete_recursive_via`. Don't shortcut back to `remove_file` for "files only" — the push pipeline can't distinguish file from dir deletes ahead of time. See v0.2.29.
 - **`mkdir_p_via` chmods each segment to 2775** — setgid + group-writable is required for shared-group teammates to push into each other's dirs. Don't drop the SETSTAT call — backlog gets healed too via `heal_owned_dirs` on watch attach. See v0.2.31.
 - **Upload pre-flight SHA-collapse before raising CONFLICT** — when sizes all match + baseline SHA exists, hash local first (cheap), then remote via SSH exec. If both match baseline, refresh baseline mtime + drop the push. Mtime jitter (npm builds, SETSTAT, git checkout) flooded Trey w/ 53 phantom conflicts in v0.2.31; v0.2.32 fixed. See `auto_sync.rs:1522`.
+- **`DriftBucket::ToDelete` is the tombstone path** — `local + no remote + has_baseline` MUST classify as `ToDelete`, NOT `ToPush`. Without it, deletes from teammates leave ghost files locally + risk accidental resurrection (autosync re-uploads on next touch). Dispatcher routes ToDelete → `drift_watcher::delete_local_one`, which guards on foreign-lock + dirty-local (skip unflushed edits — never blow away user's work). Empty-parent-dir cleanup walks up post-delete. See v0.2.33 post-mortem.

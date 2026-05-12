@@ -871,6 +871,7 @@ impl AutoSyncEngine {
             }
             let mut to_push = 0u32;
             let mut to_pull = 0u32;
+            let mut to_delete = 0u32;
             let mut conflicts = 0u32;
             let mut push_paths: Vec<PathBuf> = Vec::new();
             for e in &result.entries {
@@ -880,6 +881,7 @@ impl AutoSyncEngine {
                         push_paths.push(PathBuf::from(&e.local_path));
                     }
                     crate::sync::DriftBucket::ToPull => to_pull += 1,
+                    crate::sync::DriftBucket::ToDelete => to_delete += 1,
                     crate::sync::DriftBucket::Conflict => conflicts += 1,
                     crate::sync::DriftBucket::Synced => {}
                 }
@@ -901,6 +903,7 @@ impl AutoSyncEngine {
                     "entries": result.entries.len(),
                     "to_push": to_push,
                     "to_pull": to_pull,
+                    "to_delete": to_delete,
                     "conflicts": conflicts,
                     "enqueued_for_push": enqueued,
                     "missing_remote_folders": result.remote_folders_missing.len(),
@@ -982,14 +985,21 @@ impl AutoSyncEngine {
             );
             let mut to_pull = 0u32;
             let mut to_push = 0u32;
+            let mut to_delete = 0u32;
             let mut conflicts = 0u32;
-            let mut pull_entries: Vec<crate::sync::DriftEntry> = Vec::new();
+            // Each pending entry tagged with its bucket so the dispatcher can
+            // route ToPull → pull_one vs ToDelete → delete_local_one.
+            let mut pending: Vec<(crate::sync::DriftBucket, crate::sync::DriftEntry)> = Vec::new();
             for e in entries {
                 match e.bucket {
                     crate::sync::DriftBucket::ToPush => to_push += 1,
                     crate::sync::DriftBucket::ToPull => {
                         to_pull += 1;
-                        pull_entries.push(e);
+                        pending.push((crate::sync::DriftBucket::ToPull, e));
+                    }
+                    crate::sync::DriftBucket::ToDelete => {
+                        to_delete += 1;
+                        pending.push((crate::sync::DriftBucket::ToDelete, e));
                     }
                     crate::sync::DriftBucket::Conflict => conflicts += 1,
                     crate::sync::DriftBucket::Synced => {}
@@ -997,11 +1007,12 @@ impl AutoSyncEngine {
             }
             // Cap concurrent pulls so a slow uplink doesn't drown the SFTP
             // session with N parallel downloads. 4 was the sweet spot for
-            // Trey's Tailscale link; tunable later.
+            // Trey's Tailscale link; tunable later. Deletes are local-only
+            // fs ops — cheap — but share the slot to keep ordering sane.
             let sem = Arc::new(tokio::sync::Semaphore::new(4));
             let mut pull_dispatched = 0u32;
             let mut cancelled = false;
-            for entry in pull_entries {
+            for (bucket, entry) in pending {
                 if ct_for_task.is_cancelled() {
                     cancelled = true;
                     break;
@@ -1010,7 +1021,14 @@ impl AutoSyncEngine {
                 let permit_sem = sem.clone();
                 let h = tokio::spawn(async move {
                     let _permit = permit_sem.acquire_owned().await.ok();
-                    crate::sync::drift_watcher::pull_one(&task_engine, entry).await;
+                    match bucket {
+                        crate::sync::DriftBucket::ToDelete => {
+                            crate::sync::drift_watcher::delete_local_one(&task_engine, entry).await;
+                        }
+                        _ => {
+                            crate::sync::drift_watcher::pull_one(&task_engine, entry).await;
+                        }
+                    }
                 });
                 engine.track_pull_handle(h);
                 pull_dispatched += 1;
@@ -1031,6 +1049,7 @@ impl AutoSyncEngine {
                     "entries": 0,
                     "to_push": to_push,
                     "to_pull": to_pull,
+                    "to_delete": to_delete,
                     "conflicts": conflicts,
                     "enqueued_for_push": 0,
                     "pull_dispatched": pull_dispatched,

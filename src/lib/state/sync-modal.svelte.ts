@@ -19,6 +19,7 @@ export type SyncActivityRow = {
 export type SyncResult = {
   push: number;
   pull: number;
+  deletes: number;
   conflicts: number;
   entries: number;
   listing_error?: string | null;
