@@ -2,6 +2,36 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 27 — 2026-05-12 — v0.2.26: perms-recurrence killer + working Cancel
+
+Continuation of S26 after Trey's chmod-fix wasn't sticking. Root cause: umask 0022 on the FiveM server kept making every NEW file 0644, so v0.2.25's one-time chgrp/chmod cycle had to be re-run after every push. Fix moved into Rift itself.
+
+### Ship trail
+- **v0.2.26** —
+  - **SFTP `set_metadata(perms=0o664)` after each `upload_atomic_via` rename** ([sftp/mod.rs](src-tauri/src/sftp/mod.rs#L1013)). Combined w/ existing setgid on parent dirs, every Rift-uploaded file is group-writable on the fly. Permanent fix for the recurring teammate EACCES.
+  - **Cancel button works for `force_pull_now` AND `drift_watcher::run_tick`.** Both now register `CancellationToken`s in the shared `current_scan_cancel` slot via new `pub(crate)` helpers `register_scan_cancel`/`clear_scan_cancel` on `AutoSyncEngine`. force_pull_now checks token between dispatched pulls + emits `DriftScanResult { cancelled: true }` on abort.
+  - **`tokio::sync::Semaphore` (4 permits)** caps concurrent pulls in `force_pull_now` — was flooding SFTP session on Trey's Tailscale link.
+  - **SyncModal drops `drift_scan_progress` when `mode === "pull"`** — parallel drift_watcher ticks were leaking `scanning [ox] (8/8)` rows into Pull Now's activity feed.
+
+### Server-side (out-of-band)
+- Ran `chmod -R g+w` across all `blazzer`-owned files under `/opt/fxserver/.../resources/` for backlog cleanup. New uploads self-chmod via v0.2.26.
+- `setfacl` not available on the server (no `acl` package). Considered but skipped — Rift-side chmod is cleaner anyway.
+
+### Verify
+- `cargo check`: clean (1.71s). `svelte-check`: 0 errors, 5 pre-existing a11y warnings.
+- Tag pushed: `60db799` → `Blazzer10200/rift-tauri` + Velopack release at `rift-releases/releases/tag/v0.2.26-alpha-test`.
+
+### Flagged for v0.2.27+
+- **Token-slot race** — `register_scan_cancel` replaces the slot, so an overlapping `run_tick` mid-`force_pull_now` could shadow the user op. Move to `Vec<CancellationToken>` w/ `cancel_all` if it bites.
+- **Per-folder streaming during initial SFTP `list_recursive_batch`** — still emits no progress during the 30s+ listing. Instrument per-root completion.
+- **Pre-flight write probe** on autosync start (catch EACCES at connect time).
+- **5 a11y warnings** in Settings/LocalPane/RemotePane — pre-existing, UX sweep.
+
+### Investigation captured for future reference
+The "Pull Now feels stuck for 5 min on Trey's end" mystery had multiple overlapping causes — all addressed by v0.2.26's four edits combined: (1) every push failing → file landed 0644 → next push fails → loop, (2) Cancel did nothing → user couldn't escape, (3) N parallel SFTP pulls saturated his uplink, (4) modal showed misleading "scanning" progress from background ticks. Belt-and-suspenders fix.
+
+---
+
 ## Session 26 — 2026-05-12 — Sync modal + rapid-iteration pull-side polish (v0.2.20 → v0.2.25)
 
 Single-session ship streak. v0.2.20 introduced SyncModal + scan cancel; v0.2.21-v0.2.25 are post-field-test polish driven by Blazzer + Trey using Rift live for a real FiveM/Endure RP sync workflow.
