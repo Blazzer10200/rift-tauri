@@ -12,11 +12,12 @@
     onChange: (t: Tab) => void;
   } = $props();
 
-  const tabs: { id: Tab; label: string; icon: typeof FolderOpen; kbd: string; count?: () => number; countCls?: string }[] = [
-    { id: "browse",    label: "Browser",   icon: FolderOpen,    kbd: "1" },
-    { id: "activity",  label: "Activity",  icon: Activity,      kbd: "2", count: () => connection.activityFeed.length, countCls: "" },
-    { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "3", count: () => connection.conflictCount, countCls: "danger" },
-    { id: "settings",  label: "Settings",  icon: Cog,           kbd: "4" },
+  type TabTone = "accent" | "info" | "danger" | "neutral";
+  const tabs: { id: Tab; label: string; icon: typeof FolderOpen; kbd: string; tone: TabTone; count?: () => number; countCls?: string }[] = [
+    { id: "browse",    label: "Browser",   icon: FolderOpen,    kbd: "1", tone: "accent" },
+    { id: "activity",  label: "Activity",  icon: Activity,      kbd: "2", tone: "info",   count: () => connection.activityFeed.length, countCls: "" },
+    { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "3", tone: "danger", count: () => connection.conflictCount, countCls: "danger" },
+    { id: "settings",  label: "Settings",  icon: Cog,           kbd: "4", tone: "neutral" },
   ];
 
   const watcherOn = $derived(
@@ -76,13 +77,14 @@
 <aside class="rail" aria-label="Primary navigation">
   <div class="rail-panel">
     <div class="group" style="--active-y: {Math.max(0, activeIdx) * 31}px">
-      <div class="rail-indicator" aria-hidden="true" data-visible={indicatorVisible}></div>
+      <div class="rail-indicator" aria-hidden="true" data-visible={indicatorVisible} data-tone={tabs[activeIdx]?.tone ?? "accent"}></div>
       {#each tabs as t (t.id)}
         {@const Icon = t.icon}
         {@const c = t.count ? t.count() : 0}
         <button
           class="rail-btn"
           data-active={active === t.id}
+          data-tone={t.tone}
           onclick={() => onChange(t.id)}
           title="{t.label} (Ctrl+{t.kbd})"
           type="button"
@@ -195,16 +197,20 @@
     background: var(--accent);
     border-radius: 2px;
     transform: translateY(var(--active-y, 0px));
-    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease, left 220ms ease;
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease, left 220ms ease, background 180ms ease;
     pointer-events: none;
     opacity: 0;
     z-index: 1;
   }
+  .rail-indicator[data-tone="info"]    { background: var(--info); }
+  .rail-indicator[data-tone="danger"]  { background: var(--danger); }
+  .rail-indicator[data-tone="neutral"] { background: var(--fg-muted); }
   .rail-indicator[data-visible="true"] { opacity: 1; }
   .rail:hover .rail-indicator,
   .rail:focus-within .rail-indicator { left: -8px; }
 
   .rail-btn {
+    --tone: var(--accent);
     display: flex; align-items: center; gap: 10px;
     width: 100%; height: 30px;
     padding: 0 8px;
@@ -214,19 +220,32 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     position: relative;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 140ms ease, color 140ms ease;
     white-space: nowrap;
     overflow: hidden;
   }
+  .rail-btn[data-tone="info"]    { --tone: var(--info); }
+  .rail-btn[data-tone="danger"]  { --tone: var(--danger); }
+  .rail-btn[data-tone="neutral"] { --tone: var(--fg-muted); }
   .rail-icon {
     flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     width: 20px;
+    color: var(--tone);
+    opacity: 0.75;
+    transition: transform 180ms cubic-bezier(0.34, 1.56, 0.64, 1), opacity 140ms ease;
   }
-  .rail-btn:hover { background: var(--surface-hover); color: var(--fg); }
+  .rail-btn:hover {
+    background: color-mix(in oklch, var(--tone) 10%, var(--surface-hover));
+    color: var(--fg);
+  }
+  .rail-btn:hover .rail-icon { transform: scale(1.18); opacity: 1; }
   .rail-btn[data-active="true"] {
-    background: var(--surface); color: var(--fg);
+    background: color-mix(in oklch, var(--tone) 14%, var(--surface));
+    color: var(--fg);
   }
+  .rail-btn[data-active="true"] .rail-icon { opacity: 1; }
+  .rail-btn:active { transform: translateY(0.5px); }
   .label { flex: 1; opacity: 1; transition: opacity 140ms ease; }
   .count-pip {
     flex-shrink: 0;
