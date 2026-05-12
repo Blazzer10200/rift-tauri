@@ -6,11 +6,15 @@
 // via Tauri event `autosync://locks` so the UI can render presence badges.
 // Stale locks (>180s) get swept — usually a Rift crash mid-edit.
 //
+// Heartbeat: own locks get re-stamped every HEARTBEAT_SEC so active long-form
+// edits don't get their lock swept by another Rift's stale sweep.
+//
 // Last-writer-wins (no atomic CAS over SFTP) — fine for advisory awareness.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use dashmap::{DashMap, DashSet};
@@ -23,6 +27,7 @@ use crate::sftp::SftpClient;
 use crate::transport::env::{current_user, hostname, short_id};
 
 const STALE_SEC: i64 = 180;
+const HEARTBEAT_SEC: u64 = 60;
 const POLL_INTERVAL_MS: u64 = 10_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,7 +53,8 @@ pub struct LockPresence {
     my_user: String,
     my_host: String,
     my_locks: DashSet<String>,
-    active_by_path: DashMap<String, RemoteLock>,
+    last_heartbeat: DashMap<String, Instant>,
+    active_by_path: RwLock<HashMap<String, RemoteLock>>,
     scoped_provider: Mutex<Option<ScopedFoldersFn>>,
     poll_task: Mutex<Option<JoinHandle<()>>>,
     stop_tx: watch::Sender<bool>,
@@ -67,7 +73,8 @@ impl LockPresence {
             my_user,
             my_host,
             my_locks: DashSet::new(),
-            active_by_path: DashMap::new(),
+            last_heartbeat: DashMap::new(),
+            active_by_path: RwLock::new(HashMap::new()),
             scoped_provider: Mutex::new(None),
             poll_task: Mutex::new(None),
             stop_tx,
@@ -114,6 +121,7 @@ impl LockPresence {
         // Bounded cleanup of our own locks.
         let paths: Vec<String> = self.my_locks.iter().map(|s| s.clone()).collect();
         self.my_locks.clear();
+        self.last_heartbeat.clear();
         let sftp = self.sftp.clone();
         let cleanup = tokio::spawn(async move {
             for p in paths {
@@ -124,7 +132,10 @@ impl LockPresence {
     }
 
     pub fn find_lock_by_other(&self, remote_file: &str) -> Option<RemoteLock> {
-        self.active_by_path.get(remote_file).map(|kv| kv.clone())
+        self.active_by_path
+            .read()
+            .ok()
+            .and_then(|g| g.get(remote_file).cloned())
     }
 
     pub async fn acquire(&self, remote_file: &str) {
@@ -143,6 +154,8 @@ impl LockPresence {
         let bytes = body.to_string();
         if self.sftp.upload_bytes(bytes.as_bytes(), &lock_path).await.is_err() {
             self.my_locks.remove(&lock_path);
+        } else {
+            self.last_heartbeat.insert(lock_path, Instant::now());
         }
     }
 
@@ -154,10 +167,50 @@ impl LockPresence {
         if self.my_locks.remove(&lock_path).is_none() {
             return;
         }
+        self.last_heartbeat.remove(&lock_path);
         let _ = self.sftp.delete(&lock_path).await;
     }
 
+    /// Re-stamp each held lock's `since` field if it's been ≥ HEARTBEAT_SEC
+    /// since the last refresh. Keeps long-running edits alive past the
+    /// foreign-sweep threshold. Failed writes leave the lock as-is — next
+    /// poll retries; if connectivity is gone the lock goes stale and gets
+    /// reclaimed by another Rift, which is the desired behavior.
+    async fn refresh_my_locks(&self) {
+        let due: Vec<String> = self
+            .last_heartbeat
+            .iter()
+            .filter_map(|e| {
+                if e.value().elapsed().as_secs() >= HEARTBEAT_SEC {
+                    Some(e.key().clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for lock_path in due {
+            if !self.my_locks.contains(&lock_path) {
+                self.last_heartbeat.remove(&lock_path);
+                continue;
+            }
+            let body = serde_json::json!({
+                "user": self.my_user,
+                "host": self.my_host,
+                "since": Utc::now().to_rfc3339(),
+            });
+            if self
+                .sftp
+                .upload_bytes(body.to_string().as_bytes(), &lock_path)
+                .await
+                .is_ok()
+            {
+                self.last_heartbeat.insert(lock_path, Instant::now());
+            }
+        }
+    }
+
     async fn poll_once(&self) -> Result<(), String> {
+        self.refresh_my_locks().await;
         let scoped = {
             let g = self.scoped_provider.lock().await;
             g.as_ref().map(|f| f())
@@ -211,14 +264,12 @@ impl LockPresence {
             }
         }
 
-        // ADVISORY-ONLY: between clear() and the re-insert loop, concurrent
-        // find_lock_by_other() callers see an empty map. Refreshes are 10s
-        // apart so the window is bounded; an upload that races through this
-        // gap may proceed without seeing a foreign lock for one cycle. Locks
-        // are advisory anyway — last-writer-wins is the documented model.
-        self.active_by_path.clear();
+        let mut next = HashMap::with_capacity(found.len());
         for l in &found {
-            self.active_by_path.insert(l.file_path.clone(), l.clone());
+            next.insert(l.file_path.clone(), l.clone());
+        }
+        if let Ok(mut g) = self.active_by_path.write() {
+            *g = next;
         }
         let _ = self.app.emit("autosync://locks", &found);
         Ok(())

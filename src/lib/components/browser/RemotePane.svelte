@@ -42,6 +42,8 @@
       : entries.filter((e) => e.name.toLowerCase().includes(filter.toLowerCase())),
   );
 
+  let loadToken = 0;
+
   $effect(() => {
     void path; void serverKey; void refreshKey;
     void load();
@@ -52,17 +54,21 @@
   });
 
   async function load() {
+    const token = ++loadToken;
     if (!serverKey || !path) { entries = []; return; }
     loading = true;
     error = null;
     try {
-      entries = await invoke<RemoteEntry[]>("remote_list_dir", { serverKey, path });
+      const result = await invoke<RemoteEntry[]>("remote_list_dir", { serverKey, path });
+      if (token !== loadToken) return;
+      entries = result;
       selected = new Set();
     } catch (e) {
+      if (token !== loadToken) return;
       error = String(e);
       entries = [];
     } finally {
-      loading = false;
+      if (token === loadToken) loading = false;
     }
   }
 
@@ -89,10 +95,7 @@
 
   function rowStatus(e: RemoteEntry): "conflict" | "synced" {
     if (e.is_dir) return "synced";
-    const inConflict = connection.conflicts.some((c) => {
-      const cBase = c.remote_path.replace(/\/+$/, "").split("/").pop();
-      return cBase === e.name;
-    });
+    const inConflict = connection.conflicts.some((c) => c.remote_path === e.full_path);
     return inConflict ? "conflict" : "synced";
   }
 
@@ -234,9 +237,17 @@
     const label = paths.length === 1 ? `"${entry.name}"` : `${paths.length} items`;
     if (!window.confirm(`Permanently delete ${label} on the remote? This cannot be undone.`)) return;
     try {
-      const results = await invoke<boolean[]>("remote_delete_paths", { serverKey, paths });
-      const failed = results.filter((ok) => !ok).length;
-      if (failed > 0) error = `delete failed for ${failed}/${paths.length} items`;
+      const results = await invoke<{ ok: boolean; error: string | null }[]>(
+        "remote_delete_paths",
+        { serverKey, paths },
+      );
+      const failures = results.filter((r) => !r.ok);
+      if (failures.length > 0) {
+        const first = failures[0].error ?? "unknown error";
+        error = failures.length === 1
+          ? `delete failed: ${first}`
+          : `delete failed for ${failures.length}/${paths.length} items — first: ${first}`;
+      }
       await load();
     } catch (e) {
       error = String(e);

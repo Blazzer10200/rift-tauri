@@ -145,9 +145,9 @@
       };
       const payload = {
         ...profile,
-        bridgeToken: bridgeToken.trim() || (editing as unknown as { bridgeToken?: string })?.bridgeToken || null,
-        fingerprint: (editing as unknown as { fingerprint?: string })?.fingerprint || null,
-        addedAt: (editing as unknown as { addedAt?: string })?.addedAt || null,
+        bridgeToken: bridgeToken.trim() || editing?.bridgeToken || null,
+        fingerprint: editing?.fingerprint || null,
+        addedAt: editing?.addedAt || null,
       };
       const saved = await invoke<ServerProfile>("save_server", {
         profile: payload,

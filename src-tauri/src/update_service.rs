@@ -106,19 +106,7 @@ impl Default for UpdateService {
 }
 
 fn resolve_manager() -> Result<Option<velopack::UpdateManager>, String> {
-    // SECURITY TODO (audit H4) — before public v14 ship:
-    //   1. Get a code-signing cert (P12/PFX). Per CA/Browser Forum 2023-06,
-    //      certs must live in HSM (USB or Azure Key Vault). For SmallTeam
-    //      use Azure Artifact Signing (AAS, ~$120/yr) — eliminates on-disk key.
-    //   2. CI: store P12 base64 in GH secret `CERT_P12_BASE64` + `CERT_PASSWORD`.
-    //      Decode at job start, pass to `vpk pack --signTemplate
-    //      "/td sha256 /fd sha256 /f cert.p12 /p {password}
-    //       /tr http://timestamp.comodoca.com"`.
-    //   3. Embed Velopack-issued public key here via `UpdateOptions { public_key: ... }`
-    //      (third arg to UpdateManager::new). Without it, a compromised release
-    //      host can ship a tampered binary and the auto-updater installs it
-    //      silently.
-    //   Local FileSource (RIFT_UPDATE_FEED) is dev-only — unsigned is OK there.
+    // Local FileSource (RIFT_UPDATE_FEED) is dev-only.
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
         let p = Path::new(&local);
         if p.is_dir() {

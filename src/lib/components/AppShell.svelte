@@ -9,6 +9,7 @@
   import Settings from "./settings/Settings.svelte";
   import StatusHero from "./StatusHero.svelte";
   import ActivityToast from "./ActivityToast.svelte";
+  import ScanProgressChip from "./ScanProgressChip.svelte";
   import TwoPane from "./browser/TwoPane.svelte";
   import ActivityFeed from "./activity/ActivityFeed.svelte";
   import Diagnostics from "./diagnostics/Diagnostics.svelte";
@@ -86,20 +87,37 @@
 
   // ── lifecycle ──────────────────────────────────────────────────────
   onMount(async () => {
-    await connection.wireEvents();
+    try {
+      await connection.wireEvents();
+    } catch (e) {
+      console.error("wireEvents failed; banner will offer retry", e);
+    }
     await connection.loadServers();
     await connection.refreshStatus();
     if (!connection.selectedKey && connection.servers.length === 0) {
       gotoSettings("servers");
     }
-    window.addEventListener("keydown", onGlobalKey);
-    // Fire-and-forget — doesn't block first paint. Auto-pops the dialog
-    // exactly once if an update is available.
     updates.checkOnLaunch();
   });
 
+  async function retryWire() {
+    try {
+      await connection.wireEvents();
+      await connection.refreshStatus();
+    } catch (e) {
+      console.error("wireEvents retry failed", e);
+    }
+  }
+
+  // HMR-safe global keydown — $effect cleanup runs on unmount AND when the
+  // effect re-tracks during HMR replacement, vs onMount/onDestroy which can
+  // double-bind during fast hot swaps.
+  $effect(() => {
+    window.addEventListener("keydown", onGlobalKey);
+    return () => window.removeEventListener("keydown", onGlobalKey);
+  });
+
   onDestroy(() => {
-    window.removeEventListener("keydown", onGlobalKey);
     connection.disposeEvents();
     // Audit H9: resolve any in-flight confirm promises so awaiters unblock.
     for (const resolve of pendingConfirms) resolve(false);
@@ -187,6 +205,8 @@
   // Audit C2 — TOFU prompt. When connection.connect() probes a fresh
   // fingerprint, show a confirmation dialog before we trust it.
   let fingerprintHandled = $state<string | null>(null);
+  let shellAlive = true;
+  onDestroy(() => { shellAlive = false; });
   $effect(() => {
     const fp = connection.pendingFingerprint;
     if (!fp || fp === fingerprintHandled) return;
@@ -197,6 +217,7 @@
       body: `First connection to ${name}. Verify this matches what you expect from the server admin before accepting.\n\n${fp}`,
       isDanger: false,
     }).then((ok) => {
+      if (!shellAlive) return;
       if (ok) connection.confirmFingerprint();
       else connection.cancelFingerprint();
       fingerprintHandled = null;
@@ -253,6 +274,14 @@
     onEditCurrent={(s) => openAddServer(s)}
   />
 
+  <div class="middle">
+    {#if connection.wireError}
+      <div class="wire-error" role="alert">
+        <span>Tauri event wiring failed — status, locks, and activity are frozen. {connection.wireError}</span>
+        <button type="button" onclick={retryWire}>Retry</button>
+      </div>
+    {/if}
+
   <div class="body">
     <TabRail {active} onChange={(t) => (active = t)} />
 
@@ -294,6 +323,7 @@
         <Diagnostics />
       {/if}
     </main>
+  </div>
   </div>
 
   <StatusBar />
@@ -359,6 +389,7 @@
   <UpdateDialog />
 
   <ActivityToast />
+  <ScanProgressChip />
 </div>
 
 <style>
@@ -369,7 +400,35 @@
     background: var(--bg);
     color: var(--fg);
   }
+  .middle {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .wire-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 14px;
+    background: var(--accent-danger-bg, #5a1d1d);
+    color: var(--accent-danger-fg, #fecaca);
+    font-size: var(--fs-sm, 12px);
+    border-bottom: 1px solid var(--accent-danger-border, #7f2d2d);
+  }
+  .wire-error button {
+    background: transparent;
+    color: inherit;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    padding: 3px 10px;
+    cursor: pointer;
+    font: inherit;
+  }
+  .wire-error button:hover { background: rgba(255,255,255,0.08); }
   .body {
+    flex: 1;
     display: grid;
     grid-template-columns: 200px 1fr;
     min-height: 0;

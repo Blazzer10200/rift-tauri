@@ -100,7 +100,20 @@ impl<'a> DriftScanner<'a> {
             }
         };
 
-        for f in folders {
+        let total = folders.len();
+        for (idx, f) in folders.iter().enumerate() {
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::DriftScanProgress,
+                crate::diagnostics::DiagLevel::Debug,
+                Some(&f.resource_name),
+                None,
+                format!("scanning folder {}/{}", idx + 1, total),
+                serde_json::json!({
+                    "current": idx + 1,
+                    "total": total,
+                    "resource": f.resource_name,
+                }),
+            );
             let remote_hits = listings
                 .get(&f.remote_root)
                 .cloned()
@@ -155,14 +168,14 @@ impl<'a> DriftScanner<'a> {
             }
         }
 
-        let rr_len = f.remote_root.trim_end_matches('/').len();
+        let remote_root = f.remote_root.trim_end_matches('/');
         let mut remote_map: HashMap<String, RemoteStat> = HashMap::new();
         for r in remote_hits {
             if r.is_dir {
                 continue;
             }
-            let rel = if r.full_path.len() > rr_len {
-                r.full_path[rr_len..].trim_start_matches('/').to_string()
+            let rel = if let Some(tail) = r.full_path.strip_prefix(remote_root) {
+                tail.trim_start_matches('/').to_string()
             } else {
                 r.name.clone()
             };
@@ -308,7 +321,11 @@ impl<'a> DriftScanner<'a> {
                     }
                     continue;
                 }
-                (DriftBucket::Conflict, "no baseline — first scan with both sides present".into())
+                if ls.mtime >= rs.mtime {
+                    (DriftBucket::ToPush, "no baseline — local newer on first scan".into())
+                } else {
+                    (DriftBucket::ToPull, "no baseline — remote newer on first scan".into())
+                }
             } else {
                 unreachable!();
             };

@@ -43,6 +43,7 @@ pub enum DiagStage {
     LockReleased,
     LockHeldByOther,
     DriftScanStart,
+    DriftScanProgress,
     DriftScanResult,
     BridgePing,
     BridgeAck,

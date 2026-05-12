@@ -5,7 +5,7 @@ export type DiagStage =
   | "fs_event" | "ignored" | "debounced" | "queued" | "queue_dropped"
   | "upload_start" | "upload_done" | "upload_fail" | "atomic_rename"
   | "lock_acquired" | "lock_released" | "lock_held_by_other"
-  | "drift_scan_start" | "drift_scan_result"
+  | "drift_scan_start" | "drift_scan_progress" | "drift_scan_result"
   | "bridge_ping" | "bridge_ack"
   | "rescan_signal" | "sftp_connect" | "sftp_disconnect"
   | "remote_scan_start" | "remote_scan_result"
@@ -47,7 +47,7 @@ const ALL_STAGES: DiagStage[] = [
   "fs_event", "ignored", "debounced", "queued", "queue_dropped",
   "upload_start", "upload_done", "upload_fail", "atomic_rename",
   "lock_acquired", "lock_released", "lock_held_by_other",
-  "drift_scan_start", "drift_scan_result",
+  "drift_scan_start", "drift_scan_progress", "drift_scan_result",
   "bridge_ping", "bridge_ack",
   "rescan_signal", "sftp_connect", "sftp_disconnect",
   "remote_scan_start", "remote_scan_result",
@@ -170,15 +170,34 @@ class DiagnosticsStore {
     // Trigger drift reconcile + wait briefly for the result event so the
     // report captures fresh entry counts. 2s timeout — most reconciles
     // finish in <500ms but a slow link shouldn't block the user forever.
-    const seenStartSeq = this.events.find((e) => e.stage === "drift_scan_result")?.seq ?? -1;
+    // One-shot event listener (registered BEFORE forceDriftScan so we don't
+    // miss a fast response) instead of polling the ring buffer every 50ms.
+    let unlistenDrift = null as UnlistenFn | null;
+    const driftResult = new Promise<void>((resolve) => {
+      const timeoutId = setTimeout(() => {
+        unlistenDrift?.();
+        unlistenDrift = null;
+        resolve();
+      }, 2000);
+      void listen<DiagEvent>("diag://event", (e) => {
+        if (e.payload.stage === "drift_scan_result") {
+          clearTimeout(timeoutId);
+          unlistenDrift?.();
+          unlistenDrift = null;
+          resolve();
+        }
+      }).then((u) => {
+        if (unlistenDrift === null) { u(); return; } // already resolved
+        unlistenDrift = u;
+      });
+    });
     const driftFired = await this.forceDriftScan();
     if (driftFired) {
-      const deadline = Date.now() + 2000;
-      while (Date.now() < deadline) {
-        const newest = this.events.find((e) => e.stage === "drift_scan_result")?.seq ?? -1;
-        if (newest > seenStartSeq) break;
-        await new Promise((r) => setTimeout(r, 50));
-      }
+      await driftResult;
+    } else {
+      // No scan fired — tear down the listener immediately rather than waiting 2s.
+      unlistenDrift?.();
+      unlistenDrift = null;
     }
     let ignoredBreakdown: Record<string, number> = {};
     try {

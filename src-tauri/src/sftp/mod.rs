@@ -5,7 +5,7 @@
 // **Phase 1h gap-fill (2026-05-08) — daily-driver parity vs WPF SftpClient.cs:**
 //   - Fingerprint pinning (was TOFU only). `ConnectArgs.trusted_fingerprint`
 //     accepts both Rust's `SHA256:<b64>` form and WPF/WinSCP's full
-//     `ssh-ed25519 256 SHA256:<b64>` form via substring match. On TOFU first
+//     `ssh-ed25519 256 SHA256:<b64>` form via exact normalized match. On TOFU first
 //     connect, the captured fingerprint is exposed via `fingerprint()` so the
 //     caller can persist it back to ServerProfile (Phase 1i write-back).
 //   - Worker-pool sessions. Each `Worker` = own russh `Handle` + own
@@ -73,8 +73,8 @@ pub struct ConnectArgs<'a> {
     pub port: u16,
     pub user: &'a str,
     pub key_path: &'a Path,
-    /// If `Some`, server's pubkey fingerprint must match this string. Substring
-    /// match — accepts both Rust's `"SHA256:<b64>"` form and WPF/WinSCP's
+    /// If `Some`, server's pubkey fingerprint must match this string. Exact
+    /// normalized match — accepts both Rust's `"SHA256:<b64>"` form and WPF/WinSCP's
     /// `"ssh-ed25519 256 SHA256:<b64>"` form transparently. If `None`, TOFU:
     /// captures whatever the server presents and surfaces it via
     /// `SftpClient::fingerprint()` so the caller can persist it.
@@ -226,16 +226,19 @@ impl SftpClient {
         let mut open_futs: FuturesUnordered<_> = (0..needed)
             .map(|_| open_session(&self.connect_args))
             .collect();
-        let mut workers = self.workers.lock().await;
+        let mut opened = Vec::with_capacity(needed);
         while let Some(res) = open_futs.next().await {
             match res {
-                Ok((handle, sftp, _fp)) => workers.push(Arc::new(Worker {
+                Ok((handle, sftp, _fp)) => opened.push(Arc::new(Worker {
                     handle,
                     sftp,
                     gate: tokio::sync::Mutex::new(()),
                 })),
                 Err(e) => log::warn!("sftp worker open failed: {e}"),
             }
+        }
+        if !opened.is_empty() {
+            self.workers.lock().await.extend(opened);
         }
     }
 
@@ -341,16 +344,20 @@ impl SftpClient {
                         };
                         let Some(root) = job else { break };
                         let _g = worker.gate.lock().await;
-                        let v = list_recursive_via(
+                        let res = list_recursive_via(
                             &worker.sftp,
                             &root,
                             max_depth,
                             (*filter).as_deref(),
                         )
-                        .await
-                        .unwrap_or_default();
-                        let mut r = results_arc.lock().await;
-                        r.insert(root, v);
+                        .await;
+                        match res {
+                            Ok(v) => {
+                                let mut r = results_arc.lock().await;
+                                r.insert(root, v);
+                            }
+                            Err(e) => log::warn!("list_recursive worker failed for {root}: {e}"),
+                        }
                     }
                 }));
             }
@@ -456,14 +463,20 @@ impl SftpClient {
         if remote_path.is_empty() {
             return -1;
         }
-        let escaped = shell_quote(remote_path);
+        let escaped = match shell_quote(remote_path) {
+            Ok(v) => v,
+            Err(_) => return -1,
+        };
         // Build prune clause from the ignore module's canonical list + .rift-tmp
         // (per-file ext, not in the dir list — added explicitly).
         let mut prune_names: Vec<String> = crate::sync::ignore::ignored_directory_names()
             .iter()
-            .map(|n| format!("-name {}", shell_quote(n)))
+            .filter_map(|n| shell_quote(n).ok().map(|q| format!("-name {q}")))
             .collect();
-        prune_names.push(format!("-name {}", shell_quote(".rift-tmp")));
+        prune_names.push(format!(
+            "-name {}",
+            shell_quote(".rift-tmp").unwrap_or_else(|_| "'.rift-tmp'".into())
+        ));
         let prune_clause = prune_names.join(" -o ");
         // GNU find + awk: portable on FXServer hosts (Ubuntu/Debian/Alpine).
         let cmd = format!(
@@ -723,7 +736,8 @@ impl SftpClient {
     pub async fn get_remote_sha1(&self, path: &str) -> Option<String> {
         // sha1sum prints "<hex>  <filename>\n". We extract the hex prefix.
         // Quote the path to handle spaces / special chars.
-        let cmd = format!("sha1sum {}", shell_quote(path));
+        let quoted = shell_quote(path).ok()?;
+        let cmd = format!("sha1sum {quoted}");
         let channel = self.handle.channel_open_session().await.ok()?;
         channel.exec(true, cmd).await.ok()?;
         let mut out = String::new();
@@ -838,11 +852,19 @@ async fn list_recursive_via(
 }
 
 async fn delete_recursive_via(sftp: &SftpSession, path: &str) -> Result<(), String> {
+    // Belt-and-braces — Tauri cmd layer already containment-checks, but this
+    // helper is reachable internally too. Don't let "/" or "" get this far.
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return Err(format!("refusing to recursively delete root: '{trimmed}'"));
+    }
+    // lstat: never follow a symlink at the target. If it IS a symlink, unlink
+    // the link only — never recurse through whatever it points to.
     let meta = sftp
-        .metadata(path)
+        .symlink_metadata(path)
         .await
-        .map_err(|e| format!("stat {path}: {e}"))?;
-    if !matches!(meta.file_type(), FileType::Dir) {
+        .map_err(|e| format!("lstat {path}: {e}"))?;
+    if meta.file_type().is_symlink() || !meta.file_type().is_dir() {
         return sftp
             .remove_file(path)
             .await
@@ -862,7 +884,15 @@ async fn delete_recursive_via(sftp: &SftpSession, path: &str) -> Result<(), Stri
                 continue;
             }
             let full = format!("{}/{}", dir.trim_end_matches('/'), name);
-            if matches!(entry.metadata().file_type(), FileType::Dir) {
+            // Per-child lstat — entry.metadata() may report followed-target
+            // attrs depending on server, which could push a symlinked dir
+            // onto the visit stack and walk out of tree.
+            let child_meta = sftp
+                .symlink_metadata(&full)
+                .await
+                .map_err(|e| format!("lstat {full}: {e}"))?;
+            let ft = child_meta.file_type();
+            if ft.is_dir() && !ft.is_symlink() {
                 to_visit.push(full);
             } else {
                 sftp.remove_file(&full)
@@ -879,8 +909,22 @@ async fn delete_recursive_via(sftp: &SftpSession, path: &str) -> Result<(), Stri
     Ok(())
 }
 
+/// User-facing rename. Errors if `to` already exists — never silently overwrites.
 async fn rename_via(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {
-    // Some servers reject rename-over-existing — best-effort delete first.
+    match sftp.try_exists(to).await {
+        Ok(true) => return Err(format!("target already exists: {to}")),
+        Ok(false) => {}
+        Err(e) => return Err(format!("exists check {to}: {e}")),
+    }
+    sftp.rename(from, to)
+        .await
+        .map_err(|e| format!("rename {from} -> {to}: {e}"))
+}
+
+/// Replace-on-write rename used only by the atomic upload tmp-swap. Best-effort
+/// removes any existing destination first — required b/c some SFTP servers
+/// reject rename-over-existing. NEVER call this from user-initiated rename.
+async fn rename_overwriting_via(sftp: &SftpSession, from: &str, to: &str) -> Result<(), String> {
     let _ = sftp.remove_file(to).await;
     sftp.rename(from, to)
         .await
@@ -917,6 +961,12 @@ async fn upload_atomic_via(
         let _ = mkdir_p_via(sftp, parent).await;
     }
     let tmp = format!("{remote_path}.rift-tmp");
+    // Best-effort cleanup of any abandoned tmp from a prior crashed upload
+    // (possibly owned by another user). POSIX unlink perm comes from parent-dir
+    // write, so this clears foreign-owned tmps when the dir is group-writable.
+    // Ignore the result — if it doesn't exist, or we can't unlink, `create()`
+    // below will surface the real error.
+    let _ = sftp.remove_file(&tmp).await;
     // russh-sftp's `write()` uses OpenFlags::WRITE only — no CREATE/TRUNCATE,
     // so it fails NO_SUCH_FILE on a fresh tmp. `create()` is WRITE|CREATE|TRUNCATE.
     // Wrap in a scope so the file handle drops (and the SFTP close packet
@@ -932,7 +982,7 @@ async fn upload_atomic_via(
             return OpResult::err(format!("write tmp {tmp}: {e}"));
         }
     }
-    if let Err(e) = rename_via(sftp, &tmp, remote_path).await {
+    if let Err(e) = rename_overwriting_via(sftp, &tmp, remote_path).await {
         let _ = sftp.remove_file(&tmp).await;
         return OpResult::err(e);
     }
@@ -996,11 +1046,12 @@ fn remote_parent(path: &str) -> Option<&str> {
     if idx == 0 { Some("/") } else { Some(&trimmed[..idx]) }
 }
 
-/// POSIX single-quote escape — `replace ' with '\\''`. Safe for typical
-/// SFTP-served paths (UTF-8, no NUL/newlines). Does NOT sanitize NUL bytes
-/// or newlines — SFTP technically allows them, no FXServer host ever uses
-/// them. If that changes, sanitize at the call site.
-fn shell_quote(s: &str) -> String {
+/// POSIX single-quote escape: `replace ' with '\\''`. Rejects control
+/// characters that would split an SSH exec command line.
+fn shell_quote(s: &str) -> Result<String, String> {
+    if s.contains(['\0', '\n', '\r']) {
+        return Err("path contains command-breaking control character".into());
+    }
     let mut out = String::from("'");
     for c in s.chars() {
         if c == '\'' {
@@ -1010,5 +1061,5 @@ fn shell_quote(s: &str) -> String {
         }
     }
     out.push('\'');
-    out
+    Ok(out)
 }

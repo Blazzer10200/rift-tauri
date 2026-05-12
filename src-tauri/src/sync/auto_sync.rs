@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use dashmap::DashMap;
+use dashmap::{mapref::entry::Entry, DashMap};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -210,6 +210,11 @@ pub struct AutoSyncEngine {
     dirty: DashMap<PathBuf, DirtyEntry>,
     failed: DashMap<PathBuf, DirtyEntry>,
     conflicts: DashMap<PathBuf, ConflictRecord>,
+    manual_delete_suppress_until: DashMap<PathBuf, DateTime<Utc>>,
+    // After a drift_watcher pull writes a file, the atomic rename fires a notify
+    // Modify event which would re-enqueue the file for upload (echo loop).
+    // 2s suppression window matches the manual-delete pattern.
+    just_pulled_suppress_until: DashMap<PathBuf, DateTime<Utc>>,
 
     state: Mutex<(AutoSyncState, String)>,
     ignored_total: AtomicU64,
@@ -264,6 +269,8 @@ impl AutoSyncEngine {
             dirty: DashMap::new(),
             failed: DashMap::new(),
             conflicts: DashMap::new(),
+            manual_delete_suppress_until: DashMap::new(),
+            just_pulled_suppress_until: DashMap::new(),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
@@ -552,11 +559,52 @@ impl AutoSyncEngine {
     pub fn cache(&self) -> Arc<RemoteStateCache> { self.cache.clone() }
     pub fn locks(&self) -> Option<Arc<LockPresence>> { self.locks.clone() }
     pub fn app(&self) -> AppHandle { self.app.clone() }
+    pub fn profile_key(&self) -> &str { &self.profile.key }
     pub fn resource_name_for(&self, remote_root: &str) -> Option<String> {
         self.folders.get(remote_root).map(|fw| fw.resource_name.clone())
     }
     pub fn is_disposed(&self) -> bool { self.disposed.load(Ordering::SeqCst) }
     pub fn track_pull_handle(&self, h: JoinHandle<()>) { self.track_background(h); }
+
+    pub fn reject_remote_locked(&self, remote_path: &str) -> Result<(), String> {
+        if let Some(locks) = &self.locks {
+            if let Some(lock) = locks.find_lock_by_other(remote_path) {
+                return Err(format!("locked by {}@{}", lock.user, lock.host));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn reject_local_locked(&self, local_path: &Path) -> Result<(), String> {
+        if let Some(remote) = self.remote_for_local(local_path) {
+            self.reject_remote_locked(&remote)?;
+        }
+        Ok(())
+    }
+
+    pub fn suppress_local_delete_uploads(&self, paths: &[PathBuf]) {
+        let until = Utc::now() + chrono::Duration::seconds(2);
+        for path in paths {
+            self.manual_delete_suppress_until.insert(path.clone(), until);
+            self.remove_pending_under(path);
+        }
+    }
+
+    pub fn suppress_remote_delete_uploads(&self, remote_paths: &[String]) {
+        let locals: Vec<PathBuf> = remote_paths
+            .iter()
+            .filter_map(|remote| self.local_for_remote(remote))
+            .collect();
+        self.suppress_local_delete_uploads(&locals);
+    }
+
+    /// Suppress the immediate post-pull echo event. Drift-watcher calls this
+    /// after a successful atomic-rename pull so the resulting notify Modify
+    /// event doesn't re-enqueue the file for upload.
+    pub fn suppress_just_pulled(&self, path: &Path) {
+        let until = Utc::now() + chrono::Duration::seconds(2);
+        self.just_pulled_suppress_until.insert(path.to_path_buf(), until);
+    }
 
     pub async fn status(&self) -> AutoSyncStatus {
         let (state, detail) = self.state.lock().await.clone();
@@ -722,7 +770,7 @@ impl AutoSyncEngine {
 
     // ─── FS event handler ────────────────────────────────────────────────────
 
-    async fn on_fs_event(&self, ev: Event) {
+    async fn on_fs_event(self: &Arc<Self>, ev: Event) {
         if self.disposed.load(Ordering::SeqCst) {
             return;
         }
@@ -765,7 +813,7 @@ impl AutoSyncEngine {
     /// the rescan-signal path AND callable from the Diagnostics panel via the
     /// `diag_force_drift_scan` Tauri command. Background-spawned so the
     /// notify handler isn't stalled by SFTP latency.
-    pub fn kick_drift_reconcile(&self) {
+    pub fn kick_drift_reconcile(self: &Arc<Self>) {
         let folders: Vec<FolderWatch> = self
             .folders
             .iter()
@@ -776,6 +824,7 @@ impl AutoSyncEngine {
         }
         let sftp = self.sftp.clone();
         let snapshot = self.snapshot.clone();
+        let engine = self.clone();
         let h = tokio::spawn(async move {
             diagnostics::emit(
                 DiagStage::DriftScanStart,
@@ -792,6 +841,26 @@ impl AutoSyncEngine {
                 })
                 .collect();
             let result = scanner.scan(&targets).await;
+            let mut to_push = 0u32;
+            let mut to_pull = 0u32;
+            let mut conflicts = 0u32;
+            let mut push_paths: Vec<PathBuf> = Vec::new();
+            for e in &result.entries {
+                match e.bucket {
+                    crate::sync::DriftBucket::ToPush => {
+                        to_push += 1;
+                        push_paths.push(PathBuf::from(&e.local_path));
+                    }
+                    crate::sync::DriftBucket::ToPull => to_pull += 1,
+                    crate::sync::DriftBucket::Conflict => conflicts += 1,
+                    crate::sync::DriftBucket::Synced => {}
+                }
+            }
+            let enqueued = if !push_paths.is_empty() {
+                engine.enqueue_for_flush_batch(push_paths, false, false).await
+            } else {
+                0
+            };
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
@@ -800,6 +869,10 @@ impl AutoSyncEngine {
                 "reconcile complete",
                 serde_json::json!({
                     "entries": result.entries.len(),
+                    "to_push": to_push,
+                    "to_pull": to_pull,
+                    "conflicts": conflicts,
+                    "enqueued_for_push": enqueued,
                     "missing_remote_folders": result.remote_folders_missing.len(),
                     "listing_error": result.last_batch_listing_error,
                 }),
@@ -872,6 +945,26 @@ impl AutoSyncEngine {
             );
             return;
         }
+        if self.is_manual_delete_suppressed(&path) {
+            diagnostics::emit_for(
+                DiagStage::Ignored,
+                DiagLevel::Debug,
+                None,
+                Some(&path_str),
+                "ignored [manual-delete-suppression]",
+            );
+            return;
+        }
+        if self.is_just_pulled_suppressed(&path) {
+            diagnostics::emit_for(
+                DiagStage::Ignored,
+                DiagLevel::Debug,
+                None,
+                Some(&path_str),
+                "ignored [post-pull-echo-suppression]",
+            );
+            return;
+        }
         // Skip directory events (children fire their own).
         let is_dir = kind != ChangeKind::Deleted && path.is_dir();
         if is_dir {
@@ -895,24 +988,29 @@ impl AutoSyncEngine {
         let debounce = chrono::Duration::milliseconds(DEBOUNCE_MS as i64);
         let ceiling = chrono::Duration::milliseconds(CEILING_MS as i64);
         let watch_key_for_lock = watch_key.clone();
-        self.dirty
-            .entry(path.clone())
-            .and_modify(|existing| {
+        let first_dirty = match self.dirty.entry(path.clone()) {
+            Entry::Occupied(mut occupied) => {
+                let existing = occupied.get_mut();
                 let cap = existing.first_seen + ceiling;
                 let fresh = now + debounce;
                 existing.kind = merge_kind(existing.kind, kind);
                 existing.next_flush = if fresh > cap { cap } else { fresh };
-            })
-            .or_insert(DirtyEntry {
-                watch_key,
-                path: path.clone(),
-                kind,
-                first_seen: now,
-                next_flush: now + debounce,
-                attempts: 0,
-                next_retry: now,
-                bypass_preflight: false,
-            });
+                false
+            }
+            Entry::Vacant(vacant) => {
+                vacant.insert(DirtyEntry {
+                    watch_key,
+                    path: path.clone(),
+                    kind,
+                    first_seen: now,
+                    next_flush: now + debounce,
+                    attempts: 0,
+                    next_retry: now,
+                    bypass_preflight: false,
+                });
+                true
+            }
+        };
         diagnostics::emit_for(
             DiagStage::Queued,
             DiagLevel::Debug,
@@ -924,7 +1022,8 @@ impl AutoSyncEngine {
         // Drop a presence lock fire-and-forget on the FIRST dirty event for this
         // path in a cycle. Released on flush success (release inside process_entry)
         // or on Deleted (release here so renamed-old-path locks don't leak).
-        if let Some(locks) = self.locks.clone() {
+        if first_dirty || kind == ChangeKind::Deleted {
+            if let Some(locks) = self.locks.clone() {
             if let Some(fw) = self.folders.get(&watch_key_for_lock).map(|v| v.value().clone()) {
                 if let Some(remote) = map_local_to_remote(&path, &fw) {
                     let kind_at_queue = kind;
@@ -937,6 +1036,7 @@ impl AutoSyncEngine {
                     });
                     self.track_background(h);
                 }
+            }
             }
         }
     }
@@ -1195,13 +1295,12 @@ impl AutoSyncEngine {
         } else {
             // Wait briefly for the file to be readable (atomic-save mid-rename window).
             if !wait_for_readable(&entry.path).await {
-                let mut requeued = entry.clone();
-                requeued.next_flush = Utc::now() + chrono::Duration::milliseconds(DEBOUNCE_MS as i64);
-                self.dirty.insert(entry.path.clone(), requeued);
-                return EntryResult::Requeued;
+                self.mark_failed(&entry);
+                return EntryResult::Fail;
             }
             if !entry.path.exists() {
-                return EntryResult::Requeued;
+                self.mark_failed(&entry);
+                return EntryResult::Fail;
             }
 
             // Foreign-lock hold — if another dev's Rift is editing this file
@@ -1376,6 +1475,96 @@ impl AutoSyncEngine {
         let idx = std::cmp::min(e.attempts as usize - 1, RETRY_BACKOFFS_SECS.len() - 1);
         e.next_retry = Utc::now() + chrono::Duration::seconds(RETRY_BACKOFFS_SECS[idx] as i64);
         self.failed.insert(entry.path.clone(), e);
+    }
+
+    fn remote_for_local(&self, local_path: &Path) -> Option<String> {
+        let mut best: Option<FolderWatch> = None;
+        let mut best_len = 0usize;
+        for kv in self.folders.iter() {
+            let fw = kv.value();
+            if local_path.starts_with(&fw.local_root) {
+                let len = fw.local_root.components().count();
+                if len > best_len {
+                    best_len = len;
+                    best = Some(fw.clone());
+                }
+            }
+        }
+        best.and_then(|fw| map_local_to_remote(local_path, &fw))
+    }
+
+    fn local_for_remote(&self, remote_path: &str) -> Option<PathBuf> {
+        for kv in self.folders.iter() {
+            let fw = kv.value();
+            let root = fw.remote_root.trim_end_matches('/');
+            let rel = if remote_path == root {
+                ""
+            } else if let Some(tail) = remote_path.strip_prefix(&format!("{root}/")) {
+                tail
+            } else {
+                continue;
+            };
+            let mut local = fw.local_root.clone();
+            if !rel.is_empty() {
+                local.push(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+            }
+            return Some(local);
+        }
+        None
+    }
+
+    fn remove_pending_under(&self, root: &Path) {
+        let dirty: Vec<PathBuf> = self
+            .dirty
+            .iter()
+            .filter(|kv| kv.key().starts_with(root))
+            .map(|kv| kv.key().clone())
+            .collect();
+        for key in dirty {
+            self.dirty.remove(&key);
+        }
+        let failed: Vec<PathBuf> = self
+            .failed
+            .iter()
+            .filter(|kv| kv.key().starts_with(root))
+            .map(|kv| kv.key().clone())
+            .collect();
+        for key in failed {
+            self.failed.remove(&key);
+        }
+    }
+
+    fn is_manual_delete_suppressed(&self, path: &Path) -> bool {
+        let now = Utc::now();
+        let expired: Vec<PathBuf> = self
+            .manual_delete_suppress_until
+            .iter()
+            .filter(|kv| *kv.value() <= now)
+            .map(|kv| kv.key().clone())
+            .collect();
+        for key in expired {
+            self.manual_delete_suppress_until.remove(&key);
+        }
+        self.manual_delete_suppress_until
+            .iter()
+            .any(|kv| path.starts_with(kv.key()) && *kv.value() > now)
+    }
+
+    fn is_just_pulled_suppressed(&self, path: &Path) -> bool {
+        let now = Utc::now();
+        let expired: Vec<PathBuf> = self
+            .just_pulled_suppress_until
+            .iter()
+            .filter(|kv| *kv.value() <= now)
+            .map(|kv| kv.key().clone())
+            .collect();
+        for key in expired {
+            self.just_pulled_suppress_until.remove(&key);
+        }
+        self.just_pulled_suppress_until
+            .get(path)
+            .map(|v| *v > now)
+            .unwrap_or(false)
     }
 
     async fn set_state(&self, s: AutoSyncState, detail: String) {
