@@ -1520,6 +1520,68 @@ impl AutoSyncEngine {
                             info.last_modified,
                         );
                         if remote_changed {
+                            // SHA-equality collapse — phantom-conflict guard.
+                            //
+                            // Remote moved by stat (mtime or size differs from
+                            // baseline). But if size hasn't actually changed
+                            // AND local SHA still matches the baseline AND
+                            // remote SHA also matches the baseline, the bytes
+                            // never changed on either side — only mtimes did
+                            // (npm rebuild touching artifacts, our v0.2.26-31
+                            // SETSTAT calls bumping ctime/mtime, etc). Real
+                            // case Trey hit on 2026-05-12: 53 phantom conflicts
+                            // on `[ox]/ox_lib/web/build/` fonts + bundles.
+                            //
+                            // Drift scanner already collapses this on scan; we
+                            // need the same logic here for queued uploads, b/c
+                            // the watcher fires on local mtime-only touches.
+                            // Cost: one remote SHA1 SSH-exec when sizes match
+                            // — only fires in the false-conflict shape, so the
+                            // common (real-change) path is unaffected.
+                            let sizes_match = info.size == snap.local_size
+                                && info.size == snap.remote_size;
+                            if sizes_match && snap.sha1.is_some() {
+                                let local_sha =
+                                    SyncSnapshot::compute_sha1(&entry.path);
+                                if local_sha.is_some() && local_sha == snap.sha1 {
+                                    let remote_sha =
+                                        self.sftp.get_remote_sha1(&remote).await;
+                                    if remote_sha.is_some() && remote_sha == snap.sha1 {
+                                        // Phantom — refresh baseline mtime + drop the push.
+                                        if let Some((lsize, lmtime)) =
+                                            stat_local(&entry.path)
+                                        {
+                                            self.snapshot.set(
+                                                &remote,
+                                                lsize,
+                                                lmtime,
+                                                info.size,
+                                                info.last_modified,
+                                                snap.sha1.clone(),
+                                            );
+                                        }
+                                        self.cache.set(
+                                            &remote,
+                                            info.size,
+                                            info.last_modified,
+                                        );
+                                        self.failed.remove(&entry.path);
+                                        self.conflicts.remove(&entry.path);
+                                        diagnostics::emit_for(
+                                            DiagStage::UploadDone,
+                                            DiagLevel::Debug,
+                                            Some(&fw.resource_name),
+                                            Some(&remote),
+                                            "phantom-conflict collapsed (SHA-equal)",
+                                        );
+                                        let rel = rel_of(fw, &entry.path);
+                                        return EntryResult::Ok(
+                                            Some(rel),
+                                            "synced (mtime jitter)".into(),
+                                        );
+                                    }
+                                }
+                            }
                             let (local_size, local_mtime) = stat_local(&entry.path)
                                 .unwrap_or((0, Utc::now()));
                             let record = ConflictRecord {
