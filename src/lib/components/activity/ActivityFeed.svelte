@@ -32,16 +32,17 @@
   const BURST_WINDOW_MS = 1_000;
   const BURST_THRESHOLD = 5;
 
-  const groups: { id: Group; label: string }[] = [
-    { id: "all", label: "All" },
-    { id: "sync", label: "Sync" },
-    { id: "pull", label: "Pull" },
-    { id: "delete", label: "Delete" },
-    { id: "drift", label: "Drift" },
-    { id: "conflict", label: "Conflicts" },
-    { id: "bridge", label: "Bridge" },
-    { id: "error", label: "Errors" },
-    { id: "system", label: "System" },
+  type Tone = "neutral" | "ok" | "info" | "warn" | "danger";
+  const groups: { id: Group; label: string; tone: Tone }[] = [
+    { id: "all",      label: "All",       tone: "neutral" },
+    { id: "sync",     label: "Sync",      tone: "ok" },
+    { id: "pull",     label: "Pull",      tone: "info" },
+    { id: "delete",   label: "Delete",    tone: "warn" },
+    { id: "drift",    label: "Drift",     tone: "warn" },
+    { id: "conflict", label: "Conflicts", tone: "danger" },
+    { id: "bridge",   label: "Bridge",    tone: "info" },
+    { id: "error",    label: "Errors",    tone: "danger" },
+    { id: "system",   label: "System",    tone: "neutral" },
   ];
 
   const liveMode = $derived(!paused && !bursting && !userScrolledAway);
@@ -364,11 +365,12 @@
         <button
           type="button"
           data-active={group === g.id}
+          data-tone={g.tone}
           onclick={() => (group = g.id)}
         >
           {g.label}
           {#if g.id !== "all"}
-            <span class="pip" data-zero={n === 0}>{n}</span>
+            <span class="pip" data-zero={n === 0} data-tone={g.tone}>{n}</span>
           {/if}
         </button>
       {/each}
@@ -382,7 +384,14 @@
     />
 
     <div class="actions">
-      <button class="btn ghost sm" type="button" onclick={togglePause} title={paused ? "Resume feed" : "Pause feed"}>
+      <button
+        class="btn sm"
+        class:warn={paused}
+        class:ghost={!paused}
+        type="button"
+        onclick={togglePause}
+        title={paused ? "Resume feed" : "Pause feed"}
+      >
         {#if paused}
           <Play size={11}/> Resume
         {:else}
@@ -431,9 +440,13 @@
       {/if}
       {#if rendered.length === 0}
         <div class="empty">
-          {connection.activityFeed.length === 0
-            ? "No activity yet — start auto-sync to see events."
-            : "No matches."}
+          {#if connection.activityFeed.length === 0}
+            <span class="empty-title">No activity yet</span>
+            <span class="empty-hint">Sync, pull, and bridge events will appear here as they fire. Click Reconcile in the sidebar to trigger a scan.</span>
+          {:else}
+            <span class="empty-title">No matches</span>
+            <span class="empty-hint">{filter ? `Nothing matches "${filter}".` : "No events in this group."}</span>
+          {/if}
         </div>
       {:else}
         {#each rendered as item (item.key + (item.type === "groupHeader" ? `_${item.expanded ? "x" : "c"}_${item.rows.length}` : ""))}
@@ -445,6 +458,7 @@
             <div
               class="tr group"
               data-expanded={item.expanded}
+              data-variant={v}
               onclick={() => toggleGroup(item.key)}
               onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleGroup(item.key); } }}
               role="button"
@@ -477,6 +491,7 @@
             <div
               class="tr child"
               data-selected={isSelected}
+              data-variant={v}
               onclick={() => selectRow(item.key)}
               onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectRow(item.key); } }}
               role="button"
@@ -496,7 +511,7 @@
               <div class="td actor mono">{r.actor ?? "—"}</div>
             </div>
             {#if isSelected}
-              {@render detailStrip(r)}
+              {@render detailStrip(r, v)}
             {/if}
           {:else}
             {@const r = item.row}
@@ -526,7 +541,7 @@
               <div class="td actor mono">{r.actor ?? "—"}</div>
             </div>
             {#if isSelected}
-              {@render detailStrip(r)}
+              {@render detailStrip(r, v)}
             {/if}
           {/if}
         {/each}
@@ -544,9 +559,9 @@
   {/if}
 </section>
 
-{#snippet detailStrip(r: ActivityRow)}
+{#snippet detailStrip(r: ActivityRow, variant: Variant)}
   {@const localPath = resolveLocalPath(r)}
-  <div class="strip" role="region" aria-label="Event details">
+  <div class="strip" data-variant={variant} role="region" aria-label="Event details">
     <div class="strip-meta">
       <div class="meta-row">
         <span class="meta-k">When</span>
@@ -621,6 +636,7 @@
     max-width: 60%;
   }
   .segctl button {
+    --tone: var(--fg-muted);
     padding: 3px 9px; height: 22px;
     background: transparent; border: 0;
     color: var(--fg-muted);
@@ -629,12 +645,24 @@
     cursor: pointer;
     display: inline-flex; align-items: center; gap: 6px;
     white-space: nowrap;
+    transition: background 100ms ease, color 100ms ease, box-shadow 100ms ease;
   }
-  .segctl button:hover { color: var(--fg); }
+  .segctl button[data-tone="ok"]      { --tone: var(--ok); }
+  .segctl button[data-tone="info"]    { --tone: var(--info); }
+  .segctl button[data-tone="warn"]    { --tone: var(--warn); }
+  .segctl button[data-tone="danger"]  { --tone: var(--danger); }
+  .segctl button[data-tone="neutral"] { --tone: var(--fg-muted); }
+  .segctl button:hover { color: var(--fg); background: color-mix(in oklch, var(--tone) 10%, transparent); }
   .segctl button[data-active="true"] {
-    background: var(--surface);
+    background: color-mix(in oklch, var(--tone) 18%, var(--surface));
+    color: var(--tone);
+    box-shadow: inset 2px 0 var(--tone);
+    font-weight: 600;
+  }
+  .segctl button[data-tone="neutral"][data-active="true"] {
     color: var(--fg);
-    box-shadow: var(--shadow-sm);
+    background: var(--surface);
+    box-shadow: inset 2px 0 var(--fg-muted);
   }
   .pip {
     display: inline-flex; align-items: center; justify-content: center;
@@ -646,21 +674,28 @@
     font-variant-numeric: tabular-nums;
   }
   .pip[data-zero="true"] { opacity: 0.45; }
+  .pip[data-tone="ok"]:not([data-zero="true"])     { background: var(--ok-soft);     color: var(--ok); }
+  .pip[data-tone="info"]:not([data-zero="true"])   { background: var(--info-soft);   color: var(--info); }
+  .pip[data-tone="warn"]:not([data-zero="true"])   { background: var(--warn-soft);   color: var(--warn); }
+  .pip[data-tone="danger"]:not([data-zero="true"]) { background: var(--danger-soft); color: var(--danger); }
 
   .filter {
     flex: 1; min-width: 0;
+    height: 26px;
     background: var(--bg-elev-1);
     color: var(--fg);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    padding: 4px 8px;
+    padding: 0 10px;
     font: inherit; font-size: var(--fs-sm);
+    transition: border-color 100ms ease, box-shadow 100ms ease, background 100ms ease;
   }
   .filter:focus {
     outline: 0;
-    border-color: var(--accent);
-    background: var(--bg-elev-2);
+    border-color: var(--border-focus, var(--accent));
+    box-shadow: 0 0 0 3px var(--ring);
   }
+  .filter::placeholder { color: var(--fg-faint); }
 
   .actions { display: inline-flex; gap: 6px; }
 
@@ -717,18 +752,22 @@
   .tr:last-child { border-bottom: 0; }
   .tr:hover { background: var(--surface-hover); }
   .tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .tr[data-selected="true"] { background: var(--accent-soft); }
+  .tr[data-selected="true"] {
+    background: var(--accent-soft);
+    box-shadow: inset 2px 0 var(--accent);
+  }
   .tr[data-variant="danger"] .td.action { color: var(--danger); }
   .tr[data-variant="warn"] .td.action { color: var(--warn); }
 
-  .tr.group {
-    background: color-mix(in oklch, var(--surface) 92%, var(--accent-soft));
-    font-weight: 500;
-  }
-  .tr.group:hover { background: color-mix(in oklch, var(--surface-hover) 85%, var(--accent-soft)); }
-  .tr.child {
-    background: color-mix(in oklch, var(--surface) 95%, var(--bg-elev-2));
-  }
+  /* Group header — bg tone-keyed by kind so burst patterns are scannable */
+  .tr.group { font-weight: 500; }
+  .tr.group[data-variant="ok"]     { background: color-mix(in oklch, var(--surface) 88%, var(--ok-soft)); }
+  .tr.group[data-variant="info"]   { background: color-mix(in oklch, var(--surface) 88%, var(--info-soft)); }
+  .tr.group[data-variant="warn"]   { background: color-mix(in oklch, var(--surface) 88%, var(--warn-soft)); }
+  .tr.group[data-variant="danger"] { background: color-mix(in oklch, var(--surface) 88%, var(--danger-soft)); }
+  .tr.group[data-variant="muted"]  { background: color-mix(in oklch, var(--surface) 92%, var(--bg-elev-2)); }
+  .tr.group:hover { filter: brightness(1.08); }
+  .tr.child { background: color-mix(in oklch, var(--surface) 95%, var(--bg-elev-2)); }
   .tr.child .td.resource { padding-left: 14px; opacity: 0.7; }
 
   .td {
@@ -780,10 +819,15 @@
     padding: 8px 12px 10px;
     background: color-mix(in oklch, var(--accent-soft) 30%, var(--surface));
     border-bottom: 1px solid var(--border);
+    box-shadow: inset 2px 0 var(--accent);
     display: flex; gap: 16px; align-items: flex-start;
     flex-wrap: wrap;
     /* No entry animation — during sync bursts the flicker was nauseating. */
   }
+  .strip[data-variant="ok"]     { background: color-mix(in oklch, var(--ok-soft) 30%, var(--surface));     box-shadow: inset 2px 0 var(--ok); }
+  .strip[data-variant="info"]   { background: color-mix(in oklch, var(--info-soft) 30%, var(--surface));   box-shadow: inset 2px 0 var(--info); }
+  .strip[data-variant="warn"]   { background: color-mix(in oklch, var(--warn-soft) 30%, var(--surface));   box-shadow: inset 2px 0 var(--warn); }
+  .strip[data-variant="danger"] { background: color-mix(in oklch, var(--danger-soft) 30%, var(--surface)); box-shadow: inset 2px 0 var(--danger); }
   .strip-meta {
     display: flex; gap: 10px 18px; flex-wrap: wrap;
     flex: 1; min-width: 0;
@@ -811,11 +855,14 @@
   }
 
   .empty {
-    padding: 32px;
+    padding: 48px 32px;
+    display: flex; flex-direction: column; gap: 8px;
     color: var(--fg-muted);
     text-align: center;
     font-size: var(--fs-sm);
   }
+  .empty-title { color: var(--fg); font-weight: 500; font-size: var(--fs-md); }
+  .empty-hint { color: var(--fg-subtle); font-size: var(--fs-xs); max-width: 420px; margin: 0 auto; line-height: 1.5; }
 
   /* Top-of-feed pip — visible only when bursting or scrolled-away. Sticky so
      it stays pinned even as the list scrolls beneath it. */
@@ -860,6 +907,11 @@
     font-size: var(--fs-xs);
     box-shadow: var(--shadow);
     z-index: 2;
+  }
+  .paused-banner {
+    background: color-mix(in oklch, var(--warn-soft) 70%, var(--bg-elev-2));
+    border-color: color-mix(in oklch, var(--warn) 40%, var(--border-strong));
+    color: var(--warn);
   }
   .action-flash { bottom: 56px; }
 

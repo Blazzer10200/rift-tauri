@@ -2,6 +2,26 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 36 — 2026-05-12 — Activity page polish (Tier 5 first hit)
+
+Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped. Map at `docs/UI-POLISH-MAP.md`.
+
+Activity page (875-line `ActivityFeed.svelte`) was the largest unpolished surface. Full canon pass:
+
+- **Filter chip strip tone-coded** — was 9 identical neutral chips. Now each carries `data-tone`: All=neutral, Sync=ok, Pull=info, Delete=warn, Drift=warn, Conflicts=danger, Bridge=info, Errors=danger, System=neutral. Active chip gets tone-tinted bg (18% mix), tone fg, `inset 2px 0 var(--tone)` stripe, weight 600. Hover gets 10% tone-mix bg. Neutral active falls back to surface + fg-muted stripe to avoid clashing.
+- **Count pips inherit tone** — non-zero pips show tone-soft bg + tone fg (red Conflicts/Errors pip pops, ok Sync pip etc.). Zero pips stay muted at 0.45 opacity.
+- **Filter input** — was a one-off `.filter`, now matches canon globals: 26px height, border-strong rest, accent border + 3px ring on focus, placeholder fg-faint.
+- **Pause button** — used `.btn ghost` regardless of state. Now `.btn ghost` when running, `.btn warn` when paused. Visual reminder feed is frozen.
+- **Empty state** title+hint pair per canon ("No activity yet" / "Sync, pull, and bridge events will appear here as they fire. Click Reconcile in the sidebar to trigger a scan."). Same for filter-empty case.
+- **Selected row inset stripe** — was just accent-soft bg. Now also `box-shadow: inset 2px 0 var(--accent)` per canon.
+- **Group row bg tone-keyed** by `data-variant` — burst patterns visually scannable at a glance instead of monochrome "color-mix surface + accent-soft" everywhere.
+- **Detail strip bg + stripe tone-keyed** by selected row's variant — opening a danger row gets a danger-tinted strip w/ danger left stripe, opens an info row gets info-tinted, etc.
+- **Paused banner warn-tinted** (was neutral bg-elev-2 — easy to miss).
+
+### Verify
+- svelte-check: no new errors.
+- Zero Rust changes.
+
 ## Session 35 — 2026-05-12 — Browser page audit (canon plumbing check)
 
 Blazzer asked for one more thorough pass of the Browser page before moving to Activity. Audit found 3 things off-canon, all surgical:
