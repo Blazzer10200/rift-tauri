@@ -408,7 +408,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
   }
   .wire-error {
     display: flex;
@@ -434,9 +435,10 @@
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: 200px 1fr;
+    grid-template-columns: 48px 1fr;
     min-height: 0;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
   }
   .pane {
     min-height: 0; min-width: 0;

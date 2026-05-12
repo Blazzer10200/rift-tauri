@@ -42,12 +42,14 @@
     {#if side === "local"}<AppWindow size={11}/>{:else}<Server size={11}/>{/if}
     <span>{side === "local" ? "LOCAL" : "REMOTE"}</span>
   </div>
-  <nav class="path mono" aria-label="Path breadcrumbs">
-    {#each crumbs as c, i (c.full)}
-      {#if i > 0}<span class="sep">{sep}</span>{/if}
-      <button class="crumb" type="button" onclick={() => onNavigate(c.full)}>{c.label}</button>
-    {/each}
-  </nav>
+  <div class="path-scroll" title={path}>
+    <nav class="path mono" aria-label="Path breadcrumbs">
+      {#each crumbs as c, i (c.full)}
+        {#if i > 0}<span class="sep">{sep}</span>{/if}
+        <button class="crumb" type="button" onclick={() => onNavigate(c.full)}>{c.label}</button>
+      {/each}
+    </nav>
+  </div>
   <div class="actions">
     {#if onRefresh}
       <button class="btn ghost xs" onclick={onRefresh} type="button" title="Refresh" aria-label="Refresh">
@@ -74,10 +76,12 @@
 <style>
   .bcrumbs {
     display: flex; align-items: center; gap: 8px;
-    padding: 6px 10px;
+    padding: 0 10px;
     background: var(--bg-elev-1);
     border-bottom: 1px solid var(--border);
-    min-height: 32px;
+    height: 34px;
+    flex-wrap: nowrap;
+    overflow: clip;
   }
   .side-tag {
     display: inline-flex; align-items: center; gap: 5px;
@@ -88,19 +92,26 @@
     padding-right: 8px;
     border-right: 1px solid var(--border);
   }
+  .path-scroll {
+    flex: 1; min-width: 0;
+    direction: rtl;
+    overflow: clip;
+  }
   .path {
-    flex: 1;
-    display: flex; align-items: center;
-    flex-wrap: nowrap; overflow-x: auto;
+    direction: ltr;
+    display: inline-flex; align-items: center;
+    flex-wrap: nowrap;
     font-size: var(--fs-sm);
     color: var(--fg-muted);
-    min-width: 0;
+    white-space: nowrap;
   }
   .crumb {
     background: transparent; border: 0;
     color: var(--fg); cursor: pointer;
     padding: 2px 6px; border-radius: var(--radius-xs);
     font: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .crumb:hover { background: var(--surface-hover); color: var(--accent); }
   .sep { color: var(--fg-faint); padding: 0 1px; }

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FolderOpen, Activity, TriangleAlert, Cog, Download, DownloadCloud, UploadCloud } from "lucide-svelte";
+  import { FolderOpen, Activity, TriangleAlert, Cog, Download, DownloadCloud, UploadCloud, RefreshCw } from "lucide-svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { connection } from "../../state/connection.svelte";
   import { updates } from "../../state/updates.svelte";
@@ -28,9 +28,24 @@
 
   let pulling = $state(false);
   let pushing = $state(false);
+  let scanning = $state(false);
+
+  async function reconcile() {
+    if (!canSync || pulling || pushing || scanning) return;
+    scanning = true;
+    syncModal.start();
+    try {
+      const fired = await invoke<boolean>("diag_force_drift_scan");
+      if (!fired) syncModal.fail("Not connected — start watcher first.");
+    } catch (e) {
+      syncModal.fail(String(e));
+    } finally {
+      scanning = false;
+    }
+  }
 
   async function pullAll() {
-    if (!canSync || pulling) return;
+    if (!canSync || pulling || pushing || scanning) return;
     pulling = true;
     syncModal.start("pull");
     try {
@@ -44,7 +59,7 @@
   }
 
   async function pushAll() {
-    if (!canSync || pushing) return;
+    if (!canSync || pulling || pushing || scanning) return;
     pushing = true;
     syncModal.start("push");
     try {
@@ -58,100 +73,139 @@
   }
 </script>
 
-<div class="rail">
-  <div class="group" style="--active-y: {Math.max(0, activeIdx) * 31}px">
-    <div class="rail-indicator" aria-hidden="true" data-visible={indicatorVisible}></div>
-    {#each tabs as t (t.id)}
-      {@const Icon = t.icon}
-      {@const c = t.count ? t.count() : 0}
-      <button
-        class="rail-btn"
-        data-active={active === t.id}
-        onclick={() => onChange(t.id)}
-        title="{t.label} (Ctrl+{t.kbd})"
-        type="button"
-      >
-        <Icon size={16}/>
-        <span class="label">{t.label}</span>
-        {#if c > 0}
-          <span class="count-pip {t.countCls ?? ''}">{c}</span>
-        {/if}
-        <span class="rail-kbd kbd">⌘{t.kbd}</span>
-      </button>
-    {/each}
-  </div>
+<aside class="rail" aria-label="Primary navigation">
+  <div class="rail-panel">
+    <div class="group" style="--active-y: {Math.max(0, activeIdx) * 31}px">
+      <div class="rail-indicator" aria-hidden="true" data-visible={indicatorVisible}></div>
+      {#each tabs as t (t.id)}
+        {@const Icon = t.icon}
+        {@const c = t.count ? t.count() : 0}
+        <button
+          class="rail-btn"
+          data-active={active === t.id}
+          onclick={() => onChange(t.id)}
+          title="{t.label} (Ctrl+{t.kbd})"
+          type="button"
+        >
+          <span class="rail-icon"><Icon size={16}/></span>
+          <span class="label">{t.label}</span>
+          {#if c > 0}
+            <span class="count-pip {t.countCls ?? ''}">{c}</span>
+          {/if}
+          <span class="rail-kbd kbd">⌘{t.kbd}</span>
+        </button>
+      {/each}
+    </div>
 
-  <div class="bottom">
-    {#if updates.state === "available" && updates.info}
-      <button
-        class="update-pill"
-        type="button"
-        onclick={() => updates.open()}
-        title="Update {updates.info.version} available — click for details"
-      >
-        <span class="up-dot"></span>
-        <Download size={12}/>
-        <span class="up-text">
-          <span class="up-l">Update available</span>
-          <span class="up-v mono">{updates.info.version}</span>
-        </span>
-      </button>
-    {/if}
+    <div class="bottom">
+      {#if updates.state === "available" && updates.info}
+        <button
+          class="update-pill"
+          type="button"
+          onclick={() => updates.open()}
+          title="Update {updates.info.version} available — click for details"
+        >
+          <span class="up-dot"></span>
+          <Download size={12}/>
+          <span class="up-text">
+            <span class="up-l">Update available</span>
+            <span class="up-v mono">{updates.info.version}</span>
+          </span>
+        </button>
+      {/if}
 
-    <div class="qa">
-      <div class="qa-label">Quick actions</div>
-      <button
-        class="qa-btn"
-        type="button"
-        onclick={pullAll}
-        disabled={!canSync || pulling}
-        title={watcherOn ? "Pull all changes from remote" : "Connect a server first"}
-      >
-        <DownloadCloud size={14}/>
-        <span>Pull all</span>
-        {#if pulling}<span class="qa-spin"></span>{/if}
-      </button>
-      <button
-        class="qa-btn"
-        type="button"
-        onclick={pushAll}
-        disabled={!canSync || pushing}
-        title={watcherOn ? "Push all local changes to remote" : "Connect a server first"}
-      >
-        <UploadCloud size={14}/>
-        <span>Push all</span>
-        {#if pushing}<span class="qa-spin"></span>{/if}
-      </button>
+      <div class="qa">
+        <div class="qa-label">Quick actions</div>
+        <button
+          class="qa-btn"
+          type="button"
+          onclick={reconcile}
+          disabled={!canSync || pulling || pushing || scanning}
+          title={watcherOn ? "Reconcile — scan both sides for drift" : "Connect a server first"}
+        >
+          <RefreshCw size={14}/>
+          <span>Reconcile</span>
+          {#if scanning}<span class="qa-spin"></span>{/if}
+        </button>
+        <button
+          class="qa-btn"
+          type="button"
+          onclick={pullAll}
+          disabled={!canSync || pulling || pushing || scanning}
+          title={watcherOn ? "Pull all changes from remote" : "Connect a server first"}
+        >
+          <DownloadCloud size={14}/>
+          <span>Pull all</span>
+          {#if pulling}<span class="qa-spin"></span>{/if}
+        </button>
+        <button
+          class="qa-btn"
+          type="button"
+          onclick={pushAll}
+          disabled={!canSync || pulling || pushing || scanning}
+          title={watcherOn ? "Push all local changes to remote" : "Connect a server first"}
+        >
+          <UploadCloud size={14}/>
+          <span>Push all</span>
+          {#if pushing}<span class="qa-spin"></span>{/if}
+        </button>
+      </div>
     </div>
   </div>
-</div>
+</aside>
 
 <style>
   .rail {
-    display: flex; flex-direction: column;
+    position: relative;
+    width: 48px;
+    height: 100%;
+  }
+  .rail-panel {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 48px;
     background: var(--bg);
     border-right: 1px solid var(--border);
-    padding: 8px;
+    padding: 8px 6px;
+    display: flex; flex-direction: column;
     min-height: 0;
-    width: 200px;
+    overflow: hidden;
+    container-type: inline-size;
+    z-index: 20;
+    transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 220ms ease,
+                border-right-color 220ms ease,
+                padding 220ms ease;
   }
+  .rail:hover .rail-panel,
+  .rail:focus-within .rail-panel {
+    width: 220px;
+    padding: 8px;
+    box-shadow: 6px 0 24px rgba(0, 0, 0, 0.28);
+    border-right-color: var(--border-strong, var(--border));
+  }
+
   .group { display: flex; flex-direction: column; gap: 1px; position: relative; }
   .rail-indicator {
     position: absolute;
-    left: 0; top: 0;
+    left: -6px; top: 0;
     width: 2px; height: 30px;
     background: var(--accent);
     border-radius: 2px;
     transform: translateY(var(--active-y, 0px));
-    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease;
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease, left 220ms ease;
     pointer-events: none;
     opacity: 0;
     z-index: 1;
   }
   .rail-indicator[data-visible="true"] { opacity: 1; }
+  .rail:hover .rail-indicator,
+  .rail:focus-within .rail-indicator { left: -8px; }
+
   .rail-btn {
-    display: flex; align-items: center; gap: 9px;
-    width: 100%; height: 30px; padding: 0 10px;
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; height: 30px;
+    padding: 0 8px;
     background: transparent; border: 0;
     color: var(--fg-muted);
     text-align: left; font: inherit; font-size: var(--fs-sm);
@@ -159,12 +213,34 @@
     cursor: pointer;
     position: relative;
     transition: background 100ms ease, color 100ms ease;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .rail-icon {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px;
   }
   .rail-btn:hover { background: var(--surface-hover); color: var(--fg); }
   .rail-btn[data-active="true"] {
     background: var(--surface); color: var(--fg);
   }
-  .label { flex: 1; }
+  .label { flex: 1; opacity: 1; transition: opacity 140ms ease; }
+  .count-pip {
+    flex-shrink: 0;
+    min-width: 18px; height: 16px;
+    padding: 0 5px;
+    font-size: 10px; font-weight: 600;
+    background: var(--surface-hover);
+    color: var(--fg-muted);
+    border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: opacity 140ms ease;
+  }
+  .count-pip.danger {
+    background: color-mix(in oklch, var(--danger) 22%, transparent);
+    color: var(--danger);
+  }
   .rail-kbd {
     margin-left: auto;
     opacity: 0;
@@ -188,6 +264,7 @@
     cursor: pointer;
     font: inherit; font-size: var(--fs-xs);
     text-align: left;
+    overflow: hidden;
     transition: background 120ms, border-color 120ms;
   }
   .update-pill:hover {
@@ -211,20 +288,23 @@
 
   .qa {
     display: flex; flex-direction: column; gap: 4px;
-    padding: 10px 4px 4px;
+    padding: 10px 0 0;
     border-top: 1px solid var(--border);
   }
   .qa-label {
-    padding: 0 6px 4px;
+    padding: 0 6px 6px;
     color: var(--fg-faint);
     font-size: 10px;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
   }
   .qa-btn {
-    display: inline-flex; align-items: center; gap: 9px;
-    width: 100%; height: 32px; padding: 0 10px;
+    display: inline-flex; align-items: center; gap: 10px;
+    width: 100%; height: 32px;
+    padding: 0 8px;
     background: var(--surface);
     color: var(--fg);
     border: 1px solid var(--border);
@@ -233,6 +313,8 @@
     cursor: pointer;
     transition: background 100ms ease, border-color 100ms ease, color 100ms ease, transform 100ms ease;
     position: relative;
+    overflow: hidden;
+    white-space: nowrap;
   }
   .qa-btn > span:not(.qa-spin) { flex: 1; text-align: left; }
   .qa-btn:hover:not(:disabled) {
@@ -252,5 +334,21 @@
   @keyframes qa-pulse {
     0%, 100% { opacity: 0.4; transform: scale(0.85); }
     50%      { opacity: 1;   transform: scale(1.15); }
+  }
+
+  /* Collapsed state: hide labels, kbd hints, qa header, button text. */
+  @container (max-width: 130px) {
+    .label, .rail-kbd, .qa-label, .up-text { display: none; }
+    .qa-btn > span:not(.qa-spin) { display: none; }
+    .rail-btn, .qa-btn { justify-content: center; padding: 0; gap: 0; }
+    .update-pill { justify-content: center; padding: 8px; }
+    .count-pip {
+      position: absolute; top: 2px; right: 2px;
+      min-width: 14px; height: 14px;
+      padding: 0 4px;
+      font-size: 9px;
+      pointer-events: none;
+    }
+    .qa { padding-top: 8px; }
   }
 </style>

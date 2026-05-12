@@ -2,6 +2,34 @@
 
 > Live handoff = current session block. Older sessions live in `git log -- docs/HANDOFF.md`.
 
+## Session 32 — 2026-05-12 — UI polish pass 2 (sidebar collapse, panes touch, slim hero, Win11 tabs, nav animations)
+
+Frontend-only. Still on **v0.2.38-alpha-test**, no Rust changes, NOT shipped.
+
+### What landed
+- **Sidebar collapses to 48px gutter, hover-expands to 220px overlay** — `TabRail.svelte` rewrite. Pure CSS: `:hover` / `:focus-within` widens `.rail-panel` (absolute-positioned inside 48px outer), container queries hide labels/kbd-hints/Quick-Actions caption when narrow. Pane doesn't reflow (overlay, not push). Active indicator stripe flush-left in both states, count pips become corner badges when collapsed. `AppShell.body` grid `200px 1fr → 48px 1fr`, `.middle` + `.body` overflow `hidden → visible` so the rail can extend right.
+- **OpRail eliminated** — middle Upload/Download column killed entirely; panes now touch w/ 1px divider. Drag-drop between panes was already wired (`onDropPaths`/`onUploadPaths`/`onDownloadPaths` in `TwoPane`). `OpRail.svelte` deleted, selection-tracking state dropped from TwoPane, grid `1fr 72px 1fr → 1fr 1fr`. Sync/Pull/Push moved to TabRail Quick Actions as 3rd button (Reconcile/Pull all/Push all).
+- **StatusHero auto-hide** — quiet state = 28px slim row (`● idle · 7 folders watching · all quiet · last activity HH:MM`). Active state expands to colored chip-row (conflicts/queued/errors as pills, last-activity right-anchored). Big H1 + LED right-side card dropped (server name already in TopBar pill). Variant LED dot pulses for ok/warn/danger. ~120px vertical reclaimed when quiet.
+- **Breadcrumb crookedness fix** — `PathBreadcrumbs.svelte` locked to `height: 34px`, single-line. `.path-scroll` uses RTL-direction wrapper trick (parent `direction: rtl`, inner `direction: ltr`) so long paths fade off the LEFT side, current dir always visible at right. Full path in hover tooltip. `overflow: clip` (both axes, NOT mixed — `clip` + `hidden` mismatch falls back to scroll-container per spec → was the phantom scrollbar root cause). Same `clip` fix applied to `.bcrumbs` and `.tabstrip`.
+- **Win11-style tab strip** — `TwoPane.svelte`. Tabs auto-rename live to current local folder basename (navigate into `[ox]/ox_lib` → tab label becomes `ox_lib`). `+` button at end clones current location. Active tab pops out of elevated `bg-elev-1` strip w/ rounded top corners. Hover state on inactives. `in:fly(x:-10, 180ms)` add, `out:scale(0.85, 140ms)` remove. Tab height 32px, font-size `--fs-sm` centered, weight 500 (active 600). Tabstrip `overflow: clip` + locked `height: 38px` + dropped `+` button's 2px bottom margin (was causing vertical scroll-container). Keyboard: Ctrl+T new, Ctrl+W close, Ctrl+Tab cycle.
+- **StatusBar `⌘K` pip removed** — pointless decoration (TopBar pill already shows the shortcut).
+- **Pane folder-nav cross-fade** — `LocalPane.svelte` + `RemotePane.svelte` rows region wrapped in `{#key path}` w/ `in:fade={{ duration: 140 }}`. No more flash/snap when changing folders. Only the rows region keyed (header/breadcrumb stay mounted).
+- **Row hover polish** — folder rows get `transform: translateX(2px)` on hover (`prefers-reduced-motion` guarded). Selected row uses `box-shadow: inset 2px 0 var(--accent)` instead of border-left swap. Up-arrow `↑ ..` row gets matching subtle treatment.
+
+### Verify
+- svelte-check: 0 errors, 2 pre-existing `<section>` a11y warnings (still backlog).
+- File count: 3990 → 3989 (OpRail.svelte gone).
+- Zero Rust changes.
+
+### Flagged for v0.2.39+ (carried)
+- Pre-flight write probe on connect.
+- Activity-feed row grouping for bulk reconciles.
+- Remote `.rift-lock` cruft sweep on watch attach.
+- Many-tabs horizontal scroll (currently `overflow: clip` — fine for ≤6 tabs; add fade-edge + arrow buttons Win11-style when >10 expected).
+- `<section>` a11y warnings on LocalPane/RemotePane:294 — wrap event handlers properly or convert to role-button.
+
+---
+
 ## Session 31 — 2026-05-12 — sync verification, structural cleanup, UI consolidation
 
 Three workstreams, all frontend/ops — no Rust changes, no version bump (still on `v0.2.38-alpha-test`).
@@ -29,13 +57,13 @@ Three workstreams, all frontend/ops — no Rust changes, no version bump (still 
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`. Version pinned at **v0.2.38-alpha-test** (no bump this session; S31 was frontend/ops only).
+**Project:** rift-tauri IS Rift. Path: `C:/AI Workflow/projects/rift-tauri/`. Version still **v0.2.38-alpha-test** (S31 + S32 were frontend-only, no Rust changes, no bump).
 
-**Current state (post S31):** v0.2.38 source on `origin/main` w/ S31 UI overhaul committed on top. **NOT yet published to `rift-releases`** — Blazzer still dev-testing. No-release directive holds: don't trigger `/git-ship` or any Velopack publish until explicitly cleared.
+**Current state (post S32):** v0.2.38 source on `origin/main` w/ S31 + S32 UI overhauls committed. **NOT shipped** — Blazzer still dev-testing. No-release directive holds: don't trigger `/git-ship` or Velopack publish until cleared.
 
 **Next session likely entry points:**
-1. Blazzer sends after-screenshots from the UI overhaul — fine-tune anything off (logo size, collapsed-hero copy, sliding indicator timing, page-transition feel).
-2. v0.2.38 dev-test continues — does the auto-sync rip kill the `[world]` ping-pongs?
+1. Blazzer dev-tests S32 UI — feedback on hover-expand sidebar feel, drag-drop between panes, pane cross-fade timing, tab animations.
+2. v0.2.38 dev-test continues — does the auto-sync rip kill the `[world]` ping-pongs in real use?
 3. If both hold: bump to v0.2.39 + ship pipeline (`/git-ship` user-invoked only).
 4. Else: pick next backlog item.
 
