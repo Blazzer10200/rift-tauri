@@ -800,6 +800,38 @@ impl SftpClient {
             .unwrap_or_default()
     }
 
+    /// One-shot perm-heal sweep over a watched root.
+    ///
+    /// Walks `root` via SSH exec and runs `chmod 2775` on every directory the
+    /// SSH user owns. Setgid + group-write means a teammate in the shared group
+    /// can subsequently push into dirs we created. v0.2.26 chmods files (0664)
+    /// after each upload; v0.2.31 mirrors that for dirs via mkdir_p_via — but
+    /// THIS handles the backlog of dirs Rift already created at the umask
+    /// default 0755 (before the mkdir_p fix shipped).
+    ///
+    /// `-user "$LOGNAME"` only chmods what we own; other people's dirs are
+    /// left alone (we couldn't chmod them anyway w/o sudo). Best-effort: any
+    /// failure is swallowed — this is a convergence helper, not load-bearing.
+    pub async fn heal_owned_dirs(&self, root: &str) {
+        let Ok(quoted) = shell_quote(root) else { return };
+        // -prune-ignored is too much shell quoting hassle here; the heal only
+        // chmods dirs we own, and skipping node_modules/etc is a perf nicety
+        // not a correctness need. A typical FXserver resource tree is small.
+        let cmd = format!(
+            "find {quoted} -type d -user \"$(id -un)\" -exec chmod 2775 {{}} + 2>/dev/null"
+        );
+        let Ok(channel) = self.handle.channel_open_session().await else { return };
+        if channel.exec(true, cmd).await.is_err() {
+            return;
+        }
+        let mut chan = channel;
+        while let Some(msg) = chan.wait().await {
+            if let russh::ChannelMsg::ExitStatus { .. } = msg {
+                break;
+            }
+        }
+    }
+
     /// SHA1 of a remote file via `sha1sum` over a transient exec channel.
     /// Returns None on any failure (mirrors WPF's null-on-error). Stderr is
     /// debug-logged so drift-scan failures are diagnosable without a server
@@ -1141,6 +1173,20 @@ async fn mkdir_p_via(sftp: &SftpSession, path: &str) -> Result<(), String> {
         cur.push_str(p);
         // Idempotent: ignore "already exists".
         let _ = sftp.create_dir(&cur).await;
+        // Force mode 2775 (setgid + group-writable). Default umask 0022 leaves
+        // new dirs at 0755 → only the creator can write inside, so a teammate
+        // pushing into a dir the other person created hits EACCES on the
+        // tmp-file create. v0.2.26 fixed the file case (0664); this is the
+        // directory case. Setgid (the leading `2`) makes new files inside
+        // inherit the parent's group, which keeps the shared-group model
+        // working without per-file `chown`. Best-effort: if we don't own
+        // this segment the SETSTAT fails silently, no harm — the next push
+        // by someone who DOES own it heals the perms. Combined w/ runs on
+        // every upload's `ensure_remote_parent_dir`, the tree converges
+        // toward correct perms over time without any one-shot SSH cleanup.
+        let mut attrs = russh_sftp::protocol::FileAttributes::empty();
+        attrs.permissions = Some(0o2775);
+        let _ = sftp.set_metadata(&cur, attrs).await;
     }
     Ok(())
 }

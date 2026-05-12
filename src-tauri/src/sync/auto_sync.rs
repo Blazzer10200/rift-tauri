@@ -486,6 +486,18 @@ impl AutoSyncEngine {
         self.folders.insert(remote_root.clone(), watch);
         self.log(&format!("watching {} ({})", spec.resource_name, local_root.display()));
 
+        // Fire-and-forget perm-heal: chmod 2775 on every dir we own under this
+        // root. Backlog cleanup for dirs Rift created pre-v0.2.31 (umask 0022
+        // → 0755 → teammates couldn't push into them). v0.2.31's mkdir_p_via
+        // handles new dirs; this catches the rest. Async + best-effort — if
+        // it fails, nothing breaks; mkdir_p will heal piece-meal on future
+        // pushes anyway.
+        let sftp = self.sftp.clone();
+        let root_for_heal = remote_root.clone();
+        tokio::spawn(async move {
+            sftp.heal_owned_dirs(&root_for_heal).await;
+        });
+
         let count = self.folders.len();
         let (cur_state, _) = *self.state.lock().await;
         if cur_state == AutoSyncState::Watching {
