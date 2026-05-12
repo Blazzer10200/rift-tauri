@@ -744,14 +744,14 @@
   .thead, .tr {
     display: grid;
     grid-template-columns:
-      96px              /* time   */
-      54px              /* kind   */
-      120px             /* res    */
-      minmax(160px, 1fr)/* path   */
-      minmax(140px, 200px) /* action */
-      72px              /* size   */
-      64px              /* dur    */
-      90px;             /* actor  */
+      96px                 /* time   */
+      54px                 /* kind   */
+      110px                /* res    */
+      minmax(160px, 1fr)   /* path   */
+      minmax(240px, 360px) /* action */
+      72px                 /* size   */
+      64px                 /* dur    */
+      110px;               /* actor  */
     align-items: center;
     column-gap: 12px;
     padding: 0 12px;
@@ -787,16 +787,23 @@
     background: var(--accent-soft);
     box-shadow: inset 2px 0 var(--accent);
   }
+  .tr[data-selected="true"][data-variant="ok"]     { background: var(--ok-soft);     box-shadow: inset 2px 0 var(--ok); }
+  .tr[data-selected="true"][data-variant="info"]   { background: var(--info-soft);   box-shadow: inset 2px 0 var(--info); }
+  .tr[data-selected="true"][data-variant="warn"]   { background: var(--warn-soft);   box-shadow: inset 2px 0 var(--warn); }
+  .tr[data-selected="true"][data-variant="danger"] { background: var(--danger-soft); box-shadow: inset 2px 0 var(--danger); }
   .tr[data-variant="danger"] .td.action { color: var(--danger); }
   .tr[data-variant="warn"] .td.action { color: var(--warn); }
 
   /* Group header — bg tone-keyed by kind so burst patterns are scannable */
-  .tr.group { font-weight: 500; }
-  .tr.group[data-variant="ok"]     { background: color-mix(in oklch, var(--surface) 88%, var(--ok-soft)); }
-  .tr.group[data-variant="info"]   { background: color-mix(in oklch, var(--surface) 88%, var(--info-soft)); }
-  .tr.group[data-variant="warn"]   { background: color-mix(in oklch, var(--surface) 88%, var(--warn-soft)); }
-  .tr.group[data-variant="danger"] { background: color-mix(in oklch, var(--surface) 88%, var(--danger-soft)); }
-  .tr.group[data-variant="muted"]  { background: color-mix(in oklch, var(--surface) 92%, var(--bg-elev-2)); }
+  .tr.group {
+    font-weight: 500;
+    box-shadow: inset 2px 0 transparent;
+  }
+  .tr.group[data-variant="ok"]     { background: color-mix(in oklch, var(--surface) 72%, var(--ok-soft));     box-shadow: inset 2px 0 color-mix(in oklch, var(--ok) 55%, transparent); }
+  .tr.group[data-variant="info"]   { background: color-mix(in oklch, var(--surface) 72%, var(--info-soft));   box-shadow: inset 2px 0 color-mix(in oklch, var(--info) 55%, transparent); }
+  .tr.group[data-variant="warn"]   { background: color-mix(in oklch, var(--surface) 72%, var(--warn-soft));   box-shadow: inset 2px 0 color-mix(in oklch, var(--warn) 55%, transparent); }
+  .tr.group[data-variant="danger"] { background: color-mix(in oklch, var(--surface) 72%, var(--danger-soft)); box-shadow: inset 2px 0 color-mix(in oklch, var(--danger) 55%, transparent); }
+  .tr.group[data-variant="muted"]  { background: color-mix(in oklch, var(--surface) 88%, var(--bg-elev-2)); }
   .tr.group:hover { filter: brightness(1.08); }
   .tr.child { background: color-mix(in oklch, var(--surface) 95%, var(--bg-elev-2)); }
   .tr.child .td.resource { padding-left: 14px; opacity: 0.7; }
@@ -951,7 +958,7 @@
   @media (max-width: 1400px) {
     .thead, .tr {
       grid-template-columns:
-        96px 54px 120px minmax(160px, 1fr) minmax(140px, 200px) 72px 64px;
+        96px 54px 110px minmax(160px, 1fr) minmax(220px, 320px) 72px 64px;
     }
     .th.actor, .td.actor { display: none; }
   }
