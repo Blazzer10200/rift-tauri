@@ -312,15 +312,33 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
         loop {
             match rx.recv().await {
                 Ok(ev) => {
-                    let now = std::time::Instant::now();
-                    if now.duration_since(window_start).as_millis() >= 1000 {
-                        window_start = now;
-                        window_emitted = 0;
+                    // Critical lifecycle events ALWAYS pass through — the
+                    // SyncModal blocks on DriftScanResult and TabRail's busy
+                    // flag clears on it. Rate-limiting these caused the
+                    // "Pushing pending local edits…" hang after a 192-file
+                    // burst: result event got dropped by the 200/sec cap.
+                    let is_critical = matches!(
+                        ev.stage,
+                        DiagStage::DriftScanStart
+                            | DiagStage::DriftScanResult
+                            | DiagStage::RescanSignal
+                            | DiagStage::SftpConnect
+                            | DiagStage::SftpDisconnect
+                            | DiagStage::RemoteScanResult
+                            | DiagStage::BridgeAck
+                            | DiagStage::System
+                    );
+                    if !is_critical {
+                        let now = std::time::Instant::now();
+                        if now.duration_since(window_start).as_millis() >= 1000 {
+                            window_start = now;
+                            window_emitted = 0;
+                        }
+                        if window_emitted >= FRONTEND_RATE_PER_SEC {
+                            continue;
+                        }
+                        window_emitted += 1;
                     }
-                    if window_emitted >= FRONTEND_RATE_PER_SEC {
-                        continue;
-                    }
-                    window_emitted += 1;
                     let _ = app.emit("diag://event", &ev);
                 }
                 Err(RecvError::Lagged(n)) => {
