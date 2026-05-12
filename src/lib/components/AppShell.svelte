@@ -7,7 +7,6 @@
   import Titlebar from "./shell/Titlebar.svelte";
   import TabRail from "./shell/TabRail.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
-  import TopBar from "./TopBar.svelte";
   import Settings from "./settings/Settings.svelte";
   import StatusHero from "./StatusHero.svelte";
   import ActivityToast from "./ActivityToast.svelte";
@@ -266,9 +265,6 @@
   <Titlebar
     onOpenPalette={() => (paletteOpen = true)}
     onOpenSettings={() => (active = "settings")}
-  />
-
-  <TopBar
     onAddServer={() => openAddServer(null)}
     onEditCurrent={(s) => openAddServer(s)}
   />
@@ -399,7 +395,7 @@
 <style>
   .shell {
     display: grid;
-    grid-template-rows: 32px 44px 1fr 22px;
+    grid-template-rows: 44px 1fr 22px;
     height: 100vh;
     background: var(--bg);
     color: var(--fg);
