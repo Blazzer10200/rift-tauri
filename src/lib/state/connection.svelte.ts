@@ -88,6 +88,7 @@ export type SyncPill =
   | "Syncing"
   | "Conflict"
   | "Lock-blocked"
+  | "Sync error"
   | "Disconnected";
 
 export type FolderSpec = {
@@ -141,7 +142,7 @@ class ConnectionStore {
     if (this.conflictCount > 0) return "Conflict";
     if (this.locks.length > 0) return "Lock-blocked";
     if (this.status.state === "syncing") return "Syncing";
-    if (this.status.state === "error") return "Disconnected";
+    if (this.status.state === "error") return "Sync error";
     if (this.status.state === "watching" || this.status.state === "idle") {
       return "Connected";
     }

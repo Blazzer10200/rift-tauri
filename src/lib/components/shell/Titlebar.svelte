@@ -40,7 +40,7 @@
   const connCfg = $derived.by<Record<ConnState, { cls: string; label: string; title: string }>>(() => ({
     connected:  { cls: "ok",     label: "Connected",  title: connection.selected?.fingerprint ? `ed25519 · ${connection.selected.fingerprint}` : "ed25519" },
     connecting: { cls: "info",   label: "Connecting", title: "handshake in progress" },
-    error:      { cls: "danger", label: "Error",      title: connection.status?.detail ?? "auth failed" },
+    error:      { cls: "danger", label: "Sync error", title: connection.status?.detail ? `${connection.status.detail} — connection still active` : "auth failed" },
     offline:    { cls: "muted",  label: "Offline",    title: "not connected" },
   }));
 
