@@ -39,7 +39,13 @@ pub enum DriftBucket {
     Synced,
     ToPush,
     ToPull,
+    /// Delete from LOCAL — remote vanished while baseline says it existed.
     ToDelete,
+    /// v0.2.53 Mirror mode: delete from REMOTE — local vanished (user deleted
+    /// or moved a file/folder) while baseline + remote still have it. ONLY
+    /// produced when scanner is in mirror mode; Normal mode keeps treating
+    /// this as `ToPull` (the safer non-destructive choice).
+    ToDeleteRemote,
     Conflict,
 }
 
@@ -89,11 +95,21 @@ pub struct ScanResult {
 pub struct DriftScanner<'a> {
     sftp: &'a SftpClient,
     snapshot: Option<&'a SyncSnapshot>,
+    /// v0.2.53: Mirror mode toggle. When true, the `l.is_none() && r.is_some()
+    /// && snap.is_some()` case buckets as `ToDeleteRemote` (propagate the
+    /// local delete to remote) instead of `ToPull` (restore from remote).
+    /// Default is false — destructive direction is opt-in only.
+    mirror: bool,
 }
 
 impl<'a> DriftScanner<'a> {
     pub fn new(sftp: &'a SftpClient, snapshot: Option<&'a SyncSnapshot>) -> Self {
-        Self { sftp, snapshot }
+        Self { sftp, snapshot, mirror: false }
+    }
+
+    pub fn with_mirror(mut self, mirror: bool) -> Self {
+        self.mirror = mirror;
+        self
     }
 
     pub async fn scan(&self, folders: &[FolderTarget]) -> ScanResult {
@@ -336,7 +352,15 @@ impl<'a> DriftScanner<'a> {
             let has_snap = snap.is_some();
 
             let (bucket, reason): (DriftBucket, String) = if l.is_none() && r.is_some() {
-                (DriftBucket::ToPull, "remote-only — pull".into())
+                // v0.2.53 Mirror: if baseline says we previously had this
+                // file locally and it's now gone, the user deleted it. In
+                // Mirror mode propagate that delete to remote. In Normal
+                // mode treat as remote-add and pull.
+                if self.mirror && snap.is_some() {
+                    (DriftBucket::ToDeleteRemote, "local deleted — removing remote (Mirror)".into())
+                } else {
+                    (DriftBucket::ToPull, "remote-only — pull".into())
+                }
             } else if l.is_some() && r.is_none() {
                 // Tombstone semantics: baseline IS the proof we'd previously
                 // agreed this file existed remotely. Now remote doesn't have

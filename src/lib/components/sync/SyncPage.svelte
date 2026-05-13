@@ -3,11 +3,17 @@
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import { invoke } from "@tauri-apps/api/core";
   import {
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
     ChevronRight, CheckCircle2, CircleAlert, Inbox, History,
-    Wrench,
+    Wrench, Trash2,
   } from "lucide-svelte";
+
+  // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
+  // the Confirm button. Prevents accidental destructive remote deletes.
+  let mirrorConfirmText = $state("");
+  const MIRROR_CONFIRM_PHRASE = "MIRROR";
   import { connection } from "../../state/connection.svelte";
   import { syncPage, type ResourceGroup, type DriftEntry } from "../../state/sync-page.svelte";
 
@@ -31,6 +37,12 @@
 
   onMount(async () => {
     void syncPage.refresh();
+    // v0.2.53: sync the Mirror toggle w/ backend state (it's session-scoped
+    // on the engine; if a prior session left it on, surface that).
+    try {
+      const enabled = await invoke<boolean>("sync_get_mirror_mode");
+      syncPage.mirrorEnabled = enabled;
+    } catch { /* not connected — keep default false */ }
     try {
       unlistenDiag = await listen<{ stage: string }>("diag://event", (e) => {
         if (e.payload.stage === "drift_scan_result") {
@@ -160,6 +172,26 @@
         <Wrench size={13}/>
         <span>Sweep locks</span>
       </button>
+      <label class="mirror-toggle" title="Mirror mode: local-missing files surface as 'delete on remote' bucket instead of pull-restore. Destructive — opt-in only.">
+        <input
+          type="checkbox"
+          checked={syncPage.mirrorEnabled}
+          onchange={(e) => syncPage.toggleMirror((e.currentTarget as HTMLInputElement).checked)}
+          disabled={!canSync}
+        />
+        <span>Mirror</span>
+      </label>
+      {#if syncPage.mirrorEnabled && totals.delRemote > 0}
+        <button
+          class="btn danger"
+          type="button"
+          onclick={() => syncPage.openMirrorConfirm()}
+          disabled={!canSync}
+          title="Delete {totals.delRemote} file(s)/folder(s) from remote — requires typed confirm"
+        >
+          <Trash2 size={13}/> Apply Mirror ({totals.delRemote})
+        </button>
+      {/if}
       <button
         class="btn info"
         type="button"
@@ -396,6 +428,61 @@
       </span>
     </div>
   </footer>
+
+  {#if syncPage.mirrorConfirm}
+    <div
+      class="modal-backdrop"
+      role="presentation"
+      onclick={() => { syncPage.cancelMirrorConfirm(); mirrorConfirmText = ""; }}
+      onkeydown={(e) => { if (e.key === "Escape") { syncPage.cancelMirrorConfirm(); mirrorConfirmText = ""; } }}
+    >
+      <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="mirror-confirm-title"
+        tabindex="-1"
+        onclick={(e) => e.stopPropagation()}
+        onkeydown={(e) => e.stopPropagation()}
+      >
+        <header class="modal-head">
+          <AlertTriangle size={16}/>
+          <h2 id="mirror-confirm-title">Mirror — Delete on remote</h2>
+        </header>
+        <div class="modal-body">
+          <p>
+            This will delete <strong>{syncPage.mirrorConfirm.count}</strong> file{syncPage.mirrorConfirm.count === 1 ? "" : "s"}/folder{syncPage.mirrorConfirm.count === 1 ? "" : "s"} from <strong>remote</strong>. Local is already missing them.
+          </p>
+          <p class="caution">
+            This action is <strong>irreversible</strong>. Make sure all teammates are on a synced baseline before proceeding — anyone running an older Rift install will see these files re-appear after their next push.
+          </p>
+          <label class="confirm-input">
+            Type <code>{MIRROR_CONFIRM_PHRASE}</code> to confirm:
+            <input
+              type="text"
+              bind:value={mirrorConfirmText}
+              placeholder={MIRROR_CONFIRM_PHRASE}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+        </div>
+        <footer class="modal-foot">
+          <button
+            class="btn ghost"
+            type="button"
+            onclick={() => { syncPage.cancelMirrorConfirm(); mirrorConfirmText = ""; }}
+          >Cancel</button>
+          <button
+            class="btn danger"
+            type="button"
+            disabled={mirrorConfirmText !== MIRROR_CONFIRM_PHRASE || syncPage.busy}
+            onclick={() => { void syncPage.confirmMirrorApply(); mirrorConfirmText = ""; }}
+          >Confirm — Delete {syncPage.mirrorConfirm.count} on remote</button>
+        </footer>
+      </div>
+    </div>
+  {/if}
 </section>
 
 <style>
@@ -407,6 +494,49 @@
     min-width: 0;
     background: var(--bg);
     color: var(--fg);
+  }
+
+  /* v0.2.53 Mirror toggle + confirm modal */
+  .mirror-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
+    font-size: var(--fs-xs); color: var(--muted); cursor: pointer;
+    user-select: none;
+  }
+  .mirror-toggle input { accent-color: var(--danger); cursor: pointer; }
+  .mirror-toggle:has(input:checked) { color: var(--danger); border-color: var(--danger); }
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000; padding: 20px;
+  }
+  .modal {
+    background: var(--bg); color: var(--fg); border: 1px solid var(--danger);
+    border-radius: 10px; max-width: 540px; width: 100%;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+  }
+  .modal-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 14px 18px; border-bottom: 1px solid var(--border);
+    color: var(--danger);
+  }
+  .modal-head h2 { margin: 0; font-size: var(--fs-md); }
+  .modal-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+  .modal-body p { margin: 0; line-height: 1.5; }
+  .modal-body .caution { color: var(--warn); font-size: var(--fs-sm); }
+  .modal-body code {
+    background: var(--bg-elevated); padding: 1px 6px; border-radius: 4px;
+    border: 1px solid var(--border); font-family: var(--font-mono); font-size: 0.95em;
+  }
+  .confirm-input { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-sm); }
+  .confirm-input input {
+    padding: 6px 10px; background: var(--bg-elevated); color: var(--fg);
+    border: 1px solid var(--border); border-radius: 6px; font-family: var(--font-mono);
+  }
+  .confirm-input input:focus { outline: none; border-color: var(--danger); }
+  .modal-foot {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 12px 18px; border-top: 1px solid var(--border);
   }
 
   /* ── Hero ───────────────────────────────────────────── */

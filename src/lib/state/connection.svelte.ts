@@ -267,6 +267,15 @@ class ConnectionStore {
           this.status = e.payload;
         }),
       );
+      // v0.2.53 auto-reconnect: watch for ConnectionWedged diag events and
+      // trigger a soft restart when 3+ fire within 60s.
+      this.unlisteners.push(
+        await listen<{ stage: string }>("diag://event", (e) => {
+          if (e.payload.stage === "connection_wedged") {
+            this.handleConnectionWedged();
+          }
+        }),
+      );
       this.unlisteners.push(
         await listen<LockEntry[]>("autosync://locks", (e) => {
           this.locks = e.payload ?? [];
@@ -392,6 +401,49 @@ class ConnectionStore {
     } catch (e) {
       // Audit H2: surface IPC failures so a stale UI isn't masked.
       console.error("get_autosync_status failed", e);
+    }
+  }
+
+  // v0.2.53 auto-reconnect: rolling buffer of ConnectionWedged event
+  // timestamps. When 3+ fire within AUTO_RECONNECT_WINDOW_MS, trigger
+  // a soft reconnect (stop_autosync → wait → start_autosync). Single
+  // wedges don't reconnect — those usually self-resolve on the next op.
+  // Lives entirely client-side so we don't have to refactor the engine's
+  // owned SftpSession (which isn't behind a RwLock).
+  private wedgeTimestamps: number[] = [];
+  private reconnecting = false;
+  private static readonly AUTO_RECONNECT_THRESHOLD = 3;
+  private static readonly AUTO_RECONNECT_WINDOW_MS = 60_000;
+
+  private handleConnectionWedged() {
+    const now = Date.now();
+    this.wedgeTimestamps = this.wedgeTimestamps.filter(
+      (t) => now - t < ConnectionStore.AUTO_RECONNECT_WINDOW_MS,
+    );
+    this.wedgeTimestamps.push(now);
+    if (
+      this.wedgeTimestamps.length >= ConnectionStore.AUTO_RECONNECT_THRESHOLD &&
+      !this.reconnecting &&
+      this.selectedKey
+    ) {
+      this.wedgeTimestamps = [];
+      void this.autoReconnect();
+    }
+  }
+
+  private async autoReconnect() {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
+    console.warn("[rift] auto-reconnect: 3+ ConnectionWedged events in 60s — soft restart");
+    try {
+      await invoke("stop_autosync");
+      await new Promise((r) => setTimeout(r, 1000));
+      await this.startAutosyncForSelected();
+      console.info("[rift] auto-reconnect: complete");
+    } catch (e) {
+      console.error("[rift] auto-reconnect failed", e);
+    } finally {
+      this.reconnecting = false;
     }
   }
 

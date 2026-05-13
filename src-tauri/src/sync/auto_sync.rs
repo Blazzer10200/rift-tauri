@@ -253,6 +253,13 @@ pub struct AutoSyncEngine {
     /// or (b) 3+ consecutive batches end with `fail > 0`. Single fails go to
     /// Watching state with a "N retry pending" detail.
     consecutive_failed_batches: AtomicU64,
+    /// v0.2.53: Mirror mode toggle. When true, the drift scanner buckets
+    /// `local-missing + remote-has + baseline-has` as `ToDeleteRemote`
+    /// (propagate local delete to remote) instead of `ToPull` (restore from
+    /// remote). Session-scoped — does NOT persist across engine restarts.
+    /// User toggles via `sync_set_mirror_mode` Tauri cmd; the typed-confirm
+    /// + dry-run preview flow lives in the frontend.
+    mirror_mode: AtomicBool,
     ignored_total: AtomicU64,
     ignored_by_rule: DashMap<String, u64>,
 
@@ -317,6 +324,7 @@ impl AutoSyncEngine {
             last_aborted_shrunk: std::sync::Mutex::new(Vec::new()),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
             consecutive_failed_batches: AtomicU64::new(0),
+            mirror_mode: AtomicBool::new(false),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
             recently_written: DashMap::new(),
@@ -471,6 +479,15 @@ impl AutoSyncEngine {
             g.retain(|t| !t.is_finished());
             g.push(h);
         }
+    }
+
+    /// v0.2.53 Mirror toggle. Session-scoped; reset on engine restart.
+    pub fn set_mirror_mode(&self, enabled: bool) {
+        self.mirror_mode.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn mirror_mode_enabled(&self) -> bool {
+        self.mirror_mode.load(Ordering::Relaxed)
     }
 
     /// Snapshot of currently-watched remote roots — for `LockPresence` scoped poll.
@@ -834,7 +851,8 @@ impl AutoSyncEngine {
                         .collect();
                     let snap = engine.snapshot();
                     let sftp = engine.sftp();
-                    let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap));
+                    let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap))
+                        .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
                     let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
                     eprintln!("[rift] force_push_now: inline scan returned {} entries (cancelled={})",
                         result.entries.len(), result.cancelled);
@@ -1226,7 +1244,8 @@ impl AutoSyncEngine {
                 DiagLevel::Info,
                 format!("reconcile across {} folder(s)", folders.len()),
             );
-            let scanner = crate::sync::DriftScanner::new(&sftp, Some(&snapshot));
+            let scanner = crate::sync::DriftScanner::new(&sftp, Some(&snapshot))
+                .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
             let targets: Vec<crate::sync::FolderTarget> = folders
                 .iter()
                 .map(|fw| crate::sync::FolderTarget {
@@ -1266,12 +1285,14 @@ impl AutoSyncEngine {
             let mut to_push = 0u32;
             let mut to_pull = 0u32;
             let mut to_delete = 0u32;
+            let mut to_delete_remote = 0u32;
             let mut conflicts = 0u32;
             for e in &result.entries {
                 match e.bucket {
                     crate::sync::DriftBucket::ToPush => to_push += 1,
                     crate::sync::DriftBucket::ToPull => to_pull += 1,
                     crate::sync::DriftBucket::ToDelete => to_delete += 1,
+                    crate::sync::DriftBucket::ToDeleteRemote => to_delete_remote += 1,
                     crate::sync::DriftBucket::Conflict => conflicts += 1,
                     crate::sync::DriftBucket::Synced => {}
                 }
@@ -1280,16 +1301,17 @@ impl AutoSyncEngine {
             // result like "430 to_delete" gives no hint which resources are
             // affected. Helps root-cause partial-listing issues (e.g. deep
             // ox_lib paths or bracket-encoded dirs dropping files silently).
-            let mut by_resource: std::collections::HashMap<String, (u32, u32, u32, u32)> =
+            let mut by_resource: std::collections::HashMap<String, (u32, u32, u32, u32, u32)> =
                 std::collections::HashMap::new();
             for e in &result.entries {
-                let row = by_resource.entry(e.resource_name.clone()).or_insert((0, 0, 0, 0));
+                let row = by_resource.entry(e.resource_name.clone()).or_insert((0, 0, 0, 0, 0));
                 match e.bucket {
-                    crate::sync::DriftBucket::ToPush   => row.0 += 1,
-                    crate::sync::DriftBucket::ToPull   => row.1 += 1,
-                    crate::sync::DriftBucket::ToDelete => row.2 += 1,
-                    crate::sync::DriftBucket::Conflict => row.3 += 1,
-                    crate::sync::DriftBucket::Synced   => {}
+                    crate::sync::DriftBucket::ToPush          => row.0 += 1,
+                    crate::sync::DriftBucket::ToPull          => row.1 += 1,
+                    crate::sync::DriftBucket::ToDelete        => row.2 += 1,
+                    crate::sync::DriftBucket::Conflict        => row.3 += 1,
+                    crate::sync::DriftBucket::ToDeleteRemote  => row.4 += 1,
+                    crate::sync::DriftBucket::Synced          => {}
                 }
             }
             let breakdown: serde_json::Value = serde_json::Value::Object(
@@ -1297,10 +1319,11 @@ impl AutoSyncEngine {
                     (k.clone(), serde_json::json!({
                         "to_push": v.0, "to_pull": v.1,
                         "to_delete": v.2, "conflicts": v.3,
+                        "to_delete_remote": v.4,
                     }))
                 }).collect()
             );
-            eprintln!("[rift] reconcile complete: to_push={to_push} to_pull={to_pull} to_delete={to_delete} conflicts={conflicts} by_resource={breakdown}");
+            eprintln!("[rift] reconcile complete: to_push={to_push} to_pull={to_pull} to_delete={to_delete} to_delete_remote={to_delete_remote} conflicts={conflicts} by_resource={breakdown}");
 
             // Reconcile is read-only: it refreshes the cached scan result.
             // User must click Push Now / Pull Now to act on the findings.
@@ -1315,6 +1338,7 @@ impl AutoSyncEngine {
                     "to_push": to_push,
                     "to_pull": to_pull,
                     "to_delete": to_delete,
+                    "to_delete_remote": to_delete_remote,
                     "conflicts": conflicts,
                     "enqueued_for_push": 0,
                     "missing_remote_folders": result.remote_folders_missing.len(),
@@ -1495,11 +1519,18 @@ impl AutoSyncEngine {
                 std::collections::HashMap::new();
             let mut pulls: Vec<crate::sync::DriftEntry> = Vec::new();
             let mut pushes: Vec<crate::sync::DriftEntry> = Vec::new();
+            // v0.2.53 Mirror: ToDeleteRemote entries delete the remote file
+            // via sftp.delete (which routes dirs through delete_recursive_via).
+            // Reached this dispatch via the UI's typed "MIRROR" confirm gate,
+            // so we trust the selection and skip the local mass-delete guard
+            // (that guard exists for ToDelete which deletes LOCAL files).
+            let mut remote_deletes: Vec<crate::sync::DriftEntry> = Vec::new();
             for e in selected {
                 match e.bucket {
                     crate::sync::DriftBucket::ToDelete => {
                         delete_buckets.entry(e.resource_name.clone()).or_default().push(e);
                     }
+                    crate::sync::DriftBucket::ToDeleteRemote => remote_deletes.push(e),
                     crate::sync::DriftBucket::ToPull => pulls.push(e),
                     crate::sync::DriftBucket::ToPush => pushes.push(e),
                     _ => {}
@@ -1558,6 +1589,53 @@ impl AutoSyncEngine {
                 handles.push(tokio::spawn(async move {
                     let _p = s.acquire_owned().await.ok();
                     crate::sync::drift_watcher::delete_local_one(&e, entry).await;
+                }));
+            }
+            // v0.2.53 Mirror: dispatch remote deletes via the engine's SFTP
+            // client. SftpClient::delete routes by remote stat — dirs hit
+            // delete_recursive_via, files hit remove_file. Each success
+            // forgets the snapshot row so the next scan doesn't re-surface
+            // the bucket.
+            for entry in remote_deletes {
+                let e = engine.clone();
+                let s = sem.clone();
+                handles.push(tokio::spawn(async move {
+                    let _p = s.acquire_owned().await.ok();
+                    let started = std::time::Instant::now();
+                    let r = e.sftp.delete(&entry.remote_path).await;
+                    let elapsed_ms = started.elapsed().as_millis() as u64;
+                    if r.success {
+                        e.snapshot.forget(&entry.remote_path);
+                        e.log_activity_rich(
+                            &entry.resource_name,
+                            file_name(std::path::Path::new(&entry.local_path)),
+                            "remote deleted (Mirror)",
+                            Some(entry.rel_path.clone()),
+                            Some(entry.local_path.clone()),
+                            None,
+                            Some(elapsed_ms),
+                        );
+                        diagnostics::emit_for(
+                            DiagStage::UploadDone,
+                            DiagLevel::Info,
+                            Some(&entry.resource_name),
+                            Some(&entry.remote_path),
+                            "mirror delete ok",
+                        );
+                    } else {
+                        e.log_activity(
+                            &entry.resource_name,
+                            file_name(std::path::Path::new(&entry.local_path)),
+                            &format!("mirror delete failed: {}", r.error),
+                        );
+                        diagnostics::emit_for(
+                            DiagStage::UploadFail,
+                            DiagLevel::Warn,
+                            Some(&entry.resource_name),
+                            Some(&entry.remote_path),
+                            &format!("mirror delete failed: {}", r.error),
+                        );
+                    }
                 }));
             }
             let mut enqueued_push = false;
@@ -1633,7 +1711,8 @@ impl AutoSyncEngine {
                     .collect();
                 let snap = engine.snapshot();
                 let sftp = engine.sftp();
-                let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap));
+                let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap))
+                    .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
                 let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
                 if !result.cancelled {
                     engine.cache_scan_entries(result.entries.clone());
@@ -1667,6 +1746,7 @@ impl AutoSyncEngine {
             let mut pending: Vec<(crate::sync::DriftBucket, crate::sync::DriftEntry)> = Vec::new();
             let mut delete_buckets: std::collections::HashMap<String, Vec<crate::sync::DriftEntry>> =
                 std::collections::HashMap::new();
+            let mut to_delete_remote = 0u32;
             for e in entries {
                 match e.bucket {
                     crate::sync::DriftBucket::ToPush => to_push += 1,
@@ -1678,6 +1758,11 @@ impl AutoSyncEngine {
                         to_delete += 1;
                         delete_buckets.entry(e.resource_name.clone()).or_default().push(e);
                     }
+                    // v0.2.53 Mirror: ToDeleteRemote is dispatched ONLY via
+                    // explicit user selection from the Sync page (the typed-
+                    // confirm gate). force_pull_now is the Pull-all path and
+                    // never fires remote deletes — count for visibility only.
+                    crate::sync::DriftBucket::ToDeleteRemote => to_delete_remote += 1,
                     crate::sync::DriftBucket::Conflict => {
                         conflicts += 1;
                         crate::sync::drift_watcher::register_conflict(&engine, e);
@@ -1814,6 +1899,7 @@ impl AutoSyncEngine {
                     "to_push": to_push,
                     "to_pull": to_pull,
                     "to_delete": to_delete,
+                    "to_delete_remote": to_delete_remote,
                     "conflicts": conflicts,
                     "enqueued_for_push": 0,
                     "pull_dispatched": pull_dispatched,
