@@ -5,7 +5,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 
-export type DriftBucket = "synced" | "to_push" | "to_pull" | "to_delete" | "conflict";
+export type DriftBucket = "synced" | "to_push" | "to_pull" | "to_delete" | "to_delete_remote" | "conflict";
 
 export type DriftEntry = {
   resource_name: string;
@@ -35,6 +35,7 @@ export type ResourceGroup = {
   to_push: DriftEntry[];
   to_pull: DriftEntry[];
   to_delete: DriftEntry[];
+  to_delete_remote: DriftEntry[];
   conflict: DriftEntry[];
   total_pending: number;
 };
@@ -52,6 +53,12 @@ class SyncPageStore {
   lastRebaselineResult = $state<{ resource: string; oldCount: number; newCount: number; localOnly: number } | null>(null);
   expanded = $state<Set<string>>(new Set());
   selected = $state<Set<string>>(new Set());
+  // v0.2.53 Mirror mode: opt-in destructive remote-delete. Default false.
+  // Session-scoped on the backend; synced via sync_set_mirror_mode.
+  mirrorEnabled = $state(false);
+  // Tracks whether a typed-confirm gate is open. Holds the bucket count
+  // being mirrored so the modal can show "delete N remote files".
+  mirrorConfirm = $state<{ count: number } | null>(null);
 
   get groups(): ResourceGroup[] {
     const map = new Map<string, ResourceGroup>();
@@ -63,6 +70,7 @@ class SyncPageStore {
           to_push: [],
           to_pull: [],
           to_delete: [],
+          to_delete_remote: [],
           conflict: [],
           total_pending: 0,
         };
@@ -71,10 +79,11 @@ class SyncPageStore {
       if (e.bucket === "to_push") g.to_push.push(e);
       else if (e.bucket === "to_pull") g.to_pull.push(e);
       else if (e.bucket === "to_delete") g.to_delete.push(e);
+      else if (e.bucket === "to_delete_remote") g.to_delete_remote.push(e);
       else if (e.bucket === "conflict") g.conflict.push(e);
     }
     for (const g of map.values()) {
-      g.total_pending = g.to_push.length + g.to_pull.length + g.to_delete.length + g.conflict.length;
+      g.total_pending = g.to_push.length + g.to_pull.length + g.to_delete.length + g.to_delete_remote.length + g.conflict.length;
     }
     return Array.from(map.values())
       .filter((g) => g.total_pending > 0)
@@ -82,14 +91,15 @@ class SyncPageStore {
   }
 
   get totals() {
-    let push = 0, pull = 0, del = 0, conf = 0;
+    let push = 0, pull = 0, del = 0, delRemote = 0, conf = 0;
     for (const e of this.entries) {
       if (e.bucket === "to_push") push++;
       else if (e.bucket === "to_pull") pull++;
       else if (e.bucket === "to_delete") del++;
+      else if (e.bucket === "to_delete_remote") delRemote++;
       else if (e.bucket === "conflict") conf++;
     }
-    return { push, pull, del, conf, total: push + pull + del + conf };
+    return { push, pull, del, delRemote, conf, total: push + pull + del + delRemote + conf };
   }
 
   async refresh() {
@@ -270,6 +280,66 @@ class SyncPageStore {
     try {
       const fired = await invoke<boolean>("sync_push_pending");
       if (!fired) this.errorMsg = "Not connected — start watcher first.";
+      setTimeout(() => { void this.refresh(); }, 1200);
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * v0.2.53 Mirror mode: toggle the backend's mirror flag. Next Rescan
+   * will bucket `local-missing + remote-has + baseline-has` as
+   * ToDeleteRemote (destructive) instead of ToPull (restore-from-remote).
+   * Auto-refreshes after the toggle so the bucket counts redraw against
+   * the cached scan. Session-scoped backend-side — survives nothing.
+   */
+  async toggleMirror(next: boolean) {
+    this.busy = true;
+    this.errorMsg = null;
+    try {
+      const enabled = await invoke<boolean>("sync_set_mirror_mode", { enabled: next });
+      this.mirrorEnabled = enabled;
+      // Re-scan to rebucket against the new mode.
+      const fired = await invoke<boolean>("sync_reconcile");
+      if (!fired) this.errorMsg = "Not connected — start watcher first.";
+      setTimeout(() => { void this.refresh(); }, 800);
+    } catch (e) {
+      this.errorMsg = String(e);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  /**
+   * v0.2.53 Mirror apply: collect all `to_delete_remote` entries and stage
+   * them for the typed-confirm gate. The gate is rendered in SyncPage.svelte
+   * — this just opens it. Apply happens via `confirmMirrorApply` after the
+   * user types "MIRROR" + clicks Confirm.
+   */
+  openMirrorConfirm() {
+    const count = this.entries.filter((e) => e.bucket === "to_delete_remote").length;
+    if (count === 0) {
+      this.errorMsg = "No remote-delete entries to mirror. Enable Mirror + Rescan first.";
+      return;
+    }
+    this.mirrorConfirm = { count };
+  }
+
+  cancelMirrorConfirm() {
+    this.mirrorConfirm = null;
+  }
+
+  async confirmMirrorApply() {
+    this.busy = true;
+    this.errorMsg = null;
+    const paths = this.entries
+      .filter((e) => e.bucket === "to_delete_remote")
+      .map((e) => e.local_path);
+    try {
+      await invoke<boolean>("sync_apply_selected", { localPaths: paths });
+      this.mirrorConfirm = null;
       setTimeout(() => { void this.refresh(); }, 1200);
     } catch (e) {
       this.errorMsg = String(e);

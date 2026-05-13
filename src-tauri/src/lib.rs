@@ -250,6 +250,33 @@ async fn sync_apply_selected(
     Ok(true)
 }
 
+/// v0.2.53: Mirror-mode toggle. When enabled, the next drift scan buckets
+/// `local-missing + remote-has + baseline-has` as `ToDeleteRemote` instead
+/// of `ToPull` — propagates local deletes to remote. Session-scoped (does
+/// NOT persist across engine restart). The frontend handles the typed-
+/// confirm + dry-run preview UX before any user selection reaches
+/// `sync_apply_selected` for actual dispatch.
+#[tauri::command]
+async fn sync_set_mirror_mode(
+    state: tauri::State<'_, AutoSyncState>,
+    enabled: bool,
+) -> Result<bool, String> {
+    let engine = { state.0.lock().await.clone() };
+    let Some(engine) = engine else {
+        return Err("not connected".into());
+    };
+    engine.set_mirror_mode(enabled);
+    Ok(engine.mirror_mode_enabled())
+}
+
+#[tauri::command]
+async fn sync_get_mirror_mode(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<bool, String> {
+    let engine = { state.0.lock().await.clone() };
+    Ok(engine.map(|e| e.mirror_mode_enabled()).unwrap_or(false))
+}
+
 /// v0.2.50: user-invoked recovery — reclaim our own stale `.rift-lock`
 /// files across every watched remote root. Returns the count swept. Safe
 /// to call anytime; gates on `since > STALE_SEC` + `body.user == me`.
@@ -1705,6 +1732,8 @@ pub fn run() {
             sync_rebaseline_folder,
             sync_apply_selected,
             sync_sweep_stale_locks,
+            sync_set_mirror_mode,
+            sync_get_mirror_mode,
             diag_ignored_breakdown,
             terminal::term_list_shells,
             terminal::term_spawn,
