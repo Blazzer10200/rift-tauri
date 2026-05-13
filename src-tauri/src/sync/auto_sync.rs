@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, Utc};
 use dashmap::{mapref::entry::Entry, DashMap};
+use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -245,6 +246,13 @@ pub struct AutoSyncEngine {
     last_aborted_shrunk: std::sync::Mutex<Vec<crate::sync::AbortedShrunkFolder>>,
 
     state: Mutex<(AutoSyncState, String)>,
+    /// v0.2.52: track consecutive flush_batch failures so we don't flip the
+    /// engine to Error on a one-off single-file fail (an editor-tmp race, an
+    /// adjacent vanished path from a folder rename). Only escalate to Error
+    /// when (a) `ConnectionWedged` fires (caught by sftp/transfer.rs::with_t)
+    /// or (b) 3+ consecutive batches end with `fail > 0`. Single fails go to
+    /// Watching state with a "N retry pending" detail.
+    consecutive_failed_batches: AtomicU64,
     ignored_total: AtomicU64,
     ignored_by_rule: DashMap<String, u64>,
 
@@ -308,6 +316,7 @@ impl AutoSyncEngine {
             last_scan_entries: std::sync::Mutex::new(Vec::new()),
             last_aborted_shrunk: std::sync::Mutex::new(Vec::new()),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
+            consecutive_failed_batches: AtomicU64::new(0),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
             recently_written: DashMap::new(),
@@ -360,6 +369,66 @@ impl AutoSyncEngine {
             }
         });
         *engine.event_task.lock().await = Some(event_task);
+
+        // v0.2.52: watched-root-vanished poll. notify-rs issue #403 (open in
+        // v8.2.0) — when the user deletes the dir Rift is directly watching,
+        // the Windows backend silently unregisters the watch w/ no `Remove`
+        // event. Pre-v0.2.52 this left the engine alive but oblivious, every
+        // subsequent edit landing nowhere. Poll local_root.exists() every 5 s
+        // across all watched folders; on miss, log + emit a high-vis diag so
+        // the user sees it in the panel + kick a drift reconcile (which will
+        // surface the folder-level delete via baseline diff once Mirror mode
+        // lands in v0.2.53; for now it just confirms the gap visibly).
+        let root_engine = engine.clone();
+        let mut root_stop = engine.stop_tx.subscribe();
+        let root_task = tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_secs(5));
+            // Skip the immediate-fire tick so we don't false-alarm on startup
+            // before folders register.
+            tick.tick().await;
+            let mut seen_missing: std::collections::HashSet<std::path::PathBuf> =
+                std::collections::HashSet::new();
+            loop {
+                tokio::select! {
+                    _ = root_stop.changed() => { if *root_stop.borrow() { break; } }
+                    _ = tick.tick() => {
+                        if root_engine.disposed.load(Ordering::SeqCst) { break; }
+                        for kv in root_engine.folders.iter() {
+                            let local = kv.value().local_root.clone();
+                            let resource = kv.value().resource_name.clone();
+                            if !local.exists() {
+                                // De-dup: only fire once per missing root until
+                                // it comes back. Avoids spamming the panel
+                                // every 5 s while the user investigates.
+                                if seen_missing.insert(local.clone()) {
+                                    let msg = format!(
+                                        "watched local root vanished: {} ({})",
+                                        local.display(),
+                                        resource,
+                                    );
+                                    log::error!("{msg}");
+                                    diagnostics::emit_for(
+                                        DiagStage::Log,
+                                        DiagLevel::Error,
+                                        Some(&resource),
+                                        Some(&local.to_string_lossy()),
+                                        &msg,
+                                    );
+                                    root_engine.kick_drift_reconcile();
+                                }
+                            } else if seen_missing.remove(&local) {
+                                log::info!(
+                                    "watched local root reappeared: {} ({})",
+                                    local.display(),
+                                    resource,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        engine.track_background(root_task);
 
         engine.set_state(AutoSyncState::Watching, "0 folder(s)".into()).await;
 
@@ -1060,10 +1129,23 @@ impl AutoSyncEngine {
             self.kick_drift_reconcile();
             return;
         }
+        // v0.2.52: explicit rename-event handling. notify v8 on Windows emits
+        // folder rename as two separate events: `Modify(Name(From))` for the
+        // old path + `Modify(Name(To))` for the new path (NOT a single Both —
+        // confirmed never emitted by the Windows backend per notify issue
+        // #376). Recycle-Bin delete is technically a MOVE to $RECYCLE.BIN
+        // and surfaces as `Modify(Name(From))` w/ no matching `To` since the
+        // destination is outside the watched scope. Pre-v0.2.52 these were
+        // bucketed as `Modified`, which then failed `wait_for_readable` on
+        // the now-vanished path, flipping engine to Error w/o propagating
+        // the delete. Explicit From→Deleted + To→Created routes around it.
         let kind = match ev.kind {
             EventKind::Create(_) => ChangeKind::Created,
-            EventKind::Modify(_) => ChangeKind::Modified,
             EventKind::Remove(_) => ChangeKind::Deleted,
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)) => ChangeKind::Deleted,
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)) => ChangeKind::Created,
+            EventKind::Modify(ModifyKind::Name(_)) => ChangeKind::Modified, // Any/Both/Other safety
+            EventKind::Modify(_) => ChangeKind::Modified,
             _ => return, // Access, Other — skip
         };
         for path in ev.paths {
@@ -2061,9 +2143,31 @@ impl AutoSyncEngine {
         }
 
         if ok > 0 || fail > 0 {
-            let next = if fail > 0 { AutoSyncState::Error } else { AutoSyncState::Idle };
-            let detail = if fail > 0 {
-                format!("{}: {} ok, {} failed", fw.resource_name, ok, fail)
+            // v0.2.52: smarter escalation. Don't flip to Error on a single
+            // fail (editor-tmp race, vanished-rename source path, etc.).
+            // Track consecutive-fail batches; only escalate after 3+ in a
+            // row with no clean batch between. Any clean batch resets the
+            // counter. ConnectionWedged is handled independently by the
+            // sftp/transfer.rs with_t() helper which emits its own diag.
+            const FAIL_STREAK_THRESHOLD: u64 = 3;
+            let streak = if fail > 0 {
+                self.consecutive_failed_batches.fetch_add(1, Ordering::Relaxed) + 1
+            } else {
+                self.consecutive_failed_batches.store(0, Ordering::Relaxed);
+                0
+            };
+            let next = if streak >= FAIL_STREAK_THRESHOLD {
+                AutoSyncState::Error
+            } else if fail > 0 {
+                // Single/double fail — surface in detail but stay Watching.
+                AutoSyncState::Watching
+            } else {
+                AutoSyncState::Idle
+            };
+            let detail = if streak >= FAIL_STREAK_THRESHOLD {
+                format!("{}: {} ok, {} failed ({}× consecutive)", fw.resource_name, ok, fail, streak)
+            } else if fail > 0 {
+                format!("{}: {} ok, {} retry pending", fw.resource_name, ok, fail)
             } else {
                 format!("{}: {} synced", fw.resource_name, ok)
             };
