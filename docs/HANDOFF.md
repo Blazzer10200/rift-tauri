@@ -2,55 +2,39 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 54 — 2026-05-12 — v0.2.50 SHIPPED (connection-reliability foundation)
+## Session 56 — 2026-05-13 — Repo cleanup pass (branch `cleanup/full-audit`)
 
-**Status: SHIPPED.** Source `5cb20e5` on main, pushed. Velopack release live at https://github.com/Blazzer10200/rift-releases/releases/tag/v0.2.50-alpha (3-file delta from v0.2.49). v0.2.49 sanity check failed during validation — orphan locks + wedged uploads — pivoted to fix foundation before Mirror mode.
+**Status: BRANCH OPEN, NOT MERGED.** All work on `cleanup/full-audit`. Verify: `cargo check` clean, **46/46 backend tests pass**, **svelte-check 0/0 across 3996 files**, vitest 6/6 pass.
 
-### Diagnosed + fixed
-1. **Editor-tmp ignore.** Patterns like `client.lua.tmp.9076.310b94f68378` captured by watcher → acquired remote `.rift-lock` → upload failed (editor renamed away) → orphan locks. `classify()` extended w/ tight `.tmp.<pid>.<hex>` rule (pid ≤8 digits, hash ≥8 hex, no third dot-seg). Added `.crswap`/`.crdownload`. **Root cause of recurring orphan locks.**
-2. **SFTP op-level timeouts.** `with_t()` in `sftp/transfer.rs` wraps every op — `T_QUICK` 10 s (cleanup/close/set_metadata), `T_NORMAL` 30 s (mkdir/rename/create), `T_BODY` 120 s (write/read body). `sftp/list.rs` LIST_T 120 s on exec/serial/worker paths. Timeout → wedged-connection error + `DiagStage::ConnectionWedged` emit.
-3. **Lock-release race.** `process_entry` terminal release: `tokio::spawn`+`track_background` → inline-await w/ 5 s timeout. Spawn could be aborted by engine `stop()` before SFTP delete fired (probe2.txt repro).
-4. **Sweep locks button.** New `sync_sweep_stale_locks` Tauri cmd + button next to Rescan. Walks watched roots, reclaims own-locks older than STALE_SEC.
-5. **Prod perms fix (out-of-band).** Chowned 9× `[qbx]/qbx_*` from `root:root drwxr-xr-x` → `blazzer:fxserver drwxrwsr-x` — source of "create tmp Qbox_F8F76…" red errors. `mkdir_p_via` chmods only on dir CREATION, not pre-existing.
+**auto_sync.rs split executed** (codex-2026-05-12 item 10 deferred work). 2933 → 1954 lines (-33%). `try_watch` / `stop_watch` / `on_fs_event` / `queue_path` / `mark_recently_written` / `is_recently_written` moved to `sync/auto_sync/watch.rs` (327 L). `flush_batch` / `process_entry` / `process_entry_body` / `mark_failed` + `EntryResult` enum moved to `sync/auto_sync/flush.rs` (610 L). Submodule privacy gives access to parent's private fields w/o pub-shims. `path.rs` (160 L) untouched. Main `auto_sync.rs` keeps engine struct, start/stop, drift reconcile, force_pull/push, status surface, log helpers.
 
-### Verify
-`cargo check` 5.06 s clean · `cargo test --lib` 46 passed (incl. new `editor_tmp_pid_hex` + `cr_swap_and_download`) · `svelte-check` 0/0 across 3996 files · release build 1m 08s · `vpk pack` 5.1 s · GH release published as pre-release.
+**Other cleanup (in order):** (a) `Releases/` pruned to last 2 versions — freed ~249 MB (gitignored, no commit); (b) `components.json` deleted (shadcn scaffold abandoned, aliases `$lib/components/ui` and `$lib/hooks` never existed); (c) 13 dead shadcn CSS aliases removed from `app.css` lines 76-90 (`--background`/`--card`/`--popover`/`--primary`/`--secondary`/`--destructive`/`--input`/+ foregrounds); kept `--muted` (used by `SyncPage.svelte:503`); (d) `@vitest/coverage-v8` removed from package.json devDeps (declared, never invoked); (e) `docs/audit/` consolidated — 8 stale audit files → `AUDIT-ARCHIVE.md` (resolved) + `AUDIT-OPEN.md` (still-outstanding); stale `DriftReview.svelte` refs dropped (file removed in `79f6fae`); (f) deleted `Releases/build-v0.2.45-alpha.log` stale log.
 
-### Note re v0.2.49 listing-accuracy
-56≠61 mismatch never reproduced on validation Rescan (got 0 ToPush, both sides 61). Instrumentation kept in place for recurrence. Closing as "fixed in effect."
+**Not done (explicit defer):** lib.rs split (1747 L, 52 commands) — needs per-domain `commands/*.rs` design; `reqwest` + `ureq` consolidation — blocked on velopack 0.0.1298's sync `UpdateSource`; LocalPane/RemotePane shared-logic extraction — pair w/ scan-frontend HIGH-sev stale-closure fixes.
+
+**Working tree:** `cleanup/full-audit` branch, unstaged. Next action: review diff, commit, optionally merge to main.
 
 ---
 
-## Session 52-53 — 2026-05-12 — Push-reliability + Rebaseline arc shipped (v0.2.46 → v0.2.49)
+## Session 55 — 2026-05-13 — v0.2.51 → v0.2.53 SHIPPED
 
-**Arc summary.** v0.2.46 Bug 2/3/4 fixes (strict mkdir, orphan-lock release-on-terminal-path, wait_for_readable backoff). v0.2.47 dormant `_disabled_*` ignore. v0.2.48 Bug 5 + Bug 7 (Created+Dir debounce w/ AtomicBool coalesce, web/build prune-exclusion). v0.2.49 SuspiciousEmptyAborted rebaseline UX (banner per shrunk bracket, "Why this matters" tooltip, `replace_under()` atomic snapshot rewrite, `sync_get_aborted_shrunk`+`sync_rebaseline_folder` cmds) + `list_via_exec` raw-vs-emitted instrumentation. All validated end-to-end on Endure.
-
-**Verify:** all releases on `Blazzer10200/rift-releases`. Last source commit before v0.2.50: `8f38806`.
+Three releases today: `d51e0c7` v0.2.53 (Mirror + auto-reconnect), `e29543c` v0.2.52 (notify-rs rename-event + state-machine + watched-root vanish poll), `b47fef9` v0.2.51 ("Disconnected" relabel hotfix). Velopack at `Blazzer10200/rift-releases`. Full per-version detail in `git log`. Prod-side: `[endure]`/`[ox]`/`[community]`/`[depend]` subdirs chowned `blazzer:fxserver drwxrwsr-x` — fxserver.service still runs as root, recurrence expected until v0.2.54 fxserver-user fix.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri (Rift). Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.50-alpha** SHIPPED (commit `5cb20e5`, Velopack live). Tauri 2 + Svelte 5 + Rust + russh/russh-sftp. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri. Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.53-alpha** SHIPPED (`d51e0c7`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
-**State:** v0.2.50 connection-reliability foundation shipped + pushed. Existing v0.2.49 installs auto-update via 3-file delta. Endure validation NOT yet done on shipped binary — first action.
+**FIRST ACTION:** confirm Rift auto-updated to 0.2.53; verify push to any bracket works post-chmod (test with a small edit + save in `[endure]` + check Diagnostics for green sync rows, no red "create tmp" failures).
 
-**FIRST ACTION next session:**
-1. Launch Rift — confirm auto-update lands you on 0.2.50-alpha
-2. Connect Endure RP, edit a file in VSCode/editor, save, watch Diagnostics — confirm zero `editor-tmp(.tmp.<pid>.<hex>)` rows now bucket as "skipped: file locked or unreadable" (they should be Ignored cleanly upstream)
-3. SSH-verify no orphan `.rift-lock` files left in `[endure]` or `[qbx]` after a normal edit session
-4. Click "Sweep locks" button → confirm any straggler orphans clear
-5. If all clean → v0.2.50 validated, move to v0.2.51 planning
+**v0.2.54 queue:** (a) **Edit fxserver.service** on prod to `User=fxserver` + `Group=fxserver` — kills the chmod-recurrence root cause; (b) Rift-side EACCES auto-fix-perms affordance — detect "Permission denied" on create-tmp and surface a "Fix prod perms?" button that runs the chown+chmod via existing SSH session; (c) auto-Mirror on detected rename only (when notify pairs `Name(From)+Name(To)` w/ matching basenames within debounce window, silent remote-delete; mysterious local-missing still requires typed confirm); (d) integration test suite phase 1 (10 mock-SFTP scenarios — needs SftpClient trait abstraction or testcontainers); (e) Dry-run Mirror preview pre-confirm.
 
-**v0.2.51 queue (deferred from v0.2.50):**
-- Full auto-reconnect w/ 3× exponential backoff on `DiagStage::ConnectionWedged` (currently surfaces error + user clicks Sweep + manual reconnect via server switcher)
-- Mirror mode for Push-all (Bug 1) — `local-missing + remote-has + baseline-exists` → remote-delete bucket, Mirror toggle, typed-confirm gate, dry-run preview default
-- Integration test suite (phase 1, 10 scenarios w/ mock SFTP) — gates Mirror ship
-- Listing-accuracy targeted fix if 56≠61 mismatch ever reproduces (v0.2.49 instrumentation still live)
+**Smaller queued:** mass-delete guard tune, Terminal Settings, Appearance controls.
 
-**Smaller queued:** mass-delete guard tune, Terminal Settings sub-view, Appearance controls. Force-reconnect button (skipped tonight; user has manual disconnect+reconnect via server switcher).
+**Multi-user warning.** Trey is on a ~2wk stale Rift baseline. He auto-picks up v0.2.51-v0.2.53 on next Rift launch. Keep him OFF Mirror until he's on latest + has fresh-Pulled baseline.
 
-**Don't reintroduce:** OpRail, TopBar (merged), rail kbd hints, StatusBar ⌘K pip, titlebar gear, StatusHero big H1, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design/Sync/Editor sections, `.btn.lg`/`.pill.warn`/`.vdivider` dead CSS, `bg-backlog.sh`, `diag_*` cmd names (renamed to `sync_*` in S44), `drift_watcher::spawn` / `run_tick` / `flush_cycle` (deleted v0.2.38 — auto-path ping-ponged; Push/Pull buttons only).
+**Don't reintroduce:** OpRail, TopBar (merged), rail kbd hints, StatusBar ⌘K pip, titlebar gear, StatusHero big H1, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design/Sync/Editor sections, `.btn.lg`/`.pill.warn`/`.vdivider` dead CSS, `bg-backlog.sh`, `diag_*` cmd names, `drift_watcher::spawn`/`run_tick`/`flush_cycle`.
 
 ---
 
@@ -65,20 +49,21 @@
 - `GITHUB_OWNER`/`GITHUB_REPO` point at public `rift-releases`, NOT source repo.
 - `path_guard.rs` API frozen — `edit/in_place.rs` + lib cmds depend.
 - `rename_via` strict; `rename_overwriting_via` ONLY for atomic upload tmp-swap.
-- Source `.secrets/env.sh` first on ship/auth tasks — non-interactive bash won't auto-load.
-- `last_scan_entries` is `std::sync::Mutex` (NOT tokio) — called from notify handler; tokio `blocking_lock` panics.
-- `force_pull_now` does inline drift scan + dispatches w/ guard. Don't optimize to cache-only — stale tombstones fire mass deletes.
-- `force_push_now` (v0.2.43+) promotes scan ToPush → dirty, auto-scans on cold cache, clears cache after non-cancelled push.
-- **NEVER `FileAttributes::default()` for SETSTAT** — sends zeros → file truncation + epoch mtime. Use `FileAttributes::empty()` + set only fields you want.
-- `SftpClient::delete` routes by remote stat — dirs go through `delete_recursive_via`. Don't shortcut to `remove_file`.
-- `mkdir_p_via` chmods each segment to 2775 (setgid + group-writable) for shared-group teammate pushes. Don't drop SETSTAT.
+- Source `.secrets/env.sh` first on ship/auth tasks.
+- `last_scan_entries` is `std::sync::Mutex` (NOT tokio) — notify handler context.
+- `force_pull_now`/`force_push_now` invariants preserved (v0.2.43).
+- **NEVER `FileAttributes::default()` for SETSTAT** — sends zeros → truncation + epoch mtime. Use `empty()`.
+- `SftpClient::delete` routes by remote stat — dirs go through `delete_recursive_via`.
+- `mkdir_p_via` chmods each segment to 2775 for shared-group pushes.
 - Upload pre-flight SHA-collapse before raising CONFLICT (v0.2.32).
-- `DriftBucket::ToDelete` = `local + no remote + has_baseline`. Routes to `delete_local_one` (guards on foreign-lock + dirty-local + empty-parent walk-up).
-- All time displays MUST pass `[], { hour12: true }` — locale-default emits 24h on non-US.
-- Mass local-delete circuit breaker: `(file_count * 0.30).clamp(5, 25)`. v0.2.45 explicit-user-selection from Sync page bypasses w/ WARN log; scan-driven paths still hard-block.
-- `spawn_frontend_pump` 200/s rate-limit; critical stages bypass. Don't fold critical events back into throttled path.
+- `DriftBucket::ToDelete` = local+no-remote+has-baseline → delete LOCAL. `DriftBucket::ToDeleteRemote` (v0.2.53) = local-missing+remote-has+has-baseline + mirror-on → delete REMOTE.
+- Time displays MUST pass `[], { hour12: true }` — locale-default emits 24h on non-US.
+- Mass local-delete circuit breaker: `(file_count * 0.30).clamp(5, 25)`. Sync-page explicit-user-selection bypasses. ToDeleteRemote bypasses (user reached via typed-MIRROR gate).
+- `spawn_frontend_pump` 200/s rate-limit; critical stages bypass.
 - russh `Config { keepalive_interval: 20s, keepalive_max: 3, window_size: 2 MiB, maximum_packet_size: 32 KiB }` in both `sftp::open_session` + `tunnel::start`.
-- **v0.2.46+ data-integrity stack — DO NOT REGRESS:** `mkdir_p_strict_via` (loud parent-dir creation failure), batch pre-mkdir in `flush_batch` (eliminates worker-race on fresh trees), lock release on every `process_entry` terminal path, `path.is_file()` gate in `queue_path` lock-acquire, `wait_for_readable` 6×exp-backoff (~3.2 s).
-- **v0.2.48 ignore symmetry — DO NOT REGRESS:** `ignored_directory_names()` excludes `build` + `dist`; remote `find -prune` would otherwise kill FiveM `web/build/` + `web/dist/` ui_page bundles.
-- **v0.2.48 Created+Dir debounce — DO NOT REGRESS:** 500 ms delay + `pending_dir_reconcile: AtomicBool` coalesce around `kick_drift_reconcile` in `on_fs_event`. Immediate kick fires before files land on disk.
-- **v0.2.50 connection-reliability stack — DO NOT REGRESS:** `sftp/transfer.rs::with_t` op-level timeouts (T_QUICK 10 s / T_NORMAL 30 s / T_BODY 120 s) on every SFTP op + LIST_T 120 s on listing; `ConnectionWedged` diag emit on timeout; `auto_sync::process_entry` terminal lock-release is INLINE await w/ 5 s timeout (NOT `tokio::spawn` — was source of orphan-lock race); `sync/ignore.rs` `.tmp.<pid>.<hex>` rule tight-matched (pid ≤8 digits, hash ≥8 hex chars, no third dot-segment) — broadening would catch legit files; `sync_sweep_stale_locks` cmd uses `LockPresence::sweep_stale_mine` so it ONLY clears own-user locks, never foreign.
+- **v0.2.46+ data-integrity stack — DO NOT REGRESS:** `mkdir_p_strict_via`, batch pre-mkdir in `flush_batch`, lock release on every `process_entry` terminal path, `path.is_file()` gate in `queue_path`, `wait_for_readable` 6×exp-backoff.
+- **v0.2.48 ignore symmetry — DO NOT REGRESS:** `ignored_directory_names()` excludes `build`+`dist` for FiveM `web/build/`+`web/dist/` ui_page bundles.
+- **v0.2.48 Created+Dir debounce — DO NOT REGRESS:** 500 ms + `pending_dir_reconcile: AtomicBool` coalesce.
+- **v0.2.50 connection-reliability stack — DO NOT REGRESS:** `sftp/transfer.rs::with_t` op timeouts (T_QUICK 10s / T_NORMAL 30s / T_BODY 120s) on every SFTP op + LIST_T 120s on listing; `ConnectionWedged` diag emit on timeout; `process_entry` terminal lock-release is INLINE await w/ 5s timeout (NOT `tokio::spawn`); `sync/ignore.rs` `.tmp.<pid>.<hex>` rule tight-matched (pid ≤8 digits, hash ≥8 hex, no 3rd dot-seg); `sync_sweep_stale_locks` ONLY clears own-user locks via `LockPresence::sweep_stale_mine`.
+- **v0.2.52 watcher + state-machine — DO NOT REGRESS:** explicit `Modify(ModifyKind::Name(RenameMode::From))→Deleted` + `RenameMode::To→Created` arms (Windows notify never emits `RenameMode::Both`); `consecutive_failed_batches` threshold 3 before Error escalation (single fails stay `Watching` w/ retry-pending detail); 5s watched-root-vanish poll w/ de-dup HashSet for issue #403.
+- **v0.2.53 Mirror + auto-reconnect — DO NOT REGRESS:** Mirror mode is session-scoped (`mirror_mode: AtomicBool`), resets on engine restart by design — don't persist. UI typed-confirm gate requires literal "MIRROR" before Confirm enables. Auto-reconnect rolling-window threshold = 3 wedges in 60s w/ `reconnecting` guard (no overlap); client-side only — no engine `Arc<SftpClient>` refactor.

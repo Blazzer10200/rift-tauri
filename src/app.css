@@ -73,22 +73,8 @@
   --fs-xl: 18px;
   --fs-2xl: 22px;
 
-  /* shadcn-svelte aliases (kept so existing ui/button etc. resolve) */
-  --background:          var(--bg);
-  --foreground:          var(--fg);
-  --card:                var(--surface);
-  --card-foreground:     var(--fg);
-  --popover:             var(--bg-elev-2);
-  --popover-foreground:  var(--fg);
-  --primary:             var(--accent);
-  --primary-foreground:  var(--accent-fg);
-  --secondary:           var(--surface-hover);
-  --secondary-foreground:var(--fg);
+  /* legacy alias kept for SyncPage.svelte — rest of shadcn aliases removed */
   --muted:               var(--bg-elev-2);
-  --muted-foreground:    var(--fg-muted);
-  --accent-foreground:   var(--accent-fg);
-  --destructive:         var(--danger);
-  --input:               var(--bg-elev-1);
 
   color-scheme: dark;
 }
