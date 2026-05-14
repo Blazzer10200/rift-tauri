@@ -151,7 +151,7 @@
      - .right (window controls + cmdk) stays flex-shrink:0 — always clickable.
      - .drag-fill takes ALL leftover space — that's the window-drag handle.
      - .left can shrink (server picker truncates) but doesn't grow past content. */
-  .left      { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; height: 100%; overflow: hidden; }
+  .left      { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; height: 100%; }
   .drag-fill { flex: 1 1 auto; min-width: 24px; height: 100%; }
   .right     { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 100%; }
 
@@ -178,6 +178,7 @@
     cursor: pointer;
     font: inherit; font-size: var(--fs-xs);
     transition: background 100ms ease, border-color 100ms ease;
+    min-width: 0; max-width: 100%;
   }
   .svr-btn:hover { background: var(--surface-hover); border-color: color-mix(in oklch, var(--accent) 30%, var(--border-strong)); }
   .svr-dot {
@@ -186,8 +187,8 @@
     box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent);
     flex-shrink: 0;
   }
-  .svr-name { font-weight: 600; font-size: var(--fs-xs); }
-  .svr-host { color: var(--fg-subtle); font-size: 11px; }
+  .svr-name { font-weight: 600; font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
+  .svr-host { color: var(--fg-subtle); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 2; min-width: 0; }
 
   .svr-menu {
     position: absolute; top: calc(100% + 6px); left: 0;
@@ -196,7 +197,7 @@
     border: 1px solid var(--border-strong);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
-    z-index: 100;
+    z-index: 1000;
   }
   .menu-label { padding: 6px 8px 4px; color: var(--fg-subtle); font-size: var(--fs-xs); letter-spacing: 0.05em; text-transform: uppercase; }
   .menu-item {
