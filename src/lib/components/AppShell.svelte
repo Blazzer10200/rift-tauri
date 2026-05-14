@@ -1,7 +1,5 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { fly, fade } from "svelte/transition";
-  import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { connection, type ServerProfile, type ConflictRecord } from "../state/connection.svelte";
@@ -27,6 +25,7 @@
   import TerminalPanel from "./terminal/TerminalPanel.svelte";
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
+  import { syncPage } from "../state/sync-page.svelte";
 
   type Tab = "browse" | "activity" | "sync" | "conflicts" | "settings" | "diagnostics";
   type SettingsSection = "appearance" | "terminal" | "servers" | "keys" | "about";
@@ -34,6 +33,15 @@
   let active = $state<Tab>("browse");
   let settingsSection = $state<SettingsSection>("appearance");
   let selectedConflict = $state<ConflictRecord | null>(null);
+  // v0.2.55: lazy-mount + keep-alive — pages mount once on first visit
+  // and stay mounted (hidden via `hidden` attr) on tab switch. Drops the
+  // remount-flash where children re-ran onMount/transitions every switch.
+  let visited = $state<Set<Tab>>(new Set(["browse"]));
+  $effect(() => {
+    if (!visited.has(active)) {
+      visited = new Set([...visited, active]);
+    }
+  });
 
   // Dialog state
   let addServerOpen = $state(false);
@@ -55,6 +63,42 @@
     if (selectedConflict && !list.some((c) => c.local_path === selectedConflict!.local_path)) {
       selectedConflict = null;
     }
+  });
+
+  // v0.2.55: auto-scan drift the moment a server is ready. Fires once
+  // per server-key per session (latch in syncPage). Drops the
+  // "open Sync page → click Rescan" first-launch ceremony — drift is
+  // ready by the time the user gets there.
+  $effect(() => {
+    const st = connection.status?.state;
+    const key = connection.selectedKey;
+    if (!key) {
+      syncPage.clearAutoScanMark();
+      return;
+    }
+    if (st === "watching" || st === "idle" || st === "syncing") {
+      syncPage.maybeAutoScan(key);
+    }
+  });
+
+  // v0.2.55: periodic auto-rescan timer — catches remote-side drift the
+  // local watcher can't see. Gated on enabled + watcher-ready + key.
+  // Effect re-runs on toggle/interval change and tears down the prior
+  // timer cleanly via the cleanup return.
+  $effect(() => {
+    const enabled = syncPage.autoRescanEnabled;
+    const intervalMs = syncPage.autoRescanIntervalSec * 1000;
+    const st = connection.status?.state;
+    const watcherReady = st === "watching" || st === "idle" || st === "syncing";
+    if (!enabled || !watcherReady || !connection.selectedKey) return;
+    // setInterval first tick is at `intervalMs`, not immediately — set a
+    // last-rescan stamp so we don't double-scan if the user just rescanned
+    // manually. Past intervalMs since stamp → first tick will run.
+    const id = setInterval(() => {
+      if (syncPage.busy || syncPage.loading || syncPage.previewMode) return;
+      void syncPage.rescan();
+    }, intervalMs);
+    return () => clearInterval(id);
   });
 
   function gotoSettings(s: SettingsSection = "appearance") {
@@ -320,50 +364,59 @@
     <TabRail {active} onChange={(t) => (active = t)} />
 
     <main class="pane">
-      {#key active}
-        <div
-          class="page-shell"
-          in:fly={{ y: 6, duration: 180, delay: 90, easing: quintOut }}
-          out:fade={{ duration: 90 }}
-        >
-          {#if active === "browse"}
-            <div class="browse-stack">
-              <StatusHero />
-              <TwoPane />
-            </div>
-          {:else if active === "activity"}
-            <ActivityFeed />
-          {:else if active === "sync"}
-            <SyncPage />
-          {:else if active === "conflicts"}
-            <div class="conflicts-pane">
-              <ConflictList
-                selected={selectedConflict}
-                onSelect={(c: ConflictRecord) => (selectedConflict = c)}
-              />
-              {#if selectedConflict}
-                {#key selectedConflict.local_path}
-                  <ConflictResolver conflict={selectedConflict} />
-                {/key}
-              {:else}
-                <div class="placeholder"><h2>Conflicts</h2><p class="help">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
-              {/if}
-            </div>
-          {:else if active === "settings"}
-            {#key settingsSection}
-              <Settings
-                initialSection={settingsSection}
-                onAddServer={() => openAddServer(null)}
-                onEditServer={(s) => openAddServer(s)}
-                onDeleteServer={(s) => deleteServer(s)}
-                onLaunchKeygen={() => (keygenOpen = true)}
-              />
-            {/key}
-          {:else if active === "diagnostics"}
-            <Diagnostics />
-          {/if}
+      {#if visited.has("browse") || active === "browse"}
+        <div class="page-shell" hidden={active !== "browse"}>
+          <div class="browse-stack">
+            <StatusHero />
+            <TwoPane />
+          </div>
         </div>
-      {/key}
+      {/if}
+      {#if visited.has("activity") || active === "activity"}
+        <div class="page-shell" hidden={active !== "activity"}>
+          <ActivityFeed />
+        </div>
+      {/if}
+      {#if visited.has("sync") || active === "sync"}
+        <div class="page-shell" hidden={active !== "sync"}>
+          <SyncPage />
+        </div>
+      {/if}
+      {#if visited.has("conflicts") || active === "conflicts"}
+        <div class="page-shell" hidden={active !== "conflicts"}>
+          <div class="conflicts-pane">
+            <ConflictList
+              selected={selectedConflict}
+              onSelect={(c: ConflictRecord) => (selectedConflict = c)}
+            />
+            {#if selectedConflict}
+              {#key selectedConflict.local_path}
+                <ConflictResolver conflict={selectedConflict} />
+              {/key}
+            {:else}
+              <div class="placeholder"><h2>Conflicts</h2><p class="help">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
+            {/if}
+          </div>
+        </div>
+      {/if}
+      {#if visited.has("settings") || active === "settings"}
+        <div class="page-shell" hidden={active !== "settings"}>
+          {#key settingsSection}
+            <Settings
+              initialSection={settingsSection}
+              onAddServer={() => openAddServer(null)}
+              onEditServer={(s) => openAddServer(s)}
+              onDeleteServer={(s) => deleteServer(s)}
+              onLaunchKeygen={() => (keygenOpen = true)}
+            />
+          {/key}
+        </div>
+      {/if}
+      {#if visited.has("diagnostics") || active === "diagnostics"}
+        <div class="page-shell" hidden={active !== "diagnostics"}>
+          <Diagnostics />
+        </div>
+      {/if}
     </main>
   </div>
 

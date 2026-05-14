@@ -2,6 +2,42 @@
 
 > Live changelog = current version only. Older entries live in `git log -- docs/CHANGELOG.md`.
 
+## v0.2.55-alpha — 2026-05-14 — Sync page overhaul: one-button Sync, auto-rescan, keep-alive tabs
+
+A focused UX pass on the Sync page — the most-used screen after Browser. Two longstanding annoyances (Pull-then-Push needing two clicks; pushes hidden after Pull all completes) are gone, drift now auto-rescans on first connect + on a user-settable interval, and tab switches lost their flash.
+
+### One-button Sync (pull then push)
+
+Replaced separate `Pull all` + `Push all` buttons in the hero with a single primary `Sync` button. Click sequences `sync_pull_pending` → 2.5 s drain → `sync_push_pending` → 1.2 s → rescan, in that order. Pull-before-push is canonical: it rebases local against remote so push never dispatches against a stale baseline. Button label live-updates `Sync (N↓ M↑)` → `Pulling… (N)` → `Pushing… (M)` so the phase is always visible. Pull-only / Push-only granular controls demoted into the new `⋯` kebab menu under an "Advanced" section. Conflicts stay in the conflict bucket (not auto-resolved); Mirror remote-deletes stay gated behind the typed-confirm modal.
+
+### Rescan-after-dispatch fix
+
+Calling `Pull all` with mixed pull + push drift previously dispatched the pull, then `refresh()` returned an empty drift snapshot (backend clears cached pending entries on dispatch), so the page rendered "Everything in sync" — hiding pushes the user could clearly see two seconds earlier. Now `pullAll` / `pushAll` / `applySelected` / `confirmMirrorApply` all chain to `rescan()` instead of `refresh()`, so the next snapshot is a fresh `sync_reconcile` result with every remaining drift entry intact.
+
+### Auto-scan on first connect
+
+When the watcher transitions to `watching` / `idle` / `syncing` for the first time per server-key per session, the frontend auto-fires a drift `sync_reconcile`. Drops the "open Sync page → click Rescan → wait" first-launch ceremony — drift is already populated by the time the user navigates there. Latch clears on disconnect so reconnect re-fires.
+
+### Auto-rescan (opt-in periodic)
+
+Local watcher only sees local edits; remote drift from teammates pushing is invisible until manual rescan. New auto-rescan toggle in the kebab cycles `off → 30 s → 1 m → 2 m → 5 m → 10 m → off`. Persists to localStorage. Timer lives in `AppShell` (survives tab switches), gates on `enabled + watcher-ready + connected`, skips ticks when busy / loading / in preview. Interval changes tear down + recreate the timer cleanly via `$effect` cleanup.
+
+### Tab-switch flash fix
+
+`AppShell` was wrapping every page in `{#key active}` with `in:fly` (90 ms delay + 180 ms duration) + `out:fade` (90 ms). On every tab switch the active page fully unmounted + remounted, child components re-ran `onMount` (data fetches, listeners), and their own inner `in:fly` / `in:fade` transitions re-fired → cascade pop-in glitch. Now each page mounts once on first visit and stays mounted; `hidden` attribute toggles visibility instantly. Cold-launch unchanged (only Browse mounts initially). Inner re-key for `settingsSection` + `selectedConflict` preserved. Removed unused `fly` / `fade` / `quintOut` imports.
+
+### UI reskin (Phase A)
+
+* Hero compaction: `[⋯] [↻] [Apply Mirror (cond)] [Sync]` — three visible buttons down from seven. Kebab houses Mirror toggle, Auto-rescan, Sweep stale locks, Pull-only, Push-only, Design preview.
+* Two-line entry rows: path + size on line 1, reason + relative mtime on line 2. `formatSize` (B/KB/MB/GB) + `formatMtimeRel` (s/m/h/d ago) helpers.
+* Selection footer: tone-tinted breakdown (`2 push · 2 pull · 1 delete`) replaces the generic hint when items are selected.
+* Empty-state subtitle: `Last scan Xs ago · N folders watched` + ghost `Rescan now` button.
+* Design-preview fixture (Eye icon in kebab): injects 9-entry fixture across 3 resources covering every bucket + aborted-shrunk banner, dispatch buttons gated. Lets us screenshot every UI state without needing real drift.
+
+### Verify
+
+`svelte-check` 0 errors / 0 warnings across 3999 files.
+
 ## v0.2.54-alpha — 2026-05-13 — Fresh-install bootstrap + titlebar dropdown hotfix
 
 Two onboarding bugs surfaced while bringing a second dev (Trey) on board for the first time. Both block the empty-local → populated-remote first sync path.
