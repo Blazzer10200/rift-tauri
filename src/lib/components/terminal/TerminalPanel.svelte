@@ -1,8 +1,11 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { TerminalSquare, ChevronDown, ChevronUp, Plus, X, Trash2 } from "lucide-svelte";
-  import Terminal from "./Terminal.svelte";
+  import { getCurrentWebview } from "@tauri-apps/api/webview";
+  import type { UnlistenFn } from "@tauri-apps/api/event";
+  import { TerminalSquare, ChevronDown, ChevronUp, Plus, X, Trash2, Search, Eraser } from "lucide-svelte";
+  import Terminal, { type SearchApi } from "./Terminal.svelte";
+  import TerminalFindBar from "./TerminalFindBar.svelte";
   import { terminal, TERM_HEIGHT_MIN } from "../../state/terminal.svelte";
 
   type ShellInfo = {
@@ -34,6 +37,77 @@
   let pickerEl = $state<HTMLDivElement | undefined>();
   let panelEl = $state<HTMLElement | undefined>();
   let resizing = $state(false);
+  let findOpen = $state(false);
+  let editingTabId = $state<string | null>(null);
+  let editingValue = $state("");
+  let dropActive = $state(false);
+  let unlistenDrop: UnlistenFn | null = null;
+  // Per-tab search APIs — Terminal calls onSearchReady when its addon mounts.
+  // Map keyed by tab id so FindBar can route to the active tab.
+  const searchApis = new Map<string, SearchApi>();
+  let activeApi = $state<SearchApi | null>(null);
+
+  function refreshActiveApi() {
+    const id = terminal.activeTabId;
+    activeApi = id ? (searchApis.get(id) ?? null) : null;
+  }
+  $effect(() => {
+    // Re-resolve when the active tab changes.
+    const _id = terminal.activeTabId;
+    void _id;
+    refreshActiveApi();
+  });
+
+  function openFind() {
+    if (!terminal.open || terminal.tabs.length === 0) return;
+    findOpen = true;
+  }
+  function closeFind() { findOpen = false; }
+
+  function startRename(id: string, currentLabel: string) {
+    editingTabId = id;
+    editingValue = currentLabel;
+  }
+  function commitRename() {
+    if (!editingTabId) return;
+    terminal.renameTab(editingTabId, editingValue);
+    editingTabId = null;
+    editingValue = "";
+  }
+  function cancelRename() {
+    editingTabId = null;
+    editingValue = "";
+  }
+  function onRenameKey(e: KeyboardEvent) {
+    if (e.key === "Enter") { e.preventDefault(); commitRename(); }
+    else if (e.key === "Escape") { e.preventDefault(); cancelRename(); }
+  }
+
+  function clearActive() {
+    const tab = terminal.tabs.find((t) => t.id === terminal.activeTabId);
+    if (!tab?.sessionId) return;
+    // \x0c (form feed) is the same byte Ctrl+L emits — every shell treats
+    // this as "clear screen". Works for bash/zsh/PS/cmd uniformly.
+    void invoke("term_write", { id: tab.sessionId, data: "\x0c" })
+      .catch((e) => console.warn("clear failed", e));
+  }
+
+  function isPositionOverPanel(x: number, y: number): boolean {
+    if (!panelEl) return false;
+    const r = panelEl.getBoundingClientRect();
+    return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+  function quoteIfNeeded(p: string): string {
+    return /[\s'"]/.test(p) ? `"${p.replace(/"/g, '\\"')}"` : p;
+  }
+  async function pasteDroppedPaths(paths: string[]) {
+    const tab = terminal.tabs.find((t) => t.id === terminal.activeTabId);
+    if (!tab?.sessionId) return;
+    const joined = paths.map(quoteIfNeeded).join(" ");
+    try {
+      await invoke("term_write", { id: tab.sessionId, data: joined });
+    } catch (e) { console.warn("drop write failed", e); }
+  }
 
   // Picker is sorted: available shells first (default-marked rises to top),
   // then anything unavailable at the bottom, dimmed.
@@ -52,15 +126,74 @@
   // shell if nothing's running, OR fall back to "Terminal".
   const collapsedLabel = $derived.by(() => {
     const active = terminal.tabs.find((t) => t.id === terminal.activeTabId);
+    if (active?.customLabel) return active.customLabel;
     if (active?.shellLabel && active.shellLabel !== "Terminal") return active.shellLabel;
     const def = shells.find((s) => s.id === terminal.defaultShellId);
     return def?.label ?? "Terminal";
+  });
+
+  function onGlobalKey(e: KeyboardEvent) {
+    const meta = e.ctrlKey || e.metaKey;
+    if (!meta || e.altKey) return;
+    const k = e.key.toLowerCase();
+    const ae = document.activeElement;
+    const inOtherInput =
+      ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA") &&
+      !(ae as HTMLElement).closest(".term-panel");
+
+    if (!e.shiftKey && k === "f" && terminal.open) {
+      if (inOtherInput) return;
+      e.preventDefault();
+      openFind();
+      return;
+    }
+    if (e.shiftKey && terminal.open) {
+      // Ctrl+Shift+[ / ] cycle tabs; Ctrl+Shift+T = new tab. We check `e.code`
+      // for the brackets b/c `e.key` reports "{" / "}" under Shift.
+      if (e.code === "BracketLeft" || e.code === "BracketRight") {
+        if (inOtherInput) return;
+        e.preventDefault();
+        terminal.cycleTab(e.code === "BracketRight" ? 1 : -1);
+        return;
+      }
+      if (k === "t") {
+        if (inOtherInput) return;
+        e.preventDefault();
+        terminal.addTab(terminal.defaultShellId);
+        return;
+      }
+    }
+  }
+  $effect(() => {
+    window.addEventListener("keydown", onGlobalKey);
+    return () => window.removeEventListener("keydown", onGlobalKey);
   });
 
   onMount(async () => {
     terminal.init();
     try { shells = await invoke<ShellInfo[]>("term_list_shells"); }
     catch (e) { console.warn("term_list_shells failed", e); }
+
+    // Tauri 2 file-drop. Routes to the active tab only — drop on the terminal
+    // panel area, the absolute paths get typed into the active shell.
+    try {
+      unlistenDrop = await getCurrentWebview().onDragDropEvent((event) => {
+        const p = event.payload;
+        if (p.type === "enter" || p.type === "over") {
+          const pos = (p as { position?: { x: number; y: number } }).position;
+          dropActive = !!pos && isPositionOverPanel(pos.x, pos.y) && terminal.open;
+        } else if (p.type === "drop") {
+          const pos = (p as { position?: { x: number; y: number } }).position;
+          const paths = (p as { paths?: string[] }).paths ?? [];
+          if (pos && isPositionOverPanel(pos.x, pos.y) && terminal.open && paths.length) {
+            void pasteDroppedPaths(paths);
+          }
+          dropActive = false;
+        } else {
+          dropActive = false;
+        }
+      });
+    } catch (e) { console.warn("onDragDropEvent failed", e); }
     if (!terminal.defaultShellId) {
       const first = shells.find((s) => s.available);
       if (first) terminal.setDefaultShell(first.id);
@@ -126,6 +259,10 @@
     terminal.setHeight(terminal.height);
   }
   function resetHeight() { terminal.resetHeight(); }
+
+  onDestroy(() => {
+    if (unlistenDrop) { unlistenDrop(); unlistenDrop = null; }
+  });
 </script>
 
 {#if terminal.open}
@@ -151,10 +288,12 @@
     style="height: {terminal.height}px"
     bind:this={panelEl}
     data-resizing={resizing}
+    data-drop-active={dropActive}
   >
     <header class="term-head">
       <div class="term-tabs" role="tablist">
         {#each terminal.tabs as t (t.id)}
+          {@const displayLabel = t.customLabel || t.shellLabel}
           <button
             type="button"
             class="term-tab"
@@ -162,10 +301,26 @@
             data-active={t.id === terminal.activeTabId}
             data-status={t.status}
             onclick={() => terminal.setActive(t.id)}
-            title={t.shellLabel}
+            ondblclick={(e) => { e.preventDefault(); startRename(t.id, displayLabel); }}
+            title="{displayLabel} — double-click to rename"
           >
             <TerminalSquare size={11}/>
-            <span class="term-tab-label">{t.shellLabel}</span>
+            {#if editingTabId === t.id}
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                class="term-tab-input mono"
+                type="text"
+                bind:value={editingValue}
+                onkeydown={onRenameKey}
+                onblur={commitRename}
+                onclick={(e) => e.stopPropagation()}
+                ondblclick={(e) => e.stopPropagation()}
+                autofocus
+                placeholder={t.shellLabel}
+              />
+            {:else}
+              <span class="term-tab-label">{displayLabel}</span>
+            {/if}
             {#if t.status === "exited"}
               <span class="term-tab-dim mono">· exited</span>
             {/if}
@@ -256,6 +411,20 @@
       </div>
 
       <div class="term-head-r">
+        <button
+          type="button"
+          class="term-close"
+          onclick={clearActive}
+          title="Clear buffer (Ctrl+L)"
+          aria-label="Clear terminal buffer"
+        ><Eraser size={12}/></button>
+        <button
+          type="button"
+          class="term-close"
+          onclick={openFind}
+          title="Find in terminal (Ctrl+F)"
+          aria-label="Find in terminal"
+        ><Search size={12}/></button>
         {#if terminal.tabs.length > 1}
           <button
             type="button"
@@ -276,6 +445,9 @@
     </header>
 
     <div class="term-body">
+      {#if findOpen}
+        <TerminalFindBar api={activeApi} onClose={closeFind} />
+      {/if}
       {#each terminal.tabs as t (t.id)}
         <div
           class="term-mount"
@@ -294,6 +466,8 @@
               status: "running",
             })}
             onStatusChange={(s) => terminal.patchTab(t.id, { status: s === "idle" ? t.status : s })}
+            onSearchReady={(api) => { searchApis.set(t.id, api); refreshActiveApi(); }}
+            onSearchTeardown={() => { searchApis.delete(t.id); refreshActiveApi(); }}
           />
         </div>
       {/each}
@@ -358,10 +532,45 @@
     background: var(--bg);
     border-top: 1px solid var(--border);
     min-height: 0;
+    min-width: 0;
+    position: relative;
   }
   .term-panel[data-resizing="true"] :global(*) {
     user-select: none !important;
     pointer-events: none;
+  }
+  .term-panel[data-drop-active="true"] {
+    box-shadow: inset 0 0 0 2px var(--accent);
+  }
+  .term-panel[data-drop-active="true"]::after {
+    content: "Drop to paste path";
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 6px 12px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    border-radius: var(--radius-sm);
+    pointer-events: none;
+    z-index: 50;
+  }
+  .term-tab-input {
+    flex: 1; min-width: 60px;
+    height: 18px;
+    padding: 0 4px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-xs);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-xs);
+  }
+  .term-tab-input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px var(--ring);
   }
 
   .term-head {

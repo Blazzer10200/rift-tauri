@@ -4,10 +4,61 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown } from "lucide-svelte";
   import { updates } from "../../state/updates.svelte";
+  import {
+    terminal,
+    TERM_FONT_SIZE_MIN,
+    TERM_FONT_SIZE_MAX,
+    TERM_SCROLLBACK_MIN,
+    TERM_SCROLLBACK_MAX,
+    type CursorStyle,
+    type BellStyle,
+    type FontFamilyPreset,
+    type ThemePresetId,
+  } from "../../state/terminal.svelte";
+  import { THEME_PRESETS } from "../terminal/themePresets";
 
-  type Section = "appearance" | "servers" | "keys" | "about";
+  type Section = "appearance" | "terminal" | "servers" | "keys" | "about";
+
+  type ShellInfo = { id: string; label: string; program: string; args: string[]; available: boolean };
+  let shells = $state<ShellInfo[]>([]);
+
+  // Native <select> renders OS-themed dropdowns that break the dark theme.
+  // We mirror the Titlebar server-picker pattern w/ custom buttons + menu.
+  let shellDdOpen = $state(false);
+  let shellDdRef = $state<HTMLDivElement | undefined>();
+  let fontDdOpen = $state(false);
+  let fontDdRef = $state<HTMLDivElement | undefined>();
+
+  function onDdDocMouseDown(e: MouseEvent) {
+    const t = e.target as Node;
+    if (shellDdOpen && shellDdRef && !shellDdRef.contains(t)) shellDdOpen = false;
+    if (fontDdOpen && fontDdRef && !fontDdRef.contains(t)) fontDdOpen = false;
+  }
+  $effect(() => {
+    if (!shellDdOpen && !fontDdOpen) return;
+    document.addEventListener("mousedown", onDdDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDdDocMouseDown);
+  });
+
+  const FONT_FAMILY_OPTS: { id: FontFamilyPreset; label: string }[] = [
+    { id: "default",  label: "JetBrains Mono (default)" },
+    { id: "cascadia", label: "Cascadia Code" },
+    { id: "consolas", label: "Consolas" },
+    { id: "menlo",    label: "Menlo / Monaco" },
+    { id: "custom",   label: "Custom…" },
+  ];
+  const CURSOR_OPTS: { id: CursorStyle; label: string }[] = [
+    { id: "bar",       label: "Bar" },
+    { id: "block",     label: "Block" },
+    { id: "underline", label: "Underline" },
+  ];
+  const BELL_OPTS: { id: BellStyle; label: string }[] = [
+    { id: "none",   label: "Off" },
+    { id: "visual", label: "Visual" },
+    { id: "sound",  label: "Sound" },
+  ];
 
   let { initialSection = "appearance", onAddServer, onEditServer, onDeleteServer, onLaunchKeygen }: {
     initialSection?: Section;
@@ -22,6 +73,7 @@
 
   const sections: { id: Section; label: string; icon: typeof Cog }[] = [
     { id: "appearance", label: "Appearance", icon: Cog },
+    { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "servers",    label: "Servers",    icon: Server },
     { id: "keys",       label: "SSH keys",   icon: Key },
     { id: "about",      label: "About",      icon: Info },
@@ -30,6 +82,8 @@
   onMount(async () => {
     try { appVersion = await invoke<string>("app_version"); } catch {}
     await connection.loadServers();
+    try { shells = await invoke<ShellInfo[]>("term_list_shells"); }
+    catch (e) { console.warn("term_list_shells failed", e); }
   });
 
   async function pickServer(s: ServerProfile) {
@@ -62,6 +116,312 @@
           <Sparkles size={18} class="soon-ico"/>
           <span class="soon-title">Coming soon</span>
           <span class="soon-hint">Density, font sizing, and accent-tint controls are planned for a later build. Dark mode stays the default.</span>
+        </div>
+      </div>
+
+    {:else if section === "terminal"}
+      <div class="term-set">
+        <div class="set-head">
+          <div>
+            <h3>Terminal</h3>
+            <p class="help">Font, cursor, palette, and shell defaults for the embedded terminal.</p>
+          </div>
+          <button class="btn ghost sm" onclick={() => terminal.resetAppearance()} type="button" title="Restore defaults">
+            <RotateCcw size={11}/> Reset
+          </button>
+        </div>
+
+        <div class="ts-group">
+          <div class="ts-group-title">Shell</div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <label class="ts-label" for="ts-default-shell">Default shell</label>
+              <span class="ts-hint">Used when opening a new tab without picking a preset.</span>
+            </div>
+            <div class="ts-dd" bind:this={shellDdRef} data-open={shellDdOpen}>
+              <button
+                type="button"
+                id="ts-default-shell"
+                class="ts-dd-btn"
+                aria-haspopup="listbox"
+                aria-expanded={shellDdOpen}
+                onclick={() => (shellDdOpen = !shellDdOpen)}
+              >
+                <span class="ts-dd-value">
+                  {shells.find((s) => s.id === terminal.defaultShellId)?.label ?? (shells.length === 0 ? "Detecting…" : "Pick a shell")}
+                </span>
+                <ChevronDown size={12}/>
+              </button>
+              {#if shellDdOpen}
+                <div class="ts-dd-menu" role="listbox">
+                  {#each shells as s (s.id)}
+                    <button
+                      type="button"
+                      class="ts-dd-item"
+                      role="option"
+                      aria-selected={terminal.defaultShellId === s.id}
+                      data-active={terminal.defaultShellId === s.id}
+                      disabled={!s.available}
+                      onclick={() => {
+                        if (!s.available) return;
+                        terminal.setDefaultShell(s.id);
+                        shellDdOpen = false;
+                      }}
+                    >
+                      <span class="ts-dd-item-l">
+                        {#if terminal.defaultShellId === s.id}
+                          <span class="ts-dd-dot" aria-hidden="true"></span>
+                        {:else}
+                          <span class="ts-dd-dot-spacer" aria-hidden="true"></span>
+                        {/if}
+                        <span>{s.label}</span>
+                      </span>
+                      {#if !s.available}
+                        <span class="ts-dd-dim mono">missing</span>
+                      {/if}
+                    </button>
+                  {/each}
+                  {#if shells.length === 0}
+                    <div class="ts-dd-empty">Detecting shells…</div>
+                  {/if}
+                </div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <label class="ts-label" for="ts-auto-launch">Auto-launch command</label>
+              <span class="ts-hint">Runs in every new tab after the prompt appears. Leave blank to skip.</span>
+            </div>
+            <input
+              id="ts-auto-launch"
+              class="input mono ts-input"
+              type="text"
+              placeholder="e.g. claude"
+              value={terminal.autoLaunchCommand}
+              oninput={(e) => terminal.setAutoLaunchCommand((e.currentTarget as HTMLInputElement).value)}
+            />
+          </div>
+        </div>
+
+        <div class="ts-group">
+          <div class="ts-group-title">Typography</div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <label class="ts-label" for="ts-font-size">Font size</label>
+              <span class="ts-hint">Between {TERM_FONT_SIZE_MIN} and {TERM_FONT_SIZE_MAX}px.</span>
+            </div>
+            <div class="ts-slider">
+              <input
+                id="ts-font-size"
+                type="range"
+                min={TERM_FONT_SIZE_MIN}
+                max={TERM_FONT_SIZE_MAX}
+                step="1"
+                value={terminal.fontSize}
+                oninput={(e) => terminal.setFontSize(parseInt((e.currentTarget as HTMLInputElement).value, 10))}
+              />
+              <span class="ts-slider-val mono">{terminal.fontSize}px</span>
+            </div>
+          </div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <label class="ts-label" for="ts-font-family">Font family</label>
+              <span class="ts-hint">Monospace stacks fall back if the first family is missing.</span>
+            </div>
+            <div class="ts-dd" bind:this={fontDdRef} data-open={fontDdOpen}>
+              <button
+                type="button"
+                id="ts-font-family"
+                class="ts-dd-btn"
+                aria-haspopup="listbox"
+                aria-expanded={fontDdOpen}
+                onclick={() => (fontDdOpen = !fontDdOpen)}
+              >
+                <span class="ts-dd-value">
+                  {FONT_FAMILY_OPTS.find((f) => f.id === terminal.fontFamilyPreset)?.label ?? "Default"}
+                </span>
+                <ChevronDown size={12}/>
+              </button>
+              {#if fontDdOpen}
+                <div class="ts-dd-menu" role="listbox">
+                  {#each FONT_FAMILY_OPTS as f (f.id)}
+                    <button
+                      type="button"
+                      class="ts-dd-item"
+                      role="option"
+                      aria-selected={terminal.fontFamilyPreset === f.id}
+                      data-active={terminal.fontFamilyPreset === f.id}
+                      onclick={() => {
+                        terminal.setFontFamilyPreset(f.id);
+                        fontDdOpen = false;
+                      }}
+                    >
+                      <span class="ts-dd-item-l">
+                        {#if terminal.fontFamilyPreset === f.id}
+                          <span class="ts-dd-dot" aria-hidden="true"></span>
+                        {:else}
+                          <span class="ts-dd-dot-spacer" aria-hidden="true"></span>
+                        {/if}
+                        <span>{f.label}</span>
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          </div>
+
+          {#if terminal.fontFamilyPreset === "custom"}
+            <div class="ts-row">
+              <div class="ts-row-l">
+                <label class="ts-label" for="ts-font-custom">Custom font stack</label>
+                <span class="ts-hint">CSS font-family value. Must be monospace.</span>
+              </div>
+              <input
+                id="ts-font-custom"
+                class="input mono ts-input"
+                type="text"
+                placeholder={'"Fira Code", monospace'}
+                value={terminal.fontFamilyCustom}
+                oninput={(e) => terminal.setFontFamilyCustom((e.currentTarget as HTMLInputElement).value)}
+              />
+            </div>
+          {/if}
+        </div>
+
+        <div class="ts-group">
+          <div class="ts-group-title">Cursor</div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <span class="ts-label">Style</span>
+              <span class="ts-hint">Shape used when the terminal has focus.</span>
+            </div>
+            <div class="seg" role="radiogroup" aria-label="Cursor style">
+              {#each CURSOR_OPTS as c (c.id)}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={terminal.cursorStyle === c.id}
+                  data-active={terminal.cursorStyle === c.id}
+                  onclick={() => terminal.setCursorStyle(c.id)}
+                >{c.label}</button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <span class="ts-label">Blink</span>
+              <span class="ts-hint">Animate the cursor while focused.</span>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Toggle"
+              aria-checked={terminal.cursorBlink}
+              data-on={terminal.cursorBlink}
+              onclick={() => terminal.setCursorBlink(!terminal.cursorBlink)}
+            ><span class="switch-knob"></span></button>
+          </div>
+        </div>
+
+        <div class="ts-group">
+          <div class="ts-group-title">Behavior</div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <label class="ts-label" for="ts-scrollback">Scrollback</label>
+              <span class="ts-hint">Lines retained in history per tab ({TERM_SCROLLBACK_MIN.toLocaleString()}–{TERM_SCROLLBACK_MAX.toLocaleString()}).</span>
+            </div>
+            <input
+              id="ts-scrollback"
+              class="input mono ts-input ts-input-narrow"
+              type="number"
+              min={TERM_SCROLLBACK_MIN}
+              max={TERM_SCROLLBACK_MAX}
+              step="500"
+              value={terminal.scrollback}
+              onchange={(e) => terminal.setScrollback(parseInt((e.currentTarget as HTMLInputElement).value, 10))}
+            />
+          </div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <span class="ts-label">Bell</span>
+              <span class="ts-hint">What happens when a program rings the bell.</span>
+            </div>
+            <div class="seg" role="radiogroup" aria-label="Bell style">
+              {#each BELL_OPTS as b (b.id)}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={terminal.bellStyle === b.id}
+                  data-active={terminal.bellStyle === b.id}
+                  onclick={() => terminal.setBellStyle(b.id)}
+                >{b.label}</button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <span class="ts-label">Copy on select</span>
+              <span class="ts-hint">Selection auto-copies to clipboard.</span>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Toggle"
+              aria-checked={terminal.copyOnSelect}
+              data-on={terminal.copyOnSelect}
+              onclick={() => terminal.setCopyOnSelect(!terminal.copyOnSelect)}
+            ><span class="switch-knob"></span></button>
+          </div>
+
+          <div class="ts-row">
+            <div class="ts-row-l">
+              <span class="ts-label">Right-click paste</span>
+              <span class="ts-hint">Right-click in the terminal pastes clipboard contents.</span>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Toggle"
+              aria-checked={terminal.rightClickPaste}
+              data-on={terminal.rightClickPaste}
+              onclick={() => terminal.setRightClickPaste(!terminal.rightClickPaste)}
+            ><span class="switch-knob"></span></button>
+          </div>
+        </div>
+
+        <div class="ts-group">
+          <div class="ts-group-title">Theme</div>
+
+          <div class="ts-theme-grid">
+            {#each THEME_PRESETS as t (t.id)}
+              <button
+                type="button"
+                class="ts-theme-card"
+                data-active={terminal.themePreset === t.id}
+                onclick={() => terminal.setThemePreset(t.id as ThemePresetId)}
+              >
+                <span class="ts-theme-swatch" data-preset={t.id}></span>
+                <span class="ts-theme-text">
+                  <span class="ts-theme-label">{t.label}</span>
+                  <span class="ts-theme-sub">{t.subtitle}</span>
+                </span>
+              </button>
+            {/each}
+          </div>
         </div>
       </div>
 
@@ -264,4 +624,261 @@
     max-width: 220px;
   }
   .srv-r { display: flex; gap: 4px; }
+
+  /* ─── Terminal section ─── */
+  .term-set { display: flex; flex-direction: column; gap: 18px; }
+  .ts-group {
+    display: flex; flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    /* No overflow:hidden — dropdown menus inside need to escape the card. */
+  }
+  .ts-group-title {
+    padding: 10px 14px 8px;
+    background: var(--bg-elev-1);
+    border-bottom: 1px solid var(--border);
+    border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-subtle);
+  }
+  .ts-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ts-row:last-child { border-bottom: none; }
+  .ts-row-l { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ts-label { font-size: var(--fs-sm); font-weight: 500; color: var(--fg); }
+  .ts-hint  { font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.4; }
+  .ts-input { width: 260px; }
+  .ts-input-narrow { width: 120px; text-align: right; }
+  /* hide native number spinners — keep value-only display, integers via step */
+  .ts-input-narrow::-webkit-outer-spin-button,
+  .ts-input-narrow::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .ts-input-narrow { appearance: textfield; -moz-appearance: textfield; }
+
+  /* custom dropdown — mirrors the Titlebar server picker */
+  .ts-dd { position: relative; width: 240px; }
+  .ts-dd-btn {
+    display: inline-flex; align-items: center; justify-content: space-between;
+    width: 100%; height: 28px; padding: 0 10px;
+    gap: 8px;
+    background: var(--bg-elev-1);
+    color: var(--fg);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: inherit; font-size: var(--fs-sm);
+    text-align: left;
+    transition: background 100ms, border-color 100ms;
+  }
+  .ts-dd-btn:hover {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklch, var(--accent) 30%, var(--border-strong));
+  }
+  .ts-dd-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .ts-dd[data-open="true"] .ts-dd-btn {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+  .ts-dd-btn :global(svg) { color: var(--fg-muted); flex-shrink: 0; }
+  .ts-dd-value {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .ts-dd-menu {
+    position: absolute; top: calc(100% + 4px); right: 0;
+    min-width: 100%;
+    z-index: 60;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+    padding: 4px;
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .ts-dd-item {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    background: transparent;
+    border: 0;
+    padding: 6px 10px;
+    color: var(--fg);
+    font: inherit; font-size: var(--fs-sm);
+    text-align: left;
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    transition: background 100ms;
+  }
+  .ts-dd-item:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--accent) 12%, transparent);
+  }
+  .ts-dd-item:disabled { color: var(--fg-faint); cursor: not-allowed; opacity: 0.6; }
+  .ts-dd-item[data-active="true"] { background: color-mix(in oklch, var(--accent) 14%, transparent); }
+  .ts-dd-item-l { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+  .ts-dd-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent);
+    flex-shrink: 0;
+  }
+  .ts-dd-dot-spacer { width: 6px; height: 6px; flex-shrink: 0; }
+  .ts-dd-dim { color: var(--fg-faint); font-size: 10px; }
+  .ts-dd-empty { padding: 8px 10px; color: var(--fg-subtle); font-size: var(--fs-xs); }
+
+  /* range slider — fully Rift-themed (native accent-color is OS-tinted on Win) */
+  .ts-slider { display: inline-flex; align-items: center; gap: 10px; }
+  .ts-slider input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 180px;
+    height: 18px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .ts-slider input[type="range"]::-webkit-slider-runnable-track {
+    height: 4px;
+    background: var(--bg-elev-3);
+    border-radius: 999px;
+  }
+  .ts-slider input[type="range"]::-moz-range-track {
+    height: 4px;
+    background: var(--bg-elev-3);
+    border-radius: 999px;
+  }
+  .ts-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px; height: 14px;
+    margin-top: -5px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 60%, transparent);
+    cursor: grab;
+    transition: transform 80ms;
+  }
+  .ts-slider input[type="range"]::-moz-range-thumb {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 2px solid var(--bg);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 60%, transparent);
+    cursor: grab;
+  }
+  .ts-slider input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.1); cursor: grabbing; }
+  .ts-slider input[type="range"]:focus-visible { outline: none; }
+  .ts-slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--ring);
+  }
+  .ts-slider-val {
+    display: inline-block;
+    min-width: 44px;
+    text-align: right;
+    color: var(--fg-2);
+    font-size: var(--fs-xs);
+  }
+
+  /* segmented control */
+  .seg {
+    display: inline-flex;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    gap: 2px;
+  }
+  .seg button {
+    background: transparent;
+    border: 0;
+    color: var(--fg-muted);
+    font: inherit;
+    font-size: var(--fs-xs);
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 100ms, color 100ms;
+  }
+  .seg button:hover { color: var(--fg); }
+  .seg button[data-active="true"] {
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+
+  /* switch */
+  .switch {
+    position: relative;
+    width: 34px; height: 18px;
+    background: var(--bg-elev-3);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    cursor: pointer;
+    padding: 0;
+    transition: background 120ms, border-color 120ms;
+  }
+  .switch[data-on="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .switch-knob {
+    position: absolute;
+    top: 1px; left: 1px;
+    width: 14px; height: 14px;
+    background: var(--fg);
+    border-radius: 50%;
+    transition: transform 140ms cubic-bezier(0.2,0.8,0.2,1);
+  }
+  .switch[data-on="true"] .switch-knob {
+    transform: translateX(16px);
+    background: var(--accent-fg);
+  }
+  .switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+  /* theme grid */
+  .ts-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 8px;
+    padding: 12px 14px;
+  }
+  .ts-theme-card {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 12px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms, box-shadow 100ms;
+  }
+  .ts-theme-card:hover { background: var(--surface-hover); }
+  .ts-theme-card[data-active="true"] {
+    border-color: var(--accent);
+    box-shadow: inset 2px 0 var(--accent), 0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent);
+  }
+  .ts-theme-swatch {
+    flex-shrink: 0;
+    width: 36px; height: 28px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border-strong);
+    background-image: linear-gradient(135deg, var(--sw-bg) 0% 50%, var(--sw-accent) 50% 100%);
+  }
+  .ts-theme-swatch[data-preset="rift"]           { --sw-bg: #0f1117; --sw-accent: #a78bfa; }
+  .ts-theme-swatch[data-preset="dracula"]        { --sw-bg: #282a36; --sw-accent: #ff79c6; }
+  .ts-theme-swatch[data-preset="solarized-dark"] { --sw-bg: #002b36; --sw-accent: #268bd2; }
+  .ts-theme-swatch[data-preset="monokai"]        { --sw-bg: #272822; --sw-accent: #f92672; }
+  .ts-theme-swatch[data-preset="github-dark"]    { --sw-bg: #0d1117; --sw-accent: #58a6ff; }
+  .ts-theme-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .ts-theme-label { font-size: var(--fs-sm); font-weight: 500; }
+  .ts-theme-sub { font-size: 10px; color: var(--fg-subtle); }
 </style>

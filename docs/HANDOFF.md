@@ -2,6 +2,38 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 58 — 2026-05-14 — Terminal UI + Scaling Fixes
+
+### Completed
+- **Borderless maximize clipping** — Win32 8px invisible frame clipped close button + StatusBar. `AppShell` now toggles `body.win-maximized` via `getCurrentWindow().onResized()`; `app.css` adds `body.win-maximized { padding: 8px }`. `.shell` switched from `100vh/100vw` → `100%/100%`.
+- **Window resize content tracking** — `.middle` + `.body` lacked `min-width: 0`; `.body` grid used `1fr` not `minmax(0,1fr)`. Fixed both → content now reflows live with window edge. Also `TerminalPanel .term-panel` gets `min-width: 0`.
+- **HMR tab restore explosion** — `consumePendingRestore` re-ran on every hot reload, doubling tabs + persisting back to localStorage. Guard: `if (this.tabs.length > 0) return` bails early.
+- **Terminal Settings panel (P1)** — Full Settings → Terminal section: default shell, auto-launch, font size (styled slider), font family (custom dropdown), scrollback, cursor style/blink, bell (off/visual/sound), copy-on-select, right-click paste, theme preset grid (Rift/Dracula/Solarized Dark/Monokai/GitHub Dark). Reset button. All state persisted to localStorage in `terminal.svelte.ts`.
+- **Search addon (P2)** — `@xterm/addon-search`; `TerminalFindBar.svelte` (Ctrl+F, case/word/regex flags, match counter, Enter/Shift+Enter nav, Esc close). Per-tab SearchApi exposed via `onSearchReady` prop; panel holds Map.
+- **QoL (P3)** — Inline tab rename (dbl-click → input, persists as `customLabel`); drag-and-drop file → paste path (Tauri `onDragDropEvent`); Ctrl+Shift+`[`/`]` cycle tabs, Ctrl+Shift+T new tab; Eraser button sends `\x0c` (Ctrl+L) to clear stale buffer after resize.
+- **UI polish** — Replaced native `<select>` with custom Rift-themed dropdowns (dark menu, accent dot, purple focus ring). Fully-themed range slider (custom webkit/moz thumb). Number input spinners hidden. Switch a11y labels. `ts-group { overflow: hidden }` removed (was clipping menus) → top border-radius moved to title only.
+
+### Key Decisions
+- Bell: xterm 5.5 removed `bellStyle` option — visual = CSS flash on `.term-wrap`; sound = manual `AudioContext` sine tone.
+- Search decorations use `--accent` + `--warn` vars resolved at spawn so presets swap live.
+- DnD routes to active tab only (not position-hit-tested per tab).
+
+### Next Steps
+1. Test maximize / resize / find / rename / DnD on the installed build.
+2. Queue item (h): connecting-pill desync fix when ready.
+3. v0.2.55 queue unchanged otherwise — see RESUME HERE below.
+
+### Files Modified
+- `src/lib/components/AppShell.svelte`, `src/app.css`
+- `src/lib/components/terminal/Terminal.svelte`, `TerminalPanel.svelte`
+- `src/lib/components/terminal/TerminalFindBar.svelte` (new), `themePresets.ts` (new)
+- `src/lib/components/settings/Settings.svelte`
+- `src/lib/state/terminal.svelte.ts`
+- `package.json` (+`@xterm/addon-search`)
+
+---
+
+
 ## Session 57 — 2026-05-13 — v0.2.54-alpha SHIPPED (Trey onboarding hotfix)
 
 **Status: SHIPPED on main (`09c0a81`), Velopack tag `v0.2.54-alpha` live.** Cleanup branch merged.

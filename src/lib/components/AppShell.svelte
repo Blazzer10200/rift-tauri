@@ -3,6 +3,7 @@
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { connection, type ServerProfile, type ConflictRecord } from "../state/connection.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import TabRail from "./shell/TabRail.svelte";
@@ -28,7 +29,7 @@
   import { terminal } from "../state/terminal.svelte";
 
   type Tab = "browse" | "activity" | "sync" | "conflicts" | "settings" | "diagnostics";
-  type SettingsSection = "appearance" | "servers" | "keys" | "about";
+  type SettingsSection = "appearance" | "terminal" | "servers" | "keys" | "about";
 
   let active = $state<Tab>("browse");
   let settingsSection = $state<SettingsSection>("appearance");
@@ -100,6 +101,35 @@
       gotoSettings("servers");
     }
     updates.checkOnLaunch();
+  });
+
+  // Borderless-window maximize compensation. Win32 draws maximized
+  // `decorations: false` windows ~8px past each screen edge (invisible
+  // resize frame), clipping the close button + StatusBar. Toggle a body
+  // class so CSS can inset the shell by 8px while maximized.
+  $effect(() => {
+    const win = getCurrentWindow();
+    let unlisten: (() => void) | null = null;
+    let alive = true;
+
+    async function apply() {
+      try {
+        const max = await win.isMaximized();
+        if (alive) document.body.classList.toggle("win-maximized", max);
+      } catch { /* window gone */ }
+    }
+
+    void apply();
+    void win.onResized(() => { void apply(); }).then((fn) => {
+      if (alive) unlisten = fn;
+      else fn();
+    });
+
+    return () => {
+      alive = false;
+      if (unlisten) unlisten();
+      document.body.classList.remove("win-maximized");
+    };
   });
 
   async function retryWire() {
@@ -409,8 +439,8 @@
   .shell {
     display: grid;
     grid-template-rows: 44px 1fr 22px;
-    height: 100vh;
-    width: 100vw;
+    height: 100%;
+    width: 100%;
     min-width: 0;
     overflow: hidden;
     background: var(--bg);
@@ -420,6 +450,7 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    min-width: 0;
     overflow: visible;
     position: relative;
   }
@@ -447,8 +478,9 @@
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: 48px 1fr;
+    grid-template-columns: 48px minmax(0, 1fr);
     min-height: 0;
+    min-width: 0;
     overflow: visible;
     position: relative;
   }
