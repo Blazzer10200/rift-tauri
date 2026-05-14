@@ -7,7 +7,7 @@
   import {
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
     ChevronRight, CheckCircle2, CircleAlert, Inbox, History,
-    Wrench, Trash2,
+    Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
   } from "lucide-svelte";
 
   // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
@@ -18,13 +18,27 @@
   import { syncPage, type ResourceGroup, type DriftEntry } from "../../state/sync-page.svelte";
 
   let unlistenDiag: UnlistenFn | null = null;
+  // v0.2.55 Phase A reskin: hero overflow kebab for low-frequency utilities
+  // (Mirror toggle, Sweep stale locks, Preview). Click-outside closes.
+  let overflowOpen = $state(false);
+  let overflowRef = $state<HTMLDivElement | null>(null);
+
+  function onDocMouseDown(ev: MouseEvent) {
+    if (!overflowOpen) return;
+    if (overflowRef && ev.target instanceof Node && !overflowRef.contains(ev.target)) {
+      overflowOpen = false;
+    }
+  }
+  function onDocKey(ev: KeyboardEvent) {
+    if (overflowOpen && ev.key === "Escape") overflowOpen = false;
+  }
 
   const watcherOn = $derived(
     connection.status?.state === "watching" ||
     connection.status?.state === "idle" ||
     connection.status?.state === "syncing"
   );
-  const canSync = $derived(watcherOn && !syncPage.busy);
+  const canSync = $derived(watcherOn && !syncPage.busy && !syncPage.previewMode);
   const totals = $derived(syncPage.totals);
   const groups = $derived(syncPage.groups);
   const selectionSize = $derived(syncPage.selected.size);
@@ -36,6 +50,9 @@
   );
 
   onMount(async () => {
+    window.addEventListener("mousedown", onDocMouseDown);
+    window.addEventListener("keydown", onDocKey);
+    syncPage.loadAutoRescanPrefs();
     void syncPage.refresh();
     // v0.2.53: sync the Mirror toggle w/ backend state (it's session-scoped
     // on the engine; if a prior session left it on, surface that).
@@ -55,7 +72,50 @@
   });
 
   onDestroy(() => {
+    window.removeEventListener("mousedown", onDocMouseDown);
+    window.removeEventListener("keydown", onDocKey);
     if (unlistenDiag) unlistenDiag();
+  });
+
+  // v0.2.55 Phase A: pretty-print bytes (B/KB/MB/GB, tabular-nums friendly).
+  function formatSize(bytes: number): string {
+    if (!bytes || bytes < 0) return "";
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1048576).toFixed(1)} MB`;
+    return `${(bytes / 1073741824).toFixed(2)} GB`;
+  }
+
+  // v0.2.55 Phase A: ISO mtime → "Ns/Nm/Nh/Nd ago".
+  function formatMtimeRel(iso: string | null): string {
+    if (!iso) return "";
+    const t = new Date(iso).getTime();
+    if (Number.isNaN(t)) return "";
+    const diffSec = Math.floor((Date.now() - t) / 1000);
+    if (diffSec < 0) return "future";
+    if (diffSec < 60) return `${diffSec}s ago`;
+    if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`;
+    if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`;
+    return `${Math.floor(diffSec / 86400)}d ago`;
+  }
+
+  // v0.2.55 Phase A: selection breakdown — count selected entries per bucket
+  // so the active footer can show "2 push · 2 pull · 1 delete" inline.
+  const selBreakdown = $derived.by(() => {
+    let push = 0, pull = 0, del = 0, delRem = 0, conf = 0;
+    if (syncPage.selected.size === 0) return { push, pull, del, delRem, conf };
+    const byPath = new Map<string, DriftEntry>();
+    for (const e of syncPage.entries) byPath.set(e.local_path, e);
+    for (const path of syncPage.selected) {
+      const e = byPath.get(path);
+      if (!e) continue;
+      if (e.bucket === "to_push") push++;
+      else if (e.bucket === "to_pull") pull++;
+      else if (e.bucket === "to_delete") del++;
+      else if (e.bucket === "to_delete_remote") delRem++;
+      else if (e.bucket === "conflict") conf++;
+    }
+    return { push, pull, del, delRem, conf };
   });
 
   function relPathLabel(e: DriftEntry): string {
@@ -152,35 +212,116 @@
       </span>
     </div>
     <div class="hero-right">
+      <div class="kebab-wrap" bind:this={overflowRef}>
+        <button
+          class="btn ghost icon"
+          type="button"
+          onclick={() => (overflowOpen = !overflowOpen)}
+          aria-haspopup="menu"
+          aria-expanded={overflowOpen}
+          title="More options"
+        >
+          <MoreHorizontal size={14}/>
+        </button>
+        {#if overflowOpen}
+          <div class="kebab-menu" role="menu" in:fade={{ duration: 80 }}>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              class:active={syncPage.mirrorEnabled}
+              disabled={!watcherOn || syncPage.busy || syncPage.previewMode}
+              onclick={() => { syncPage.toggleMirror(!syncPage.mirrorEnabled); overflowOpen = false; }}
+              title="Mirror mode: local-missing files surface as 'delete on remote' bucket instead of pull-restore. Destructive — opt-in only."
+            >
+              <span class="kebab-check">{#if syncPage.mirrorEnabled}<Check size={12}/>{/if}</span>
+              <Trash2 size={13}/>
+              <span>Mirror mode</span>
+              {#if syncPage.mirrorEnabled}<span class="kebab-tag danger">on</span>{/if}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              class:active={syncPage.autoRescanEnabled}
+              onclick={() => syncPage.cycleAutoRescan()}
+              title="Periodic auto-rescan — catches remote-side drift (teammate pushes, out-of-band edits) the local watcher can't see. Click cycles: off → 30s → 1m → 2m → 5m → 10m → off."
+            >
+              <span class="kebab-check">{#if syncPage.autoRescanEnabled}<Check size={12}/>{/if}</span>
+              <Timer size={13}/>
+              <span>Auto-rescan</span>
+              {#if syncPage.autoRescanEnabled}
+                <span class="kebab-tag">{syncPage.autoRescanLabel}</span>
+              {:else}
+                <span class="kebab-tag muted">off</span>
+              {/if}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              disabled={!canSync}
+              onclick={() => { syncPage.sweepStaleLocks(); overflowOpen = false; }}
+              title="Reclaim our own stale .rift-lock files across every watched root"
+            >
+              <span class="kebab-check"></span>
+              <Wrench size={13}/>
+              <span>Sweep stale locks</span>
+            </button>
+            <div class="kebab-divider"></div>
+            <div class="kebab-section-label">Advanced</div>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              disabled={!canSync || totals.pull + totals.del === 0}
+              onclick={() => { syncPage.pullAll(); overflowOpen = false; }}
+              title="Pull only — fetch every ToPull + ToDelete entry without pushing"
+            >
+              <span class="kebab-check"></span>
+              <DownloadCloud size={13}/>
+              <span>Pull only</span>
+              {#if totals.pull + totals.del > 0}<span class="kebab-tag">{totals.pull + totals.del}</span>{/if}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              disabled={!canSync || totals.push === 0}
+              onclick={() => { syncPage.pushAll(); overflowOpen = false; }}
+              title="Push only — upload every dirty + ToPush entry without pulling first"
+            >
+              <span class="kebab-check"></span>
+              <UploadCloud size={13}/>
+              <span>Push only</span>
+              {#if totals.push > 0}<span class="kebab-tag">{totals.push}</span>{/if}
+            </button>
+            <div class="kebab-divider"></div>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              class:active={syncPage.previewMode}
+              onclick={() => { syncPage.previewMode ? syncPage.exitPreview() : syncPage.enterPreview(); overflowOpen = false; }}
+              title="Toggle design-preview fixture covering every bucket. Apply buttons are gated while active."
+            >
+              <span class="kebab-check">{#if syncPage.previewMode}<Check size={12}/>{/if}</span>
+              {#if syncPage.previewMode}<EyeOff size={13}/>{:else}<Eye size={13}/>{/if}
+              <span>{syncPage.previewMode ? "Exit preview" : "Design preview"}</span>
+            </button>
+          </div>
+        {/if}
+      </div>
       <button
-        class="btn ghost"
+        class="btn ghost icon"
         type="button"
         onclick={() => syncPage.rescan()}
         disabled={!canSync}
         title="Re-scan both sides for drift"
+        aria-label="Rescan"
       >
         <RefreshCw size={13} class={syncPage.busy ? "spin" : ""} />
-        <span>Rescan</span>
       </button>
-      <button
-        class="btn ghost"
-        type="button"
-        onclick={() => syncPage.sweepStaleLocks()}
-        disabled={!canSync}
-        title="Reclaim our own stale .rift-lock files across every watched root (recovery for connection wedges)"
-      >
-        <Wrench size={13}/>
-        <span>Sweep locks</span>
-      </button>
-      <label class="mirror-toggle" title="Mirror mode: local-missing files surface as 'delete on remote' bucket instead of pull-restore. Destructive — opt-in only.">
-        <input
-          type="checkbox"
-          checked={syncPage.mirrorEnabled}
-          onchange={(e) => syncPage.toggleMirror((e.currentTarget as HTMLInputElement).checked)}
-          disabled={!canSync}
-        />
-        <span>Mirror</span>
-      </label>
       {#if syncPage.mirrorEnabled && totals.delRemote > 0}
         <button
           class="btn danger"
@@ -193,25 +334,34 @@
         </button>
       {/if}
       <button
-        class="btn info"
+        class="btn primary sync-btn"
         type="button"
-        onclick={() => syncPage.pullAll()}
-        disabled={!canSync || totals.pull + totals.del === 0}
-        title="Pull every ToPull + ToDelete entry"
+        onclick={() => syncPage.syncNow()}
+        disabled={!canSync || (totals.push + totals.pull + totals.del === 0)}
+        title="Pull then Push — canonical sync ordering. Pulls remote changes first so push never dispatches against a stale baseline. Conflicts and Mirror remote-deletes stay gated."
       >
-        <DownloadCloud size={13}/> Pull all
-      </button>
-      <button
-        class="btn warn"
-        type="button"
-        onclick={() => syncPage.pushAll()}
-        disabled={!canSync || totals.push === 0}
-        title="Push every dirty + ToPush entry"
-      >
-        <UploadCloud size={13}/> Push all
+        <RefreshCcw size={13} class={syncPage.syncPhase !== "idle" ? "spin" : ""}/>
+        {#if syncPage.syncPhase === "pulling"}
+          <span>Pulling… <span class="sync-sub">({totals.pull + totals.del})</span></span>
+        {:else if syncPage.syncPhase === "pushing"}
+          <span>Pushing… <span class="sync-sub">({totals.push})</span></span>
+        {:else}
+          <span>Sync</span>
+          {#if totals.push + totals.pull + totals.del > 0}
+            <span class="sync-sub">({totals.pull + totals.del}↓ {totals.push}↑)</span>
+          {/if}
+        {/if}
       </button>
     </div>
   </header>
+
+  {#if syncPage.previewMode}
+    <div class="banner preview" role="status" in:fade={{ duration: 120 }}>
+      <Eye size={13}/>
+      <span><strong>Preview mode</strong> — synthetic fixture, dispatch buttons gated. Use to review UI states + plan reskin.</span>
+      <button class="banner-x" onclick={() => syncPage.exitPreview()} aria-label="Exit preview">×</button>
+    </div>
+  {/if}
 
   {#if syncPage.errorMsg}
     <div class="banner" role="alert" in:fade={{ duration: 120 }}>
@@ -303,6 +453,22 @@
           <div class="empty-icon ok"><CheckCircle2 size={28}/></div>
           <div class="empty-title">Everything in sync</div>
           <p class="empty-hint">Both sides match. Local edits will appear here as drift.</p>
+          <div class="empty-sub">
+            <span>Last scan <span class="mono">{scanAgeLabel()}</span></span>
+            {#if connection.status?.watches}
+              <span class="dotsep">·</span>
+              <span>{connection.status.watches} folder{connection.status.watches === 1 ? "" : "s"} watched</span>
+            {/if}
+          </div>
+          <button
+            class="btn ghost sm empty-action"
+            type="button"
+            onclick={() => syncPage.rescan()}
+            disabled={!canSync}
+          >
+            <RefreshCw size={12} class={syncPage.busy ? "spin" : ""}/>
+            <span>Rescan now</span>
+          </button>
         {/if}
       </div>
     {:else}
@@ -367,6 +533,8 @@
                   {#each [...g.to_push, ...g.to_pull, ...g.to_delete, ...g.conflict] as e, j (e.local_path)}
                     {@const etone = bucketTone(e.bucket)}
                     {@const interactive = e.bucket !== "conflict"}
+                    {@const sizeBytes = e.bucket === "to_pull" ? e.remote_size : e.local_size}
+                    {@const mtimeIso = e.bucket === "to_pull" ? e.remote_mtime : e.local_mtime}
                     <li
                       class="entry"
                       data-tone={etone}
@@ -380,8 +548,16 @@
                           disabled={!interactive}
                         />
                         <span class="entry-bucket" data-tone={etone}>{bucketLabel(e.bucket)}</span>
-                        <span class="entry-path mono" title={e.local_path}>{relPathLabel(e)}</span>
-                        <span class="entry-reason" title={e.reason}>{e.reason}</span>
+                        <div class="entry-main">
+                          <div class="entry-line-1">
+                            <span class="entry-path mono" title={e.local_path}>{relPathLabel(e)}</span>
+                            {#if sizeBytes > 0}<span class="entry-meta-right">{formatSize(sizeBytes)}</span>{/if}
+                          </div>
+                          <div class="entry-line-2">
+                            <span class="entry-reason" title={e.reason}>{e.reason}</span>
+                            {#if mtimeIso}<span class="entry-meta-right muted">{formatMtimeRel(mtimeIso)}</span>{/if}
+                          </div>
+                        </div>
                       </label>
                     </li>
                   {/each}
@@ -414,18 +590,20 @@
       {/if}
     </div>
     <div class="footer-right">
-      <span class="foot-hint">
-        {#if hasSelection}
-          <Inbox size={11}/>
-          <span>{selectionSize} item{selectionSize === 1 ? "" : "s"} queued · </span>
-          <span class="foot-cta">Apply</span>
-          <span> to dispatch</span>
-        {:else if !isEmpty}
+      {#if hasSelection}
+        <span class="sel-breakdown" in:fade={{ duration: 120 }}>
+          {#if selBreakdown.push > 0}<span class="br" data-tone="push">{selBreakdown.push} push</span>{/if}
+          {#if selBreakdown.pull > 0}<span class="br" data-tone="pull">{selBreakdown.pull} pull</span>{/if}
+          {#if selBreakdown.del > 0}<span class="br" data-tone="delete">{selBreakdown.del} delete</span>{/if}
+          {#if selBreakdown.delRem > 0}<span class="br" data-tone="delete">{selBreakdown.delRem} remote-delete</span>{/if}
+        </span>
+      {:else if !isEmpty}
+        <span class="foot-hint">
           <span>Pick rows below to queue them, or use</span>
           <span class="foot-cta">Pull all</span> <span>/</span> <span class="foot-cta">Push all</span>
           <span>above.</span>
-        {/if}
-      </span>
+        </span>
+      {/if}
     </div>
   </footer>
 
@@ -496,15 +674,7 @@
     color: var(--fg);
   }
 
-  /* v0.2.53 Mirror toggle + confirm modal */
-  .mirror-toggle {
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px;
-    font-size: var(--fs-xs); color: var(--muted); cursor: pointer;
-    user-select: none;
-  }
-  .mirror-toggle input { accent-color: var(--danger); cursor: pointer; }
-  .mirror-toggle:has(input:checked) { color: var(--danger); border-color: var(--danger); }
+  /* v0.2.53 Mirror confirm modal (toggle moved into kebab v0.2.55) */
   .modal-backdrop {
     position: fixed; inset: 0; background: rgba(0,0,0,0.55);
     display: flex; align-items: center; justify-content: center;
@@ -576,6 +746,11 @@
     background: color-mix(in oklch, var(--accent) 14%, transparent);
     color: var(--fg);
     border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  }
+  .banner.preview {
+    background: color-mix(in oklch, var(--info) 12%, transparent);
+    color: var(--fg);
+    border-color: color-mix(in oklch, var(--info) 32%, transparent);
   }
   .banner-x {
     margin-left: auto;
@@ -831,13 +1006,36 @@
 
   .entry-row {
     display: grid;
-    grid-template-columns: 18px 60px minmax(0, 1fr) minmax(0, auto);
+    grid-template-columns: 18px 60px minmax(0, 1fr);
     gap: 10px;
-    align-items: center;
-    padding: 5px 4px;
+    align-items: start;
+    padding: 7px 4px;
     cursor: pointer;
     transition: background 100ms ease, box-shadow 100ms ease;
   }
+  .entry-row input[type="checkbox"] { margin-top: 3px; }
+  .entry-row .entry-bucket { margin-top: 2px; }
+  .entry-main {
+    display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  }
+  .entry-line-1, .entry-line-2 {
+    display: flex; align-items: center; gap: 8px; min-width: 0;
+  }
+  .entry-line-1 .entry-path { flex: 1; min-width: 0; }
+  .entry-line-2 .entry-reason {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: var(--fg-faint);
+  }
+  .entry-meta-right {
+    margin-left: auto; flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono);
+    font-size: var(--fs-xs);
+    color: var(--fg-muted);
+  }
+  .entry-meta-right.muted { color: var(--fg-faint); }
   .entry-row:hover {
     background: color-mix(in oklch, var(--etone) 8%, transparent);
     box-shadow: inset 2px 0 var(--etone);
@@ -865,15 +1063,6 @@
     white-space: nowrap;
     color: var(--fg);
   }
-  .entry-reason {
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    justify-self: end;
-    max-width: 240px;
-  }
 
   /* ── Footer ─────────────────────────────────────────── */
   .footer {
@@ -900,4 +1089,115 @@
   }
 
   .spin.big { width: 22px; height: 22px; border-width: 3px; border: 3px solid currentColor; border-right-color: transparent; border-radius: 50%; display: inline-block; }
+
+  /* ── v0.2.55 Phase A: overflow kebab ──────────────────── */
+  .kebab-wrap { position: relative; display: inline-flex; }
+  .btn.icon {
+    padding: 4px 6px;
+    min-width: 0;
+  }
+  .kebab-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 260px;
+    width: max-content;
+    max-width: 360px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.42);
+    z-index: 100;
+    padding: 4px;
+    display: flex; flex-direction: column; gap: 1px;
+  }
+  .kebab-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 10px;
+    background: transparent;
+    border: 0;
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    width: 100%;
+    white-space: nowrap;
+  }
+  .kebab-item > span:not(.kebab-check):not(.kebab-tag) {
+    flex: 1;
+    min-width: 0;
+  }
+  .kebab-item:hover:not(:disabled) { background: var(--bg-elev-2); }
+  .kebab-item:disabled { opacity: 0.45; cursor: not-allowed; }
+  .kebab-item.active { color: var(--accent); }
+  .kebab-check {
+    display: inline-flex;
+    width: 12px; height: 12px;
+    align-items: center; justify-content: center;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .kebab-tag {
+    margin-left: auto;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--fg-muted);
+  }
+  .kebab-tag.danger { background: var(--danger-soft); color: var(--danger); }
+  .kebab-tag.muted { opacity: 0.55; }
+  .kebab-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 2px;
+  }
+  .kebab-section-label {
+    padding: 4px 10px 2px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--fg-faint);
+  }
+
+  /* Combined sync button — primary CTA, replaces dual Pull/Push (v0.2.55) */
+  .sync-btn { gap: 6px; }
+  .sync-sub {
+    font-size: var(--fs-xs);
+    color: color-mix(in oklch, currentColor 70%, transparent);
+    font-variant-numeric: tabular-nums;
+    margin-left: 2px;
+  }
+
+  /* ── v0.2.55 Phase A: selection breakdown in footer ───── */
+  .sel-breakdown {
+    display: inline-flex; gap: 10px; align-items: center;
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .sel-breakdown .br {
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+  .sel-breakdown .br[data-tone="push"]   { color: var(--accent); }
+  .sel-breakdown .br[data-tone="pull"]   { color: var(--info); }
+  .sel-breakdown .br[data-tone="delete"] { color: var(--danger); }
+
+  /* ── v0.2.55 Phase A: empty-state subtitle + action ───── */
+  .empty-sub {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: var(--fs-xs);
+    color: var(--fg-faint);
+  }
+  .empty-sub .dotsep { opacity: 0.6; }
+  .empty-action {
+    margin-top: 10px;
+  }
 </style>

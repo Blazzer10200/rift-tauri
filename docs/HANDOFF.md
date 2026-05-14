@@ -2,62 +2,55 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 58 — 2026-05-14 — Terminal UI + Scaling Fixes
+## Session 59 — 2026-05-14 — v0.2.55-alpha Sync overhaul SHIPPED
+
+**Status: SHIPPED on main, Velopack tag `v0.2.55-alpha` live.**
 
 ### Completed
-- **Borderless maximize clipping** — Win32 8px invisible frame clipped close button + StatusBar. `AppShell` now toggles `body.win-maximized` via `getCurrentWindow().onResized()`; `app.css` adds `body.win-maximized { padding: 8px }`. `.shell` switched from `100vh/100vw` → `100%/100%`.
-- **Window resize content tracking** — `.middle` + `.body` lacked `min-width: 0`; `.body` grid used `1fr` not `minmax(0,1fr)`. Fixed both → content now reflows live with window edge. Also `TerminalPanel .term-panel` gets `min-width: 0`.
-- **HMR tab restore explosion** — `consumePendingRestore` re-ran on every hot reload, doubling tabs + persisting back to localStorage. Guard: `if (this.tabs.length > 0) return` bails early.
-- **Terminal Settings panel (P1)** — Full Settings → Terminal section: default shell, auto-launch, font size (styled slider), font family (custom dropdown), scrollback, cursor style/blink, bell (off/visual/sound), copy-on-select, right-click paste, theme preset grid (Rift/Dracula/Solarized Dark/Monokai/GitHub Dark). Reset button. All state persisted to localStorage in `terminal.svelte.ts`.
-- **Search addon (P2)** — `@xterm/addon-search`; `TerminalFindBar.svelte` (Ctrl+F, case/word/regex flags, match counter, Enter/Shift+Enter nav, Esc close). Per-tab SearchApi exposed via `onSearchReady` prop; panel holds Map.
-- **QoL (P3)** — Inline tab rename (dbl-click → input, persists as `customLabel`); drag-and-drop file → paste path (Tauri `onDragDropEvent`); Ctrl+Shift+`[`/`]` cycle tabs, Ctrl+Shift+T new tab; Eraser button sends `\x0c` (Ctrl+L) to clear stale buffer after resize.
-- **UI polish** — Replaced native `<select>` with custom Rift-themed dropdowns (dark menu, accent dot, purple focus ring). Fully-themed range slider (custom webkit/moz thumb). Number input spinners hidden. Switch a11y labels. `ts-group { overflow: hidden }` removed (was clipping menus) → top border-radius moved to title only.
+- **Pull/Push rescan-after-dispatch** — `pullAll`/`pushAll`/`applySelected`/`confirmMirrorApply` chain to `rescan()` not `refresh()`. Pushes no longer hidden after Pull all completes.
+- **Auto-scan on first connect** — `AppShell` $effect watches `connection.status.state` → fires `syncPage.maybeAutoScan(key)` once per server-key when watcher ready. Latch cleared on disconnect.
+- **One-button Sync (pull then push)** — replaced separate Pull/Push buttons w/ single primary `Sync (N↓ M↑)`. Sequences `sync_pull_pending` → 2.5s drain → `sync_push_pending` → 1.2s → rescan. Phase labels live (`Pulling…` / `Pushing…`). Conflicts + Mirror remote-deletes stay gated.
+- **Auto-rescan periodic** — kebab cycle `off→30s→1m→2m→5m→10m→off`, localStorage-persisted. Timer lives in AppShell (survives tab switches), gated busy/preview/disconnect. `$effect` cleanup tears down on toggle/interval change.
+- **Tab-switch flash fix** — dropped `{#key active}` + `in:fly`+`out:fade`. Lazy-mount + keep-alive: each page mounts once on first visit, `hidden` attr toggles visibility. No remount → no transition cascade → no flash. Inner re-keys (`settingsSection`, `selectedConflict`) preserved.
+- **Sync page reskin Phase A** — hero compacted to `[⋯][↻][Apply Mirror (cond)][Sync]`. Kebab w/ Mirror toggle / Auto-rescan / Sweep / Advanced (Pull-only, Push-only) / Design preview. Kebab anchored `right: 0` (was `left: 0` → viewport clip).
+- **Two-line entry rows** — path + size line 1, reason + relative mtime line 2. `formatSize`/`formatMtimeRel` helpers.
+- **Selection breakdown footer** — tone-tinted `2 push · 2 pull · 1 delete` replaces generic hint.
+- **Empty-state subtitle + ghost rescan** — Last scan + folder count + `Rescan now` button.
+- **Design preview fixture** — kebab toggle injects 9-entry fixture across 3 resources for UI review, dispatch gated.
 
 ### Key Decisions
-- Bell: xterm 5.5 removed `bellStyle` option — visual = CSS flash on `.term-wrap`; sound = manual `AudioContext` sine tone.
-- Search decorations use `--accent` + `--warn` vars resolved at spawn so presets swap live.
-- DnD routes to active tab only (not position-hit-tested per tab).
-
-### Next Steps
-1. Test maximize / resize / find / rename / DnD on the installed build.
-2. Queue item (h): connecting-pill desync fix when ready.
-3. v0.2.55 queue unchanged otherwise — see RESUME HERE below.
+- syncNow uses timing-based drain (2.5s) not event-driven — backend has no hard pull-complete signal yet. Refine later if tight in practice.
+- Auto-rescan opt-in default OFF — most users on a single-machine workflow don't need it. Teams w/ remote teammates flip it on.
+- Lazy-mount visited Set + `|| active === X` fallback covers same-render-frame race.
 
 ### Files Modified
-- `src/lib/components/AppShell.svelte`, `src/app.css`
-- `src/lib/components/terminal/Terminal.svelte`, `TerminalPanel.svelte`
-- `src/lib/components/terminal/TerminalFindBar.svelte` (new), `themePresets.ts` (new)
-- `src/lib/components/settings/Settings.svelte`
-- `src/lib/state/terminal.svelte.ts`
-- `package.json` (+`@xterm/addon-search`)
+- `src/lib/components/AppShell.svelte`, `src/lib/components/sync/SyncPage.svelte`
+- `src/lib/state/sync-page.svelte.ts`
+- Version bump THREE files: `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json` → 0.2.55-alpha
+
+### Next Steps
+1. Test installed build: tab switches (no flash), auto-rescan cycling, Sync button mid-flight, Preview toggle.
+2. v0.2.56 queue: connecting-pill desync (item h), EACCES auto-fix (item a), dry-run Mirror preview (item d), integration tests (item c), lib.rs split (item e).
 
 ---
 
+## Session 58 — 2026-05-14 — Terminal UI overhaul (shipped via S59 batch)
 
-## Session 57 — 2026-05-13 — v0.2.54-alpha SHIPPED (Trey onboarding hotfix)
+Terminal: borderless-max clip fix, window-resize reflow, HMR tab-explosion fix, Settings → Terminal panel (font/cursor/scrollback/bell/themes), `@xterm/addon-search` (Ctrl+F), QoL (inline rename, file-drop paste, Ctrl+Shift+[/]/T, clear button). Custom Rift-themed dropdowns + slider replace native `<select>`. Full detail: `git log -- docs/HANDOFF.md`.
 
-**Status: SHIPPED on main (`09c0a81`), Velopack tag `v0.2.54-alpha` live.** Cleanup branch merged.
+---
 
-Trey onboarding surfaced two blockers, both fixed + shipped same session:
+## Session 57 — 2026-05-13 — v0.2.54-alpha SHIPPED — see `git log -- docs/HANDOFF.md`
 
-1. **Fresh-install bootstrap** — `auto_sync::try_watch` was returning `Ok(false)` silently when per-folder local subdirs didn't exist, leaving fresh installs with `watches=0` and Sync page falsely showing "Everything in sync" against empty-local + populated-remote. Now: `mkdir_all`s the missing subdir when profile `local_root` exists, logs to diagnostics, attaches watcher normally. Profile `local_root` missing still bails (genuine config error). Drift scanner now sees remote tree → ToPull entries surface → Pull all works as documented in ONBOARDING.md.
-2. **Titlebar server-picker dropdown clipped** — `.left` had `overflow: hidden` for drag-region containment, which also clipped the dropdown menu vertically. Moved overflow constraint to child spans via `text-overflow: ellipsis` on `.svr-name` / `.svr-host`; dropdown renders unblocked. Defensive `z-index: 100→1000`.
-
-**Server-side check for Trey** — fully ready. Trey's SSH key active on both `/home/blazzer/.ssh/authorized_keys` AND `/home/treyday/.ssh/authorized_keys` (CT 120). `treyday` user (uid 1001) in `fxserver` group. All 4 chowned brackets clean (`drwxrwsr-x blazzer:fxserver`, zero root-owned, zero non-g+w). **HANDOFF v0.2.54 item (a) was already done** — `fxserver.service` already runs `User=fxserver Group=fxserver`, NOT root. Stale claim removed from queue.
-
-**Trey's profile** — use Tailscale host `100.122.178.19`, user `treyday`, remoteRoot `/opt/fxserver/server/txData/Qbox_F8F761.base/resources`. Bridge token optional (set `rift_bridge_token "3QeHEnvFAYJKJEdX3MNNX10ZPwnFJ6jr8jUvYX+uc38="` if wanted later, port 30120).
+Trey onboarding hotfix: fresh-install bootstrap (`try_watch` now `mkdir_all`s missing subdirs) + titlebar dropdown clip. Trey's profile: Tailscale host `100.122.178.19`, user `treyday`, remoteRoot `/opt/fxserver/server/txData/Qbox_F8F761.base/resources`.
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri. Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.54-alpha** SHIPPED (`09c0a81`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri. Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.55-alpha** SHIPPED. Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
-**FIRST ACTION:** confirm Trey auto-updated to 0.2.54 + completed initial Pull all. After Pull all completes, sync activity should be live both directions (his pushes land cleanly, your edits on `[endure]` brackets land on his next bg fetch).
+**v0.2.56 queue (carried from v0.2.55 minus shipped items):** (a) Rift-side EACCES auto-fix-perms affordance — detect "Permission denied" on create-tmp and surface a "Fix prod perms?" button that runs chown+chmod via existing SSH session; (b) auto-Mirror on detected rename only (when notify pairs `Name(From)+Name(To)` w/ matching basenames within debounce window, silent remote-delete; mysterious local-missing still requires typed confirm); (c) integration test suite phase 1 (10 mock-SFTP scenarios — needs SftpClient trait abstraction or testcontainers); (d) Dry-run Mirror preview pre-confirm; (e) `lib.rs` split (1747 L, 52 commands) — needs per-domain `commands/*.rs` design; (f) `reqwest` + `ureq` consolidation — blocked on velopack 0.0.1298's sync `UpdateSource`; (g) LocalPane/RemotePane shared-logic extraction; (h) connection.connecting pill desync from status.state — pill stuck "Connecting" while engine reports `watching`; add derived guard so `state in {watching,idle,syncing}` overrides `connecting`.
 
-**v0.2.55 queue (carried from v0.2.54 minus shipped items):** (a) Rift-side EACCES auto-fix-perms affordance — detect "Permission denied" on create-tmp and surface a "Fix prod perms?" button that runs chown+chmod via existing SSH session; (b) auto-Mirror on detected rename only (when notify pairs `Name(From)+Name(To)` w/ matching basenames within debounce window, silent remote-delete; mysterious local-missing still requires typed confirm); (c) integration test suite phase 1 (10 mock-SFTP scenarios — needs SftpClient trait abstraction or testcontainers); (d) Dry-run Mirror preview pre-confirm; (e) `lib.rs` split (1747 L, 52 commands) — needs per-domain `commands/*.rs` design; (f) `reqwest` + `ureq` consolidation — blocked on velopack 0.0.1298's sync `UpdateSource`; (g) LocalPane/RemotePane shared-logic extraction — pair w/ scan-frontend HIGH-sev stale-closure fixes; (h) connection.connecting pill desync from status.state — observed in Trey screenshot 2026-05-13 (pill stuck "Connecting" while engine reports `watching`); add derived guard so `state in {watching,idle,syncing}` overrides `connecting`.
-
-**Smaller queued:** mass-delete guard tune, Terminal Settings, Appearance controls.
-
-**Multi-user warning.** Trey is on a ~2wk stale Rift baseline. He auto-picks up v0.2.51-v0.2.53 on next Rift launch. Keep him OFF Mirror until he's on latest + has fresh-Pulled baseline.
+**Multi-user warning.** Trey: keep him OFF Mirror until he's on latest + fresh-Pulled baseline. v0.2.55 introduces auto-rescan (off by default) — safe for him to receive.
 
 **Don't reintroduce:** OpRail, TopBar (merged), rail kbd hints, StatusBar ⌘K pip, titlebar gear, StatusHero big H1, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design/Sync/Editor sections, `.btn.lg`/`.pill.warn`/`.vdivider` dead CSS, `bg-backlog.sh`, `diag_*` cmd names, `drift_watcher::spawn`/`run_tick`/`flush_cycle`.
 
