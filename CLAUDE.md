@@ -6,7 +6,7 @@
 
 Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Velopack updater wired. NSIS installer (perUser).
 
-Versions in lockstep: `package.json` + `src-tauri/Cargo.toml` (currently `0.2.4-alpha`).
+Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json`. Source of truth for current version: `docs/CHANGELOG.md` (don't hard-code in this file — went stale at v0.2.4 vs v0.2.48 reality before 2026-05-13 cleanup).
 
 ## Canonical paths
 
@@ -38,16 +38,16 @@ None exceed the 2000-line agent-split threshold yet, but `auto_sync.rs` and `sft
 
 ## Agent routing
 
+Only `operator` + `recon` are defined as local subagents. `architect` / `scout` / `verifier` were archived 2026-05-02 — use built-ins of the same name if needed, else inline.
+
 | Area / task | Default | Why |
 |---|---|---|
 | `sync/`, `sftp/` multi-file changes | **operator** | Coupled state across watcher + queue + transport |
 | `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `update_service.rs` | inline | All <400 lines, single-file edits typical |
-| Svelte/TS edits | inline + cclsp | LSP covers TS/JS — no agent needed |
-| Rust symbol lookup | inline + cclsp | LSP covers Rust |
+| Svelte/TS / Rust symbol lookup | inline + cclsp | LSP covers TS/JS/Rust |
 | "Where does X live" (LSP miss) | **recon** | Terse `path:line :: snippet` output |
-| IPC contract change (bridge ↔ Svelte) | **architect** | Genuinely ambiguous tradeoffs |
-| Tauri 2 / russh / Velopack docs lookup | **scout** if 3+ sources, else inline `WebFetch` | Batch threshold |
-| Spot-check `operator`/`recon` claims before acting | **verifier** | NOT for verifying my own output (Opus 4.7 self-verifies) |
+| IPC contract change, tradeoff calls | inline (or `Plan` skill for multi-track) | Built-in `architect` agent is available but heavyweight; usually inline reasoning is enough |
+| Tauri 2 / russh / Velopack docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
 
 ## Verification
 
