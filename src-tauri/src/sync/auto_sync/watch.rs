@@ -39,12 +39,26 @@ impl AutoSyncEngine {
         let local_root = std::path::Path::new(&self.profile.local_root)
             .join(spec.remote_subpath.replace('/', std::path::MAIN_SEPARATOR_STR));
         if !local_root.exists() {
+            let profile_root = std::path::Path::new(&self.profile.local_root);
+            if !profile_root.exists() {
+                self.log(&format!(
+                    "watch failed (profile local_root missing): {} -> {}",
+                    remote_root,
+                    local_root.display()
+                ));
+                return Ok(false);
+            }
+            if let Err(e) = std::fs::create_dir_all(&local_root) {
+                self.log(&format!(
+                    "watch failed (mkdir {}): {e}",
+                    local_root.display()
+                ));
+                return Ok(false);
+            }
             self.log(&format!(
-                "watch failed (local missing): {} -> {}",
-                remote_root,
+                "auto-created local folder for first-time bootstrap: {}",
                 local_root.display()
             ));
-            return Ok(false);
         }
         // Refuse to attach to ignored paths (e.g. `[disabled]/`).
         let probe = format!("{}{}", local_root.display(), std::path::MAIN_SEPARATOR);
