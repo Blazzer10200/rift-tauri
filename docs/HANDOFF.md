@@ -2,33 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 56 — 2026-05-13 — Repo cleanup pass (branch `cleanup/full-audit`)
+## Session 57 — 2026-05-13 — v0.2.54-alpha SHIPPED (Trey onboarding hotfix)
 
-**Status: BRANCH OPEN, NOT MERGED.** All work on `cleanup/full-audit`. Verify: `cargo check` clean, **46/46 backend tests pass**, **svelte-check 0/0 across 3996 files**, vitest 6/6 pass.
+**Status: SHIPPED on main (`09c0a81`), Velopack tag `v0.2.54-alpha` live.** Cleanup branch merged.
 
-**auto_sync.rs split executed** (codex-2026-05-12 item 10 deferred work). 2933 → 1954 lines (-33%). `try_watch` / `stop_watch` / `on_fs_event` / `queue_path` / `mark_recently_written` / `is_recently_written` moved to `sync/auto_sync/watch.rs` (327 L). `flush_batch` / `process_entry` / `process_entry_body` / `mark_failed` + `EntryResult` enum moved to `sync/auto_sync/flush.rs` (610 L). Submodule privacy gives access to parent's private fields w/o pub-shims. `path.rs` (160 L) untouched. Main `auto_sync.rs` keeps engine struct, start/stop, drift reconcile, force_pull/push, status surface, log helpers.
+Trey onboarding surfaced two blockers, both fixed + shipped same session:
 
-**Other cleanup (in order):** (a) `Releases/` pruned to last 2 versions — freed ~249 MB (gitignored, no commit); (b) `components.json` deleted (shadcn scaffold abandoned, aliases `$lib/components/ui` and `$lib/hooks` never existed); (c) 13 dead shadcn CSS aliases removed from `app.css` lines 76-90 (`--background`/`--card`/`--popover`/`--primary`/`--secondary`/`--destructive`/`--input`/+ foregrounds); kept `--muted` (used by `SyncPage.svelte:503`); (d) `@vitest/coverage-v8` removed from package.json devDeps (declared, never invoked); (e) `docs/audit/` consolidated — 8 stale audit files → `AUDIT-ARCHIVE.md` (resolved) + `AUDIT-OPEN.md` (still-outstanding); stale `DriftReview.svelte` refs dropped (file removed in `79f6fae`); (f) deleted `Releases/build-v0.2.45-alpha.log` stale log.
+1. **Fresh-install bootstrap** — `auto_sync::try_watch` was returning `Ok(false)` silently when per-folder local subdirs didn't exist, leaving fresh installs with `watches=0` and Sync page falsely showing "Everything in sync" against empty-local + populated-remote. Now: `mkdir_all`s the missing subdir when profile `local_root` exists, logs to diagnostics, attaches watcher normally. Profile `local_root` missing still bails (genuine config error). Drift scanner now sees remote tree → ToPull entries surface → Pull all works as documented in ONBOARDING.md.
+2. **Titlebar server-picker dropdown clipped** — `.left` had `overflow: hidden` for drag-region containment, which also clipped the dropdown menu vertically. Moved overflow constraint to child spans via `text-overflow: ellipsis` on `.svr-name` / `.svr-host`; dropdown renders unblocked. Defensive `z-index: 100→1000`.
 
-**Not done (explicit defer):** lib.rs split (1747 L, 52 commands) — needs per-domain `commands/*.rs` design; `reqwest` + `ureq` consolidation — blocked on velopack 0.0.1298's sync `UpdateSource`; LocalPane/RemotePane shared-logic extraction — pair w/ scan-frontend HIGH-sev stale-closure fixes.
+**Server-side check for Trey** — fully ready. Trey's SSH key active on both `/home/blazzer/.ssh/authorized_keys` AND `/home/treyday/.ssh/authorized_keys` (CT 120). `treyday` user (uid 1001) in `fxserver` group. All 4 chowned brackets clean (`drwxrwsr-x blazzer:fxserver`, zero root-owned, zero non-g+w). **HANDOFF v0.2.54 item (a) was already done** — `fxserver.service` already runs `User=fxserver Group=fxserver`, NOT root. Stale claim removed from queue.
 
-**Working tree:** `cleanup/full-audit` branch, unstaged. Next action: review diff, commit, optionally merge to main.
-
----
-
-## Session 55 — 2026-05-13 — v0.2.51 → v0.2.53 SHIPPED
-
-Three releases today: `d51e0c7` v0.2.53 (Mirror + auto-reconnect), `e29543c` v0.2.52 (notify-rs rename-event + state-machine + watched-root vanish poll), `b47fef9` v0.2.51 ("Disconnected" relabel hotfix). Velopack at `Blazzer10200/rift-releases`. Full per-version detail in `git log`. Prod-side: `[endure]`/`[ox]`/`[community]`/`[depend]` subdirs chowned `blazzer:fxserver drwxrwsr-x` — fxserver.service still runs as root, recurrence expected until v0.2.54 fxserver-user fix.
-
----
+**Trey's profile** — use Tailscale host `100.122.178.19`, user `treyday`, remoteRoot `/opt/fxserver/server/txData/Qbox_F8F761.base/resources`. Bridge token optional (set `rift_bridge_token "3QeHEnvFAYJKJEdX3MNNX10ZPwnFJ6jr8jUvYX+uc38="` if wanted later, port 30120).
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri. Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.53-alpha** SHIPPED (`d51e0c7`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri. Path `C:/AI Workflow/projects/rift-tauri/`. Version **v0.2.54-alpha** SHIPPED (`09c0a81`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
-**FIRST ACTION:** confirm Rift auto-updated to 0.2.53; verify push to any bracket works post-chmod (test with a small edit + save in `[endure]` + check Diagnostics for green sync rows, no red "create tmp" failures).
+**FIRST ACTION:** confirm Trey auto-updated to 0.2.54 + completed initial Pull all. After Pull all completes, sync activity should be live both directions (his pushes land cleanly, your edits on `[endure]` brackets land on his next bg fetch).
 
-**v0.2.54 queue:** (a) **Edit fxserver.service** on prod to `User=fxserver` + `Group=fxserver` — kills the chmod-recurrence root cause; (b) Rift-side EACCES auto-fix-perms affordance — detect "Permission denied" on create-tmp and surface a "Fix prod perms?" button that runs the chown+chmod via existing SSH session; (c) auto-Mirror on detected rename only (when notify pairs `Name(From)+Name(To)` w/ matching basenames within debounce window, silent remote-delete; mysterious local-missing still requires typed confirm); (d) integration test suite phase 1 (10 mock-SFTP scenarios — needs SftpClient trait abstraction or testcontainers); (e) Dry-run Mirror preview pre-confirm.
+**v0.2.55 queue (carried from v0.2.54 minus shipped items):** (a) Rift-side EACCES auto-fix-perms affordance — detect "Permission denied" on create-tmp and surface a "Fix prod perms?" button that runs chown+chmod via existing SSH session; (b) auto-Mirror on detected rename only (when notify pairs `Name(From)+Name(To)` w/ matching basenames within debounce window, silent remote-delete; mysterious local-missing still requires typed confirm); (c) integration test suite phase 1 (10 mock-SFTP scenarios — needs SftpClient trait abstraction or testcontainers); (d) Dry-run Mirror preview pre-confirm; (e) `lib.rs` split (1747 L, 52 commands) — needs per-domain `commands/*.rs` design; (f) `reqwest` + `ureq` consolidation — blocked on velopack 0.0.1298's sync `UpdateSource`; (g) LocalPane/RemotePane shared-logic extraction — pair w/ scan-frontend HIGH-sev stale-closure fixes; (h) connection.connecting pill desync from status.state — observed in Trey screenshot 2026-05-13 (pill stuck "Connecting" while engine reports `watching`); add derived guard so `state in {watching,idle,syncing}` overrides `connecting`.
 
 **Smaller queued:** mass-delete guard tune, Terminal Settings, Appearance controls.
 
