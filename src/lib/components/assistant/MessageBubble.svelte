@@ -75,6 +75,21 @@
       console.warn("copy failed", e);
     }
   }
+
+  // Tighten the resolved model id into a short human label.
+  //   claude-sonnet-4-6-20251001  → Sonnet 4.6
+  //   claude-opus-4-7[1m]         → Opus 4.7
+  //   claude-haiku-4-5            → Haiku 4.5
+  function shortModel(id: string): string {
+    const m = /claude-(opus|sonnet|haiku)-(\d+)-(\d+)/i.exec(id);
+    if (!m) return id;
+    const name = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+    return `${name} ${m[2]}.${m[3]}`;
+  }
+  const modelLabel = $derived(message.model ? shortModel(message.model) : null);
+  const costLabel = $derived(
+    typeof message.costUsd === "number" ? `$${message.costUsd.toFixed(4)}` : null,
+  );
 </script>
 
 <div class="bubble" data-role={message.role}>
@@ -89,6 +104,13 @@
   <div class="body">
     <div class="role-row">
       <span class="role-name">{isUser ? "You" : "Claude"}</span>
+      {#if !isUser && (modelLabel || costLabel)}
+        <span class="turn-badge" title="Model · per-turn cost">
+          {#if modelLabel}<span class="turn-model">{modelLabel}</span>{/if}
+          {#if modelLabel && costLabel}<span class="turn-sep">·</span>{/if}
+          {#if costLabel}<span class="turn-cost">{costLabel}</span>{/if}
+        </span>
+      {/if}
       {#if plainText.length > 0}
         <button class="copybtn" type="button" onclick={copy} title="Copy">
           {#if copied}
@@ -195,6 +217,23 @@
     font-weight: 600;
     color: var(--fg-2);
   }
+  .turn-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev-2));
+    border: 1px solid color-mix(in oklch, var(--accent) 14%, var(--border));
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  .turn-model { color: var(--fg-2); font-weight: 500; }
+  .turn-sep { color: var(--fg-faint); }
+  .turn-cost { color: var(--fg-muted); font-family: var(--font-mono, monospace); }
   .copybtn {
     opacity: 0;
     background: transparent;

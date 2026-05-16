@@ -61,6 +61,11 @@ export type ChatMessage = {
   id: string;
   role: "user" | "assistant";
   blocks: Block[];
+  /** Per-turn cost in USD captured from the CLI `result` envelope. Only set
+   *  on assistant messages after the turn completes. */
+  costUsd?: number | null;
+  /** Resolved model id captured from the CLI `system:init` envelope. */
+  model?: string | null;
 };
 
 export type ConversationMeta = {
@@ -181,6 +186,14 @@ class AssistantStore {
   // updated whenever the user opens, switches, or clears a folder. Empty
   // `current` falls back to AutoSync folders on the Rust side.
   workspace = $state<WorkspaceState>({ current: null, recent: [] });
+
+  // Cached relative file paths under the workspace root, populated on first
+  // `@` trigger and re-loaded whenever the workspace root changes. Drives the
+  // composer's `@`-file mention picker. Walk is cheap (~ms for typical FiveM
+  // resource folder) so we re-fetch on each open rather than invalidate via
+  // a watcher.
+  workspaceFiles = $state<string[]>([]);
+  workspaceFilesLoadingFor = $state<string | null>(null);
 
   composerDraft = $state("");
   // Outbound message queue. send() appends here if a turn is already
@@ -339,6 +352,7 @@ class AssistantStore {
   async setRoot(path: string) {
     try {
       this.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
+      this.workspaceFiles = [];
       this.lastNotice = `Workspace: ${path}`;
     } catch (e) {
       this.lastError = `Set workspace failed: ${String(e)}`;
@@ -348,6 +362,7 @@ class AssistantStore {
   async clearRoot() {
     try {
       this.workspace = await invoke<WorkspaceState>("assistant_clear_root");
+      this.workspaceFiles = [];
     } catch (e) {
       console.warn("assistant_clear_root failed", e);
     }
@@ -358,6 +373,23 @@ class AssistantStore {
       this.workspace = await invoke<WorkspaceState>("assistant_remove_recent_root", { path });
     } catch (e) {
       console.warn("assistant_remove_recent_root failed", e);
+    }
+  }
+
+  /** Lazy-load relative file paths under the current workspace root. Caches
+   *  per-root in `workspaceFiles`; concurrent calls are de-duped via the
+   *  `workspaceFilesLoadingFor` guard. */
+  async loadWorkspaceFiles() {
+    const root = this.workspace.current;
+    if (!root) { this.workspaceFiles = []; return; }
+    if (this.workspaceFilesLoadingFor === root) return;
+    this.workspaceFilesLoadingFor = root;
+    try {
+      this.workspaceFiles = await invoke<string[]>("assistant_list_workspace_files");
+    } catch (e) {
+      console.warn("assistant_list_workspace_files failed", e);
+    } finally {
+      this.workspaceFilesLoadingFor = null;
     }
   }
 
@@ -881,9 +913,24 @@ class AssistantStore {
           // CLI emits the cost FOR THIS RUN — accumulate across turns so
           // /cost reports the full session, not just the last turn.
           this.totalCostUsd = (this.totalCostUsd ?? 0) + env.total_cost_usd;
+          // Pin per-turn cost to the streaming assistant message so the
+          // bubble can render a tiny "$0.0042" pill next to "Claude".
+          const turnCost = env.total_cost_usd;
+          this.mutateStreaming((m) => ({ ...m, costUsd: turnCost }));
         }
         if (env.subtype && env.subtype !== "success") {
           this.lastError = `Run ended with subtype: ${env.subtype}`;
+        }
+        break;
+      }
+      case "system": {
+        // CLI emits a `{type:"system",subtype:"init",...,model:"..."}` line
+        // at the start of every spawn. Capture the resolved model id so the
+        // bubble's per-turn badge shows what actually ran (e.g. "sonnet" alias
+        // → "claude-sonnet-4-6").
+        const sysModel = typeof env.model === "string" ? env.model : null;
+        if (sysModel) {
+          this.mutateStreaming((m) => ({ ...m, model: sysModel }));
         }
         break;
       }
@@ -1006,11 +1053,13 @@ class AssistantStore {
         return true;
       case "tools":
         this.lastNotice =
-          "MCP tools (workspace-scoped, read-only): " +
-          "read_file(path) — UTF-8 ≤500KB; " +
-          "list_dir(path) — immediate children; " +
-          "grep(pattern, path?, glob?, case_insensitive?) — regex search, ≤200 hits. " +
-          "Plus TodoWrite for ≥3-step plans (surfaces in Tasks dock).";
+          "Tools available this turn: " +
+          "Read / Write / Edit (files); Bash (shell, in workspace cwd); " +
+          "Glob (filename patterns); Grep (content search); " +
+          "WebFetch / WebSearch (open web); " +
+          "TodoWrite (multi-step plans → Tasks dock). " +
+          "Rift MCP: read_file / list_dir / grep (workspace-scoped helpers)" +
+          (this.allowRemoteShell ? "; remote_bash (russh exec on the active SSH session)." : ".");
         return true;
       case "help":
         this.lastNotice =

@@ -14,9 +14,9 @@
     prompt: string;
   };
 
-  // Trimmed to 3 high-signal prompts. Quality > quantity. Each one works on
-  // any stack — no assumptions about FiveM, JS, Rust, Python, etc.
-  const suggestions: Suggestion[] = [
+  // Generic suggestions — work on any stack. Used as fallback when no
+  // distinctive workspace marker is detected.
+  const genericSuggestions: Suggestion[] = [
     {
       icon: FolderTree,
       title: "Map the project",
@@ -33,6 +33,45 @@
       prompt: "Pick the most important file in this project and walk me through what it does.",
     },
   ];
+
+  // FiveM/RedM-aware suggestions — surfaced when `fxmanifest.lua` is detected
+  // anywhere under the workspace root.
+  const fivemSuggestions: Suggestion[] = [
+    {
+      icon: FolderTree,
+      title: "List every event handler",
+      prompt: "Scan every resource under this workspace. List all RegisterNetEvent / AddEventHandler / on() handlers grouped by resource, with file:line.",
+    },
+    {
+      icon: Search,
+      title: "Find missing dependencies",
+      prompt: "Read every fxmanifest.lua. For each resource's declared dependencies, verify the dependency resource exists in this workspace. List any unresolved dependencies.",
+    },
+    {
+      icon: FileText,
+      title: "Show me the resource boot order",
+      prompt: "Walk through how this server boots: server.cfg start order if present, fxmanifest dependencies, and any explicit ensure() calls. Diagram the load chain.",
+    },
+  ];
+
+  function detectStack(files: readonly string[]): "fivem" | "generic" {
+    for (const f of files) {
+      const lower = f.toLowerCase();
+      if (lower === "fxmanifest.lua" || lower.endsWith("/fxmanifest.lua")) return "fivem";
+    }
+    return "generic";
+  }
+
+  // Kick off a workspace file walk lazily once the empty-state renders.
+  // Cheap (~ms) on typical FiveM resource folders; cached on the store.
+  $effect(() => {
+    if (assistant.workspace.current && assistant.workspaceFiles.length === 0) {
+      void assistant.loadWorkspaceFiles();
+    }
+  });
+
+  const stack = $derived(detectStack(assistant.workspaceFiles));
+  const suggestions = $derived(stack === "fivem" ? fivemSuggestions : genericSuggestions);
 
   function pick(prompt: string) {
     assistant.composerDraft = prompt;

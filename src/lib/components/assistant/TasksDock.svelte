@@ -70,6 +70,25 @@
     return n;
   }
 
+  // Edit-op diff rows: split old_string / new_string into a unified
+  // red/green list. Single-string-replace case — no context resolution.
+  type DiffRow = { kind: "del" | "add" | "meta"; text: string };
+  function editDiffRows(input: Record<string, unknown>): DiffRow[] | null {
+    const oldStr = typeof input.old_string === "string" ? input.old_string : null;
+    const newStr = typeof input.new_string === "string" ? input.new_string : null;
+    if (oldStr === null || newStr === null) return null;
+    const rows: DiffRow[] = [];
+    const replaceAll = input.replace_all === true;
+    if (replaceAll) rows.push({ kind: "meta", text: "replace_all: true" });
+    for (const line of oldStr.split("\n")) rows.push({ kind: "del", text: line });
+    for (const line of newStr.split("\n")) rows.push({ kind: "add", text: line });
+    return rows;
+  }
+  function isEditTool(name: string): boolean {
+    const sn = name.replace(/^mcp__rift__/, "");
+    return sn === "Edit";
+  }
+
   // Live elapsed timer — ticks every second while streaming.
   let nowTick = $state(Date.now());
   $effect(() => {
@@ -175,8 +194,31 @@
               </button>
               {#if isOpen}
                 <div class="op-body">
-                  <div class="op-field-label">input</div>
-                  <pre class="op-block">{JSON.stringify(t.input, null, 2)}</pre>
+                  {#if isEditTool(t.name)}
+                    {@const rows = editDiffRows(t.input)}
+                    {@const filePath = typeof t.input.file_path === "string" ? (t.input.file_path as string) : null}
+                    {#if rows}
+                      {#if filePath}
+                        <div class="op-field-label">file</div>
+                        <pre class="op-block">{filePath}</pre>
+                      {/if}
+                      <div class="op-field-label">diff</div>
+                      <div class="op-diff">
+                        {#each rows as r, ri (ri)}
+                          <div class="diff-row" data-kind={r.kind}>
+                            <span class="diff-sigil">{r.kind === "add" ? "+" : r.kind === "del" ? "-" : " "}</span>
+                            <span class="diff-text">{r.text || " "}</span>
+                          </div>
+                        {/each}
+                      </div>
+                    {:else}
+                      <div class="op-field-label">input</div>
+                      <pre class="op-block">{JSON.stringify(t.input, null, 2)}</pre>
+                    {/if}
+                  {:else}
+                    <div class="op-field-label">input</div>
+                    <pre class="op-block">{JSON.stringify(t.input, null, 2)}</pre>
+                  {/if}
                   <div class="op-field-label">{t.isError ? "error" : "result"}</div>
                   <pre class="op-block" class:error={t.isError}>{t.result ?? "(running…)"}</pre>
                 </div>
@@ -411,6 +453,52 @@
     border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
     color: oklch(0.88 0.07 22);
   }
+
+  .op-diff {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--font-mono, monospace);
+    font-size: 10px;
+    line-height: 1.45;
+    max-height: 240px;
+    overflow: auto;
+  }
+  .diff-row {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    padding: 0 4px;
+    border-left: 2px solid transparent;
+  }
+  .diff-sigil {
+    text-align: center;
+    color: var(--fg-faint);
+    user-select: none;
+    font-weight: 600;
+  }
+  .diff-text {
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--fg-2);
+  }
+  .diff-row[data-kind="del"] {
+    background: oklch(0.68 0.20 22 / 0.13);
+    border-left-color: oklch(0.68 0.20 22 / 0.55);
+  }
+  .diff-row[data-kind="del"] .diff-sigil { color: oklch(0.78 0.16 22); }
+  .diff-row[data-kind="del"] .diff-text { color: oklch(0.88 0.10 22); }
+  .diff-row[data-kind="add"] {
+    background: oklch(0.76 0.18 152 / 0.13);
+    border-left-color: oklch(0.76 0.18 152 / 0.55);
+  }
+  .diff-row[data-kind="add"] .diff-sigil { color: oklch(0.80 0.14 152); }
+  .diff-row[data-kind="add"] .diff-text { color: oklch(0.90 0.09 152); }
+  .diff-row[data-kind="meta"] {
+    color: var(--fg-muted);
+    font-style: italic;
+    padding: 1px 4px 3px;
+  }
+  .diff-row[data-kind="meta"] .diff-text { color: var(--fg-muted); }
 
   .cost-row {
     display: flex; justify-content: space-between; align-items: center;

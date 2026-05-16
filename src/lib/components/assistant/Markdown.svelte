@@ -72,7 +72,26 @@
   let { text }: { text: string } = $props();
 
   function onClick(e: MouseEvent) {
-    const a = (e.target as HTMLElement | null)?.closest("a") as HTMLAnchorElement | null;
+    const target = e.target as HTMLElement | null;
+    const copyBtn = target?.closest(".code-copy") as HTMLElement | null;
+    if (copyBtn) {
+      e.preventDefault();
+      const pre = copyBtn.closest("pre");
+      const code = pre?.querySelector("code");
+      const text = code?.textContent ?? "";
+      if (!text) return;
+      void navigator.clipboard.writeText(text).then(() => {
+        const prev = copyBtn.textContent;
+        copyBtn.classList.add("copied");
+        copyBtn.textContent = "Copied";
+        setTimeout(() => {
+          copyBtn.classList.remove("copied");
+          copyBtn.textContent = prev ?? "Copy";
+        }, 1200);
+      }).catch((err) => console.warn("copy failed", err));
+      return;
+    }
+    const a = target?.closest("a") as HTMLAnchorElement | null;
     if (!a) return;
     const href = a.getAttribute("href");
     if (!href || href.startsWith("#")) return;
@@ -107,6 +126,31 @@
       ul.remove();
     });
     return { html: tpl.innerHTML, items };
+  }
+
+  // Inject a tiny copy affordance into every fenced code block. The button
+  // lives inside the <pre> so we can position it absolutely top-right.
+  // Diff blocks are skipped — copying their gutter-laden HTML would yield
+  // mangled output, and the inline +/- coloring already conveys the change.
+  function annotateCodeBlocks(html: string): string {
+    if (typeof document === "undefined") return html;
+    if (!html.includes("<pre")) return html;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    tpl.content.querySelectorAll("pre").forEach((pre) => {
+      if (pre.classList.contains("diff-block")) return;
+      const code = pre.querySelector("code");
+      if (!code || (code.textContent ?? "").length === 0) return;
+      pre.classList.add("has-copy");
+      const btn = document.createElement("span");
+      btn.className = "code-copy";
+      btn.setAttribute("role", "button");
+      btn.setAttribute("tabindex", "0");
+      btn.setAttribute("aria-label", "Copy code");
+      btn.textContent = "Copy";
+      pre.insertBefore(btn, pre.firstChild);
+    });
+    return tpl.innerHTML;
   }
 
   // Tag flat short lists (e.g., 8 short filenames) so CSS can flow them
@@ -148,7 +192,7 @@
       ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open"],
     });
     const extracted = extractAndStripChecklists(clean);
-    return { html: tagFlatShortLists(extracted.html), items: extracted.items };
+    return { html: annotateCodeBlocks(tagFlatShortLists(extracted.html)), items: extracted.items };
   });
   const html = $derived(processed.html);
 
@@ -215,6 +259,40 @@
     padding: 0;
     font-size: inherit;
     color: var(--fg);
+  }
+
+  /* Code-block copy affordance. <span class="code-copy"> injected by
+     annotateCodeBlocks() — appears on hover of the parent <pre>. */
+  .md :global(pre.has-copy) { position: relative; }
+  .md :global(pre .code-copy) {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 2px 8px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    background: color-mix(in oklch, var(--bg-elev-2) 90%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    opacity: 0;
+    transition: opacity 140ms ease-out, color 120ms ease-out, background 120ms ease-out;
+  }
+  .md :global(pre:hover .code-copy),
+  .md :global(pre .code-copy:focus) { opacity: 1; }
+  .md :global(pre .code-copy:hover) {
+    color: var(--fg);
+    background: var(--bg-elev-2);
+  }
+  .md :global(pre .code-copy.copied) {
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    opacity: 1;
   }
 
   /* Lists — nuclear flatten. Marked emits loose lists w/ each <li>
