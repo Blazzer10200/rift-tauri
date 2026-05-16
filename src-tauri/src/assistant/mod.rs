@@ -189,6 +189,11 @@ struct AssistantConfig {
     /// `None` = default (true). Switch off for a sandboxed Assistant.
     #[serde(default)]
     use_full_config: Option<bool>,
+    /// Hard dollar cap per turn, passed as `--max-budget-usd <amount>`. The
+    /// CLI exits non-zero if exceeded — we surface the failure as a chat
+    /// notice. `None` or `<= 0` = no cap.
+    #[serde(default)]
+    max_budget_usd: Option<f64>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -468,6 +473,18 @@ pub fn assistant_set_use_full_config(value: bool) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn assistant_get_max_budget_usd() -> Result<Option<f64>, String> {
+    Ok(load_config().max_budget_usd.filter(|v| v.is_finite() && *v > 0.0))
+}
+
+#[tauri::command]
+pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.max_budget_usd = value.filter(|v| v.is_finite() && *v > 0.0);
+    save_config(&cfg)
+}
+
+#[tauri::command]
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
     let mut cfg = load_config();
     cfg.api_key = api_key.filter(|s| !s.is_empty());
@@ -534,13 +551,6 @@ pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, Stri
     Ok(workspace_state_from(&cfg))
 }
 
-/// A single chat turn replayed to the CLI as conversation history.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ChatTurn {
-    pub role: String, // "user" | "assistant"
-    pub text: String,
-}
-
 /// Rift's system-prompt addendum. Appended to the CLI's default system prompt
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
@@ -549,47 +559,24 @@ const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding 
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
-/// Assemble multi-turn context as a single text prompt. The CLI's `-p` flag
-/// takes one user message, so we replay history inline using the legacy
-/// Human:/Assistant: format that Anthropic models still understand. This
-/// avoids `--session-id` persistence which would litter the user's
-/// `~/.claude/projects/<cwd>/` directory with Rift-spawned sessions.
-fn build_prompt(history: &[ChatTurn], new_msg: &str) -> String {
-    let mut out = String::new();
-    for turn in history {
-        let label = match turn.role.as_str() {
-            "assistant" => "Assistant",
-            _ => "Human",
-        };
-        out.push_str("\n\n");
-        out.push_str(label);
-        out.push_str(": ");
-        out.push_str(&turn.text);
-    }
-    out.push_str("\n\nHuman: ");
-    out.push_str(new_msg);
-    out
-}
-
-/// Streaming round-trip with conversation history. Spawns `claude -p` over
-/// stdin, forwards stdout NDJSON line-by-line on `assistant://stream`. Wires
-/// the Rift MCP server (read_file / list_dir / grep) as the CLI's sole
-/// tool source via `--mcp-config` + `--allowed-tools mcp__rift__*`. When no
-/// AutoSync engine is running (user hasn't connected yet), we fall back to a
-/// no-tools turn and surface that in the system addendum.
+/// Streaming round-trip. Spawns `claude -p` over stdin, forwards stdout NDJSON
+/// line-by-line on `assistant://stream`. Phase 2 (S72) replaced hand-rolled
+/// `Human:/Assistant:` history replay with native CLI session continuation —
+/// `--session-id <uuid>` on first turn, `--resume <uuid>` on subsequent.
+/// Sessions persist under `~/.claude/projects/<cwd-hash>/`, which we accept
+/// as the trade for cheaper tokens + native context.
 #[tauri::command]
 pub async fn assistant_send(
     app: AppHandle,
     state: tauri::State<'_, crate::AutoSyncState>,
     prompt: String,
-    history: Option<Vec<ChatTurn>>,
+    session_id: String,
+    is_first_turn: bool,
     model: Option<String>,
 ) -> Result<(), String> {
     let cfg = load_config();
     let use_api_key = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
     let model = model.unwrap_or_else(|| "sonnet".to_string());
-    let history = history.unwrap_or_default();
-    let assembled = build_prompt(&history, &prompt);
 
     // Workspace root resolution — priority order:
     //   1. The user's explicitly-opened folder (`current_root` in config).
@@ -628,11 +615,11 @@ pub async fn assistant_send(
         }
     };
 
-    // Pipe the (multi-line) assembled prompt via stdin instead of `-p <arg>`.
-    // The CLI accepts prompt text on stdin when `-p` is bare; this keeps every
-    // arg short + newline-free so .cmd shims work under Rust 1.77+ batch
-    // validation (CVE-2024-24576). Addenda + MCP config path are single-line
-    // by design, so they're safe as args.
+    // Pipe the user's prompt via stdin instead of `-p <arg>`. The CLI accepts
+    // prompt text on stdin when `-p` is bare; this keeps every arg short and
+    // newline-free so .cmd shims work under Rust 1.77+ batch validation
+    // (CVE-2024-24576). Addenda + MCP config path are single-line by design,
+    // so they're safe as args.
     // "Piggyback" mode: drop the two fences so the CLI loads user MCP servers
     // (from `~/.claude.json`) and honors user slash commands. CLAUDE.md / hooks
     // / skills already load today via the CLI's own resolution regardless of
@@ -650,11 +637,23 @@ pub async fn assistant_send(
         .arg("--verbose")
         .arg("--include-partial-messages")
         .arg("--model").arg(&model)
-        .arg("--no-session-persistence")
         .arg("--permission-mode").arg("dontAsk")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // Session continuation: mint on first turn, resume thereafter. The CLI
+    // persists the conversation under `~/.claude/projects/<cwd-hash>/`; the
+    // user can clear it with `claude project purge` if needed.
+    if is_first_turn {
+        cmd.arg("--session-id").arg(&session_id);
+    } else {
+        cmd.arg("--resume").arg(&session_id);
+    }
+
+    if let Some(budget) = cfg.max_budget_usd.filter(|v| v.is_finite() && *v > 0.0) {
+        cmd.arg("--max-budget-usd").arg(format!("{budget}"));
+    }
 
     if !use_full_config {
         cmd.arg("--strict-mcp-config")
@@ -701,15 +700,20 @@ pub async fn assistant_send(
         cmd.env("MAX_THINKING_TOKENS", "10000");
     }
 
+    log::info!(
+        "assistant_send: spawn session_id={} first_turn={} model={} use_full_config={} mcp={} api_key={}",
+        session_id, is_first_turn, model, use_full_config, mcp_config_path.is_some(), use_api_key
+    );
+
     USER_STOPPED.store(false, Ordering::SeqCst);
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     set_current_pid(child.id());
 
-    // Write the assembled prompt to stdin, then close it so the CLI knows the
+    // Write the user's prompt to stdin, then close it so the CLI knows the
     // input stream is complete and starts streaming back.
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
-        if let Err(e) = stdin.write_all(assembled.as_bytes()).await {
+        if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
             return Err(format!("write prompt to stdin: {e}"));
         }
         drop(stdin); // EOF

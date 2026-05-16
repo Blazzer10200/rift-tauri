@@ -127,10 +127,14 @@
   let asstApiKeySaving = $state(false);
   let asstApiKeyMsg = $state<string | null>(null);
   let asstApiKeyVisible = $state(false);
+  let asstMaxBudgetDraft = $state<number | null>(null);
+  let asstMaxBudgetSaving = $state(false);
+  let asstMaxBudgetMsg = $state<string | null>(null);
   $effect(() => {
     if (section === "assistant") {
       void assistantStore.init();
       asstApiKeyDraft = assistantStore.apiKey ?? "";
+      asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
     }
   });
   async function saveAsstApiKey() {
@@ -143,6 +147,18 @@
       asstApiKeyMsg = `Failed: ${e}`;
     } finally {
       asstApiKeySaving = false;
+    }
+  }
+  async function saveAsstMaxBudget() {
+    asstMaxBudgetSaving = true;
+    asstMaxBudgetMsg = null;
+    try {
+      await assistantStore.setMaxBudgetUsd(asstMaxBudgetDraft);
+      asstMaxBudgetMsg = assistantStore.maxBudgetUsd != null ? `Saved: $${assistantStore.maxBudgetUsd.toFixed(2)} cap.` : "Cleared (no cap).";
+    } catch (e) {
+      asstMaxBudgetMsg = `Failed: ${e}`;
+    } finally {
+      asstMaxBudgetSaving = false;
     }
   }
 
@@ -545,6 +561,34 @@
               {/if}
             </span>
           </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Per-turn cost cap</h4>
+          <p class="muted">
+            Passes <code>--max-budget-usd</code> to the CLI. If a turn would exceed this dollar
+            amount, the CLI exits with an error and Rift surfaces it in the chat. Leave blank
+            (or set 0) for no cap.
+          </p>
+          <div class="asst-row">
+            <input
+              class="input mono asst-input"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="5.00"
+              bind:value={asstMaxBudgetDraft}
+            />
+            <button class="btn primary sm" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving}>
+              {asstMaxBudgetSaving ? "Saving…" : "Save"}
+            </button>
+            {#if assistantStore.maxBudgetUsd != null}
+              <button class="btn ghost sm" type="button" onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}>
+                Clear
+              </button>
+            {/if}
+          </div>
+          {#if asstMaxBudgetMsg}<p class="muted">{asstMaxBudgetMsg}</p>{/if}
         </div>
 
         <div class="card asst-card">
