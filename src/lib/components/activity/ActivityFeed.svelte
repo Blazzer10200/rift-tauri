@@ -456,7 +456,7 @@
             icon={ActivityIcon}
             tone="info"
             title="No activity yet"
-            hint="Sync, pull, and bridge events will appear here as they fire. Trigger a drift scan to see anything that's diverged."
+            hint="Sync, pull, and bridge events will appear here as they fire. Trigger a rescan to see anything that's diverged."
           >
             <button
               type="button"

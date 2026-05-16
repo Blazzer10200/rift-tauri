@@ -42,7 +42,20 @@ export type TextBlock = {
   text: string;
 };
 
-export type Block = TextBlock | ToolBlock;
+export type ThinkingBlock = {
+  type: "thinking";
+  // Plaintext reasoning if the API streamed it. Often empty in -p mode —
+  // Anthropic encrypts thinking content and only emits the signature, in
+  // which case we show duration + a "reasoning recorded" hint instead.
+  text: string;
+  // Encrypted signature blob received (presence flag — we don't render it).
+  hasSignature: boolean;
+  // Wall-clock duration of the reasoning step. Null while still active.
+  durationMs: number | null;
+  status: "active" | "done";
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock;
 
 export type ChatMessage = {
   id: string;
@@ -71,12 +84,27 @@ type ConversationRecord = {
 // Minimal stream-json envelope shape we care about.
 type ContentBlock =
   | { type: "text"; text: string }
+  | { type: "thinking"; thinking?: string; signature?: string }
   | { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean };
 
+type StreamDelta = {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  signature?: string;
+};
+
+type StreamEvent = {
+  type?: string;
+  index?: number;
+  content_block?: ContentBlock;
+  delta?: StreamDelta;
+};
+
 type StreamEnvelope =
   | { type: "system"; subtype?: string; [k: string]: unknown }
-  | { type: "stream_event"; event?: { type?: string; delta?: { type?: string; text?: string } }; [k: string]: unknown }
+  | { type: "stream_event"; event?: StreamEvent; [k: string]: unknown }
   | { type: "assistant"; message: { content: ContentBlock[] } }
   | { type: "user"; message: { content: ContentBlock[] } }
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
@@ -171,6 +199,22 @@ class AssistantStore {
   private streamingMsgId: string | null = null;
   private seenToolUseIds = new Set<string>();
   private dockAutoOpenedThisConvo = false;
+  // Per-turn delta/envelope reconciliation. `--include-partial-messages` is
+  // expected to stream text via stream_event text_deltas, but CLI version
+  // drift or short responses sometimes emit zero deltas and ship the full
+  // text only in the final `assistant` envelope. Without a fallback the
+  // bubble renders blank. Track delta count + buffer envelope text; on
+  // turn end, if no deltas arrived, flush the envelope buffer into the bubble.
+  private deltaCount = 0;
+  private envelopeTextBuffer = "";
+  private rawLineLog: string[] = [];
+  // Per-turn thinking tracking. `content_block_start`/`stop` carry an `index`
+  // identifying which block is open; we map that to the thinking block we
+  // pushed into the message so subsequent `thinking_delta` / `signature_delta`
+  // events land in the right place. `activeThinkingIndex` is the currently-
+  // open block's index, null when no thinking is in flight.
+  private thinkingByIndex = new Map<number, { blockOffset: number; startedAt: number }>();
+  private activeThinkingIndex: number | null = null;
 
   setModel(v: "sonnet" | "opus" | "haiku") {
     this.model = v;
@@ -432,6 +476,11 @@ class AssistantStore {
     this.lastError = null;
     this.lastNotice = null;
     this.seenToolUseIds.clear();
+    this.deltaCount = 0;
+    this.envelopeTextBuffer = "";
+    this.rawLineLog = [];
+    this.thinkingByIndex.clear();
+    this.activeThinkingIndex = null;
     this.activity = { currentLabel: null, turnStartedAt: Date.now() };
     // Track for /retry and Up-arrow recall. De-dupe consecutive identicals.
     if (this.promptHistory[this.promptHistory.length - 1] !== trimmed) {
@@ -454,6 +503,101 @@ class AssistantStore {
   private mutateStreaming(fn: (m: ChatMessage) => ChatMessage) {
     if (!this.streamingMsgId) return;
     this.messages = this.messages.map((m) => (m.id === this.streamingMsgId ? fn(m) : m));
+  }
+
+  private beginThinking(index: number) {
+    if (this.thinkingByIndex.has(index)) return;
+    this.activeThinkingIndex = index;
+    const startedAt = Date.now();
+    // Push a fresh thinking block into the current assistant message and
+    // remember its offset so subsequent deltas find it after other blocks
+    // are appended.
+    this.mutateStreaming((m) => {
+      const blocks = m.blocks.slice();
+      this.thinkingByIndex.set(index, { blockOffset: blocks.length, startedAt });
+      blocks.push({
+        type: "thinking",
+        text: "",
+        hasSignature: false,
+        durationMs: null,
+        status: "active",
+      });
+      return { ...m, blocks };
+    });
+    this.activity = { ...this.activity, currentLabel: "Thinking…" };
+  }
+
+  private mutateThinking(index: number, fn: (b: ThinkingBlock) => ThinkingBlock) {
+    const entry = this.thinkingByIndex.get(index);
+    if (!entry) return;
+    this.mutateStreaming((m) => {
+      const blocks = m.blocks.slice();
+      const target = blocks[entry.blockOffset];
+      if (target && target.type === "thinking") {
+        blocks[entry.blockOffset] = fn(target);
+      }
+      return { ...m, blocks };
+    });
+  }
+
+  private appendThinkingText(index: number, chunk: string) {
+    if (!chunk) return;
+    this.mutateThinking(index, (b) => ({ ...b, text: b.text + chunk }));
+  }
+
+  private markThinkingSignature(index: number) {
+    this.mutateThinking(index, (b) => (b.hasSignature ? b : { ...b, hasSignature: true }));
+  }
+
+  private endThinking(index: number) {
+    const entry = this.thinkingByIndex.get(index);
+    if (!entry) return;
+    const durationMs = Date.now() - entry.startedAt;
+    this.mutateThinking(index, (b) => ({ ...b, status: "done", durationMs }));
+    if (this.activeThinkingIndex === index) {
+      this.activeThinkingIndex = null;
+      // Don't clobber a tool label that may have come in between.
+      if (this.activity.currentLabel === "Thinking…") {
+        this.activity = { ...this.activity, currentLabel: null };
+      }
+    }
+  }
+
+  private ensureThinkingFromEnvelope(block: { thinking?: string; signature?: string }) {
+    // If a thinking block exists for the current message and is still empty,
+    // hydrate it from the envelope. Otherwise append a finalized one.
+    if (!this.streamingMsgId) return;
+    const msg = this.messages.find((m) => m.id === this.streamingMsgId);
+    if (!msg) return;
+    const existing = msg.blocks.find((b) => b.type === "thinking") as ThinkingBlock | undefined;
+    const envText = typeof block.thinking === "string" ? block.thinking : "";
+    const envSig = !!block.signature && block.signature.length > 0;
+    if (existing) {
+      if (envText.length > existing.text.length || (envSig && !existing.hasSignature)) {
+        this.mutateStreaming((m) => ({
+          ...m,
+          blocks: m.blocks.map((b) =>
+            b.type === "thinking" && b === existing
+              ? { ...b, text: envText.length > b.text.length ? envText : b.text, hasSignature: b.hasSignature || envSig }
+              : b,
+          ),
+        }));
+      }
+      return;
+    }
+    this.mutateStreaming((m) => ({
+      ...m,
+      blocks: [
+        ...m.blocks,
+        {
+          type: "thinking",
+          text: envText,
+          hasSignature: envSig,
+          durationMs: null,
+          status: "done",
+        },
+      ],
+    }));
   }
 
   private appendText(chunk: string) {
@@ -563,28 +707,65 @@ class AssistantStore {
   }
 
   private onStream(raw: string) {
+    // Ring-buffer raw lines so a blank-turn fallback or post-mortem can dump them.
+    if (this.rawLineLog.length >= 200) this.rawLineLog.shift();
+    this.rawLineLog.push(raw);
     let env: StreamEnvelope;
     try {
       env = JSON.parse(raw) as StreamEnvelope;
     } catch {
-      console.debug("assistant stream: non-JSON line", raw);
+      // Non-JSON line on stdout — happens when the CLI silently downgrades
+      // from stream-json to plain text (version/flag drift). Render it as
+      // assistant text so the bubble isn't blank. Increment deltaCount to
+      // suppress the envelope fallback in onDone().
+      if (this.streaming && this.streamingMsgId && raw.length > 0) {
+        const prefix = this.deltaCount > 0 ? "\n" : "";
+        this.deltaCount++;
+        this.appendText(prefix + raw);
+      } else {
+        console.debug("assistant stream: non-JSON line (idle)", raw);
+      }
       return;
     }
     switch (env.type) {
       case "stream_event": {
-        const d = env.event?.delta;
-        if (env.event?.type === "content_block_delta" && d?.type === "text_delta" && d.text) {
-          this.appendText(d.text);
+        const ev = env.event;
+        const evType = ev?.type;
+        const idx = typeof ev?.index === "number" ? ev.index : null;
+        if (evType === "content_block_start" && ev?.content_block?.type === "thinking" && idx !== null) {
+          this.beginThinking(idx);
+        } else if (evType === "content_block_delta") {
+          const d = ev?.delta;
+          if (d?.type === "text_delta" && d.text) {
+            this.deltaCount++;
+            this.appendText(d.text);
+          } else if (d?.type === "thinking_delta" && typeof d.thinking === "string" && idx !== null) {
+            this.appendThinkingText(idx, d.thinking);
+          } else if (d?.type === "signature_delta" && idx !== null) {
+            this.markThinkingSignature(idx);
+          }
+        } else if (evType === "content_block_stop" && idx !== null) {
+          this.endThinking(idx);
         }
         break;
       }
       case "assistant": {
         // Capture every tool_use block so its card renders before the
-        // tool_result arrives. Text blocks are already streamed via
-        // stream_event deltas, so we don't re-emit them here.
+        // tool_result arrives. Text blocks are normally streamed via
+        // stream_event deltas, but we also buffer their final text here as
+        // a fallback for when --include-partial-messages emits zero deltas
+        // (CLI version drift, certain short responses). Flushed in onDone()
+        // if deltaCount stayed 0.
         for (const block of env.message?.content ?? []) {
           if (block.type === "tool_use") {
             this.appendToolUse(block);
+          } else if (block.type === "text" && typeof block.text === "string") {
+            this.envelopeTextBuffer += block.text;
+          } else if (block.type === "thinking") {
+            // Final form of a thinking block. If we never saw stream events
+            // for it (e.g. older CLI w/o partial-message support for
+            // thinking), synthesize one now from the envelope alone.
+            this.ensureThinkingFromEnvelope(block);
           }
         }
         break;
@@ -619,6 +800,50 @@ class AssistantStore {
   }
 
   private onDone() {
+    // Fallback: zero text deltas this turn → CLI shipped full text only in
+    // the final assistant envelope. Flush it now so the bubble isn't blank.
+    if (this.deltaCount === 0 && this.envelopeTextBuffer.length > 0) {
+      this.appendText(this.envelopeTextBuffer);
+      console.debug(
+        `[assistant] envelope-fallback flushed ${this.envelopeTextBuffer.length} chars (zero deltas this turn)`,
+      );
+    } else if (this.deltaCount === 0 && this.envelopeTextBuffer.length === 0) {
+      // Genuinely blank turn — dump raw NDJSON to console AND surface to UI
+      // so the user doesn't need DevTools to diagnose. Skip if any tool calls
+      // fired (those are visible inline and a text-less assistant turn is valid).
+      const msg = this.streamingMsgId
+        ? this.messages.find((m) => m.id === this.streamingMsgId)
+        : null;
+      const hadTools = !!msg && msg.blocks.some((b) => b.type === "tool");
+      if (!hadTools) {
+        const lines = this.rawLineLog.slice();
+        console.warn(
+          "[assistant] turn ended with no text and no tools. Raw stream lines:",
+          lines,
+        );
+        // Pretty-print the envelope types we did see — a quick fingerprint of
+        // what the CLI emitted. Full lines are in console.
+        const types: string[] = [];
+        const nonJsonSamples: string[] = [];
+        for (const ln of lines) {
+          try {
+            const parsed = JSON.parse(ln) as { type?: string; subtype?: string };
+            types.push(parsed.subtype ? `${parsed.type}:${parsed.subtype}` : (parsed.type ?? "?"));
+          } catch {
+            types.push("non-json");
+            if (nonJsonSamples.length < 3) {
+              nonJsonSamples.push(ln.length > 240 ? ln.slice(0, 240) + "…" : ln);
+            }
+          }
+        }
+        const fingerprint = `[${types.join(", ")}]`;
+        const tail =
+          nonJsonSamples.length > 0
+            ? ` Non-JSON output: ${nonJsonSamples.map((s) => `"${s}"`).join(" | ")}`
+            : " Full NDJSON in DevTools console.";
+        this.lastError = `Blank response — CLI emitted ${lines.length} line(s): ${fingerprint}.${tail}`;
+      }
+    }
     this.streaming = false;
     this.streamingMsgId = null;
     this.seenToolUseIds.clear();

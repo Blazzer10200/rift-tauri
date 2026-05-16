@@ -26,9 +26,10 @@ Rift needs an OpenSSH ed25519 keypair to talk to your FXServer.
 
 ## 4. First sync
 
-- **Drift** tab → **Scan**. Shows what's different btw local + remote.
-- **Pull all** if local is empty. **Push all** if remote needs catching up. Otherwise resolve per-file.
-- **AutoSync** tab → **Start** once you're happy with the baseline. Local edits now stream up.
+- **Sync** tab (Ctrl+2). Drift auto-populates as soon as the connection is ready.
+- Click the **Sync** button to pull-then-push in one shot (the pull-before-push order rebases local against remote so push never dispatches against a stale baseline). Granular `Pull only` / `Push only` live under the `⋯` kebab.
+- Conflicts surface in the **Conflicts** tab (Ctrl+4); resolve per-file there.
+- Auto-rescan toggle (kebab → off / 30s / 1m / 2m / 5m / 10m) catches teammate pushes the local watcher can't see.
 
 ## 5. Updates
 
