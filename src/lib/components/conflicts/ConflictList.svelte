@@ -64,53 +64,39 @@
 </script>
 
 <aside class="list">
-  <header>
-    <h3>Conflicts</h3>
-    {#if connection.conflicts.length > 0}
-      <span class="count-pip danger">{connection.conflicts.length}</span>
-    {/if}
-  </header>
-  {#if connection.conflicts.length === 0}
-    <div class="empty">
-      <span class="empty-title">No conflicts</span>
-      <span class="empty-hint">Both sides agree — anything that diverges lands here.</span>
+  <div class="bulk-bar">
+    <span class="bulk-label">Resolve all <span class="bulk-count">({connection.conflicts.length})</span></span>
+    <div class="bulk-actions">
+      <button type="button" class="btn ghost sm warn" disabled={busy} onclick={() => bulkResolve("accept_remote")}>
+        Take Remote
+      </button>
+      <button type="button" class="btn ghost sm info" disabled={busy} onclick={() => bulkResolve("force_local")}>
+        Take Local
+      </button>
     </div>
-  {:else}
-    <div class="bulk-bar">
-      <span class="bulk-label">Resolve all <span class="bulk-count">({connection.conflicts.length})</span></span>
-      <div class="bulk-actions">
-        <button type="button" class="btn ghost sm warn" disabled={busy} onclick={() => bulkResolve("accept_remote")}>
-          Take Remote
-        </button>
-        <button type="button" class="btn ghost sm info" disabled={busy} onclick={() => bulkResolve("force_local")}>
-          Take Local
-        </button>
-      </div>
-    </div>
-    {#if bulkError}
-      <p class="bulk-error">{bulkError}</p>
-    {/if}
-    <div class="rows">
-      {#each connection.conflicts as c, i (c.local_path)}
-        <button
-          type="button"
-          class="row"
-          data-active={selected?.local_path === c.local_path}
-          onclick={() => onSelect(c)}
-          in:fly={rowIn(i)}
-          animate:flip={{ duration: reducedMotion ? 0 : 240 }}
-        >
-          <div class="row-head">
-            <AlertTriangle size={11} class="ico"/>
-            <span class="file mono">{basename(c.local_path)}</span>
-          </div>
-          <span class="resource mono">{c.resource_name}</span>
-          <span class="path mono dim" title={c.local_path}>{c.local_path}</span>
-        </button>
-      {/each}
-    </div>
+  </div>
+  {#if bulkError}
+    <p class="bulk-error">{bulkError}</p>
   {/if}
-  <p class="emptyhint help">New conflicts appear here in real time.</p>
+  <div class="rows">
+    {#each connection.conflicts as c, i (c.local_path)}
+      <button
+        type="button"
+        class="row"
+        data-active={selected?.local_path === c.local_path}
+        onclick={() => onSelect(c)}
+        in:fly={rowIn(i)}
+        animate:flip={{ duration: reducedMotion ? 0 : 240 }}
+      >
+        <div class="row-head">
+          <AlertTriangle size={11} class="ico"/>
+          <span class="file mono">{basename(c.local_path)}</span>
+        </div>
+        <span class="resource mono">{c.resource_name}</span>
+        <span class="path mono dim" title={c.local_path}>{c.local_path}</span>
+      </button>
+    {/each}
+  </div>
 </aside>
 
 <style>
@@ -122,20 +108,6 @@
     display: flex; flex-direction: column;
     min-height: 0;
   }
-  header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 10px 14px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-elev-1);
-  }
-  header h3 { margin: 0; font-size: var(--fs-sm); font-weight: 600; }
-  .empty {
-    padding: 28px 16px;
-    display: flex; flex-direction: column; gap: 4px;
-    align-items: center; text-align: center;
-  }
-  .empty-title { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
-  .empty-hint { color: var(--fg-muted); font-size: var(--fs-xs); max-width: 240px; line-height: 1.45; }
   .bulk-bar {
     display: flex; flex-direction: column; gap: 6px;
     padding: 8px 10px;
@@ -193,10 +165,5 @@
     font-size: var(--fs-xs);
     color: var(--fg-faint);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .emptyhint {
-    padding: 10px 14px;
-    border-top: 1px solid var(--border);
-    margin: 0;
   }
 </style>

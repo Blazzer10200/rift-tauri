@@ -200,6 +200,7 @@ body {
   50%      { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 14%, transparent); }
 }
 .pill.ok    { color: var(--ok);    background: var(--ok-soft);    border-color: color-mix(in oklch, var(--ok) 30%, transparent); }
+.pill.warn  { color: var(--warn);  background: var(--warn-soft);  border-color: color-mix(in oklch, var(--warn) 30%, transparent); }
 .pill.danger{ color: var(--danger);background: var(--danger-soft);border-color: color-mix(in oklch, var(--danger) 30%, transparent); }
 .pill.info  { color: var(--info);  background: var(--info-soft);  border-color: color-mix(in oklch, var(--info) 30%, transparent); }
 .pill.muted { color: var(--fg-muted); background: var(--bg-elev-2); border-color: var(--border); }

@@ -2,19 +2,17 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { connection, type ServerProfile, type ConflictRecord } from "../state/connection.svelte";
+  import { connection, type ServerProfile } from "../state/connection.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import TabRail from "./shell/TabRail.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
   import Settings from "./settings/Settings.svelte";
-  import StatusHero from "./StatusHero.svelte";
   import ActivityToast from "./ActivityToast.svelte";
   import TwoPane from "./browser/TwoPane.svelte";
   import ActivityFeed from "./activity/ActivityFeed.svelte";
   import SyncPage from "./sync/SyncPage.svelte";
   import Diagnostics from "./diagnostics/Diagnostics.svelte";
-  import ConflictList from "./conflicts/ConflictList.svelte";
-  import ConflictResolver from "./conflicts/ConflictResolver.svelte";
+  import ConflictsPage from "./conflicts/ConflictsPage.svelte";
   import AddServer from "./dialogs/AddServer.svelte";
   import Bootstrap from "./dialogs/Bootstrap.svelte";
   import Keygen from "./dialogs/Keygen.svelte";
@@ -23,16 +21,16 @@
   import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import TerminalPanel from "./terminal/TerminalPanel.svelte";
+  import AssistantPage from "./assistant/AssistantPage.svelte";
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
   import { syncPage } from "../state/sync-page.svelte";
 
-  type Tab = "browse" | "activity" | "sync" | "conflicts" | "settings" | "diagnostics";
-  type SettingsSection = "appearance" | "terminal" | "servers" | "keys" | "about";
+  type Tab = "browse" | "activity" | "sync" | "assistant" | "conflicts" | "settings" | "diagnostics";
+  type SettingsSection = "appearance" | "terminal" | "assistant" | "servers" | "keys" | "about";
 
   let active = $state<Tab>("browse");
   let settingsSection = $state<SettingsSection>("appearance");
-  let selectedConflict = $state<ConflictRecord | null>(null);
   // v0.2.55: lazy-mount + keep-alive — pages mount once on first visit
   // and stay mounted (hidden via `hidden` attr) on tab switch. Drops the
   // remount-flash where children re-ran onMount/transitions every switch.
@@ -57,13 +55,6 @@
     onResult: (ok: boolean) => void;
   }>({ open: false, title: "", body: "", isDanger: false, onResult: () => {} });
   let paletteOpen = $state(false);
-
-  $effect(() => {
-    const list = connection.conflicts;
-    if (selectedConflict && !list.some((c) => c.local_path === selectedConflict!.local_path)) {
-      selectedConflict = null;
-    }
-  });
 
   // v0.2.55: auto-scan drift the moment a server is ready. Fires once
   // per server-key per session (latch in syncPage). Drops the
@@ -117,11 +108,12 @@
     { id: "bootstrap", group: "Sync", title: "Bootstrap from remote…",
       subtitle: connection.selected ? `Pull missing files for ${connection.selected.name}` : "Connect a server first",
       run: () => openBootstrap() },
-    { id: "tab-browse",   group: "Go to", title: "Browser",  shortcut: "Ctrl+1", run: () => (active = "browse")   },
-    { id: "tab-activity", group: "Go to", title: "Activity", shortcut: "Ctrl+2", run: () => (active = "activity") },
-    { id: "tab-sync",     group: "Go to", title: "Sync",     shortcut: "Ctrl+3", run: () => (active = "sync")     },
+    { id: "tab-browse",   group: "Go to", title: "Files",    shortcut: "Ctrl+1", run: () => (active = "browse")   },
+    { id: "tab-sync",     group: "Go to", title: "Sync",     shortcut: "Ctrl+2", run: () => (active = "sync")     },
+    { id: "tab-assistant",group: "Go to", title: "Assistant",shortcut: "Ctrl+3", run: () => (active = "assistant")},
     { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
-    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+5", run: () => (active = "settings") },
+    { id: "tab-activity", group: "Go to", title: "Activity", shortcut: "Ctrl+5", run: () => (active = "activity") },
+    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+6", run: () => (active = "settings") },
     { id: "tab-diagnostics", group: "Go to", title: "Sync Inspector", subtitle: "Live diagnostics for the sync pipeline", shortcut: "Ctrl+Shift+D",
       run: () => (active = "diagnostics") },
     { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
@@ -215,9 +207,9 @@
     if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
     if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
-    if (/^[1-5]$/.test(e.key)) {
+    if (/^[1-6]$/.test(e.key)) {
       e.preventDefault();
-      const tab = (["browse", "activity", "sync", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
+      const tab = (["browse", "activity", "sync", "assistant", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
       active = tab;
     }
   }
@@ -366,10 +358,7 @@
     <main class="pane">
       {#if visited.has("browse") || active === "browse"}
         <div class="page-shell" hidden={active !== "browse"}>
-          <div class="browse-stack">
-            <StatusHero />
-            <TwoPane />
-          </div>
+          <TwoPane onAddServer={() => openAddServer(null)} />
         </div>
       {/if}
       {#if visited.has("activity") || active === "activity"}
@@ -382,21 +371,14 @@
           <SyncPage />
         </div>
       {/if}
+      {#if visited.has("assistant") || active === "assistant"}
+        <div class="page-shell" hidden={active !== "assistant"}>
+          <AssistantPage />
+        </div>
+      {/if}
       {#if visited.has("conflicts") || active === "conflicts"}
         <div class="page-shell" hidden={active !== "conflicts"}>
-          <div class="conflicts-pane">
-            <ConflictList
-              selected={selectedConflict}
-              onSelect={(c: ConflictRecord) => (selectedConflict = c)}
-            />
-            {#if selectedConflict}
-              {#key selectedConflict.local_path}
-                <ConflictResolver conflict={selectedConflict} />
-              {/key}
-            {:else}
-              <div class="placeholder"><h2>Conflicts</h2><p class="help">{connection.conflicts.length === 0 ? "No conflicts." : "Pick a conflict from the list."}</p></div>
-            {/if}
-          </div>
+          <ConflictsPage />
         </div>
       {/if}
       {#if visited.has("settings") || active === "settings"}
@@ -531,7 +513,8 @@
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: var(--rail-w, 48px) minmax(0, 1fr);
+    transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
     min-height: 0;
     min-width: 0;
     overflow: visible;
@@ -546,9 +529,4 @@
     flex: 1; min-height: 0; min-width: 0;
     display: flex; flex-direction: column;
   }
-  .conflicts-pane { display: flex; flex: 1; min-height: 0; }
-  .browse-stack { flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .placeholder { padding: 22px; color: var(--fg); overflow: auto; flex: 1; }
-  .placeholder h2 { margin: 0 0 8px; font-size: var(--fs-lg); font-weight: 600; }
-  .placeholder p { color: var(--fg-muted); font-size: var(--fs-md); margin: 4px 0; }
 </style>

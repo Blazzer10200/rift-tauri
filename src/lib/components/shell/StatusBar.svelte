@@ -53,28 +53,6 @@
     <span class="led" data-state={ledClass}></span>
     <span class="lbl">{connection.connecting ? "connecting" : stateText}</span>
   </button>
-  {#if locks > 0}
-    <div class="sep"></div>
-    <div class="grp" transition:fade={{ duration: 100 }}>
-      <Lock size={11}/>
-      <span class="lbl">locks</span>
-      <span class="mono val warn">{locks}</span>
-    </div>
-  {/if}
-  {#if queue > 0}
-    <div class="sep"></div>
-    <div class="grp" transition:fade={{ duration: 100 }}>
-      <span class="lbl">queued</span>
-      <span class="mono val warn">{queue}</span>
-    </div>
-  {/if}
-  {#if failed > 0}
-    <div class="sep"></div>
-    <div class="grp" transition:fade={{ duration: 100 }}>
-      <span class="lbl">errors</span>
-      <span class="mono val danger">{failed}</span>
-    </div>
-  {/if}
 
   {#if bgSync}
     {@const Icon = bgIcon}
@@ -94,10 +72,10 @@
 
   <div class="flex-spacer"></div>
 
-  {#if conflicts > 0}
-    <div class="grp" transition:fade={{ duration: 100 }}>
-      <span class="lbl">conflicts</span>
-      <span class="mono val danger">{conflicts}</span>
+  {#if locks > 0}
+    <div class="grp" title="Active lock files held by this client" transition:fade={{ duration: 100 }}>
+      <Lock size={11}/>
+      <span class="mono val warn">{locks}</span>
     </div>
   {/if}
 </div>
@@ -116,7 +94,6 @@
   .lbl { color: var(--fg-subtle); }
   .val { color: var(--fg-2); }
   .val.warn { color: var(--warn); }
-  .val.danger { color: var(--danger); }
   .sep { width: 1px; height: 12px; background: var(--border); }
   .flex-spacer { flex: 1; }
   .led {

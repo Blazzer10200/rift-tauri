@@ -5,6 +5,7 @@
 //! lives at the bottom of this file (`run()`'s `invoke_handler!`) and is the
 //! contract with the Svelte frontend.
 
+pub mod assistant;
 pub mod bootstrap;
 pub mod bridge;
 pub mod diagnostics;
@@ -1659,8 +1660,18 @@ pub fn run() {
 
     velopack::VelopackApp::build().run();
 
+    // Assistant α2: when launched by the Claude CLI as an MCP server (env
+    // RIFT_MCP_SERVER=1), serve JSON-RPC on stdio and skip Tauri entirely.
+    // assistant_send writes a temp MCP config that points the CLI at our own
+    // exe with that env set + RIFT_MCP_ROOTS describing the workspace scope.
+    if std::env::var_os("RIFT_MCP_SERVER").is_some() {
+        assistant::mcp_server::run_stdio();
+        return;
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
@@ -1741,6 +1752,19 @@ pub fn run() {
             terminal::term_resize,
             terminal::term_kill,
             terminal::term_default_cwd,
+            assistant::assistant_auth_probe,
+            assistant::assistant_get_api_key,
+            assistant::assistant_set_api_key,
+            assistant::assistant_send,
+            assistant::assistant_stop,
+            assistant::assistant_list_conversations,
+            assistant::assistant_load_conversation,
+            assistant::assistant_save_conversation,
+            assistant::assistant_delete_conversation,
+            assistant::assistant_get_workspace,
+            assistant::assistant_set_root,
+            assistant::assistant_clear_root,
+            assistant::assistant_remove_recent_root,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
