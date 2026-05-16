@@ -54,6 +54,103 @@
     });
   });
 
+  // ── `@`-file mention picker ────────────────────────────────────────────
+  // Triggers when the caret is just past an `@` token, e.g. `look at @sr|`
+  // matches but `you@example.com` does not (preceding char must be ws/start).
+  // Insert path as plain text — Claude resolves via Read tool from there.
+  type MentionState = { start: number; query: string };
+  function detectMention(): MentionState | null {
+    if (!ta) return null;
+    const draft = assistant.composerDraft;
+    const caret = ta.selectionStart ?? draft.length;
+    if (ta.selectionStart !== ta.selectionEnd) return null;
+    let i = caret - 1;
+    while (i >= 0) {
+      const ch = draft[i];
+      if (ch === "@") {
+        const prev = i === 0 ? " " : draft[i - 1];
+        if (!/\s/.test(prev) && i !== 0) return null;
+        return { start: i, query: draft.slice(i + 1, caret) };
+      }
+      if (/\s/.test(ch)) return null;
+      i--;
+    }
+    return null;
+  }
+  let mentionState = $state<MentionState | null>(null);
+  let mentionIdx = $state(0);
+  function refreshMention() {
+    mentionState = detectMention();
+    if (mentionState && assistant.workspaceFiles.length === 0) {
+      void assistant.loadWorkspaceFiles();
+    }
+  }
+  // Light fuzzy match with three tiers: literal substring in basename,
+  // fuzzy match in basename, fuzzy match anywhere. `Comp` against
+  // `lib/foo/Composer.svelte` should beat `compress.lua` because the match
+  // starts at the basename.
+  function fuzzyScore(path: string, query: string): number | null {
+    if (query.length === 0) return 0;
+    const p = path.toLowerCase();
+    const q = query.toLowerCase();
+    const basenameStart = p.lastIndexOf("/") + 1;
+    const basename = p.slice(basenameStart);
+    const subIdx = basename.indexOf(q);
+    if (subIdx !== -1) return 1000 - subIdx;
+    let pi = 0;
+    let firstHit = -1;
+    for (const ch of q) {
+      const found = basename.indexOf(ch, pi);
+      if (found === -1) { firstHit = -1; pi = -1; break; }
+      if (firstHit === -1) firstHit = found;
+      pi = found + 1;
+    }
+    if (pi !== -1 && firstHit >= 0) return 500 - firstHit;
+    pi = 0; firstHit = -1;
+    for (const ch of q) {
+      const found = p.indexOf(ch, pi);
+      if (found === -1) return null;
+      if (firstHit === -1) firstHit = found;
+      pi = found + 1;
+    }
+    return -firstHit;
+  }
+  const mentionResults = $derived.by(() => {
+    if (!mentionState) return [] as string[];
+    const q = mentionState.query;
+    const files = assistant.workspaceFiles;
+    if (q.length === 0) return files.slice(0, 12);
+    const scored: { path: string; score: number }[] = [];
+    for (const f of files) {
+      const s = fuzzyScore(f, q);
+      if (s !== null) scored.push({ path: f, score: s });
+      if (scored.length >= 800) break;
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 12).map((r) => r.path);
+  });
+  $effect(() => {
+    const _l = mentionResults.length;
+    void _l;
+    mentionIdx = 0;
+  });
+  function pickMention(path: string) {
+    if (!mentionState || !ta) return;
+    const draft = assistant.composerDraft;
+    const caret = ta.selectionStart ?? draft.length;
+    const before = draft.slice(0, mentionState.start);
+    const after = draft.slice(caret);
+    const insertion = `@${path} `;
+    assistant.composerDraft = before + insertion + after;
+    const newCaret = before.length + insertion.length;
+    mentionState = null;
+    void tick().then(() => {
+      ta?.focus();
+      ta?.setSelectionRange(newCaret, newCaret);
+      autosize();
+    });
+  }
+
   // Slash menu state. Triggers when the draft starts with `/` and the
   // textarea has focus. Filters by the text after the slash.
   // `modelPickerOpen` is a separate state that flips when /model is picked
@@ -120,12 +217,36 @@
   function resetRecall() { recallOffset = -1; }
 
   function onKey(e: KeyboardEvent) {
-    // History recall — only when neither menu is open and the textarea is
+    // Mention picker keys take precedence — runs before history recall so
+    // arrow keys navigate the list, not the prompt history.
+    if (mentionState && mentionResults.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        mentionIdx = (mentionIdx + 1) % mentionResults.length;
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        mentionIdx = (mentionIdx - 1 + mentionResults.length) % mentionResults.length;
+        return;
+      }
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault();
+        pickMention(mentionResults[mentionIdx]);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        mentionState = null;
+        return;
+      }
+    }
+    // History recall — only when no menu is open and the textarea is
     // either empty, or cursor is at position 0 (so plain Up in a multiline
     // draft still moves the caret normally).
     const empty = assistant.composerDraft.length === 0;
     const atStart = ta?.selectionStart === 0 && ta?.selectionEnd === 0;
-    if (!modelPickerOpen && !slashOpen && (empty || atStart)) {
+    if (!modelPickerOpen && !slashOpen && !mentionState && (empty || atStart)) {
       if (e.key === "ArrowUp") {
         const next = assistant.recallPrompt(recallOffset + 1);
         if (next !== null) {
@@ -269,6 +390,30 @@
       </div>
     {/if}
 
+    {#if mentionState && mentionResults.length > 0}
+      <div class="slash-menu mention-menu" role="listbox">
+        {#each mentionResults as path, i (path)}
+          {@const slash = path.lastIndexOf("/")}
+          {@const dir = slash > 0 ? path.slice(0, slash + 1) : ""}
+          {@const base = slash >= 0 ? path.slice(slash + 1) : path}
+          <button
+            type="button"
+            class="slash-item mention-item"
+            class:active={i === mentionIdx}
+            onmousedown={(e) => { e.preventDefault(); pickMention(path); }}
+          >
+            <span class="mention-base">{base}</span>
+            <span class="mention-dir">{dir}</span>
+          </button>
+        {/each}
+        <div class="slash-hint">
+          {assistant.workspaceFiles.length > 0
+            ? `${assistant.workspaceFiles.length} files · ↑↓ select · Tab/Enter pick · Esc cancel`
+            : "loading workspace files…"}
+        </div>
+      </div>
+    {/if}
+
     {#if modelPickerOpen}
       <div class="slash-menu model-menu" role="listbox">
         <div class="model-header">Select model</div>
@@ -297,7 +442,10 @@
       <textarea
         bind:this={ta}
         bind:value={assistant.composerDraft}
-        oninput={() => { resetRecall(); autosize(); }}
+        oninput={() => { resetRecall(); autosize(); refreshMention(); }}
+        onkeyup={refreshMention}
+        onclick={refreshMention}
+        onblur={() => { mentionState = null; }}
         onkeydown={onKey}
         placeholder={assistant.streaming
           ? "Type to queue another message — Enter sends, /stop halts"
@@ -570,6 +718,35 @@
     color: var(--fg);
     border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
   }
+
+  .mention-menu { max-height: 280px; }
+  .mention-item {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+    gap: 10px;
+    padding: 5px 10px;
+  }
+  .mention-base {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--fs-sm);
+    color: var(--fg);
+    font-weight: 500;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mention-dir {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--fs-xs);
+    color: var(--fg-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: right;
+  }
+  .mention-item.active .mention-base { color: var(--accent); }
 
   .model-menu .model-header {
     padding: 6px 10px 4px;

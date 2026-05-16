@@ -588,6 +588,49 @@ pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, Stri
     Ok(workspace_state_from(&cfg))
 }
 
+/// Enumerate file paths under the active workspace root, relative to the root,
+/// forward-slash normalized. Drives the composer's `@`-file mention picker.
+/// Skip set mirrors `mcp_server::SKIP_DIRS`. Capped at `MENTION_LIMIT` files.
+#[tauri::command]
+pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
+    const MENTION_LIMIT: usize = 4000;
+    const SKIP_DIRS: &[&str] = &[
+        "node_modules", ".git", ".svelte-kit", "build", "dist", "target",
+        ".rift-trail", ".rift-tmp", "__pycache__", ".venv", ".next",
+    ];
+    let cfg = load_config();
+    let root = match cfg.current_root {
+        Some(p) => p,
+        None => return Ok(Vec::new()),
+    };
+    let mut out = Vec::with_capacity(512);
+    for entry in walkdir::WalkDir::new(&root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            if e.depth() > 0 && e.file_type().is_dir() && SKIP_DIRS.contains(&name.as_ref()) {
+                return false;
+            }
+            true
+        })
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry.path().strip_prefix(&root).unwrap_or(entry.path());
+        out.push(rel.to_string_lossy().replace('\\', "/"));
+        if out.len() >= MENTION_LIMIT {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 /// Rift's system-prompt addendum. Appended to the CLI's default system prompt
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the

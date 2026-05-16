@@ -1771,6 +1771,7 @@ pub fn run() {
             assistant::assistant_set_root,
             assistant::assistant_clear_root,
             assistant::assistant_remove_recent_root,
+            assistant::assistant_list_workspace_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

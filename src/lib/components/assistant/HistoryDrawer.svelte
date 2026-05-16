@@ -1,15 +1,23 @@
 <script lang="ts">
-  import { History, X, Plus, Trash2, Pencil, Check, MessagesSquare } from "lucide-svelte";
+  import { History, X, Plus, Trash2, Pencil, Check, MessagesSquare, Search } from "lucide-svelte";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
 
   let renameId = $state<string | null>(null);
   let renameDraft = $state("");
   let confirmDeleteId = $state<string | null>(null);
+  let searchQuery = $state("");
+
+  const filteredConversations = $derived.by(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return assistant.conversations;
+    return assistant.conversations.filter((c) => c.title.toLowerCase().includes(q));
+  });
 
   function close() {
     assistant.ui.historyOpen = false;
     renameId = null;
     confirmDeleteId = null;
+    searchQuery = "";
   }
 
   function startRename(c: ConversationMeta) {
@@ -73,6 +81,23 @@
       </div>
     </header>
 
+    {#if assistant.conversations.length > 0}
+      <div class="search">
+        <Search size={12} />
+        <input
+          type="search"
+          placeholder="Filter by title…"
+          bind:value={searchQuery}
+          aria-label="Filter conversations"
+        />
+        {#if searchQuery}
+          <button class="search-clear" type="button" title="Clear" onclick={() => (searchQuery = "")}>
+            <X size={11} />
+          </button>
+        {/if}
+      </div>
+    {/if}
+
     <div class="list">
       {#if assistant.conversations.length === 0}
         <div class="empty">
@@ -80,8 +105,14 @@
           <p>No saved conversations yet.</p>
           <span class="hint">Send a message — it'll appear here automatically.</span>
         </div>
+      {:else if filteredConversations.length === 0}
+        <div class="empty">
+          <Search size={22} />
+          <p>No matches for "{searchQuery}".</p>
+          <span class="hint">Try a shorter query.</span>
+        </div>
       {:else}
-        {#each assistant.conversations as c (c.id)}
+        {#each filteredConversations as c (c.id)}
           <div
             class="row"
             class:active={c.id === assistant.currentConvoId}
@@ -205,6 +236,43 @@
     font-weight: 600;
   }
   .iconbtn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-fg); }
+
+  .search {
+    display: flex; align-items: center; gap: 6px;
+    margin: 8px 10px 4px;
+    padding: 5px 9px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--fg-faint);
+    transition: border-color 120ms, color 120ms;
+  }
+  .search:focus-within {
+    border-color: var(--accent);
+    color: var(--fg-muted);
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  .search input {
+    flex: 1; min-width: 0;
+    background: transparent;
+    border: 0; outline: none;
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+  }
+  .search input::placeholder { color: var(--fg-subtle); }
+  .search input::-webkit-search-cancel-button { appearance: none; }
+  .search-clear {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px;
+    background: transparent;
+    border: 0;
+    color: var(--fg-faint);
+    cursor: pointer;
+    border-radius: 50%;
+    padding: 0;
+  }
+  .search-clear:hover { background: var(--surface-hover); color: var(--fg); }
 
   .list {
     flex: 1; min-height: 0;
