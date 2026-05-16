@@ -109,6 +109,19 @@ type StreamEnvelope =
   | { type: "user"; message: { content: ContentBlock[] } }
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
 
+type RemoteLockEvt = {
+  file_path: string;
+  user: string;
+  host: string;
+  since: string;
+};
+
+type RemoteShellEvt = {
+  command: string;
+  remote_root: string;
+  at: string;
+};
+
 const MODEL_KEY = "rift.assistant.model";
 
 function loadModel(): "sonnet" | "opus" | "haiku" {
@@ -158,6 +171,10 @@ class AssistantStore {
   apiKey = $state<string | null>(null);
   useFullConfig = $state<boolean>(true);
   maxBudgetUsd = $state<number | null>(null);
+  allowRemoteShell = $state<boolean>(false);
+  remoteShellLockedByOther = $state<{ user: string; host: string; sinceMs: number } | null>(null);
+  remoteShellBannerSeen = $state<boolean>(false);
+  remoteShellLastEvent = $state<{ command: string; remoteRoot: string; at: string } | null>(null);
 
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
@@ -250,8 +267,51 @@ class AssistantStore {
     } catch (e) {
       console.warn("assistant_get_max_budget_usd failed", e);
     }
+    try {
+      this.allowRemoteShell = await invoke<boolean>("assistant_get_allow_remote_shell");
+    } catch (e) {
+      console.warn("assistant_get_allow_remote_shell failed", e);
+    }
+    try {
+      this.remoteShellBannerSeen = localStorage.getItem("rift.assistant.remoteShellBannerSeen") === "1";
+    } catch { /* localStorage unavailable in some test contexts */ }
+
+    this.unlistens.push(
+      await listen<RemoteLockEvt[]>("autosync://locks", (e) => this.onLocksUpdate(e.payload)),
+      await listen<RemoteShellEvt>("assistant://remote-shell-fired", (e) => this.onRemoteShellFired(e.payload)),
+    );
+
     await this.refreshConversations();
     await this.refreshWorkspace();
+  }
+
+  private onLocksUpdate(locks: RemoteLockEvt[]) {
+    const shell = locks.find((l) => l.file_path.endsWith("/.rift-shell"));
+    if (shell) {
+      const sinceMs = Date.parse(shell.since);
+      this.remoteShellLockedByOther = {
+        user: shell.user,
+        host: shell.host,
+        sinceMs: Number.isFinite(sinceMs) ? sinceMs : Date.now(),
+      };
+    } else {
+      this.remoteShellLockedByOther = null;
+    }
+  }
+
+  private onRemoteShellFired(evt: RemoteShellEvt) {
+    this.remoteShellLastEvent = {
+      command: evt.command,
+      remoteRoot: evt.remote_root,
+      at: evt.at,
+    };
+  }
+
+  ackRemoteShellBanner() {
+    this.remoteShellBannerSeen = true;
+    try {
+      localStorage.setItem("rift.assistant.remoteShellBannerSeen", "1");
+    } catch { /* same as above */ }
   }
 
   async refreshWorkspace() {
@@ -462,6 +522,11 @@ class AssistantStore {
     const v = value !== null && Number.isFinite(value) && value > 0 ? value : null;
     await invoke("assistant_set_max_budget_usd", { value: v });
     this.maxBudgetUsd = v;
+  }
+
+  async setAllowRemoteShell(value: boolean) {
+    await invoke("assistant_set_allow_remote_shell", { value });
+    this.allowRemoteShell = value;
   }
 
   async send(prompt: string) {

@@ -592,6 +592,34 @@
         </div>
 
         <div class="card asst-card">
+          <h4 class="asst-h4">Allow remote shell</h4>
+          <p class="muted">
+            Exposes <code>mcp__rift__remote_bash</code> to the model — runs commands on the
+            connected SSH server via the auto-sync engine's russh session. A workspace-scoped
+            advisory lock serializes calls between users. Off by default; flip on for ops
+            work (pm2, server status, log inspection).
+          </p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Allow remote shell"
+              aria-checked={assistantStore.allowRemoteShell}
+              data-on={assistantStore.allowRemoteShell}
+              onclick={() => void assistantStore.setAllowRemoteShell(!assistantStore.allowRemoteShell)}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if assistantStore.allowRemoteShell}
+                On — Claude can run shell commands against the connected remote.
+              {:else}
+                Off — remote_bash tool is hidden from the model.
+              {/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
           <h4 class="asst-h4">API-key fallback</h4>
           <p class="muted">Pay-per-token via <code>console.anthropic.com</code>. Used when configured; overrides the CLI session.</p>
           <div class="asst-row">

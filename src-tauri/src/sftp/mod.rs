@@ -39,7 +39,7 @@ use crate::transport::ssh_handler::PinningHandler;
 
 mod list;
 pub(crate) mod ops;
-mod remote_exec;
+pub(crate) mod remote_exec;
 mod transfer;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

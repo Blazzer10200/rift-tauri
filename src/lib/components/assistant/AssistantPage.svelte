@@ -49,6 +49,9 @@
 
   const needsAuth = $derived(assistant.auth?.pill === "red");
   const showEmpty = $derived(assistant.messages.length === 0);
+  const showRemoteShellBanner = $derived(
+    !assistant.remoteShellBannerSeen && assistant.remoteShellLastEvent !== null,
+  );
 </script>
 
 <div class="assistant">
@@ -72,6 +75,16 @@
               <button class="notice" type="button" onclick={() => assistant.dismissNotice()} title="Click to dismiss">
                 <span class="notice-icon">ℹ</span>
                 <span class="notice-text">{assistant.lastNotice}</span>
+              </button>
+            {/if}
+            {#if showRemoteShellBanner}
+              <button class="notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} title="Got it — don't show again">
+                <span class="notice-icon">⚡</span>
+                <span class="notice-text">
+                  Claude just ran a remote shell command on your server. It's gated by the
+                  Settings → Assistant → Allow remote shell toggle and a workspace-scoped
+                  lock so two users can't fire shell commands at once. Click to dismiss.
+                </span>
               </button>
             {/if}
           </div>

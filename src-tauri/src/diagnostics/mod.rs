@@ -26,6 +26,9 @@ use tokio::sync::broadcast;
 
 const BUS_CAPACITY: usize = 4096;
 const FRONTEND_RATE_PER_SEC: u32 = 200;
+/// Cap of the recent-events ring buffer. Sized to cover ~30s of activity at
+/// typical churn while staying small enough that snapshot reads don't matter.
+const RECENT_RING_CAP: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -109,6 +112,10 @@ pub struct DiagBus {
     bus_lag_total: AtomicU64,
     events_emitted_total: AtomicU64,
     enabled: AtomicBool,
+    /// Bounded ring of the most recent events. Pre-existing subscribers see
+    /// every event live; this is a passive cache so non-subscriber callers
+    /// (Assistant `WorkspaceContext` gather) can pull a snapshot synchronously.
+    recent: std::sync::Mutex<std::collections::VecDeque<DiagEvent>>,
 }
 
 impl DiagBus {
@@ -123,6 +130,9 @@ impl DiagBus {
             bus_lag_total: AtomicU64::new(0),
             events_emitted_total: AtomicU64::new(0),
             enabled: AtomicBool::new(true),
+            recent: std::sync::Mutex::new(std::collections::VecDeque::with_capacity(
+                RECENT_RING_CAP,
+            )),
         }
     }
 
@@ -152,10 +162,26 @@ impl DiagBus {
             }
             _ => {}
         }
+        if let Ok(mut ring) = self.recent.lock() {
+            if ring.len() >= RECENT_RING_CAP {
+                ring.pop_front();
+            }
+            ring.push_back(event.clone());
+        }
         // send() returns Err only when there are zero subscribers — that's
         // fine, we drop on the floor. Lag is reported through Receiver::recv
         // returning RecvError::Lagged on the consumer side.
         let _ = self.tx.send(event);
+    }
+
+    /// Snapshot of the most recent `n` events, newest first. Synchronous —
+    /// safe to call from any thread without subscribing to the broadcast.
+    pub fn recent_events(&self, n: usize) -> Vec<DiagEvent> {
+        self.recent
+            .lock()
+            .ok()
+            .map(|g| g.iter().rev().take(n).cloned().collect::<Vec<_>>())
+            .unwrap_or_default()
     }
 
     pub fn record_bus_lag(&self, n: u64) {
