@@ -2,46 +2,34 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 72 — 2026-05-16 — Phase 2 Session-ID + Native Resume
+## Session 73 — 2026-05-16 — Phase 3 Rift-Native Sprint
 
-**Committed mid-session, not shipped/bumped. Bundles into v0.2.57-alpha alongside S69–S71.** Roadmap: `docs/design/assistant-roadmap.md`.
+**Committed mid-session, not shipped/bumped. Bundles into v0.2.57-alpha alongside S69–S72.** Roadmap: `docs/design/assistant-roadmap.md` §3.
 
-**Replaced hand-rolled `Human:/Assistant:` history replay with native CLI session continuation.** Cheaper tokens (no full-history retransmit per turn), better prompt-cache reuse, unlocks `--max-budget-usd`. CDP-verified end-to-end: turn 1 "Remember my favorite color is teal. Reply OK." → "OK\n"; turn 2 "What is my favorite color?" → "teal\n". Continuity inherited via `--resume <uuid>`.
+**Three deliverables, one commit.** (a) per-turn `WorkspaceContext` addendum — live multi-writer state (foreign LockPresence locks, AutoSync queue, recent DiagBus events) spliced single-line onto `RIFT_SYSTEM_ADDENDUM_TOOLS` at spawn time. (b) `mcp__rift__remote_bash(command, timeout_secs?)` tool — exec over the auto-sync engine's live russh session via a loopback NDJSON bridge (`assistant/remote_bridge.rs`); env-gated by `RIFT_REMOTE_SHELL_ENABLED=1` so the tool is hidden from `tools/list` when the toggle is off. (c) Workspace-scoped advisory lock `<remote_root>/.rift-shell.rift-lock` — bridge acquires before exec, releases after; foreign holders surface as a "trey (4m)" pill in `AssistantHeader.svelte` via existing `autosync://locks` event.
 
-**Edits:**
-- `mod.rs`: deleted `ChatTurn` struct + `build_prompt` fn. `assistant_send` signature now takes `session_id: String` + `is_first_turn: bool` (no more `history`). Spawn passes `--session-id <uuid>` on first turn, `--resume <uuid>` thereafter. Dropped `--no-session-persistence` (was blocking resume). Added `--max-budget-usd <amount>` arg when config has a positive value. New `log::info!` on spawn captures session_id/first_turn/model/use_full_config/mcp/api_key for CDP-friendly verification. Stdin write switched from `assembled` to raw `prompt`.
-- `mod.rs`: `AssistantConfig.max_budget_usd: Option<f64>`. New cmds `assistant_get_max_budget_usd` + `assistant_set_max_budget_usd` (set filters `0` / negatives / non-finite to `None`).
-- `lib.rs`: registered the 2 new cmds.
-- `assistant.svelte.ts`: removed `messageText()` (only used for history). `send()` captures `isFirstTurn = !this.currentConvoId` BEFORE minting the UUID, then passes `{prompt, sessionId, isFirstTurn, model}`. No more history payload. Added `maxBudgetUsd` $state + init + `setMaxBudgetUsd` setter.
-- `Settings.svelte`: new `.asst-card` "Per-turn cost cap" with number input + Save/Clear; wired to `assistantStore.setMaxBudgetUsd`. Sits between use-full-config and api-key cards.
-
-**Open question resolved:** multi-user `~/.claude/projects/<cwd-hash>/` collision is non-issue — each user has their own `~/.claude/`, so Blazzer + Trey can't collide even on the same workspace cwd. CLI session file confirmed at `~/.claude/projects/C--AI-Workflow-projects-rift-tauri-scratch/49fe3e62-….jsonl` matching the minted UUID.
-
-**Roadmap correction:** `--max-turns` does NOT exist as a CLI flag (verified via `claude --help`); only `--max-budget-usd` shipped. Loaded-conversation edge case: if the CLI session is purged externally (`claude project purge`), `--resume` on that UUID fails — surfaced as chat error, no auto-recovery. Acceptable for Phase 2.
-
-**Phase 3 next session** (~1 focused session): the Rift-native moat. `WorkspaceContext` struct splicing live LockPresence foreign-locks + DiagBus recent events + drift counts into `RIFT_SYSTEM_ADDENDUM_TOOLS` per-turn. Remote-Bash MCP tool over russh exec channel (Settings toggle, default OFF; workspace-scoped advisory lock for concurrent users). See roadmap §3.
-
-## Session 71 — 2026-05-16 — Phase 1 Harness Pull-Through
-
-**Committed mid-session, not shipped/bumped. Bundles into v0.2.57-alpha alongside S69+S70.** Roadmap: `docs/design/assistant-roadmap.md`.
-
-**Probe verified live via CDP:** user's `~/.claude/CLAUDE.md` IS loaded by the CLI when Rift spawns it today, even with `--strict-mcp-config` + `--disable-slash-commands` + `--append-system-prompt`. Single-line canary string in CLAUDE.md echoed verbatim in assistant bubble. Hooks/skills/CLAUDE.md piggyback was already free; user slash commands + user MCPs were the only gaps.
+**Open question resolved:** CLI spawn is fresh per turn so the russh session can't live inside the MCP child. Solution = loopback TCP bridge (`127.0.0.1:<port>`, token-auth via env) that the MCP child dials per-call; the bridge reuses the AutoSync engine's `Arc<SftpClient>` (with its 20s keepalive loop) and `Arc<LockPresence>`. Cost: ~5ms loopback RTT per call vs ~500ms cold SSH dial.
 
 **Edits:**
-- `mod.rs`: `AssistantConfig.use_full_config: Option<bool>` (default true via `unwrap_or(true)`). Spawn-arg restructure — `--strict-mcp-config` + `--disable-slash-commands` now only fire when `!use_full_config` OR API-key mode (which already forces `--bare`). `--allowed-tools` becomes `…,mcp__*` in piggyback path so any user MCP tool the CLI merges in is admitted.
-- `lib.rs`: registered `assistant_get_use_full_config` + `assistant_set_use_full_config`.
-- `assistant.svelte.ts`: `useFullConfig` $state + init + setter.
-- `Settings.svelte`: new `.asst-card` "Use my full Claude Code config" with switch + status-copy that flips between "On — your CLAUDE.md, hooks, skills, slash commands, and MCPs are live." / "Off — sandboxed." / "Force-off while API-key mode is active". Switch disabled when `apiKey` set.
+- `sftp/remote_exec.rs`: `ExecOutput` struct + `SftpClient::exec_bash(command, timeout)`. Drains stdout/stderr/exit, 256KB cap per stream, `tokio::time::timeout` bound. Same drain-to-close pattern as `get_remote_sha1`.
+- `sync/lock_presence.rs`: `active_locks() -> Vec<RemoteLock>` snapshot getter on top of the existing poll cache.
+- `diagnostics/mod.rs`: 128-event ring buffer + `bus().recent_events(n)`. Synchronous, lock-free reads.
+- `assistant/remote_bridge.rs` (new): TCP listener on `127.0.0.1:0`, base64 token in `OnceLock<BridgeInfo>`. NDJSON dispatch for `remote_bash` (check foreign lock → acquire → exec → release → emit `assistant://remote-shell-fired`) and `shell_lock_status`.
+- `assistant/mod.rs`: `AssistantConfig.allow_remote_shell`, 2 new Tauri cmds, `gather_workspace_context()` async helper, addendum concat in `assistant_send`. `write_mcp_config` takes `bridge: Option<&BridgeInfo>` + `remote_shell_enabled: bool` and emits `RIFT_BRIDGE_PORT` / `RIFT_BRIDGE_TOKEN` / `RIFT_REMOTE_SHELL_ENABLED` into the MCP child env when on. Allowed-tools list adds `mcp__rift__remote_bash` in non-piggyback path.
+- `assistant/mcp_server.rs`: `tool_remote_bash()` + dispatch wiring. Blocking `TcpStream` to the bridge; conditional tool listing via `RIFT_REMOTE_SHELL_ENABLED`. Formatted output = `$ cmd / --- stdout --- / --- stderr --- / --- exit: N ---`.
+- `lib.rs`: 2 new cmds registered.
+- `Settings.svelte`: new `.asst-card` "Allow remote shell" with switch + status-copy. Sits between cost-cap and api-key cards.
+- `assistant.svelte.ts`: `allowRemoteShell` $state + setter + init. `autosync://locks` listener filters for `/.rift-shell` to drive `remoteShellLockedByOther` indicator. `assistant://remote-shell-fired` listener feeds `remoteShellLastEvent` for the first-fire banner. `localStorage` flag `rift.assistant.remoteShellBannerSeen` for dismiss.
+- `AssistantHeader.svelte`: `shell-lock` pill (warn-soft) when a foreign user is mid-exec.
+- `AssistantPage.svelte`: dismissible first-fire `.notice-shell` banner.
 
-**CDP-verified end-to-end:** aria-checked flips, status copy flips, `~/.rift/assistant/config.json` persists `use_full_config:true`, smoke prompt round-trips clean ("OK\n"). MCP server + allowed-tools chain still works under the new wildcard.
+**Verification:** `cargo check` + `npm run check` both clean (0 errors, 0 warnings). CDP smoke through dev: toggle persisted to `~/.rift/assistant/config.json` (`"allow_remote_shell": true`), Assistant tab renders 4 cards in expected order, fresh-spawn round-trip "Reply with exactly: OK" → "OK\n" succeeded with `remote_shell=true` in the spawn log. Full lock-spoofing + real-SSH exec verification gated on user-side server actions (workspace boundary trust model — Claude doesn't write remote files for verification).
 
-**Carried in same commit (pre-existing dirty since 04b3ffd checkpoint apparently missed them):** `Markdown.svelte` tagFlatShortLists pass, `MessageBubble.svelte` white-space fix, `TasksDock.svelte` summarize/icon coverage for 9 tools, `assistant.svelte.ts` parser-deny-list + `RIFT_SYSTEM_ADDENDUM_TOOLS` rewrite to "full Claude Code toolset" copy. All matched the roadmap's "shipped on main at handoff" inventory.
+**Phase 4 next session** (piecemeal): diff view in op-cards, per-message cost+model pill, `@`-file mention in composer, code-block copy buttons, conversation search, context-aware empty-state suggestions, stale `/tools` slash-notice copy fix. Each ships independently.
 
-**Phase 2 next session** (~half day): replace `build_prompt(history)` replay with native `--session-id <uuid>` first-turn + `--resume <uuid>` subsequent. Unlocks `--max-budget-usd` + `--max-turns` Settings. Verify multi-user `~/.claude/projects/<cwd-hash>/` collision before shipping.
+## Sessions 69-72 — 2026-05-15/16 — see git log (collapsed 2026-05-16 by S73)
 
-## Sessions 69 + 70 — 2026-05-15/16 — see git log (collapsed 2026-05-16)
-
-S69 fixed Assistant blank-response (cmd-shim mangling `--output-format`; resolver probes bundled `.exe` directly between LOCALAPPDATA + .cmd fallback) and surfaced extended-thinking blocks (animated "🧠 Thinking" pill → "Reasoned · 5.3s"; `MAX_THINKING_TOKENS=10000` env, non-haiku only). S70 shipped CDP autonomous-verify infra (`scripts/cdp/serve.cjs` + `c.sh`; WebView2 port 9222; Input.dispatchKeyEvent for trusted key events) and a 4-fix UX polish batch (ActivityFeed "rescan" copy, TabRail aria-label, Settings API-key Eye toggle, Appearance section hidden). All committed at 04b3ffd. Don't retry `--settings '{"thinking":...}'` / `--permission-mode plan` for thinking emission — only the env var works.
+S69 fixed Assistant blank-response (cmd-shim mangling `--output-format`) and added extended-thinking surface (`MAX_THINKING_TOKENS=10000` env). S70 shipped CDP autonomous-verify infra (`scripts/cdp/serve.cjs`, port 9223) + 4 polish fixes. S71 (Phase 1) wired `AssistantConfig.use_full_config` default ON — drops `--strict-mcp-config` + `--disable-slash-commands` so user MCPs + slash commands layer alongside Rift's; `--allowed-tools …,mcp__*` admits whatever the CLI merges in. S72 (Phase 2) replaced hand-rolled `Human:/Assistant:` history replay with native `--session-id <uuid>` (first turn) / `--resume <uuid>` (subsequent); `assistant_send` signature dropped `history`. `AssistantConfig.max_budget_usd: Option<f64>` + 2 cmds + Settings "Per-turn cost cap" card. All four sessions bundle into v0.2.57-alpha (next ship). `--max-turns` does not exist as a CLI flag; only `--max-budget-usd` shipped. Don't retry `--settings '{"thinking":...}'` / `--permission-mode plan` for thinking — only the env var works.
 
 ---
 

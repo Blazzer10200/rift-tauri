@@ -18,7 +18,9 @@
 //! mcp__rift__*` together guarantee these are the only tools Claude can call.
 
 use std::io::{self, BufRead, Write};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -284,6 +286,130 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     }
 }
 
+/// Whether the parent Rift process has enabled the remote-Bash tool for this
+/// MCP-child spawn. Set via `RIFT_REMOTE_SHELL_ENABLED=1` in the MCP env
+/// stanza written by `assistant::mod::write_mcp_config`. Gates both tool
+/// listing AND tool dispatch — so even if the model name-collides with a
+/// disabled tool, the call is rejected at the server side.
+fn remote_shell_enabled() -> bool {
+    std::env::var("RIFT_REMOTE_SHELL_ENABLED").as_deref() == Ok("1")
+}
+
+/// Dial the parent Tauri's loopback bridge and run a single `remote_bash`
+/// round-trip. Returns the formatted human-readable output (stdout + stderr +
+/// exit code) ready to hand to the model, or an error string. Blocking I/O
+/// because `run_stdio` is itself synchronous (one thread per MCP child).
+fn tool_remote_bash(args: &Value) -> Result<String, String> {
+    if !remote_shell_enabled() {
+        return Err("remote_bash is disabled — toggle 'Allow remote shell' on the Rift Assistant Settings page and restart the conversation".into());
+    }
+    let port_s = std::env::var("RIFT_BRIDGE_PORT")
+        .map_err(|_| "RIFT_BRIDGE_PORT not set on this MCP child".to_string())?;
+    let token = std::env::var("RIFT_BRIDGE_TOKEN")
+        .map_err(|_| "RIFT_BRIDGE_TOKEN not set on this MCP child".to_string())?;
+    let port: u16 = port_s
+        .parse()
+        .map_err(|e| format!("invalid RIFT_BRIDGE_PORT `{port_s}`: {e}"))?;
+
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .ok_or("missing `command`")?;
+    if command.trim().is_empty() {
+        return Err("`command` is empty".into());
+    }
+    let timeout_secs: u64 = args
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(60)
+        .clamp(1, 600);
+
+    let req = json!({
+        "op": "remote_bash",
+        "token": token,
+        "command": command,
+        "timeout_secs": timeout_secs,
+    });
+
+    let addr: SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| format!("bridge addr parse: {e}"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .map_err(|e| format!("bridge connect: {e}"))?;
+    // The bridge holds the connection open for the whole exec — read timeout
+    // covers the worst case (full exec duration + bridge overhead).
+    let read_to = Duration::from_secs(timeout_secs + 15);
+    let _ = stream.set_read_timeout(Some(read_to));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    let payload = format!("{}\n", req);
+    stream
+        .write_all(payload.as_bytes())
+        .map_err(|e| format!("bridge write: {e}"))?;
+    stream.flush().ok();
+
+    let mut reader = io::BufReader::new(&stream);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("bridge read: {e}"))?;
+
+    if line.trim().is_empty() {
+        return Err("bridge closed connection without a response".into());
+    }
+    let resp: Value = serde_json::from_str(line.trim())
+        .map_err(|e| format!("bridge parse: {e} (raw: {})", line.trim()))?;
+
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let msg = resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown bridge error");
+        return Err(msg.to_string());
+    }
+
+    let stdout_s = resp.get("stdout").and_then(|v| v.as_str()).unwrap_or("");
+    let stderr_s = resp.get("stderr").and_then(|v| v.as_str()).unwrap_or("");
+    let exit_code = resp.get("exit_code").and_then(|v| v.as_i64());
+    let truncated = resp
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let cmd_preview = command.lines().next().unwrap_or(command);
+    let cmd_preview = if cmd_preview.len() > 200 {
+        &cmd_preview[..200]
+    } else {
+        cmd_preview
+    };
+    let mut out = String::new();
+    out.push_str(&format!("$ {cmd_preview}\n"));
+    if !stdout_s.is_empty() {
+        out.push_str("--- stdout ---\n");
+        out.push_str(stdout_s);
+        if !stdout_s.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    if !stderr_s.is_empty() {
+        out.push_str("--- stderr ---\n");
+        out.push_str(stderr_s);
+        if !stderr_s.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out.push_str(&format!(
+        "--- exit: {} ---\n",
+        exit_code
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "?".into())
+    ));
+    if truncated {
+        out.push_str("(output truncated at 256 KB)\n");
+    }
+    Ok(out)
+}
+
 /// Tiny glob → regex compiler. Supports `*` (any, including `/`), `?` (one
 /// non-`/`), `**` (also any), and literal everything else. Sufficient for
 /// `*.rs`, `src/**/*.svelte` style patterns.
@@ -315,46 +441,59 @@ fn glob_to_regex(glob: &str) -> Result<regex::Regex, String> {
 // ─── JSON-RPC dispatch ─────────────────────────────────────────────────────
 
 fn tools_list_payload() -> Value {
-    json!({
-        "tools": [
-            {
-                "name": "read_file",
-                "description": "Read a UTF-8 text file from the user's Rift workspace. Path is absolute, or relative to the workspace root. Files larger than 500 KB are rejected — use grep to locate the specific section instead.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "File path (absolute or workspace-relative)." }
-                    },
-                    "required": ["path"]
-                }
-            },
-            {
-                "name": "list_dir",
-                "description": "List the immediate (non-recursive) contents of a directory in the user's Rift workspace. Returns one entry per line: directories suffixed with `/`, files with their byte size.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Directory path (absolute or workspace-relative)." }
-                    },
-                    "required": ["path"]
-                }
-            },
-            {
-                "name": "grep",
-                "description": "Search the user's Rift workspace for a regex pattern. Skips node_modules, .git, build/dist/target, and binary files. Returns up to 200 matches as `path:line: snippet`.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Regex pattern (Rust regex flavor, multiline mode on)." },
-                        "path": { "type": "string", "description": "Optional subdirectory to scope the search to. Defaults to the full workspace root." },
-                        "glob": { "type": "string", "description": "Optional glob to filter files, e.g. `*.rs` or `src/**/*.svelte`." },
-                        "case_insensitive": { "type": "boolean", "description": "Case-insensitive match. Defaults to false." }
-                    },
-                    "required": ["pattern"]
-                }
+    let mut tools = vec![
+        json!({
+            "name": "read_file",
+            "description": "Read a UTF-8 text file from the user's Rift workspace. Path is absolute, or relative to the workspace root. Files larger than 500 KB are rejected — use grep to locate the specific section instead.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "File path (absolute or workspace-relative)." }
+                },
+                "required": ["path"]
             }
-        ]
-    })
+        }),
+        json!({
+            "name": "list_dir",
+            "description": "List the immediate (non-recursive) contents of a directory in the user's Rift workspace. Returns one entry per line: directories suffixed with `/`, files with their byte size.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Directory path (absolute or workspace-relative)." }
+                },
+                "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "grep",
+            "description": "Search the user's Rift workspace for a regex pattern. Skips node_modules, .git, build/dist/target, and binary files. Returns up to 200 matches as `path:line: snippet`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "pattern": { "type": "string", "description": "Regex pattern (Rust regex flavor, multiline mode on)." },
+                    "path": { "type": "string", "description": "Optional subdirectory to scope the search to. Defaults to the full workspace root." },
+                    "glob": { "type": "string", "description": "Optional glob to filter files, e.g. `*.rs` or `src/**/*.svelte`." },
+                    "case_insensitive": { "type": "boolean", "description": "Case-insensitive match. Defaults to false." }
+                },
+                "required": ["pattern"]
+            }
+        }),
+    ];
+    if remote_shell_enabled() {
+        tools.push(json!({
+            "name": "remote_bash",
+            "description": "Run a shell command on the Rift-connected remote SSH server, reusing the auto-sync engine's live russh session. Output is bounded to 256 KB per stream; commands time out after `timeout_secs` (default 60, max 600). A workspace-scoped advisory lock serializes calls across users — if another user is mid-exec, the call returns an error and you should retry shortly. Use for ops work (server status, pm2 restart, git pull on the remote, log inspection); prefer the file-edit tools for content changes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "Shell command line. Runs in the remote user's default shell (bash). Quote arguments yourself." },
+                    "timeout_secs": { "type": "integer", "description": "Per-call timeout. Default 60, max 600.", "minimum": 1, "maximum": 600 }
+                },
+                "required": ["command"]
+            }
+        }));
+    }
+    json!({ "tools": tools })
 }
 
 fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
@@ -378,6 +517,7 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "read_file" => tool_read_file(&args, roots),
                 "list_dir" => tool_list_dir(&args, roots),
                 "grep" => tool_grep(&args, roots),
+                "remote_bash" => tool_remote_bash(&args),
                 other => Err(format!("unknown tool: {other}")),
             };
             match res {

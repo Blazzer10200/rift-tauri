@@ -11,6 +11,7 @@
 //! spawn with `--bare` + `ANTHROPIC_API_KEY` env so the CLI ignores OAuth.
 
 pub mod mcp_server;
+pub mod remote_bridge;
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -18,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -194,6 +196,12 @@ struct AssistantConfig {
     /// notice. `None` or `<= 0` = no cap.
     #[serde(default)]
     max_budget_usd: Option<f64>,
+    /// Gate for the `mcp__rift__remote_bash` tool. Off by default; flipping on
+    /// exposes a single remote-shell tool to the model, scoped to the active
+    /// AutoSync engine's russh session and workspace-locked against concurrent
+    /// users. `None` = default (false).
+    #[serde(default)]
+    allow_remote_shell: Option<bool>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -344,7 +352,16 @@ fn save_config(cfg: &AssistantConfig) -> Result<(), String> {
 /// branches to `mcp_server::run_stdio` instead of launching Tauri. Workspace
 /// roots are passed via `RIFT_MCP_ROOTS` (newline-separated) so the spawned
 /// child knows the path-safety boundary at request time.
-fn write_mcp_config(roots: &[PathBuf]) -> Result<PathBuf, String> {
+///
+/// S73: when `bridge` is `Some` AND `remote_shell_enabled` is true, the MCP
+/// child also gets `RIFT_BRIDGE_PORT` + `RIFT_BRIDGE_TOKEN` so its
+/// `remote_bash` tool can dial the parent Tauri's loopback bridge. The bridge
+/// itself reuses the AutoSync engine's live russh session for the exec.
+fn write_mcp_config(
+    roots: &[PathBuf],
+    bridge: Option<&remote_bridge::BridgeInfo>,
+    remote_shell_enabled: bool,
+) -> Result<PathBuf, String> {
     let home = dirs_home()?;
     let dir = home.join(".rift").join("assistant");
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir ~/.rift/assistant: {e}"))?;
@@ -357,15 +374,23 @@ fn write_mcp_config(roots: &[PathBuf]) -> Result<PathBuf, String> {
         .collect::<Vec<_>>()
         .join("\n");
 
+    let mut env_map = serde_json::Map::new();
+    env_map.insert("RIFT_MCP_SERVER".into(), Value::from("1"));
+    env_map.insert("RIFT_MCP_ROOTS".into(), Value::from(roots_joined));
+    if remote_shell_enabled {
+        if let Some(b) = bridge {
+            env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(b.port.to_string()));
+            env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(b.token.clone()));
+            env_map.insert("RIFT_REMOTE_SHELL_ENABLED".into(), Value::from("1"));
+        }
+    }
+
     let payload = serde_json::json!({
         "mcpServers": {
             "rift": {
                 "command": exe.to_string_lossy(),
                 "args": [],
-                "env": {
-                    "RIFT_MCP_SERVER": "1",
-                    "RIFT_MCP_ROOTS": roots_joined,
-                }
+                "env": Value::Object(env_map),
             }
         }
     });
@@ -485,6 +510,18 @@ pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn assistant_get_allow_remote_shell() -> Result<bool, String> {
+    Ok(load_config().allow_remote_shell.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn assistant_set_allow_remote_shell(value: bool) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.allow_remote_shell = Some(value);
+    save_config(&cfg)
+}
+
+#[tauri::command]
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
     let mut cfg = load_config();
     cfg.api_key = api_key.filter(|s| !s.is_empty());
@@ -559,6 +596,141 @@ const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding 
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
+/// Build a single-line per-turn addendum that describes the live AutoSync /
+/// LockPresence state — foreign locks held by other users, sync queue depth,
+/// recent DiagBus stage events. Concatenated onto `RIFT_SYSTEM_ADDENDUM_TOOLS`
+/// per turn so the model sees fresh multi-writer state. Returns an empty
+/// string when no AutoSync engine is active (no signal worth surfacing).
+async fn gather_workspace_context(state: &crate::AutoSyncState) -> String {
+    let engine = { state.0.lock().await.clone() };
+    let Some(engine) = engine else { return String::new(); };
+    let folders = engine.folders_clone();
+    if folders.is_empty() {
+        return String::new();
+    }
+    let status = engine.status().await;
+    let foreign: Vec<crate::sync::lock_presence::RemoteLock> = engine
+        .locks()
+        .map(|l| l.active_locks())
+        .unwrap_or_default();
+
+    let mut parts: Vec<String> = Vec::new();
+    parts.push("Workspace is multi-writer (concurrent collaborators may be editing the same files over SFTP).".into());
+
+    if foreign.is_empty() {
+        parts.push("No foreign edits currently in progress.".into());
+    } else {
+        let preview: Vec<String> = foreign
+            .iter()
+            .take(4)
+            .map(|l| {
+                let file = l
+                    .file_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&l.file_path)
+                    .to_string();
+                format!("{} on {} ({} ago)", l.user, file, rel_age(l.since))
+            })
+            .collect();
+        let more = if foreign.len() > preview.len() {
+            format!(" +{} more", foreign.len() - preview.len())
+        } else {
+            String::new()
+        };
+        parts.push(format!("Foreign edits in progress: {}{}.", preview.join(", "), more));
+    }
+
+    parts.push(format!(
+        "Sync queue: {} pending, {} failed, {} conflicts.",
+        status.pending, status.failed, status.conflicts
+    ));
+
+    let events = crate::diagnostics::bus().recent_events(20);
+    let event_summary = summarize_events(&events);
+    if !event_summary.is_empty() {
+        parts.push(format!("Recent sync activity: {}.", event_summary));
+    }
+
+    parts.push("If you read a file more than ~30 s ago, re-read before editing — another writer may have changed it.".into());
+
+    // Force single-line for the Rust 1.77 batch-arg validator (CVE-2024-24576).
+    let joined = parts.join(" ");
+    joined.replace('\n', " ").replace('\r', " ")
+}
+
+fn rel_age(when: chrono::DateTime<chrono::Utc>) -> String {
+    let secs = (chrono::Utc::now() - when).num_seconds().max(0);
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{}h", secs / 3600)
+    }
+}
+
+fn summarize_events(events: &[crate::diagnostics::DiagEvent]) -> String {
+    use crate::diagnostics::{DiagLevel, DiagStage};
+    let mut uploads_ok = 0usize;
+    let mut uploads_fail = 0usize;
+    let mut drift_scans = 0usize;
+    let mut conflicts = 0usize;
+    let mut pulls = 0usize;
+    let mut wedged = 0usize;
+    let mut last_log_err: Option<String> = None;
+    for ev in events {
+        match ev.stage {
+            DiagStage::UploadDone => uploads_ok += 1,
+            DiagStage::UploadFail => uploads_fail += 1,
+            DiagStage::DriftScanResult => drift_scans += 1,
+            DiagStage::RemotePullDone => pulls += 1,
+            DiagStage::ConnectionWedged => wedged += 1,
+            DiagStage::Log if matches!(ev.level, DiagLevel::Error | DiagLevel::Warn) => {
+                if last_log_err.is_none() {
+                    last_log_err = Some(ev.message.clone());
+                }
+            }
+            _ => {}
+        }
+        if matches!(
+            ev.stage,
+            DiagStage::DriftScanResult
+        ) && ev.message.to_lowercase().contains("conflict")
+        {
+            conflicts += 1;
+        }
+    }
+    let mut tokens: Vec<String> = Vec::new();
+    if uploads_ok > 0 {
+        tokens.push(format!("{uploads_ok} uploads ok"));
+    }
+    if uploads_fail > 0 {
+        tokens.push(format!("{uploads_fail} uploads failed"));
+    }
+    if pulls > 0 {
+        tokens.push(format!("{pulls} pulls ok"));
+    }
+    if drift_scans > 0 {
+        tokens.push(format!("{drift_scans} drift scans"));
+    }
+    if conflicts > 0 {
+        tokens.push(format!("{conflicts} conflicts"));
+    }
+    if wedged > 0 {
+        tokens.push(format!("{wedged} connection wedges"));
+    }
+    if let Some(msg) = last_log_err {
+        let trimmed = if msg.len() > 80 {
+            format!("{}\u{2026}", &msg[..80])
+        } else {
+            msg
+        };
+        tokens.push(format!("recent warn: {}", trimmed.replace('\n', " ")));
+    }
+    tokens.join(", ")
+}
+
 /// Streaming round-trip. Spawns `claude -p` over stdin, forwards stdout NDJSON
 /// line-by-line on `assistant://stream`. Phase 2 (S72) replaced hand-rolled
 /// `Human:/Assistant:` history replay with native CLI session continuation —
@@ -602,18 +774,47 @@ pub async fn assistant_send(
             .unwrap_or_default()
     };
 
-    // Provision a temp MCP config when we have at least one root.
-    let (mcp_config_path, addendum) = if roots.is_empty() {
-        (None, RIFT_SYSTEM_ADDENDUM_NO_WS)
+    // Remote-shell tool only fires when the user toggled it on AND the parent
+    // can stand up the loopback bridge. Bridge `start` is idempotent — first
+    // call binds the listener; later calls return the cached info.
+    let allow_remote_shell = cfg.allow_remote_shell.unwrap_or(false);
+    let bridge_info = if allow_remote_shell {
+        match remote_bridge::start(app.clone()).await {
+            Ok(info) => Some(info),
+            Err(e) => {
+                log::warn!("assistant: bridge start failed, remote_bash disabled: {e}");
+                None
+            }
+        }
     } else {
-        match write_mcp_config(&roots) {
-            Ok(p) => (Some(p), RIFT_SYSTEM_ADDENDUM_TOOLS),
+        None
+    };
+    let remote_shell_enabled = allow_remote_shell && bridge_info.is_some();
+
+    // Provision a temp MCP config when we have at least one root. Addendum is
+    // a `String` (not &'static str) so we can append per-turn workspace state.
+    let (mcp_config_path, mut addendum) = if roots.is_empty() {
+        (None, RIFT_SYSTEM_ADDENDUM_NO_WS.to_string())
+    } else {
+        match write_mcp_config(&roots, bridge_info.as_ref(), remote_shell_enabled) {
+            Ok(p) => (Some(p), RIFT_SYSTEM_ADDENDUM_TOOLS.to_string()),
             Err(e) => {
                 log::warn!("assistant: failed to provision MCP config, falling back to no-tools: {e}");
-                (None, RIFT_SYSTEM_ADDENDUM_NO_WS)
+                (None, RIFT_SYSTEM_ADDENDUM_NO_WS.to_string())
             }
         }
     };
+
+    // S73: splice live multi-writer state onto the addendum. Single-line so
+    // the .cmd-shim batch-arg validator (Rust 1.77+) accepts it.
+    let ws_ctx = gather_workspace_context(&state).await;
+    if !ws_ctx.is_empty() {
+        addendum.push(' ');
+        addendum.push_str(&ws_ctx);
+    }
+    if remote_shell_enabled {
+        addendum.push_str(" A `mcp__rift__remote_bash` tool is available — runs a shell command over SSH against the active remote server (reuses the auto-sync engine's russh session). Use sparingly for ops work (status checks, pm2 restart, etc.); a workspace-scoped advisory lock serializes calls between users.");
+    }
 
     // Pipe the user's prompt via stdin instead of `-p <arg>`. The CLI accepts
     // prompt text on stdin when `-p` is bare; this keeps every arg short and
@@ -661,11 +862,17 @@ pub async fn assistant_send(
     }
 
     if let Some(ref p) = mcp_config_path {
-        let allowed = if use_full_config {
+        // S73: when the remote-shell toggle is on, the explicit-named path adds
+        // `mcp__rift__remote_bash`. Piggyback already admits `mcp__*` so the
+        // tool is reachable there unconditionally — the gate is server-side
+        // (RIFT_REMOTE_SHELL_ENABLED env on the MCP child).
+        let allowed: &str = if use_full_config {
             // `mcp__*` admits any tool from user MCP servers that the CLI
             // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
             // via the explicit-name entries.
             "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,mcp__*"
+        } else if remote_shell_enabled {
+            "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__remote_bash"
         } else {
             "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep"
         };
@@ -701,8 +908,8 @@ pub async fn assistant_send(
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} use_full_config={} mcp={} api_key={}",
-        session_id, is_first_turn, model, use_full_config, mcp_config_path.is_some(), use_api_key
+        "assistant_send: spawn session_id={} first_turn={} model={} use_full_config={} mcp={} api_key={} remote_shell={}",
+        session_id, is_first_turn, model, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
     );
 
     USER_STOPPED.store(false, Ordering::SeqCst);

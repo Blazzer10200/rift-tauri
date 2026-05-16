@@ -1,4 +1,93 @@
 use super::*;
+use std::time::Duration;
+
+/// Captured output of an interactive remote command invocation.
+/// `truncated` is true when either stream hit `MAX_EXEC_OUTPUT_BYTES`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExecOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: Option<i32>,
+    pub truncated: bool,
+}
+
+const MAX_EXEC_OUTPUT_BYTES: usize = 256 * 1024;
+
+impl SftpClient {
+    /// Execute an arbitrary command over the live russh session; drain stdout +
+    /// stderr to bounded buffers, capture exit status, and bail with a typed
+    /// error on timeout. Wraps the same `channel_open_session → exec → drain`
+    /// pattern as `get_remote_sha1`, but exposed for remote-Bash use.
+    pub async fn exec_bash(
+        &self,
+        command: &str,
+        timeout: Duration,
+    ) -> Result<ExecOutput, String> {
+        let channel = self
+            .handle
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("open channel: {e}"))?;
+        channel
+            .exec(true, command)
+            .await
+            .map_err(|e| format!("exec: {e}"))?;
+        let mut chan = channel;
+
+        let mut out: Vec<u8> = Vec::new();
+        let mut err: Vec<u8> = Vec::new();
+        let mut exit_code: Option<i32> = None;
+        let mut truncated = false;
+
+        let drain = async {
+            // Drain to channel close, NOT to ExitStatus — SSH does not order
+            // ExitStatus after final Data. Breaking early can truncate output.
+            while let Some(msg) = chan.wait().await {
+                match msg {
+                    russh::ChannelMsg::Data { data } => {
+                        if out.len() + data.len() > MAX_EXEC_OUTPUT_BYTES {
+                            let room = MAX_EXEC_OUTPUT_BYTES.saturating_sub(out.len());
+                            out.extend_from_slice(&data[..room]);
+                            truncated = true;
+                        } else {
+                            out.extend_from_slice(&data);
+                        }
+                    }
+                    russh::ChannelMsg::ExtendedData { data, ext: 1 } => {
+                        if err.len() + data.len() > MAX_EXEC_OUTPUT_BYTES {
+                            let room = MAX_EXEC_OUTPUT_BYTES.saturating_sub(err.len());
+                            err.extend_from_slice(&data[..room]);
+                            truncated = true;
+                        } else {
+                            err.extend_from_slice(&data);
+                        }
+                    }
+                    russh::ChannelMsg::ExitStatus { exit_status } => {
+                        exit_code = Some(exit_status as i32);
+                    }
+                    _ => {}
+                }
+            }
+        };
+
+        match tokio::time::timeout(timeout, drain).await {
+            Ok(()) => {}
+            Err(_) => {
+                return Err(format!(
+                    "remote command timed out after {}s",
+                    timeout.as_secs()
+                ));
+            }
+        }
+
+        Ok(ExecOutput {
+            stdout: String::from_utf8_lossy(&out).into_owned(),
+            stderr: String::from_utf8_lossy(&err).into_owned(),
+            exit_code,
+            truncated,
+        })
+    }
+}
 
 impl SftpClient {
     pub async fn heal_owned_dirs(&self, root: &str) {

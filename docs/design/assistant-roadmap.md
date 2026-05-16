@@ -36,9 +36,7 @@ Workspace boundary trust model — Claude can write/edit/Bash without per-call c
 
 **Caveat:** the CLI persists sessions under `~/.claude/projects/<cwd-hash>/`. Multi-user collision: when both Blazzer and Trey work in the same `cwd`, do their session IDs collide? They shouldn't (UUID-keyed), but verify. Also: `claude project purge` exists if cleanup is needed.
 
-**Wire `--max-budget-usd`** as a Settings option (default 5.00 USD/turn) — Claude exits with error if exceeded. Surface as a tasteful "limit hit" notice with retry button.
-
-**Wire `--max-turns`** as a Settings option (default 50) — guards against runaway agentic loops.
+**Wire `--max-budget-usd`** as a Settings option — Claude exits with error if exceeded. Surface as a tasteful "limit hit" notice with retry button. (`--max-turns` was in an earlier draft of this doc; S72 found it doesn't actually exist as a flag in the current CLI — only `--max-budget-usd` shipped.)
 
 **Verify via CDP:** fire turn 1, fire turn 2 referring to turn 1's context, check the response shows continuity. Backend: log the spawn args, confirm `--resume <uuid>` is on turn 2.
 

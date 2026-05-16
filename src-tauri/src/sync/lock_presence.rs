@@ -138,6 +138,18 @@ impl LockPresence {
             .and_then(|g| g.get(remote_file).cloned())
     }
 
+    /// Snapshot of currently-known foreign locks across the watched roots.
+    /// Sourced from the poll cache; refreshed every POLL_INTERVAL_MS. Used by
+    /// the Assistant `WorkspaceContext` addendum to surface multi-writer state
+    /// in the system prompt.
+    pub fn active_locks(&self) -> Vec<RemoteLock> {
+        self.active_by_path
+            .read()
+            .ok()
+            .map(|g| g.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
     pub async fn acquire(&self, remote_file: &str) {
         if self.disposed.load(Ordering::SeqCst) || remote_file.is_empty() {
             return;

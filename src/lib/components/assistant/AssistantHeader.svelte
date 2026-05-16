@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X } from "lucide-svelte";
+  import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
   function leafName(p: string): string {
@@ -7,6 +7,15 @@
     const parts = norm.split("/");
     return parts[parts.length - 1] || norm;
   }
+
+  function shortAgo(sinceMs: number): string {
+    const sec = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+    return `${Math.floor(sec / 3600)}h`;
+  }
+
+  const foreignShell = $derived(assistant.remoteShellLockedByOther);
 
   // Auth status surfaces here ONLY when degraded — green/healthy state is
   // implicit (no clutter). The model name lives in the composer pill, not
@@ -78,6 +87,16 @@
       >
         <span class="dot"></span>
         <span>{authWarn.text}</span>
+      </span>
+    {/if}
+
+    {#if foreignShell}
+      <span
+        class="shell-lock"
+        title={`${foreignShell.user}@${foreignShell.host} is running a remote command`}
+      >
+        <TerminalSquare size={11}/>
+        <span>{foreignShell.user} ({shortAgo(foreignShell.sinceMs)})</span>
       </span>
     {/if}
 
@@ -177,6 +196,17 @@
     background: color-mix(in oklch, var(--danger) 10%, transparent);
   }
   .auth-warn[data-tone="red"] .dot { background: var(--danger); }
+
+  .shell-lock {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    color: var(--warn);
+    background: var(--warn-soft);
+    border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
+  }
 
   .hdr-btn {
     display: inline-flex; align-items: center; gap: 5px;
