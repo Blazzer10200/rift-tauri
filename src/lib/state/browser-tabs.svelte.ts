@@ -90,6 +90,23 @@ class BrowserTabsStore {
     this.persist();
   }
 
+  reorder(from: number, to: number) {
+    if (from === to) return;
+    if (from < 0 || from >= this.tabs.length) return;
+    if (to < 0 || to >= this.tabs.length) return;
+    const next = [...this.tabs];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    // Track activeIdx so the active tab doesn't change selection.
+    const prevActiveId = this.tabs[this.activeIdx]?.id;
+    this.tabs = next;
+    if (prevActiveId) {
+      const newIdx = next.findIndex((t) => t.id === prevActiveId);
+      if (newIdx >= 0) this.activeIdx = newIdx;
+    }
+    this.persist();
+  }
+
   setActive(idx: number) {
     if (idx >= 0 && idx < this.tabs.length) {
       this.activeIdx = idx;

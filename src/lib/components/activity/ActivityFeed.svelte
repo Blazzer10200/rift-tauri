@@ -2,11 +2,15 @@
   import {
     RefreshCw, Download, Trash2, AlertTriangle, Check,
     GitBranch, Network, Lock, XCircle, Info, Pause, Play,
-    ChevronRight, ChevronDown, Copy, Folder, ExternalLink,
+    ChevronRight, ChevronDown, Copy, Folder, ExternalLink, Activity as ActivityIcon,
   } from "lucide-svelte";
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { fmtRelative } from "../../utils/time";
+  import PageHeader from "../shell/PageHeader.svelte";
+  import PageToolbar from "../shell/PageToolbar.svelte";
+  import EmptyState from "../shell/EmptyState.svelte";
+  import { syncPage } from "../../state/sync-page.svelte";
 
   type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "error" | "system";
 
@@ -359,32 +363,13 @@
 </script>
 
 <section class="feed">
-  <div class="toolbar">
-    <div class="segctl">
-      {#each groups as g (g.id)}
-        {@const n = g.id === "all" ? connection.activityFeed.length : countFor(g.id)}
-        <button
-          type="button"
-          data-active={group === g.id}
-          data-tone={g.tone}
-          onclick={() => (group = g.id)}
-        >
-          {g.label}
-          {#if g.id !== "all"}
-            <span class="pip" data-zero={n === 0} data-tone={g.tone}>{n}</span>
-          {/if}
-        </button>
-      {/each}
-    </div>
-
-    <input
-      class="filter"
-      type="text"
-      placeholder="Filter resource / file / action…"
-      bind:value={filter}
-    />
-
-    <div class="actions">
+  <PageHeader
+    icon={ActivityIcon}
+    title="Activity"
+    tone="info"
+    subtitle={paused ? "Paused" : connection.activityFeed.length === 0 ? "Idle" : `${connection.activityFeed.length} events`}
+  >
+    {#snippet actions()}
       <button
         class="btn sm"
         class:warn={paused}
@@ -408,8 +393,34 @@
       >
         <Trash2 size={11}/> Clear
       </button>
+    {/snippet}
+  </PageHeader>
+
+  <PageToolbar>
+    <div class="segctl">
+      {#each groups as g (g.id)}
+        {@const n = g.id === "all" ? connection.activityFeed.length : countFor(g.id)}
+        <button
+          type="button"
+          data-active={group === g.id}
+          data-tone={g.tone}
+          onclick={() => (group = g.id)}
+        >
+          {g.label}
+          {#if g.id !== "all"}
+            <span class="pip" data-zero={n === 0} data-tone={g.tone}>{n}</span>
+          {/if}
+        </button>
+      {/each}
     </div>
-  </div>
+
+    <input
+      class="filter"
+      type="text"
+      placeholder="Filter resource / file / action…"
+      bind:value={filter}
+    />
+  </PageToolbar>
 
   <div class="table">
     <div class="thead">
@@ -440,15 +451,36 @@
         </button>
       {/if}
       {#if rendered.length === 0}
-        <div class="empty">
-          {#if connection.activityFeed.length === 0}
-            <span class="empty-title">No activity yet</span>
-            <span class="empty-hint">Sync, pull, and bridge events will appear here as they fire. Click Reconcile in the sidebar to trigger a scan.</span>
-          {:else}
-            <span class="empty-title">No matches</span>
-            <span class="empty-hint">{filter ? `Nothing matches "${filter}".` : "No events in this group."}</span>
-          {/if}
-        </div>
+        {#if connection.activityFeed.length === 0}
+          <EmptyState
+            icon={ActivityIcon}
+            tone="info"
+            title="No activity yet"
+            hint="Sync, pull, and bridge events will appear here as they fire. Trigger a drift scan to see anything that's diverged."
+          >
+            <button
+              type="button"
+              class="btn primary"
+              disabled={!connection.status || connection.status.state === "disabled" || connection.status.state === "error"}
+              onclick={() => syncPage.rescan()}
+            >
+              <RefreshCw size={13}/> Rescan now
+            </button>
+          </EmptyState>
+        {:else}
+          <EmptyState
+            icon={ActivityIcon}
+            tone="neutral"
+            title="No matches"
+            hint={filter ? `Nothing matches "${filter}".` : "No events in this group."}
+          >
+            {#if filter || group !== "all"}
+              <button type="button" class="btn ghost sm" onclick={() => { filter = ""; group = "all"; }}>
+                Clear filters
+              </button>
+            {/if}
+          </EmptyState>
+        {/if}
       {:else}
         {#each rendered as item (item.key + (item.type === "groupHeader" ? `_${item.expanded ? "x" : "c"}_${item.rows.length}` : ""))}
           {#if item.type === "groupHeader"}
@@ -616,15 +648,9 @@
   .feed {
     display: flex; flex-direction: column;
     flex: 1; min-height: 0;
-    padding: 10px 14px 14px;
     background: var(--bg);
     color: var(--fg);
     position: relative;
-  }
-
-  .toolbar {
-    display: flex; align-items: center; gap: 8px;
-    margin-bottom: 8px;
   }
 
   .segctl {
@@ -698,12 +724,11 @@
   }
   .filter::placeholder { color: var(--fg-faint); }
 
-  .actions { display: inline-flex; gap: 6px; }
-
   /* Table-style layout. Single source of truth for column widths lives on
      `.thead` and is mirrored on every `.tr` via display: grid. Keeps headers
      and rows aligned without per-cell width hacks. */
   .table {
+    margin: 10px 14px 14px;
     flex: 1; min-height: 0;
     display: flex; flex-direction: column;
     border: 1px solid var(--border);
@@ -862,15 +887,6 @@
     flex-shrink: 0;
   }
 
-  .empty {
-    padding: 48px 32px;
-    display: flex; flex-direction: column; gap: 8px;
-    color: var(--fg-muted);
-    text-align: center;
-    font-size: var(--fs-sm);
-  }
-  .empty-title { color: var(--fg); font-weight: 500; font-size: var(--fs-md); }
-  .empty-hint { color: var(--fg-subtle); font-size: var(--fs-xs); max-width: 420px; margin: 0 auto; line-height: 1.5; }
 
   /* Top-of-feed pip — visible only when bursting or scrolled-away. Sticky so
      it stays pinned even as the list scrolls beneath it. */

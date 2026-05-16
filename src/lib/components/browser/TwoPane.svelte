@@ -1,8 +1,9 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onDestroy, onMount } from "svelte";
-  import { X, Plus } from "lucide-svelte";
+  import { X, Plus, FolderOpen, Server } from "lucide-svelte";
   import { fly, scale } from "svelte/transition";
+  import { flip } from "svelte/animate";
   import { quintOut } from "svelte/easing";
   import { connection } from "../../state/connection.svelte";
   import { browserTabs } from "../../state/browser-tabs.svelte";
@@ -10,6 +11,33 @@
   import RemotePane from "./RemotePane.svelte";
   import FlashToast from "../FlashToast.svelte";
   import SyncModal from "../sync/SyncModal.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
+  import EmptyState from "../shell/EmptyState.svelte";
+
+  const stateLabel = $derived(connection.status?.state ?? "idle");
+  const watches = $derived(connection.status?.watches ?? 0);
+  const pending = $derived(connection.status?.pending ?? 0);
+  const failed = $derived(connection.status?.failed ?? 0);
+
+  type HeaderTone = "accent" | "info" | "warn" | "danger" | "ok" | "neutral";
+  const headerTone = $derived.by<HeaderTone>(() => {
+    if (!connection.status) return "neutral";
+    if (connection.conflictCount > 0 || connection.status.state === "error") return "danger";
+    if (failed > 0 || connection.lockCount > 0) return "warn";
+    if (connection.status.state === "watching" || connection.status.state === "syncing") return "ok";
+    return "info";
+  });
+  const headerSubtitle = $derived.by(() => {
+    if (!connection.status) return "Not connected";
+    const parts: string[] = [];
+    parts.push(stateLabel);
+    parts.push(`${watches} ${watches === 1 ? "folder" : "folders"}`);
+    if (connection.conflictCount > 0) parts.push(`${connection.conflictCount} conflicts`);
+    else if (pending > 0) parts.push(`${pending} queued`);
+    else if (failed > 0) parts.push(`${failed} errors`);
+    else parts.push("all quiet");
+    return parts.join(" · ");
+  });
 
   type LocalEntry = {
     name: string; path: string; is_dir: boolean; size: number; mtime: number;
@@ -17,6 +45,8 @@
   type RemoteEntry = {
     full_path: string; name: string; is_dir: boolean; size: number; last_modified: string;
   };
+
+  let { onAddServer = () => {} }: { onAddServer?: () => void } = $props();
 
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
 
@@ -132,6 +162,66 @@
 
   function setLocalPath(idx: number, p: string) { browserTabs.updateLocalPath(idx, p); }
   function setRemotePath(idx: number, p: string) { browserTabs.updateRemotePath(idx, p); }
+
+  // Tab drag-reorder via pointer events. HTML5 DnD is flaky inside the
+  // Tauri (webview2) shell — pointerdown/move/up reliably fires and lets
+  // us detect a true drag (movement > threshold) vs a click.
+  let dragFromIdx = $state<number | null>(null);
+  let dragOverIdx = $state<number | null>(null);
+  let dragStartX = 0;
+  let dragArmedIdx: number | null = null;
+  let dragMoveBound: ((e: PointerEvent) => void) | null = null;
+  let dragUpBound: ((e: PointerEvent) => void) | null = null;
+  const DRAG_THRESHOLD_PX = 6;
+
+  function onTabPointerDown(e: PointerEvent, i: number) {
+    // Left button only; ignore middle/right + clicks on the close X.
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest(".tab-x")) return;
+    if (browserTabs.tabs.length <= 1) return;
+    dragArmedIdx = i;
+    dragStartX = e.clientX;
+    dragMoveBound = (ev) => onPointerMoveGlobal(ev);
+    dragUpBound = (ev) => onPointerUpGlobal(ev);
+    window.addEventListener("pointermove", dragMoveBound);
+    window.addEventListener("pointerup", dragUpBound);
+  }
+  function onPointerMoveGlobal(e: PointerEvent) {
+    if (dragArmedIdx === null) return;
+    if (dragFromIdx === null) {
+      const dx = Math.abs(e.clientX - dragStartX);
+      if (dx < DRAG_THRESHOLD_PX) return;
+      dragFromIdx = dragArmedIdx;
+    }
+    // Hit-test the cursor against the tab strip's children. Use the
+    // horizontal midpoint of each tab so the shuffle feels predictable
+    // (cross half-line → tab swaps), not jittery near edges.
+    const strip = document.querySelector(".tabstrip") as HTMLElement | null;
+    if (!strip) return;
+    const kids = Array.from(strip.children) as HTMLElement[];
+    let targetIdx = -1;
+    for (let k = 0; k < kids.length; k++) {
+      const r = kids[k].getBoundingClientRect();
+      if (e.clientX < r.left + r.width / 2) { targetIdx = k; break; }
+    }
+    if (targetIdx < 0) targetIdx = kids.length - 1;
+    // Live reorder — call the store as the cursor crosses midpoints so
+    // tabs visibly shuffle in real time (animate:flip handles the slide).
+    if (targetIdx !== dragFromIdx) {
+      browserTabs.reorder(dragFromIdx, targetIdx);
+      dragFromIdx = targetIdx;
+    }
+  }
+  function onPointerUpGlobal(_e: PointerEvent) {
+    dragFromIdx = null;
+    dragOverIdx = null;
+    dragArmedIdx = null;
+    if (dragMoveBound) window.removeEventListener("pointermove", dragMoveBound);
+    if (dragUpBound) window.removeEventListener("pointerup", dragUpBound);
+    dragMoveBound = null;
+    dragUpBound = null;
+  }
 
   function openLocalNewTab(entry: LocalEntry) {
     const t = browserTabs.active;
@@ -250,14 +340,34 @@
 </script>
 
 <div class="two-pane">
+  <PageHeader
+    icon={FolderOpen}
+    title="Files"
+    tone={headerTone}
+    subtitle={headerSubtitle}
+  >
+    {#snippet actions()}
+      <button
+        type="button"
+        class="btn ghost sm"
+        onclick={newTab}
+        title="New tab (Ctrl+T)"
+      ><Plus size={12}/> New tab</button>
+    {/snippet}
+  </PageHeader>
+
   <div class="tabstrip-wrap">
     <div class="tabstrip">
       {#each browserTabs.tabs as t, i (t.id)}
       <div
         class="tab"
+        role="presentation"
         data-active={i === browserTabs.activeIdx}
+        data-dragging={dragFromIdx === i}
         in:fly={{ x: -10, duration: 180, easing: quintOut }}
         out:scale={{ start: 0.85, duration: 140, easing: quintOut }}
+        animate:flip={{ duration: 220 }}
+        onpointerdown={(e) => onTabPointerDown(e, i)}
       >
         <button
           type="button" class="tab-label"
@@ -276,12 +386,6 @@
         {/if}
       </div>
     {/each}
-      <button
-        type="button" class="tab-new"
-        onclick={newTab}
-        title="New tab (Ctrl+T)"
-        aria-label="New tab"
-      ><Plus size={14}/></button>
     </div>
   </div>
 
@@ -332,7 +436,16 @@
       />
     </div>
   {:else}
-    <div class="placeholder">Pick a server to begin browsing.</div>
+    <EmptyState
+      icon={Server}
+      tone="neutral"
+      title="No server connected"
+      hint="Add an SSH/SFTP server to start browsing remote files alongside your local workspace."
+    >
+      <button type="button" class="btn primary" onclick={() => onAddServer()}>
+        <Plus size={13}/> Add a server
+      </button>
+    </EmptyState>
   {/if}
 
   {#if toast}
@@ -390,12 +503,38 @@
     transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
   }
   .tab:hover { background: var(--surface-hover); color: var(--fg); }
+  /* Subtle hover lift signals tabs are interactive/draggable without
+     screaming "grabbable". Only when there are 2+ tabs (single tab can't
+     be reordered). */
+  .tabstrip:has(.tab + .tab) .tab:hover:not([data-dragging="true"]) {
+    transform: translateY(-1px);
+    transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1), background 100ms ease;
+  }
   .tab[data-active="true"] {
     background: var(--bg);
     color: var(--fg);
     border-color: var(--border);
     margin-bottom: -1px;
   }
+  .tab { user-select: none; -webkit-user-select: none; }
+  /* Currently-dragged tab — lifted look, scale-up, accent ring + soft
+     shadow + grabbing cursor. animate:flip on the each block slides the
+     OTHER tabs aside in real time as we live-reorder during the drag. */
+  .tab[data-dragging="true"] {
+    z-index: 2;
+    cursor: grabbing;
+    background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));
+    color: var(--fg);
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+    box-shadow:
+      0 6px 18px rgba(0, 0, 0, 0.32),
+      0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent);
+    transform: scale(1.04) translateY(-1px);
+    transition: transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 160ms ease,
+                background 140ms ease;
+  }
+  .tab[data-dragging="true"] .tab-label { cursor: grabbing; }
   .tab-label {
     flex: 1;
     background: transparent; border: 0;
@@ -420,21 +559,6 @@
     transition: background 100ms ease, color 100ms ease;
   }
   .tab-x:hover { background: var(--danger); color: oklch(0.99 0 0); }
-  .tab-new {
-    background: transparent;
-    border: 0;
-    color: var(--fg-muted);
-    width: 28px; height: 28px;
-    margin: 0 0 0 4px;
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    display: inline-flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-    transition: background 120ms ease, color 120ms ease, transform 120ms ease;
-  }
-  .tab-new:hover { background: var(--surface-hover); color: var(--fg); transform: scale(1.08); }
-  .tab-new:active { transform: scale(0.94); }
-  .tab-new:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
   .split {
     flex: 1;
@@ -489,11 +613,6 @@
   .split[data-dragging="true"] .divider-grip {
     opacity: 1;
     background: oklch(0.99 0 0);
-  }
-
-  .placeholder {
-    flex: 1; display: flex; align-items: center; justify-content: center;
-    color: var(--fg-muted); font-size: var(--fs-sm);
   }
 
   .toast-anchor {

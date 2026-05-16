@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { FolderOpen, Activity, TriangleAlert, Cog, Download, RefreshCcw } from "lucide-svelte";
+  import { FolderOpen, Activity, TriangleAlert, Cog, Download, RefreshCcw, Sparkles, ChevronRight, Pin, PinOff } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { updates } from "../../state/updates.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
 
-  type Tab = "browse" | "activity" | "sync" | "conflicts" | "settings" | "diagnostics";
+  type Tab = "browse" | "activity" | "sync" | "assistant" | "conflicts" | "settings" | "diagnostics";
 
   let { active, onChange }: {
     active: Tab;
@@ -11,43 +12,115 @@
   } = $props();
 
   type TabTone = "accent" | "info" | "danger" | "neutral";
-  const tabs: { id: Tab; label: string; icon: typeof FolderOpen; kbd: string; tone: TabTone; count?: () => number; countCls?: string }[] = [
-    { id: "browse",    label: "Browser",   icon: FolderOpen,    kbd: "1", tone: "accent" },
-    { id: "activity",  label: "Activity",  icon: Activity,      kbd: "2", tone: "info",   count: () => connection.activityFeed.length, countCls: "" },
-    { id: "sync",      label: "Sync",      icon: RefreshCcw,    kbd: "3", tone: "accent" },
-    { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "4", tone: "danger", count: () => connection.conflictCount, countCls: "danger" },
-    { id: "settings",  label: "Settings",  icon: Cog,           kbd: "5", tone: "neutral" },
+  type TabDef = { id: Tab; label: string; icon: typeof FolderOpen; kbd: string; tone: TabTone; count?: () => number; countCls?: string; beta?: boolean };
+  type TabGroup = { id: string; tabs: TabDef[] };
+
+  // Primary surfaces, grouped by purpose. Dividers between groups make
+  // hierarchy readable: workspace tools / AI / diagnostic / admin.
+  const groups: TabGroup[] = [
+    {
+      id: "workspace",
+      tabs: [
+        { id: "browse", label: "Files", icon: FolderOpen, kbd: "1", tone: "accent" },
+        { id: "sync",   label: "Sync",  icon: RefreshCcw, kbd: "2", tone: "accent" },
+      ],
+    },
+    {
+      id: "ai",
+      tabs: [
+        { id: "assistant", label: "Assistant", icon: Sparkles, kbd: "3", tone: "info", beta: true },
+      ],
+    },
+    {
+      id: "status",
+      tabs: [
+        { id: "conflicts", label: "Conflicts", icon: TriangleAlert, kbd: "4", tone: "danger", count: () => connection.conflictCount, countCls: "danger" },
+        { id: "activity",  label: "Activity",  icon: Activity,      kbd: "5", tone: "info",   count: () => connection.activityFeed.length, countCls: "" },
+      ],
+    },
+  ];
+  // Settings bottom-anchored — convention matches VSCode/Slack/Discord.
+  const footer: TabDef[] = [
+    { id: "settings", label: "Settings", icon: Cog, kbd: "6", tone: "neutral" },
   ];
 
-  const activeIdx = $derived(tabs.findIndex((t) => t.id === active));
-  const indicatorVisible = $derived(activeIdx >= 0);
+  const activeFooterIdx = $derived(footer.findIndex((t) => t.id === active));
 </script>
 
-<aside class="rail" aria-label="Primary navigation">
+<aside class="rail" class:pinned={uiPrefs.railPinned} aria-label="Primary navigation">
   <div class="rail-panel">
-    <div class="group" style="--active-y: {Math.max(0, activeIdx) * 31}px">
-      <div class="rail-indicator" aria-hidden="true" data-visible={indicatorVisible} data-tone={tabs[activeIdx]?.tone ?? "accent"}></div>
-      {#each tabs as t (t.id)}
-        {@const Icon = t.icon}
-        {@const c = t.count ? t.count() : 0}
-        <button
-          class="rail-btn"
-          data-active={active === t.id}
-          data-tone={t.tone}
-          onclick={(e) => { onChange(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
-          title="{t.label} (Ctrl+{t.kbd})"
-          type="button"
-        >
-          <span class="rail-icon"><Icon size={16}/></span>
-          <span class="label">{t.label}</span>
-          {#if c > 0}
-            <span class="count-pip {t.countCls ?? ''}">{c}</span>
-          {/if}
-        </button>
-      {/each}
+    <div class="rail-brand" aria-hidden="true">
+      <img class="brand-mark" src="/favicon.png" alt="" draggable="false"/>
+      <span class="brand-word">RIFT</span>
     </div>
+    <button
+      class="rail-pin"
+      type="button"
+      onclick={(e) => { uiPrefs.toggleRailPinned(); (e.currentTarget as HTMLButtonElement).blur(); }}
+      title={uiPrefs.railPinned ? "Unpin rail (collapse on leave)" : "Pin rail open"}
+      aria-pressed={uiPrefs.railPinned}
+    >
+      {#if uiPrefs.railPinned}
+        <PinOff size={12}/>
+      {:else}
+        <ChevronRight size={12}/>
+      {/if}
+    </button>
+    {#each groups as g, gi (g.id)}
+      {@const activeIdxInGroup = g.tabs.findIndex((t) => t.id === active)}
+      {#if gi > 0}
+        <div class="group-divider" aria-hidden="true"></div>
+      {/if}
+      <div class="group" style="--active-y: {Math.max(0, activeIdxInGroup) * 31}px">
+        {#if activeIdxInGroup >= 0}
+          <div class="rail-indicator" aria-hidden="true" data-tone={g.tabs[activeIdxInGroup].tone}></div>
+        {/if}
+        {#each g.tabs as t (t.id)}
+          {@const Icon = t.icon}
+          {@const c = t.count ? t.count() : 0}
+          <button
+            class="rail-btn"
+            data-active={active === t.id}
+            data-tone={t.tone}
+            onclick={(e) => { onChange(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
+            title="{t.label} (Ctrl+{t.kbd})"
+            type="button"
+          >
+            <span class="rail-icon"><Icon size={16}/></span>
+            <span class="label">{t.label}</span>
+            {#if t.beta}<span class="beta-pill" title="Beta — use at your own risk">beta</span>{/if}
+            <span class="kbd-hint mono">{t.kbd}</span>
+            {#if c > 0}
+              <span class="count-pip {t.countCls ?? ''}">{c}</span>
+            {/if}
+          </button>
+        {/each}
+      </div>
+    {/each}
 
     <div class="bottom">
+      <div class="divider" aria-hidden="true"></div>
+      <div class="group footer" style="--active-y: {Math.max(0, activeFooterIdx) * 31}px">
+        {#if activeFooterIdx >= 0}
+          <div class="rail-indicator" aria-hidden="true" data-tone={footer[activeFooterIdx].tone}></div>
+        {/if}
+        {#each footer as t (t.id)}
+          {@const Icon = t.icon}
+          <button
+            class="rail-btn"
+            data-active={active === t.id}
+            data-tone={t.tone}
+            onclick={(e) => { onChange(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
+            title="{t.label} (Ctrl+{t.kbd})"
+            type="button"
+          >
+            <span class="rail-icon"><Icon size={16}/></span>
+            <span class="label">{t.label}</span>
+            {#if t.beta}<span class="beta-pill" title="Beta — use at your own risk">beta</span>{/if}
+            <span class="kbd-hint mono">{t.kbd}</span>
+          </button>
+        {/each}
+      </div>
       {#if updates.state === "available" && updates.info}
         <button
           class="update-pill"
@@ -92,14 +165,85 @@
                 padding 220ms ease;
   }
   .rail:hover .rail-panel,
-  .rail:focus-within .rail-panel {
+  .rail:focus-within .rail-panel,
+  .rail.pinned .rail-panel {
     width: 220px;
     padding: 8px;
     box-shadow: 6px 0 24px rgba(0, 0, 0, 0.28);
     border-right-color: var(--border-strong, var(--border));
   }
+  /* When pinned the rail behaves like a permanent sidebar: take real
+     layout width so main content reflows next to it, not under it. */
+  .rail.pinned { width: 220px; }
+  .rail.pinned .rail-panel { box-shadow: none; }
+
+  /* Rift wordmark at the top of the rail. Gives the rail a brand anchor and
+     balances visual weight (was top-heavy w/ just icons). In collapsed
+     state shows only the favicon mark; in expanded state the "RIFT"
+     wordmark fades in alongside. */
+  .rail-brand {
+    display: flex; align-items: center; gap: 8px;
+    height: 24px;
+    padding: 0 6px;
+    margin-bottom: 8px;
+    color: var(--fg);
+  }
+  .brand-mark {
+    width: 18px; height: 18px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .brand-word {
+    font-weight: 700;
+    font-size: var(--fs-sm);
+    letter-spacing: 0.12em;
+    color: var(--fg);
+    opacity: 1;
+    transition: opacity 140ms ease;
+  }
+
+  /* Top-of-rail pin/chevron button. Collapsed-state: ">" hint (rotates to
+     "<" on hover as expand cue). Pinned-state: filled PinOff icon — click
+     to release back to hover-expand. */
+  .rail-pin {
+    display: flex; align-items: center; justify-content: center;
+    width: 24px; height: 20px;
+    margin: 0 auto 6px; padding: 0;
+    background: transparent; border: 0;
+    color: var(--fg-faint);
+    opacity: 0.65;
+    cursor: pointer;
+    border-radius: var(--radius-xs);
+    transition: opacity 180ms ease, color 180ms ease, background 140ms ease;
+  }
+  .rail-pin :global(svg) {
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .rail:not(.pinned):hover .rail-pin :global(svg),
+  .rail:not(.pinned):focus-within .rail-pin :global(svg) {
+    transform: rotate(180deg);
+  }
+  .rail:hover .rail-pin,
+  .rail:focus-within .rail-pin {
+    opacity: 1;
+    color: var(--fg-muted);
+  }
+  .rail-pin:hover { background: var(--surface-hover); color: var(--fg); }
+  .rail.pinned .rail-pin {
+    color: var(--accent);
+    opacity: 1;
+  }
 
   .group { display: flex; flex-direction: column; gap: 1px; position: relative; }
+  /* Inter-group divider — visually separates workspace / AI / status
+     clusters. Hairline + reduced opacity so it reads as a subtle break,
+     not a hard rule. */
+  .group-divider {
+    height: 1px;
+    margin: 6px 8px;
+    background: var(--border);
+    opacity: 0.55;
+  }
   .rail-indicator {
     position: absolute;
     left: -6px; top: 0;
@@ -107,15 +251,13 @@
     background: var(--accent);
     border-radius: 2px;
     transform: translateY(var(--active-y, 0px));
-    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), opacity 160ms ease, left 220ms ease, background 180ms ease;
+    transition: transform 220ms cubic-bezier(0.4, 0, 0.2, 1), left 220ms ease, background 180ms ease;
     pointer-events: none;
-    opacity: 0;
     z-index: 1;
   }
   .rail-indicator[data-tone="info"]    { background: var(--info); }
   .rail-indicator[data-tone="danger"]  { background: var(--danger); }
   .rail-indicator[data-tone="neutral"] { background: var(--fg-muted); }
-  .rail-indicator[data-visible="true"] { opacity: 1; }
   .rail:hover .rail-indicator,
   .rail:focus-within .rail-indicator { left: -8px; }
 
@@ -154,9 +296,39 @@
     background: color-mix(in oklch, var(--tone) 14%, var(--surface));
     color: var(--fg);
   }
-  .rail-btn[data-active="true"] .rail-icon { opacity: 1; }
+  /* Active icon takes the tab's tone. Big "where am I" signal — especially
+     in collapsed 48px state where labels are hidden. */
+  .rail-btn[data-active="true"] .rail-icon {
+    opacity: 1;
+    color: var(--tone);
+    filter: drop-shadow(0 0 6px color-mix(in oklch, var(--tone) 35%, transparent));
+  }
   .rail-btn:active { transform: translateY(0.5px); }
   .label { flex: 1; opacity: 1; transition: opacity 140ms ease; }
+  /* Keyboard shortcut hint — slim digit. Tooltip on the button shows the
+     full "Ctrl+N" form so this stays as a quiet visual numeral, not a
+     bulky chip. Only visible when rail is expanded. */
+  .kbd-hint {
+    flex-shrink: 0;
+    min-width: 14px;
+    text-align: center;
+    font-size: 10px;
+    color: var(--fg-faint);
+    opacity: 0.55;
+    letter-spacing: 0.02em;
+  }
+  .rail-btn[data-active="true"] .kbd-hint { opacity: 0.9; color: var(--fg-muted); }
+  .beta-pill {
+    flex-shrink: 0;
+    padding: 1px 5px;
+    font-size: 9px;
+    font-weight: 700;
+    background: var(--warn-soft);
+    color: var(--warn);
+    border-radius: 4px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
   .count-pip {
     flex-shrink: 0;
     min-width: 18px; height: 16px;
@@ -176,6 +348,12 @@
   .bottom {
     margin-top: auto;
     display: flex; flex-direction: column;
+  }
+  .divider {
+    height: 1px;
+    margin: 8px 4px;
+    background: var(--border);
+    opacity: 0.6;
   }
   .update-pill {
     margin-bottom: 8px;
@@ -212,7 +390,8 @@
 
   /* Collapsed state: hide labels, kbd hints, button text. */
   @container (max-width: 130px) {
-    .label, .up-text { display: none; }
+    .label, .up-text, .kbd-hint, .brand-word, .beta-pill { display: none; }
+    .rail-brand { justify-content: center; padding: 0; gap: 0; }
     .rail-btn { justify-content: center; padding: 0; gap: 0; }
     .update-pill { justify-content: center; padding: 8px; }
     .count-pip {

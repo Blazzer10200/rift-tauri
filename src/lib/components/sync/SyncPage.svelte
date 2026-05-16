@@ -6,14 +6,23 @@
   import { invoke } from "@tauri-apps/api/core";
   import {
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
-    ChevronRight, CheckCircle2, CircleAlert, Inbox, History,
+    ChevronRight, CheckCircle2, CircleAlert, History,
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
   } from "lucide-svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
 
   // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
   // the Confirm button. Prevents accidental destructive remote deletes.
   let mirrorConfirmText = $state("");
   const MIRROR_CONFIRM_PHRASE = "MIRROR";
+  // Track which shrink-banners are expanded. Default collapsed —
+  // banner is dense and steals vertical space when several brackets fire.
+  let shrinkExpanded = $state<Set<string>>(new Set());
+  function toggleShrink(key: string) {
+    const next = new Set(shrinkExpanded);
+    if (next.has(key)) next.delete(key); else next.add(key);
+    shrinkExpanded = next;
+  }
   import { connection } from "../../state/connection.svelte";
   import { syncPage, type ResourceGroup, type DriftEntry } from "../../state/sync-page.svelte";
 
@@ -195,9 +204,13 @@
 </script>
 
 <section class="page">
-  <header class="hero">
-    <div class="hero-left">
-      <h2>Sync</h2>
+  <PageHeader
+    icon={RefreshCcw}
+    title="Sync"
+    tone={!watcherOn ? "neutral" : isEmpty ? "ok" : "info"}
+    subtitle={watcherOn ? `Last scan ${scanAgeLabel()}` : "Not connected"}
+  >
+    {#snippet extras()}
       {#if !watcherOn}
         <span class="pill muted"><CircleAlert size={11}/> Not connected</span>
       {:else if isEmpty}
@@ -207,11 +220,8 @@
           {totals.total} pending · {groups.length} resource{groups.length === 1 ? "" : "s"}
         </span>
       {/if}
-      <span class="meta" title="Last drift scan">
-        Last scan <span class="mono">{scanAgeLabel()}</span>
-      </span>
-    </div>
-    <div class="hero-right">
+    {/snippet}
+    {#snippet actions()}
       <div class="kebab-wrap" bind:this={overflowRef}>
         <button
           class="btn ghost icon"
@@ -352,8 +362,8 @@
           {/if}
         {/if}
       </button>
-    </div>
-  </header>
+    {/snippet}
+  </PageHeader>
 
   {#if syncPage.previewMode}
     <div class="banner preview" role="status" in:fade={{ duration: 120 }}>
@@ -385,18 +395,24 @@
   {#each syncPage.visibleAbortedShrunk as folder (folder.remote_root)}
     {@const isConfirming = syncPage.confirmingRebaseline === folder.remote_root}
     {@const isBusy = syncPage.rebaselining.has(folder.remote_root)}
-    <div class="shrink-banner" role="alert" in:fade={{ duration: 120 }}>
-      <div class="shrink-head">
+    {@const isOpen = shrinkExpanded.has(folder.remote_root) || isConfirming}
+    <div class="shrink-banner" class:collapsed={!isOpen} role="alert" in:fade={{ duration: 120 }}>
+      <button class="shrink-head" type="button" onclick={() => toggleShrink(folder.remote_root)} aria-expanded={isOpen}>
         <AlertTriangle size={13}/>
         <span class="shrink-msg">
-          Listing shrink detected — <strong>{folder.resource_name}</strong>:
-          baseline {folder.baseline_count} → scan {folder.listing_count}.
-          Bracket aborted to prevent phantom deletes.
+          <strong>{folder.resource_name}</strong>
+          <span class="shrink-counts mono">{folder.baseline_count} → {folder.listing_count}</span>
+          {#if isOpen}<span class="shrink-detail">— bracket aborted to prevent phantom deletes.</span>{/if}
         </span>
-        <span class="shrink-tip" title="Until rebaselined, new resources or files added inside this bracket will be invisible to Rift — they won't appear in the queue and won't sync to the server. Click Rebaseline if this shrink reflects an intentional cleanup; click Dismiss only if you expect the next scan to catch up.">
-          Why this matters
+        <ChevronRight class="shrink-chev" size={12}/>
+      </button>
+      {#if isOpen}
+      <div class="shrink-explain" in:fade={{ duration: 100 }}>
+        <span class="shrink-tip" title="Until rebaselined, new resources or files added inside this bracket will be invisible to Rift — they won't appear in the queue and won't sync to the server.">
+          Until rebaselined, new files inside this bracket won't sync. Rebaseline if this shrink was intentional; Dismiss only if you expect the next scan to catch up.
         </span>
       </div>
+      {/if}
       {#if isConfirming}
         <div class="shrink-confirm" in:fade={{ duration: 100 }}>
           <span>
@@ -410,7 +426,7 @@
             <button onclick={() => syncPage.cancelRebaseline()} disabled={isBusy}>Cancel</button>
           </div>
         </div>
-      {:else}
+      {:else if isOpen}
         <div class="shrink-actions">
           <button class="primary" disabled={isBusy} onclick={() => syncPage.requestRebaseline(folder.remote_root)}>
             <History size={12}/> Rebaseline
@@ -570,6 +586,7 @@
     {/if}
   </div>
 
+  {#if !isEmpty}
   <footer class="footer" class:active={hasSelection}>
     <div class="footer-left">
       <button
@@ -606,6 +623,7 @@
       {/if}
     </div>
   </footer>
+  {/if}
 
   {#if syncPage.mirrorConfirm}
     <div
@@ -709,27 +727,6 @@
     padding: 12px 18px; border-top: 1px solid var(--border);
   }
 
-  /* ── Hero ───────────────────────────────────────────── */
-  .hero {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px;
-    padding: 14px 18px 10px;
-    border-bottom: 1px solid var(--border);
-    flex-wrap: wrap;
-  }
-  .hero-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex-wrap: wrap; }
-  .hero h2 {
-    margin: 0;
-    font-size: var(--fs-lg);
-    font-weight: 600;
-    letter-spacing: -0.01em;
-  }
-  .meta {
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-  }
-  .hero-right { display: flex; gap: 6px; flex-wrap: wrap; }
-
   /* ── Banner ─────────────────────────────────────────── */
   .banner {
     margin: 8px 18px 0;
@@ -777,20 +774,43 @@
     flex-direction: column;
     gap: 8px;
   }
+  .shrink-banner.collapsed { padding: 4px 10px; gap: 0; }
   .shrink-head {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+    width: 100%;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    padding: 0;
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
   }
-  .shrink-msg { flex: 1; min-width: 240px; }
-  .shrink-tip {
+  .shrink-head :global(.shrink-chev) {
+    margin-left: auto;
+    color: var(--warn);
+    transition: transform 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .shrink-banner:not(.collapsed) .shrink-head :global(.shrink-chev) {
+    transform: rotate(90deg);
+  }
+  .shrink-msg { flex: 1; min-width: 240px; display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .shrink-counts {
     font-size: var(--fs-xs);
     color: var(--warn);
-    text-decoration: underline dotted;
-    text-underline-offset: 2px;
+    background: color-mix(in oklch, var(--warn) 18%, transparent);
+    padding: 1px 6px;
+    border-radius: var(--radius-xs);
+  }
+  .shrink-detail { color: var(--fg-muted); font-size: var(--fs-xs); }
+  .shrink-explain { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.45; }
+  .shrink-tip {
+    color: var(--warn);
     cursor: help;
-    white-space: nowrap;
   }
   .shrink-actions {
     display: flex;

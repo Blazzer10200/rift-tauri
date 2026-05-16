@@ -4,7 +4,9 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check } from "lucide-svelte";
+  import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
+  import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
   import {
     terminal,
@@ -19,7 +21,7 @@
   } from "../../state/terminal.svelte";
   import { THEME_PRESETS } from "../terminal/themePresets";
 
-  type Section = "appearance" | "terminal" | "servers" | "keys" | "about";
+  type Section = "appearance" | "terminal" | "assistant" | "servers" | "keys" | "about";
 
   type ShellInfo = { id: string; label: string; program: string; args: string[]; available: boolean };
   let shells = $state<ShellInfo[]>([]);
@@ -70,17 +72,80 @@
 
   let section = $state<Section>(untrack(() => initialSection));
   let appVersion = $state("?");
+  let configDir = $state<string>("");
+  let logDir = $state<string>("");
+  let diagCopied = $state(false);
+
+  async function loadAboutPaths() {
+    try { configDir = await appConfigDir(); } catch (e) { console.warn("appConfigDir failed", e); }
+    try { logDir = await appLogDir(); } catch (e) { console.warn("appLogDir failed", e); }
+  }
+  async function openDir(p: string) {
+    if (!p) return;
+    try { await openPath(p); } catch (e) { console.error("openPath failed", e); }
+  }
+  // Replace OS username segments in paths with <user> so a pasted
+  // diagnostic doesn't leak the user's Windows/macOS login name.
+  // Matches C:\Users\<name>\..., /home/<name>/..., /Users/<name>/...
+  function scrubUser(p: string): string {
+    if (!p) return p;
+    return p
+      .replace(/([A-Za-z]:[\\/]Users[\\/])[^\\/]+/g, "$1<user>")
+      .replace(/(\/home\/)[^/]+/g, "$1<user>")
+      .replace(/(\/Users\/)[^/]+/g, "$1<user>");
+  }
+  async function copyDiagnostic() {
+    const lines = [
+      `Rift ${appVersion}`,
+      `Platform: ${navigator.platform}`,
+      `Config: ${scrubUser(configDir) || "(unknown)"}`,
+      `Logs:   ${scrubUser(logDir) || "(unknown)"}`,
+      `Servers: ${connection.servers.length}`,
+      `Active server: ${connection.selected ? "(configured)" : "(none)"} · state: ${connection.status?.state ?? "offline"}`,
+    ].join("\n");
+    try {
+      await navigator.clipboard.writeText(lines);
+      diagCopied = true;
+      setTimeout(() => (diagCopied = false), 1400);
+    } catch (e) { console.error("clipboard failed", e); }
+  }
 
   const sections: { id: Section; label: string; icon: typeof Cog }[] = [
     { id: "appearance", label: "Appearance", icon: Cog },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
+    { id: "assistant",  label: "Assistant",  icon: Sparkles },
     { id: "servers",    label: "Servers",    icon: Server },
     { id: "keys",       label: "SSH keys",   icon: Key },
     { id: "about",      label: "About",      icon: Info },
   ];
 
+  // Assistant API-key field — value mirrors store, save commits to disk.
+  import { assistant as assistantStore } from "../../state/assistant.svelte";
+  let asstApiKeyDraft = $state("");
+  let asstApiKeySaving = $state(false);
+  let asstApiKeyMsg = $state<string | null>(null);
+  $effect(() => {
+    if (section === "assistant") {
+      void assistantStore.init();
+      asstApiKeyDraft = assistantStore.apiKey ?? "";
+    }
+  });
+  async function saveAsstApiKey() {
+    asstApiKeySaving = true;
+    asstApiKeyMsg = null;
+    try {
+      await assistantStore.setApiKey(asstApiKeyDraft);
+      asstApiKeyMsg = asstApiKeyDraft.trim() ? "Saved." : "Cleared.";
+    } catch (e) {
+      asstApiKeyMsg = `Failed: ${e}`;
+    } finally {
+      asstApiKeySaving = false;
+    }
+  }
+
   onMount(async () => {
     try { appVersion = await invoke<string>("app_version"); } catch {}
+    void loadAboutPaths();
     await connection.loadServers();
     try { shells = await invoke<ShellInfo[]>("term_list_shells"); }
     catch (e) { console.warn("term_list_shells failed", e); }
@@ -425,6 +490,56 @@
         </div>
       </div>
 
+    {:else if section === "assistant"}
+      <div>
+        <h3>Assistant</h3>
+        <p class="help">Authentication for the Assistant page. By default Rift piggybacks on your local <code>claude</code> CLI session — no key needed.</p>
+
+        <div class="card asst-card">
+          <div class="asst-row">
+            <span class="asst-label">CLI status</span>
+            {#if assistantStore.auth}
+              <span class="asst-pill" data-tone={assistantStore.auth.pill}>
+                <span class="asst-dot"></span>{assistantStore.auth.summary}
+              </span>
+            {:else if assistantStore.authChecking}
+              <span class="asst-pill" data-tone="neutral"><span class="asst-dot"></span>Checking…</span>
+            {:else}
+              <span class="asst-pill" data-tone="neutral"><span class="asst-dot"></span>Unknown — open Assistant to probe</span>
+            {/if}
+            <button class="btn ghost sm" type="button" onclick={() => assistantStore.refreshAuth()} disabled={assistantStore.authChecking}>
+              <RefreshCw size={11}/> Re-probe
+            </button>
+          </div>
+          <p class="muted">Not signed in? In a terminal run <code>claude login</code>, then re-probe.</p>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">API-key fallback</h4>
+          <p class="muted">Pay-per-token via <code>console.anthropic.com</code>. Used when configured; overrides the CLI session.</p>
+          <div class="asst-row">
+            <input
+              class="input mono asst-input"
+              type="password"
+              placeholder="sk-ant-api03-…"
+              bind:value={asstApiKeyDraft}
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button class="btn primary sm" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving}>
+              {asstApiKeySaving ? "Saving…" : "Save"}
+            </button>
+            {#if assistantStore.apiKey}
+              <button class="btn ghost sm" type="button" onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}>
+                Clear
+              </button>
+            {/if}
+          </div>
+          {#if asstApiKeyMsg}<p class="muted">{asstApiKeyMsg}</p>{/if}
+          <p class="muted asst-warn">Stored in <code>~/.rift/assistant/config.json</code> as plaintext. Keychain migration planned.</p>
+        </div>
+      </div>
+
     {:else if section === "servers"}
       <div>
         <div class="set-head">
@@ -503,6 +618,34 @@
             <RefreshCw size={11}/> Check for updates
           </button>
         </div>
+
+        <h3 style="margin-top:24px">Paths</h3>
+        <div class="set-row">
+          <span>Config</span>
+          <span class="path-cell">
+            <code class="mono path-val" title={configDir}>{configDir || "—"}</code>
+            <button class="btn ghost sm" type="button" disabled={!configDir} onclick={() => openDir(configDir)}>
+              <FolderOpen size={11}/> Open
+            </button>
+          </span>
+        </div>
+        <div class="set-row">
+          <span>Logs</span>
+          <span class="path-cell">
+            <code class="mono path-val" title={logDir}>{logDir || "—"}</code>
+            <button class="btn ghost sm" type="button" disabled={!logDir} onclick={() => openDir(logDir)}>
+              <FolderOpen size={11}/> Open
+            </button>
+          </span>
+        </div>
+
+        <h3 style="margin-top:24px">Diagnostics</h3>
+        <div class="set-row">
+          <span>Support info</span>
+          <button class="btn ghost sm" type="button" onclick={copyDiagnostic}>
+            {#if diagCopied}<Check size={11}/> Copied{:else}<Copy size={11}/> Copy diagnostic info{/if}
+          </button>
+        </div>
       </div>
     {/if}
       </div>
@@ -576,6 +719,19 @@
     gap: 12px;
   }
   .set-row:last-child { border-bottom: none; }
+  .path-cell {
+    display: inline-flex; align-items: center; gap: 8px;
+    min-width: 0; max-width: 70%;
+  }
+  .path-val {
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
+    background: var(--bg-elev-1);
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0; max-width: 360px;
+  }
 
   .empty {
     padding: 28px 16px;
@@ -881,4 +1037,24 @@
   .ts-theme-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .ts-theme-label { font-size: var(--fs-sm); font-weight: 500; }
   .ts-theme-sub { font-size: 10px; color: var(--fg-subtle); }
+
+  /* Assistant settings */
+  .asst-card { padding: 14px 16px; margin-top: 12px; }
+  .asst-card + .asst-card { margin-top: 10px; }
+  .asst-h4 { margin: 0 0 4px; font-size: var(--fs-md); font-weight: 600; }
+  .asst-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .asst-label { font-size: var(--fs-sm); color: var(--fg-muted); min-width: 80px; }
+  .asst-input { flex: 1; min-width: 280px; padding: 7px 10px; }
+  .asst-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px; border-radius: 999px;
+    font-size: var(--fs-xs);
+    background: var(--surface-hover);
+    color: var(--fg);
+  }
+  .asst-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-muted); }
+  .asst-pill[data-tone="green"]   .asst-dot { background: var(--success, #4ade80); }
+  .asst-pill[data-tone="yellow"]  .asst-dot { background: var(--warn,    #fbbf24); }
+  .asst-pill[data-tone="red"]     .asst-dot { background: var(--danger,  #f87171); }
+  .asst-warn { color: var(--warn, #fbbf24); }
 </style>

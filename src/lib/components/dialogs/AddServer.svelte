@@ -204,7 +204,7 @@
         <div class="dialog-icon"><Server size={14}/></div>
         <div>
           <div class="dialog-title">{editing ? "Edit server" : "Add server"}</div>
-          <div class="dialog-sub">Connect Rift to a remote FiveM dev server over SSH.</div>
+          <div class="dialog-sub">Connect Rift to a remote dev server over SSH.</div>
         </div>
         <button class="dialog-close" type="button" onclick={() => !saving && onClose(null)} aria-label="Close">
           <X size={14}/>

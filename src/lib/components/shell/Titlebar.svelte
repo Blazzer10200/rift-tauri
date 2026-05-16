@@ -55,8 +55,13 @@
     </div>
 
     <div class="svr-picker" bind:this={menuRef} data-open={menuOpen}>
-      <button class="svr-btn" onclick={() => (menuOpen = !menuOpen)} type="button">
-        <span class="svr-dot"></span>
+      <button
+        class="svr-btn"
+        onclick={() => (menuOpen = !menuOpen)}
+        type="button"
+        title={`${connCfg[connState].label} — ${connCfg[connState].title}`}
+      >
+        <span class="svr-dot" data-state={connCfg[connState].cls}></span>
         {#if sel}
           <span class="svr-name">{sel.name}</span>
           <span class="svr-host mono">{sel.user}@{sel.host}{sel.port !== 22 ? `:${sel.port}` : ""}</span>
@@ -99,10 +104,6 @@
       {/if}
     </div>
 
-    <div class="pill {connCfg[connState].cls}" title={connCfg[connState].title}>
-      <span class="dot"></span>
-      <span>{connCfg[connState].label}</span>
-    </div>
   </div>
 
   <div class="drag-fill" data-tauri-drag-region></div>
@@ -183,9 +184,22 @@
   .svr-btn:hover { background: var(--surface-hover); border-color: color-mix(in oklch, var(--accent) 30%, var(--border-strong)); }
   .svr-dot {
     width: 8px; height: 8px; border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 22%, transparent);
+    background: var(--fg-faint);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--fg-faint) 22%, transparent);
     flex-shrink: 0;
+    transition: background 120ms ease, box-shadow 120ms ease;
+  }
+  .svr-dot[data-state="ok"]     { background: var(--ok);     box-shadow: 0 0 0 2px color-mix(in oklch, var(--ok)     22%, transparent); }
+  .svr-dot[data-state="info"]   { background: var(--info);   box-shadow: 0 0 0 2px color-mix(in oklch, var(--info)   22%, transparent); }
+  .svr-dot[data-state="danger"] { background: var(--danger); box-shadow: 0 0 0 2px color-mix(in oklch, var(--danger) 22%, transparent); }
+  .svr-dot[data-state="muted"]  { background: var(--fg-faint); box-shadow: 0 0 0 2px color-mix(in oklch, var(--fg-faint) 22%, transparent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .svr-dot[data-state="ok"]   { animation: dot-breathe 2.6s ease-in-out infinite; }
+    .svr-dot[data-state="info"] { animation: dot-breathe 1.4s ease-in-out infinite; }
+  }
+  @keyframes dot-breathe {
+    0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 14%, transparent); }
   }
   .svr-name { font-weight: 600; font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; min-width: 0; }
   .svr-host { color: var(--fg-subtle); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 2; min-width: 0; }
@@ -214,8 +228,6 @@
   .shortcut { margin-left: auto; }
   .empty { padding: 8px; }
   .divider { height: 1px; background: var(--border); margin: 4px 0; }
-
-  .pill { height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
 
   .bridge {
     display: inline-flex; align-items: center; gap: 6px;
