@@ -157,6 +157,7 @@ class AssistantStore {
 
   apiKey = $state<string | null>(null);
   useFullConfig = $state<boolean>(true);
+  maxBudgetUsd = $state<number | null>(null);
 
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
@@ -243,6 +244,11 @@ class AssistantStore {
       this.useFullConfig = await invoke<boolean>("assistant_get_use_full_config");
     } catch (e) {
       console.warn("assistant_get_use_full_config failed", e);
+    }
+    try {
+      this.maxBudgetUsd = await invoke<number | null>("assistant_get_max_budget_usd");
+    } catch (e) {
+      console.warn("assistant_get_max_budget_usd failed", e);
     }
     await this.refreshConversations();
     await this.refreshWorkspace();
@@ -452,12 +458,10 @@ class AssistantStore {
     this.useFullConfig = value;
   }
 
-  /** Derive plain-text content of a message for history replay. */
-  private messageText(m: ChatMessage): string {
-    return m.blocks
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim();
+  async setMaxBudgetUsd(value: number | null) {
+    const v = value !== null && Number.isFinite(value) && value > 0 ? value : null;
+    await invoke("assistant_set_max_budget_usd", { value: v });
+    this.maxBudgetUsd = v;
   }
 
   async send(prompt: string) {
@@ -470,14 +474,10 @@ class AssistantStore {
       this.queue = [...this.queue, { id: crypto.randomUUID(), text: trimmed }];
       return;
     }
-    // Snapshot prior history BEFORE we mutate this.messages — backend replays
-    // these as Human:/Assistant: chain so Claude sees the conversation context.
-    // Tool blocks aren't included in history replay; the CLI handles its own
-    // tool turns in-session and our replay only carries final text per role.
-    const history = this.messages
-      .map((m) => ({ role: m.role, text: this.messageText(m) }))
-      .filter((m) => m.text.length > 0);
-    // Assign a conversation id on first send; persist from there.
+    // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
+    // UUID and passes `--session-id`; subsequent turns pass `--resume` against
+    // the same UUID. The session is persisted under `~/.claude/projects/<cwd-hash>/`.
+    const isFirstTurn = !this.currentConvoId;
     if (!this.currentConvoId) {
       this.currentConvoId = crypto.randomUUID();
       this.convoCreatedAt = Date.now();
@@ -505,7 +505,12 @@ class AssistantStore {
     this.messages = [...this.messages, asst];
     this.streamingMsgId = asst.id;
     try {
-      await invoke("assistant_send", { prompt: trimmed, history, model: this.model });
+      await invoke("assistant_send", {
+        prompt: trimmed,
+        sessionId: this.currentConvoId,
+        isFirstTurn,
+        model: this.model,
+      });
     } catch (e) {
       this.onError(String(e));
     }

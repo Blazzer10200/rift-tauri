@@ -2,6 +2,25 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 72 — 2026-05-16 — Phase 2 Session-ID + Native Resume
+
+**Committed mid-session, not shipped/bumped. Bundles into v0.2.57-alpha alongside S69–S71.** Roadmap: `docs/design/assistant-roadmap.md`.
+
+**Replaced hand-rolled `Human:/Assistant:` history replay with native CLI session continuation.** Cheaper tokens (no full-history retransmit per turn), better prompt-cache reuse, unlocks `--max-budget-usd`. CDP-verified end-to-end: turn 1 "Remember my favorite color is teal. Reply OK." → "OK\n"; turn 2 "What is my favorite color?" → "teal\n". Continuity inherited via `--resume <uuid>`.
+
+**Edits:**
+- `mod.rs`: deleted `ChatTurn` struct + `build_prompt` fn. `assistant_send` signature now takes `session_id: String` + `is_first_turn: bool` (no more `history`). Spawn passes `--session-id <uuid>` on first turn, `--resume <uuid>` thereafter. Dropped `--no-session-persistence` (was blocking resume). Added `--max-budget-usd <amount>` arg when config has a positive value. New `log::info!` on spawn captures session_id/first_turn/model/use_full_config/mcp/api_key for CDP-friendly verification. Stdin write switched from `assembled` to raw `prompt`.
+- `mod.rs`: `AssistantConfig.max_budget_usd: Option<f64>`. New cmds `assistant_get_max_budget_usd` + `assistant_set_max_budget_usd` (set filters `0` / negatives / non-finite to `None`).
+- `lib.rs`: registered the 2 new cmds.
+- `assistant.svelte.ts`: removed `messageText()` (only used for history). `send()` captures `isFirstTurn = !this.currentConvoId` BEFORE minting the UUID, then passes `{prompt, sessionId, isFirstTurn, model}`. No more history payload. Added `maxBudgetUsd` $state + init + `setMaxBudgetUsd` setter.
+- `Settings.svelte`: new `.asst-card` "Per-turn cost cap" with number input + Save/Clear; wired to `assistantStore.setMaxBudgetUsd`. Sits between use-full-config and api-key cards.
+
+**Open question resolved:** multi-user `~/.claude/projects/<cwd-hash>/` collision is non-issue — each user has their own `~/.claude/`, so Blazzer + Trey can't collide even on the same workspace cwd. CLI session file confirmed at `~/.claude/projects/C--AI-Workflow-projects-rift-tauri-scratch/49fe3e62-….jsonl` matching the minted UUID.
+
+**Roadmap correction:** `--max-turns` does NOT exist as a CLI flag (verified via `claude --help`); only `--max-budget-usd` shipped. Loaded-conversation edge case: if the CLI session is purged externally (`claude project purge`), `--resume` on that UUID fails — surfaced as chat error, no auto-recovery. Acceptable for Phase 2.
+
+**Phase 3 next session** (~1 focused session): the Rift-native moat. `WorkspaceContext` struct splicing live LockPresence foreign-locks + DiagBus recent events + drift counts into `RIFT_SYSTEM_ADDENDUM_TOOLS` per-turn. Remote-Bash MCP tool over russh exec channel (Settings toggle, default OFF; workspace-scoped advisory lock for concurrent users). See roadmap §3.
+
 ## Session 71 — 2026-05-16 — Phase 1 Harness Pull-Through
 
 **Committed mid-session, not shipped/bumped. Bundles into v0.2.57-alpha alongside S69+S70.** Roadmap: `docs/design/assistant-roadmap.md`.

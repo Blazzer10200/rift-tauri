@@ -1757,6 +1757,8 @@ pub fn run() {
             assistant::assistant_set_api_key,
             assistant::assistant_get_use_full_config,
             assistant::assistant_set_use_full_config,
+            assistant::assistant_get_max_budget_usd,
+            assistant::assistant_set_max_budget_usd,
             assistant::assistant_send,
             assistant::assistant_stop,
             assistant::assistant_list_conversations,
