@@ -181,6 +181,14 @@ struct AssistantConfig {
     /// a separate source the picker shows as a "Synced servers" group.
     #[serde(default)]
     recent_roots: Vec<PathBuf>,
+    /// When true (the default), spawn the CLI without `--strict-mcp-config`
+    /// and `--disable-slash-commands` so user MCP servers + slash commands
+    /// layer alongside Rift's. CLAUDE.md / hooks / skills always load via
+    /// the CLI's own resolution — there's no opt-out short of `--bare`,
+    /// which fires automatically in API-key mode.
+    /// `None` = default (true). Switch off for a sandboxed Assistant.
+    #[serde(default)]
+    use_full_config: Option<bool>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -448,6 +456,18 @@ pub fn assistant_get_api_key() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+pub fn assistant_get_use_full_config() -> Result<bool, String> {
+    Ok(load_config().use_full_config.unwrap_or(true))
+}
+
+#[tauri::command]
+pub fn assistant_set_use_full_config(value: bool) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.use_full_config = Some(value);
+    save_config(&cfg)
+}
+
+#[tauri::command]
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
     let mut cfg = load_config();
     cfg.api_key = api_key.filter(|s| !s.is_empty());
@@ -525,7 +545,7 @@ pub struct ChatTurn {
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
 /// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, operating against a project folder the user has opened (like VS Code's \"Open Folder\"). You have THREE read-only workspace tools exposed through Rift's MCP server: read_file(path) reads a UTF-8 text file (≤500 KB) from inside the open folder; list_dir(path) lists immediate directory contents; grep(pattern, path?, glob?, case_insensitive?) searches the folder for a regex (skips node_modules/.git/build/dist/target/binaries, returns ≤200 matches). Paths are absolute or relative to the workspace root. You also have the TodoWrite tool — USE IT proactively whenever a request involves three or more distinct steps. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI, so they can watch your plan tick down in real time. Update task statuses (pending → in_progress → completed) as you work. You currently have NO write tools, no Bash, no terminal — these may arrive in later releases. The user's project could be any language or framework; do not assume the stack. Use the tools freely to answer questions about the user's code instead of asking them to paste files. Do not claim capabilities you do not have.";
+const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, and TodoWrite for multi-step plans. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped helpers; prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. Act directly — build it, run it, fix it. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Project stack is open-ended — do not assume the language, framework, or layout.";
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
@@ -613,6 +633,14 @@ pub async fn assistant_send(
     // arg short + newline-free so .cmd shims work under Rust 1.77+ batch
     // validation (CVE-2024-24576). Addenda + MCP config path are single-line
     // by design, so they're safe as args.
+    // "Piggyback" mode: drop the two fences so the CLI loads user MCP servers
+    // (from `~/.claude.json`) and honors user slash commands. CLAUDE.md / hooks
+    // / skills already load today via the CLI's own resolution regardless of
+    // these flags — verified live via CDP probe 2026-05-16 (S71).
+    // API-key mode forces `--bare`, which suppresses user config wholesale,
+    // so we runtime-disable piggyback in that path.
+    let use_full_config = cfg.use_full_config.unwrap_or(true) && !use_api_key;
+
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
     cmd.arg("-p")
@@ -622,17 +650,34 @@ pub async fn assistant_send(
         .arg("--verbose")
         .arg("--include-partial-messages")
         .arg("--model").arg(&model)
-        .arg("--strict-mcp-config")
         .arg("--no-session-persistence")
         .arg("--permission-mode").arg("dontAsk")
-        .arg("--disable-slash-commands")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    if !use_full_config {
+        cmd.arg("--strict-mcp-config")
+            .arg("--disable-slash-commands");
+    }
+
     if let Some(ref p) = mcp_config_path {
+        let allowed = if use_full_config {
+            // `mcp__*` admits any tool from user MCP servers that the CLI
+            // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
+            // via the explicit-name entries.
+            "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,mcp__*"
+        } else {
+            "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep"
+        };
         cmd.arg("--mcp-config").arg(p)
-            .arg("--allowed-tools").arg("mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,TodoWrite");
+            .arg("--allowed-tools").arg(allowed);
+        // Spawn cwd = workspace root so Bash + relative paths resolve correctly.
+        // `roots[0]` is always non-empty when mcp_config_path is Some (see the
+        // write_mcp_config branch above).
+        if let Some(first) = roots.first() {
+            cmd.current_dir(first);
+        }
     } else {
         // No MCP config → keep the SDK's built-in tools off via empty tool set.
         cmd.arg("--tools").arg("");

@@ -2,35 +2,27 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 70 — 2026-05-16 — CDP autonomous-verify infra + UX polish
+## Session 71 — 2026-05-16 — Phase 1 Harness Pull-Through
 
-**Committed mid-session (pre-compact checkpoint), not shipped/version-bumped.** Bundles into v0.2.57-alpha alongside S69.
+**Committed mid-session, not shipped/bumped. Bundles into v0.2.57-alpha alongside S69+S70.** Roadmap: `docs/design/assistant-roadmap.md`.
 
-**CDP infra (`scripts/cdp/`)** — Claude can drive + observe the running Rift UI autonomously. WebView2 CDP enabled in `scripts/run-dev.bat` via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Persistent Node wrapper (`serve.cjs`) on `127.0.0.1:9223` holds one ws to WebView2 → ~40-60ms/call vs ~700ms PS cold-start. Endpoints: `/health /eval /type /click /wait /screenshot /key /state /shutdown`. Bash helper: `bash scripts/cdp/c.sh <cmd>`. `npm run cdp:serve`. `/key` uses CDP `Input.dispatchKeyEvent` (OS-trusted) — synthetic JS KeyboardEvents won't close palette by design. Workflow in `CLAUDE.md` + `scripts/cdp/README.md`. **Dev-only**, prod doesn't expose port.
+**Probe verified live via CDP:** user's `~/.claude/CLAUDE.md` IS loaded by the CLI when Rift spawns it today, even with `--strict-mcp-config` + `--disable-slash-commands` + `--append-system-prompt`. Single-line canary string in CLAUDE.md echoed verbatim in assistant bubble. Hooks/skills/CLAUDE.md piggyback was already free; user slash commands + user MCPs were the only gaps.
 
-**S69 live-verified end-to-end via CDP** — Sonnet 4.6 emits thinking blocks under `MAX_THINKING_TOKENS=10000` ("Reasoned 5.5s", click-to-expand `.reasoning-body` w/ real text, brain icon, `aria-expanded` toggles). Bundled-`.exe` resolver fired cleanly (no `.cmd` shim corruption). Open question from S69 closed.
+**Edits:**
+- `mod.rs`: `AssistantConfig.use_full_config: Option<bool>` (default true via `unwrap_or(true)`). Spawn-arg restructure — `--strict-mcp-config` + `--disable-slash-commands` now only fire when `!use_full_config` OR API-key mode (which already forces `--bare`). `--allowed-tools` becomes `…,mcp__*` in piggyback path so any user MCP tool the CLI merges in is admitted.
+- `lib.rs`: registered `assistant_get_use_full_config` + `assistant_set_use_full_config`.
+- `assistant.svelte.ts`: `useFullConfig` $state + init + setter.
+- `Settings.svelte`: new `.asst-card` "Use my full Claude Code config" with switch + status-copy that flips between "On — your CLAUDE.md, hooks, skills, slash commands, and MCPs are live." / "Off — sandboxed." / "Force-off while API-key mode is active". Switch disabled when `apiKey` set.
 
-**UX polish batch (4 fixes)** —
-- `ActivityFeed.svelte:459` copy unified ("drift scan" → "rescan")
-- `TabRail.svelte:61` rail-pin `aria-label` added alongside `title`
-- `Settings.svelte` Assistant section: API-key field gained Eye/EyeOff show/hide toggle w/ `aria-label` flip
-- `Settings.svelte:113` Appearance hidden from nav (dormant render branch kept for fast re-enable); `initialSection` default → `"terminal"`. Queue item (j) resolved by hiding.
+**CDP-verified end-to-end:** aria-checked flips, status copy flips, `~/.rift/assistant/config.json` persists `use_full_config:true`, smoke prompt round-trips clean ("OK\n"). MCP server + allowed-tools chain still works under the new wildcard.
 
-**Tour observations not yet acted on** — Sync page stat cards (item 5 from tour), Conflicts default-education (item 6), titlebar hostname leak toggle (item 11), `Sync Inspector` (Ctrl+Shift+D) surfacing.
+**Carried in same commit (pre-existing dirty since 04b3ffd checkpoint apparently missed them):** `Markdown.svelte` tagFlatShortLists pass, `MessageBubble.svelte` white-space fix, `TasksDock.svelte` summarize/icon coverage for 9 tools, `assistant.svelte.ts` parser-deny-list + `RIFT_SYSTEM_ADDENDUM_TOOLS` rewrite to "full Claude Code toolset" copy. All matched the roadmap's "shipped on main at handoff" inventory.
 
-## Session 69 — 2026-05-15 — Assistant blank-response fix + thinking surface
+**Phase 2 next session** (~half day): replace `build_prompt(history)` replay with native `--session-id <uuid>` first-turn + `--resume <uuid>` subsequent. Unlocks `--max-budget-usd` + `--max-turns` Settings. Verify multi-user `~/.claude/projects/<cwd-hash>/` collision before shipping.
 
-**Status: committed S70 checkpoint, not shipped.** Bundle into v0.2.57-alpha.
+## Sessions 69 + 70 — 2026-05-15/16 — see git log (collapsed 2026-05-16)
 
-**Root cause fix** — Rift's CLI resolver fell through to `claude.cmd`; cmd.exe `%*` mangled `--output-format stream-json` → CLI silently downgraded to plain text → parser dropped everything. Fix: probe bundled `%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\bin\claude.exe` directly between LOCALAPPDATA + .cmd fallback (`mod.rs:resolve_claude_exe` step 2b).
-
-**Defense-in-depth (`assistant.svelte.ts:onStream`):** non-JSON lines render as assistant text; envelope text-blocks buffered as fallback when zero deltas fire; per-turn delta count + ring-logged raw NDJSON; blank-turn banner fingerprints envelope types.
-
-**Thinking surface** — new `ThinkingBlock` type in Block union; parser handles `content_block_start/_delta/_stop` for `thinking`, `thinking_delta`, `signature_delta`. Backend sets `MAX_THINKING_TOKENS=10000` env for non-haiku. UI: animated "🧠 Thinking" pill w/ live elapsed timer (250ms tick), transitions to "Reasoned · 5.3s" w/ collapsed first-line preview; click-to-expand panel; encrypted-only blocks show "· encrypted" suffix.
-
-**Don't retry:** `--settings '{"thinking":{...}}'` / `--settings '{"maxThinkingTokens":N}'` / bare `MAX_THINKING_TOKENS` env alone — none triggered thinking emission. ONLY `MAX_THINKING_TOKENS=10000` env + opus model reliably fires blocks. `--permission-mode plan` triggers but restricts edits.
-
-**Next:** live-test against sonnet (does it emit `thinking` under `MAX_THINKING_TOKENS` or only opus?). Bundle into v0.2.57-alpha w/ queue items. Pre-expand first thinking block in fresh convos for discoverability?
+S69 fixed Assistant blank-response (cmd-shim mangling `--output-format`; resolver probes bundled `.exe` directly between LOCALAPPDATA + .cmd fallback) and surfaced extended-thinking blocks (animated "🧠 Thinking" pill → "Reasoned · 5.3s"; `MAX_THINKING_TOKENS=10000` env, non-haiku only). S70 shipped CDP autonomous-verify infra (`scripts/cdp/serve.cjs` + `c.sh`; WebView2 port 9222; Input.dispatchKeyEvent for trusted key events) and a 4-fix UX polish batch (ActivityFeed "rescan" copy, TabRail aria-label, Settings API-key Eye toggle, Appearance section hidden). All committed at 04b3ffd. Don't retry `--settings '{"thinking":...}'` / `--permission-mode plan` for thinking emission — only the env var works.
 
 ---
 
