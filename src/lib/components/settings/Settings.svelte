@@ -518,6 +518,36 @@
         </div>
 
         <div class="card asst-card">
+          <h4 class="asst-h4">Use my full Claude Code config</h4>
+          <p class="muted">
+            Layers your <code>~/.claude/CLAUDE.md</code>, slash commands, skills, and MCP servers
+            into every Assistant turn alongside Rift's own MCP tools. Off = sandboxed mode (Rift
+            MCP only, no user slash commands).
+          </p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Use full Claude Code config"
+              aria-checked={assistantStore.useFullConfig && !assistantStore.apiKey}
+              data-on={assistantStore.useFullConfig && !assistantStore.apiKey}
+              disabled={!!assistantStore.apiKey}
+              onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if assistantStore.apiKey}
+                Force-off while API-key mode is active — <code>--bare</code> suppresses user config.
+              {:else if assistantStore.useFullConfig}
+                On — your CLAUDE.md, hooks, skills, slash commands, and MCPs are live.
+              {:else}
+                Off — sandboxed. Only Rift's MCP + the built-in tool set.
+              {/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
           <h4 class="asst-h4">API-key fallback</h4>
           <p class="muted">Pay-per-token via <code>console.anthropic.com</code>. Used when configured; overrides the CLI session.</p>
           <div class="asst-row">

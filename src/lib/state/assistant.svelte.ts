@@ -156,6 +156,7 @@ class AssistantStore {
   promptHistory = $state<string[]>([]);
 
   apiKey = $state<string | null>(null);
+  useFullConfig = $state<boolean>(true);
 
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
@@ -237,6 +238,11 @@ class AssistantStore {
       this.apiKey = await invoke<string | null>("assistant_get_api_key");
     } catch (e) {
       console.warn("assistant_get_api_key failed", e);
+    }
+    try {
+      this.useFullConfig = await invoke<boolean>("assistant_get_use_full_config");
+    } catch (e) {
+      console.warn("assistant_get_use_full_config failed", e);
     }
     await this.refreshConversations();
     await this.refreshWorkspace();
@@ -439,6 +445,11 @@ class AssistantStore {
     await invoke("assistant_set_api_key", { apiKey: v });
     this.apiKey = v;
     await this.refreshAuth();
+  }
+
+  async setUseFullConfig(value: boolean) {
+    await invoke("assistant_set_use_full_config", { value });
+    this.useFullConfig = value;
   }
 
   /** Derive plain-text content of a message for history replay. */
@@ -653,9 +664,20 @@ class AssistantStore {
   private shortToolLabel(name: string, input?: Record<string, unknown>): string {
     const base = name.replace(/^mcp__rift__/, "");
     const inp = input ?? {};
-    if (base === "read_file" && typeof inp.path === "string") return `read ${inp.path}`;
+    // Claude Code built-ins (PascalCase) + Rift MCP variants (snake_case).
+    if ((base === "Read" || base === "read_file") && typeof (inp.file_path ?? inp.path) === "string")
+      return `read ${inp.file_path ?? inp.path}`;
+    if (base === "Write" && typeof inp.file_path === "string") return `write ${inp.file_path}`;
+    if (base === "Edit" && typeof inp.file_path === "string") return `edit ${inp.file_path}`;
+    if (base === "Bash" && typeof inp.command === "string") {
+      const c = inp.command as string;
+      return `$ ${c.length > 70 ? c.slice(0, 69) + "…" : c}`;
+    }
+    if (base === "Glob" && typeof inp.pattern === "string") return `glob ${inp.pattern}`;
+    if ((base === "Grep" || base === "grep") && typeof inp.pattern === "string") return `grep "${inp.pattern}"`;
+    if (base === "WebFetch" && typeof inp.url === "string") return `fetch ${inp.url}`;
+    if (base === "WebSearch" && typeof inp.query === "string") return `search "${inp.query}"`;
     if (base === "list_dir" && typeof inp.path === "string") return `list ${inp.path}`;
-    if (base === "grep" && typeof inp.pattern === "string") return `grep "${inp.pattern}"`;
     return base;
   }
 
@@ -667,10 +689,11 @@ class AssistantStore {
       this.applyTodoWrite(block.input);
       return;
     }
-    // Skip CC harness internals (ToolSearch for deferred-tool discovery, etc).
-    // Only surface Rift's own MCP tools inline; everything else stays in the
-    // CLI's internal layer and never reaches the chat UI.
-    if (!block.name.startsWith("mcp__rift__")) return;
+    // Surface all whitelisted workspace tools — Claude Code built-ins
+    // (Read/Write/Edit/Bash/Glob/Grep/WebFetch/WebSearch) and Rift's MCP
+    // variants. Deny-list CLI-internal helpers we never want in the chat UI.
+    const DENY = new Set(["ToolSearch"]);
+    if (DENY.has(block.name)) return;
     this.activity = { ...this.activity, currentLabel: this.shortToolLabel(block.name, block.input) };
     // First tool call of a conversation auto-opens the dock — same UX as the
     // first TodoWrite. Respects user's manual close after that.

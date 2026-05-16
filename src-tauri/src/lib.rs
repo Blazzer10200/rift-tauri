@@ -1755,6 +1755,8 @@ pub fn run() {
             assistant::assistant_auth_probe,
             assistant::assistant_get_api_key,
             assistant::assistant_set_api_key,
+            assistant::assistant_get_use_full_config,
+            assistant::assistant_set_use_full_config,
             assistant::assistant_send,
             assistant::assistant_stop,
             assistant::assistant_list_conversations,

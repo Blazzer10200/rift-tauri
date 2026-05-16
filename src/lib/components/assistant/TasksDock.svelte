@@ -1,5 +1,9 @@
 <script lang="ts">
-  import { ListChecks, Circle, CircleDot, CheckCircle2, Activity, Loader2, X, FileText, FolderTree, Search, ChevronRight, AlertCircle } from "lucide-svelte";
+  import {
+    ListChecks, Circle, CircleDot, CheckCircle2, Activity, Loader2, X,
+    FileText, FolderTree, Search, ChevronRight, AlertCircle,
+    FilePen, FilePlus, Terminal, Globe, Wrench,
+  } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
 
   const counts = $derived.by(() => {
@@ -28,15 +32,40 @@
     expanded = { ...expanded, [id]: !expanded[id] };
   }
   function shortName(name: string) { return name.replace(/^mcp__rift__/, ""); }
+  function trim(s: string, n = 80): string {
+    return s.length > n ? s.slice(0, n - 1) + "…" : s;
+  }
+  function hostOf(u: string): string {
+    try { return new URL(u).host; } catch { return u; }
+  }
   function summarize(t: ToolBlock): string {
     const n = shortName(t.name);
     const inp = t.input ?? {};
-    if (n === "read_file") return typeof inp.path === "string" ? (inp.path as string) : "file";
-    if (n === "list_dir") return typeof inp.path === "string" ? (inp.path as string) : "directory";
-    if (n === "grep") {
+    // Claude Code built-ins (PascalCase) + Rift MCP variants (snake_case).
+    if (n === "Read" || n === "read_file") return typeof inp.file_path === "string" ? (inp.file_path as string) : (typeof inp.path === "string" ? (inp.path as string) : "file");
+    if (n === "Write") return typeof inp.file_path === "string" ? `${inp.file_path} (${(inp.content as string ?? "").length} chars)` : "file";
+    if (n === "Edit") {
+      const p = typeof inp.file_path === "string" ? inp.file_path as string : "file";
+      const old = typeof inp.old_string === "string" ? (inp.old_string as string).split("\n")[0].slice(0, 32) : "";
+      return old ? `${p} — ${old}` : p;
+    }
+    if (n === "Bash") return typeof inp.command === "string" ? trim(inp.command as string, 90) : "shell";
+    if (n === "Glob") {
+      const pat = typeof inp.pattern === "string" ? (inp.pattern as string) : "?";
+      const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+      return `${pat}${scope}`;
+    }
+    if (n === "Grep" || n === "grep") {
       const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "?";
       const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
       return `${pat}${scope}`;
+    }
+    if (n === "WebFetch") return typeof inp.url === "string" ? hostOf(inp.url as string) : "url";
+    if (n === "WebSearch") return typeof inp.query === "string" ? `"${trim(inp.query as string, 60)}"` : "search";
+    if (n === "list_dir") return typeof inp.path === "string" ? (inp.path as string) : "directory";
+    if (n === "TodoWrite") {
+      const todos = Array.isArray(inp.todos) ? (inp.todos as Array<{content?: string}>).length : 0;
+      return `${todos} task${todos === 1 ? "" : "s"}`;
     }
     return n;
   }
@@ -123,10 +152,16 @@
               <button class="op-head" type="button" onclick={() => toggleCard(t.id)} aria-expanded={isOpen}>
                 <span class="op-chev" class:open={isOpen}><ChevronRight size={11} /></span>
                 <span class="op-icon">
-                  {#if sn === "read_file"}<FileText size={11} />
+                  {#if sn === "Read" || sn === "read_file"}<FileText size={11} />
                   {:else if sn === "list_dir"}<FolderTree size={11} />
-                  {:else if sn === "grep"}<Search size={11} />
-                  {:else}<FileText size={11} />{/if}
+                  {:else if sn === "Grep" || sn === "grep"}<Search size={11} />
+                  {:else if sn === "Glob"}<FolderTree size={11} />
+                  {:else if sn === "Write"}<FilePlus size={11} />
+                  {:else if sn === "Edit"}<FilePen size={11} />
+                  {:else if sn === "Bash"}<Terminal size={11} />
+                  {:else if sn === "WebFetch" || sn === "WebSearch"}<Globe size={11} />
+                  {:else if sn === "TodoWrite"}<ListChecks size={11} />
+                  {:else}<Wrench size={11} />{/if}
                 </span>
                 <span class="op-name-row">
                   <span class="op-tool">{sn}</span>

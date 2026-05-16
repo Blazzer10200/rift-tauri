@@ -109,6 +109,27 @@
     return { html: tpl.innerHTML, items };
   }
 
+  // Tag flat short lists (e.g., 8 short filenames) so CSS can flow them
+  // into columns. Keeps long-prose lists single-column.
+  function tagFlatShortLists(html: string): string {
+    if (typeof document === "undefined") return html;
+    if (!html.includes("<ul")) return html;
+    const tpl = document.createElement("template");
+    tpl.innerHTML = html;
+    tpl.content.querySelectorAll("ul").forEach((ul) => {
+      const items = ul.querySelectorAll(":scope > li");
+      if (items.length < 5) return;
+      let qualifies = true;
+      items.forEach((li) => {
+        if (li.querySelector("ul, ol, pre, blockquote, table, img, h1, h2, h3, h4, h5, h6")) qualifies = false;
+        const txt = (li.textContent ?? "").trim();
+        if (txt.length > 60) qualifies = false;
+      });
+      if (qualifies) ul.classList.add("flat-short");
+    });
+    return tpl.innerHTML;
+  }
+
   const processed = $derived.by(() => {
     const raw = marked.parse(text, { async: false }) as string;
     const clean = DOMPurify.sanitize(raw, {
@@ -126,7 +147,8 @@
       ],
       ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open"],
     });
-    return extractAndStripChecklists(clean);
+    const extracted = extractAndStripChecklists(clean);
+    return { html: tagFlatShortLists(extracted.html), items: extracted.items };
   });
   const html = $derived(processed.html);
 
@@ -231,6 +253,16 @@
   .md :global(ul > li) {
     position: relative;
     padding-left: 16px;
+  }
+  /* Flat short lists (≥5 items, all ≤60 chars, no nested blocks) flow into
+     auto columns — scans cleanly when the model dumps a list of filenames
+     or short labels. Tagged in `tagFlatShortLists()` above. */
+  .md :global(ul.flat-short) {
+    columns: 22ch;
+    column-gap: 28px;
+  }
+  .md :global(ul.flat-short > li) {
+    break-inside: avoid;
   }
   .md :global(ul > li)::before {
     content: "";

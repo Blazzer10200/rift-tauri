@@ -213,12 +213,16 @@
     gap: 4px;
   }
   .text {
-    white-space: pre-wrap;
     word-wrap: break-word;
     font-size: var(--fs-md);
     line-height: 1.55;
     color: var(--fg);
   }
+  /* User text is raw — preserve newlines they typed.
+     Assistant text is rendered HTML (Markdown component) so the default
+     whitespace mode applies — `pre-wrap` here would render every `\n`
+     between `</li>` and `<li>` in the marked output as a full line of
+     empty space, stacking ~20px under every list item. */
   .bubble[data-role="user"] .text {
     padding: 8px 12px;
     background: var(--accent-soft);
@@ -228,6 +232,7 @@
     align-self: flex-start;
     max-width: min(100%, 78ch);
     width: fit-content;
+    white-space: pre-wrap;
   }
   .bubble[data-role="assistant"] .text { max-width: 78ch; }
 
