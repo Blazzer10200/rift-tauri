@@ -16,25 +16,37 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Backend | `src-tauri/src/` |
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
-| Audit notes | `docs/audit/` |
-| Design briefs | `docs/design/` |
+| Audit notes | `docs/AUDIT.md` (merged 2026-05-15 from `docs/audit/`) |
+| Design briefs | `docs/design/` (empty as of 2026-05-16; shipped briefs in `docs/archive/design/`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
 
-## Hot files (measured 2026-05-09)
+## Hot files (measured 2026-05-16)
 
 Files large enough to matter for agent scoping. Everything else is small enough for inline or `recon`.
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/sync/auto_sync.rs` | 1208 | watcher → debounce → upload |
-| `src-tauri/src/sftp/mod.rs` | 1100 | russh-sftp wrapper, connection pool |
-| `src-tauri/src/lib.rs` | 811 | tauri command registry |
-| `src-tauri/src/sync/drift_scanner.rs` | 397 | local↔remote diff |
-| `src-tauri/src/state/sync_snapshot.rs` | 334 | snapshot persistence |
+| `src-tauri/src/sync/auto_sync.rs` | 1954 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
+| `src-tauri/src/lib.rs` | 1771 | tauri command registry (52 cmds) |
+| `src-tauri/src/assistant/mod.rs` | 775 | claude CLI integration + auth + workspace |
+| `src-tauri/src/sync/auto_sync/flush.rs` | 610 | flush_batch pipeline (split out 2026-05-13) |
+| `src-tauri/src/sync/drift_scanner.rs` | 555 | 3-way drift diff |
+| `src-tauri/src/sftp/list.rs` | 454 | exec-fast-path + worker fallback (split v0.2.49) |
+| `src-tauri/src/assistant/mcp_server.rs` | 447 | stdio JSON-RPC MCP server |
+| `src-tauri/src/sync/ignore.rs` | 441 | full WPF ignore-rule parity + tests |
+| `src-tauri/src/sync/drift_watcher.rs` | 380 | pull_one / delete_local_one / register_conflict (auto-poll loop removed v0.2.38) |
+| `src-tauri/src/sftp/transfer.rs` | 368 | atomic upload/download + `with_t` op timeouts |
+| `src-tauri/src/state/sync_snapshot.rs` | 364 | snapshot persistence |
+| `src-tauri/src/diagnostics/mod.rs` | 358 | DiagBus + LogForwarder + frontend pump |
+| `src-tauri/src/sync/lock_presence.rs` | 343 | .rift-lock advisory presence |
+| `src-tauri/src/sync/auto_sync/watch.rs` | 341 | notify lifecycle + queue_path |
+| `src-tauri/src/sftp/mod.rs` | 302 | session core (split v0.2.49 from 1100L → 302L) |
 
-None exceed the 2000-line agent-split threshold yet, but `auto_sync.rs` and `sftp/mod.rs` are climbing. When either crosses 1500, scope agents by line range, not "audit X."
+Frontend hot files: `SyncPage.svelte` 1223L, `Settings.svelte` 1060L, `assistant.svelte.ts` 1012L, `ActivityFeed.svelte` 951L, `TerminalPanel.svelte` 818L.
+
+`auto_sync.rs` + `lib.rs` are approaching the 2000-line agent-split threshold — `lib.rs` split into per-domain `commands/*.rs` is queue item (e).
 
 ## Agent routing
 
@@ -56,6 +68,17 @@ Only `operator` + `recon` are defined as local subagents. `architect` / `scout` 
 - `/check` skill auto-routes both
 
 `operator` returning "done" on Rust changes MUST paste verbatim `cargo check` exit + zero `error[E\d+]` lines. Absent or summarized = UNVERIFIED — re-run before accepting.
+
+## Live UI verification — CDP (2026-05-16, S69)
+
+Claude can drive + observe the running Rift UI autonomously. No manual screenshots needed.
+
+1. `scripts/run-dev.bat` already sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Always start dev via this batch (not raw `npm run tauri dev`) so CDP is exposed.
+2. Start the wrapper once per dev session: `npm run cdp:serve` (background). It holds one persistent ws to WebView2 and exposes `127.0.0.1:9223`. ~40-60ms per call.
+3. Drive via `bash scripts/cdp/c.sh {health|state|eval|type|click|wait|shot|shutdown}`. Full docs: `scripts/cdp/README.md`.
+4. **Prefer `/state` + `/eval` (DOM reads) over screenshots.** Per-screenshot is ~$0.07 at Opus 4.7 rates; DOM reads are free. Screenshot only when pixels matter (layout / animation / contrast).
+5. Webview only — titlebar / drag region / OS dialogs are invisible to CDP. If a native-chrome bug appears, ask the user OR queue a Windows-MCP setup.
+6. CDP is dev-only. Prod builds don't expose the port.
 
 ## Project gotchas
 

@@ -4,7 +4,7 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
@@ -62,7 +62,7 @@
     { id: "sound",  label: "Sound" },
   ];
 
-  let { initialSection = "appearance", onAddServer, onEditServer, onDeleteServer, onLaunchKeygen }: {
+  let { initialSection = "terminal", onAddServer, onEditServer, onDeleteServer, onLaunchKeygen }: {
     initialSection?: Section;
     onAddServer: () => void;
     onEditServer: (s: ServerProfile) => void;
@@ -110,8 +110,10 @@
     } catch (e) { console.error("clipboard failed", e); }
   }
 
+  // Appearance hidden until the section has real controls (density / font / accent).
+  // Keeping the type + render branch dormant lets it light up once shipped without
+  // touching this nav array. See HANDOFF queue item (j).
   const sections: { id: Section; label: string; icon: typeof Cog }[] = [
-    { id: "appearance", label: "Appearance", icon: Cog },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "assistant",  label: "Assistant",  icon: Sparkles },
     { id: "servers",    label: "Servers",    icon: Server },
@@ -124,6 +126,7 @@
   let asstApiKeyDraft = $state("");
   let asstApiKeySaving = $state(false);
   let asstApiKeyMsg = $state<string | null>(null);
+  let asstApiKeyVisible = $state(false);
   $effect(() => {
     if (section === "assistant") {
       void assistantStore.init();
@@ -518,14 +521,25 @@
           <h4 class="asst-h4">API-key fallback</h4>
           <p class="muted">Pay-per-token via <code>console.anthropic.com</code>. Used when configured; overrides the CLI session.</p>
           <div class="asst-row">
-            <input
-              class="input mono asst-input"
-              type="password"
-              placeholder="sk-ant-api03-…"
-              bind:value={asstApiKeyDraft}
-              autocomplete="off"
-              spellcheck="false"
-            />
+            <div class="asst-input-wrap">
+              <input
+                class="input mono asst-input"
+                type={asstApiKeyVisible ? "text" : "password"}
+                placeholder="sk-ant-api03-…"
+                bind:value={asstApiKeyDraft}
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button
+                class="asst-eye"
+                type="button"
+                onclick={() => (asstApiKeyVisible = !asstApiKeyVisible)}
+                aria-label={asstApiKeyVisible ? "Hide API key" : "Show API key"}
+                title={asstApiKeyVisible ? "Hide API key" : "Show API key"}
+              >
+                {#if asstApiKeyVisible}<EyeOff size={14}/>{:else}<Eye size={14}/>{/if}
+              </button>
+            </div>
             <button class="btn primary sm" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving}>
               {asstApiKeySaving ? "Saving…" : "Save"}
             </button>
@@ -1044,7 +1058,19 @@
   .asst-h4 { margin: 0 0 4px; font-size: var(--fs-md); font-weight: 600; }
   .asst-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
   .asst-label { font-size: var(--fs-sm); color: var(--fg-muted); min-width: 80px; }
+  .asst-input-wrap { position: relative; flex: 1; min-width: 280px; display: flex; align-items: center; }
+  .asst-input-wrap .asst-input { width: 100%; padding-right: 34px; }
   .asst-input { flex: 1; min-width: 280px; padding: 7px 10px; }
+  .asst-eye {
+    position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; padding: 0;
+    background: transparent; border: 0; border-radius: var(--radius-xs);
+    color: var(--fg-muted); cursor: pointer;
+    transition: color 140ms ease, background 140ms ease;
+  }
+  .asst-eye:hover { color: var(--fg); background: var(--surface-hover); }
+  .asst-eye:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .asst-pill {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 9px; border-radius: 999px;

@@ -1,11 +1,31 @@
 <script lang="ts">
-  import { User, Sparkles, Copy, Check } from "lucide-svelte";
-  import type { ChatMessage } from "../../state/assistant.svelte";
+  import { User, Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
+  import { onDestroy } from "svelte";
+  import type { ChatMessage, ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
 
   let { message, streaming = false }: { message: ChatMessage; streaming?: boolean } = $props();
 
   let copied = $state(false);
+  let expandedThinking = $state(new Set<number>());
+  // Live tick so `active` thinking blocks show real-time elapsed seconds.
+  // Only runs while at least one active block is present in this bubble.
+  let tickNow = $state(Date.now());
+  const hasActiveThinking = $derived(
+    streaming && message.blocks.some((b) => b.type === "thinking" && b.status === "active"),
+  );
+  let tickHandle: ReturnType<typeof setInterval> | null = null;
+  $effect(() => {
+    if (hasActiveThinking && !tickHandle) {
+      tickHandle = setInterval(() => (tickNow = Date.now()), 250);
+    } else if (!hasActiveThinking && tickHandle) {
+      clearInterval(tickHandle);
+      tickHandle = null;
+    }
+  });
+  onDestroy(() => {
+    if (tickHandle) clearInterval(tickHandle);
+  });
 
   const plainText = $derived(
     message.blocks
@@ -16,6 +36,34 @@
 
   const hasContent = $derived(message.blocks.length > 0);
   const isUser = $derived(message.role === "user");
+
+  function formatDuration(ms: number): string {
+    if (ms < 1000) return `${ms} ms`;
+    const s = ms / 1000;
+    return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+  }
+
+  function elapsedFor(b: ThinkingBlock, startSeed: number): string {
+    // For done blocks use stored durationMs; for active, derive from tickNow.
+    // startSeed is unused but referenced so Svelte tracks tickNow dep below.
+    void startSeed;
+    if (b.status === "done" && b.durationMs != null) return formatDuration(b.durationMs);
+    return "…";
+  }
+
+  function previewOf(text: string): string {
+    // First non-empty line, lightly trimmed for a glimpse-style preview.
+    const line = text.split(/\n+/).find((l) => l.trim().length > 0) ?? "";
+    const t = line.trim().replace(/^[#*>`\-_\s]+/, "");
+    return t.length > 110 ? t.slice(0, 108) + "…" : t;
+  }
+
+  function toggleThinking(i: number) {
+    const next = new Set(expandedThinking);
+    if (next.has(i)) next.delete(i);
+    else next.add(i);
+    expandedThinking = next;
+  }
 
   async function copy() {
     if (!plainText) return;
@@ -60,6 +108,42 @@
           {:else}
             <div class="text"><Markdown text={b.text} /></div>
           {/if}
+        {:else if b.type === "thinking"}
+          {@const isActive = b.status === "active"}
+          {@const hasText = b.text.length > 0}
+          {@const isOpen = expandedThinking.has(bi)}
+          {@const elapsed = elapsedFor(b, tickNow)}
+          <div class="reasoning" class:active={isActive} class:expandable={hasText}>
+            <button
+              type="button"
+              class="reasoning-head"
+              onclick={() => hasText && toggleThinking(bi)}
+              disabled={!hasText}
+              aria-expanded={isOpen}
+            >
+              <Brain size={12} />
+              <span class="reasoning-label">
+                {#if isActive}Thinking{:else}Reasoned{/if}
+              </span>
+              <span class="reasoning-meta">{elapsed}</span>
+              {#if isActive}
+                <span class="dots" aria-hidden="true">
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                </span>
+              {:else if !hasText && b.hasSignature}
+                <span class="reasoning-meta subtle">· encrypted</span>
+              {/if}
+              {#if hasText}
+                <span class="chev" class:open={isOpen}><ChevronDown size={12} /></span>
+              {/if}
+            </button>
+            {#if hasText && !isOpen && !isActive}
+              <div class="reasoning-preview">{previewOf(b.text)}</div>
+            {/if}
+            {#if hasText && isOpen}
+              <div class="reasoning-body"><Markdown text={b.text} /></div>
+            {/if}
+          </div>
         {/if}
       {/each}
 
@@ -146,6 +230,83 @@
     width: fit-content;
   }
   .bubble[data-role="assistant"] .text { max-width: 78ch; }
+
+  /* Reasoning / thinking surface */
+  .reasoning {
+    align-self: flex-start;
+    max-width: min(100%, 78ch);
+    border: 1px solid var(--border);
+    background: color-mix(in oklch, var(--accent-soft) 35%, var(--bg-elev-1));
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 180ms ease-out, background 180ms ease-out;
+  }
+  .reasoning.active {
+    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+    background: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev-1));
+    animation: reasoning-glow 2.4s ease-in-out infinite;
+  }
+  @keyframes reasoning-glow {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
+    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent); }
+  }
+  .reasoning-head {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%;
+    padding: 5px 9px;
+    background: transparent;
+    border: 0;
+    color: var(--fg-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    cursor: default;
+    text-align: left;
+  }
+  .reasoning.expandable .reasoning-head { cursor: pointer; }
+  .reasoning.expandable .reasoning-head:hover { background: var(--surface-hover); }
+  .reasoning-head[disabled] { opacity: 1; } /* keep visible state */
+  .reasoning-label { color: var(--fg); }
+  .reasoning.active .reasoning-label { color: var(--accent); }
+  .reasoning-meta {
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 11px;
+  }
+  .reasoning-meta.subtle { color: var(--fg-faint); }
+  .chev {
+    margin-left: auto;
+    display: inline-flex;
+    color: var(--fg-faint);
+    transition: transform 160ms ease-out;
+  }
+  .chev.open { transform: rotate(180deg); }
+  .dots { display: inline-flex; gap: 3px; margin-left: 2px; }
+  .dots .dot {
+    width: 4px; height: 4px; border-radius: 50%;
+    background: var(--accent);
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .dots .dot:nth-child(2) { animation-delay: 0.15s; }
+  .dots .dot:nth-child(3) { animation-delay: 0.3s; }
+  .reasoning-preview {
+    padding: 0 10px 7px 10px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--fg-muted);
+    font-style: italic;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .reasoning-body {
+    padding: 4px 10px 9px 10px;
+    border-top: 1px solid var(--border);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--fg-2);
+    font-style: italic;
+    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
+  }
 
   .thinking {
     display: flex; gap: 4px;

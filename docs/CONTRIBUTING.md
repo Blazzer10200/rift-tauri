@@ -49,4 +49,4 @@ The dev process watches `src/` (Svelte) + `src-tauri/src/` (Rust) and hot-reload
 
 ## Releases
 
-Maintainers only — `scripts/release.ps1` drives bump → build → `vpk pack` → `vpk upload`.
+Maintainers only. Versions are bumped manually (or via `/git-ship`) across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — the script's preflight bails on any mismatch. `release.ps1` then drives `tauri build` → `vpk pack` → `vpk upload github` against the public `rift-releases` repo.

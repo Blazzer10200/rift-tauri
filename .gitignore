@@ -15,3 +15,9 @@ src-tauri/src/state/rift-edits/
 
 # Claude Code workspace-local agent state (worktrees, transient).
 .claude/
+
+# CDP wrapper scratch (screenshots, ws snapshots).
+scripts/cdp/.tmp/
+
+# Local timestamped backups dir created by tooling.
+backups/

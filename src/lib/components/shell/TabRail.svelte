@@ -58,6 +58,7 @@
       type="button"
       onclick={(e) => { uiPrefs.toggleRailPinned(); (e.currentTarget as HTMLButtonElement).blur(); }}
       title={uiPrefs.railPinned ? "Unpin rail (collapse on leave)" : "Pin rail open"}
+      aria-label={uiPrefs.railPinned ? "Unpin rail (collapse on leave)" : "Pin rail open"}
       aria-pressed={uiPrefs.railPinned}
     >
       {#if uiPrefs.railPinned}

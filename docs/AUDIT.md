@@ -1,8 +1,8 @@
 # Rift — Audit Log
 
-Single source of truth for code audit findings. Open items at top, archive below. Line numbers are pre-cleanup (2026-05-11 tree) unless noted — re-verify against current HEAD before fixing.
+Single source of truth for code audit findings. Open items at top, archive below. Line numbers refreshed 2026-05-16 against HEAD (v0.2.56-alpha tree). Re-verify before fixing if HEAD has moved.
 
-Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Pre-merge history: `git log -- docs/audit/`.
+Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15.
 
 ---
 
@@ -14,9 +14,9 @@ Consolidated 2026-05-13 from `scan-frontend-2026-05-11.md`, `scan-lib-2026-05-11
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| HIGH | `RemotePane.svelte:44-47` | `$effect`'s async `void load()` swallows rejection + stale-closure race overwrites newer entries. | Destroyed flag in effect cleanup; propagate rejection. |
-| HIGH | `LocalPane.svelte:44-47` | Same pattern as `RemotePane`. | Same fix. |
-| HIGH | `AppShell.svelte:95` | `addEventListener` in `onMount` leaks on HMR/remount. | Convert to `$effect` w/ cleanup. |
+| HIGH | `RemotePane.svelte:59` | `$effect`'s async `void load()` swallows rejection + stale-closure race overwrites newer entries. | Destroyed flag in effect cleanup; propagate rejection. |
+| HIGH | `LocalPane.svelte:59` | Same pattern as `RemotePane`. | Same fix. |
+| HIGH | `AppShell.svelte:184` | `addEventListener` in `onMount` leaks on HMR/remount. | Convert to `$effect` w/ cleanup. |
 | HIGH | `Diagnostics.svelte:38-49` | Synchronous `clientHeight` read inside `$effect` before DOM settles. | Drive `viewport` from `ResizeObserver` only. |
 | HIGH | `connection.svelte.ts:249-321` | `wireEvents()` failure has no UI surface or retry. | Surface failure + retry trigger. |
 | MED | `RemotePane.svelte:89-95` | Conflict detection matches basename → cross-dir false positives. | Use `c.remote_path === e.full_path`. |
@@ -36,8 +36,8 @@ Consolidated 2026-05-13 from `scan-frontend-2026-05-11.md`, `scan-lib-2026-05-11
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| LOW | `lib.rs:diag_state_pump:176-222`, `diag_get_state:76-108` | `AutoSyncState` lock held across `status().await`. | Clone `Arc` under lock, drop, then await. |
-| MED | `lib.rs:editor_for:1034-1057` | Double-init race silently drops first `Arc<EditInPlaceManager>`. | `tokio::sync::OnceCell` per server key OR `warn!` on collision. |
+| LOW | `lib.rs:diag_state_pump:313-358`, `diag_get_state:78-113` | `AutoSyncState` lock held across `status().await`. | Clone `Arc` under lock, drop, then await. |
+| MED | `lib.rs:editor_for:1576-1599` | Double-init race silently drops first `Arc<EditInPlaceManager>`. Mitigated 2026-05-16: lock now released between read-fast-path and SFTP open; `or_insert` wins the race but one Arc still drops. | `tokio::sync::OnceCell` per server key OR `warn!` on collision. |
 | MED | `diagnostics/mod.rs:LogForwarder:277` | Forwards every log msg to frontend incl. error bodies w/ potential key paths. | Audit `log::error!/warn!` callers; add `RUST_LOG_DIAG_SCRUB` env flag. |
 | MED | `diagnostics/mod.rs:DiagEvent.file:84-93` | Absolute paths can be sent verbatim to renderer. | Relativize to watch root or basename-only. |
 | LOW | `diagnostics/mod.rs:DiagBus:95-176` | `last_rescan_signal_at` / `last_drift_scan_at` in `std::sync::Mutex`, hot path, panic-poison silent. | `AtomicU64` epoch-ms. |
@@ -57,30 +57,23 @@ Consolidated 2026-05-13 from `scan-frontend-2026-05-11.md`, `scan-lib-2026-05-11
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| MED | `auto_sync.rs:953` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
-| MED | `auto_sync.rs:1302` | `mark_failed` inserts after "giving up" log → unbounded `failed` map growth. | Return without insert post-giveup. |
+| MED | `sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
+| MED | `sync/auto_sync.rs:mark_failed` | `mark_failed` inserts after "giving up" log → unbounded `failed` map growth. | Return without insert post-giveup. Line ref stale; locate via `mark_failed` symbol. |
 | MED | `edit_trail.rs:read_raw:75` | Subdir w/ PID+short_id race can cross-delete concurrent reads. | `tempfile::NamedTempFile` direct in temp dir. |
-| MED | `drift_watcher.rs:56` | After pushing-skip, full `secs` re-sleep doubles pull latency. | Short retry sleep on skip. |
-| MED | `ignore.rs:163` | `_disabled_archive` falls through to `"seg:?"` in match. | Add explicit arm. |
-| LOW | `auto_sync.rs:try_watch:444` | Probe path uses `MAIN_SEPARATOR` (backslash on Win) — inconsistent w/ rest of codebase. | Build via `.to_string_lossy().replace('\\','/')`. |
-| LOW | `auto_sync.rs:is_dir:818` | Symlinked dirs skipped silently. | Debug log the skip. |
-| LOW | `sync_snapshot.rs:compute_sha1:105` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
-| LOW | `lock_presence.rs:stale-delete:197` | Stale-lock delete failures silent → 10s retry loop indefinite. | Warn log + backoff counter. |
+| LOW | `sync/auto_sync/watch.rs:try_watch` | Probe path uses `MAIN_SEPARATOR` (backslash on Win) — inconsistent w/ rest of codebase. | Build via `.to_string_lossy().replace('\\','/')`. |
+| LOW | `sync_snapshot.rs:compute_sha1` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
+| LOW | `sync/lock_presence.rs:201-205` | Stale-lock delete failures now log `warn` (✅ partial fix 2026-05-?), but no backoff counter — retry-loop still indefinite on persistent failure. | Add backoff counter. |
 
 ## Backend — transport/sftp/tunnel/edit/update (`scan-transport-2026-05-11`)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| MED | `sftp/mod.rs:delete_recursive_via:880` | Relies on `russh-sftp` `is_symlink()` method whose presence is version-dependent. | Match `FileType::Symlink` variant explicitly + compile-time assertion. |
-| MED | `tunnel/mod.rs:per-conn-tasks:117` | Per-conn `tokio::spawn` outlives `SshTunnel::stop()`. | `CancellationToken` per conn; cancel in `stop()`. |
-| MED | `edit/in_place.rs:begin_edit:100` | `remote_path` not validated against profile `remote_root`. | Apply containment guard in `begin_edit` + `save`. |
-| LOW | `sftp/mod.rs:close:247` | `workers` lock held across each `sftp.close()` await. | Clone Arcs, drop lock, close outside. |
-| LOW | `update_service.rs:RIFT_UPDATE_FEED:110` | Env-var local FileSource bypass not gated by build profile. | `#[cfg(debug_assertions)]` or signed marker file. |
-| LOW | `edit/in_place.rs:Drop:287` | Synchronous `fs::remove_dir_all` in async drop context. | `spawn_blocking` or explicit `async close_all()`. |
-| LOW | `transport/ssh_keygen.rs:generate:75` | Private key file inherits umask on POSIX. | `set_permissions(0o600)` on `#[cfg(unix)]`. |
-| LOW | `edit/in_place.rs:short_id:126` | 4-byte short_id collision risk at scale. | Bump to 8 bytes or `Uuid::new_v4()`. |
+| LOW | `sftp/mod.rs:close:274-285` | `workers` lock held across each `sftp.close()` await. | Clone Arcs, drop lock, close outside. |
+| LOW | `update_service.rs:RIFT_UPDATE_FEED:110-118` | Env-var local FileSource bypass not gated by build profile. | `#[cfg(debug_assertions)]` or signed marker file. |
+| LOW | `edit/in_place.rs:Drop:301-307` | Synchronous `fs::remove_dir_all` in async drop context. | `spawn_blocking` or explicit `async close_all()`. |
+| LOW | `transport/ssh_keygen.rs:generate:75-92` | Private key file inherits umask on POSIX. | `set_permissions(0o600)` on `#[cfg(unix)]`. |
 | INFO | `bridge/mod.rs:57` | Token in plaintext over loopback HTTP. | Accepted; documented. |
-| INFO | `transport/env.rs:hostname:17` | Spawns external `hostname` binary on non-Windows; ambient PATH risk. | Document. |
+| INFO | `transport/env.rs:hostname:16-24` | Spawns external `hostname` binary on non-Windows; ambient PATH risk. | Document. |
 
 ## Originally-listed but out of scope at filing time (still open)
 
@@ -143,6 +136,19 @@ See `HANDOFF.md` Session 56 (via `git log -- docs/HANDOFF.md`) for the full list
 - `components.json` + 13 dead shadcn CSS aliases removed.
 - `@vitest/coverage-v8` removed.
 - Audit docs consolidated.
+
+## Resolved between 2026-05-11 and 2026-05-16 (verified by audit pass)
+
+Six prior Open items confirmed fixed in HEAD code by the 2026-05-16 audit. Moved here from Open Findings.
+
+| # | Original anchor | Current state |
+|---:|---|---|
+| 1 | `tunnel/mod.rs:117` per-conn `tokio::spawn` outlives `SshTunnel::stop()` (MED) | ✅ Fixed — `SshTunnel.conn_cancel: CancellationToken` at `tunnel/mod.rs:55`, cancelled in `stop()` at L185 and `Drop` at L198. Per-conn `copy_bidirectional` races against `conn_cancel.cancelled()` via `tokio::select!`. |
+| 2 | `sftp/mod.rs:delete_recursive_via:880` relies on version-dependent `is_symlink()` method (MED) | ✅ Fixed — sftp module split v0.2.49 moved this to `sftp/ops.rs:98-154` (`delete_recursive_via`). New impl uses `sftp.symlink_metadata()` + `ft.is_symlink()` + `ft.is_dir() && !ft.is_symlink()` chain (russh-sftp 2.1 stable surface). |
+| 3 | `edit/in_place.rs:begin_edit:100` `remote_path` not validated against profile `remote_root` (MED) | ✅ Fixed — `guard_remote_path()` helper at `edit/in_place.rs:84-90` loads fresh profile, runs `path_guard::validate_remote_child`. Called from `begin_edit` (L116) AND `save` (L240). |
+| 4 | `edit/in_place.rs:short_id:126` 4-byte collision risk (LOW) | ✅ Fixed — `short_id()` now lives at `transport/env.rs:30-34` and produces 16-hex (8 bytes) via `rand::fill(&mut buf)`. Old 4-byte impl is gone. |
+| 5 | `drift_watcher.rs:56` after-pushing skip → full `secs` re-sleep doubles pull latency (MED) | ✅ Moot — v0.2.38 removed the auto-poll loop entirely (`drift_watcher::spawn` / `run_tick` / `flush_cycle` all gone). Module is now pure helpers (`pull_one`, `delete_local_one`, `register_conflict`) — no sleep loop to double. |
+| 6 | `ignore.rs:163` `_disabled_archive` falls through to `"seg:?"` (MED) | ✅ Fixed — explicit arm at `sync/ignore.rs:226`: `"_disabled_archive" => "seg:_disabled_archive"`. Stable label, not the catch-all. |
 
 ## Skipped at time of fix (now tracked in Open Findings above)
 

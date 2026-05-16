@@ -98,6 +98,24 @@ fn resolve_claude_exe() -> Option<PathBuf> {
                         }
                     }
                 }
+                // 2b) npm-installed claude bundles the real claude.exe inside
+                // its node_modules dir. The shim on PATH is `claude.cmd`
+                // which forwards via `%*` — and cmd.exe arg forwarding
+                // silently mangles `--output-format stream-json` so the CLI
+                // downgrades to plain text output. Calling the bundled .exe
+                // directly avoids the shim entirely.
+                if let Some(appdata) = std::env::var_os("APPDATA") {
+                    let bundled = PathBuf::from(&appdata)
+                        .join("npm")
+                        .join("node_modules")
+                        .join("@anthropic-ai")
+                        .join("claude-code")
+                        .join("bin")
+                        .join("claude.exe");
+                    if bundled.is_file() {
+                        return Some(bundled);
+                    }
+                }
                 // 3) Fall back to .cmd/.bat. assistant_send keeps spawn args
                 // newline-free (system addendum is single-line, prompt goes
                 // via stdin) so the Rust 1.77 batch-args validator accepts it.
@@ -626,6 +644,16 @@ pub async fn assistant_send(
         if let Some(k) = cfg.api_key.as_deref() {
             cmd.env("ANTHROPIC_API_KEY", k);
         }
+    }
+
+    // Enable extended thinking for models that support it (opus, sonnet on
+    // 4.x+). Haiku skips silently. The plaintext reasoning is encrypted by
+    // the API in -p mode — what reaches us is `content_block_start` of type
+    // `thinking` + a `signature_delta` blob, with `thinking_delta` text
+    // arriving in some scenarios. UI surfaces the indicator + duration even
+    // when the text itself is redacted.
+    if model != "haiku" {
+        cmd.env("MAX_THINKING_TOKENS", "10000");
     }
 
     USER_STOPPED.store(false, Ordering::SeqCst);
