@@ -51,9 +51,24 @@ pub struct RiftConfig {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Hard cap on `~/.rift/rift.json` parse size. A normal config is <10 KB;
+/// 1 MiB is ~100× headroom. A crafted oversize file (e.g. attacker-supplied
+/// w/ deeply-nested `extra` flatten payload) is rejected up-front before
+/// `serde_json` can allocate or recurse into stack overflow.
+const RIFT_CONFIG_MAX_BYTES: u64 = 1024 * 1024;
+
 impl RiftConfig {
     pub fn load() -> Result<Self, String> {
         let path = config_path().map_err(|e| format!("rift dir: {e}"))?;
+        let meta = std::fs::metadata(&path)
+            .map_err(|e| format!("stat {}: {e}", path.display()))?;
+        if meta.len() > RIFT_CONFIG_MAX_BYTES {
+            return Err(format!(
+                "rift.json oversized: {} bytes > cap {}",
+                meta.len(),
+                RIFT_CONFIG_MAX_BYTES
+            ));
+        }
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("read {}: {e}", path.display()))?;
         serde_json::from_str(&text).map_err(|e| format!("parse rift.json: {e}"))

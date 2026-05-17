@@ -274,12 +274,17 @@ impl SftpClient {
     pub async fn close(self) {
         let _ = self.sftp.close().await;
         // Tear down worker pool — each worker holds its own SSH connection,
-        // leaking them would orphan russh background tasks.
-        let workers = self.workers.lock().await;
-        for w in workers.iter() {
+        // leaking them would orphan russh background tasks. Snapshot the
+        // worker Arcs under the lock, drop the lock, THEN await each close
+        // so a slow close on one worker can't keep the lock held against
+        // any concurrent observer.
+        let workers: Vec<Arc<Worker>> = {
+            let g = self.workers.lock().await;
+            g.iter().cloned().collect()
+        };
+        for w in workers {
             let _ = w.sftp.close().await;
         }
-        drop(workers);
         drop(self.handle);
     }
 }
