@@ -204,9 +204,22 @@ const KEY_DEFS = {
     ArrowUp: { code: 'ArrowUp', key: 'ArrowUp', windowsVirtualKeyCode: 38 },
     ArrowDown: { code: 'ArrowDown', key: 'ArrowDown', windowsVirtualKeyCode: 40 },
 };
+// Digit + letter keys derived on demand so KEY_DEFS stays a single source of truth
+// for special-key mappings while still letting callers send Alt+1..9 / Ctrl+T / etc.
+function resolveKeyDef(key) {
+    if (KEY_DEFS[key]) return KEY_DEFS[key];
+    if (/^[0-9]$/.test(key)) {
+        return { code: `Digit${key}`, key, windowsVirtualKeyCode: 0x30 + Number(key) };
+    }
+    if (/^[a-zA-Z]$/.test(key)) {
+        const upper = key.toUpperCase();
+        return { code: `Key${upper}`, key, windowsVirtualKeyCode: upper.charCodeAt(0) };
+    }
+    return null;
+}
 async function pressKey({ key, modifiers = 0 }) {
-    const def = KEY_DEFS[key];
-    if (!def) return { error: `unsupported key: ${key}. Supported: ${Object.keys(KEY_DEFS).join(',')}` };
+    const def = resolveKeyDef(key);
+    if (!def) return { error: `unsupported key: ${key}. Special: ${Object.keys(KEY_DEFS).join(',')}; digits 0-9 and letters a-z are auto-resolved.` };
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, ...def });
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, ...def });
     return { ok: true, key };

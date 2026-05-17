@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
-  import { Minimize2 } from "lucide-svelte";
+  import { Minimize2, MessagesSquare, Plus } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import AssistantHeader from "./AssistantHeader.svelte";
@@ -10,6 +10,7 @@
   import TasksDock from "./TasksDock.svelte";
   import HistoryDrawer from "./HistoryDrawer.svelte";
   import { PANELS } from "../dock/panels";
+  import type { PanelId } from "../../state/panel-types";
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
@@ -63,6 +64,17 @@
   // asking Claude about whatever they just maximized.
   const maximizedId = $derived(uiPrefs.useV03Shell ? uiPrefs.maximized : null);
   const maximizedDef = $derived(maximizedId ? PANELS[maximizedId] : null);
+  // v0.4 — empty-tabs CTA. Under v0.3 only; v0.2 path always has chat shown.
+  // Hides composer + chat scroller; renders a centered card w/ + New chat
+  // button and a hint to expand History panel.
+  const showEmptyTabsCta = $derived(
+    uiPrefs.useV03Shell && assistant.openTabs.length === 0 && !maximizedId,
+  );
+
+  function openHistoryPanel() {
+    const id: PanelId = "history";
+    uiPrefs.setPanelOpen(id, true);
+  }
 </script>
 
 <div class="assistant">
@@ -73,7 +85,29 @@
       <HistoryDrawer />
     {/if}
     <div class="chat">
-      {#if maximizedId && maximizedDef}
+      {#if showEmptyTabsCta}
+        <div class="empty-tabs">
+          <div class="empty-tabs-card">
+            <MessagesSquare size={28} class="sparkle"/>
+            <h2>Start a new chat</h2>
+            <p>Open a fresh tab to talk to Claude, or pick a saved conversation from History.</p>
+            <div class="empty-tabs-actions">
+              <button
+                class="empty-tabs-btn primary"
+                type="button"
+                onclick={() => void assistant.newTab()}
+              >
+                <Plus size={14}/>
+                <span>New chat</span>
+                <kbd class="kbd-hint mono">Ctrl+T</kbd>
+              </button>
+              <button class="empty-tabs-btn" type="button" onclick={openHistoryPanel}>
+                History
+              </button>
+            </div>
+          </div>
+        </div>
+      {:else if maximizedId && maximizedDef}
         {#key maximizedId}
           <div class="restore-strip" role="region" aria-label="Maximized panel controls">
             <span class="restore-label">
@@ -128,7 +162,9 @@
         </div>
       {/if}
 
-      <Composer onsubmit={(text) => assistant.send(text)} />
+      {#if !showEmptyTabsCta}
+        <Composer onsubmit={(text) => assistant.send(text)} />
+      {/if}
     </div>
 
     {#if !uiPrefs.useV03Shell}
@@ -271,5 +307,92 @@
   @keyframes restore-in {
     from { opacity: 0; transform: translateY(-4px); }
     to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* v0.4 — empty-tabs CTA. Centered card replacing chat scroller + composer
+     when assistant.openTabs is empty under v0.3. */
+  .empty-tabs {
+    flex: 1; min-height: 0;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .empty-tabs-card {
+    max-width: 360px;
+    padding: 28px 32px 24px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-align: center;
+    color: var(--fg-muted);
+    box-shadow: 0 6px 24px oklch(0 0 0 / 0.18);
+    animation: empty-tabs-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .empty-tabs-card :global(.sparkle) {
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .empty-tabs-card h2 {
+    margin: 6px 0 8px;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .empty-tabs-card p {
+    margin: 0 0 18px;
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    color: var(--fg-muted);
+  }
+  .empty-tabs-actions {
+    display: flex; flex-direction: column;
+    gap: 6px;
+    align-items: stretch;
+  }
+  .empty-tabs-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--fg-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--fs-sm);
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  }
+  .empty-tabs-btn:hover {
+    color: var(--fg);
+    border-color: var(--border-strong);
+    background: var(--surface-hover);
+  }
+  .empty-tabs-btn.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+  .empty-tabs-btn.primary:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: var(--accent-fg);
+  }
+  .empty-tabs-btn .kbd-hint {
+    padding: 1px 6px;
+    background: color-mix(in oklch, var(--accent-fg) 18%, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent-fg) 28%, transparent);
+    border-radius: 4px;
+    font-size: 10px;
+    color: var(--accent-fg);
+    margin-left: 4px;
+  }
+  .empty-tabs-btn:not(.primary) .kbd-hint {
+    background: var(--bg-elev-2);
+    border-color: var(--border);
+    color: var(--fg-muted);
+  }
+  @keyframes empty-tabs-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
   }
 </style>

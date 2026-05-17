@@ -4,7 +4,7 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
@@ -239,6 +239,33 @@
               />
               <span class="v03-switch-track"></span>
             </label>
+          </div>
+
+          <!-- v0.4 Layout sub-section: reset dock split, reset all tabs, kbd cheat sheet. -->
+          <div class="v03-toggle card v03-sub layout-card">
+            <div class="v03-toggle-l">
+              <span class="v03-title v03-sub-title">Layout</span>
+              <span class="v03-hint">
+                v0.4 — chat tabs + split dock. Drag a panel header across the dock to move it
+                between the left and right slots; an internal divider appears once the right
+                slot has anything in it.
+              </span>
+              <div class="layout-actions">
+                <button class="btn ghost sm" type="button" onclick={() => uiPrefs.setDockSplitPct(50)}>
+                  <RotateCcw size={11}/> Reset dock split
+                </button>
+                <button class="btn ghost sm" type="button" onclick={() => void assistantStore.closeAllTabs()}>
+                  <X size={11}/> Close all chat tabs
+                </button>
+              </div>
+              <div class="kbd-grid">
+                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">T</kbd><span>New chat tab</span></div>
+                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">W</kbd><span>Close active tab</span></div>
+                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Tab</kbd><span>Cycle tabs (Shift to reverse)</span></div>
+                <div class="kbd-row"><kbd class="kbd">Alt</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">9</kbd><span>Jump to tab N</span></div>
+                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">8</kbd><span>Toggle dock panel</span></div>
+              </div>
+            </div>
           </div>
         {/if}
 
@@ -934,7 +961,8 @@
     background: var(--surface);
   }
   .v03-sub-title { font-weight: 500; }
-  .v03-hint .kbd {
+  .v03-hint .kbd,
+  .kbd-row .kbd {
     display: inline-block;
     margin: 0 1px;
     padding: 0 4px;
@@ -945,6 +973,30 @@
     font-size: 10px;
     color: var(--fg-muted);
   }
+
+  .layout-card .layout-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .layout-card .kbd-grid {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+  .layout-card .kbd-row {
+    display: grid;
+    grid-template-columns: 130px 1fr;
+    align-items: center;
+    gap: 8px;
+  }
+  .layout-card .kbd-row span { color: var(--fg-muted); }
 
   .set-row {
     display: flex; align-items: center; justify-content: space-between;

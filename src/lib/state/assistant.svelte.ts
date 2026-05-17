@@ -217,8 +217,12 @@ class AssistantStore {
   //   - `conversations` is the metadata cache for the drawer; refreshed
   //     after every save/delete/rename.
   //   - `createdAt` is set when the convo starts, kept stable across saves.
+  //   - `openTabs` (v0.4) is the ordered list of convo ids visible as tabs in
+  //     the top tab bar. Tabs share the singleton stream pipeline (mid-stream
+  //     switch = stop stream; concurrent live UI deferred to v0.4.1).
   currentConvoId = $state<string | null>(null);
   conversations = $state<ConversationMeta[]>([]);
+  openTabs = $state<string[]>([]);
   private convoCreatedAt: number | null = null;
   private convoTitle: string | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -307,6 +311,7 @@ class AssistantStore {
 
     await this.refreshConversations();
     await this.refreshWorkspace();
+    await this.restoreTabs();
   }
 
   private onLocksUpdate(locks: RemoteLockEvt[]) {
@@ -509,7 +514,10 @@ class AssistantStore {
   async deleteConversation(id: string) {
     try {
       await invoke("assistant_delete_conversation", { id });
-      if (this.currentConvoId === id) {
+      if (this.openTabs.includes(id)) {
+        // Reuse closeTab so neighbor-pick + active-switch logic stays in one place.
+        await this.closeTab(id);
+      } else if (this.currentConvoId === id) {
         this.currentConvoId = null;
         this.convoCreatedAt = null;
         this.convoTitle = null;
@@ -520,6 +528,212 @@ class AssistantStore {
       this.lastError = `Failed to delete conversation: ${String(e)}`;
     }
   }
+
+  // ── v0.4 tabs ────────────────────────────────────────────────────────
+  private persistTabs() {
+    try {
+      localStorage.setItem(
+        "rift.ui.tabs.v1",
+        JSON.stringify({ openTabs: this.openTabs, activeTabId: this.currentConvoId }),
+      );
+    } catch { /* localStorage unavailable */ }
+  }
+
+  private async restoreTabs() {
+    try {
+      const raw = localStorage.getItem("rift.ui.tabs.v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { openTabs?: unknown; activeTabId?: unknown };
+      const ids = Array.isArray(parsed.openTabs)
+        ? parsed.openTabs.filter((s): s is string => typeof s === "string")
+        : [];
+      const existing = new Set(this.conversations.map((c) => c.id));
+      const valid = ids.filter((id) => existing.has(id));
+      this.openTabs = valid;
+      const active = typeof parsed.activeTabId === "string" ? parsed.activeTabId : null;
+      if (active && valid.includes(active)) {
+        await this.loadConversation(active);
+      } else if (valid.length > 0) {
+        await this.loadConversation(valid[0]);
+      }
+      this.persistTabs();
+    } catch (e) {
+      console.warn("restoreTabs failed", e);
+    }
+  }
+
+  /** Open a saved convo as a tab. Push to openTabs if not already there;
+   *  activate + load from disk. Unsaved new-tab ids (minted by newTab() but
+   *  no send yet → no disk record) drop into a fresh in-memory state instead
+   *  of disk-load. Singleton stream pipeline — mid-stream switch is handled
+   *  by loadConversation() calling stop(). */
+  async openTab(id: string) {
+    if (!this.openTabs.includes(id)) {
+      this.openTabs = [...this.openTabs, id];
+    }
+    if (this.currentConvoId === id) {
+      this.persistTabs();
+      return;
+    }
+    if (this.messages.length > 0 && this.currentConvoId) {
+      this.scheduleSave(true);
+    }
+    const inMeta = this.conversations.some((c) => c.id === id);
+    if (inMeta) {
+      await this.loadConversation(id);
+    } else {
+      if (this.streaming) await this.stop();
+      this.currentConvoId = id;
+      this.convoCreatedAt = null;
+      this.convoTitle = null;
+      this.messages = [];
+      this.tasks = [];
+      this.queue = [];
+      this.lastError = null;
+      this.lastNotice = null;
+      this.totalCostUsd = null;
+      this.dockAutoOpenedThisConvo = false;
+    }
+    this.persistTabs();
+  }
+
+  /** Close a tab. Removes from openTabs; convo stays on disk → still in History.
+   *  Active-tab close picks the right neighbor (or left if at end); last-tab
+   *  close drops to empty state w/ currentConvoId=null. */
+  async closeTab(id: string) {
+    const idx = this.openTabs.indexOf(id);
+    if (idx === -1) return;
+    const wasActive = this.currentConvoId === id;
+    const next = this.openTabs.slice();
+    next.splice(idx, 1);
+    this.openTabs = next;
+    if (wasActive) {
+      // Save unsaved tail of the closing tab before switching/clearing.
+      if (this.messages.length > 0 && this.convoCreatedAt) {
+        this.scheduleSave(true);
+      }
+      if (this.streaming) await this.stop();
+      if (next.length === 0) {
+        this.messages = [];
+        this.currentConvoId = null;
+        this.convoCreatedAt = null;
+        this.convoTitle = null;
+        this.tasks = [];
+        this.queue = [];
+        this.lastError = null;
+        this.lastNotice = null;
+        this.totalCostUsd = null;
+        this.dockAutoOpenedThisConvo = false;
+      } else {
+        // Right-priority: the entry that shifted into idx, else last.
+        const neighbor = next[idx] ?? next[next.length - 1];
+        const inMeta = this.conversations.some((c) => c.id === neighbor);
+        if (inMeta) {
+          await this.loadConversation(neighbor);
+        } else {
+          this.currentConvoId = neighbor;
+          this.convoCreatedAt = null;
+          this.convoTitle = null;
+          this.messages = [];
+          this.tasks = [];
+          this.queue = [];
+          this.lastError = null;
+          this.lastNotice = null;
+          this.totalCostUsd = null;
+          this.dockAutoOpenedThisConvo = false;
+        }
+      }
+    }
+    this.persistTabs();
+  }
+
+  /** Open a fresh empty tab. Mints currentConvoId up-front so the tab can
+   *  render before the first send; convoCreatedAt stays null so send() still
+   *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
+  async newTab() {
+    if (this.streaming) await this.stop();
+    if (this.messages.length > 0 && this.currentConvoId) {
+      this.scheduleSave(true);
+    }
+    const id = crypto.randomUUID();
+    this.openTabs = [...this.openTabs, id];
+    this.currentConvoId = id;
+    this.convoCreatedAt = null;
+    this.convoTitle = null;
+    this.messages = [];
+    this.tasks = [];
+    this.queue = [];
+    this.lastError = null;
+    this.lastNotice = null;
+    this.totalCostUsd = null;
+    this.promptHistory = [];
+    this.dockAutoOpenedThisConvo = false;
+    this.persistTabs();
+  }
+
+  reorderTabs(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return;
+    if (fromIdx < 0 || fromIdx >= this.openTabs.length) return;
+    const next = this.openTabs.slice();
+    const [moved] = next.splice(fromIdx, 1);
+    const clamped = Math.max(0, Math.min(toIdx, next.length));
+    next.splice(clamped, 0, moved);
+    this.openTabs = next;
+    this.persistTabs();
+  }
+
+  async cycleTab(direction: 1 | -1) {
+    if (this.openTabs.length === 0) return;
+    const cur = this.currentConvoId ? this.openTabs.indexOf(this.currentConvoId) : -1;
+    const n = this.openTabs.length;
+    const nextIdx = ((cur < 0 ? 0 : cur + direction) + n) % n;
+    await this.openTab(this.openTabs[nextIdx]);
+  }
+
+  async closeOtherTabs(keepId: string) {
+    const others = this.openTabs.filter((id) => id !== keepId);
+    if (others.length === 0) return;
+    this.openTabs = [keepId];
+    if (this.currentConvoId !== keepId) {
+      await this.loadConversation(keepId);
+    }
+    this.persistTabs();
+  }
+
+  /** Wipe all open tabs and drop into the empty-tabs state. Flushes the
+   *  current convo if it has messages so nothing's lost; closes streams. */
+  async closeAllTabs() {
+    if (this.streaming) await this.stop();
+    if (this.messages.length > 0 && this.convoCreatedAt) {
+      this.scheduleSave(true);
+    }
+    this.openTabs = [];
+    this.currentConvoId = null;
+    this.convoCreatedAt = null;
+    this.convoTitle = null;
+    this.messages = [];
+    this.tasks = [];
+    this.queue = [];
+    this.lastError = null;
+    this.lastNotice = null;
+    this.totalCostUsd = null;
+    this.dockAutoOpenedThisConvo = false;
+    this.persistTabs();
+  }
+
+  async closeTabsToRight(anchorId: string) {
+    const idx = this.openTabs.indexOf(anchorId);
+    if (idx === -1 || idx === this.openTabs.length - 1) return;
+    const kept = this.openTabs.slice(0, idx + 1);
+    const removedActive = this.currentConvoId && !kept.includes(this.currentConvoId);
+    this.openTabs = kept;
+    if (removedActive) {
+      await this.loadConversation(anchorId);
+    }
+    this.persistTabs();
+  }
+
+  // ── /v0.4 tabs ───────────────────────────────────────────────────────
 
   async renameConversation(id: string, title: string) {
     const trimmed = title.trim();
@@ -585,11 +799,23 @@ class AssistantStore {
     // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
     // UUID and passes `--session-id`; subsequent turns pass `--resume` against
     // the same UUID. The session is persisted under `~/.claude/projects/<cwd-hash>/`.
-    const isFirstTurn = !this.currentConvoId;
+    // v0.4: newTab() mints currentConvoId up-front so the tab can render
+    // before send() — gate isFirstTurn on convoCreatedAt instead so the very
+    // first send still passes --session-id, not --resume.
+    const isFirstTurn = !this.convoCreatedAt;
     if (!this.currentConvoId) {
       this.currentConvoId = crypto.randomUUID();
+    }
+    if (!this.convoCreatedAt) {
       this.convoCreatedAt = Date.now();
       this.convoTitle = null;
+    }
+    // v0.4: under v0.3 shell, ensure the active convo has a tab. Catches the
+    // raw newConversation→send path (slash /new under v0.2 etc.) so tabs are
+    // never out of sync with the streaming convo.
+    if (uiPrefs.useV03Shell && this.currentConvoId && !this.openTabs.includes(this.currentConvoId)) {
+      this.openTabs = [...this.openTabs, this.currentConvoId];
+      this.persistTabs();
     }
     this.streaming = true;
     this.lastError = null;
@@ -1079,7 +1305,8 @@ class AssistantStore {
     switch (cmd.toLowerCase()) {
       case "clear":
       case "new":
-        void this.newConversation();
+        if (uiPrefs.useV03Shell) void this.newTab();
+        else void this.newConversation();
         return true;
       case "history":
         this.ui.historyOpen = !this.ui.historyOpen;

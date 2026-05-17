@@ -74,7 +74,10 @@
           class="iconbtn primary"
           type="button"
           title="New conversation"
-          onclick={() => { void assistant.newConversation(); if (!uiPrefs.useV03Shell) close(); }}
+          onclick={() => {
+            if (uiPrefs.useV03Shell) void assistant.newTab();
+            else { void assistant.newConversation(); close(); }
+          }}
         >
           <Plus size={13} /> New
         </button>
@@ -139,7 +142,10 @@
               <button
                 class="row-main"
                 type="button"
-                onclick={() => void assistant.loadConversation(c.id)}
+                onclick={() => {
+                  if (uiPrefs.useV03Shell) void assistant.openTab(c.id);
+                  else void assistant.loadConversation(c.id);
+                }}
                 title="Open"
               >
                 <span class="row-title">{c.title}</span>
