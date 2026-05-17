@@ -13,6 +13,7 @@
   import SyncModal from "../sync/SyncModal.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
 
   const stateLabel = $derived(connection.status?.state ?? "idle");
   const watches = $derived(connection.status?.watches ?? 0);
@@ -339,22 +340,24 @@
 
 </script>
 
-<div class="two-pane">
-  <PageHeader
-    icon={FolderOpen}
-    title="Files"
-    tone={headerTone}
-    subtitle={headerSubtitle}
-  >
-    {#snippet actions()}
-      <button
-        type="button"
-        class="btn ghost sm"
-        onclick={newTab}
-        title="New tab (Ctrl+T)"
-      ><Plus size={12}/> New tab</button>
-    {/snippet}
-  </PageHeader>
+<div class="two-pane" class:v03={uiPrefs.useV03Shell}>
+  {#if !uiPrefs.useV03Shell}
+    <PageHeader
+      icon={FolderOpen}
+      title="Files"
+      tone={headerTone}
+      subtitle={headerSubtitle}
+    >
+      {#snippet actions()}
+        <button
+          type="button"
+          class="btn ghost sm"
+          onclick={newTab}
+          title="New tab (Ctrl+T)"
+        ><Plus size={12}/> New tab</button>
+      {/snippet}
+    </PageHeader>
+  {/if}
 
   <div class="tabstrip-wrap">
     <div class="tabstrip">
@@ -463,6 +466,18 @@
     flex: 1; min-height: 0; min-width: 0;
     background: var(--bg);
     position: relative;
+    container-type: inline-size;
+  }
+  /* Dock-hosted panel can be < 600px wide — stack panes vertically so each
+     file browser keeps usable width. Reverts to side-by-side once the host
+     widens past the threshold (e.g. Phase C maximize-to-center). */
+  @container (max-width: 600px) {
+    .split {
+      grid-template-columns: 1fr !important;
+      grid-template-rows: 1fr 6px 1fr;
+    }
+    .divider { cursor: row-resize; }
+    .divider-grip { width: 28px; height: 2px; }
   }
   .tabstrip-wrap {
     position: relative;
