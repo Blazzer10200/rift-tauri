@@ -7,7 +7,6 @@
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { fmtRelative } from "../../utils/time";
-  import PageHeader from "../shell/PageHeader.svelte";
   import PageToolbar from "../shell/PageToolbar.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
   import { syncPage } from "../../state/sync-page.svelte";
@@ -363,39 +362,6 @@
 </script>
 
 <section class="feed">
-  <PageHeader
-    icon={ActivityIcon}
-    title="Activity"
-    tone="info"
-    subtitle={paused ? "Paused" : connection.activityFeed.length === 0 ? "Idle" : `${connection.activityFeed.length} events`}
-  >
-    {#snippet actions()}
-      <button
-        class="btn sm"
-        class:warn={paused}
-        class:ghost={!paused}
-        type="button"
-        onclick={togglePause}
-        title={paused ? "Resume feed" : "Pause feed"}
-      >
-        {#if paused}
-          <Play size={11}/> Resume
-        {:else}
-          <Pause size={11}/> Pause
-        {/if}
-      </button>
-      <button
-        class="btn ghost sm"
-        type="button"
-        onclick={() => connection.clearActivity()}
-        disabled={connection.activityFeed.length === 0}
-        title="Clear feed"
-      >
-        <Trash2 size={11}/> Clear
-      </button>
-    {/snippet}
-  </PageHeader>
-
   <PageToolbar>
     <div class="segctl">
       {#each groups as g (g.id)}
@@ -420,6 +386,30 @@
       placeholder="Filter resource / file / action…"
       bind:value={filter}
     />
+
+    <button
+      class="btn sm"
+      class:warn={paused}
+      class:ghost={!paused}
+      type="button"
+      onclick={togglePause}
+      title={paused ? "Resume feed" : "Pause feed"}
+    >
+      {#if paused}
+        <Play size={11}/> Resume
+      {:else}
+        <Pause size={11}/> Pause
+      {/if}
+    </button>
+    <button
+      class="btn ghost sm"
+      type="button"
+      onclick={() => connection.clearActivity()}
+      disabled={connection.activityFeed.length === 0}
+      title="Clear feed"
+    >
+      <Trash2 size={11}/> Clear
+    </button>
   </PageToolbar>
 
   <div class="table">

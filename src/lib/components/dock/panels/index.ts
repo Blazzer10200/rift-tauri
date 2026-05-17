@@ -8,7 +8,7 @@ import HistoryStub from "./HistoryStub.svelte";
 import AgentsStub from "./AgentsStub.svelte";
 import TerminalStub from "./TerminalStub.svelte";
 import AttachmentsStub from "./AttachmentsStub.svelte";
-import ActivityStub from "./ActivityStub.svelte";
+import ActivityPanel from "./ActivityPanel.svelte";
 
 // Shape matches lucide-svelte's component export — typed via `typeof Activity`
 // so the registry stays compatible w/o explicit `Component<...>` constraint
@@ -35,5 +35,5 @@ export const PANELS: Record<PanelId, PanelDef> = {
   agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "5" },
   terminal:    { component: TerminalStub,    title: "Terminal",    icon: Terminal,   kbd: "6" },
   attachments: { component: AttachmentsStub, title: "Attachments", icon: Paperclip,  kbd: "7" },
-  activity:    { component: ActivityStub,    title: "Activity",    icon: Activity,   kbd: "8" },
+  activity:    { component: ActivityPanel,   title: "Activity",    icon: Activity,   kbd: "8" },
 };
