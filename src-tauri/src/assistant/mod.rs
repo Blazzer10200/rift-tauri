@@ -778,12 +778,26 @@ fn summarize_events(events: &[crate::diagnostics::DiagEvent]) -> String {
     tokens.join(", ")
 }
 
+/// One image (or other future binary) attached to a single user-message turn.
+/// Carried inline from the frontend as base64 to avoid an extra disk round-trip.
+/// 20 MiB safety cap enforced at the call boundary below.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssistantAttachment {
+    pub mime: String,
+    pub data_base64: String,
+}
+
 /// Streaming round-trip. Spawns `claude -p` over stdin, forwards stdout NDJSON
 /// line-by-line on `assistant://stream`. Phase 2 (S72) replaced hand-rolled
 /// `Human:/Assistant:` history replay with native CLI session continuation —
 /// `--session-id <uuid>` on first turn, `--resume <uuid>` on subsequent.
 /// Sessions persist under `~/.claude/projects/<cwd-hash>/`, which we accept
 /// as the trade for cheaper tokens + native context.
+///
+/// `attachments`: optional inline images. When present, the spawn switches to
+/// `--input-format stream-json` and writes a structured user-message envelope
+/// (text + image content blocks) to stdin instead of the bare prompt text.
 #[tauri::command]
 pub async fn assistant_send(
     app: AppHandle,
@@ -792,6 +806,7 @@ pub async fn assistant_send(
     session_id: String,
     is_first_turn: bool,
     model: Option<String>,
+    attachments: Option<Vec<AssistantAttachment>>,
 ) -> Result<(), String> {
     let cfg = load_config();
     let use_api_key = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
@@ -876,12 +891,33 @@ pub async fn assistant_send(
     // so we runtime-disable piggyback in that path.
     let use_full_config = cfg.use_full_config.unwrap_or(true) && !use_api_key;
 
+    // 20 MiB total cap across all attachments — protects the CLI's JSON
+    // parser from a runaway paste. Per-image cap is the same as the cumulative
+    // since one big image is the realistic worst case.
+    const ATTACHMENT_BYTES_CAP: usize = 20 * 1024 * 1024;
+    let attachments = attachments.unwrap_or_default();
+    if !attachments.is_empty() {
+        let total: usize = attachments.iter().map(|a| a.data_base64.len() * 3 / 4).sum();
+        if total > ATTACHMENT_BYTES_CAP {
+            return Err(format!(
+                "Attachment(s) too large: {} bytes > cap {}",
+                total, ATTACHMENT_BYTES_CAP
+            ));
+        }
+        for a in &attachments {
+            if !a.mime.starts_with("image/") {
+                return Err(format!("Unsupported attachment mime: {}", a.mime));
+            }
+        }
+    }
+    let has_attachments = !attachments.is_empty();
+
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
     cmd.arg("-p")
         .arg("--append-system-prompt").arg(addendum)
         .arg("--output-format").arg("stream-json")
-        .arg("--input-format").arg("text")
+        .arg("--input-format").arg(if has_attachments { "stream-json" } else { "text" })
         .arg("--verbose")
         .arg("--include-partial-messages")
         .arg("--model").arg(&model)
@@ -964,10 +1000,36 @@ pub async fn assistant_send(
     set_current_pid(child.id());
 
     // Write the user's prompt to stdin, then close it so the CLI knows the
-    // input stream is complete and starts streaming back.
+    // input stream is complete and starts streaming back. With attachments,
+    // serialize a stream-json `user` envelope (text + image blocks);
+    // otherwise pipe the bare prompt for text input-format.
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
-        if let Err(e) = stdin.write_all(prompt.as_bytes()).await {
+        let payload: Vec<u8> = if has_attachments {
+            let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
+            content.push(serde_json::json!({ "type": "text", "text": prompt }));
+            for a in &attachments {
+                content.push(serde_json::json!({
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": a.mime,
+                        "data": a.data_base64,
+                    }
+                }));
+            }
+            let envelope = serde_json::json!({
+                "type": "user",
+                "message": { "role": "user", "content": content }
+            });
+            let mut line = serde_json::to_vec(&envelope)
+                .map_err(|e| format!("serialize input envelope: {e}"))?;
+            line.push(b'\n');
+            line
+        } else {
+            prompt.as_bytes().to_vec()
+        };
+        if let Err(e) = stdin.write_all(&payload).await {
             return Err(format!("write prompt to stdin: {e}"));
         }
         drop(stdin); // EOF

@@ -205,10 +205,68 @@
 
   function fire() {
     const text = assistant.composerDraft.trim();
-    if (!text) return;
+    // Allow attachments-only sends (paste-and-go); only block if both empty.
+    if (!text && assistant.composerAttachments.length === 0) return;
     assistant.composerDraft = "";
     onsubmit(text);
     void tick().then(autosize);
+  }
+
+  // ── Image paste ─────────────────────────────────────────────────────────
+  // Captures any image item on the clipboard when pasted into the textarea.
+  // Reads as ArrayBuffer → base64 → stages on the assistant store for the
+  // next send. Mixed paste (image + text) keeps the text in the textarea
+  // and stages the image separately. Caps mirror backend's 20 MiB guard so
+  // we reject early rather than round-trip a doomed payload.
+  function bytesToBase64(buf: ArrayBuffer): string {
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(bin);
+  }
+
+  let attachError = $state<string | null>(null);
+  async function onPaste(e: ClipboardEvent) {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageItems = Array.from(items).filter(
+      (it) => it.kind === "file" && it.type.startsWith("image/"),
+    );
+    if (imageItems.length === 0) return;
+    e.preventDefault();
+    attachError = null;
+    for (const it of imageItems) {
+      const file = it.getAsFile();
+      if (!file) continue;
+      if (file.size > 20 * 1024 * 1024) {
+        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
+        continue;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const dataBase64 = bytesToBase64(buf);
+        const ok = assistant.addAttachment({
+          mime: file.type || "image/png",
+          dataBase64,
+          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
+          sizeBytes: file.size,
+        });
+        if (!ok) {
+          attachError = "Attachment limit reached (20 MB total per turn).";
+        }
+      } catch (err) {
+        attachError = `Failed to read pasted image: ${String(err)}`;
+      }
+    }
+  }
+
+  function fmtSize(n: number): string {
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / 1024 / 1024).toFixed(1)} MB`;
   }
 
   // Up-arrow recall offset (0 = newest). Reset whenever the user types or
@@ -347,7 +405,7 @@
   });
   const canFire = $derived(
     mode === "stop" ||
-      (assistant.composerDraft.trim().length > 0 &&
+      ((assistant.composerDraft.trim().length > 0 || assistant.composerAttachments.length > 0) &&
         (assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")),
   );
 </script>
@@ -368,6 +426,36 @@
         <button class="qclear" type="button" onclick={() => assistant.clearQueue()}>
           Clear all
         </button>
+      {/if}
+    </div>
+  {/if}
+
+  {#if assistant.composerAttachments.length > 0 || attachError}
+    <div class="attachments">
+      {#each assistant.composerAttachments as a (a.id)}
+        <div class="attach-chip" title={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
+          <img class="attach-thumb" src={a.previewUrl} alt="pasted attachment" />
+          <span class="attach-meta">
+            <span class="attach-name">image</span>
+            <span class="attach-size">{fmtSize(a.sizeBytes)}</span>
+          </span>
+          <button
+            class="attach-x"
+            type="button"
+            onclick={() => assistant.removeAttachment(a.id)}
+            aria-label="Remove attachment"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      {/each}
+      {#if attachError}
+        <div class="attach-error" role="alert">
+          {attachError}
+          <button class="attach-error-x" type="button" onclick={() => (attachError = null)} aria-label="Dismiss">
+            <X size={10} />
+          </button>
+        </div>
       {/if}
     </div>
   {/if}
@@ -447,9 +535,12 @@
         onclick={refreshMention}
         onblur={() => { mentionState = null; }}
         onkeydown={onKey}
+        onpaste={onPaste}
         placeholder={assistant.streaming
           ? "Type to queue another message — Enter sends, /stop halts"
-          : "Ask Claude — or type / for commands"}
+          : assistant.composerAttachments.length > 0
+          ? "Add a question or hit Send to ask about the image"
+          : "Ask Claude — paste images, or type / for commands"}
         rows="1"
       ></textarea>
       <button
@@ -568,6 +659,67 @@
     opacity: 1;
     transform: scale(1) rotate(0);
   }
+
+  .attachments {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+  }
+  .attach-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 4px 8px 4px 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    transition: border-color 140ms ease-out, background 140ms ease-out;
+  }
+  .attach-chip:hover { border-color: var(--border-strong); }
+  .attach-thumb {
+    width: 40px; height: 40px;
+    object-fit: cover;
+    border-radius: 6px;
+    background: var(--bg-elev-2);
+  }
+  .attach-meta {
+    display: inline-flex; flex-direction: column; gap: 1px;
+    line-height: 1.2;
+  }
+  .attach-name { font-size: var(--fs-xs); font-weight: 600; color: var(--fg); }
+  .attach-size {
+    font-size: 10px;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+  }
+  .attach-x {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 20px; height: 20px;
+    background: transparent;
+    border: 0; border-radius: 50%;
+    color: var(--fg-faint);
+    cursor: pointer;
+    padding: 0;
+    margin-left: 2px;
+  }
+  .attach-x:hover { background: var(--bg-elev-2); color: var(--fg); }
+  .attach-error {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 8px 4px 10px;
+    background: var(--danger-soft, color-mix(in oklch, var(--danger) 12%, transparent));
+    border: 1px solid color-mix(in oklch, var(--danger) 35%, var(--border));
+    border-radius: 8px;
+    font-size: var(--fs-xs);
+    color: var(--danger);
+  }
+  .attach-error-x {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px;
+    background: transparent;
+    border: 0; border-radius: 50%;
+    color: var(--danger);
+    cursor: pointer;
+    opacity: 0.7;
+    padding: 0;
+  }
+  .attach-error-x:hover { opacity: 1; background: color-mix(in oklch, var(--danger) 18%, transparent); }
 
   .queue {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
