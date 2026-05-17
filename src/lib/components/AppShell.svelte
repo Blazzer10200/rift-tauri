@@ -24,10 +24,12 @@
   import TerminalPanel from "./terminal/TerminalPanel.svelte";
   import AssistantPage from "./assistant/AssistantPage.svelte";
   import ChatTabsBar from "./shell/ChatTabsBar.svelte";
-  import Dock from "./dock/Dock.svelte";
-  import PresetPicker from "./dock/PresetPicker.svelte";
+  import RightPane from "./shell/RightPane.svelte";
+  import ActivityBar from "./shell/ActivityBar.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
+  import { rightPane, type ActivityBarId } from "../state/right-pane.svelte";
   import type { PanelId } from "../state/panel-types";
+  import { PANELS } from "./dock/panels";
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
   import { syncPage } from "../state/sync-page.svelte";
@@ -112,11 +114,11 @@
   }
   function closeSettingsModal() { settingsModalOpen = false; }
 
-  // v0.3: panel toggles route through uiPrefs; under v0.2 these are no-ops
-  // because the rail/cmd-palette never emit them.
-  // Phase C Part 2: `allowMulti` (shift-click / Ctrl+Shift+N) bypasses
-  // accordion mode so the user can stack multiple panels open.
-  function togglePanel(id: PanelId, opts?: { allowMulti?: boolean }) { uiPrefs.togglePanel(id, opts); }
+  // v0.4.1: right-pane page toggles. Replaces the v0.3 dock per-panel toggle
+  // (one page at a time, no accordion / stacking semantics — picking a new
+  // id swaps the surface). PanelId is the legacy alias; treat it as the
+  // ActivityBarId set (v0.4.1 dropped `tasks`).
+  function togglePanel(id: PanelId) { rightPane.toggle(id as ActivityBarId); }
 
   // ── command registry ──────────────────────────────────────────────
   // Shared (both v0.2 and v0.3) — server + sync ops are surface-agnostic.
@@ -150,16 +152,18 @@
   ]);
 
   const v03Commands = $derived<Command[]>([
-    { id: "panel-sync",        group: "Panels", title: "Toggle Sync panel",        shortcut: "Ctrl+1", run: () => togglePanel("sync") },
-    { id: "panel-files",       group: "Panels", title: "Toggle Files panel",       shortcut: "Ctrl+2", run: () => togglePanel("files") },
-    { id: "panel-history",     group: "Panels", title: "Toggle History panel",     shortcut: "Ctrl+3", run: () => togglePanel("history") },
-    { id: "panel-agents",      group: "Panels", title: "Toggle Agents panel",      shortcut: "Ctrl+4", run: () => togglePanel("agents") },
-    { id: "panel-terminal",    group: "Panels", title: "Toggle Terminal panel",    shortcut: "Ctrl+5", run: () => togglePanel("terminal") },
-    { id: "panel-attachments", group: "Panels", title: "Toggle Attachments panel", shortcut: "Ctrl+6", run: () => togglePanel("attachments") },
-    { id: "panel-activity",    group: "Panels", title: "Toggle Activity panel",    shortcut: "Ctrl+7", run: () => togglePanel("activity") },
-    { id: "open-settings",     group: "App",    title: "Settings…",                shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
-    { id: "open-preset-picker",group: "App",    title: "Reset layout from preset…",subtitle: "Choose Minimal / Standard / Power",
-      run: () => { uiPrefs.presetPicked = false; } },
+    ...rightPane.order.map((id, idx) => {
+      const def = PANELS[id];
+      return {
+        id: `right-pane-${id}`,
+        group: "Right pane" as const,
+        title: `Toggle ${def.title}`,
+        shortcut: `Ctrl+${idx + 1}`,
+        run: () => rightPane.toggle(id),
+      } as Command;
+    }),
+    { id: "right-pane-close", group: "Right pane", title: "Close right pane", shortcut: "Ctrl+0", run: () => rightPane.close() },
+    { id: "open-settings",    group: "App",        title: "Settings…",        shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
   ]);
 
   const commands = $derived<Command[]>(
@@ -235,16 +239,11 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
-    // Esc closes the Settings slide-over (v0.3 only — modal-shaped).
+    // Esc closes the Settings slide-over (v0.3 only — modal-shaped). v0.4.1
+    // dropped the panel-maximize feature, so Esc has no other shell meaning.
     if (e.key === "Escape" && settingsModalOpen) {
       e.preventDefault();
       closeSettingsModal();
-      return;
-    }
-    // Esc restores chat when a v0.3 panel is maximized into the main column.
-    if (e.key === "Escape" && uiPrefs.useV03Shell && uiPrefs.maximized) {
-      e.preventDefault();
-      uiPrefs.maximizePanel(null);
       return;
     }
     // v0.4 — Alt+1..9 jumps to chat tab N (1-indexed). Doesn't require meta;
@@ -279,26 +278,33 @@
       }
     }
     // Ctrl+` toggles the embedded terminal — global so it works on every tab.
-    // Under v0.3 this routes to the Terminal dock panel toggle.
+    // Under v0.4.1 this routes to the Terminal right-pane page toggle.
     if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
       e.preventDefault();
-      if (uiPrefs.useV03Shell) togglePanel("terminal");
+      if (uiPrefs.useV03Shell) rightPane.toggle("terminal");
       else terminal.toggle();
       return;
     }
     const k = e.key.toLowerCase();
     if (e.shiftKey && k === "d") {
       e.preventDefault();
-      if (uiPrefs.useV03Shell) togglePanel("activity"); // Diagnostics is v2; Activity is closest stand-in
+      if (uiPrefs.useV03Shell) rightPane.toggle("activity"); // Diagnostics is v2; Activity is closest stand-in
       else active = "diagnostics";
       return;
     }
-    // Ctrl+(Shift+)1..7 — panel toggles under v0.3. Shift bypasses accordion.
-    // Handled BEFORE the shift-bail so Ctrl+Shift+N stays usable for stacking.
+    // Ctrl+0 closes the right pane under v0.4.1 (focus chat full-width).
+    if (uiPrefs.useV03Shell && !e.shiftKey && e.key === "0") {
+      e.preventDefault();
+      rightPane.close();
+      return;
+    }
+    // Ctrl+1..7 — right-pane page toggles under v0.4.1, mapped by activity-bar
+    // order so a user-reordered bar matches its kbd shortcuts.
     if (uiPrefs.useV03Shell && /^[1-7]$/.test(e.key)) {
       e.preventDefault();
-      const pid = (["sync", "files", "history", "agents", "terminal", "attachments", "activity"] as PanelId[])[parseInt(e.key, 10) - 1];
-      togglePanel(pid, { allowMulti: e.shiftKey });
+      const idx = parseInt(e.key, 10) - 1;
+      const id = rightPane.order[idx];
+      if (id) rightPane.toggle(id);
       return;
     }
     if (e.shiftKey) return;
@@ -456,11 +462,12 @@
 
   {#if uiPrefs.useV03Shell}
     <ChatTabsBar />
-    <div class="body" data-v03="true">
+    <div class="body" data-v04-1="true">
       <main class="pane">
         <AssistantPage />
       </main>
-      <Dock />
+      <RightPane />
+      <ActivityBar />
     </div>
   {:else}
     <div class="body">
@@ -605,9 +612,6 @@
     </aside>
   {/if}
 
-  {#if uiPrefs.useV03Shell && !uiPrefs.presetPicked}
-    <PresetPicker onPick={(p) => uiPrefs.applyPreset(p)} />
-  {/if}
 </div>
 
 <style>
@@ -660,18 +664,15 @@
     overflow: visible;
     position: relative;
   }
-  /* v0.3 shell: no left rail. Two-column grid w/ chat-first main + right-side dock.
-     Drop the grid-template-columns transition — under v0.3 the only animated
-     column is --dock-w, which is driven by the user dragging the resize
-     handle. Easing that pointer-driven change made the dock feel laggy (the
-     grid chased the cursor over 220ms). v0.2 keeps the transition for rail
-     pin/unpin animation. */
-  .body[data-v03="true"] {
-    grid-template-columns: minmax(0, 1fr) var(--dock-w, 320px);
+  /* v0.4.1 shell: no left rail. Three-column grid:
+     [chat | right-pane (0 when closed) | 40px activity bar].
+     --right-pane-w is driven by rightPane.svelte.ts (CSS var); collapses to
+     0px when activeId is null so chat takes everything except the bar. No
+     grid-template-columns transition — see v0.3 history for why pointer-
+     driven width was unbearable when eased. */
+  .body[data-v04-1="true"] {
+    grid-template-columns: minmax(0, 1fr) var(--right-pane-w, 0px) 40px;
     transition: none;
-  }
-  .body[data-v03="true"][data-dock-collapsed="true"] {
-    grid-template-columns: minmax(0, 1fr) 0;
   }
   .pane {
     min-height: 0; min-width: 0;

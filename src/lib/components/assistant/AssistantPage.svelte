@@ -10,7 +10,7 @@
   import TasksDock from "./TasksDock.svelte";
   import HistoryDrawer from "./HistoryDrawer.svelte";
   import { PANELS } from "../dock/panels";
-  import type { PanelId } from "../../state/panel-types";
+  import { rightPane } from "../../state/right-pane.svelte";
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
@@ -72,8 +72,7 @@
   );
 
   function openHistoryPanel() {
-    const id: PanelId = "history";
-    uiPrefs.setPanelOpen(id, true);
+    rightPane.setActive("history");
   }
 </script>
 

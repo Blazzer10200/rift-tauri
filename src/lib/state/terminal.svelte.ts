@@ -4,6 +4,7 @@
 // shell preference.
 
 import { uiPrefs } from "./ui-prefs.svelte";
+import { rightPane } from "./right-pane.svelte";
 
 export type TermStatus = "starting" | "running" | "exited" | "error";
 
@@ -197,11 +198,11 @@ class TerminalStore {
   }
 
   toggle() {
-    // Under v0.3 the embedded overlay is gone — the terminal is a dock panel
-    // governed by uiPrefs. Route through uiPrefs.togglePanel so Ctrl+` and
-    // every existing terminal.toggle() call site stays valid in both shells.
+    // Under v0.4.1 the embedded overlay is gone — the terminal lives in the
+    // right pane. Route through rightPane.toggle so Ctrl+` and every existing
+    // terminal.toggle() call site stays valid in both shells.
     if (uiPrefs.useV03Shell) {
-      uiPrefs.togglePanel("terminal");
+      rightPane.toggle("terminal");
       return;
     }
     this.setOpen(!this.open);

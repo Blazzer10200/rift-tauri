@@ -2,6 +2,7 @@
   import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
+  import { rightPane } from "../../state/right-pane.svelte";
 
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
@@ -49,11 +50,11 @@
   });
 
   const historyOpen = $derived(
-    uiPrefs.useV03Shell ? uiPrefs.panels.history.open : assistant.ui.historyOpen,
+    uiPrefs.useV03Shell ? rightPane.activeId === "history" : assistant.ui.historyOpen,
   );
   const tasksOpen = $derived(assistant.ui.dockOpen);
   function toggleHistory() {
-    if (uiPrefs.useV03Shell) uiPrefs.togglePanel("history");
+    if (uiPrefs.useV03Shell) rightPane.toggle("history");
     else assistant.ui.historyOpen = !assistant.ui.historyOpen;
   }
   function toggleTasks() {
