@@ -1,5 +1,6 @@
 import { ListTodo, RefreshCcw, FolderOpen, History, Bot, Terminal, Paperclip, Activity } from "lucide-svelte";
 import type { PanelId } from "$lib/state/panel-types";
+import { connection } from "$lib/state/connection.svelte";
 
 import TasksStub from "./TasksStub.svelte";
 import SyncPanel from "./SyncPanel.svelte";
@@ -22,6 +23,11 @@ export type PanelDef = {
   icon: PanelIcon;
   kbd: string;
   defaultHeight?: number;
+  /** Optional reactive count surfaced as a pip in the panel header.
+   *  Lambda reads $state-backed stores so the pip auto-tracks. */
+  getCount?: () => number;
+  /** Tone of the count pip — defaults to neutral if omitted. */
+  getTone?: "warn" | "danger" | "info";
 };
 
 // Registry of every v1 panel. Phase B swaps stub components for real wrapped
@@ -29,11 +35,11 @@ export type PanelDef = {
 // panel-types.ts (single source of truth shared with ui-prefs).
 export const PANELS: Record<PanelId, PanelDef> = {
   tasks:       { component: TasksStub,       title: "Tasks",       icon: ListTodo,   kbd: "1" },
-  sync:        { component: SyncPanel,       title: "Sync",        icon: RefreshCcw, kbd: "2" },
+  sync:        { component: SyncPanel,       title: "Sync",        icon: RefreshCcw, kbd: "2", getCount: () => connection.conflictCount, getTone: "danger" },
   files:       { component: FilesStub,       title: "Files",       icon: FolderOpen, kbd: "3" },
   history:     { component: HistoryStub,     title: "History",     icon: History,    kbd: "4" },
   agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "5" },
   terminal:    { component: TerminalDockPanel, title: "Terminal",  icon: Terminal,   kbd: "6" },
   attachments: { component: AttachmentsStub, title: "Attachments", icon: Paperclip,  kbd: "7" },
-  activity:    { component: ActivityPanel,   title: "Activity",    icon: Activity,   kbd: "8" },
+  activity:    { component: ActivityPanel,   title: "Activity",    icon: Activity,   kbd: "8", getCount: () => connection.activityFeed.length, getTone: "info" },
 };

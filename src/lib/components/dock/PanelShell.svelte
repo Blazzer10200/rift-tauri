@@ -26,6 +26,10 @@
   const def = $derived(PANELS[id]);
   const ps = $derived(uiPrefs.panels[id]);
   const showBody = $derived(!ps.collapsed);
+  // Optional count pip from registry — reactive because getCount reads
+  // $state-backed stores inside the lambda. Tone defaults to neutral grey.
+  const count = $derived(def.getCount?.() ?? 0);
+  const countTone = $derived(def.getTone ?? "neutral");
 
   // Lazy-mount: don't instantiate panel body until first open. Once mounted,
   // stays mounted so internal state (scroll, selection) survives toggle.
@@ -102,6 +106,9 @@
     </button>
     <span class="head-icon"><def.icon size={13}/></span>
     <span class="head-title">{def.title}</span>
+    {#if count > 0}
+      <span class="head-count count-pip" data-tone={countTone}>{count}</span>
+    {/if}
     <span class="head-spacer"></span>
     <button
       class="head-btn"
@@ -232,6 +239,14 @@
     letter-spacing: -0.005em;
   }
   .head-spacer { flex: 1; }
+
+  /* Count pip in panel header — uses the global .count-pip primitive from
+     app.css plus per-tone overrides. Stays muted by default so it doesn't
+     fight the title for attention. */
+  .head-count { flex-shrink: 0; }
+  .head-count[data-tone="warn"]   { background: var(--warn-soft);   color: var(--warn); }
+  .head-count[data-tone="danger"] { background: var(--danger-soft); color: var(--danger); }
+  .head-count[data-tone="info"]   { background: var(--info-soft);   color: var(--info); }
 
   .head-btn {
     display: inline-flex; align-items: center; justify-content: center;
