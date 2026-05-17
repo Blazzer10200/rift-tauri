@@ -209,6 +209,11 @@ class AssistantStore {
   workspaceFilesLoadingFor = $state<string | null>(null);
 
   composerDraft = $state("");
+  // Pasted/dropped binary attachments staged for the next send. Each carries
+  // base64 + mime so the backend can emit a stream-json `image` content
+  // block. `previewUrl` is a data URL for the in-composer thumbnail; it's
+  // cheap to keep here since the same bytes are already in dataBase64.
+  composerAttachments = $state<{ id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]>([]);
   // Outbound message queue. send() appends here if a turn is already
   // streaming; onDone() pops the next one. UI surfaces queued items as
   // pills above the composer with an X to remove.
@@ -832,7 +837,9 @@ class AssistantStore {
 
   async send(prompt: string) {
     const trimmed = prompt.trim();
-    if (!trimmed) return;
+    // Empty prompts are allowed when attachments are staged (paste-and-go).
+    // Drop only if BOTH the prompt and attachments are empty.
+    if (!trimmed && this.composerAttachments.length === 0) return;
     // Try-handle as a slash command first; if it matched, we're done.
     if (trimmed.startsWith("/") && this.runSlash(trimmed)) return;
     // Already streaming → queue instead of dropping.
@@ -880,23 +887,66 @@ class AssistantStore {
     if (this.promptHistory[this.promptHistory.length - 1] !== trimmed) {
       this.promptHistory = [...this.promptHistory, trimmed].slice(-50);
     }
+    // User bubble text: when paste-and-go with no text, show an attachment
+    // marker so the bubble isn't blank. Persistence is text-only (image data
+    // isn't saved into the convo JSON — claude has it on its side, and the
+    // marker makes the turn legible on reload).
+    const attachCount = this.composerAttachments.length;
+    const bubbleText =
+      trimmed.length > 0
+        ? trimmed
+        : attachCount === 1
+        ? "📎 1 image"
+        : `📎 ${attachCount} images`;
     this.messages = [
       ...this.messages,
-      { id: crypto.randomUUID(), role: "user", blocks: [{ type: "text", text: trimmed }] },
+      { id: crypto.randomUUID(), role: "user", blocks: [{ type: "text", text: bubbleText }] },
     ];
     const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [] };
     this.messages = [...this.messages, asst];
     this.streamingMsgId = asst.id;
+    // Snapshot attachments for this turn + clear the composer so a fast retype
+    // doesn't accidentally re-attach. Pass only the wire-relevant fields to
+    // the backend (drops previewUrl which is only for UI thumbnails).
+    const turnAttachments = this.composerAttachments.map((a) => ({
+      mime: a.mime,
+      dataBase64: a.dataBase64,
+    }));
+    this.composerAttachments = [];
     try {
       await invoke("assistant_send", {
         prompt: trimmed,
         sessionId: this.currentConvoId,
         isFirstTurn,
         model: this.model,
+        attachments: turnAttachments.length > 0 ? turnAttachments : null,
       });
     } catch (e) {
       this.onError(String(e));
     }
+  }
+
+  /** Stage a binary attachment for the next send. Returns false if the size
+   *  cap would be exceeded; the composer surfaces a notice on rejection. */
+  addAttachment(att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }): boolean {
+    // 20 MiB cumulative cap — mirrors the backend guard so we reject before
+    // round-tripping a hopeless payload.
+    const CAP = 20 * 1024 * 1024;
+    const current = this.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
+    if (current + att.sizeBytes > CAP) return false;
+    this.composerAttachments = [
+      ...this.composerAttachments,
+      { id: crypto.randomUUID(), ...att },
+    ];
+    return true;
+  }
+
+  removeAttachment(id: string) {
+    this.composerAttachments = this.composerAttachments.filter((a) => a.id !== id);
+  }
+
+  clearAttachments() {
+    this.composerAttachments = [];
   }
 
   private mutateStreaming(fn: (m: ChatMessage) => ChatMessage) {
