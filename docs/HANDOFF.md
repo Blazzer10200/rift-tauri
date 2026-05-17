@@ -20,6 +20,14 @@ TTS reversed (only STT wanted): removed `src-tauri/src/tts/`, `tts.svelte.ts`, s
 
 ---
 
+## S91 PRIORITIES — user-flagged at end of S90
+
+1. **Permission errors in embedded Claude — TOP PRIORITY.** Blazzer + Trey both hit recurring "no permission to use tool X" / "tool not allowed" messages in the Assistant. Very annoying. Hypothesis: `--allowed-tools` allowlist in `assistant_send` (3 branches in `assistant/mod.rs:952`) is too narrow — only `mcp__rift__*` + `Skill` are explicit. Likely missing: `Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`, `TodoWrite`, `WebFetch`, `WebSearch`, etc. S88 added `Skill`; needs a full pass over which built-in tools should be allowed by default. Cross-check Anthropic Agent SDK default tool list. May also need a Settings → Assistant → "Allowed tools" multiselect for power users. **Reproduce by:** asking Claude in the Assistant to "edit X" or "grep for Y" — watch for "permission denied"/"tool not in allowlist" response.
+
+2. **STT accuracy improvement — slurred-speech support.** Both users sometimes slur words; WebView2's default `SpeechRecognition` (Edge → Azure Neural) struggles. Options to investigate: (a) `r.maxAlternatives > 1` + confidence scoring (currently fixed at 1 in `stt.svelte.ts:135`); (b) `SpeechGrammarList` for domain-specific vocabulary hints (FiveM/RedM/Lua/Rust terms); (c) per-user phrase-list / acoustic profile; (d) fallback to a different backend (Azure direct API w/ enhanced models, OpenAI Whisper API, AssemblyAI streaming). Trade-offs: native WebView path is free + zero-install; cloud APIs cost money + require keys but offer better accuracy. **Don't reintroduce whisper-rs** (libclang Windows dep is the blocker — see Don't-reintroduce list). Possible middle-ground: a confidence-threshold setting + "show alternates" UI when confidence is low so user can pick or re-speak.
+
+---
+
 ## RESUME HERE — first read every new session
 
 **Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.4-alpha** (committed); binary release pending — run `powershell -NoProfile -File ./scripts/release.ps1` to publish vpk+nsis to `rift-releases`. Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
