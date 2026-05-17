@@ -39,6 +39,9 @@
     if (!menuOpen) return;
     if (menuEl && !menuEl.contains(ev.target as Node)) menuOpen = false;
   }
+  function onWindowKey(ev: KeyboardEvent) {
+    if (menuOpen && ev.key === "Escape") menuOpen = false;
+  }
 
   // Resize handle drag (pinned-height mode). Pointer events for unified
   // mouse+touch+pen behavior; capture so release fires reliably.
@@ -67,7 +70,7 @@
   }
 </script>
 
-<svelte:window onclick={onWindowClick}/>
+<svelte:window onclick={onWindowClick} onkeydown={onWindowKey}/>
 
 <section
   class="panel"
