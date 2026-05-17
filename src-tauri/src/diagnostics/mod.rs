@@ -313,6 +313,46 @@ impl LogForwarder {
     }
 }
 
+/// Scrub log messages of homedir prefixes + obvious key/secret markers
+/// before they're broadcast to the diag bus (and onward to the renderer).
+/// Disable via `RIFT_LOG_SCRUB=0` for dev/debugging only.
+///
+/// Scrubs applied (order matters — homedir first so it doesn't undo
+/// secret-body redaction):
+///   1. `$USERPROFILE` / `$HOME` (both backslash + forward-slash forms) → `~`
+///   2. Lines containing OpenSSH/RSA `BEGIN ... PRIVATE KEY` markers →
+///      full-message redaction (safer than per-line — a single leaked body
+///      line is enough to compromise the key, so drop the whole message).
+fn scrub_log_message(msg: &str) -> String {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    let enabled = *ENABLED
+        .get_or_init(|| !matches!(std::env::var("RIFT_LOG_SCRUB").as_deref(), Ok("0")));
+    if !enabled {
+        return msg.to_string();
+    }
+    let mut out = msg.to_string();
+    for var in ["USERPROFILE", "HOME"] {
+        if let Ok(home) = std::env::var(var) {
+            if !home.is_empty() {
+                let fwd = home.replace('\\', "/");
+                if home.len() >= 3 {
+                    out = out.replace(&home, "~");
+                }
+                if fwd != home && fwd.len() >= 3 {
+                    out = out.replace(&fwd, "~");
+                }
+            }
+        }
+    }
+    if out.contains("BEGIN OPENSSH PRIVATE KEY")
+        || out.contains("BEGIN RSA PRIVATE KEY")
+        || out.contains("BEGIN EC PRIVATE KEY")
+    {
+        return "[REDACTED — log line contained private-key body]".to_string();
+    }
+    out
+}
+
 impl log::Log for LogForwarder {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
         self.inner.enabled(metadata)
@@ -330,7 +370,7 @@ impl log::Log for LogForwarder {
         if target.starts_with("rift_tauri_lib::diagnostics") {
             return;
         }
-        let message = format!("{}", record.args());
+        let message = scrub_log_message(&format!("{}", record.args()));
         bus().publish(DiagEvent {
             at: Utc::now(),
             seq: 0,

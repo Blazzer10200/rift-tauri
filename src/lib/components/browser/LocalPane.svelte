@@ -50,6 +50,10 @@
   $effect(() => {
     void path; void refreshKey;
     void load();
+    // On destroy / next re-run, bump the token so any in-flight `load()`
+    // bails at its `token !== loadToken` guard. Defensive — pairs with the
+    // existing stale-overwrite guard inside load().
+    return () => { loadToken++; };
   });
 
   $effect(() => {
