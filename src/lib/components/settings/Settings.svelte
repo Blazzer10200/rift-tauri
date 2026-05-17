@@ -4,7 +4,7 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Volume2 } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
@@ -23,7 +23,7 @@
   } from "../../state/terminal.svelte";
   import { THEME_PRESETS } from "../terminal/themePresets";
 
-  type Section = "appearance" | "terminal" | "assistant" | "servers" | "keys" | "about";
+  type Section = "appearance" | "terminal" | "assistant" | "voice" | "servers" | "keys" | "about";
 
   type ShellInfo = { id: string; label: string; program: string; args: string[]; available: boolean };
   let shells = $state<ShellInfo[]>([]);
@@ -118,6 +118,7 @@
     { id: "appearance", label: "Appearance", icon: Sparkles },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "assistant",  label: "Assistant",  icon: Sparkles },
+    { id: "voice",      label: "Voice",      icon: Volume2 },
     { id: "servers",    label: "Servers",    icon: Server },
     { id: "keys",       label: "SSH keys",   icon: Key },
     { id: "about",      label: "About",      icon: Info },
@@ -125,6 +126,49 @@
 
   // Assistant API-key field — value mirrors store, save commits to disk.
   import { assistant as assistantStore } from "../../state/assistant.svelte";
+  import { tts } from "../../state/tts.svelte";
+  import { stt } from "../../state/stt.svelte";
+  const STT_LANGS: { id: string; label: string }[] = [
+    { id: "en-US", label: "English (US)" },
+    { id: "en-GB", label: "English (UK)" },
+    { id: "en-AU", label: "English (Australia)" },
+    { id: "es-ES", label: "Spanish (Spain)" },
+    { id: "es-MX", label: "Spanish (Mexico)" },
+    { id: "fr-FR", label: "French" },
+    { id: "de-DE", label: "German" },
+    { id: "it-IT", label: "Italian" },
+    { id: "pt-BR", label: "Portuguese (Brazil)" },
+    { id: "ja-JP", label: "Japanese" },
+    { id: "ko-KR", label: "Korean" },
+    { id: "zh-CN", label: "Chinese (Mandarin)" },
+  ];
+  let voiceDdOpen = $state(false);
+  let voiceDdRef = $state<HTMLDivElement | undefined>();
+  let voiceTestText = $state("This is a test of the current voice.");
+  $effect(() => {
+    if (section === "voice") {
+      void tts.init();
+      void tts.loadVoices();
+      void stt.init();
+    }
+  });
+  $effect(() => {
+    if (!voiceDdOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (voiceDdRef && !voiceDdRef.contains(t)) voiceDdOpen = false;
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  });
+  const currentVoiceLabel = $derived.by(() => {
+    const sel = tts.config.voice;
+    if (!sel) return "Aria (en-US, default)";
+    const hit = tts.voices.find((v) => v.name === sel);
+    if (!hit) return sel;
+    const gender = hit.gender ? ` · ${hit.gender}` : "";
+    return `${hit.short_name} (${hit.locale}${gender})`;
+  });
   let asstApiKeyDraft = $state("");
   let asstApiKeySaving = $state(false);
   let asstApiKeyMsg = $state<string | null>(null);
@@ -711,6 +755,274 @@
           {#if asstApiKeyMsg}<p class="muted">{asstApiKeyMsg}</p>{/if}
           <p class="muted asst-warn">Stored in <code>~/.rift/assistant/config.json</code> as plaintext. Keychain migration planned.</p>
         </div>
+      </div>
+
+    {:else if section === "voice"}
+      <div>
+        <h3>Voice</h3>
+        <p class="help">
+          Speak assistant replies aloud using Microsoft Edge's Azure Neural voices —
+          free, no API key, no model download. Toggle <em>Auto-speak</em> in the
+          Assistant header to enable streaming sentence-by-sentence playback.
+        </p>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Enable text-to-speech</h4>
+          <p class="muted">Master switch. Off = the speaker button + per-message replay are inert.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Enable text-to-speech"
+              aria-checked={tts.config.enabled}
+              data-on={tts.config.enabled}
+              onclick={() => void tts.setConfig({ enabled: !tts.config.enabled })}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if tts.config.enabled}On — Rift can synthesize and play audio.{:else}Off — synthesis disabled.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Auto-speak streaming replies</h4>
+          <p class="muted">When on, every completed sentence is spoken as the model streams it. Off = manual replay only.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Auto-speak streaming replies"
+              aria-checked={tts.config.auto_speak}
+              data-on={tts.config.auto_speak}
+              disabled={!tts.config.enabled}
+              onclick={() => void tts.setConfig({ auto_speak: !tts.config.auto_speak })}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if !tts.config.enabled}Enable TTS first.{:else if tts.config.auto_speak}On.{:else}Off — use the speaker icon on each message to replay.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Voice</h4>
+          <p class="muted">~500 Edge Neural voices — English locales listed first.</p>
+          <div class="voice-dd-wrap" bind:this={voiceDdRef}>
+            <button
+              type="button"
+              class="voice-dd-btn"
+              onclick={() => (voiceDdOpen = !voiceDdOpen)}
+              aria-haspopup="listbox"
+              aria-expanded={voiceDdOpen}
+            >
+              <span class="voice-dd-label">{currentVoiceLabel}</span>
+              <ChevronDown size={13}/>
+            </button>
+            {#if voiceDdOpen}
+              <div class="voice-dd-menu" role="listbox">
+                {#if tts.voicesLoading}
+                  <div class="voice-dd-empty">Loading voices…</div>
+                {:else if tts.voicesError}
+                  <div class="voice-dd-empty err">Failed: {tts.voicesError}</div>
+                {:else if tts.voices.length === 0}
+                  <div class="voice-dd-empty">No voices available.</div>
+                {:else}
+                  <button
+                    type="button"
+                    class="voice-dd-item"
+                    class:active={!tts.config.voice}
+                    onclick={() => { void tts.setConfig({ voice: "" }); voiceDdOpen = false; }}
+                  >
+                    <span class="voice-item-name">Aria <span class="voice-item-meta">(en-US, default)</span></span>
+                  </button>
+                  {#each tts.voices as v (v.name)}
+                    <button
+                      type="button"
+                      class="voice-dd-item"
+                      class:active={tts.config.voice === v.name}
+                      onclick={() => { void tts.setConfig({ voice: v.name }); voiceDdOpen = false; }}
+                    >
+                      <span class="voice-item-name">
+                        {v.short_name}
+                        <span class="voice-item-meta">
+                          ({v.locale}{v.gender ? ` · ${v.gender}` : ""})
+                        </span>
+                      </span>
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Rate, pitch, volume</h4>
+          <p class="muted">Range -100 to +100, each percent of the natural baseline. 0 = unchanged.</p>
+          <div class="voice-slider-row">
+            <label class="voice-slider-label" for="voice-rate">Rate</label>
+            <input
+              id="voice-rate"
+              type="range" min="-50" max="50" step="5"
+              value={tts.config.rate}
+              oninput={(e) => void tts.setConfig({ rate: Number((e.target as HTMLInputElement).value) })}
+              class="voice-slider"
+            />
+            <span class="voice-slider-val mono">{tts.config.rate}%</span>
+          </div>
+          <div class="voice-slider-row">
+            <label class="voice-slider-label" for="voice-pitch">Pitch</label>
+            <input
+              id="voice-pitch"
+              type="range" min="-50" max="50" step="5"
+              value={tts.config.pitch}
+              oninput={(e) => void tts.setConfig({ pitch: Number((e.target as HTMLInputElement).value) })}
+              class="voice-slider"
+            />
+            <span class="voice-slider-val mono">{tts.config.pitch}%</span>
+          </div>
+          <div class="voice-slider-row">
+            <label class="voice-slider-label" for="voice-volume">Volume</label>
+            <input
+              id="voice-volume"
+              type="range" min="-50" max="50" step="5"
+              value={tts.config.volume}
+              oninput={(e) => void tts.setConfig({ volume: Number((e.target as HTMLInputElement).value) })}
+              class="voice-slider"
+            />
+            <span class="voice-slider-val mono">{tts.config.volume}%</span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Test voice</h4>
+          <p class="muted">Synthesises and plays the text below using the current settings.</p>
+          <div class="asst-row">
+            <input
+              class="input asst-input"
+              type="text"
+              bind:value={voiceTestText}
+              placeholder="Type something to speak…"
+            />
+            <button class="btn primary sm" type="button" onclick={() => void tts.testVoice(voiceTestText)}>
+              <Volume2 size={11}/> Speak
+            </button>
+            {#if tts.playing}
+              <button class="btn ghost sm" type="button" onclick={() => void tts.cancel()}>Stop</button>
+            {/if}
+          </div>
+          {#if tts.lastError}<p class="muted asst-warn">{tts.lastError}</p>{/if}
+        </div>
+
+        <h3 class="set-subhead">Speech-to-text (dictation)</h3>
+        <p class="help">
+          Talk into the mic and your words stream into the composer. Uses the
+          WebView's built-in speech recognition (Microsoft Azure when online) —
+          nothing to install or download.
+          {#if !stt.supported}
+            <span class="asst-warn"> · Your WebView does not expose <code>SpeechRecognition</code>; STT is unavailable.</span>
+          {/if}
+        </p>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Enable speech-to-text</h4>
+          <p class="muted">Master switch. When off, the mic button in the composer is hidden / inert.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Enable speech-to-text"
+              aria-checked={stt.config.enabled}
+              data-on={stt.config.enabled}
+              disabled={!stt.supported}
+              onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if stt.config.enabled}On — mic button in the composer is live.{:else}Off.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Language</h4>
+          <p class="muted">BCP-47 tag passed to the recogniser. Use English (US) unless you're speaking another language.</p>
+          <div class="stt-lang-grid">
+            {#each STT_LANGS as l (l.id)}
+              <button
+                type="button"
+                class="stt-lang-pick"
+                data-active={stt.config.language === l.id}
+                onclick={() => void stt.setConfig({ language: l.id })}
+              >
+                <span class="stt-lang-label">{l.label}</span>
+                <span class="stt-lang-code mono">{l.id}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Live partial transcripts</h4>
+          <p class="muted">Words appear in the composer as you speak. Off = wait for each sentence to commit before any text shows.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Live partial transcripts"
+              aria-checked={stt.config.show_interim}
+              data-on={stt.config.show_interim}
+              disabled={!stt.config.enabled}
+              onclick={() => void stt.setConfig({ show_interim: !stt.config.show_interim })}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if stt.config.show_interim}On — interim words appear live.{:else}Off — only final committed text appears.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Continuous mode</h4>
+          <p class="muted">Keep listening across pauses until you click stop. Off = recogniser stops after the first sentence.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Continuous mode"
+              aria-checked={stt.config.continuous}
+              data-on={stt.config.continuous}
+              disabled={!stt.config.enabled}
+              onclick={() => void stt.setConfig({ continuous: !stt.config.continuous })}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if stt.config.continuous}On — recogniser keeps listening until you stop.{:else}Off — stops after one sentence.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Insertion mode</h4>
+          <p class="muted">Transcript can append to the existing draft (preserves what's typed) or replace it (mic-first workflow).</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Append transcript to existing draft"
+              aria-checked={stt.config.append_to_draft}
+              data-on={stt.config.append_to_draft}
+              disabled={!stt.config.enabled}
+              onclick={() => void stt.setConfig({ append_to_draft: !stt.config.append_to_draft })}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if stt.config.append_to_draft}Append — transcript adds to the composer.{:else}Replace — transcript overwrites the composer.{/if}
+            </span>
+          </div>
+        </div>
+        {#if stt.lastError}<p class="muted asst-warn">{stt.lastError}</p>{/if}
       </div>
 
     {:else if section === "servers"}
@@ -1340,4 +1652,113 @@
   .asst-pill[data-tone="yellow"]  .asst-dot { background: var(--warn,    #fbbf24); }
   .asst-pill[data-tone="red"]     .asst-dot { background: var(--danger,  #f87171); }
   .asst-warn { color: var(--warn, #fbbf24); }
+
+  /* Voice settings */
+  .voice-dd-wrap { position: relative; margin-top: 8px; }
+  .voice-dd-btn {
+    width: 100%;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px;
+    padding: 8px 12px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: background 120ms, border-color 120ms;
+  }
+  .voice-dd-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+  .voice-dd-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .voice-dd-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+    z-index: 20;
+    max-height: 320px;
+    overflow-y: auto;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    padding: 4px;
+  }
+  .voice-dd-empty {
+    padding: 10px 12px;
+    color: var(--fg-muted);
+    font-size: var(--fs-sm);
+  }
+  .voice-dd-empty.err { color: var(--danger); }
+  .voice-dd-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 7px 10px;
+    background: transparent;
+    border: 0;
+    border-radius: var(--radius-xs);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+  }
+  .voice-dd-item:hover { background: var(--surface-hover); }
+  .voice-dd-item.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .voice-item-name { display: inline-flex; gap: 6px; align-items: baseline; }
+  .voice-item-meta { color: var(--fg-muted); font-size: 11px; }
+  .voice-dd-item.active .voice-item-meta {
+    color: color-mix(in oklch, var(--accent) 70%, var(--fg-muted));
+  }
+
+  .voice-slider-row {
+    display: grid;
+    grid-template-columns: 64px 1fr 56px;
+    align-items: center;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .voice-slider-label { font-size: var(--fs-sm); color: var(--fg-muted); }
+  .voice-slider {
+    width: 100%;
+    accent-color: var(--accent);
+  }
+  .voice-slider-val { font-size: var(--fs-xs); color: var(--fg); text-align: right; }
+
+  .set-subhead {
+    margin: 28px 0 4px;
+    font-size: var(--fs-lg);
+    font-weight: 600;
+    color: var(--fg);
+  }
+
+  .stt-lang-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px;
+    margin-top: 8px;
+  }
+  .stt-lang-pick {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    text-align: left;
+    transition: background 100ms, border-color 100ms;
+  }
+  .stt-lang-pick:hover { background: var(--surface-hover); }
+  .stt-lang-pick[data-active="true"] {
+    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    background: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev-1));
+    color: var(--accent);
+  }
+  .stt-lang-code { font-size: 10px; color: var(--fg-muted); }
+  .stt-lang-pick[data-active="true"] .stt-lang-code { color: color-mix(in oklch, var(--accent) 80%, var(--fg-muted)); }
 </style>
