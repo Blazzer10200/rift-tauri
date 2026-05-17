@@ -2,6 +2,14 @@
 
 > Retired entries from `docs/CHANGELOG.md`. Newest first. Pre-archive history also available via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.7-alpha — 2026-05-17 — Settings → Accessibility (dyslexia-friendly Assistant)
+
+Trey-driven feature. New **Settings → Accessibility** section between *Assistant* and *Speech* (lucide `Accessibility` icon). One master toggle plus three independent dials, all persisted to localStorage and applied via `data-a11y-*` attributes on `<html>` so CSS overrides land instantly with no reflow shrapnel.
+
+**Master toggle — Dyslexia-friendly mode.** First time on, seeds the recommended bundle: Lexend font + increased line-height. When on, [src/lib/state/assistant.svelte.ts](src/lib/state/assistant.svelte.ts) forwards a `dyslexiaMode: true` arg to the new `assistant_send` signature, and [src-tauri/src/assistant/mod.rs](src-tauri/src/assistant/mod.rs) appends a single-line addendum to the per-turn system prompt telling Claude to interpret phonetic/letter-swap typos and slurred-speech artifacts charitably.
+
+**Three independent dials:** UI font (System ↔ Lexend, bundled via `@fontsource-variable/lexend`), increased line + letter spacing (scoped to `.bubble` / `.markdown-body` / textarea), warm reading tint (sepia overlay on message bubbles + code blocks only).
+
 ## v0.4.6-alpha — 2026-05-17 — Hot-fix: switch embedded Claude to `bypassPermissions`
 
 A second Assistant session reported `mcp__rift__remote_bash` denied with: *"Permission to use mcp__rift__remote_bash has been denied because Claude Code is running in don't ask mode."* — surfaced after the v0.4.5 ship despite `mcp__rift__remote_bash` being in the `--allowed-tools` allowlist (verified). Root cause: [src-tauri/src/assistant/mod.rs:926](src-tauri/src/assistant/mod.rs#L926) passed `--permission-mode dontAsk`, which auto-DENIES anything that would otherwise prompt the user — and MCP tools (incl. `mcp__rift__remote_bash`) require per-call approval that `--allowed-tools` does NOT short-circuit in `dontAsk`. Rift has no interactive permission UI by design, so the right mode is `bypassPermissions` — auto-allows every call, and `--allowed-tools` continues to act as the actual gate over which tool names are reachable.

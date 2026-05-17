@@ -71,8 +71,14 @@ class Accessibility {
     if (typeof document === "undefined") return;
     const ds = document.documentElement.dataset;
     ds.a11yDyslexia = this.dyslexiaMode ? "on" : "off";
-    ds.a11yFont = this.font;
-    ds.a11yLineHeight = this.lineHeightBoost ? "on" : "off";
+    // Font + line-height dials are GATED by the master toggle so flipping
+    // dyslexia mode off snaps the visual back to defaults. Their localStorage
+    // values still persist independently so re-enabling the master restores
+    // whatever the user last picked.
+    ds.a11yFont = this.dyslexiaMode ? this.font : "system";
+    ds.a11yLineHeight = this.dyslexiaMode && this.lineHeightBoost ? "on" : "off";
+    // Warm tint is independent — some users want it without the dyslexia
+    // bundle (just glare reduction), so it ignores the master switch.
     ds.a11yWarmTint = this.warmTint ? "on" : "off";
   }
 }
