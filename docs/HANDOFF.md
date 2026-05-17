@@ -2,17 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 81 — 2026-05-17 — audit fix-pass (6 items)
+## Sessions 81–82 — 2026-05-17 — audit fix-passes (12 items + 1 downgrade)
 
-Closed B2 (`editor_for` race-loss `warn!`), B4 (`DiagEvent.file` basename-only at publish), B5 (`DiagBus` mutexes → `AtomicI64` epoch-ms), B9 (`safe_profile_key` empty sentinel), S6 (`lock_presence` stale-delete backoff counter), T4 (`ssh_keygen` `cfg(unix)` 0o600 chmod). `cargo check` clean. **Audit Open: 23 → 17 actionable** (1 MED + 13 LOW + 2 PARTIAL + 1 MOOT/INFO). Full per-item summary in [docs/AUDIT.md](docs/AUDIT.md) "S81 Fix-Pass".
+S81 closed B2/B4/B5/B9 + S6 + T4 (`editor_for` race warn, `DiagEvent.file` basename, `DiagBus` atomic, `safe_profile_key` sentinel, lock backoff, ssh_keygen chmod). S82 closed B7/B11 + S4 + T1/T2/T3 (`RiftConfig` size guard, velopack pin doc, watch forward-slash probe, sftp close lock-drop, `RIFT_UPDATE_FEED` debug gate, `in_place` Drop detach) + B16 → INFO. `cargo check` clean both. **Audit Open: 23 → 11 actionable** (1 MED + 8 LOW + 2 PARTIAL frontend). Transport/sftp/edit functionally clean. Per-item detail in [docs/AUDIT.md](docs/AUDIT.md).
 
-## Session 80 — audit verification pass
+## Sessions 78–80 — v0.4.1 refactor + audit re-verify
 
-Re-verified 42-item audit vs HEAD. v0.3/v0.4 refactors silently fixed 16, 3 → PARTIAL. AUDIT.md reorganized; Archive gained Verification Pass block. Docs-only.
-
-## Session 78–79 — v0.4.1 right-pane refactor
-
-Dropped dock-accordion. Right side = one full page picked from 40px `ActivityBar`. Commits `aff9cd0`→`8b984f9` under `useV03Shell`; v0.2 pixel-identical. `0.4.1-alpha` committed; `scripts/release.ps1` NOT invoked yet.
+S78–79 dropped dock-accordion (right side = one full page from 40px `ActivityBar`); `aff9cd0`→`8b984f9` under `useV03Shell`. S80 re-verified 42-item audit vs HEAD; 16 silently fixed by v0.3/v0.4. `0.4.1-alpha` committed; `release.ps1` NOT invoked.
 
 ---
 
@@ -26,7 +22,7 @@ Dropped dock-accordion. Right side = one full page picked from 40px `ActivityBar
 
 **v0.2 queue:** EACCES auto-fix-perms; auto-Mirror on rename; integration tests phase 1; dry-run Mirror preview; `lib.rs` → `commands/*.rs` split; LocalPane/RemotePane shared-logic extract; connection.connecting pill desync; Diagnostics canonical-skeleton.
 
-**Audit queue (post-S81):** 17 open (9 lib/config, 3 sync, 3 transport/edit, 2 frontend PARTIAL). Remaining MED: `LogForwarder` log scrubbing, `flush_batch` inline `safe_count_files`. Full list in [docs/AUDIT.md](docs/AUDIT.md).
+**Audit queue (post-S82):** 11 open (6 lib/config, 2 sync, 0 transport, 2 frontend PARTIAL, 1 INFO). Remaining MED: `LogForwarder` log scrubbing, `flush_batch` inline `safe_count_files`. Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
 **Multi-user:** Trey OFF Mirror until on latest + fresh-Pulled baseline.
 

@@ -36,8 +36,13 @@ impl AutoSyncEngine {
         if self.folders.contains_key(&remote_root) {
             return Ok(true);
         }
+        // Rest of the codebase carries forward-slash paths even on Windows
+        // (`auto_sync/path.rs` normalizes both ways). Building the watched
+        // root via `MAIN_SEPARATOR_STR` previously produced `C:\path\a\b`
+        // on Win and `/path/a/b` on POSIX, splitting the equality story
+        // for callers that pass already-normalized subpaths.
         let local_root = std::path::Path::new(&self.profile.local_root)
-            .join(spec.remote_subpath.replace('/', std::path::MAIN_SEPARATOR_STR));
+            .join(spec.remote_subpath.trim_start_matches('/'));
         if !local_root.exists() {
             let profile_root = std::path::Path::new(&self.profile.local_root);
             if !profile_root.exists() {
@@ -60,8 +65,10 @@ impl AutoSyncEngine {
                 local_root.display()
             ));
         }
-        // Refuse to attach to ignored paths (e.g. `[disabled]/`).
-        let probe = format!("{}{}", local_root.display(), std::path::MAIN_SEPARATOR);
+        // Refuse to attach to ignored paths (e.g. `[disabled]/`). Probe with
+        // forward-slash so `ignore::should_ignore` (which normalizes the
+        // input the same way) gets a stable representation on both OSes.
+        let probe = format!("{}/", local_root.display().to_string().replace('\\', "/"));
         if ignore::should_ignore(&probe) {
             self.log(&format!("watch refused (ignored path): {}", local_root.display()));
             return Ok(false);

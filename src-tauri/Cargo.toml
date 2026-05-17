@@ -37,7 +37,10 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # File system watcher — replaces .NET FileSystemWatcher
 notify = "8"
 
-# Auto-updater — same Velopack ecosystem we use on the WPF side
+# Auto-updater — same Velopack ecosystem we use on the WPF side.
+# EXACT pin (=0.0.1298) is intentional: 0.0.x semver = breaking-change
+# noise between patches. Last reviewed 2026-05-17; revisit quarterly
+# (audit B11). Security advisories on velopack-rust → check fasterthanlime/velopack release notes.
 velopack = "=0.0.1298"
 # HTTP client for our custom GithubSource (velopack-rust 0.0.1298 has no
 # GithubSource type; we implement UpdateSource against the GitHub REST API).

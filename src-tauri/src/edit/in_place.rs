@@ -300,9 +300,15 @@ impl EditInPlaceManager {
 
 impl Drop for EditInPlaceManager {
     fn drop(&mut self) {
-        // Best-effort cleanup; can't await Mutex inside Drop, so we just nuke
-        // the tmp root — outstanding watchers fall off w/ the dropped map.
-        let _ = std::fs::remove_dir_all(&self.tmp_root);
+        // Best-effort cleanup; can't await inside Drop. Detach the
+        // remove_dir_all onto a fresh OS thread so a slow filesystem
+        // (e.g. AV scanner holding handles) can't block the async runtime
+        // worker that's executing this Drop. Outstanding watchers fall off
+        // w/ the dropped map either way.
+        let path = self.tmp_root.clone();
+        std::thread::spawn(move || {
+            let _ = std::fs::remove_dir_all(&path);
+        });
     }
 }
 

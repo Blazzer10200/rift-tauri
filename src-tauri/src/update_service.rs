@@ -106,7 +106,10 @@ impl Default for UpdateService {
 }
 
 fn resolve_manager() -> Result<Option<velopack::UpdateManager>, String> {
-    // Local FileSource (RIFT_UPDATE_FEED) is dev-only.
+    // Local FileSource (RIFT_UPDATE_FEED) is dev-only — gated behind
+    // `debug_assertions` so a release-build binary can't be tricked into
+    // pointing at an attacker-controlled local update feed via env var.
+    #[cfg(debug_assertions)]
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
         let p = Path::new(&local);
         if p.is_dir() {

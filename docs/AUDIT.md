@@ -2,7 +2,7 @@
 
 Single source of truth for code audit findings. Open items at top, archive below. Line numbers re-verified 2026-05-17 against HEAD (v0.4.1-alpha tree). Re-verify before fixing if HEAD has moved.
 
-Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 fix-pass 2026-05-17 closed 6 more items (B2/B4/B5/B9 + S6 + T4). Total Open went 42 → 17 actionable.
+Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 fix-pass closed 6 (B2/B4/B5/B9 + S6 + T4). S82 fix-pass closed 6 more (B7 + B11 + S4 + T1 + T2 + T3) + downgraded B16 to INFO. Total Open: 42 → **11 actionable**.
 
 ---
 
@@ -17,45 +17,39 @@ Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged
 
 (F3-F15 verified resolved 2026-05-17 — moved to Archive.)
 
-## Backend — lib / config / capabilities (9 items)
+## Backend — lib / config / capabilities (6 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
 | MED | `src-tauri/src/diagnostics/mod.rs:277` `LogForwarder` | Forwards every log msg to frontend incl. error bodies w/ potential key paths. | Audit `log::error!/warn!` callers; add `RUST_LOG_DIAG_SCRUB` env flag. |
 | LOW | `src-tauri/src/profile/mod.rs:31-36` `bridge_token` | Plaintext in `~/.rift/rift.json`. Comment acknowledges. | Phase-6 tracking only — Stronghold/DPAPI/keyring. |
-| LOW | `src-tauri/src/profile/mod.rs:55-59` `RiftConfig::load` | Unbounded `extra` flatten depth → stack overflow on crafted config. | Depth-limit `serde_json::Deserializer` or size guard. |
 | LOW | `src-tauri/src/state/paths.rs:68` `atomic_write_json` | `std::thread::sleep` retry loop on async cmd thread blocks Tokio worker. | `spawn_blocking` or async sleep + async save. |
 | LOW | `src-tauri/Cargo.toml:41-44` reqwest+ureq | Two HTTP stacks. | Defer — `velopack` 0.0.1298 `UpdateSource` is sync (ureq); reqwest is async elsewhere. Revisit when velopack ships async source. |
-| LOW | `src-tauri/Cargo.toml:41` `velopack="=0.0.1298"` | 0.0.x semver = API instability; exact pin blocks security patches silently. | Comment intent + quarterly review note. |
 | LOW | `src-tauri/tauri.conf.json:24` csp | `style-src 'self' 'unsafe-inline'`. | Nonce/strict-dynamic once Tailwind supports hashed styles. |
 | LOW | `src-tauri/capabilities/default.json:7` | `core:default` broad superset. | Pin specific `core:*` perms in use. |
 | LOW | `src-tauri/capabilities/default.json:12` | `opener:default` unscoped. | Scope to known prefixes (update URL, docs URL). |
-| LOW-PARTIAL | `src-tauri/src/path_guard.rs:23-66` `validate_remote_child` | Destructive ops reject `/` root ✅ + backslash ✅. Case-insensitive remotes (Samba/macOS) still unguarded. | Per-segment case-fold or document Linux-only requirement. |
+| INFO | `src-tauri/src/path_guard.rs:21` Linux-only containment | Containment is case-sensitive and assumes Linux remote (Samba/macOS unguarded). Documented inline. Accepted: Rift's deploy target IS Linux. | None — file in incident if a Samba/macOS user reports drift. |
 
-(B1 + B15 verified resolved 2026-05-17 verification pass; B2 + B4 + B5 + B9 closed by S81 fix-pass 2026-05-17 — all moved to Archive.)
+(B1 + B15 fixed by 2026-05-17 verification pass; B2 + B4 + B5 + B9 closed by S81; B7 + B11 closed + B16 → INFO by S82 — all in Archive.)
 
-## Backend — sync (3 items)
+## Backend — sync (2 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
 | MED | `src-tauri/src/sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
-| LOW | `src-tauri/src/sync/auto_sync/watch.rs:40,64` `try_watch` | Probe path uses `MAIN_SEPARATOR` (backslash on Win) — inconsistent w/ rest of codebase. | Build via `.to_string_lossy().replace('\\','/')`. |
 | LOW | `src-tauri/src/state/sync_snapshot.rs:141` `compute_sha1` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
 | INFO-MOOT | `src-tauri/src/sync/edit_trail.rs:75-80` `read_raw` | Subdir w/ PID+`short_id` race could cross-delete concurrent reads. `short_id` widened to 8 bytes 2026-05-12; PID+rand collision now astronomical. Keep tracked but no action needed. | Optional `NamedTempFile` migration. |
 
-(S2 verified resolved 2026-05-17 verification pass; S6 closed by S81 fix-pass — moved to Archive.)
+(S2 fixed by 2026-05-17 verification pass; S6 closed by S81; S4 closed by S82 — all in Archive.)
 
-## Backend — transport/sftp/tunnel/edit/update (3 items)
+## Backend — transport/sftp/tunnel/edit/update (0 actionable, 2 INFO accepted)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| LOW | `src-tauri/src/sftp/mod.rs:278-282` `close` | `workers` lock held across each `sftp.close()` await. | Clone Arcs, drop lock, close outside. |
-| LOW | `src-tauri/src/update_service.rs:108-118` `RIFT_UPDATE_FEED` | Env-var local FileSource bypass not gated by build profile. | `#[cfg(debug_assertions)]` or signed marker file. |
-| LOW | `src-tauri/src/edit/in_place.rs:301-307` `Drop` | Synchronous `fs::remove_dir_all` in async drop context. Comment acknowledges. | `spawn_blocking` or explicit `async close_all()`. |
 | INFO | `src-tauri/src/bridge/mod.rs:57` | Token in plaintext over loopback HTTP. | Accepted; documented. |
 | INFO | `src-tauri/src/transport/env.rs:16-24` `hostname` | Spawns external `hostname` binary on non-Windows; ambient PATH risk. | Document. |
 
-(T4 closed by S81 fix-pass 2026-05-17 — moved to Archive.)
+(T4 closed by S81; T1 + T2 + T3 closed by S82 — all in Archive. Section is functionally clean.)
 
 ## Originally-listed but out of scope at filing time (still open)
 
@@ -67,6 +61,20 @@ Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged
 # Archive — Resolved
 
 All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix (Rust) or `npm run check` (frontend). Line numbers reflect pre-cleanup tree.
+
+## S82 Fix-Pass 2026-05-17 (6 items + 1 downgrade)
+
+Second backend batch — Cargo.toml doc + 1 sync + 3 transport + 1 lib/config + 1 INFO downgrade. `cargo check` clean (3.71s after one corrective edit on T1).
+
+| # | File:line | Change |
+|---:|---|---|
+| B7 | `profile/mod.rs:54-64 RiftConfig::load` | Added `RIFT_CONFIG_MAX_BYTES = 1 MiB` const + pre-parse `std::fs::metadata` size check. Rejects crafted oversize configs before `serde_json` can stack-overflow on nested `extra` flatten. |
+| B11 | `Cargo.toml:40-44 velopack` | Doc comment added: "EXACT pin (=0.0.1298) is intentional, 0.0.x semver = breaking-change noise. Last reviewed 2026-05-17; revisit quarterly." Tracks audit B11 explicitly. |
+| S4 | `sync/auto_sync/watch.rs:39-45, 65-69 try_watch` | `local_root` build no longer uses `MAIN_SEPARATOR_STR` (would produce backslash-paths on Win); `probe` for `ignore::should_ignore` now forward-slash normalized. Aligns with `auto_sync/path.rs` conventions. |
+| T1 | `sftp/mod.rs:280-293 close` | `workers` lock snapshot now clones `Arc<Worker>` list under lock, drops lock, then awaits each `sftp.close()` outside. Slow close on one worker no longer blocks observers on the same lock. |
+| T2 | `update_service.rs:108-122 resolve_manager` | `RIFT_UPDATE_FEED` env-var → local FileSource branch wrapped in `#[cfg(debug_assertions)]`. Release builds physically cannot be tricked into an attacker-controlled local update feed. |
+| T3 | `edit/in_place.rs:301-313 Drop` | `std::fs::remove_dir_all` detached via `std::thread::spawn`. Slow FS (AV scanner / locked handles) can't block the async runtime worker executing Drop. |
+| B16 | `path_guard.rs:21` | Downgraded LOW-PARTIAL → INFO. Inline doc already states the Linux-only assumption; Rift's deploy target IS Linux remotes (FiveM/RedM servers). Filed as "incident on Samba/macOS report" rather than open work. |
 
 ## S81 Fix-Pass 2026-05-17 (6 items)
 
