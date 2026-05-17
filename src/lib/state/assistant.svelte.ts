@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { uiPrefs } from "./ui-prefs.svelte";
 
 export type WorkspaceState = {
   current: string | null;
@@ -791,7 +792,7 @@ class AssistantStore {
       status: t.checked ? "completed" : "pending",
     }));
     this.ui.tasksUpdatedAt = Date.now();
-    this.ui.dockOpen = true;
+    this.ui.dockOpen = true; uiPrefs.setPanelOpen("tasks", true);
     this.dockAutoOpenedThisConvo = true;
   }
 
@@ -812,7 +813,7 @@ class AssistantStore {
     // First TodoWrite of a conversation auto-opens the dock once. If user
     // closes it after, we respect that — no re-open on subsequent updates.
     if (next.length > 0 && !this.dockAutoOpenedThisConvo) {
-      this.ui.dockOpen = true;
+      this.ui.dockOpen = true; uiPrefs.setPanelOpen("tasks", true);
       this.dockAutoOpenedThisConvo = true;
     }
   }
@@ -854,7 +855,7 @@ class AssistantStore {
     // First tool call of a conversation auto-opens the dock — same UX as the
     // first TodoWrite. Respects user's manual close after that.
     if (!this.dockAutoOpenedThisConvo) {
-      this.ui.dockOpen = true;
+      this.ui.dockOpen = true; uiPrefs.setPanelOpen("tasks", true);
       this.dockAutoOpenedThisConvo = true;
     }
     this.mutateStreaming((m) => ({
