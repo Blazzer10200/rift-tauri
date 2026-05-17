@@ -1,13 +1,14 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { revealItemInDir, openPath } from "@tauri-apps/plugin-opener";
-  import { Folder, FileCode, File, Upload, FolderOpen, Copy, ExternalLink, Pencil, Trash2 } from "lucide-svelte";
+  import { Folder, Upload, FolderOpen, Copy, ExternalLink, Pencil, Trash2 } from "lucide-svelte";
   import PathBreadcrumbs from "./PathBreadcrumbs.svelte";
   import LockBadge from "./LockBadge.svelte";
   import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { connection } from "../../state/connection.svelte";
   import { fmtRelative, fmtAbsolute } from "../../utils/time";
+  import { fmtSize, pickIcon, isEditableTarget, clampMenuPos } from "../../utils/file-display";
 
   type LocalEntry = {
     name: string;
@@ -79,14 +80,6 @@
     }
   }
 
-  function fmtSize(n: number, isDir: boolean): string {
-    if (isDir) return "";
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-    return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
-  }
-
   function fmtTime(secs: number): string {
     if (!secs) return "—";
     return fmtRelative(new Date(secs * 1000));
@@ -117,12 +110,6 @@
     return inConflict ? "conflict" : "synced";
   }
 
-  function pickIcon(e: LocalEntry) {
-    if (e.is_dir) return Folder;
-    if (/\.(lua|ts|js|py|rs|cs|go|rb|json|yml|yaml|toml)$/i.test(e.name)) return FileCode;
-    return File;
-  }
-
   function onRowClick(e: MouseEvent, entry: LocalEntry) {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
       const next = new Set(selected);
@@ -145,16 +132,7 @@
     e.stopPropagation();
     if (!selected.has(entry.path)) selected = new Set([entry.path]);
     menuFor = entry;
-    const MENU_W = 240;
-    const MENU_H = 320;
-    const PAD = 8;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + MENU_W > vw) x = Math.max(PAD, vw - MENU_W - PAD);
-    if (y + MENU_H > vh) y = Math.max(PAD, vh - MENU_H - PAD);
-    menuPos = { x, y };
+    menuPos = clampMenuPos(e.clientX, e.clientY);
   }
 
   function onBodyContextMenu(e: MouseEvent) {
@@ -233,10 +211,6 @@
     }
   }
 
-  function isEditableTarget(t: EventTarget | null): boolean {
-    const el = t as HTMLElement | null;
-    return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
-  }
   function onPaneKeyDown(e: KeyboardEvent) {
     if (isEditableTarget(e.target)) return;
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
@@ -397,7 +371,7 @@
             {#each filtered as e (e.path)}
               {@const status = rowStatus(e)}
               {@const lk = !e.is_dir ? (() => { const rp = connection.remoteForLocalPath(e.path); return rp ? connection.lockForRemotePath(rp) : null; })() : null}
-              {@const Icon = pickIcon(e)}
+              {@const Icon = pickIcon(e.name, e.is_dir)}
               <div
                 class="row"
                 data-selected={selected.has(e.path)}

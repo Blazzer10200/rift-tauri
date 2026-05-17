@@ -2,7 +2,8 @@
 // engine. Split out from `auto_sync.rs` 2026-05-13. EntryResult lives here
 // since it's the return contract of the flush pipeline.
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::Arc;
 
 use chrono::Utc;
 use tauri::Emitter;
@@ -11,9 +12,15 @@ use tokio_util::sync::CancellationToken;
 use super::path::{file_name, map_local_to_remote, rel_of, safe_count_files, stat_local, wait_for_readable};
 use super::{
     ActivityKind, ActivityRow, AutoSyncEngine, AutoSyncState, ChangeKind, ConflictRecord,
-    DirtyEntry, FolderWatch, LOCK_HOLD_RETRY_SEC, MASS_DELETE_THRESHOLD, RETRY_BACKOFFS_SECS,
-    UPLOAD_CONCURRENCY,
+    DirtyEntry, FolderCountCache, FolderWatch, LOCK_HOLD_RETRY_SEC, MASS_DELETE_THRESHOLD,
+    RETRY_BACKOFFS_SECS, UPLOAD_CONCURRENCY,
 };
+
+/// File-count cache TTL. After this many seconds, the next flush refreshes via
+/// `safe_count_files` even if no add/remove deltas have been applied. Covers
+/// drift from out-of-band changes (manual `rm -rf`, IDE refactor that bypasses
+/// notify, etc.) without paying the walkdir cost on every batch.
+const COUNT_CACHE_TTL_SECS: i64 = 300;
 use crate::diagnostics::{self, DiagLevel, DiagStage};
 use crate::state::sync_snapshot::SHA1_MAX_BYTES;
 use crate::state::SyncSnapshot;
@@ -33,8 +40,9 @@ impl AutoSyncEngine {
     ) -> u32 {
         // ── Mass-delete circuit breaker ───────────────────────────────────
         let delete_count = entries.iter().filter(|e| e.kind == ChangeKind::Deleted).count();
+        let created_count = entries.iter().filter(|e| e.kind == ChangeKind::Created).count();
         let local_root_gone = !fw.local_root.exists();
-        let local_file_count = safe_count_files(&fw.local_root).await;
+        let local_file_count = self.cached_local_file_count(fw).await;
         let scaled_threshold =
             ((local_file_count as f64 * 0.30) as usize).clamp(5, MASS_DELETE_THRESHOLD);
         if local_root_gone || delete_count >= scaled_threshold {
@@ -238,7 +246,42 @@ impl AutoSyncEngine {
             self.track_background(h);
         }
 
+        // Apply best-effort delta to the cached file count. Optimistic — uses
+        // input entry kinds (not per-entry success) since the TTL refresh
+        // (5 min) corrects accumulated drift. Threshold clamp 5..25 forgives
+        // small inaccuracy.
+        if created_count > 0 || delete_count > 0 {
+            self.apply_count_delta(&fw.remote_root, created_count as i64, delete_count as i64);
+        }
+
         dispatched
+    }
+
+    /// Returns the cached local file count, refreshing via `safe_count_files`
+    /// on cold cache or TTL expiry. v0.4.2 audit S1 — was inline every batch.
+    async fn cached_local_file_count(&self, fw: &FolderWatch) -> usize {
+        let now = Utc::now().timestamp();
+        if let Some(cache) = self.local_file_counts.get(&fw.remote_root) {
+            let age = now - cache.last_refresh_secs.load(Ordering::Relaxed);
+            if age >= 0 && age < COUNT_CACHE_TTL_SECS {
+                return cache.count.load(Ordering::Relaxed) as usize;
+            }
+        }
+        let count = safe_count_files(&fw.local_root).await;
+        let entry = Arc::new(FolderCountCache {
+            count: AtomicU64::new(count as u64),
+            last_refresh_secs: AtomicI64::new(now),
+        });
+        self.local_file_counts.insert(fw.remote_root.clone(), entry);
+        count
+    }
+
+    fn apply_count_delta(&self, remote_root: &str, created: i64, deleted: i64) {
+        if let Some(cache) = self.local_file_counts.get(remote_root) {
+            let cur = cache.count.load(Ordering::Relaxed) as i64;
+            let new = (cur + created - deleted).max(0) as u64;
+            cache.count.store(new, Ordering::Relaxed);
+        }
     }
 
     async fn process_entry(

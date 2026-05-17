@@ -26,14 +26,13 @@ All open frontend audit items resolved. F3–F15 fixed by v0.3/v0.4 refactors (v
 
 (B1/B15 fixed by 2026-05-17 verification pass; B2/B4/B5/B9 by S81; B7/B11 + B16→INFO by S82; B3 by S83 — all in Archive.)
 
-## Backend — sync (1 actionable)
+## Backend — sync (0 actionable)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| MED | `src-tauri/src/sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
 | INFO-MOOT | `src-tauri/src/sync/edit_trail.rs:75-80` `read_raw` | Subdir w/ PID+`short_id` race could cross-delete concurrent reads. `short_id` widened to 8 bytes 2026-05-12; collision astronomical. No action needed. | Optional `NamedTempFile`. |
 
-(S2 fixed by verification pass; S6 by S81; S4 by S82; S5 by S84 — all in Archive.)
+(S2 fixed by verification pass; S6 by S81; S4 by S82; S5 by S84; S1 by S86 — all in Archive.)
 
 ## Backend — transport/sftp/tunnel/edit/update (0 actionable, 2 INFO accepted)
 
@@ -54,6 +53,12 @@ All open frontend audit items resolved. F3–F15 fixed by v0.3/v0.4 refactors (v
 # Archive — Resolved
 
 All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix (Rust) or `npm run check` (frontend). Line numbers reflect pre-cleanup tree.
+
+## S86 Fix-Pass 2026-05-17 (1 item — sole sync MED closes the section)
+
+| # | File:line | Change |
+|---:|---|---|
+| S1 | `sync/auto_sync/flush.rs:34-39, ~245-285` + `sync/auto_sync.rs:191-205, 312` + `sync/auto_sync/watch.rs:122-124` | `flush_batch` no longer awaits `safe_count_files` inline. Added `FolderCountCache { count: AtomicU64, last_refresh_secs: AtomicI64 }` keyed by `remote_root` in a new `DashMap` on `AutoSyncEngine`. `cached_local_file_count()` returns cached value when age < 5 min TTL, else refreshes via `safe_count_files` and updates cache. `apply_count_delta()` runs post-batch with `(created, deleted)` counts from input entries — optimistic delta; TTL refresh corrects drift. `stop_watch` evicts the cache entry. Threshold clamp 5..25 forgives the small inaccuracy from "input entry" (vs per-entry success) accounting. `cargo check` 0.49s, no warnings. |
 
 ## S84 Fix-Pass 2026-05-17 (1 item)
 
