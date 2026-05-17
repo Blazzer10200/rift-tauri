@@ -205,10 +205,10 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<"sonnet" | "opus" | "haiku">(loadModel());
-  // `dockOpen` + `historyOpen` are v0.2-only. Under v0.3 (uiPrefs.useV03Shell),
-  // Tasks + History live in the top-level Dock and visibility is driven by
-  // `uiPrefs.panels.tasks.open` / `uiPrefs.panels.history.open`. The fields
-  // here are kept so the v0.2 shell still renders pixel-identical for rollback.
+  // `dockOpen` drives the inline TasksDock in AssistantPage under both v0.2
+  // and v0.3/v0.4.1 shells (Tasks returned to AssistantPage in v0.4.1).
+  // `historyOpen` is v0.2-only — under v0.3 History lives in the right pane
+  // and visibility is driven by `uiPrefs.panels.history.open`.
   ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false });
 
   // Conversation history.
@@ -1018,7 +1018,7 @@ class AssistantStore {
       status: t.checked ? "completed" : "pending",
     }));
     this.ui.tasksUpdatedAt = Date.now();
-    this.ui.dockOpen = true; uiPrefs.setPanelOpen("tasks", true);
+    this.ui.dockOpen = true;
     this.dockAutoOpenedThisConvo = true;
   }
 
@@ -1039,7 +1039,7 @@ class AssistantStore {
     // First TodoWrite of a conversation auto-opens the dock once. If user
     // closes it after, we respect that — no re-open on subsequent updates.
     if (next.length > 0 && !this.dockAutoOpenedThisConvo) {
-      this.ui.dockOpen = true; uiPrefs.setPanelOpen("tasks", true);
+      this.ui.dockOpen = true;
       this.dockAutoOpenedThisConvo = true;
     }
   }
@@ -1081,7 +1081,7 @@ class AssistantStore {
     // First tool call of a conversation auto-opens the dock — same UX as the
     // first TodoWrite. Respects user's manual close after that.
     if (!this.dockAutoOpenedThisConvo) {
-      this.ui.dockOpen = true; uiPrefs.setPanelOpen("tasks", true);
+      this.ui.dockOpen = true;
       this.dockAutoOpenedThisConvo = true;
     }
     this.mutateStreaming((m) => ({

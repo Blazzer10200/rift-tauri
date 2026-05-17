@@ -150,14 +150,13 @@
   ]);
 
   const v03Commands = $derived<Command[]>([
-    { id: "panel-tasks",       group: "Panels", title: "Toggle Tasks panel",       shortcut: "Ctrl+1", run: () => togglePanel("tasks") },
-    { id: "panel-sync",        group: "Panels", title: "Toggle Sync panel",        shortcut: "Ctrl+2", run: () => togglePanel("sync") },
-    { id: "panel-files",       group: "Panels", title: "Toggle Files panel",       shortcut: "Ctrl+3", run: () => togglePanel("files") },
-    { id: "panel-history",     group: "Panels", title: "Toggle History panel",     shortcut: "Ctrl+4", run: () => togglePanel("history") },
-    { id: "panel-agents",      group: "Panels", title: "Toggle Agents panel",      shortcut: "Ctrl+5", run: () => togglePanel("agents") },
-    { id: "panel-terminal",    group: "Panels", title: "Toggle Terminal panel",    shortcut: "Ctrl+6", run: () => togglePanel("terminal") },
-    { id: "panel-attachments", group: "Panels", title: "Toggle Attachments panel", shortcut: "Ctrl+7", run: () => togglePanel("attachments") },
-    { id: "panel-activity",    group: "Panels", title: "Toggle Activity panel",    shortcut: "Ctrl+8", run: () => togglePanel("activity") },
+    { id: "panel-sync",        group: "Panels", title: "Toggle Sync panel",        shortcut: "Ctrl+1", run: () => togglePanel("sync") },
+    { id: "panel-files",       group: "Panels", title: "Toggle Files panel",       shortcut: "Ctrl+2", run: () => togglePanel("files") },
+    { id: "panel-history",     group: "Panels", title: "Toggle History panel",     shortcut: "Ctrl+3", run: () => togglePanel("history") },
+    { id: "panel-agents",      group: "Panels", title: "Toggle Agents panel",      shortcut: "Ctrl+4", run: () => togglePanel("agents") },
+    { id: "panel-terminal",    group: "Panels", title: "Toggle Terminal panel",    shortcut: "Ctrl+5", run: () => togglePanel("terminal") },
+    { id: "panel-attachments", group: "Panels", title: "Toggle Attachments panel", shortcut: "Ctrl+6", run: () => togglePanel("attachments") },
+    { id: "panel-activity",    group: "Panels", title: "Toggle Activity panel",    shortcut: "Ctrl+7", run: () => togglePanel("activity") },
     { id: "open-settings",     group: "App",    title: "Settings…",                shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
     { id: "open-preset-picker",group: "App",    title: "Reset layout from preset…",subtitle: "Choose Minimal / Standard / Power",
       run: () => { uiPrefs.presetPicked = false; } },
@@ -294,11 +293,11 @@
       else active = "diagnostics";
       return;
     }
-    // Ctrl+(Shift+)1..8 — panel toggles under v0.3. Shift bypasses accordion.
+    // Ctrl+(Shift+)1..7 — panel toggles under v0.3. Shift bypasses accordion.
     // Handled BEFORE the shift-bail so Ctrl+Shift+N stays usable for stacking.
-    if (uiPrefs.useV03Shell && /^[1-8]$/.test(e.key)) {
+    if (uiPrefs.useV03Shell && /^[1-7]$/.test(e.key)) {
       e.preventDefault();
-      const pid = (["tasks", "sync", "files", "history", "agents", "terminal", "attachments", "activity"] as PanelId[])[parseInt(e.key, 10) - 1];
+      const pid = (["sync", "files", "history", "agents", "terminal", "attachments", "activity"] as PanelId[])[parseInt(e.key, 10) - 1];
       togglePanel(pid, { allowMulti: e.shiftKey });
       return;
     }
