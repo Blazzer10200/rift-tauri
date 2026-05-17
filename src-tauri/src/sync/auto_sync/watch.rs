@@ -121,6 +121,7 @@ impl AutoSyncEngine {
 
     pub(super) async fn stop_watch(&self, remote_root: &str) {
         let Some((_, fw)) = self.folders.remove(remote_root) else { return };
+        self.local_file_counts.remove(remote_root);
         if let Some(w) = self.watcher.lock().await.as_mut() {
             let _ = w.unwatch(&fw.local_root);
         }

@@ -131,6 +131,15 @@ class ConnectionStore {
 
   pill = $derived.by<SyncPill>(() => this.computePill());
 
+  /** True only while a handshake is genuinely in flight (probing fingerprint or
+   *  waiting for the first `autosync://status` event). Raw `connecting` stays
+   *  true through the awaited `startAutosyncForSelected()` call AFTER status
+   *  has already arrived via the listener, producing a brief but visible
+   *  "Connecting" pill flash when the engine is actually watching. Consumers
+   *  driving UI labels should read this; consumers gating actions (button
+   *  disabled) should still read raw `connecting` to prevent double-fire. */
+  isHandshaking = $derived(this.connecting && this.status === null);
+
   lockCount = $derived(this.locks.length);
   conflictCount = $derived(this.conflicts.length);
 

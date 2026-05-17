@@ -21,7 +21,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -194,6 +194,14 @@ pub struct FolderWatch {
     pub resource_name: String,
 }
 
+/// Per-watch cached file count for the mass-delete circuit breaker. Avoids
+/// awaiting `safe_count_files` (full walkdir) inline every flush cycle.
+/// Refreshed on TTL miss; updated by best-effort delta per batch.
+pub(super) struct FolderCountCache {
+    pub count: AtomicU64,
+    pub last_refresh_secs: AtomicI64,
+}
+
 const RETRY_BACKOFFS_SECS: &[u64] = &[30, 120, 600];
 
 fn merge_kind(a: ChangeKind, b: ChangeKind) -> ChangeKind {
@@ -218,6 +226,9 @@ pub struct AutoSyncEngine {
     app: AppHandle,
 
     folders: DashMap<String, FolderWatch>, // remote_root -> FolderWatch
+    /// remote_root -> cached local file count for mass-delete threshold.
+    /// Stale-tolerant; refresh TTL handled in `flush.rs::cached_local_file_count`.
+    pub(super) local_file_counts: DashMap<String, Arc<FolderCountCache>>,
     dirty: DashMap<PathBuf, DirtyEntry>,
     failed: DashMap<PathBuf, DirtyEntry>,
     conflicts: DashMap<PathBuf, ConflictRecord>,
@@ -310,6 +321,7 @@ impl AutoSyncEngine {
             bridge,
             app,
             folders: DashMap::new(),
+            local_file_counts: DashMap::new(),
             dirty: DashMap::new(),
             failed: DashMap::new(),
             conflicts: DashMap::new(),

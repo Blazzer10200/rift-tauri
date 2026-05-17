@@ -48,10 +48,10 @@
     type="button"
     onclick={toggleWatcher}
     disabled={!connection.selected || connection.connecting}
-    title={connection.connecting ? "Connecting…" : watcherOn ? "Click to stop watching" : "Click to start watching"}
+    title={connection.isHandshaking ? "Connecting…" : watcherOn ? "Click to stop watching" : "Click to start watching"}
   >
     <span class="led" data-state={ledClass}></span>
-    <span class="lbl">{connection.connecting ? "connecting" : stateText}</span>
+    <span class="lbl">{connection.isHandshaking ? "connecting" : stateText}</span>
   </button>
 
   {#if bgSync}
