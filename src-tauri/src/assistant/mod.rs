@@ -809,6 +809,7 @@ pub async fn assistant_send(
     is_first_turn: bool,
     model: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
+    dyslexia_mode: Option<bool>,
 ) -> Result<(), String> {
     let cfg = load_config();
     let use_api_key = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
@@ -878,6 +879,13 @@ pub async fn assistant_send(
     }
     if remote_shell_enabled {
         addendum.push_str(" A `mcp__rift__remote_bash` tool is available — runs a shell command over SSH against the active remote server (reuses the auto-sync engine's russh session). Use sparingly for ops work (status checks, pm2 restart, etc.); a workspace-scoped advisory lock serializes calls between users.");
+    }
+    // S93 dyslexia-friendly mode: the user has flagged that they (or someone
+    // sharing the workspace) has dyslexia and/or uses voice-to-text. This
+    // hint nudges Claude to interpret typos and slurred-speech artifacts
+    // charitably rather than asking pedantic clarifying questions.
+    if dyslexia_mode.unwrap_or(false) {
+        addendum.push_str(" The user has enabled dyslexia-friendly mode and may also use voice-to-text; phonetic typos (e.g. \"wair\"/\"where\", \"nite\"/\"night\"), letter-swap typos (b/d, p/q), and slurred-speech transcription artifacts are expected. Interpret the most likely intended meaning charitably and proceed; only ask for clarification when the meaning is genuinely ambiguous, not for ordinary typos. Avoid pointing out spelling/grammar unless the user asks.");
     }
 
     // Pipe the user's prompt via stdin instead of `-p <arg>`. The CLI accepts

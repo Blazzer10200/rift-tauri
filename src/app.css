@@ -397,3 +397,43 @@ body.win-maximized .slideover { top: 52px; bottom: 30px; }
   .spin   { animation: spin 0.8s linear infinite; }
   .fade-in{ animation: fade-in 120ms ease-out both; }
 }
+
+/* ─── Accessibility — dyslexia-friendly overrides ─── */
+/* Driven by `data-a11y-*` attributes on <html>, set by accessibility.svelte.ts.
+   Scoped narrowly: font swap is global (since it's UI-wide), but line-height
+   and warm-tint apply only inside reading surfaces so the rest of the UI
+   keeps its compact information density. */
+
+[data-a11y-font="lexend"] body,
+[data-a11y-font="lexend"] textarea,
+[data-a11y-font="lexend"] input,
+[data-a11y-font="lexend"] button,
+[data-a11y-font="lexend"] select {
+  font-family: "Lexend Variable", var(--font-ui);
+  font-feature-settings: normal;
+  letter-spacing: 0;
+}
+
+[data-a11y-line-height="on"] .bubble,
+[data-a11y-line-height="on"] .bubble p,
+[data-a11y-line-height="on"] .markdown-body,
+[data-a11y-line-height="on"] .markdown-body p,
+[data-a11y-line-height="on"] .markdown-body li,
+[data-a11y-line-height="on"] textarea {
+  line-height: 1.85;
+  letter-spacing: 0.012em;
+  word-spacing: 0.06em;
+}
+
+/* Warm sepia tint on reading surfaces — keeps the dark theme but softens the
+   bright-white-on-near-black contrast that triggers glare for some readers. */
+[data-a11y-warm-tint="on"] .bubble,
+[data-a11y-warm-tint="on"] .markdown-body {
+  background: oklch(0.225 0.014 60);
+  color: oklch(0.94 0.018 80);
+}
+[data-a11y-warm-tint="on"] .bubble code,
+[data-a11y-warm-tint="on"] .markdown-body code {
+  background: oklch(0.27 0.018 60);
+  color: oklch(0.96 0.022 80);
+}
