@@ -923,7 +923,12 @@ pub async fn assistant_send(
         .arg("--verbose")
         .arg("--include-partial-messages")
         .arg("--model").arg(&model)
-        .arg("--permission-mode").arg("dontAsk")
+        // S92 hot-fix: `dontAsk` auto-DENIES anything that would prompt the
+        // user (incl. MCP tools like `mcp__rift__remote_bash`) even when the
+        // tool is in `--allowed-tools`. There's no interactive surface in
+        // Rift to approve such prompts, so the right mode is
+        // `bypassPermissions` — auto-allows; `--allowed-tools` is the gate.
+        .arg("--permission-mode").arg("bypassPermissions")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
