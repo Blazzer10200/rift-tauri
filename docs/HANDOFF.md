@@ -2,51 +2,35 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 90 — 2026-05-17 — v0.4.4-alpha source ship + stress-test fix-ups
+## Session 91 — 2026-05-17 — v0.4.5-alpha: embedded-Claude allowlist + STT slur-tolerance
 
-Autonomous CDP-driven stress test across every UI surface: ActivityBar (Ctrl+1..7 / Ctrl+0 / drag-reorder + persistence), chat tabs (Ctrl+T/W, Ctrl+Tab, Alt+1..9), right-pane × 7 (lazy-mount latch + width clamp 320..1200 + dblclick-snap), Settings × 7 sections (v0.3↔v0.2 shell round-trip, all STT/Assistant/Terminal toggles, language picker, diagnostic copy), Sync (drift scanner caught 1 pull in `[endure]`), Files (TwoPane nav + remote ctx menu), Terminal (PTY echo verified), Velopack ("Up to date" vs released 0.4.3). Status bar `isHandshaking` invariant held across reconnect.
+Both S91 priorities landed. CDP-verified.
 
-Two latent UX bugs caught + fixed: (a) `right-pane.svelte.ts::init()` clamped state.width but didn't re-persist, so OOB localStorage values survived launches — now writes back. (b) Composer mic button rendered unconditionally; clicking it with STT disabled silently set `stt.lastError`. Gated on `stt.config.enabled && stt.supported` w/ `onMount(() => stt.init())` so the gate reflects backend config without a Settings visit. Tooling: `scripts/cdp/serve.cjs` `KEY_DEFS` gained Comma / Slash / Space / Period / Backquote / ArrowLeft / ArrowRight (drives `Ctrl+,`, `Ctrl+\`` directly).
+**Allowlist (P1).** [src-tauri/src/assistant/mod.rs](src-tauri/src/assistant/mod.rs) `assistant_send` widened `--allowed-tools` in all three branches to the full CLI built-in surface via shared `BUILTINS` const. Added (over S88's `+Skill`): `Agent` (subagent spawn — `/plan`/`/quick-review`/`/check`), `AskUserQuestion`, `BashOutput`+`KillBash`+`KillShell` (auto-fired after `Bash run_in_background:true`), `ExitPlanMode`, `MultiEdit`, `NotebookEdit`, `SlashCommand`. MCP scope unchanged. Verified via CDP smoke: fresh chat tab → Bash + Agent-subagent spawn both completed cleanly, zero `permission|denied|not allowed` strings in body text.
 
-Bumped 3-file version 0.4.3 → 0.4.4-alpha; Cargo.lock auto-synced. CHANGELOG v0.4.4 extended w/ S90 fix-ups. Source committed + pushed.
+**STT (P2).** [src/lib/state/stt.svelte.ts](src/lib/state/stt.svelte.ts) bumped `r.maxAlternatives` 1 → 3 + added `pickBestAlternate(res)` helper called from `onResult` — returns highest-confidence transcript, falls back to `alt[0]` when WebView2 returns 0 for every alternate (spec-allowed). Cleaner lower-ranked variants can now win. Vocabulary hints + Azure-direct fallback deferred (stretch).
 
-**Pending:** binary release via `powershell -NoProfile -File ./scripts/release.ps1` — vpk+nsis → `rift-releases`.
-
----
-
-## Session 89 — 2026-05-17 — TTS rollback + workspace clean-out
-
-TTS reversed (only STT wanted): removed `src-tauri/src/tts/`, `tts.svelte.ts`, speaker UI, `msedge-tts` chain. Settings `Voice` → `Speech` (id `"speech"`). 6 dead npm deps + stale `cdp/smoke-v04.sh` + orphan branches dropped. svelte-check **0/0**. Folded into v0.4.4-alpha (S90).
-
----
-
-## S91 PRIORITIES — user-flagged at end of S90
-
-1. **Permission errors in embedded Claude — TOP PRIORITY.** Blazzer + Trey both hit recurring "no permission to use tool X" / "tool not allowed" messages in the Assistant. Very annoying. Hypothesis: `--allowed-tools` allowlist in `assistant_send` (3 branches in `assistant/mod.rs:952`) is too narrow — only `mcp__rift__*` + `Skill` are explicit. Likely missing: `Bash`, `Read`, `Write`, `Edit`, `Grep`, `Glob`, `TodoWrite`, `WebFetch`, `WebSearch`, etc. S88 added `Skill`; needs a full pass over which built-in tools should be allowed by default. Cross-check Anthropic Agent SDK default tool list. May also need a Settings → Assistant → "Allowed tools" multiselect for power users. **Reproduce by:** asking Claude in the Assistant to "edit X" or "grep for Y" — watch for "permission denied"/"tool not in allowlist" response.
-
-2. **STT accuracy improvement — slurred-speech support.** Both users sometimes slur words; WebView2's default `SpeechRecognition` (Edge → Azure Neural) struggles. Options to investigate: (a) `r.maxAlternatives > 1` + confidence scoring (currently fixed at 1 in `stt.svelte.ts:135`); (b) `SpeechGrammarList` for domain-specific vocabulary hints (FiveM/RedM/Lua/Rust terms); (c) per-user phrase-list / acoustic profile; (d) fallback to a different backend (Azure direct API w/ enhanced models, OpenAI Whisper API, AssemblyAI streaming). Trade-offs: native WebView path is free + zero-install; cloud APIs cost money + require keys but offer better accuracy. **Don't reintroduce whisper-rs** (libclang Windows dep is the blocker — see Don't-reintroduce list). Possible middle-ground: a confidence-threshold setting + "show alternates" UI when confidence is low so user can pick or re-speak.
+3-file version 0.4.4 → 0.4.5-alpha; Cargo.lock auto-syncs. CHANGELOG v0.4.5 extended; v0.4.3/v0.4.4 archived. **Pending:** commit + push; optional `release.ps1` for binary → Trey auto-updates.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.4-alpha** (committed); binary release pending — run `powershell -NoProfile -File ./scripts/release.ps1` to publish vpk+nsis to `rift-releases`. Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.5-alpha** (S91 pending commit). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
-**v0.4.1 shell** is the default daily-driver path; `useV03Shell` toggle = experimental v0.2 fallback (storage key kept verbatim, never rename).
+**v0.4.1 shell** = default; `useV03Shell` toggle = experimental v0.2 fallback (storage key verbatim, never rename).
 
-**CDP autonomous-verify live** — `run-dev.bat` sets WebView2 port; `npm run cdp:serve` on 9223; drive via `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`.
+**CDP autonomous-verify live** — `run-dev.bat` sets WebView2 port; `npm run cdp:serve` on 9223; `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`.
 
-**Voice:** Settings → Speech (STT only — TTS removed S89). Mic button in composer; WebView `SpeechRecognition` writes to `assistant.composerDraft`. Mic permission prompts once on first record.
+**Voice:** Settings → Speech (STT only). Mic in composer; WebView `SpeechRecognition` → `assistant.composerDraft`. v0.4.5 picks highest-confidence of 3 alternates.
 
-**v0.2 queue** (each needs `/grill` or `/plan`): auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split (1790L / 51 cmds — biggest pick); LocalPane/RemotePane base-component extract; Diagnostics canonical-skeleton; integration tests phase 1.
+**v0.2 queue** (each needs `/grill` or `/plan`): auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split (1790L / 51 cmds — biggest); LocalPane/RemotePane base extract; Diagnostics canonical-skeleton; integration tests phase 1. STT stretch: vocabulary hints / Azure-direct fallback / "did you mean X?" UI.
 
 **Audit queue:** 6 LOW lib/config, upstream-blocked. See [docs/AUDIT.md](docs/AUDIT.md).
 
-**Multi-user:** Trey OFF Mirror until on-latest. Setup: [docs/TREY-SETUP.md](docs/TREY-SETUP.md). v0.4.4 auto-updates him.
+**Multi-user:** Trey OFF Mirror until on-latest. Setup: [docs/TREY-SETUP.md](docs/TREY-SETUP.md). v0.4.5 auto-updates him.
 
 **Don't reintroduce:** dock primitive, maximize-to-center, `PanelState.slot`, `dockSplitPct`, Tasks-as-peer, AddPanelMenu, TabRail under v0.4.1, OpRail/TopBar, whisper-rs (libclang Windows dep), `msedge-tts` / TTS module / speaker UI.
-
-**Ship pipeline:** `powershell -NoProfile -File ./scripts/release.ps1` — build → vpk pack → upload to `rift-releases`.
 
 ---
 
@@ -60,10 +44,10 @@ TTS reversed (only STT wanted): removed `src-tauri/src/tts/`, `tts.svelte.ts`, s
 - `last_scan_entries` = `std::sync::Mutex` (NOT tokio). `force_pull_now`/`force_push_now` invariants preserved.
 - `FileAttributes::default()` for SETSTAT = data-loss — use `empty()`. Upload pre-flight SHA-collapse before CONFLICT. `DriftBucket::ToDelete` deletes LOCAL; `ToDeleteRemote` deletes REMOTE (mirror+baseline gated).
 - Time displays MUST pass `[], { hour12: true }`. `spawn_frontend_pump` 200/s rate-limit; critical stages bypass.
-- **v0.2.56:** Assistant tab self-execs MCP via `RIFT_MCP_SERVER=1` env branch in `lib.rs::run()` BEFORE Tauri loop; CLI passes `--mcp-config` + `--allowed-tools mcp__rift__* + Skill` (S88 added Skill).
+- **v0.2.56:** Assistant tab self-execs MCP via `RIFT_MCP_SERVER=1` env branch in `lib.rs::run()` BEFORE Tauri loop.
 - **v0.4 chat tabs:** `openTabs` filters vs `assistant_list_conversations` on init. `send()` keys `isFirstTurn` off `convoCreatedAt` (NOT `currentConvoId`).
 - **v0.4.1 right-pane:** keep `useV03Shell` storage key. Width 320-1200, default 560. Left-edge-resize only.
 - **S87 context pill:** `recordTurnUsage(u, accumulate)` — only `result` envelope updates `sessionUsage`; both refresh `lastTurnUsage`. Effective ctx = `input + cache_read + cache_create`. `[1m]` suffix = 1M window.
 - **S87 image paste:** `assistant_send` flips `--input-format text → stream-json` when attachments present. 20 MiB cap + `image/*` gate.
-- **S88 Skill tool:** `--allowed-tools` allowlist MUST include `Skill` in all 3 branches of `assistant_send`. Comment at L192 corrected — skills need both `--disable-slash-commands` OFF and `Skill` in allowlist.
+- **S91 allowlist:** `assistant_send` `--allowed-tools` MUST keep the full `BUILTINS` const (all CLI built-ins incl. Agent/BashOutput/KillBash/SlashCommand) in all three branches. Narrowing → per-tool denials in the Assistant tab.
 - **S88 STT:** WebView's `SpeechRecognition` writes directly to `assistant.composerDraft`. `baseDraft` snapshot on start preserves pre-existing text in append mode. `errno("not-allowed")` → friendly mic-perm message. Settings section id=`"speech"` (was `"voice"`). TTS is fully removed — do not reintroduce.

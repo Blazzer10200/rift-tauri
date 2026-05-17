@@ -132,7 +132,10 @@ class SttStore {
     r.lang = this.config.language || "en-US";
     r.continuous = this.config.continuous;
     r.interimResults = this.config.show_interim;
-    r.maxAlternatives = 1;
+    // S91: request 3 alternates so onResult can pick the highest-confidence
+    // variant. WebView2's Azure backend sometimes ranks a cleaner alternate
+    // above the slurred primary; defaulting to alt[0] missed those wins.
+    r.maxAlternatives = 3;
     r.onstart = () => {
       this.recording = true;
       this.transcribing = false;
@@ -184,7 +187,7 @@ class SttStore {
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
-      const txt = res[0]?.transcript ?? "";
+      const txt = pickBestAlternate(res);
       if (res.isFinal) {
         this.finalText = (this.finalText + " " + txt).replace(/\s+/g, " ").trim();
       } else if (this.config.show_interim) {
@@ -221,6 +224,23 @@ class SttStore {
     this.transcribing = false;
     this.recognition = null;
   }
+}
+
+// Pick the alternate with the highest confidence. Falls back to alt[0]
+// when confidence is uniformly 0 (some WebView2 builds return 0 for every
+// alternate — the spec allows it). Tolerates slurred input by letting a
+// lower-ranked-but-more-confident variant win when the engine bothers to
+// score them. Empty / missing alternates -> empty string.
+function pickBestAlternate(res: SpeechRecognitionResult): string {
+  if (res.length === 0) return "";
+  let best = res[0];
+  for (let i = 1; i < res.length; i++) {
+    const alt = res[i];
+    if (alt && (alt.confidence ?? 0) > (best?.confidence ?? 0)) {
+      best = alt;
+    }
+  }
+  return best?.transcript ?? "";
 }
 
 function errorMessage(code: string, msg?: string): string {
