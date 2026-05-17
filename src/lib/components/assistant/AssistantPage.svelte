@@ -167,11 +167,9 @@
       {/if}
     </div>
 
-    {#if !uiPrefs.useV03Shell}
-      <div class="dock-slot" class:open={assistant.ui.dockOpen}>
-        <TasksDock />
-      </div>
-    {/if}
+    <div class="dock-slot" class:open={assistant.ui.dockOpen}>
+      <TasksDock />
+    </div>
   </div>
 </div>
 

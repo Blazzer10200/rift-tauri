@@ -1,9 +1,8 @@
-import { ListTodo, RefreshCcw, FolderOpen, History, Bot, Terminal, Paperclip, Activity } from "lucide-svelte";
+import { RefreshCcw, FolderOpen, History, Bot, Terminal, Paperclip, Activity } from "lucide-svelte";
 import type { PanelId } from "$lib/state/panel-types";
 import { connection } from "$lib/state/connection.svelte";
 import { assistant } from "$lib/state/assistant.svelte";
 
-import TasksPanel from "./TasksPanel.svelte";
 import SyncPanel from "./SyncPanel.svelte";
 import FilesPanel from "./FilesPanel.svelte";
 import HistoryPanel from "./HistoryPanel.svelte";
@@ -19,7 +18,7 @@ import ActivityPanel from "./ActivityPanel.svelte";
 export type PanelIcon = typeof Activity;
 
 export type PanelDef = {
-  component: typeof TasksPanel;
+  component: typeof SyncPanel;
   title: string;
   icon: PanelIcon;
   kbd: string;
@@ -35,12 +34,11 @@ export type PanelDef = {
 // surfaces; this file is the only edit needed. PANEL_IDS + PRESETS live in
 // panel-types.ts (single source of truth shared with ui-prefs).
 export const PANELS: Record<PanelId, PanelDef> = {
-  tasks:       { component: TasksPanel,      title: "Tasks",       icon: ListTodo,   kbd: "1", getCount: () => assistant.tasks.length, getTone: "info" },
-  sync:        { component: SyncPanel,       title: "Sync",        icon: RefreshCcw, kbd: "2", getCount: () => connection.conflictCount, getTone: "danger" },
-  files:       { component: FilesPanel,      title: "Files",       icon: FolderOpen, kbd: "3" },
-  history:     { component: HistoryPanel,    title: "History",     icon: History,    kbd: "4", getCount: () => assistant.conversations.length, getTone: "info" },
-  agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "5" },
-  terminal:    { component: TerminalDockPanel, title: "Terminal",  icon: Terminal,   kbd: "6" },
-  attachments: { component: AttachmentsStub, title: "Attachments", icon: Paperclip,  kbd: "7" },
-  activity:    { component: ActivityPanel,   title: "Activity",    icon: Activity,   kbd: "8", getCount: () => connection.activityFeed.length, getTone: "info" },
+  sync:        { component: SyncPanel,       title: "Sync",        icon: RefreshCcw, kbd: "1", getCount: () => connection.conflictCount, getTone: "danger" },
+  files:       { component: FilesPanel,      title: "Files",       icon: FolderOpen, kbd: "2" },
+  history:     { component: HistoryPanel,    title: "History",     icon: History,    kbd: "3", getCount: () => assistant.conversations.length, getTone: "info" },
+  agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "4" },
+  terminal:    { component: TerminalDockPanel, title: "Terminal",  icon: Terminal,   kbd: "5" },
+  attachments: { component: AttachmentsStub, title: "Attachments", icon: Paperclip,  kbd: "6" },
+  activity:    { component: ActivityPanel,   title: "Activity",    icon: Activity,   kbd: "7", getCount: () => connection.activityFeed.length, getTone: "info" },
 };

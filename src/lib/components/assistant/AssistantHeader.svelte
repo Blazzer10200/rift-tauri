@@ -38,11 +38,10 @@
     const t = assistant.ui.tasksUpdatedAt;
     if (t > lastSeenUpdate) {
       lastSeenUpdate = t;
-      // Pulse only when the tasks surface is closed — open surface already shows
-      // the change. v0.3 reads through uiPrefs.panels.tasks; v0.2 reads the
-      // inline dock flag.
-      const tasksOpen = uiPrefs.useV03Shell ? uiPrefs.panels.tasks.open : assistant.ui.dockOpen;
-      if (!tasksOpen && taskCount > 0) {
+      // Pulse only when TasksDock is closed — open surface already shows the
+      // change. v0.4.1 collapses both paths to assistant.ui.dockOpen since
+      // TasksDock now lives inside AssistantPage in both shells.
+      if (!assistant.ui.dockOpen && taskCount > 0) {
         pulse = true;
         setTimeout(() => (pulse = false), 700);
       }
@@ -52,16 +51,13 @@
   const historyOpen = $derived(
     uiPrefs.useV03Shell ? uiPrefs.panels.history.open : assistant.ui.historyOpen,
   );
-  const tasksOpen = $derived(
-    uiPrefs.useV03Shell ? uiPrefs.panels.tasks.open : assistant.ui.dockOpen,
-  );
+  const tasksOpen = $derived(assistant.ui.dockOpen);
   function toggleHistory() {
     if (uiPrefs.useV03Shell) uiPrefs.togglePanel("history");
     else assistant.ui.historyOpen = !assistant.ui.historyOpen;
   }
   function toggleTasks() {
-    if (uiPrefs.useV03Shell) uiPrefs.togglePanel("tasks");
-    else assistant.ui.dockOpen = !assistant.ui.dockOpen;
+    assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
 </script>
 
