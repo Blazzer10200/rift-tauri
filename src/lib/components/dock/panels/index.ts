@@ -4,7 +4,7 @@ import { connection } from "$lib/state/connection.svelte";
 
 import TasksStub from "./TasksStub.svelte";
 import SyncPanel from "./SyncPanel.svelte";
-import FilesStub from "./FilesStub.svelte";
+import FilesPanel from "./FilesPanel.svelte";
 import HistoryStub from "./HistoryStub.svelte";
 import AgentsStub from "./AgentsStub.svelte";
 import TerminalDockPanel from "./TerminalDockPanel.svelte";
@@ -36,7 +36,7 @@ export type PanelDef = {
 export const PANELS: Record<PanelId, PanelDef> = {
   tasks:       { component: TasksStub,       title: "Tasks",       icon: ListTodo,   kbd: "1" },
   sync:        { component: SyncPanel,       title: "Sync",        icon: RefreshCcw, kbd: "2", getCount: () => connection.conflictCount, getTone: "danger" },
-  files:       { component: FilesStub,       title: "Files",       icon: FolderOpen, kbd: "3" },
+  files:       { component: FilesPanel,      title: "Files",       icon: FolderOpen, kbd: "3" },
   history:     { component: HistoryStub,     title: "History",     icon: History,    kbd: "4" },
   agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "5" },
   terminal:    { component: TerminalDockPanel, title: "Terminal",  icon: Terminal,   kbd: "6" },
