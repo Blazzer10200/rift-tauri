@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. Older entries live in `docs/archive/CHANGELOG-archive.md` (and `git log -- docs/CHANGELOG.md`).
 
+## v0.4.2-alpha — 2026-05-17 — Hot-fix: embedded Claude's `Skill` tool
+
+Trey reported `/handoff`, `/check`, `/plan` etc. were rejected inside Rift's Assistant tab w/ "skills blocked." Root cause: `assistant_send` builds `--allowed-tools` as an explicit comma-list and `Skill` was missing from all three branches (full-config, scoped, scoped+remote-shell). The CLI's allowlist gate then denied the `Skill` tool even though `--disable-slash-commands` wasn't set. Added `Skill` to every branch in `assistant/mod.rs`; corrected the misleading `use_full_config` doc comment that claimed skills "always load via the CLI's own resolution" (true for command discovery, false for the tool gate).
+
+Affects: every user of the embedded Claude in Rift since v0.2.56. Hot-fix only — no schema changes, no migration. Velopack delta is one Rust object.
+
 ## v0.4.1-alpha — 2026-05-17 — Right-pane refactor + audit fix-pass arc
 
 Daily-driver use of v0.4.0-alpha surfaced two model mismatches, both corrected. `useV03Shell` toggle name + storage key reused for upgrade compat; v0.2 path stays pixel-identical.
