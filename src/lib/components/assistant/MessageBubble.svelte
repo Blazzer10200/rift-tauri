@@ -92,7 +92,7 @@
   );
 </script>
 
-<div class="bubble" data-role={message.role}>
+<div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
   <div class="avatar" aria-hidden="true">
     {#if isUser}
       <User size={13} />
@@ -152,8 +152,6 @@
                 <span class="dots" aria-hidden="true">
                   <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                 </span>
-              {:else if !hasText && b.hasSignature}
-                <span class="reasoning-meta subtle">· encrypted</span>
               {/if}
               {#if hasText}
                 <span class="chev" class:open={isOpen}><ChevronDown size={12} /></span>
@@ -366,5 +364,30 @@
   @keyframes pulse {
     0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
     30% { opacity: 1; transform: scale(1); }
+  }
+
+  /* Streaming-only chrome — blinking tail caret + soft fade on the last line
+     so newly-arriving text looks like it's materializing in. Mask is applied
+     to the whole content column; once a line is no longer the last one it
+     pops to full opacity (the "reveal" feel). */
+  .bubble[data-streaming="true"] .content {
+    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.4) 100%);
+    mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.4) 100%);
+  }
+  .bubble[data-streaming="true"] .content > .text:last-of-type :global(p:last-of-type)::after,
+  .bubble[data-streaming="true"] .content > .text:last-of-type :global(li:last-child)::after {
+    content: "▍";
+    display: inline-block;
+    margin-left: 2px;
+    font-weight: 200;
+    opacity: 0.55;
+    color: currentColor;
+    vertical-align: -1px;
+    animation: caret-blink 1s ease-in-out infinite;
+  }
+  @keyframes caret-blink {
+    0%, 55% { opacity: 0.55; }
+    78% { opacity: 0; }
+    100% { opacity: 0.55; }
   }
 </style>

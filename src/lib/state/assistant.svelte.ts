@@ -240,6 +240,12 @@ class AssistantStore {
   private deltaCount = 0;
   private envelopeTextBuffer = "";
   private rawLineLog: string[] = [];
+  // Streaming pacer — decouples visual paint from network burst cadence so
+  // CLI chunks of 200+ chars trickle out instead of slamming in. Base rate
+  // ~120 ch/s; any backlog auto-drains in ~400ms to stay responsive.
+  private pendingText = "";
+  private drainHandle: ReturnType<typeof requestAnimationFrame> | null = null;
+  private lastDrainAt = 0;
   // Per-turn thinking tracking. `content_block_start`/`stop` carry an `index`
   // identifying which block is open; we map that to the thinking block we
   // pushed into the message so subsequent `thinking_delta` / `signature_delta`
@@ -587,6 +593,11 @@ class AssistantStore {
     this.deltaCount = 0;
     this.envelopeTextBuffer = "";
     this.rawLineLog = [];
+    if (this.drainHandle !== null) {
+      cancelAnimationFrame(this.drainHandle);
+      this.drainHandle = null;
+    }
+    this.pendingText = "";
     this.thinkingByIndex.clear();
     this.activeThinkingIndex = null;
     this.activity = { currentLabel: null, turnStartedAt: Date.now() };
@@ -727,6 +738,45 @@ class AssistantStore {
     });
   }
 
+  private enqueueText(chunk: string) {
+    if (!chunk) return;
+    this.pendingText += chunk;
+    if (this.drainHandle === null) {
+      this.lastDrainAt = performance.now();
+      this.drainHandle = requestAnimationFrame(this.drainTick);
+    }
+  }
+
+  private drainTick = () => {
+    if (this.pendingText.length === 0) {
+      this.drainHandle = null;
+      return;
+    }
+    const now = performance.now();
+    const dt = Math.min(now - this.lastDrainAt, 100);
+    this.lastDrainAt = now;
+    const rate = Math.max(120, this.pendingText.length / 0.4);
+    const n = Math.min(
+      this.pendingText.length,
+      Math.max(1, Math.round((rate * dt) / 1000)),
+    );
+    const chunk = this.pendingText.slice(0, n);
+    this.pendingText = this.pendingText.slice(n);
+    this.appendText(chunk);
+    this.drainHandle = requestAnimationFrame(this.drainTick);
+  };
+
+  private flushPendingText() {
+    if (this.drainHandle !== null) {
+      cancelAnimationFrame(this.drainHandle);
+      this.drainHandle = null;
+    }
+    if (this.pendingText.length > 0) {
+      this.appendText(this.pendingText);
+      this.pendingText = "";
+    }
+  }
+
   /** User-driven pin from a chat checklist into the Tasks dock.
    *  Items arrive as plain text + checked flag from rendered HTML. */
   pinTasksFromChecklist(items: Array<{ content: string; checked: boolean }>) {
@@ -846,7 +896,7 @@ class AssistantStore {
       if (this.streaming && this.streamingMsgId && raw.length > 0) {
         const prefix = this.deltaCount > 0 ? "\n" : "";
         this.deltaCount++;
-        this.appendText(prefix + raw);
+        this.enqueueText(prefix + raw);
       } else {
         console.debug("assistant stream: non-JSON line (idle)", raw);
       }
@@ -863,7 +913,7 @@ class AssistantStore {
           const d = ev?.delta;
           if (d?.type === "text_delta" && d.text) {
             this.deltaCount++;
-            this.appendText(d.text);
+            this.enqueueText(d.text);
           } else if (d?.type === "thinking_delta" && typeof d.thinking === "string" && idx !== null) {
             this.appendThinkingText(idx, d.thinking);
           } else if (d?.type === "signature_delta" && idx !== null) {
@@ -940,6 +990,9 @@ class AssistantStore {
   }
 
   private onDone() {
+    // Drain any text still sitting in the pacer buffer before deciding whether
+    // we need the envelope fallback — pending counts as "deltas arrived."
+    this.flushPendingText();
     // Fallback: zero text deltas this turn → CLI shipped full text only in
     // the final assistant envelope. Flush it now so the bubble isn't blank.
     if (this.deltaCount === 0 && this.envelopeTextBuffer.length > 0) {
@@ -1128,6 +1181,11 @@ class AssistantStore {
   private onError(msg: string) {
     this.lastError = msg;
     this.streaming = false;
+    if (this.drainHandle !== null) {
+      cancelAnimationFrame(this.drainHandle);
+      this.drainHandle = null;
+    }
+    this.pendingText = "";
     if (this.streamingMsgId) {
       const id = this.streamingMsgId;
       this.messages = this.messages.filter(
