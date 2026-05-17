@@ -22,6 +22,10 @@
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import TerminalPanel from "./terminal/TerminalPanel.svelte";
   import AssistantPage from "./assistant/AssistantPage.svelte";
+  import Dock from "./dock/Dock.svelte";
+  import PresetPicker from "./dock/PresetPicker.svelte";
+  import { uiPrefs } from "../state/ui-prefs.svelte";
+  import type { PanelId } from "../state/panel-types";
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
   import { syncPage } from "../state/sync-page.svelte";
@@ -31,6 +35,9 @@
 
   let active = $state<Tab>("browse");
   let settingsSection = $state<SettingsSection>("appearance");
+  // v0.3 shell: Settings becomes a slide-over modal. Both v0.2 and v0.3 paths
+  // share the `settingsSection` cursor — same target component, different host.
+  let settingsModalOpen = $state(false);
   // v0.2.55: lazy-mount + keep-alive — pages mount once on first visit
   // and stay mounted (hidden via `hidden` attr) on tab switch. Drops the
   // remount-flash where children re-ran onMount/transitions every switch.
@@ -94,11 +101,21 @@
 
   function gotoSettings(s: SettingsSection = "appearance") {
     settingsSection = s;
-    active = "settings";
+    if (uiPrefs.useV03Shell) {
+      settingsModalOpen = true;
+    } else {
+      active = "settings";
+    }
   }
+  function closeSettingsModal() { settingsModalOpen = false; }
+
+  // v0.3: panel toggles route through uiPrefs; under v0.2 these are no-ops
+  // because the rail/cmd-palette never emit them.
+  function togglePanel(id: PanelId) { uiPrefs.togglePanel(id); }
 
   // ── command registry ──────────────────────────────────────────────
-  const commands = $derived<Command[]>([
+  // Shared (both v0.2 and v0.3) — server + sync ops are surface-agnostic.
+  const sharedCommands = $derived<Command[]>([
     { id: "switch-server", group: "Servers", title: "Manage servers…", subtitle: "Add, edit, or delete servers", shortcut: "Ctrl+P",
       run: () => gotoSettings("servers") },
     { id: "add-server", group: "Servers", title: "Add server…", subtitle: "Configure a new SSH/SFTP target",
@@ -108,6 +125,15 @@
     { id: "bootstrap", group: "Sync", title: "Bootstrap from remote…",
       subtitle: connection.selected ? `Pull missing files for ${connection.selected.name}` : "Connect a server first",
       run: () => openBootstrap() },
+    { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
+      run: () => connection.connect().catch((e) => console.error(e)) },
+    { id: "disconnect",   group: "Sync",  title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
+      run: () => connection.disconnect() },
+    { id: "reload",       group: "Servers", title: "Reload servers",
+      run: () => connection.loadServers() },
+  ]);
+
+  const v02Commands = $derived<Command[]>([
     { id: "tab-browse",   group: "Go to", title: "Files",    shortcut: "Ctrl+1", run: () => (active = "browse")   },
     { id: "tab-sync",     group: "Go to", title: "Sync",     shortcut: "Ctrl+2", run: () => (active = "sync")     },
     { id: "tab-assistant",group: "Go to", title: "Assistant",shortcut: "Ctrl+3", run: () => (active = "assistant")},
@@ -116,13 +142,25 @@
     { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+6", run: () => (active = "settings") },
     { id: "tab-diagnostics", group: "Go to", title: "Sync Inspector", subtitle: "Live diagnostics for the sync pipeline", shortcut: "Ctrl+Shift+D",
       run: () => (active = "diagnostics") },
-    { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
-      run: () => connection.connect().catch((e) => console.error(e)) },
-    { id: "disconnect",   group: "Sync",  title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
-      run: () => connection.disconnect() },
-    { id: "reload",       group: "Servers", title: "Reload servers",
-      run: () => connection.loadServers() },
   ]);
+
+  const v03Commands = $derived<Command[]>([
+    { id: "panel-tasks",       group: "Panels", title: "Toggle Tasks panel",       shortcut: "Ctrl+1", run: () => togglePanel("tasks") },
+    { id: "panel-sync",        group: "Panels", title: "Toggle Sync panel",        shortcut: "Ctrl+2", run: () => togglePanel("sync") },
+    { id: "panel-files",       group: "Panels", title: "Toggle Files panel",       shortcut: "Ctrl+3", run: () => togglePanel("files") },
+    { id: "panel-history",     group: "Panels", title: "Toggle History panel",     shortcut: "Ctrl+4", run: () => togglePanel("history") },
+    { id: "panel-agents",      group: "Panels", title: "Toggle Agents panel",      shortcut: "Ctrl+5", run: () => togglePanel("agents") },
+    { id: "panel-terminal",    group: "Panels", title: "Toggle Terminal panel",    shortcut: "Ctrl+6", run: () => togglePanel("terminal") },
+    { id: "panel-attachments", group: "Panels", title: "Toggle Attachments panel", shortcut: "Ctrl+7", run: () => togglePanel("attachments") },
+    { id: "panel-activity",    group: "Panels", title: "Toggle Activity panel",    shortcut: "Ctrl+8", run: () => togglePanel("activity") },
+    { id: "open-settings",     group: "App",    title: "Settings…",                shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
+    { id: "open-preset-picker",group: "App",    title: "Reset layout from preset…",subtitle: "Choose Minimal / Standard / Power",
+      run: () => { uiPrefs.presetPicked = false; } },
+  ]);
+
+  const commands = $derived<Command[]>(
+    uiPrefs.useV03Shell ? [...sharedCommands, ...v03Commands] : [...sharedCommands, ...v02Commands],
+  );
 
   // ── lifecycle ──────────────────────────────────────────────────────
   onMount(async () => {
@@ -196,17 +234,35 @@
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
     // Ctrl+` toggles the embedded terminal — global so it works on every tab.
+    // Under v0.3 this routes to the Terminal dock panel toggle.
     if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
       e.preventDefault();
-      terminal.toggle();
+      if (uiPrefs.useV03Shell) togglePanel("terminal");
+      else terminal.toggle();
       return;
     }
     const k = e.key.toLowerCase();
-    if (e.shiftKey && k === "d") { e.preventDefault(); active = "diagnostics"; return; }
+    if (e.shiftKey && k === "d") {
+      e.preventDefault();
+      if (uiPrefs.useV03Shell) togglePanel("activity"); // Diagnostics is v2; Activity is closest stand-in
+      else active = "diagnostics";
+      return;
+    }
     if (e.shiftKey) return;
     if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
+    // Ctrl+, opens Settings under v0.3 (modal). Under v0.2, Ctrl+P historically
+    // routed to Servers section — keep that for v0.2 compat.
+    if (e.key === "," && uiPrefs.useV03Shell) { e.preventDefault(); gotoSettings("appearance"); return; }
     if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
+    if (uiPrefs.useV03Shell) {
+      if (/^[1-8]$/.test(e.key)) {
+        e.preventDefault();
+        const pid = (["tasks", "sync", "files", "history", "agents", "terminal", "attachments", "activity"] as PanelId[])[parseInt(e.key, 10) - 1];
+        togglePanel(pid);
+      }
+      return;
+    }
     if (/^[1-6]$/.test(e.key)) {
       e.preventDefault();
       const tab = (["browse", "activity", "sync", "assistant", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
@@ -352,57 +408,73 @@
       </div>
     {/if}
 
-  <div class="body">
-    <TabRail {active} onChange={(t) => (active = t)} />
+  {#if uiPrefs.useV03Shell}
+    <div class="body" data-v03="true">
+      <TabRail
+        mode="panels"
+        {active}
+        onChange={(t) => (active = t)}
+        onPanelToggle={togglePanel}
+        onOpenSettings={() => gotoSettings("appearance")}
+      />
+      <main class="pane">
+        <AssistantPage />
+      </main>
+      <Dock />
+    </div>
+  {:else}
+    <div class="body">
+      <TabRail {active} onChange={(t) => (active = t)} />
 
-    <main class="pane">
-      {#if visited.has("browse") || active === "browse"}
-        <div class="page-shell" hidden={active !== "browse"}>
-          <TwoPane onAddServer={() => openAddServer(null)} />
-        </div>
-      {/if}
-      {#if visited.has("activity") || active === "activity"}
-        <div class="page-shell" hidden={active !== "activity"}>
-          <ActivityFeed />
-        </div>
-      {/if}
-      {#if visited.has("sync") || active === "sync"}
-        <div class="page-shell" hidden={active !== "sync"}>
-          <SyncPage />
-        </div>
-      {/if}
-      {#if visited.has("assistant") || active === "assistant"}
-        <div class="page-shell" hidden={active !== "assistant"}>
-          <AssistantPage />
-        </div>
-      {/if}
-      {#if visited.has("conflicts") || active === "conflicts"}
-        <div class="page-shell" hidden={active !== "conflicts"}>
-          <ConflictsPage />
-        </div>
-      {/if}
-      {#if visited.has("settings") || active === "settings"}
-        <div class="page-shell" hidden={active !== "settings"}>
-          {#key settingsSection}
-            <Settings
-              initialSection={settingsSection}
-              onAddServer={() => openAddServer(null)}
-              onEditServer={(s) => openAddServer(s)}
-              onDeleteServer={(s) => deleteServer(s)}
-              onLaunchKeygen={() => (keygenOpen = true)}
-            />
-          {/key}
-        </div>
-      {/if}
-      {#if visited.has("diagnostics") || active === "diagnostics"}
-        <div class="page-shell" hidden={active !== "diagnostics"}>
-          <Diagnostics />
-        </div>
-      {/if}
-    </main>
-  </div>
+      <main class="pane">
+        {#if visited.has("browse") || active === "browse"}
+          <div class="page-shell" hidden={active !== "browse"}>
+            <TwoPane onAddServer={() => openAddServer(null)} />
+          </div>
+        {/if}
+        {#if visited.has("activity") || active === "activity"}
+          <div class="page-shell" hidden={active !== "activity"}>
+            <ActivityFeed />
+          </div>
+        {/if}
+        {#if visited.has("sync") || active === "sync"}
+          <div class="page-shell" hidden={active !== "sync"}>
+            <SyncPage />
+          </div>
+        {/if}
+        {#if visited.has("assistant") || active === "assistant"}
+          <div class="page-shell" hidden={active !== "assistant"}>
+            <AssistantPage />
+          </div>
+        {/if}
+        {#if visited.has("conflicts") || active === "conflicts"}
+          <div class="page-shell" hidden={active !== "conflicts"}>
+            <ConflictsPage />
+          </div>
+        {/if}
+        {#if visited.has("settings") || active === "settings"}
+          <div class="page-shell" hidden={active !== "settings"}>
+            {#key settingsSection}
+              <Settings
+                initialSection={settingsSection}
+                onAddServer={() => openAddServer(null)}
+                onEditServer={(s) => openAddServer(s)}
+                onDeleteServer={(s) => deleteServer(s)}
+                onLaunchKeygen={() => (keygenOpen = true)}
+              />
+            {/key}
+          </div>
+        {/if}
+        {#if visited.has("diagnostics") || active === "diagnostics"}
+          <div class="page-shell" hidden={active !== "diagnostics"}>
+            <Diagnostics />
+          </div>
+        {/if}
+      </main>
+    </div>
 
-  <TerminalPanel />
+    <TerminalPanel />
+  {/if}
   </div>
 
   <StatusBar />
@@ -468,6 +540,25 @@
   <UpdateDialog />
 
   <ActivityToast />
+
+  {#if uiPrefs.useV03Shell && settingsModalOpen}
+    <div class="slideover-scrim" onclick={closeSettingsModal} role="presentation"></div>
+    <aside class="slideover" aria-label="Settings">
+      {#key settingsSection}
+        <Settings
+          initialSection={settingsSection}
+          onAddServer={() => openAddServer(null)}
+          onEditServer={(s) => openAddServer(s)}
+          onDeleteServer={(s) => deleteServer(s)}
+          onLaunchKeygen={() => (keygenOpen = true)}
+        />
+      {/key}
+    </aside>
+  {/if}
+
+  {#if uiPrefs.useV03Shell && !uiPrefs.presetPicked}
+    <PresetPicker onPick={(p) => uiPrefs.applyPreset(p)} />
+  {/if}
 </div>
 
 <style>
@@ -519,6 +610,14 @@
     min-width: 0;
     overflow: visible;
     position: relative;
+  }
+  /* v0.3 shell: add a third column for the right-side dock. Width is driven
+     by --dock-w (set by uiPrefs.setDockWidth) and goes to 0 when collapsed. */
+  .body[data-v03="true"] {
+    grid-template-columns: var(--rail-w, 48px) minmax(0, 1fr) var(--dock-w, 320px);
+  }
+  .body[data-v03="true"][data-dock-collapsed="true"] {
+    grid-template-columns: var(--rail-w, 48px) minmax(0, 1fr) 0;
   }
   .pane {
     min-height: 0; min-width: 0;
