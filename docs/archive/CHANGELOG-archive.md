@@ -2,6 +2,16 @@
 
 > Retired entries from `docs/CHANGELOG.md`. Newest first. Pre-archive history also available via `git log -- docs/CHANGELOG.md`.
 
+## v0.2.56-alpha — 2026-05-15 — AI Assistant + full UI consistency rework
+
+The big one. Nine sessions (S60-68) of work covering Rift's biggest identity change since v0.2.0: an in-app **AI Assistant** that lets you talk to Claude against an open project folder, plus a top-to-bottom UI consistency pass that re-shaped every page around a canonical skeleton.
+
+Assistant tab (Ctrl+3, BETA chip) auth-piggybacks on the user's `claude` CLI session; API-key fallback for pay-per-token. Rift ships a stdio MCP server inside its own binary; CLI spawns w/ `--mcp-config` pointing back at itself + `--allowed-tools mcp__rift__*`. Three read-only tools (`read_file` ≤500KB, `list_dir` ≤500 entries, `grep` walkdir+regex ≤200 matches), all paths canonicalized + checked against `RIFT_MCP_ROOTS`. Plus `TodoWrite`. Workspace decoupled from FiveM Sync — VSCode-style "Open Folder," works on any stack. Chat surface: AssistantHeader, Composer (autosize, send→stop morph, slash menu w/ 9 cmds, ↑/↓ recall), MessageBubble (avatar gutter, copy btn), state-aware EmptyState, TasksDock (auto-opens on first TodoWrite/MCP tool call), HistoryDrawer (rename + two-step delete). Markdown via marked+marked-alert+DOMPurify, full GFM. Real stop button via taskkill/kill -TERM tracking child PID. Auto-scroll respects user intent (stickToBottom flag).
+
+UI consistency: four new shell primitives (PageHeader, PageToolbar, PageFooter, EmptyState). Five pages converted to canonical skeleton (Conflicts, Activity, Files, Sync, Assistant). Titlebar declutter (connection pill folded into server-picker dot). StatusBar simplified. TabRail rework (groups + hairline dividers + active-tone glow + pin button + container query collapsing). Files tab drag-reorder via pointer events + animate:flip. Sync shrink-banner collapsible. About page Paths + Diagnostics sections w/ privacy scrub on copy.
+
+Verify: svelte-check 0 errors across 4020 files, cargo check clean, privacy audit confirmed standalone.
+
 ## v0.2.55-alpha — 2026-05-14 — Sync page overhaul: one-button Sync, auto-rescan, keep-alive tabs
 
 A focused UX pass on the Sync page — the most-used screen after Browser. Two longstanding annoyances (Pull-then-Push needing two clicks; pushes hidden after Pull all completes) are gone, drift now auto-rescans on first connect + on a user-settable interval, and tab switches lost their flash.
