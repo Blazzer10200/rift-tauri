@@ -8,6 +8,7 @@
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import {
     terminal,
     TERM_FONT_SIZE_MIN,
@@ -195,10 +196,33 @@
     {#if section === "appearance"}
       <div>
         <h3>Appearance</h3>
-        <p class="help">Theme, density, and font controls.</p>
+        <p class="help">Theme, density, font, and shell-layout controls.</p>
+
+        <div class="v03-toggle card">
+          <div class="v03-toggle-l">
+            <span class="v03-title">
+              <Sparkles size={14} class="v03-ico"/>
+              Experimental v0.3 shell layout
+              <span class="v03-beta">beta</span>
+            </span>
+            <span class="v03-hint">
+              Single-canvas chat-first layout with a customizable right-side dock.
+              Restart Rift after toggling — some components only read the flag at mount.
+            </span>
+          </div>
+          <label class="v03-switch" title={uiPrefs.useV03Shell ? "Disable v0.3 shell" : "Enable v0.3 shell"}>
+            <input
+              type="checkbox"
+              checked={uiPrefs.useV03Shell}
+              onchange={(e) => uiPrefs.setUseV03Shell((e.currentTarget as HTMLInputElement).checked)}
+            />
+            <span class="v03-switch-track"></span>
+          </label>
+        </div>
+
         <div class="soon card">
           <Sparkles size={18} class="soon-ico"/>
-          <span class="soon-title">Coming soon</span>
+          <span class="soon-title">More coming soon</span>
           <span class="soon-hint">Density, font sizing, and accent-tint controls are planned for a later build. Dark mode stays the default.</span>
         </div>
       </div>
@@ -827,6 +851,59 @@
   .soon :global(.soon-ico) { color: var(--accent); }
   .soon-title { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
   .soon-hint { color: var(--fg-muted); font-size: var(--fs-xs); max-width: 360px; line-height: 1.5; }
+
+  /* v0.3 experimental shell toggle — sits above the more-coming-soon card.
+     Single switch row; restart required so we leave it visually deliberate
+     (warn-toned border) but not alarming. */
+  .v03-toggle {
+    margin-top: 14px;
+    padding: 14px 16px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    border: 1px solid color-mix(in oklch, var(--warn) 30%, var(--border));
+    background: color-mix(in oklch, var(--warn) 4%, var(--surface));
+    border-radius: var(--radius);
+  }
+  .v03-toggle-l { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .v03-title {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--fg); font-size: var(--fs-sm); font-weight: 600;
+  }
+  .v03-toggle :global(.v03-ico) { color: var(--warn); }
+  .v03-beta {
+    padding: 1px 6px;
+    font-size: 9px; font-weight: 700;
+    background: var(--warn-soft); color: var(--warn);
+    border-radius: 4px;
+    letter-spacing: 0.06em; text-transform: uppercase;
+  }
+  .v03-hint { color: var(--fg-muted); font-size: var(--fs-xs); line-height: 1.5; max-width: 540px; }
+  .v03-switch { position: relative; display: inline-block; width: 38px; height: 22px; cursor: pointer; flex-shrink: 0; }
+  .v03-switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+  .v03-switch-track {
+    position: absolute; inset: 0;
+    background: var(--bg-elev-3);
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .v03-switch-track::before {
+    content: "";
+    position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    background: var(--fg-muted);
+    border-radius: 50%;
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 120ms ease;
+  }
+  .v03-switch input:checked + .v03-switch-track {
+    background: color-mix(in oklch, var(--accent) 70%, transparent);
+    border-color: var(--accent);
+  }
+  .v03-switch input:checked + .v03-switch-track::before {
+    transform: translateX(16px);
+    background: var(--accent-fg);
+  }
+  .v03-switch input:focus-visible + .v03-switch-track { box-shadow: 0 0 0 2px var(--ring); }
+
   .set-row {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 4px;
