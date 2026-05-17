@@ -170,6 +170,18 @@ class AssistantStore {
   // Rendered as a dismissible info banner separate from error styling.
   lastNotice = $state<string | null>(null);
   totalCostUsd = $state<number | null>(null);
+  // Token-usage telemetry parsed from `assistant` + `result` envelopes.
+  // `lastTurnUsage` is the most recent turn's `message.usage` block; the
+  // `input + cache_read + cache_creation` sum is the effective context the
+  // model just processed (= "what the model is seeing this turn"), which is
+  // the right number for a context-utilization indicator. `sessionUsage`
+  // accumulates across turns for cost/throughput inspection.
+  lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
+  sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
+  // Resolved model id from the most recent CLI `system`/init event ("claude-sonnet-4-6"
+  // / "claude-opus-4-7" / "claude-opus-4-7[1m]" etc.). Used to pick the
+  // context-window cap for the header pill — 1M variant carries `[1m]` suffix.
+  lastModelId = $state<string | null>(null);
   // Ring buffer of user prompts, newest last. Powers /retry and Up-arrow
   // recall in the composer. Capped at 50 entries.
   promptHistory = $state<string[]>([]);
@@ -506,6 +518,7 @@ class AssistantStore {
     this.currentConvoId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
+    this.resetUsage();
   }
 
   async loadConversation(id: string) {
@@ -524,6 +537,7 @@ class AssistantStore {
       this.lastError = null;
       this.lastNotice = null;
       this.totalCostUsd = null;
+      this.resetUsage();
       this.promptHistory = this.messages
         .filter((m) => m.role === "user")
         .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())
@@ -669,6 +683,7 @@ class AssistantStore {
           this.lastNotice = null;
           this.totalCostUsd = null;
           this.dockAutoOpenedThisConvo = false;
+          this.resetUsage();
         }
       }
     }
@@ -696,6 +711,7 @@ class AssistantStore {
     this.totalCostUsd = null;
     this.promptHistory = [];
     this.dockAutoOpenedThisConvo = false;
+    this.resetUsage();
     this.persistTabs();
   }
 
@@ -1129,6 +1145,38 @@ class AssistantStore {
     }));
   }
 
+  /** Parse a `usage` block from a stream-json envelope (`assistant.message.usage`
+   *  or `result.usage`) and update `lastTurnUsage` + `sessionUsage`. Fields
+   *  default to 0 when absent so partial blocks don't poison the counters. */
+  private recordTurnUsage(u: Record<string, unknown>) {
+    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const turn = {
+      input: num(u.input_tokens),
+      output: num(u.output_tokens),
+      cacheRead: num(u.cache_read_input_tokens),
+      cacheCreate: num(u.cache_creation_input_tokens),
+    };
+    // Skip empty-usage echoes (some envelopes carry a {} usage on retry).
+    if (turn.input + turn.output + turn.cacheRead + turn.cacheCreate === 0) return;
+    this.lastTurnUsage = turn;
+    this.sessionUsage = {
+      totalInput: this.sessionUsage.totalInput + turn.input,
+      totalOutput: this.sessionUsage.totalOutput + turn.output,
+      totalCacheRead: this.sessionUsage.totalCacheRead + turn.cacheRead,
+      totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
+      turns: this.sessionUsage.turns + 1,
+    };
+  }
+
+  /** Reset all token-usage telemetry for a fresh conversation. Called from
+   *  `newConversation`, `newTab`, and `loadConversation` (different convo on
+   *  disk means stale counters). */
+  private resetUsage() {
+    this.lastTurnUsage = null;
+    this.sessionUsage = { totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 };
+    this.lastModelId = null;
+  }
+
   private fillToolResult(toolUseId: string, content: string, isError: boolean) {
     this.mutateStreaming((m) => ({
       ...m,
@@ -1190,6 +1238,8 @@ class AssistantStore {
         // a fallback for when --include-partial-messages emits zero deltas
         // (CLI version drift, certain short responses). Flushed in onDone()
         // if deltaCount stayed 0.
+        const msgUsage = (env.message as { usage?: Record<string, unknown> } | undefined)?.usage;
+        if (msgUsage) this.recordTurnUsage(msgUsage);
         for (const block of env.message?.content ?? []) {
           if (block.type === "tool_use") {
             this.appendToolUse(block);
@@ -1227,6 +1277,11 @@ class AssistantStore {
           const turnCost = env.total_cost_usd;
           this.mutateStreaming((m) => ({ ...m, costUsd: turnCost }));
         }
+        // The result envelope carries the final, server-confirmed usage —
+        // sometimes more accurate than the streamed `assistant` event's
+        // usage when partial-message buffering is in play.
+        const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
+        if (resultUsage) this.recordTurnUsage(resultUsage);
         if (env.subtype && env.subtype !== "success") {
           this.lastError = `Run ended with subtype: ${env.subtype}`;
         }
@@ -1236,9 +1291,11 @@ class AssistantStore {
         // CLI emits a `{type:"system",subtype:"init",...,model:"..."}` line
         // at the start of every spawn. Capture the resolved model id so the
         // bubble's per-turn badge shows what actually ran (e.g. "sonnet" alias
-        // → "claude-sonnet-4-6").
+        // → "claude-sonnet-4-6"). Also pinned on the store for the
+        // context-window pill to pick the right cap (200K vs 1M).
         const sysModel = typeof env.model === "string" ? env.model : null;
         if (sysModel) {
+          this.lastModelId = sysModel;
           this.mutateStreaming((m) => ({ ...m, model: sysModel }));
         }
         break;
