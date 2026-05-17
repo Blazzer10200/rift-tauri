@@ -468,9 +468,13 @@
     position: relative;
     container-type: inline-size;
   }
-  /* Dock-hosted panel can be < 600px wide — stack panes vertically so each
-     file browser keeps usable width. Reverts to side-by-side once the host
-     widens past the threshold (e.g. Phase C maximize-to-center). */
+  /* Phase C: under v0.3 the Files panel renders a compact summary in the dock
+     and the full TwoPane only when maximized — always wide. Disable container
+     query by suppressing the container scope so @container queries below
+     never match. */
+  .two-pane.v03 { container-type: normal; }
+  /* v0.2 only — dock-hosted panel can be < 600px wide; stack panes vertically
+     so each file browser keeps usable width. */
   @container (max-width: 600px) {
     .split {
       grid-template-columns: 1fr !important;
