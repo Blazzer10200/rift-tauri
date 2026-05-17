@@ -9,6 +9,7 @@ const DOCK_WIDTH_KEY = "rift.ui.dock-w.v1";
 const MAXIMIZED_KEY = "rift.ui.maximized.v1";
 const PRESET_PICKED_KEY = "rift.ui.preset-picked.v1";
 const V03_SHELL_KEY = "rift.ui.v03-shell.v1";
+const DOCK_ACCORDION_KEY = "rift.ui.dock-accordion.v1";
 
 const DOCK_WIDTH_MIN = 280;
 const DOCK_WIDTH_MAX = 560;
@@ -32,6 +33,7 @@ class UiPrefs {
   maximized = $state<PanelId | null>(null);
   presetPicked = $state(false);
   useV03Shell = $state(false);
+  dockAccordion = $state(true);
 
   init() {
     if (typeof window === "undefined") return;
@@ -42,6 +44,8 @@ class UiPrefs {
     this.railPinned = localStorage.getItem(RAIL_PINNED_KEY) === "1";
     this.presetPicked = localStorage.getItem(PRESET_PICKED_KEY) === "1";
     this.useV03Shell = localStorage.getItem(V03_SHELL_KEY) === "1";
+    // Accordion defaults to true. Missing key = true (first-launch); explicit "0" = off.
+    this.dockAccordion = localStorage.getItem(DOCK_ACCORDION_KEY) !== "0";
 
     const dw = parseInt(localStorage.getItem(DOCK_WIDTH_KEY) ?? "", 10);
     if (Number.isFinite(dw)) this.dockWidth = clampWidth(dw);
@@ -65,17 +69,37 @@ class UiPrefs {
     this.applyRail();
   }
 
-  togglePanel(id: PanelId) {
+  togglePanel(id: PanelId, opts?: { allowMulti?: boolean }) {
     const cur = this.panels[id];
-    const next: PanelState = { ...cur, open: !cur.open };
-    this.panels = { ...this.panels, [id]: next };
-    this.persistPanels();
+    const opening = !cur.open;
+    this.applyOpenState(id, !cur.open, opening && this.accordionActive(opts));
   }
 
-  setPanelOpen(id: PanelId, open: boolean) {
+  setPanelOpen(id: PanelId, open: boolean, opts?: { allowMulti?: boolean }) {
     if (this.panels[id].open === open) return;
-    this.panels = { ...this.panels, [id]: { ...this.panels[id], open } };
+    this.applyOpenState(id, open, open && this.accordionActive(opts));
+  }
+
+  // Accordion gating: only under v0.3 + accordion pref enabled + shift-bypass not set.
+  // Phase C Part 2 — keeps v0.2 callers and shift-click users free to stack panels.
+  private accordionActive(opts?: { allowMulti?: boolean }): boolean {
+    return this.useV03Shell && this.dockAccordion && !opts?.allowMulti;
+  }
+
+  private applyOpenState(id: PanelId, open: boolean, closeOthers: boolean) {
+    const next = { ...this.panels };
+    if (closeOthers) {
+      for (const pid of PANEL_IDS) {
+        if (pid !== id && next[pid].open) next[pid] = { ...next[pid], open: false };
+      }
+    }
+    next[id] = { ...next[id], open };
+    this.panels = next;
     this.persistPanels();
+    // If the maximized panel just got closed (directly OR via accordion sweep),
+    // restore chat — leaving it maximized while it has no dock header would
+    // strand the user (no ⛶ to click to restore besides Esc).
+    if (this.maximized && !next[this.maximized].open) this.maximizePanel(null);
   }
 
   togglePanelCollapsed(id: PanelId) {
@@ -146,6 +170,11 @@ class UiPrefs {
   setUseV03Shell(on: boolean) {
     this.useV03Shell = on;
     localStorage.setItem(V03_SHELL_KEY, on ? "1" : "0");
+  }
+
+  setDockAccordion(on: boolean) {
+    this.dockAccordion = on;
+    localStorage.setItem(DOCK_ACCORDION_KEY, on ? "1" : "0");
   }
 
   private persistPanels() {

@@ -220,6 +220,28 @@
           </label>
         </div>
 
+        {#if uiPrefs.useV03Shell}
+          <div class="v03-toggle card v03-sub">
+            <div class="v03-toggle-l">
+              <span class="v03-title v03-sub-title">
+                One panel at a time (accordion)
+              </span>
+              <span class="v03-hint">
+                Opening a dock panel auto-closes the previously open one. Hold <kbd class="kbd">Shift</kbd> while
+                clicking a rail icon (or press <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Shift</kbd>+<kbd class="kbd">N</kbd>) to keep multiple panels open.
+              </span>
+            </div>
+            <label class="v03-switch" title={uiPrefs.dockAccordion ? "Allow multiple open panels" : "Switch to accordion mode"}>
+              <input
+                type="checkbox"
+                checked={uiPrefs.dockAccordion}
+                onchange={(e) => uiPrefs.setDockAccordion((e.currentTarget as HTMLInputElement).checked)}
+              />
+              <span class="v03-switch-track"></span>
+            </label>
+          </div>
+        {/if}
+
         <div class="soon card">
           <Sparkles size={18} class="soon-ico"/>
           <span class="soon-title">More coming soon</span>
@@ -903,6 +925,26 @@
     background: var(--accent-fg);
   }
   .v03-switch input:focus-visible + .v03-switch-track { box-shadow: 0 0 0 2px var(--ring); }
+
+  /* Sub-toggle (accordion) — same shape as parent but neutral tone since
+     it's only visible when v0.3 is on (not experimental in its own right). */
+  .v03-toggle.v03-sub {
+    margin-top: 8px;
+    border-color: var(--border);
+    background: var(--surface);
+  }
+  .v03-sub-title { font-weight: 500; }
+  .v03-hint .kbd {
+    display: inline-block;
+    margin: 0 1px;
+    padding: 0 4px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font: inherit;
+    font-size: 10px;
+    color: var(--fg-muted);
+  }
 
   .set-row {
     display: flex; align-items: center; justify-content: space-between;

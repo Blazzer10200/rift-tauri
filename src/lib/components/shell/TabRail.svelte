@@ -12,7 +12,9 @@
     mode?: RailMode;
     active: Tab;
     onChange: (t: Tab) => void;
-    onPanelToggle?: (id: PanelId) => void;
+    // Phase C Part 2: shift-click bypasses accordion mode (lets user keep
+    // multiple panels open at once). Plumbed via the second arg.
+    onPanelToggle?: (id: PanelId, opts?: { allowMulti?: boolean }) => void;
     onOpenSettings?: () => void;
   } = $props();
 
@@ -94,10 +96,10 @@
     return active === itemId;
   }
 
-  function handleClick(itemId: string) {
+  function handleClick(itemId: string, ev?: MouseEvent | KeyboardEvent) {
     if (mode === "panels") {
       if (itemId === "settings") { onOpenSettings?.(); return; }
-      onPanelToggle?.(itemId as PanelId);
+      onPanelToggle?.(itemId as PanelId, { allowMulti: !!ev?.shiftKey });
       return;
     }
     onChange(itemId as Tab);
@@ -143,7 +145,7 @@
             data-active={isActive(t.id)}
             data-tone={t.tone}
             data-panel-id={mode === "panels" ? t.id : null}
-            onclick={(e) => { handleClick(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
+            onclick={(e) => { handleClick(t.id, e); (e.currentTarget as HTMLButtonElement).blur(); }}
             title="{t.label} (Ctrl+{t.kbd})"
             type="button"
           >
@@ -171,7 +173,7 @@
             class="rail-btn"
             data-active={isActive(t.id)}
             data-tone={t.tone}
-            onclick={(e) => { handleClick(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
+            onclick={(e) => { handleClick(t.id, e); (e.currentTarget as HTMLButtonElement).blur(); }}
             title="{t.label} ({mode === 'panels' ? 'Ctrl+,' : `Ctrl+${t.kbd}`})"
             type="button"
           >
