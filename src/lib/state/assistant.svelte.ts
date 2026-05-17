@@ -204,6 +204,10 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<"sonnet" | "opus" | "haiku">(loadModel());
+  // `dockOpen` + `historyOpen` are v0.2-only. Under v0.3 (uiPrefs.useV03Shell),
+  // Tasks + History live in the top-level Dock and visibility is driven by
+  // `uiPrefs.panels.tasks.open` / `uiPrefs.panels.history.open`. The fields
+  // here are kept so the v0.2 shell still renders pixel-identical for rollback.
   ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false });
 
   // Conversation history.

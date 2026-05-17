@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
 
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
@@ -37,13 +38,31 @@
     const t = assistant.ui.tasksUpdatedAt;
     if (t > lastSeenUpdate) {
       lastSeenUpdate = t;
-      // Pulse only when dock is closed — open dock already shows the change.
-      if (!assistant.ui.dockOpen && taskCount > 0) {
+      // Pulse only when the tasks surface is closed — open surface already shows
+      // the change. v0.3 reads through uiPrefs.panels.tasks; v0.2 reads the
+      // inline dock flag.
+      const tasksOpen = uiPrefs.useV03Shell ? uiPrefs.panels.tasks.open : assistant.ui.dockOpen;
+      if (!tasksOpen && taskCount > 0) {
         pulse = true;
         setTimeout(() => (pulse = false), 700);
       }
     }
   });
+
+  const historyOpen = $derived(
+    uiPrefs.useV03Shell ? uiPrefs.panels.history.open : assistant.ui.historyOpen,
+  );
+  const tasksOpen = $derived(
+    uiPrefs.useV03Shell ? uiPrefs.panels.tasks.open : assistant.ui.dockOpen,
+  );
+  function toggleHistory() {
+    if (uiPrefs.useV03Shell) uiPrefs.togglePanel("history");
+    else assistant.ui.historyOpen = !assistant.ui.historyOpen;
+  }
+  function toggleTasks() {
+    if (uiPrefs.useV03Shell) uiPrefs.togglePanel("tasks");
+    else assistant.ui.dockOpen = !assistant.ui.dockOpen;
+  }
 </script>
 
 <header class="head">
@@ -111,10 +130,10 @@
 
     <button
       class="hdr-btn"
-      class:active={assistant.ui.historyOpen}
+      class:active={historyOpen}
       type="button"
       title="Conversation history"
-      onclick={() => (assistant.ui.historyOpen = !assistant.ui.historyOpen)}
+      onclick={toggleHistory}
     >
       <History size={13} />
       {#if assistant.conversations.length > 0}
@@ -124,10 +143,10 @@
 
     <button
       class="dock-toggle"
-      class:open={assistant.ui.dockOpen}
+      class:open={tasksOpen}
       class:pulse
       type="button"
-      onclick={() => (assistant.ui.dockOpen = !assistant.ui.dockOpen)}
+      onclick={toggleTasks}
       title="Tasks panel"
     >
       <ListChecks size={13} />
