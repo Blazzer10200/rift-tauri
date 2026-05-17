@@ -2,47 +2,39 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 76 — 2026-05-17 — v0.3 mid-session polish + v0.4 design locked
+## Session 77 — 2026-05-17 — v0.4 chat tabs + split dock
 
-**v0.3 shell mid-session polish (uncommitted, on main working tree):**
+Three phases on top of v0.3, all flag-gated under `uiPrefs.useV03Shell`. v0.2 path pixel-identical.
 
-Real-driver feedback exposed three friction points. Fixed in-session, all flag-gated.
+**Phase 1 — Chat tabs.** New `ChatTabsBar.svelte` (34px row under Titlebar). `AssistantStore` grows `openTabs: string[]` + tab helpers (open/close/new/reorder/cycle/closeAll/closeOthers/closeTabsToRight). Storage `rift.ui.tabs.v1= { openTabs, activeTabId }`; init filters ids against `assistant_list_conversations`. `send()` now keys first-turn off `convoCreatedAt` so `newTab`-minted ids still route `--session-id`. Unsaved-new-tab switch handled in-memory (no disk hit). Keys: `Ctrl+T`/`Ctrl+W`/`Ctrl+Tab`/`Ctrl+Shift+Tab`/`Alt+1..9`. HTML5 DnD reorder + tail-zone. HistoryDrawer + AssistantHeader + `/new` slash branch to `newTab` under v0.3. Empty-tabs CTA replaces chat+composer.
 
-1. **Two-sidebar fatigue.** Left rail + right dock sandwiching chat felt cramped. Dropped TabRail under v0.3 entirely; body grid `[rail | main | dock]` → `[main | dock]`. All 8 panel headers now always render in the dock (no AddPanel button); `open` field repurposed as expanded/collapsed. PanelShell whole-header click toggles. Shift-click stacks past accordion (matches `Ctrl+Shift+1..8`). AddPanelMenu deleted.
-2. **No visual hierarchy.** Open panel gets a 2px accent left-rail + lifted `bg` + bolder title. Dock background lifted to `bg-elev-1` so it reads as a distinct surface. Sync + Files summary cards harmonized — compact 2-row info + small inline "Open" maximize button. Dock max width 560 → 460.
-3. **Dock-resize handle laggy.** Three compounding causes: (a) 4px hit strip too thin → widened to 10px straddling the dock border seam, visual stays 2px via `::after`; (b) synchronous `localStorage.setItem` on every pointermove → split into `setDockWidthLive` (state+CSS) used during drag + `persistDockWidth` called once on pointerup; RAF-throttled the move handler; (c) `transition: grid-template-columns 220ms` on `.body[data-v03]` made the grid chase the cursor — dropped under v0.3 (kept under v0.2 for rail-pin animation). Now snappy.
+**Phase 2 — Split dock.** `PanelState.slot: "left"|"right"` (legacy → left on migration). Outer max `Math.min(900, innerWidth - 480)` per resize; dblclick outer handle → ~half viewport. Inside: grid `[left][4px handle][right]`, collapses to one column when right empty. Cross-slot drop via header drag; empty-right shows "Drop here" hint during left-source drag. `dockSplitPct = $state(50)` → `:root --dock-split-pct` (no inline-style override, so programmatic resize works). 20–80% clamp, dblclick → 50. Per-slot accordion: `applyOpenState` sweep restricted to dragged panel's slot. `Ctrl+1..8` panel toggles unaware of slot.
 
-Settings copy updated — "rail icon" reference removed, now mentions `Ctrl+Shift+1…8`. CDP-verified end-to-end (Files, Sync, Tasks empty, Activity empty, Settings slide-over, maximize-to-center + Esc restore).
+**Phase 3 — Polish.** Settings → Appearance picks up Layout sub-card (Reset split, Close all tabs, kbd cheat). `scripts/cdp/smoke-v04.sh` 23/23 PASS end-to-end. CDP `serve.cjs` `KEY_DEFS` auto-resolves digits + letters. CHANGELOG v0.4.0-alpha live (597w), v0.2.57-alpha archived. Three-file bump → **0.4.0-alpha**. `npm run check`: 0 errors, 6 warnings (4 pre-existing, 2 fixed via slot `role="region"`).
 
-Files touched: `AppShell.svelte`, `Dock.svelte`, `PanelShell.svelte`, `FilesPanel.svelte`, `SyncPage.svelte`, `ui-prefs.svelte.ts`, `Settings.svelte`. Deleted: `AddPanelMenu.svelte`.
+**Source state:** v0.4.0-alpha committed but **NOT YET shipped** via `scripts/release.ps1`. Quit Rift dev first (build collides w/ incremental rebuild lock). Self-replace dance applies if an installed Rift is running.
 
-**v0.4 design — chat tabs + split dock — locked:**
+## Sessions 69–76 — 2026-05-15/17 — Assistant maturity + v0.3 shell + v0.4 spec (collapsed)
 
-User-driven scope: top-of-app browser-style chat tabs + dock can grow to ~50vw and split horizontally into LEFT/RIGHT slots with independent panel stacks. Spec lives in [`docs/design/v0.4-tabs-and-split-dock.md`](design/v0.4-tabs-and-split-dock.md) — every fork decided, executing session transcribes only. Three phases: tabs (state + ChatTabsBar + AppShell mount), split (slot field + per-slot grid + internal handle), polish + ship. Built on the v0.3 toggle; v0.2 untouched throughout.
-
-## Sessions 69–75 — 2026-05-15/17 — Assistant maturity + v0.3 shell (collapsed)
-
-S69 fixed Assistant blank-response (cmd-shim arg mangling) + ext-thinking via `MAX_THINKING_TOKENS=10000`. S70 shipped CDP autonomous-verify infra (`scripts/cdp/serve.cjs`, port 9223). S71 (Phase 1) harness pull-through — `use_full_config` default ON. S72 (Phase 2) native `--session-id`/`--resume` + Settings cost cap. S73 (Phase 3) Rift-native sprint — per-turn `WorkspaceContext` + `mcp__rift__remote_bash` + workspace shell lock. S74 (Phase 4) UX polish — diff cards, cost+model badge, @-file mentions, code-block copy, conversation search, context-aware empty-state, streaming pacer. S75 v0.3 UI redesign Phases A→C+1 (23 commits `0b39dc8..bf64470`), all behind `useV03Shell` toggle.
+S69 blank-response fix + ext-thinking. S70 CDP autonomous-verify infra. S71 harness pull-through. S72 native session-id + cost cap. S73 Rift-native (`mcp__rift__remote_bash` + workspace shell lock). S74 UX polish (diff cards, cost+model badge, @-files, code-block copy, conversation search, streaming pacer). S75 v0.3 UI redesign Phases A→C+1 (23 commits flag-gated). **S76** mid-session v0.3 polish — dropped TabRail under v0.3, always-render panel headers, snappy dock-resize (RAF + drag/persist split + no grid transition); locked the v0.4 spec.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Last shipped: **v0.2.56-alpha** (`687edb8` on main). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Last commit on main: **v0.4.0-alpha** (uncomitted to GitHub releases yet). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
-**Source state:** v0.2.57-alpha version-bumped across 3 lockstep files + CHANGELOG entry in, NOT YET shipped via `scripts/release.ps1`. S76 v0.3 polish is uncommitted on main working tree — squash into the v0.2.57 ship OR commit separately before/after.
+**Source state:** v0.4.0-alpha — three-file lockstep + CHANGELOG live entry + HANDOFF rewritten + S77 phases committed. `scripts/release.ps1` not yet invoked. Run it next session after dev is quit.
 
-**v0.3 shell:** EXPERIMENTAL behind `useV03Shell` toggle (Settings → Appearance, default OFF). Polished this session; daily-driveable. Spec: `docs/design/v0.3-ui-redesign.md`.
+**v0.3 + v0.4 shell:** EXPERIMENTAL behind `useV03Shell` toggle (Settings → Appearance, default OFF). v0.4 = chat tabs + split dock; spec archived at `docs/archive/design/v0.3-ui-redesign.md`. The v0.4 spec doc (`docs/design/v0.4-tabs-and-split-dock.md`) stays live until v0.4 ships.
 
-**v0.4 era:** spec'd this session in `docs/design/v0.4-tabs-and-split-dock.md`. Concrete + decided. Pick up via kickoff prompt prepared by S76.
+**CDP autonomous-verify is live for dev** — `scripts/run-dev.bat` sets the WebView2 port; `npm run cdp:serve` wraps it on 9223; drive via `bash scripts/cdp/c.sh state|eval|type|click|wait|shot|key`. New: `scripts/cdp/smoke-v04.sh` (23-check end-to-end smoke).
 
-**CDP autonomous-verify is live for dev** — `scripts/run-dev.bat` sets the WebView2 port; `npm run cdp:serve` wraps it on 9223; drive via `bash scripts/cdp/c.sh state|eval|type|click|wait|shot|key`. Use BEFORE asking the user to screenshot anything.
-
-**v0.2.57 queue (carryover):** (a) EACCES auto-fix-perms; (b) auto-Mirror on detected rename; (c) integration test phase 1 (needs SftpClient trait); (d) dry-run Mirror preview; (e) `lib.rs` split (1771L) → per-domain `commands/*.rs`; (f) `reqwest`+`ureq` consolidation (blocked on velopack); (g) LocalPane/RemotePane shared-logic extract; (h) connection.connecting pill desync; (i) Diagnostics page canonical-skeleton.
+**v0.2 queue (carryover):** (a) EACCES auto-fix-perms; (b) auto-Mirror on detected rename; (c) integration test phase 1 (needs SftpClient trait); (d) dry-run Mirror preview; (e) `lib.rs` split (1771L) → per-domain `commands/*.rs`; (f) `reqwest`+`ureq` consolidation (blocked on velopack); (g) LocalPane/RemotePane shared-logic extract; (h) connection.connecting pill desync; (i) Diagnostics page canonical-skeleton.
 
 **Multi-user warning:** Trey: keep him OFF Mirror until on latest + fresh-Pulled baseline.
 
-**Don't reintroduce:** OpRail, TopBar, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design/Sync/Editor sections, `.btn.lg`/`.pill.warn`, FiveM-specific Assistant copy, AddPanelMenu (S76 dropped it).
+**Don't reintroduce:** OpRail, TopBar, S37+S39 dev seeds, S40 floating purple Terminal pill, Settings Design/Sync/Editor sections, `.btn.lg`/`.pill.warn`, FiveM-specific Assistant copy, AddPanelMenu (S76 dropped it). TabRail under v0.3. The 220ms `transition: grid-template-columns` on `.body[data-v03]`. `localStorage.setItem` on every pointermove during dock resize. Per-pointermove localStorage during the internal split-resize (same drag/persist split pattern applied there too).
 
 **Ship pipeline:** `scripts/release.ps1` IS the full ship (build → vpk pack → upload to rift-releases). Run via `powershell -NoProfile -File ./scripts/release.ps1`.
 
@@ -75,6 +67,7 @@ S69 fixed Assistant blank-response (cmd-shim arg mangling) + ext-thinking via `M
 - **v0.2.50:** `with_t` op timeouts + LIST_T 120s; `ConnectionWedged` diag emit; `process_entry` terminal lock-release INLINE w/ 5s timeout; `.tmp.<pid>.<hex>` rule tight-matched; `sync_sweep_stale_locks` ONLY clears own-user locks.
 - **v0.2.52:** explicit `RenameMode::From→Deleted`+`To→Created` arms; `consecutive_failed_batches` threshold 3; 5s watched-root-vanish poll.
 - **v0.2.53:** Mirror session-scoped (`mirror_mode: AtomicBool`). UI typed-confirm requires "MIRROR". Auto-reconnect rolling-window 3 wedges in 60s.
-- **v0.2.56:** Assistant tab self-execs MCP server via `RIFT_MCP_SERVER=1` env branch in `lib.rs::run()` BEFORE Tauri loop; `RIFT_MCP_ROOTS` scopes filesystem; CLI spawn passes `--mcp-config` + `--allowed-tools mcp__rift__*`. TabRail `--rail-w` CSS var drives AppShell grid (v0.2 only). Files tab drag uses pointer events, NOT HTML5 DnD.
+- **v0.2.56:** Assistant tab self-execs MCP server via `RIFT_MCP_SERVER=1` env branch in `lib.rs::run()` BEFORE Tauri loop; `RIFT_MCP_ROOTS` scopes filesystem; CLI spawn passes `--mcp-config` + `--allowed-tools mcp__rift__*`. Files tab drag uses pointer events, NOT HTML5 DnD.
 - **v0.3 shell (flag-gated):** PanelShell registry-based mount. PanelDef carries optional `getCount`/`getTone`. `applyOpenState` clears `maximized` if the maximized panel closes. AppShell branches body grid on `useV03Shell`; all v0.2 codepaths preserved verbatim. Terminal panel uses `$effect`+`onMount` fallback for maximize-on-first-open.
-- **S76 v0.3 polish:** No TabRail under v0.3. All panel headers always-visible. `panel.open` = expanded state. Dock width 260–460. Width-resize: `setDockWidthLive` during drag + `persistDockWidth` on release + RAF-throttle + `transition: none` on `.body[data-v03]` grid. Whole-header click toggles; `.caret` is a passive span; action buttons `stopPropagation`.
+- **S76 v0.3 polish:** No TabRail under v0.3. All panel headers always-visible. Dock width 260–(viewport-aware max). Width-resize: `setDockWidthLive` during drag + `persistDockWidth` on release + RAF-throttle + `transition: none` on `.body[data-v03]` grid. Whole-header click toggles.
+- **v0.4 (S77):** `openTabs` storage `rift.ui.tabs.v1` filters against `assistant_list_conversations` on init. `send()` keys isFirstTurn off `convoCreatedAt` (not `currentConvoId`) so `newTab`-minted ids still route as `--session-id`. `PanelState.slot` localStorage migration defaults to `"left"`. Dock-split uses `:root` `--dock-split-pct` only (no inline style on `.dock-body` — that broke programmatic resize via dynamic import). Internal split handle follows the same drag/persist split pattern as the outer width handle.

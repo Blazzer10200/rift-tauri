@@ -123,7 +123,10 @@
       class="hdr-btn"
       type="button"
       title="New conversation"
-      onclick={() => void assistant.newConversation()}
+      onclick={() => {
+        if (uiPrefs.useV03Shell) void assistant.newTab();
+        else void assistant.newConversation();
+      }}
     >
       <Plus size={13} />
     </button>

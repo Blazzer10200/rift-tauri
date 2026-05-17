@@ -23,6 +23,7 @@
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import TerminalPanel from "./terminal/TerminalPanel.svelte";
   import AssistantPage from "./assistant/AssistantPage.svelte";
+  import ChatTabsBar from "./shell/ChatTabsBar.svelte";
   import Dock from "./dock/Dock.svelte";
   import PresetPicker from "./dock/PresetPicker.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
@@ -30,6 +31,7 @@
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
   import { syncPage } from "../state/sync-page.svelte";
+  import { assistant } from "../state/assistant.svelte";
 
   type Tab = "browse" | "activity" | "sync" | "assistant" | "conflicts" | "settings" | "diagnostics";
   type SettingsSection = "appearance" | "terminal" | "assistant" | "servers" | "keys" | "about";
@@ -246,8 +248,37 @@
       uiPrefs.maximizePanel(null);
       return;
     }
+    // v0.4 — Alt+1..9 jumps to chat tab N (1-indexed). Doesn't require meta;
+    // checked before the meta-gate. Gated on v0.3 since tabs only exist there.
+    if (uiPrefs.useV03Shell && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+      e.preventDefault();
+      const idx = parseInt(e.key, 10) - 1;
+      const target = assistant.openTabs[idx];
+      if (target) void assistant.openTab(target);
+      return;
+    }
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
+    // v0.4 — chat-tab keybinds (gated on v0.3). Ctrl+T new, Ctrl+W close
+    // active, Ctrl+Tab cycle. preventDefault keeps WebView2 from intercepting.
+    if (uiPrefs.useV03Shell && !e.altKey) {
+      if (!e.shiftKey && e.key.toLowerCase() === "t") {
+        e.preventDefault();
+        void assistant.newTab();
+        return;
+      }
+      if (!e.shiftKey && e.key.toLowerCase() === "w") {
+        e.preventDefault();
+        const cur = assistant.currentConvoId;
+        if (cur) void assistant.closeTab(cur);
+        return;
+      }
+      if (e.key === "Tab") {
+        e.preventDefault();
+        void assistant.cycleTab(e.shiftKey ? -1 : 1);
+        return;
+      }
+    }
     // Ctrl+` toggles the embedded terminal — global so it works on every tab.
     // Under v0.3 this routes to the Terminal dock panel toggle.
     if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
@@ -425,6 +456,7 @@
     {/if}
 
   {#if uiPrefs.useV03Shell}
+    <ChatTabsBar />
     <div class="body" data-v03="true">
       <main class="pane">
         <AssistantPage />
