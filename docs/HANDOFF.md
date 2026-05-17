@@ -2,13 +2,9 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Sessions 81–84 — 2026-05-17 — audit fix-passes (16 items + 1 downgrade)
+## Sessions 78–85 — 2026-05-17 — v0.4.1 refactor + audit fix-passes + UI fixes
 
-Four batches: S81 closed B2/B4/B5/B9 + S6 + T4; S82 closed B7/B11 + S4 + T1/T2/T3 + B16→INFO; S83 closed B3 (`LogForwarder` scrub) + F1/F2 (effect cleanup via `loadToken++`); S84 closed S5 (`compute_sha1` streamed via BufReader). All `cargo check` + `npm run check` + tests clean. **Audit Open: 23 → 7 actionable** (6 LOW lib/config + 1 MED sync). Transport, frontend, lib/config-MED all functionally clean. Detail in [docs/AUDIT.md](docs/AUDIT.md).
-
-## Sessions 78–80 — v0.4.1 refactor + audit re-verify
-
-S78–79 dropped dock-accordion (right side = one full page from 40px `ActivityBar`); `aff9cd0`→`8b984f9` under `useV03Shell`. S80 re-verified 42-item audit vs HEAD; 16 silently fixed by v0.3/v0.4. `0.4.1-alpha` committed; `release.ps1` NOT invoked.
+S78–79 dropped dock-accordion (right side = one full page from 40px `ActivityBar`) under `useV03Shell`; `0.4.1-alpha` committed but `release.ps1` NOT invoked yet. S80 re-verified 42-item audit (16 silently fixed by v0.3/v0.4). S81–S84 closed 16 audit items + 1 downgrade across 4 batches. S85 (`bbd7642`) shipped 2 live UI fixes: dedupe History button (hidden under v0.3/v0.4.1 since ActivityBar covers it); auto-recover from claude's "No conversation found" on `--resume` via new `assistant://session-lost` event → frontend nulls `convoCreatedAt`, re-sends as first-turn. All `cargo check`/test/`npm run check` clean. **Audit Open: 42 → 7 actionable** (6 LOW lib/config + 1 MED sync). Detail in [docs/AUDIT.md](docs/AUDIT.md).
 
 ---
 
@@ -22,7 +18,7 @@ S78–79 dropped dock-accordion (right side = one full page from 40px `ActivityB
 
 **v0.2 queue:** EACCES auto-fix-perms; auto-Mirror on rename; integration tests phase 1; dry-run Mirror preview; `lib.rs` → `commands/*.rs` split; LocalPane/RemotePane shared-logic extract; connection.connecting pill desync; Diagnostics canonical-skeleton.
 
-**Audit queue (post-S84):** 7 open (6 LOW lib/config + 1 MED sync `flush_batch` inline count). All LOWs are upstream-blocked or needs design (velopack async, Tailwind hashed CSS, Phase-6 secrets, capabilities perm-usage audit). Full list in [docs/AUDIT.md](docs/AUDIT.md).
+**Audit queue (post-S85):** 7 open (6 LOW lib/config + 1 MED sync `flush_batch` inline count). All blocked upstream or need design (velopack async, Tailwind hashed CSS, Phase-6 secrets, capabilities perm-usage audit). Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
 **Multi-user:** Trey OFF Mirror until on latest + fresh-Pulled baseline.
 
@@ -56,3 +52,4 @@ S78–79 dropped dock-accordion (right side = one full page from 40px `ActivityB
 - **v0.4 chat tabs:** `openTabs` (`rift.ui.tabs.v1`) filters vs `assistant_list_conversations` on init. `send()` keys `isFirstTurn` off `convoCreatedAt` (NOT `currentConvoId`) so `newTab`-minted ids route as `--session-id`.
 - **v0.4.1 right-pane:** `useV03Shell` storage key kept verbatim. `rightPane.activeId` = `rift.ui.right-pane.v1`; width = `rift.ui.right-pane-w.v1` (320–1200, default 560); order = `rift.ui.activitybar-order.v1`. `--right-pane-w` → 0px when `activeId === null`. Left-edge-resize only — no internal split, no maximize.
 - **S79 layout:** right-pane page wrappers at `src/lib/components/right-pane/` (moved from deleted `dock/panels/`). Registry export `PANELS` + type `PanelDef` names retained for min churn.
+- **S85 session-lost (`bbd7642`):** backend emits `assistant://session-lost {session_id, prompt}` on stderr-match "No conversation found with session ID:" + `!is_first_turn`. Frontend `onSessionLost` pops failed pair, nulls `convoCreatedAt`, re-sends. Don't gate first-turn through this path.
