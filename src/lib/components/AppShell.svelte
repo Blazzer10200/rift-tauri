@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { X } from "lucide-svelte";
   import { connection, type ServerProfile } from "../state/connection.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import TabRail from "./shell/TabRail.svelte";
@@ -231,6 +232,12 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
+    // Esc closes the Settings slide-over (v0.3 only — modal-shaped).
+    if (e.key === "Escape" && settingsModalOpen) {
+      e.preventDefault();
+      closeSettingsModal();
+      return;
+    }
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
     // Ctrl+` toggles the embedded terminal — global so it works on every tab.
@@ -544,6 +551,15 @@
   {#if uiPrefs.useV03Shell && settingsModalOpen}
     <div class="slideover-scrim" onclick={closeSettingsModal} role="presentation"></div>
     <aside class="slideover" aria-label="Settings">
+      <button
+        class="slideover-close"
+        type="button"
+        onclick={closeSettingsModal}
+        title="Close (Esc)"
+        aria-label="Close settings"
+      >
+        <X size={14}/>
+      </button>
       {#key settingsSection}
         <Settings
           initialSection={settingsSection}

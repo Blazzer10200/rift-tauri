@@ -357,6 +357,21 @@ body {
   background: oklch(0 0 0 / 0.4);
   z-index: 140;
 }
+.slideover-close {
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 26px; height: 26px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--fg-muted);
+  display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  z-index: 1;
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease;
+}
+.slideover-close:hover { background: var(--surface-hover); color: var(--fg); border-color: var(--border); }
+.slideover-close:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 body.win-maximized .slideover { top: 52px; bottom: 30px; }
 @media (prefers-reduced-motion: no-preference) {
   @keyframes slideover-in {
