@@ -15,6 +15,27 @@
   const isV03 = $derived(uiPrefs.useV03Shell);
   const isVisible = $derived(isV03 ? uiPrefs.panels.terminal.open : terminal.open);
 
+  // Phase C+1: under v0.3, the terminal is unusable at the 320px default dock
+  // width (xterm squeezes to ~40 cols). Picked option (b) — auto-maximize to
+  // center on the closed→open transition — for consistency w/ Files + Sync
+  // (power tools go to center, light affordances stay in the dock). Less
+  // surprising than auto-resizing the user's saved dock width.
+  //
+  // The `prevTerminalOpen` baseline starts undefined so the first $effect
+  // fire (mount + initial state read) is a no-op, only true closed→open
+  // transitions trigger maximize. Reloading w/ the terminal already open
+  // does NOT re-maximize.
+  let prevTerminalOpen: boolean | undefined = undefined;
+  $effect(() => {
+    const now = uiPrefs.panels.terminal.open;
+    const prev = prevTerminalOpen;
+    prevTerminalOpen = now;
+    if (prev === undefined) return;
+    if (isV03 && now && !prev) {
+      uiPrefs.maximizePanel("terminal");
+    }
+  });
+
   type ShellInfo = {
     id: string;
     label: string;
@@ -213,6 +234,15 @@
     // Under v0.3, mount itself means the dock panel is open, so always seed.
     if (isVisible && terminal.tabs.length === 0) {
       terminal.addTab(terminal.defaultShellId);
+    }
+    // Phase C+1: under v0.3 the dock-hosted terminal is unusable at 320px,
+    // so we maximize to center on open. Lazy-mount (see PanelShell:39) means
+    // THIS onMount IS the first open-transition in the app session — the
+    // $effect below can't catch it (no prev=false baseline exists). Only
+    // fire if nothing else is currently maximized so a reload w/ another
+    // panel already maxed keeps the user's intent.
+    if (uiPrefs.useV03Shell && uiPrefs.panels.terminal.open && uiPrefs.maximized === null) {
+      uiPrefs.maximizePanel("terminal");
     }
   });
 
