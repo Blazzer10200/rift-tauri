@@ -1145,10 +1145,14 @@ class AssistantStore {
     }));
   }
 
-  /** Parse a `usage` block from a stream-json envelope (`assistant.message.usage`
-   *  or `result.usage`) and update `lastTurnUsage` + `sessionUsage`. Fields
-   *  default to 0 when absent so partial blocks don't poison the counters. */
-  private recordTurnUsage(u: Record<string, unknown>) {
+  /** Parse a `usage` block from a stream-json envelope and update
+   *  `lastTurnUsage` always; only the `result` envelope (`accumulate=true`)
+   *  contributes to `sessionUsage` since both `assistant.message.usage` and
+   *  `result.usage` carry the same end-of-turn tally — accumulating both
+   *  would double-count. `lastTurnUsage` (per-turn live view) takes whichever
+   *  comes last, which is `result` in practice. Fields default to 0 when
+   *  absent so partial blocks don't poison the counters. */
+  private recordTurnUsage(u: Record<string, unknown>, accumulate: boolean) {
     const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
     const turn = {
       input: num(u.input_tokens),
@@ -1159,13 +1163,15 @@ class AssistantStore {
     // Skip empty-usage echoes (some envelopes carry a {} usage on retry).
     if (turn.input + turn.output + turn.cacheRead + turn.cacheCreate === 0) return;
     this.lastTurnUsage = turn;
-    this.sessionUsage = {
-      totalInput: this.sessionUsage.totalInput + turn.input,
-      totalOutput: this.sessionUsage.totalOutput + turn.output,
-      totalCacheRead: this.sessionUsage.totalCacheRead + turn.cacheRead,
-      totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
-      turns: this.sessionUsage.turns + 1,
-    };
+    if (accumulate) {
+      this.sessionUsage = {
+        totalInput: this.sessionUsage.totalInput + turn.input,
+        totalOutput: this.sessionUsage.totalOutput + turn.output,
+        totalCacheRead: this.sessionUsage.totalCacheRead + turn.cacheRead,
+        totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
+        turns: this.sessionUsage.turns + 1,
+      };
+    }
   }
 
   /** Reset all token-usage telemetry for a fresh conversation. Called from
@@ -1239,7 +1245,7 @@ class AssistantStore {
         // (CLI version drift, certain short responses). Flushed in onDone()
         // if deltaCount stayed 0.
         const msgUsage = (env.message as { usage?: Record<string, unknown> } | undefined)?.usage;
-        if (msgUsage) this.recordTurnUsage(msgUsage);
+        if (msgUsage) this.recordTurnUsage(msgUsage, false);
         for (const block of env.message?.content ?? []) {
           if (block.type === "tool_use") {
             this.appendToolUse(block);
@@ -1281,7 +1287,7 @@ class AssistantStore {
         // sometimes more accurate than the streamed `assistant` event's
         // usage when partial-message buffering is in play.
         const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
-        if (resultUsage) this.recordTurnUsage(resultUsage);
+        if (resultUsage) this.recordTurnUsage(resultUsage, true);
         if (env.subtype && env.subtype !== "success") {
           this.lastError = `Run ended with subtype: ${env.subtype}`;
         }
