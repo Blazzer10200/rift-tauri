@@ -111,10 +111,10 @@
     } catch (e) { console.error("clipboard failed", e); }
   }
 
-  // Appearance hidden until the section has real controls (density / font / accent).
-  // Keeping the type + render branch dormant lets it light up once shipped without
-  // touching this nav array. See HANDOFF queue item (j).
+  // Appearance carries the v0.3 shell toggle now (and will pick up density /
+  // font / accent later). Surfaced as the first nav item per convention.
   const sections: { id: Section; label: string; icon: typeof Cog }[] = [
+    { id: "appearance", label: "Appearance", icon: Sparkles },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "assistant",  label: "Assistant",  icon: Sparkles },
     { id: "servers",    label: "Servers",    icon: Server },
