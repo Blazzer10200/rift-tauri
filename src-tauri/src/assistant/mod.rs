@@ -951,18 +951,24 @@ pub async fn assistant_send(
         // `mcp__rift__remote_bash`. Piggyback already admits `mcp__*` so the
         // tool is reachable there unconditionally — the gate is server-side
         // (RIFT_REMOTE_SHELL_ENABLED env on the MCP child).
-        // `Skill` is required for `/handoff`, `/check`, `/plan`, etc. to
-        // invoke — without it the CLI's allowlist gate denies the Skill tool
-        // even when slash commands themselves are enabled.
-        let allowed: &str = if use_full_config {
+        // S91: full built-in tool set. The CLI's allowlist gate denies any
+        // tool name not listed verbatim. S88 added `Skill`; users still hit
+        // denials on `Agent` (subagent spawn — used by /plan, /quick-review,
+        // /check), `BashOutput`/`KillBash`/`KillShell` (background-bash
+        // bookkeeping the CLI auto-invokes after `run_in_background: true`),
+        // `MultiEdit`, `NotebookEdit`, `SlashCommand`, `AskUserQuestion`,
+        // `ExitPlanMode`. Wider built-in coverage = fewer denial pop-ups.
+        // MCP scope still restricts to rift's tools in the scoped branches.
+        const BUILTINS: &str = "Agent,AskUserQuestion,Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
+        let allowed: String = if use_full_config {
             // `mcp__*` admits any tool from user MCP servers that the CLI
             // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
             // via the explicit-name entries.
-            "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,Skill,mcp__*"
+            format!("{BUILTINS},mcp__*")
         } else if remote_shell_enabled {
-            "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,Skill,mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__remote_bash"
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__remote_bash")
         } else {
-            "Read,Write,Edit,Bash,Glob,Grep,WebFetch,WebSearch,TodoWrite,Skill,mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep"
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);
