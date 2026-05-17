@@ -8,6 +8,7 @@
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
     ChevronRight, CheckCircle2, CircleAlert, History,
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
+    Maximize2,
   } from "lucide-svelte";
   import PageHeader from "../shell/PageHeader.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
@@ -58,6 +59,14 @@
   const bucketsActive = $derived(
     (totals.push > 0 ? 1 : 0) + (totals.pull > 0 ? 1 : 0) +
     (totals.del > 0 ? 1 : 0) + (totals.conf > 0 ? 1 : 0)
+  );
+
+  // Phase C+1: while NOT maximized, the dock-hosted Sync panel is too narrow
+  // (320px default dock width) to render the drift table + Mirror toolbar.
+  // Show a compact summary card w/ a "View drift in center" affordance that
+  // maximizes into the main column. v0.2 path renders the full UI unchanged.
+  const isDockSummary = $derived(
+    uiPrefs.useV03Shell && uiPrefs.maximized !== "sync"
   );
 
   onMount(async () => {
@@ -360,7 +369,44 @@
       </button>
 {/snippet}
 
-<section class="page" class:v03={uiPrefs.useV03Shell}>
+<section class="page" class:v03={uiPrefs.useV03Shell} class:dock-summary={isDockSummary}>
+  {#if isDockSummary}
+    <div class="sync-summary">
+      <div class="summary-state">
+        {#if !watcherOn}
+          <span class="pill muted"><CircleAlert size={11}/> Not connected</span>
+        {:else if isEmpty}
+          <span class="pill ok"><span class="dot"></span> Everything synced</span>
+        {:else}
+          <span class="pill info">{totals.total} pending</span>
+        {/if}
+      </div>
+
+      <div class="summary-counts">
+        <div class="cnt" data-tone={connection.conflictCount > 0 ? "conflict" : "muted"}>
+          <span class="n">{connection.conflictCount}</span>
+          <span class="l">conflict{connection.conflictCount === 1 ? "" : "s"}</span>
+        </div>
+        <div class="cnt" data-tone={totals.total > 0 ? "info" : "muted"}>
+          <span class="n">{totals.total}</span>
+          <span class="l">drift item{totals.total === 1 ? "" : "s"}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        class="view-btn"
+        onclick={() => uiPrefs.maximizePanel("sync")}
+        title="Maximize Sync into the main column"
+      >
+        <Maximize2 size={12}/>
+        <span>View drift in center</span>
+      </button>
+      <p class="summary-hint">
+        Drift table + Mirror toolbar need more room than the dock — maximize to work with sync.
+      </p>
+    </div>
+  {:else}
   {#if !uiPrefs.useV03Shell}
     <PageHeader
       icon={RefreshCcw}
@@ -705,6 +751,7 @@
         </footer>
       </div>
     </div>
+  {/if}
   {/if}
 </section>
 
@@ -1302,5 +1349,74 @@
     overflow: auto;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Phase C+1: dock-mode summary card. Renders when v0.3 + not maximized. */
+  .sync-summary {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 14px;
+  }
+  .summary-state {
+    display: flex;
+    padding: 0 2px;
+  }
+  .summary-counts {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    margin-top: 2px;
+  }
+  .summary-counts .cnt {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 10px 6px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    text-align: center;
+  }
+  .summary-counts .cnt[data-tone="conflict"] {
+    background: var(--danger-soft);
+    border-color: color-mix(in oklch, var(--danger) 30%, transparent);
+  }
+  .summary-counts .cnt[data-tone="info"] {
+    background: var(--info-soft);
+    border-color: color-mix(in oklch, var(--info) 30%, transparent);
+  }
+  .summary-counts .n {
+    font-size: 20px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg);
+    line-height: 1;
+  }
+  .summary-counts .cnt[data-tone="conflict"] .n { color: var(--danger); }
+  .summary-counts .cnt[data-tone="info"] .n { color: var(--info); }
+  .summary-counts .l {
+    font-size: var(--fs-xs);
+    color: var(--fg-muted);
+    margin-top: 4px;
+  }
+  .view-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 30px;
+    padding: 0 12px;
+    margin-top: 4px;
+    background: color-mix(in oklch, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--border));
+    color: var(--fg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--fs-sm);
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+  .view-btn:hover {
+    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 60%, var(--border));
+  }
+  .summary-hint {
+    margin: 4px 2px 0;
+    font-size: var(--fs-xs);
+    color: var(--fg-faint);
+    line-height: 1.45;
   }
 </style>
