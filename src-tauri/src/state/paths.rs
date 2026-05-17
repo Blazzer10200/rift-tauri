@@ -27,9 +27,17 @@ pub fn dirs_home() -> std::io::Result<PathBuf> {
 }
 
 pub fn safe_profile_key(key: &str) -> String {
-    key.chars()
+    let cleaned: String = key
+        .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect()
+        .collect();
+    if cleaned.is_empty() {
+        log::warn!(
+            "safe_profile_key: input '{key}' sanitized to empty; using '_empty' sentinel"
+        );
+        return "_empty".into();
+    }
+    cleaned
 }
 
 pub fn cache_path(prefix: &str, profile_key: &str) -> std::io::Result<PathBuf> {

@@ -1591,11 +1591,18 @@ async fn editor_for(
     let sftp_arc = Arc::new(client);
     let mgr = Arc::new(edit::in_place::EditInPlaceManager::new(server_key.to_string(), sftp_arc, app.clone())?);
     // Two concurrent first-time inits for the same server may both reach
-    // here; `or_insert` ensures one wins and the other Arc<EditInPlaceManager>
-    // (with its SFTP client) is dropped immediately. Worst case: one
-    // wasted SFTP handshake. Better than UI-wide stall.
+    // here. The first to grab the lock wins; the loser drops its just-opened
+    // SFTP handle. Worst case: one wasted handshake. Race-loss now logs a
+    // `warn!` so the drop is visible in diag/logs instead of silent.
     let mut g = state.0.lock().await;
-    Ok(g.entry(server_key.to_string()).or_insert(mgr).clone())
+    if let Some(existing) = g.get(server_key) {
+        log::warn!(
+            "editor_for: race lost on '{server_key}' — discarding just-opened SFTP handle (another task initialized first)"
+        );
+        return Ok(existing.clone());
+    }
+    g.insert(server_key.to_string(), mgr.clone());
+    Ok(mgr)
 }
 
 #[tauri::command]

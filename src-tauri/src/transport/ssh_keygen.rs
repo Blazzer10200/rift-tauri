@@ -46,8 +46,9 @@ impl SshKeygen {
 
     /// Generate an ed25519 keypair at `target_dir/<filename>` (private) +
     /// `.pub` (public). `comment` lands in the public key. Refuses to
-    /// overwrite an existing private key. Caller is responsible for chmod —
-    /// Windows ignores it; on POSIX systems the user can `chmod 600` after.
+    /// overwrite an existing private key. On POSIX the private key is
+    /// chmod'd to 0600 in-place (ssh refuses world/group-readable keys);
+    /// Windows ignores Unix perms entirely.
     pub fn generate(
         target_dir: &Path,
         filename: &str,
@@ -74,6 +75,16 @@ impl SshKeygen {
             .map_err(|e| format!("private to_openssh: {e}"))?;
         std::fs::write(&private_path, pem.as_bytes())
             .map_err(|e| format!("write {}: {e}", private_path.display()))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                &private_path,
+                std::fs::Permissions::from_mode(0o600),
+            )
+            .map_err(|e| format!("chmod 0600 {}: {e}", private_path.display()))?;
+        }
 
         let pub_text = key
             .public_key()

@@ -18,7 +18,7 @@
 //!   reactivity on a webpack-rebuild-style burst.
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -107,8 +107,12 @@ pub struct DiagBus {
     tx: broadcast::Sender<DiagEvent>,
     seq: AtomicU64,
     queue_dropped_total: AtomicU64,
-    last_rescan_signal_at: std::sync::Mutex<Option<DateTime<Utc>>>,
-    last_drift_scan_at: std::sync::Mutex<Option<DateTime<Utc>>>,
+    /// Epoch-ms of the last RescanSignal publish. `i64::MIN` = none seen yet.
+    /// Atomic (vs `Mutex<Option<DateTime>>`) so the diagnostics hot-path
+    /// stays lock-free.
+    last_rescan_signal_at_ms: AtomicI64,
+    /// Epoch-ms of the last DriftScanStart/Result publish. `i64::MIN` = none.
+    last_drift_scan_at_ms: AtomicI64,
     bus_lag_total: AtomicU64,
     events_emitted_total: AtomicU64,
     enabled: AtomicBool,
@@ -118,6 +122,11 @@ pub struct DiagBus {
     recent: std::sync::Mutex<std::collections::VecDeque<DiagEvent>>,
 }
 
+fn basename_only(path: &str) -> String {
+    let norm = path.replace('\\', "/");
+    norm.rsplit('/').find(|s| !s.is_empty()).unwrap_or("").to_string()
+}
+
 impl DiagBus {
     fn new() -> Self {
         let (tx, _rx) = broadcast::channel(BUS_CAPACITY);
@@ -125,8 +134,8 @@ impl DiagBus {
             tx,
             seq: AtomicU64::new(0),
             queue_dropped_total: AtomicU64::new(0),
-            last_rescan_signal_at: std::sync::Mutex::new(None),
-            last_drift_scan_at: std::sync::Mutex::new(None),
+            last_rescan_signal_at_ms: AtomicI64::new(i64::MIN),
+            last_drift_scan_at_ms: AtomicI64::new(i64::MIN),
             bus_lag_total: AtomicU64::new(0),
             events_emitted_total: AtomicU64::new(0),
             enabled: AtomicBool::new(true),
@@ -144,6 +153,11 @@ impl DiagBus {
         if !self.enabled.load(Ordering::Relaxed) {
             return;
         }
+        // Renderer-bound: trailing basename only. Absolute paths leak the
+        // user's directory structure (and occasionally embedded credentials)
+        // to the webview. The basename keeps the signal — which file moved —
+        // without the noise.
+        event.file = event.file.as_deref().map(basename_only);
         event.seq = self.seq.fetch_add(1, Ordering::Relaxed);
         self.events_emitted_total.fetch_add(1, Ordering::Relaxed);
         match event.stage {
@@ -151,14 +165,12 @@ impl DiagBus {
                 self.queue_dropped_total.fetch_add(1, Ordering::Relaxed);
             }
             DiagStage::RescanSignal => {
-                if let Ok(mut g) = self.last_rescan_signal_at.lock() {
-                    *g = Some(event.at);
-                }
+                self.last_rescan_signal_at_ms
+                    .store(event.at.timestamp_millis(), Ordering::Relaxed);
             }
             DiagStage::DriftScanStart | DiagStage::DriftScanResult => {
-                if let Ok(mut g) = self.last_drift_scan_at.lock() {
-                    *g = Some(event.at);
-                }
+                self.last_drift_scan_at_ms
+                    .store(event.at.timestamp_millis(), Ordering::Relaxed);
             }
             _ => {}
         }
@@ -193,11 +205,21 @@ impl DiagBus {
     }
 
     pub fn last_rescan_signal_at(&self) -> Option<DateTime<Utc>> {
-        self.last_rescan_signal_at.lock().ok().and_then(|g| *g)
+        let ms = self.last_rescan_signal_at_ms.load(Ordering::Relaxed);
+        if ms == i64::MIN {
+            None
+        } else {
+            DateTime::<Utc>::from_timestamp_millis(ms)
+        }
     }
 
     pub fn last_drift_scan_at(&self) -> Option<DateTime<Utc>> {
-        self.last_drift_scan_at.lock().ok().and_then(|g| *g)
+        let ms = self.last_drift_scan_at_ms.load(Ordering::Relaxed);
+        if ms == i64::MIN {
+            None
+        } else {
+            DateTime::<Utc>::from_timestamp_millis(ms)
+        }
     }
 
     pub fn bus_lag_total(&self) -> u64 {
