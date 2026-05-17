@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import AssistantHeader from "./AssistantHeader.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
@@ -58,7 +59,9 @@
   <AssistantHeader />
 
   <div class="layout">
-    <HistoryDrawer />
+    {#if !uiPrefs.useV03Shell}
+      <HistoryDrawer />
+    {/if}
     <div class="chat">
       <div class="scroll" bind:this={scrollEl} onscroll={onScroll}>
         {#if showEmpty}
@@ -94,9 +97,11 @@
       <Composer onsubmit={(text) => assistant.send(text)} />
     </div>
 
-    <div class="dock-slot" class:open={assistant.ui.dockOpen}>
-      <TasksDock />
-    </div>
+    {#if !uiPrefs.useV03Shell}
+      <div class="dock-slot" class:open={assistant.ui.dockOpen}>
+        <TasksDock />
+      </div>
+    {/if}
   </div>
 </div>
 

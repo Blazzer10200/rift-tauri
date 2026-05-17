@@ -1,6 +1,7 @@
 <script lang="ts">
   import { History, X, Plus, Trash2, Pencil, Check, MessagesSquare, Search } from "lucide-svelte";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
 
   let renameId = $state<string | null>(null);
   let renameDraft = $state("");
@@ -57,9 +58,11 @@
   }
 </script>
 
-{#if assistant.ui.historyOpen}
-  <div class="overlay" onclick={close} role="presentation"></div>
-  <aside class="drawer" aria-label="Conversation history">
+{#if uiPrefs.useV03Shell || assistant.ui.historyOpen}
+  {#if !uiPrefs.useV03Shell}
+    <div class="overlay" onclick={close} role="presentation"></div>
+  {/if}
+  <aside class="drawer" class:v03={uiPrefs.useV03Shell} aria-label="Conversation history">
     <header class="head">
       <div class="title">
         <History size={14} />
@@ -71,13 +74,15 @@
           class="iconbtn primary"
           type="button"
           title="New conversation"
-          onclick={() => { void assistant.newConversation(); close(); }}
+          onclick={() => { void assistant.newConversation(); if (!uiPrefs.useV03Shell) close(); }}
         >
           <Plus size={13} /> New
         </button>
-        <button class="iconbtn" type="button" title="Close" onclick={close}>
-          <X size={14} />
-        </button>
+        {#if !uiPrefs.useV03Shell}
+          <button class="iconbtn" type="button" title="Close" onclick={close}>
+            <X size={14} />
+          </button>
+        {/if}
       </div>
     </header>
 
@@ -191,6 +196,19 @@
     z-index: 31;
     display: flex; flex-direction: column;
     animation: slide-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  /* Under v0.3, PanelShell owns frame + close affordance; the drawer is just
+     a body that fills its dock panel. */
+  .drawer.v03 {
+    position: static;
+    width: 100%;
+    height: 100%;
+    box-shadow: none;
+    border-right: 0;
+    background: transparent;
+    animation: none;
+    z-index: auto;
+    flex: 1;
   }
   @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
   @keyframes slide-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
