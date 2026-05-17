@@ -139,9 +139,20 @@ impl SyncSnapshot {
     }
 
     pub fn compute_sha1(local_path: &Path) -> Option<String> {
-        let bytes = std::fs::read(local_path).ok()?;
+        use std::io::{BufReader, Read};
+
+        let f = std::fs::File::open(local_path).ok()?;
+        let mut reader = BufReader::with_capacity(64 * 1024, f);
         let mut hasher = Sha1::new();
-        hasher.update(&bytes);
+        let mut buf = [0u8; 8 * 1024];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => hasher.update(&buf[..n]),
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => return None,
+            }
+        }
         Some(hex_upper(&hasher.finalize()))
     }
 

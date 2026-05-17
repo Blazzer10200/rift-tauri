@@ -2,7 +2,7 @@
 
 Single source of truth for code audit findings. Open items at top, archive below. Line numbers re-verified 2026-05-17 against HEAD (v0.4.1-alpha tree). Re-verify before fixing if HEAD has moved.
 
-Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 fix-pass closed 6 (B2/B4/B5/B9 + S6 + T4). S82 fix-pass closed 6 (B7 + B11 + S4 + T1 + T2 + T3) + downgraded B16 to INFO. S83 fix-pass closed 3 more (B3 + F1 + F2). Total Open: 42 → **8 actionable**.
+Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 closed 6 (B2/B4/B5/B9 + S6 + T4). S82 closed 6 (B7 + B11 + S4 + T1 + T2 + T3) + B16→INFO. S83 closed 3 (B3 + F1 + F2). S84 closed 1 (S5). Total Open: 42 → **7 actionable**.
 
 ---
 
@@ -26,15 +26,14 @@ All open frontend audit items resolved. F3–F15 fixed by v0.3/v0.4 refactors (v
 
 (B1/B15 fixed by 2026-05-17 verification pass; B2/B4/B5/B9 by S81; B7/B11 + B16→INFO by S82; B3 by S83 — all in Archive.)
 
-## Backend — sync (2 items)
+## Backend — sync (1 actionable)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
 | MED | `src-tauri/src/sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
-| LOW | `src-tauri/src/state/sync_snapshot.rs:141` `compute_sha1` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
-| INFO-MOOT | `src-tauri/src/sync/edit_trail.rs:75-80` `read_raw` | Subdir w/ PID+`short_id` race could cross-delete concurrent reads. `short_id` widened to 8 bytes 2026-05-12; PID+rand collision now astronomical. Keep tracked but no action needed. | Optional `NamedTempFile` migration. |
+| INFO-MOOT | `src-tauri/src/sync/edit_trail.rs:75-80` `read_raw` | Subdir w/ PID+`short_id` race could cross-delete concurrent reads. `short_id` widened to 8 bytes 2026-05-12; collision astronomical. No action needed. | Optional `NamedTempFile`. |
 
-(S2 fixed by 2026-05-17 verification pass; S6 closed by S81; S4 closed by S82 — all in Archive.)
+(S2 fixed by verification pass; S6 by S81; S4 by S82; S5 by S84 — all in Archive.)
 
 ## Backend — transport/sftp/tunnel/edit/update (0 actionable, 2 INFO accepted)
 
@@ -55,6 +54,12 @@ All open frontend audit items resolved. F3–F15 fixed by v0.3/v0.4 refactors (v
 # Archive — Resolved
 
 All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix (Rust) or `npm run check` (frontend). Line numbers reflect pre-cleanup tree.
+
+## S84 Fix-Pass 2026-05-17 (1 item)
+
+| # | File:line | Change |
+|---:|---|---|
+| S5 | `state/sync_snapshot.rs:141-156 compute_sha1` | Switched from `std::fs::read` (whole file into heap, ≤64 MiB) to `BufReader` 64 KiB + 8 KiB stream loop. Hash output unchanged (verified via `compute_sha1_known_input` + `compute_sha1_missing_file_returns_none` tests, both pass). EINTR retry loop included for POSIX correctness. |
 
 ## S83 Fix-Pass 2026-05-17 (3 items)
 
