@@ -206,9 +206,9 @@ class AssistantStore {
   // Initialized from localStorage so the choice survives reloads.
   model = $state<"sonnet" | "opus" | "haiku">(loadModel());
   // `dockOpen` drives the inline TasksDock in AssistantPage under both v0.2
-  // and v0.3/v0.4.1 shells (Tasks returned to AssistantPage in v0.4.1).
-  // `historyOpen` is v0.2-only — under v0.3 History lives in the right pane
-  // and visibility is driven by `uiPrefs.panels.history.open`.
+  // and v0.4.1 shells (Tasks returned to AssistantPage in v0.4.1).
+  // `historyOpen` is v0.2-only — under v0.4.1 History lives in the right
+  // pane and visibility is driven by `rightPane.activeId === "history"`.
   ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false });
 
   // Conversation history.

@@ -27,8 +27,7 @@
   import RightPane from "./shell/RightPane.svelte";
   import ActivityBar from "./shell/ActivityBar.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
-  import { rightPane, type ActivityBarId } from "../state/right-pane.svelte";
-  import type { PanelId } from "../state/panel-types";
+  import { rightPane } from "../state/right-pane.svelte";
   import { PANELS } from "./dock/panels";
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
@@ -113,12 +112,6 @@
     }
   }
   function closeSettingsModal() { settingsModalOpen = false; }
-
-  // v0.4.1: right-pane page toggles. Replaces the v0.3 dock per-panel toggle
-  // (one page at a time, no accordion / stacking semantics — picking a new
-  // id swaps the surface). PanelId is the legacy alias; treat it as the
-  // ActivityBarId set (v0.4.1 dropped `tasks`).
-  function togglePanel(id: PanelId) { rightPane.toggle(id as ActivityBarId); }
 
   // ── command registry ──────────────────────────────────────────────
   // Shared (both v0.2 and v0.3) — server + sync ops are surface-agnostic.
