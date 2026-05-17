@@ -4,7 +4,7 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Mic } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Mic, Accessibility as A11yIcon } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
@@ -23,7 +23,7 @@
   } from "../../state/terminal.svelte";
   import { THEME_PRESETS } from "../terminal/themePresets";
 
-  type Section = "appearance" | "terminal" | "assistant" | "speech" | "servers" | "keys" | "about";
+  type Section = "appearance" | "terminal" | "assistant" | "accessibility" | "speech" | "servers" | "keys" | "about";
 
   type ShellInfo = { id: string; label: string; program: string; args: string[]; available: boolean };
   let shells = $state<ShellInfo[]>([]);
@@ -118,6 +118,7 @@
     { id: "appearance", label: "Appearance", icon: Sparkles },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "assistant",  label: "Assistant",  icon: Sparkles },
+    { id: "accessibility", label: "Accessibility", icon: A11yIcon },
     { id: "speech",     label: "Speech",     icon: Mic },
     { id: "servers",    label: "Servers",    icon: Server },
     { id: "keys",       label: "SSH keys",   icon: Key },
@@ -127,6 +128,7 @@
   // Assistant API-key field — value mirrors store, save commits to disk.
   import { assistant as assistantStore } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
+  import { accessibility } from "../../state/accessibility.svelte";
   const STT_LANGS: { id: string; label: string }[] = [
     { id: "en-US", label: "English (US)" },
     { id: "en-GB", label: "English (UK)" },
@@ -731,6 +733,98 @@
           </div>
           {#if asstApiKeyMsg}<p class="muted">{asstApiKeyMsg}</p>{/if}
           <p class="muted asst-warn">Stored in <code>~/.rift/assistant/config.json</code> as plaintext. Keychain migration planned.</p>
+        </div>
+      </div>
+
+    {:else if section === "accessibility"}
+      <div>
+        <h3>Accessibility</h3>
+        <p class="help">
+          Reading-comfort options for the Assistant. The master switch enables
+          a dyslexia-friendly bundle (font + spacing + a hint to Claude to
+          interpret typos charitably); the dials below let you fine-tune.
+        </p>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Dyslexia-friendly mode</h4>
+          <p class="muted">Turns on Lexend font + increased line spacing, and tells Claude to interpret phonetic typos / voice-to-text artifacts charitably (no spelling pedantry).</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Dyslexia-friendly mode"
+              aria-checked={accessibility.dyslexiaMode}
+              data-on={accessibility.dyslexiaMode}
+              onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if accessibility.dyslexiaMode}On — Claude is briefed each turn; font + spacing dials apply below.{:else}Off.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">UI font</h4>
+          <p class="muted">Lexend has the strongest research backing for reading-rate improvement on dyslexic readers. System keeps the default Inter UI font.</p>
+          <div class="stt-lang-grid">
+            <button
+              type="button"
+              class="stt-lang-pick"
+              data-active={accessibility.font === "system"}
+              onclick={() => accessibility.setFont("system")}
+            >
+              <span class="stt-lang-label">System default</span>
+              <span class="stt-lang-code mono">Inter</span>
+            </button>
+            <button
+              type="button"
+              class="stt-lang-pick"
+              data-active={accessibility.font === "lexend"}
+              onclick={() => accessibility.setFont("lexend")}
+            >
+              <span class="stt-lang-label">Lexend</span>
+              <span class="stt-lang-code mono">dyslexia-tuned</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Increased line + letter spacing</h4>
+          <p class="muted">Bumps line-height to 1.85 and adds letter-/word-spacing inside Assistant message bubbles and the composer. Other surfaces (Files, Sync, etc.) keep their compact density.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Increased line and letter spacing"
+              aria-checked={accessibility.lineHeightBoost}
+              data-on={accessibility.lineHeightBoost}
+              onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if accessibility.lineHeightBoost}On — wider rows in messages + composer.{:else}Off — default compact spacing.{/if}
+            </span>
+          </div>
+        </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Warm reading tint</h4>
+          <p class="muted">Tints Assistant message bubbles with a warm sepia overlay — softens the bright-white-on-dark contrast that triggers glare for some readers. Rest of the UI keeps its current theme.</p>
+          <div class="asst-row">
+            <button
+              type="button"
+              class="switch"
+              role="switch"
+              aria-label="Warm reading tint"
+              aria-checked={accessibility.warmTint}
+              data-on={accessibility.warmTint}
+              onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}
+            ><span class="switch-knob"></span></button>
+            <span class="muted">
+              {#if accessibility.warmTint}On — sepia tint on message bubbles.{:else}Off — default dark theme.{/if}
+            </span>
+          </div>
         </div>
       </div>
 

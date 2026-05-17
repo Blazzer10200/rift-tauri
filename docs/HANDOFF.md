@@ -2,33 +2,36 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 92 — 2026-05-17 — v0.4.6-alpha HOT-FIX: `bypassPermissions` mode
+## Session 93 — 2026-05-17 — v0.4.7-alpha: Settings → Accessibility
 
-Second Assistant session hit `mcp__rift__remote_bash` "running in don't ask mode" denial — despite S91 allowlist including the tool. Root cause: [src-tauri/src/assistant/mod.rs:926](src-tauri/src/assistant/mod.rs#L926) passed `--permission-mode dontAsk`, which auto-DENIES anything that would prompt (MCP calls included — `--allowed-tools` doesn't short-circuit that gate). Switched to `bypassPermissions` — auto-allows; `--allowed-tools` remains the reachability gate. One-line change + explanatory comment, 3-file bump 0.4.5 → 0.4.6-alpha.
+Phase 1 of the dyslexia-friendly arc. New section between Assistant + Speech (lucide `Accessibility` icon) — one master toggle + three dials:
 
-**S91 recap (v0.4.5 binary released earlier same day):** widened `--allowed-tools` to full CLI `BUILTINS` const + STT `maxAlternatives` 1→3 w/ `pickBestAlternate` helper. Trey auto-updated.
+- **Master switch** — first-time-on seeds Lexend + line-height boost; forwards `dyslexiaMode: true` through `assistant_send` so [assistant/mod.rs](src-tauri/src/assistant/mod.rs) appends a per-turn addendum telling Claude to interpret phonetic/letter-swap typos + STT slur artifacts charitably. Zero per-turn cost.
+- **UI font** — System (Inter) ↔ Lexend (`@fontsource-variable/lexend`, ~150KB offline).
+- **Line + letter spacing** — 1.85 line-height + letter/word spacing bumps, scoped to `.bubble`/`.markdown-body`/textarea.
+- **Warm reading tint** — sepia overlay on bubbles + code only; rest of UI keeps dark theme.
 
-**Next arc (deferred):** dyslexia-friendly Assistant for Trey. Phase 1 = Settings → Accessibility (Lexend font, +line-height, cream bg, system-prompt hint). Phase 2 = SymSpell+Metaphone "did you mean" pill. Open Qs in chat.
+Store [accessibility.svelte.ts](src/lib/state/accessibility.svelte.ts) mirrors `ui-prefs.svelte.ts` (localStorage + `documentElement.dataset.a11y*`). CSS at bottom of `app.css`. Settings UI matches Speech section. Wired via `+layout.svelte`. 3-file bump 0.4.6 → 0.4.7-alpha. Auto-verifier clean. Phase 2 deferred.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.6-alpha** (S92 hot-fix pending commit; v0.4.5 binary already released). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.7-alpha** (S93 pending commit; v0.4.6 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
 **v0.4.1 shell** = default; `useV03Shell` toggle = experimental v0.2 fallback (storage key verbatim, never rename).
 
 **CDP autonomous-verify live** — `run-dev.bat` sets WebView2 port; `npm run cdp:serve` on 9223; `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`.
 
-**Voice:** Settings → Speech (STT only). Mic in composer; WebView `SpeechRecognition` → `assistant.composerDraft`. v0.4.5 picks highest-confidence of 3 alternates.
+**Voice:** Settings → Speech (STT only); v0.4.5 picks highest-conf of 3 alternates. **A11y:** Settings → Accessibility (dyslexia-friendly mode, font, spacing, warm tint — v0.4.7).
 
-**v0.2 queue** (each needs `/grill` or `/plan`): auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split (1790L / 51 cmds — biggest); LocalPane/RemotePane base extract; Diagnostics canonical-skeleton; integration tests phase 1. STT stretch: vocabulary hints / Azure-direct fallback / "did you mean X?" UI.
+**v0.2 queue** (needs `/grill` or `/plan`): auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split (1790L); LocalPane/RemotePane base extract; integration tests phase 1. A11y stretch: SymSpell+Metaphone "did you mean" pill; STT vocab hints / Azure-direct.
 
 **Audit queue:** 6 LOW lib/config, upstream-blocked. See [docs/AUDIT.md](docs/AUDIT.md).
 
-**Multi-user:** Trey OFF Mirror until on-latest. Setup: [docs/TREY-SETUP.md](docs/TREY-SETUP.md). v0.4.5 auto-updates him.
+**Multi-user:** Trey OFF Mirror until on-latest. [docs/TREY-SETUP.md](docs/TREY-SETUP.md). v0.4.7 auto-updates him.
 
-**Don't reintroduce:** dock primitive, maximize-to-center, `PanelState.slot`, `dockSplitPct`, Tasks-as-peer, AddPanelMenu, TabRail under v0.4.1, OpRail/TopBar, whisper-rs (libclang Windows dep), `msedge-tts` / TTS module / speaker UI.
+**Don't reintroduce:** dock primitive, maximize-to-center, `PanelState.slot`, `dockSplitPct`, Tasks-as-peer, AddPanelMenu, TabRail under v0.4.1, OpRail/TopBar, whisper-rs (libclang dep), `msedge-tts` / TTS / speaker UI.
 
 ---
 

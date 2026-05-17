@@ -9,6 +9,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { uiPrefs } from "./ui-prefs.svelte";
+import { accessibility } from "./accessibility.svelte";
 
 export type WorkspaceState = {
   current: string | null;
@@ -920,6 +921,7 @@ class AssistantStore {
         isFirstTurn,
         model: this.model,
         attachments: turnAttachments.length > 0 ? turnAttachments : null,
+        dyslexiaMode: accessibility.dyslexiaMode,
       });
     } catch (e) {
       this.onError(String(e));

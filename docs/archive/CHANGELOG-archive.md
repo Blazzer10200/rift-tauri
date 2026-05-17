@@ -2,6 +2,16 @@
 
 > Retired entries from `docs/CHANGELOG.md`. Newest first. Pre-archive history also available via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.6-alpha — 2026-05-17 — Hot-fix: switch embedded Claude to `bypassPermissions`
+
+A second Assistant session reported `mcp__rift__remote_bash` denied with: *"Permission to use mcp__rift__remote_bash has been denied because Claude Code is running in don't ask mode."* — surfaced after the v0.4.5 ship despite `mcp__rift__remote_bash` being in the `--allowed-tools` allowlist (verified). Root cause: [src-tauri/src/assistant/mod.rs:926](src-tauri/src/assistant/mod.rs#L926) passed `--permission-mode dontAsk`, which auto-DENIES anything that would otherwise prompt the user — and MCP tools (incl. `mcp__rift__remote_bash`) require per-call approval that `--allowed-tools` does NOT short-circuit in `dontAsk`. Rift has no interactive permission UI by design, so the right mode is `bypassPermissions` — auto-allows every call, and `--allowed-tools` continues to act as the actual gate over which tool names are reachable.
+
+One-line change (`dontAsk` → `bypassPermissions`) plus a comment block explaining why. `--allowed-tools` from S91 unchanged: the full `BUILTINS` set + scoped `mcp__rift__*` (+ `mcp__rift__remote_bash` when the remote-shell toggle is on) still defines what's reachable.
+
+This is the real root cause behind the chronic "permission denied" reports — S91 widened tool *availability* but every MCP call still hit the per-call approval gate. v0.4.6 closes that gate via mode switch.
+
+Verify: `cargo check` clean (auto-verifier). Functional verification via CDP after binary install — re-run the previously-blocked `mcp__rift__remote_bash` from a Trey-mode session.
+
 ## v0.4.5-alpha — 2026-05-17 — Embedded Claude tool allowlist + STT alternates
 
 **S91 priority 1 — permission denials in the Assistant tab.** Blazzer + Trey hit recurring "tool not in allowlist" / "permission denied" messages whenever the embedded Claude tried to spawn a subagent, run a background bash command, edit a notebook, etc. S88's fix added `Skill` to all three `--allowed-tools` branches in [src-tauri/src/assistant/mod.rs](src-tauri/src/assistant/mod.rs) but stopped short of the rest of the built-in surface. S91 widens to the full CLI built-in set: `Agent` (subagent spawning — used by `/plan`, `/quick-review`, `/check`), `AskUserQuestion`, `BashOutput` + `KillBash` + `KillShell` (the CLI auto-invokes these whenever Bash runs with `run_in_background: true`), `ExitPlanMode`, `MultiEdit`, `NotebookEdit`, `SlashCommand`. Refactored the three branch bodies to share a single `BUILTINS` const so future additions land in one place. MCP scope is unchanged — full-config keeps `mcp__*`, scoped branches keep the explicit `mcp__rift__*` entries (+ `mcp__rift__remote_bash` when the remote-shell toggle is on). Verified via CDP: a fresh Assistant tab successfully called Bash + spawned an Agent subagent with zero permission denials.
