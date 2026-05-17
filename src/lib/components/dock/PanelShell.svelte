@@ -25,17 +25,17 @@
   // check on every downstream `.open`/`.collapsed` access.
   const def = $derived(PANELS[id]);
   const ps = $derived(uiPrefs.panels[id]);
-  // While ANY panel is maximized into the main column, all dock panels render
-  // header-only — clicking another header's ⛶ swaps focus; clicking the
-  // maximized panel's ⛶ (which is now in main + dock) restores chat.
-  const showBody = $derived(!ps.collapsed && uiPrefs.maximized === null);
+  // All panel headers render at all times; `open` drives expanded/collapsed
+  // body. While any panel is maximized into the main column, all dock bodies
+  // hide — header-only mode lets the user swap focus via another header's ⛶.
+  const showBody = $derived(ps.open && uiPrefs.maximized === null);
   // Optional count pip from registry — reactive because getCount reads
   // $state-backed stores inside the lambda. Tone defaults to neutral grey.
   const count = $derived(def.getCount?.() ?? 0);
   const countTone = $derived(def.getTone ?? "neutral");
 
-  // Lazy-mount: don't instantiate panel body until first open. Once mounted,
-  // stays mounted so internal state (scroll, selection) survives toggle.
+  // Lazy-mount: don't instantiate panel body until first expand. Once mounted,
+  // stays mounted so internal state (scroll, selection) survives collapse.
   let everOpened = $state(false);
   $effect(() => { if (ps.open && !everOpened) everOpened = true; });
 
@@ -83,7 +83,7 @@
   class="panel"
   data-panel-id={id}
   data-open={ps.open}
-  data-collapsed={ps.collapsed}
+  data-collapsed={!ps.open}
   data-maximized={isMaximized}
   aria-label="{def.title} panel"
 >
@@ -93,20 +93,19 @@
     aria-label="{def.title} panel header"
     tabindex="-1"
     draggable={!isMaximized}
+    onclick={(e) => {
+      // Header click toggles expand/collapse. Inner buttons stopPropagation
+      // so their clicks don't bubble here and double-fire.
+      uiPrefs.togglePanel(id, { allowMulti: e.shiftKey });
+    }}
     ondragstart={(e) => onDragStart?.(id, e)}
     ondragover={(e) => onDragOver?.(id, e)}
     ondrop={(e) => onDrop?.(id, e)}
     ondragend={(e) => onDragEnd?.(id, e)}
   >
-    <button
-      class="caret"
-      type="button"
-      aria-label={ps.collapsed ? "Expand panel body" : "Collapse panel body"}
-      aria-expanded={!ps.collapsed}
-      onclick={(e) => { uiPrefs.togglePanelCollapsed(id); (e.currentTarget as HTMLButtonElement).blur(); }}
-    >
-      <span class="caret-icon" data-open={!ps.collapsed}><ChevronRight size={12}/></span>
-    </button>
+    <span class="caret" aria-hidden="true">
+      <span class="caret-icon" data-open={ps.open}><ChevronRight size={12}/></span>
+    </span>
     <span class="head-icon"><def.icon size={13}/></span>
     <span class="head-title">{def.title}</span>
     {#if count > 0}
@@ -118,7 +117,7 @@
       type="button"
       title={isMaximized ? "Restore to dock" : "Maximize to center"}
       aria-label={isMaximized ? "Restore panel to dock" : "Maximize panel to center"}
-      onclick={(e) => { uiPrefs.maximizePanel(isMaximized ? null : id); (e.currentTarget as HTMLButtonElement).blur(); }}
+      onclick={(e) => { e.stopPropagation(); uiPrefs.maximizePanel(isMaximized ? null : id); (e.currentTarget as HTMLButtonElement).blur(); }}
     >
       {#if isMaximized}<Minimize2 size={12}/>{:else}<Maximize2 size={12}/>{/if}
     </button>
@@ -195,17 +194,32 @@
 
 <style>
   .panel {
+    position: relative;
     display: flex; flex-direction: column;
-    background: var(--bg);
+    background: transparent;
     border-bottom: 1px solid var(--border);
     min-height: 0;
+    transition: background 120ms ease;
   }
   .panel:last-child { border-bottom: 0; }
+  /* Open panels lift slightly + get an accent rail on the left edge so the
+     eye can find the expanded section without scanning chevrons. */
+  .panel[data-open="true"] {
+    background: var(--bg);
+  }
+  .panel[data-open="true"]::before {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--accent);
+    opacity: 0.8;
+  }
 
   .panel-head {
     display: flex; align-items: center; gap: 6px;
-    height: 30px;
-    padding: 0 6px 0 2px;
+    height: 32px;
+    padding: 0 6px 0 6px;
     color: var(--fg-2);
     font-size: var(--fs-sm);
     user-select: none;
@@ -214,16 +228,17 @@
   }
   .panel-head:hover { background: var(--surface-hover); }
   .panel-head:active { cursor: grabbing; }
+  .panel[data-open="true"] .panel-head { color: var(--fg); }
+  .panel[data-open="true"] .head-title { font-weight: 600; }
 
   .caret {
     display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 22px;
-    background: transparent; border: 0; padding: 0;
     color: var(--fg-muted);
-    cursor: pointer;
-    border-radius: var(--radius-xs);
+    flex-shrink: 0;
+    pointer-events: none;
   }
-  .caret:hover { color: var(--fg); background: var(--surface-active); }
+  .panel-head:hover .caret { color: var(--fg); }
   .caret-icon {
     display: inline-flex;
     transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1);

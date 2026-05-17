@@ -44,21 +44,18 @@
           {#if serverName}{serverName} · {/if}{basename(active?.remotePath) || "/"}
         </span>
       </div>
-      <div class="meta">
-        {tabCount} {tabCount === 1 ? "tab" : "tabs"} open
+      <div class="foot">
+        <span class="meta">{tabCount} {tabCount === 1 ? "tab" : "tabs"}</span>
+        <button
+          type="button"
+          class="view-btn"
+          onclick={() => uiPrefs.maximizePanel("files")}
+          title="Maximize Files into the main column"
+        >
+          <Maximize2 size={11}/>
+          <span>Open</span>
+        </button>
       </div>
-      <button
-        type="button"
-        class="view-btn"
-        onclick={() => uiPrefs.maximizePanel("files")}
-        title="Maximize Files into the main column"
-      >
-        <Maximize2 size={12}/>
-        <span>View files</span>
-      </button>
-      <p class="hint">
-        Side-by-side browser needs more room than the dock — maximize to see Local + Remote panes.
-      </p>
     </div>
   {/if}
 </div>
@@ -70,8 +67,8 @@
     height: 100%;
   }
   .summary {
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 12px;
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 10px 12px 12px;
   }
   .row {
     display: flex; align-items: center; gap: 8px;
@@ -82,45 +79,43 @@
   .lbl {
     display: inline-flex; align-items: center; gap: 6px;
     color: var(--fg-muted);
-    width: 64px;
+    width: 60px;
     flex-shrink: 0;
+    font-size: var(--fs-xs);
   }
   .path {
     flex: 1; min-width: 0;
     color: var(--fg);
     font-size: var(--fs-xs);
-    background: var(--bg-elev-1);
+    background: var(--bg-elev-2);
     padding: 3px 7px;
     border-radius: var(--radius-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .foot {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 4px;
+  }
   .meta {
     font-size: var(--fs-xs);
     color: var(--fg-faint);
-    padding: 0 2px;
   }
   .view-btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    height: 30px;
-    padding: 0 12px;
-    margin-top: 4px;
-    background: color-mix(in oklch, var(--accent) 10%, transparent);
-    border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--border));
-    color: var(--fg);
-    border-radius: var(--radius-sm);
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 24px;
+    padding: 0 10px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--fg-2);
+    border-radius: var(--radius-xs);
     cursor: pointer;
     font: inherit;
-    font-size: var(--fs-sm);
-    transition: background 120ms ease, border-color 120ms ease;
+    font-size: var(--fs-xs);
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
   }
   .view-btn:hover {
-    background: color-mix(in oklch, var(--accent) 18%, transparent);
-    border-color: color-mix(in oklch, var(--accent) 60%, var(--border));
-  }
-  .hint {
-    margin: 4px 2px 0;
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-    line-height: 1.45;
+    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border-strong));
+    color: var(--fg);
   }
 </style>

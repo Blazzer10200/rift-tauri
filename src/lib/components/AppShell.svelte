@@ -426,13 +426,6 @@
 
   {#if uiPrefs.useV03Shell}
     <div class="body" data-v03="true">
-      <TabRail
-        mode="panels"
-        {active}
-        onChange={(t) => (active = t)}
-        onPanelToggle={togglePanel}
-        onOpenSettings={() => gotoSettings("appearance")}
-      />
       <main class="pane">
         <AssistantPage />
       </main>
@@ -636,13 +629,18 @@
     overflow: visible;
     position: relative;
   }
-  /* v0.3 shell: add a third column for the right-side dock. Width is driven
-     by --dock-w (set by uiPrefs.setDockWidth) and goes to 0 when collapsed. */
+  /* v0.3 shell: no left rail. Two-column grid w/ chat-first main + right-side dock.
+     Drop the grid-template-columns transition — under v0.3 the only animated
+     column is --dock-w, which is driven by the user dragging the resize
+     handle. Easing that pointer-driven change made the dock feel laggy (the
+     grid chased the cursor over 220ms). v0.2 keeps the transition for rail
+     pin/unpin animation. */
   .body[data-v03="true"] {
-    grid-template-columns: var(--rail-w, 48px) minmax(0, 1fr) var(--dock-w, 320px);
+    grid-template-columns: minmax(0, 1fr) var(--dock-w, 320px);
+    transition: none;
   }
   .body[data-v03="true"][data-dock-collapsed="true"] {
-    grid-template-columns: var(--rail-w, 48px) minmax(0, 1fr) 0;
+    grid-template-columns: minmax(0, 1fr) 0;
   }
   .pane {
     min-height: 0; min-width: 0;
