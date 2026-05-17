@@ -3,6 +3,8 @@
 // open/closed, drawer height, the live tab list, and the user's default
 // shell preference.
 
+import { uiPrefs } from "./ui-prefs.svelte";
+
 export type TermStatus = "starting" | "running" | "exited" | "error";
 
 export type TermTab = {
@@ -194,7 +196,16 @@ class TerminalStore {
     this.setOpen(false);
   }
 
-  toggle() { this.setOpen(!this.open); }
+  toggle() {
+    // Under v0.3 the embedded overlay is gone — the terminal is a dock panel
+    // governed by uiPrefs. Route through uiPrefs.togglePanel so Ctrl+` and
+    // every existing terminal.toggle() call site stays valid in both shells.
+    if (uiPrefs.useV03Shell) {
+      uiPrefs.togglePanel("terminal");
+      return;
+    }
+    this.setOpen(!this.open);
+  }
 
   setHeight(h: number) {
     this.height = h;
