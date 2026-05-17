@@ -7,6 +7,13 @@
   import Terminal, { type SearchApi } from "./Terminal.svelte";
   import TerminalFindBar from "./TerminalFindBar.svelte";
   import { terminal, TERM_HEIGHT_MIN } from "../../state/terminal.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
+
+  // v0.3 hosts the terminal inside PanelShell (dock). Overlay chrome (resize
+  // divider, collapsed strip, height/position logic, hide-self close button)
+  // collapses to a no-op; PanelShell owns visibility + sizing instead.
+  const isV03 = $derived(uiPrefs.useV03Shell);
+  const isVisible = $derived(isV03 ? uiPrefs.panels.terminal.open : terminal.open);
 
   type ShellInfo = {
     id: string;
@@ -59,7 +66,7 @@
   });
 
   function openFind() {
-    if (!terminal.open || terminal.tabs.length === 0) return;
+    if (!isVisible || terminal.tabs.length === 0) return;
     findOpen = true;
   }
   function closeFind() { findOpen = false; }
@@ -141,13 +148,13 @@
       ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA") &&
       !(ae as HTMLElement).closest(".term-panel");
 
-    if (!e.shiftKey && k === "f" && terminal.open) {
+    if (!e.shiftKey && k === "f" && isVisible) {
       if (inOtherInput) return;
       e.preventDefault();
       openFind();
       return;
     }
-    if (e.shiftKey && terminal.open) {
+    if (e.shiftKey && isVisible) {
       // Ctrl+Shift+[ / ] cycle tabs; Ctrl+Shift+T = new tab. We check `e.code`
       // for the brackets b/c `e.key` reports "{" / "}" under Shift.
       if (e.code === "BracketLeft" || e.code === "BracketRight") {
@@ -181,11 +188,11 @@
         const p = event.payload;
         if (p.type === "enter" || p.type === "over") {
           const pos = (p as { position?: { x: number; y: number } }).position;
-          dropActive = !!pos && isPositionOverPanel(pos.x, pos.y) && terminal.open;
+          dropActive = !!pos && isPositionOverPanel(pos.x, pos.y) && isVisible;
         } else if (p.type === "drop") {
           const pos = (p as { position?: { x: number; y: number } }).position;
           const paths = (p as { paths?: string[] }).paths ?? [];
-          if (pos && isPositionOverPanel(pos.x, pos.y) && terminal.open && paths.length) {
+          if (pos && isPositionOverPanel(pos.x, pos.y) && isVisible && paths.length) {
             void pasteDroppedPaths(paths);
           }
           dropActive = false;
@@ -203,7 +210,8 @@
     terminal.consumePendingRestore();
     // Open-but-no-tabs fallback: panel was open last time but no saved tabs
     // (first run, or storage cleared) — spin up one with the default shell.
-    if (terminal.open && terminal.tabs.length === 0) {
+    // Under v0.3, mount itself means the dock panel is open, so always seed.
+    if (isVisible && terminal.tabs.length === 0) {
       terminal.addTab(terminal.defaultShellId);
     }
   });
@@ -265,7 +273,205 @@
   });
 </script>
 
-{#if terminal.open}
+{#snippet termInner(showHideButton: boolean)}
+  <header class="term-head">
+    <div class="term-tabs" role="tablist">
+      {#each terminal.tabs as t (t.id)}
+        {@const displayLabel = t.customLabel || t.shellLabel}
+        <button
+          type="button"
+          class="term-tab"
+          role="tab"
+          data-active={t.id === terminal.activeTabId}
+          data-status={t.status}
+          onclick={() => terminal.setActive(t.id)}
+          ondblclick={(e) => { e.preventDefault(); startRename(t.id, displayLabel); }}
+          title="{displayLabel} — double-click to rename"
+        >
+          <TerminalSquare size={11}/>
+          {#if editingTabId === t.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="term-tab-input mono"
+              type="text"
+              bind:value={editingValue}
+              onkeydown={onRenameKey}
+              onblur={commitRename}
+              onclick={(e) => e.stopPropagation()}
+              ondblclick={(e) => e.stopPropagation()}
+              autofocus
+              placeholder={t.shellLabel}
+            />
+          {:else}
+            <span class="term-tab-label">{displayLabel}</span>
+          {/if}
+          {#if t.status === "exited"}
+            <span class="term-tab-dim mono">· exited</span>
+          {/if}
+          {#if terminal.tabs.length > 1}
+            <span
+              class="term-tab-x"
+              role="button"
+              tabindex="-1"
+              aria-label="Close tab"
+              title="Close tab"
+              onclick={(e) => { e.stopPropagation(); terminal.closeTab(t.id); }}
+              onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); terminal.closeTab(t.id); } }}
+            ><X size={9}/></span>
+          {/if}
+        </button>
+      {/each}
+
+      <div class="term-tab-add" bind:this={pickerEl} data-open={pickerOpen}>
+        <button
+          type="button"
+          class="term-tab-new"
+          onclick={() => addTab(null)}
+          title="New {shells.find((s) => s.id === terminal.defaultShellId)?.label ?? 'shell'} tab"
+          aria-label="New tab"
+        ><Plus size={11}/></button>
+        <span class="term-tab-sep" aria-hidden="true"></span>
+        <button
+          type="button"
+          class="term-tab-pick"
+          onclick={() => (pickerOpen = !pickerOpen)}
+          title="Pick a shell"
+          aria-label="Pick shell"
+          aria-expanded={pickerOpen}
+        ><ChevronDown size={10}/></button>
+
+        {#if pickerOpen}
+          <div class="term-picker" role="menu">
+            <div class="term-picker-section">Presets</div>
+            {#each PRESETS as p (p.id)}
+              {@const shellAvail = shells.find((s) => s.id === p.shellId)?.available ?? false}
+              <button
+                type="button"
+                class="term-picker-item"
+                role="menuitem"
+                disabled={!shellAvail}
+                onclick={() => addPresetTab(p)}
+                title={shellAvail ? `New tab → ${p.autoLaunch}` : "Underlying shell not installed"}
+              >
+                <span class="term-picker-left">
+                  <span class="term-picker-dot-spacer" aria-hidden="true"></span>
+                  <span class="term-picker-stack">
+                    <span class="term-picker-label">{p.label}</span>
+                    <span class="term-picker-sub mono">{p.subtitle}</span>
+                  </span>
+                </span>
+              </button>
+            {/each}
+
+            <div class="term-picker-section">Shells</div>
+            {#each sortedShells as s (s.id)}
+              <button
+                type="button"
+                class="term-picker-item"
+                role="menuitem"
+                disabled={!s.available}
+                data-default={s.id === terminal.defaultShellId}
+                onclick={() => addTab(s.id)}
+                title={s.available ? s.program : "Not installed"}
+              >
+                <span class="term-picker-left">
+                  {#if s.id === terminal.defaultShellId}
+                    <span class="term-picker-dot" aria-hidden="true"></span>
+                  {:else}
+                    <span class="term-picker-dot-spacer" aria-hidden="true"></span>
+                  {/if}
+                  <span class="term-picker-label">{s.label}</span>
+                </span>
+                {#if !s.available}
+                  <span class="term-picker-dim mono">missing</span>
+                {:else if s.id === terminal.defaultShellId}
+                  <span class="term-picker-dim mono">default</span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+
+    <div class="term-head-r">
+      <button
+        type="button"
+        class="term-close"
+        onclick={clearActive}
+        title="Clear buffer (Ctrl+L)"
+        aria-label="Clear terminal buffer"
+      ><Eraser size={12}/></button>
+      <button
+        type="button"
+        class="term-close"
+        onclick={openFind}
+        title="Find in terminal (Ctrl+F)"
+        aria-label="Find in terminal"
+      ><Search size={12}/></button>
+      {#if terminal.tabs.length > 1}
+        <button
+          type="button"
+          class="term-close-all"
+          onclick={() => terminal.closeAllTabs()}
+          title="Close all tabs"
+          aria-label="Close all tabs"
+        ><Trash2 size={12}/></button>
+      {/if}
+      {#if showHideButton}
+        <button
+          type="button"
+          class="term-close"
+          onclick={() => terminal.setOpen(false)}
+          title="Hide terminal (Ctrl+`)"
+          aria-label="Hide terminal"
+        ><ChevronDown size={14}/></button>
+      {/if}
+    </div>
+  </header>
+
+  <div class="term-body">
+    {#if findOpen}
+      <TerminalFindBar api={activeApi} onClose={closeFind} />
+    {/if}
+    {#each terminal.tabs as t (t.id)}
+      <div
+        class="term-mount"
+        style:display={t.id === terminal.activeTabId ? "flex" : "none"}
+      >
+        <Terminal
+          visible={t.id === terminal.activeTabId && isVisible}
+          shellId={t.shellId}
+          fontSize={terminal.fontSize}
+          autoLaunch={t.autoLaunch || terminal.autoLaunchCommand}
+          onSessionStart={(info) => terminal.patchTab(t.id, {
+            sessionId: info.id,
+            // Preserve preset-supplied labels ("Claude Code", "Codex CLI") —
+            // only overwrite if the tab is still on the default "Terminal".
+            shellLabel: t.shellLabel === "Terminal" ? info.shell_label : t.shellLabel,
+            status: "running",
+          })}
+          onStatusChange={(s) => terminal.patchTab(t.id, { status: s === "idle" ? t.status : s })}
+          onSearchReady={(api) => { searchApis.set(t.id, api); refreshActiveApi(); }}
+          onSearchTeardown={() => { searchApis.delete(t.id); refreshActiveApi(); }}
+        />
+      </div>
+    {/each}
+  </div>
+{/snippet}
+
+{#if isV03}
+  <!-- v0.3 dock mode: PanelShell wraps this and owns visibility/height.
+       No drag divider, no inline height, no collapsed strip, no hide-self
+       button (PanelShell exposes Close via its panel menu). -->
+  <section
+    class="term-panel term-panel-v03"
+    bind:this={panelEl}
+    data-drop-active={dropActive}
+  >
+    {@render termInner(false)}
+  </section>
+{:else if terminal.open}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <div
@@ -290,188 +496,7 @@
     data-resizing={resizing}
     data-drop-active={dropActive}
   >
-    <header class="term-head">
-      <div class="term-tabs" role="tablist">
-        {#each terminal.tabs as t (t.id)}
-          {@const displayLabel = t.customLabel || t.shellLabel}
-          <button
-            type="button"
-            class="term-tab"
-            role="tab"
-            data-active={t.id === terminal.activeTabId}
-            data-status={t.status}
-            onclick={() => terminal.setActive(t.id)}
-            ondblclick={(e) => { e.preventDefault(); startRename(t.id, displayLabel); }}
-            title="{displayLabel} — double-click to rename"
-          >
-            <TerminalSquare size={11}/>
-            {#if editingTabId === t.id}
-              <!-- svelte-ignore a11y_autofocus -->
-              <input
-                class="term-tab-input mono"
-                type="text"
-                bind:value={editingValue}
-                onkeydown={onRenameKey}
-                onblur={commitRename}
-                onclick={(e) => e.stopPropagation()}
-                ondblclick={(e) => e.stopPropagation()}
-                autofocus
-                placeholder={t.shellLabel}
-              />
-            {:else}
-              <span class="term-tab-label">{displayLabel}</span>
-            {/if}
-            {#if t.status === "exited"}
-              <span class="term-tab-dim mono">· exited</span>
-            {/if}
-            {#if terminal.tabs.length > 1}
-              <span
-                class="term-tab-x"
-                role="button"
-                tabindex="-1"
-                aria-label="Close tab"
-                title="Close tab"
-                onclick={(e) => { e.stopPropagation(); terminal.closeTab(t.id); }}
-                onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); terminal.closeTab(t.id); } }}
-              ><X size={9}/></span>
-            {/if}
-          </button>
-        {/each}
-
-        <div class="term-tab-add" bind:this={pickerEl} data-open={pickerOpen}>
-          <button
-            type="button"
-            class="term-tab-new"
-            onclick={() => addTab(null)}
-            title="New {shells.find((s) => s.id === terminal.defaultShellId)?.label ?? 'shell'} tab"
-            aria-label="New tab"
-          ><Plus size={11}/></button>
-          <span class="term-tab-sep" aria-hidden="true"></span>
-          <button
-            type="button"
-            class="term-tab-pick"
-            onclick={() => (pickerOpen = !pickerOpen)}
-            title="Pick a shell"
-            aria-label="Pick shell"
-            aria-expanded={pickerOpen}
-          ><ChevronDown size={10}/></button>
-
-          {#if pickerOpen}
-            <div class="term-picker" role="menu">
-              <div class="term-picker-section">Presets</div>
-              {#each PRESETS as p (p.id)}
-                {@const shellAvail = shells.find((s) => s.id === p.shellId)?.available ?? false}
-                <button
-                  type="button"
-                  class="term-picker-item"
-                  role="menuitem"
-                  disabled={!shellAvail}
-                  onclick={() => addPresetTab(p)}
-                  title={shellAvail ? `New tab → ${p.autoLaunch}` : "Underlying shell not installed"}
-                >
-                  <span class="term-picker-left">
-                    <span class="term-picker-dot-spacer" aria-hidden="true"></span>
-                    <span class="term-picker-stack">
-                      <span class="term-picker-label">{p.label}</span>
-                      <span class="term-picker-sub mono">{p.subtitle}</span>
-                    </span>
-                  </span>
-                </button>
-              {/each}
-
-              <div class="term-picker-section">Shells</div>
-              {#each sortedShells as s (s.id)}
-                <button
-                  type="button"
-                  class="term-picker-item"
-                  role="menuitem"
-                  disabled={!s.available}
-                  data-default={s.id === terminal.defaultShellId}
-                  onclick={() => addTab(s.id)}
-                  title={s.available ? s.program : "Not installed"}
-                >
-                  <span class="term-picker-left">
-                    {#if s.id === terminal.defaultShellId}
-                      <span class="term-picker-dot" aria-hidden="true"></span>
-                    {:else}
-                      <span class="term-picker-dot-spacer" aria-hidden="true"></span>
-                    {/if}
-                    <span class="term-picker-label">{s.label}</span>
-                  </span>
-                  {#if !s.available}
-                    <span class="term-picker-dim mono">missing</span>
-                  {:else if s.id === terminal.defaultShellId}
-                    <span class="term-picker-dim mono">default</span>
-                  {/if}
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
-      </div>
-
-      <div class="term-head-r">
-        <button
-          type="button"
-          class="term-close"
-          onclick={clearActive}
-          title="Clear buffer (Ctrl+L)"
-          aria-label="Clear terminal buffer"
-        ><Eraser size={12}/></button>
-        <button
-          type="button"
-          class="term-close"
-          onclick={openFind}
-          title="Find in terminal (Ctrl+F)"
-          aria-label="Find in terminal"
-        ><Search size={12}/></button>
-        {#if terminal.tabs.length > 1}
-          <button
-            type="button"
-            class="term-close-all"
-            onclick={() => terminal.closeAllTabs()}
-            title="Close all tabs"
-            aria-label="Close all tabs"
-          ><Trash2 size={12}/></button>
-        {/if}
-        <button
-          type="button"
-          class="term-close"
-          onclick={() => terminal.setOpen(false)}
-          title="Hide terminal (Ctrl+`)"
-          aria-label="Hide terminal"
-        ><ChevronDown size={14}/></button>
-      </div>
-    </header>
-
-    <div class="term-body">
-      {#if findOpen}
-        <TerminalFindBar api={activeApi} onClose={closeFind} />
-      {/if}
-      {#each terminal.tabs as t (t.id)}
-        <div
-          class="term-mount"
-          style:display={t.id === terminal.activeTabId ? "flex" : "none"}
-        >
-          <Terminal
-            visible={t.id === terminal.activeTabId && terminal.open}
-            shellId={t.shellId}
-            fontSize={terminal.fontSize}
-            autoLaunch={t.autoLaunch || terminal.autoLaunchCommand}
-            onSessionStart={(info) => terminal.patchTab(t.id, {
-              sessionId: info.id,
-              // Preserve preset-supplied labels ("Claude Code", "Codex CLI") —
-              // only overwrite if the tab is still on the default "Terminal".
-              shellLabel: t.shellLabel === "Terminal" ? info.shell_label : t.shellLabel,
-              status: "running",
-            })}
-            onStatusChange={(s) => terminal.patchTab(t.id, { status: s === "idle" ? t.status : s })}
-            onSearchReady={(api) => { searchApis.set(t.id, api); refreshActiveApi(); }}
-            onSearchTeardown={() => { searchApis.delete(t.id); refreshActiveApi(); }}
-          />
-        </div>
-      {/each}
-    </div>
+    {@render termInner(true)}
   </section>
 {:else}
   <button
@@ -534,6 +559,14 @@
     min-height: 0;
     min-width: 0;
     position: relative;
+  }
+  /* v0.3 dock mode: PanelShell owns the border + sizing. The panel fills the
+     dock-body slot top-to-bottom; the .wrap min-height in TerminalDockPanel
+     provides the floor (xterm has no natural height). */
+  .term-panel.term-panel-v03 {
+    flex: 1;
+    height: 100%;
+    border-top: 0;
   }
   .term-panel[data-resizing="true"] :global(*) {
     user-select: none !important;

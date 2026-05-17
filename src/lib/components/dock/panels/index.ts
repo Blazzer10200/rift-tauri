@@ -6,7 +6,7 @@ import SyncPanel from "./SyncPanel.svelte";
 import FilesStub from "./FilesStub.svelte";
 import HistoryStub from "./HistoryStub.svelte";
 import AgentsStub from "./AgentsStub.svelte";
-import TerminalStub from "./TerminalStub.svelte";
+import TerminalDockPanel from "./TerminalDockPanel.svelte";
 import AttachmentsStub from "./AttachmentsStub.svelte";
 import ActivityPanel from "./ActivityPanel.svelte";
 
@@ -33,7 +33,7 @@ export const PANELS: Record<PanelId, PanelDef> = {
   files:       { component: FilesStub,       title: "Files",       icon: FolderOpen, kbd: "3" },
   history:     { component: HistoryStub,     title: "History",     icon: History,    kbd: "4" },
   agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "5" },
-  terminal:    { component: TerminalStub,    title: "Terminal",    icon: Terminal,   kbd: "6" },
+  terminal:    { component: TerminalDockPanel, title: "Terminal",  icon: Terminal,   kbd: "6" },
   attachments: { component: AttachmentsStub, title: "Attachments", icon: Paperclip,  kbd: "7" },
   activity:    { component: ActivityPanel,   title: "Activity",    icon: Activity,   kbd: "8" },
 };
