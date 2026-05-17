@@ -2,6 +2,20 @@
 
 > **Author:** S70 research session, 2026-05-16. Read-only research only — no code shipped in this session beyond the v0.2.57 polish + tool-parity work already on `main` at `04b3ffd`. This doc is the executable plan for the next session(s).
 
+## Status (as of 2026-05-16, end of day)
+
+**Phase 1 — Harness Pull-Through:** ✅ SHIPPED in `34af694` (S71). User's CLAUDE.md/hooks/skills/slash/MCPs now load alongside Rift's. Settings toggle defaults on; API-key mode forces off via `--bare`.
+
+**Phase 2 — Session-ID + Native Resume:** ✅ SHIPPED in `b974d81` (S72). Hand-rolled history replay deleted; `--session-id` on turn 1, `--resume` on follow-ups. `--max-budget-usd` Settings card landed. Multi-user `<cwd-hash>` collision resolved (per-user `~/.claude/` isolates).
+
+**Phase 3 — Rift-Native Sprint:** ✅ SHIPPED in `2c81a5c` (S73). Per-turn `WorkspaceContext` addendum, `mcp__rift__remote_bash` tool via loopback NDJSON bridge to parent Tauri (reuses AutoSync russh session, ~5ms RTT), workspace-scoped advisory shell lock with foreign-holder pill in header. Settings toggle defaults OFF.
+
+**Phase 4 — UX Polish Pass:** ✅ SHIPPED in `db19a44` + HANDOFF `15dbed1` (S74). All seven items + the stale /tools fix. Diff view in Edit op-cards, per-message cost+model badge, @-file mention picker (new `assistant_list_workspace_files` cmd), code-block copy chips, conversation search, context-aware empty-state with `fxmanifest.lua` detection.
+
+**Phase 5 — Background Agents:** ⏳ DEFERRED. Folded into the v0.3 arc per user direction. See [v0.3-brainstorm.md](v0.3-brainstorm.md).
+
+v0.2 arc COMPLETE pending version bump + CHANGELOG + `scripts/release.ps1` ship as v0.2.57-alpha (bundles S69 through S74).
+
 ## Context (60s read)
 
 The Assistant is a CLI-direct wrapper around the user's installed `claude` binary, spawned by Rust w/ NDJSON over stdin/stdout (`tokio::process::Command`). NOT the Agent SDK — we go one layer deeper because Tauri webview can't host Node. Two real users (Blazzer + Trey) collaborate on the same FiveM workspace via the auto-sync engine.
