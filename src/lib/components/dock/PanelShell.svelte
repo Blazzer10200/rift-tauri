@@ -25,7 +25,10 @@
   // check on every downstream `.open`/`.collapsed` access.
   const def = $derived(PANELS[id]);
   const ps = $derived(uiPrefs.panels[id]);
-  const showBody = $derived(!ps.collapsed);
+  // While ANY panel is maximized into the main column, all dock panels render
+  // header-only — clicking another header's ⛶ swaps focus; clicking the
+  // maximized panel's ⛶ (which is now in main + dock) restores chat.
+  const showBody = $derived(!ps.collapsed && uiPrefs.maximized === null);
   // Optional count pip from registry — reactive because getCount reads
   // $state-backed stores inside the lambda. Tone defaults to neutral grey.
   const count = $derived(def.getCount?.() ?? 0);

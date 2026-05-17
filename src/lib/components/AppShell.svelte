@@ -112,7 +112,9 @@
 
   // v0.3: panel toggles route through uiPrefs; under v0.2 these are no-ops
   // because the rail/cmd-palette never emit them.
-  function togglePanel(id: PanelId) { uiPrefs.togglePanel(id); }
+  // Phase C Part 2: `allowMulti` (shift-click / Ctrl+Shift+N) bypasses
+  // accordion mode so the user can stack multiple panels open.
+  function togglePanel(id: PanelId, opts?: { allowMulti?: boolean }) { uiPrefs.togglePanel(id, opts); }
 
   // ── command registry ──────────────────────────────────────────────
   // Shared (both v0.2 and v0.3) — server + sync ops are surface-agnostic.
@@ -238,6 +240,12 @@
       closeSettingsModal();
       return;
     }
+    // Esc restores chat when a v0.3 panel is maximized into the main column.
+    if (e.key === "Escape" && uiPrefs.useV03Shell && uiPrefs.maximized) {
+      e.preventDefault();
+      uiPrefs.maximizePanel(null);
+      return;
+    }
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
     // Ctrl+` toggles the embedded terminal — global so it works on every tab.
@@ -255,6 +263,14 @@
       else active = "diagnostics";
       return;
     }
+    // Ctrl+(Shift+)1..8 — panel toggles under v0.3. Shift bypasses accordion.
+    // Handled BEFORE the shift-bail so Ctrl+Shift+N stays usable for stacking.
+    if (uiPrefs.useV03Shell && /^[1-8]$/.test(e.key)) {
+      e.preventDefault();
+      const pid = (["tasks", "sync", "files", "history", "agents", "terminal", "attachments", "activity"] as PanelId[])[parseInt(e.key, 10) - 1];
+      togglePanel(pid, { allowMulti: e.shiftKey });
+      return;
+    }
     if (e.shiftKey) return;
     if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
     // Ctrl+, opens Settings under v0.3 (modal). Under v0.2, Ctrl+P historically
@@ -262,14 +278,7 @@
     if (e.key === "," && uiPrefs.useV03Shell) { e.preventDefault(); gotoSettings("appearance"); return; }
     if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
-    if (uiPrefs.useV03Shell) {
-      if (/^[1-8]$/.test(e.key)) {
-        e.preventDefault();
-        const pid = (["tasks", "sync", "files", "history", "agents", "terminal", "attachments", "activity"] as PanelId[])[parseInt(e.key, 10) - 1];
-        togglePanel(pid);
-      }
-      return;
-    }
+    if (uiPrefs.useV03Shell) return;
     if (/^[1-6]$/.test(e.key)) {
       e.preventDefault();
       const tab = (["browse", "activity", "sync", "assistant", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
