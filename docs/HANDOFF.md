@@ -2,9 +2,9 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Sessions 78–86 — 2026-05-17 — v0.4.1 ship: refactor + audit pass + queue clear
+## Sessions 78–87 — 2026-05-17 — v0.4.1 ship + context reader + image paste
 
-S78–85 arc archived. **S86** closed audit MED S1 (`FolderCountCache`), `isHandshaking` pill fix, `file-display.ts` extract. Verify clean. **Audit Open: 7 → 6** (6 LOW lib/config; sync closed). Pre-ship security review — no new findings. CHANGELOG expanded for full release scope. See [docs/AUDIT.md](docs/AUDIT.md).
+S78–86 arc archived. **S87** shipped v0.4.1-alpha to `rift-releases` (Velopack: full + delta + Setup.exe + Portable.zip), wrote `docs/TREY-SETUP.md` collaborator guide, added Assistant-tab **context-reader pill** (parses CLI `usage` blocks → per-turn `input+cache_read+cache_create` / model-window cap, color-tiered 70%/90%, hover tooltip w/ session totals; fixed double-count between `assistant`+`result` envelopes), and end-to-end **image paste** (Composer `onpaste` → chunked base64 → 40px thumb chip → backend switches to `--input-format stream-json` w/ text+image content blocks, 20 MiB cap both ends). All on `main`. Audit Open still 6 LOW upstream-blocked.
 
 ---
 
@@ -20,7 +20,9 @@ S78–85 arc archived. **S86** closed audit MED S1 (`FolderCountCache`), `isHand
 
 **Audit queue (post-S86):** 6 LOW lib/config, all blocked upstream. Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
-**Multi-user:** Trey OFF Mirror until on-latest + fresh-Pulled baseline.
+**Multi-user:** Trey OFF Mirror until on-latest + fresh-Pulled baseline. Setup doc: [docs/TREY-SETUP.md](docs/TREY-SETUP.md).
+
+**Dev-loop reminder (S87):** tauri dev's filewatcher missed S87's Rust edits to `assistant_send`. Restart dev (Ctrl+C → `./scripts/run-dev.bat`) on next session-start so image-paste handler loads. Frontend HMR did pick up composer/state changes.
 
 **Don't reintroduce:** dock primitive, maximize-to-center, `PanelState.slot`, `dockSplitPct`, Tasks-as-peer, AddPanelMenu, TabRail under v0.4.1, OpRail/TopBar.
 
@@ -54,4 +56,6 @@ S78–85 arc archived. **S86** closed audit MED S1 (`FolderCountCache`), `isHand
 - **S79 layout:** right-pane pages at `src/lib/components/right-pane/`. Registry `PANELS` + type `PanelDef` names retained.
 - **S85 session-lost (`bbd762`):** backend emits `assistant://session-lost {session_id, prompt}` on stderr-match "No conversation found with session ID:" + `!is_first_turn`. Frontend `onSessionLost` pops failed pair, nulls `convoCreatedAt`, re-sends. Don't gate first-turn through this path.
 - **S86 pill desync:** `isHandshaking = $derived(connecting && status === null)` — UI labels read this; raw `connecting` still gates action buttons (anti-double-fire). Don't collapse.
-- **S86 file-count cache:** `FolderCountCache { AtomicU64 count, AtomicI64 last_refresh_secs }` keyed by `remote_root`. 5-min TTL → `safe_count_files`; otherwise optimistic `apply_count_delta(created, deleted)` from INPUT entries (not per-entry success). `stop_watch` MUST evict cache. Threshold's 5..25 clamp forgives small drift.
+- **S86 file-count cache:** `FolderCountCache { AtomicU64 count, AtomicI64 last_refresh_secs }` keyed by `remote_root`. 5-min TTL → `safe_count_files`; otherwise optimistic `apply_count_delta(created, deleted)` from INPUT entries. `stop_watch` MUST evict cache. Threshold's 5..25 clamp forgives small drift.
+- **S87 context pill:** `recordTurnUsage(u, accumulate)` — both `assistant.message.usage` AND `result.usage` envelopes carry the SAME end-of-turn tally. Only `result` (`accumulate=true`) updates `sessionUsage`; both refresh `lastTurnUsage`. Don't accumulate on `assistant` or session totals 2× off. Effective context = `input + cache_read + cache_create`. `[1m]` model suffix = 1M window, else 200K.
+- **S87 image paste:** `assistant_send` gains optional `attachments: Vec<AssistantAttachment{mime,data_base64}>`. When present, CLI args flip `--input-format text` → `stream-json` and stdin gets one envelope `{type:"user",message:{role:"user",content:[{type:"text",text},{type:"image",source:{type:"base64",media_type,data}}]}}`. 20 MiB cap both sides + `image/*` mime gate. Empty-text + image = allowed.
