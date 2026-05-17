@@ -128,18 +128,22 @@
       <Plus size={13} />
     </button>
 
-    <button
-      class="hdr-btn"
-      class:active={historyOpen}
-      type="button"
-      title="Conversation history"
-      onclick={toggleHistory}
-    >
-      <History size={13} />
-      {#if assistant.conversations.length > 0}
-        <span class="convo-chip">{assistant.conversations.length}</span>
-      {/if}
-    </button>
+    {#if !uiPrefs.useV03Shell}
+      <!-- v0.2 only: v0.3/v0.4.1 shell exposes History via the ActivityBar
+           on the right edge, so this button would be a duplicate there. -->
+      <button
+        class="hdr-btn"
+        class:active={historyOpen}
+        type="button"
+        title="Conversation history"
+        onclick={toggleHistory}
+      >
+        <History size={13} />
+        {#if assistant.conversations.length > 0}
+          <span class="convo-chip">{assistant.conversations.length}</span>
+        {/if}
+      </button>
+    {/if}
 
     <button
       class="dock-toggle"

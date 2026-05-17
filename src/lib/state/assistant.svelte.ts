@@ -307,11 +307,39 @@ class AssistantStore {
     this.unlistens.push(
       await listen<RemoteLockEvt[]>("autosync://locks", (e) => this.onLocksUpdate(e.payload)),
       await listen<RemoteShellEvt>("assistant://remote-shell-fired", (e) => this.onRemoteShellFired(e.payload)),
+      await listen<{ session_id: string; prompt: string }>(
+        "assistant://session-lost",
+        (e) => this.onSessionLost(e.payload),
+      ),
     );
 
     await this.refreshConversations();
     await this.refreshWorkspace();
     await this.restoreTabs();
+  }
+
+  /** Auto-recovery: claude's --resume index lost track of our session JSONL.
+   *  Pop the failed user+assistant message pair, null convoCreatedAt so the
+   *  next send uses --session-id, surface a friendly notice, then re-send
+   *  the prompt. Tab-aware: ignore if the lost session isn't current
+   *  (user switched tabs while the error was in flight). */
+  private onSessionLost(payload: { session_id: string; prompt: string }) {
+    if (payload.session_id !== this.currentConvoId) return;
+    if (this.streaming) this.streaming = false;
+    // Drop the empty assistant message + the user message that failed.
+    // send() will re-add them on retry.
+    const msgs = this.messages.slice();
+    if (msgs.length >= 2 && msgs[msgs.length - 1].role === "assistant") {
+      msgs.pop();
+      if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
+    }
+    this.messages = msgs;
+    this.streamingMsgId = null;
+    this.convoCreatedAt = null;
+    this.convoTitle = null;
+    this.lastError = null;
+    this.lastNotice = "Session was lost — retrying as a fresh start";
+    void this.send(payload.prompt);
   }
 
   private onLocksUpdate(locks: RemoteLockEvt[]) {
