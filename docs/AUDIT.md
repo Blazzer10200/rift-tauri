@@ -2,7 +2,7 @@
 
 Single source of truth for code audit findings. Open items at top, archive below. Line numbers re-verified 2026-05-17 against HEAD (v0.4.1-alpha tree). Re-verify before fixing if HEAD has moved.
 
-Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Last verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) and downgraded 3 to PARTIAL.
+Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 fix-pass 2026-05-17 closed 6 more items (B2/B4/B5/B9 + S6 + T4). Total Open went 42 → 17 actionable.
 
 ---
 
@@ -17,18 +17,14 @@ Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged
 
 (F3-F15 verified resolved 2026-05-17 — moved to Archive.)
 
-## Backend — lib / config / capabilities (12 items)
+## Backend — lib / config / capabilities (9 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| MED | `src-tauri/src/lib.rs:1576-1599` `editor_for` | Double-init race silently drops first `Arc<EditInPlaceManager>`. Comment at L1593-96 acknowledges. | `tokio::sync::OnceCell` per server key OR `warn!` on collision. |
 | MED | `src-tauri/src/diagnostics/mod.rs:277` `LogForwarder` | Forwards every log msg to frontend incl. error bodies w/ potential key paths. | Audit `log::error!/warn!` callers; add `RUST_LOG_DIAG_SCRUB` env flag. |
-| MED | `src-tauri/src/diagnostics/mod.rs:101` `DiagEvent.file` | Absolute paths sent verbatim to renderer. | Relativize to watch root or basename-only. |
-| LOW | `src-tauri/src/diagnostics/mod.rs:110-111` `DiagBus` | `last_rescan_signal_at` / `last_drift_scan_at` in `std::sync::Mutex<Option<DateTime>>`, hot path, panic-poison silent. | `AtomicU64` epoch-ms. |
 | LOW | `src-tauri/src/profile/mod.rs:31-36` `bridge_token` | Plaintext in `~/.rift/rift.json`. Comment acknowledges. | Phase-6 tracking only — Stronghold/DPAPI/keyring. |
 | LOW | `src-tauri/src/profile/mod.rs:55-59` `RiftConfig::load` | Unbounded `extra` flatten depth → stack overflow on crafted config. | Depth-limit `serde_json::Deserializer` or size guard. |
 | LOW | `src-tauri/src/state/paths.rs:68` `atomic_write_json` | `std::thread::sleep` retry loop on async cmd thread blocks Tokio worker. | `spawn_blocking` or async sleep + async save. |
-| LOW | `src-tauri/src/state/paths.rs:29-33` `safe_profile_key` | Sanitized empty key risk. | Log/assert if empty. |
 | LOW | `src-tauri/Cargo.toml:41-44` reqwest+ureq | Two HTTP stacks. | Defer — `velopack` 0.0.1298 `UpdateSource` is sync (ureq); reqwest is async elsewhere. Revisit when velopack ships async source. |
 | LOW | `src-tauri/Cargo.toml:41` `velopack="=0.0.1298"` | 0.0.x semver = API instability; exact pin blocks security patches silently. | Comment intent + quarterly review note. |
 | LOW | `src-tauri/tauri.conf.json:24` csp | `style-src 'self' 'unsafe-inline'`. | Nonce/strict-dynamic once Tailwind supports hashed styles. |
@@ -36,30 +32,30 @@ Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged
 | LOW | `src-tauri/capabilities/default.json:12` | `opener:default` unscoped. | Scope to known prefixes (update URL, docs URL). |
 | LOW-PARTIAL | `src-tauri/src/path_guard.rs:23-66` `validate_remote_child` | Destructive ops reject `/` root ✅ + backslash ✅. Case-insensitive remotes (Samba/macOS) still unguarded. | Per-segment case-fold or document Linux-only requirement. |
 
-(B1 + B15 verified resolved 2026-05-17 — moved to Archive.)
+(B1 + B15 verified resolved 2026-05-17 verification pass; B2 + B4 + B5 + B9 closed by S81 fix-pass 2026-05-17 — all moved to Archive.)
 
-## Backend — sync (4 items)
+## Backend — sync (3 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
 | MED | `src-tauri/src/sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
 | LOW | `src-tauri/src/sync/auto_sync/watch.rs:40,64` `try_watch` | Probe path uses `MAIN_SEPARATOR` (backslash on Win) — inconsistent w/ rest of codebase. | Build via `.to_string_lossy().replace('\\','/')`. |
 | LOW | `src-tauri/src/state/sync_snapshot.rs:141` `compute_sha1` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
-| LOW | `src-tauri/src/sync/lock_presence.rs:213-216` | Stale-lock delete failures log `warn` ✅ but no backoff counter — retry-loop still indefinite on persistent failure. | Add backoff counter. |
 | INFO-MOOT | `src-tauri/src/sync/edit_trail.rs:75-80` `read_raw` | Subdir w/ PID+`short_id` race could cross-delete concurrent reads. `short_id` widened to 8 bytes 2026-05-12; PID+rand collision now astronomical. Keep tracked but no action needed. | Optional `NamedTempFile` migration. |
 
-(S2 verified resolved 2026-05-17 — moved to Archive.)
+(S2 verified resolved 2026-05-17 verification pass; S6 closed by S81 fix-pass — moved to Archive.)
 
-## Backend — transport/sftp/tunnel/edit/update (5 items)
+## Backend — transport/sftp/tunnel/edit/update (3 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
 | LOW | `src-tauri/src/sftp/mod.rs:278-282` `close` | `workers` lock held across each `sftp.close()` await. | Clone Arcs, drop lock, close outside. |
 | LOW | `src-tauri/src/update_service.rs:108-118` `RIFT_UPDATE_FEED` | Env-var local FileSource bypass not gated by build profile. | `#[cfg(debug_assertions)]` or signed marker file. |
 | LOW | `src-tauri/src/edit/in_place.rs:301-307` `Drop` | Synchronous `fs::remove_dir_all` in async drop context. Comment acknowledges. | `spawn_blocking` or explicit `async close_all()`. |
-| LOW | `src-tauri/src/transport/ssh_keygen.rs:75-76` `generate` | Private key file inherits umask on POSIX. | `set_permissions(0o600)` on `#[cfg(unix)]`. |
 | INFO | `src-tauri/src/bridge/mod.rs:57` | Token in plaintext over loopback HTTP. | Accepted; documented. |
 | INFO | `src-tauri/src/transport/env.rs:16-24` `hostname` | Spawns external `hostname` binary on non-Windows; ambient PATH risk. | Document. |
+
+(T4 closed by S81 fix-pass 2026-05-17 — moved to Archive.)
 
 ## Originally-listed but out of scope at filing time (still open)
 
@@ -71,6 +67,19 @@ Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged
 # Archive — Resolved
 
 All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix (Rust) or `npm run check` (frontend). Line numbers reflect pre-cleanup tree.
+
+## S81 Fix-Pass 2026-05-17 (6 items)
+
+Targeted batch — 3 MED + 3 LOW. `cargo check` clean (5.51s, 0 errors).
+
+| # | File:line | Change |
+|---:|---|---|
+| B2 | `lib.rs:1576-1602` `editor_for` | Replaced `or_insert` (which silently dropped the loser Arc) w/ explicit `get`-then-`insert` + `log::warn!` on race-loss. Drop is now visible in logs/diag instead of silent. |
+| B4 | `diagnostics/mod.rs:basename_only` + `publish:148` | Added `basename_only()` helper; applied at `publish()` chokepoint so `DiagEvent.file` is reduced to trailing basename before broadcast. Renderer no longer sees absolute paths. |
+| B5 | `diagnostics/mod.rs:110-113, 128-129, 153-160, 195-211` `DiagBus` | Converted `last_rescan_signal_at` + `last_drift_scan_at` from `std::sync::Mutex<Option<DateTime<Utc>>>` to `AtomicI64` (epoch-ms, `i64::MIN` sentinel for None). Hot-path is now lock-free; panic-poison risk gone. |
+| B9 | `state/paths.rs:29-41` `safe_profile_key` | Empty-sanitized key now emits `log::warn!` and returns `"_empty"` sentinel instead of empty string. Prevents downstream cache-path filename collisions. |
+| S6 | `sync/lock_presence.rs:50-71, 213-244` | Added `STALE_DELETE_MAX_FAILS=3` const + per-path `DashMap<String, u8>` `stale_delete_fails`. Sweep skips paths that hit cap; success resets counter. Eliminates indefinite warn-log noise on permanently-unreachable locks. |
+| T4 | `transport/ssh_keygen.rs:51-92` `generate` | `#[cfg(unix)]` block sets `0o600` perms on private key immediately after write. Doc comment updated to drop the "caller is responsible" line. Windows path unchanged. |
 
 ## Verification Pass 2026-05-17 (16 items resolved by v0.3/v0.4/v0.4.1 refactors)
 

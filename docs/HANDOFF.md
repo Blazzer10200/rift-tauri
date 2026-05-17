@@ -2,13 +2,17 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 80 — 2026-05-17 — audit verification pass
+## Session 81 — 2026-05-17 — audit fix-pass (6 items)
 
-Re-ran 42-item audit against v0.4.1-alpha HEAD. v0.3/v0.4 refactors silently fixed **16** (13 fe + 3 be), **3 downgraded** to PARTIAL, **23 still real**. [docs/AUDIT.md](docs/AUDIT.md) reorganized — Open table HEAD-refreshed; Archive gained "Verification Pass 2026-05-17". No code changed.
+Closed B2 (`editor_for` race-loss `warn!`), B4 (`DiagEvent.file` basename-only at publish), B5 (`DiagBus` mutexes → `AtomicI64` epoch-ms), B9 (`safe_profile_key` empty sentinel), S6 (`lock_presence` stale-delete backoff counter), T4 (`ssh_keygen` `cfg(unix)` 0o600 chmod). `cargo check` clean. **Audit Open: 23 → 17 actionable** (1 MED + 13 LOW + 2 PARTIAL + 1 MOOT/INFO). Full per-item summary in [docs/AUDIT.md](docs/AUDIT.md) "S81 Fix-Pass".
 
-## Session 78–79 — 2026-05-17 — v0.4.1 right-pane refactor
+## Session 80 — audit verification pass
 
-Dropped dock-accordion. Right side = one full page picked from 40px `ActivityBar`. `ui-prefs.svelte.ts` 325→58L; legacy keys migrate once. Commits `aff9cd0`→`8b984f9` under `useV03Shell`; v0.2 pixel-identical. `0.4.1-alpha` committed; `scripts/release.ps1` NOT invoked yet (quit Rift dev first — build collides w/ incremental rebuild lock).
+Re-verified 42-item audit vs HEAD. v0.3/v0.4 refactors silently fixed 16, 3 → PARTIAL. AUDIT.md reorganized; Archive gained Verification Pass block. Docs-only.
+
+## Session 78–79 — v0.4.1 right-pane refactor
+
+Dropped dock-accordion. Right side = one full page picked from 40px `ActivityBar`. Commits `aff9cd0`→`8b984f9` under `useV03Shell`; v0.2 pixel-identical. `0.4.1-alpha` committed; `scripts/release.ps1` NOT invoked yet.
 
 ---
 
@@ -20,13 +24,13 @@ Dropped dock-accordion. Right side = one full page picked from 40px `ActivityBar
 
 **CDP autonomous-verify live** — `scripts/run-dev.bat` sets WebView2 port; `npm run cdp:serve` wraps on 9223; drive via `bash scripts/cdp/c.sh state|eval|type|click|wait|shot|key`. Smoke: `scripts/cdp/smoke-v04-1.sh`.
 
-**v0.2 queue:** EACCES auto-fix-perms; auto-Mirror on detected rename; integration tests phase 1 (SftpClient trait); dry-run Mirror preview; `lib.rs` split → per-domain `commands/*.rs`; reqwest+ureq consolidation (blocked on velopack); LocalPane/RemotePane shared-logic extract; connection.connecting pill desync; Diagnostics canonical-skeleton.
+**v0.2 queue:** EACCES auto-fix-perms; auto-Mirror on rename; integration tests phase 1; dry-run Mirror preview; `lib.rs` → `commands/*.rs` split; LocalPane/RemotePane shared-logic extract; connection.connecting pill desync; Diagnostics canonical-skeleton.
 
-**Audit queue (post-S80):** 23 open (12 lib/config, 4 sync, 5 transport/edit, 2 frontend PARTIAL). Top MED: `editor_for` double-init, `LogForwarder`/`DiagEvent.file` path leakage, `flush_batch` inline count. Full list in [docs/AUDIT.md](docs/AUDIT.md).
+**Audit queue (post-S81):** 17 open (9 lib/config, 3 sync, 3 transport/edit, 2 frontend PARTIAL). Remaining MED: `LogForwarder` log scrubbing, `flush_batch` inline `safe_count_files`. Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
 **Multi-user:** Trey OFF Mirror until on latest + fresh-Pulled baseline.
 
-**Don't reintroduce:** dock primitive; maximize-to-center; `PanelState.slot`; `dockSplitPct`; Tasks as registry peer; summary cards in pages; AddPanelMenu; TabRail under v0.4.1; OpRail/TopBar; legacy `.btn.lg`/`.pill.warn`.
+**Don't reintroduce:** dock primitive; maximize-to-center; `PanelState.slot`; `dockSplitPct`; Tasks as registry peer; AddPanelMenu; TabRail under v0.4.1; OpRail/TopBar.
 
 **Ship pipeline:** `powershell -NoProfile -File ./scripts/release.ps1` — build → vpk pack → upload to `rift-releases`.
 

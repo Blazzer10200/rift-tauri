@@ -47,6 +47,11 @@ struct LockBody {
 
 pub type ScopedFoldersFn = Arc<dyn Fn() -> Vec<String> + Send + Sync>;
 
+/// Skip stale-lock delete retries after this many consecutive failures per
+/// path. Prevents a permanently-unreachable lock (perms revoked, remote
+/// dir gone) from generating warn-log noise on every 10s sweep cycle.
+const STALE_DELETE_MAX_FAILS: u8 = 3;
+
 pub struct LockPresence {
     sftp: Arc<SftpClient>,
     remote_root: String,
@@ -60,6 +65,9 @@ pub struct LockPresence {
     stop_tx: watch::Sender<bool>,
     app: AppHandle,
     disposed: AtomicBool,
+    /// Per-path failed-delete counter for stale-lock sweep. Reset on success;
+    /// skips further attempts once `STALE_DELETE_MAX_FAILS` is hit.
+    stale_delete_fails: DashMap<String, u8>,
 }
 
 impl LockPresence {
@@ -74,6 +82,7 @@ impl LockPresence {
             my_host,
             my_locks: DashSet::new(),
             last_heartbeat: DashMap::new(),
+            stale_delete_fails: DashMap::new(),
             active_by_path: RwLock::new(HashMap::new()),
             scoped_provider: Mutex::new(None),
             poll_task: Mutex::new(None),
@@ -200,6 +209,16 @@ impl LockPresence {
             if self.my_locks.contains(&e.full_path) {
                 continue;
             }
+            // Skip paths that have already failed STALE_DELETE_MAX_FAILS
+            // times — keeps repeated warn-log noise out of the diag bus.
+            if self
+                .stale_delete_fails
+                .get(&e.full_path)
+                .map(|c| *c >= STALE_DELETE_MAX_FAILS)
+                .unwrap_or(false)
+            {
+                continue;
+            }
             let Some(body) = self.try_read_lock(&e.full_path).await else { continue };
             if body.user != self.my_user {
                 continue;
@@ -212,8 +231,20 @@ impl LockPresence {
             }
             if self.sftp.delete(&e.full_path).await.success {
                 removed += 1;
+                self.stale_delete_fails.remove(&e.full_path);
             } else {
-                log::warn!("stale lock cleanup failed for {}", e.full_path);
+                let count = {
+                    let mut entry =
+                        self.stale_delete_fails.entry(e.full_path.clone()).or_insert(0);
+                    *entry = entry.saturating_add(1);
+                    *entry
+                };
+                log::warn!(
+                    "stale lock cleanup failed for {} (attempt {}/{})",
+                    e.full_path,
+                    count,
+                    STALE_DELETE_MAX_FAILS
+                );
             }
         }
         Ok(removed)
