@@ -1,91 +1,99 @@
 # Rift — Audit Log
 
-Single source of truth for code audit findings. Open items at top, archive below. Line numbers refreshed 2026-05-16 against HEAD (v0.2.56-alpha tree). Re-verify before fixing if HEAD has moved.
+Single source of truth for code audit findings. Open items at top, archive below. Line numbers re-verified 2026-05-17 against HEAD (v0.4.1-alpha tree). Re-verify before fixing if HEAD has moved.
 
-Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15.
+Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Last verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) and downgraded 3 to PARTIAL.
 
 ---
 
 # Open Findings
 
-Consolidated 2026-05-13 from `scan-frontend-2026-05-11.md`, `scan-lib-2026-05-11.md`, `scan-sync-2026-05-11.md`, `scan-transport-2026-05-11.md`. Items resolved by codex fix-passes have been moved to the Archive section below.
-
-## Frontend (`scan-frontend-2026-05-11`)
+## Frontend (3 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| HIGH | `RemotePane.svelte:59` | `$effect`'s async `void load()` swallows rejection + stale-closure race overwrites newer entries. | Destroyed flag in effect cleanup; propagate rejection. |
-| HIGH | `LocalPane.svelte:59` | Same pattern as `RemotePane`. | Same fix. |
-| HIGH | `AppShell.svelte:184` | `addEventListener` in `onMount` leaks on HMR/remount. | Convert to `$effect` w/ cleanup. |
-| HIGH | `Diagnostics.svelte:38-49` | Synchronous `clientHeight` read inside `$effect` before DOM settles. | Drive `viewport` from `ResizeObserver` only. |
-| HIGH | `connection.svelte.ts:249-321` | `wireEvents()` failure has no UI surface or retry. | Surface failure + retry trigger. |
-| MED | `RemotePane.svelte:89-95` | Conflict detection matches basename → cross-dir false positives. | Use `c.remote_path === e.full_path`. |
-| MED | `LocalPane.svelte:92-99` | Same basename-only match. | Use full-path equality w/ OS normalization. |
-| MED | `TwoPane.svelte:41-46` | `toastTimer` not cleared in `onDestroy`. | `onDestroy` clearTimeout. |
-| MED | `AppShell.svelte:196-204` | TOFU `.then()` may execute after destroy. | Capture `alive` flag, guard the handler. |
-| MED | `diagnostics.svelte.ts:174-181` | `generateReport()` busy-polls 50ms × 2s. | One-shot listener filtered to `drift_scan_result`. |
-| MED | `AddServer.svelte:148-151` | Triple `as unknown as` cast hides `ServerProfile` drift. | Extend `ServerProfile` type w/ optional fields. |
-| MED | `AppShell.svelte:62-85` | `commands` array recreates each tick, churning `CommandPalette` props. | Split static/dynamic; `$derived.by()` memoize. |
-| LOW | `updates.svelte.ts:20` | `catch {}` silently swallows `app_version` invoke failure. | `console.warn(...)`. |
-| LOW | `ConflictResolver.svelte:18-23` | `$effect` reset is redundant w/ `{#key}` remount. | Drop the effect. |
-| LOW | `AddServer.svelte:59-68` | Async IIFE in `$effect` writes after potential destroy. | Cancel flag in cleanup. |
+| MED-PARTIAL | `src/lib/components/browser/RemotePane.svelte:50-53` | `$effect` async `void load()` uses `loadToken` guard (race fixed) but no destroy-flag in cleanup; rejection caught into `error` state only. | Destroyed flag in effect cleanup; propagate fatal rejection. |
+| MED-PARTIAL | `src/lib/components/browser/LocalPane.svelte:50-53` | Same pattern as `RemotePane` (loadToken landed; cleanup-cancel didn't). | Same fix. |
 
-(`DriftReview.svelte` items from this scan are obsolete — file removed in `79f6fae` UI consolidation.)
+(F3-F15 verified resolved 2026-05-17 — moved to Archive.)
 
-## Backend — lib / config / capabilities (`scan-lib-2026-05-11`)
+## Backend — lib / config / capabilities (12 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| LOW | `lib.rs:diag_state_pump:313-358`, `diag_get_state:78-113` | `AutoSyncState` lock held across `status().await`. | Clone `Arc` under lock, drop, then await. |
-| MED | `lib.rs:editor_for:1576-1599` | Double-init race silently drops first `Arc<EditInPlaceManager>`. Mitigated 2026-05-16: lock now released between read-fast-path and SFTP open; `or_insert` wins the race but one Arc still drops. | `tokio::sync::OnceCell` per server key OR `warn!` on collision. |
-| MED | `diagnostics/mod.rs:LogForwarder:277` | Forwards every log msg to frontend incl. error bodies w/ potential key paths. | Audit `log::error!/warn!` callers; add `RUST_LOG_DIAG_SCRUB` env flag. |
-| MED | `diagnostics/mod.rs:DiagEvent.file:84-93` | Absolute paths can be sent verbatim to renderer. | Relativize to watch root or basename-only. |
-| LOW | `diagnostics/mod.rs:DiagBus:95-176` | `last_rescan_signal_at` / `last_drift_scan_at` in `std::sync::Mutex`, hot path, panic-poison silent. | `AtomicU64` epoch-ms. |
-| LOW | `profile/mod.rs:bridge_token:15-39` | Plaintext in `~/.rift/rift.json`. | Phase-6 tracking only — Stronghold/DPAPI/keyring. |
-| LOW | `profile/mod.rs:RiftConfig::load:55-59` | Unbounded `extra` flatten depth → stack overflow on crafted config. | Depth-limit `serde_json::Deserializer` or size guard. |
-| LOW | `state/paths.rs:atomic_write_json:41-79` | `thread::sleep` retry loop on async cmd thread blocks Tokio worker. | `spawn_blocking` or async sleep + async save. |
-| LOW | `state/paths.rs:safe_profile_key:29-33` | Sanitized empty key risk. | Log/assert if empty. |
-| LOW | `Cargo.toml:reqwest+ureq` | Two HTTP stacks. | Defer — `velopack` 0.0.1298 `UpdateSource` is sync (ureq); reqwest is async elsewhere. Revisit when velopack ships async source. |
-| LOW | `Cargo.toml:velopack="=0.0.1298"` | 0.0.x semver = API instability; exact pin blocks security patches silently. | Comment intent + quarterly review note. |
-| LOW | `tauri.conf.json:csp` | `style-src 'self' 'unsafe-inline'`. | Nonce/strict-dynamic once Tailwind supports hashed styles. |
-| LOW | `capabilities/default.json:7` | `core:default` broad superset. | Pin specific `core:*` perms in use. |
-| LOW | `capabilities/default.json:12` | `opener:default` unscoped. | Scope to known prefixes (update URL, docs URL). |
-| LOW | `path_guard.rs:78-91` | Non-existent path joins raw filename; NUL/overlong edge case. | Post-join `canon.parent() == canon_parent`. |
-| LOW | `path_guard.rs:55,20-60,20` | Remote validation: `root_norm == "/"`, case-sensitivity, per-segment backslash. | Reject `/` root; document Linux-only; future per-segment check. |
+| MED | `src-tauri/src/lib.rs:1576-1599` `editor_for` | Double-init race silently drops first `Arc<EditInPlaceManager>`. Comment at L1593-96 acknowledges. | `tokio::sync::OnceCell` per server key OR `warn!` on collision. |
+| MED | `src-tauri/src/diagnostics/mod.rs:277` `LogForwarder` | Forwards every log msg to frontend incl. error bodies w/ potential key paths. | Audit `log::error!/warn!` callers; add `RUST_LOG_DIAG_SCRUB` env flag. |
+| MED | `src-tauri/src/diagnostics/mod.rs:101` `DiagEvent.file` | Absolute paths sent verbatim to renderer. | Relativize to watch root or basename-only. |
+| LOW | `src-tauri/src/diagnostics/mod.rs:110-111` `DiagBus` | `last_rescan_signal_at` / `last_drift_scan_at` in `std::sync::Mutex<Option<DateTime>>`, hot path, panic-poison silent. | `AtomicU64` epoch-ms. |
+| LOW | `src-tauri/src/profile/mod.rs:31-36` `bridge_token` | Plaintext in `~/.rift/rift.json`. Comment acknowledges. | Phase-6 tracking only — Stronghold/DPAPI/keyring. |
+| LOW | `src-tauri/src/profile/mod.rs:55-59` `RiftConfig::load` | Unbounded `extra` flatten depth → stack overflow on crafted config. | Depth-limit `serde_json::Deserializer` or size guard. |
+| LOW | `src-tauri/src/state/paths.rs:68` `atomic_write_json` | `std::thread::sleep` retry loop on async cmd thread blocks Tokio worker. | `spawn_blocking` or async sleep + async save. |
+| LOW | `src-tauri/src/state/paths.rs:29-33` `safe_profile_key` | Sanitized empty key risk. | Log/assert if empty. |
+| LOW | `src-tauri/Cargo.toml:41-44` reqwest+ureq | Two HTTP stacks. | Defer — `velopack` 0.0.1298 `UpdateSource` is sync (ureq); reqwest is async elsewhere. Revisit when velopack ships async source. |
+| LOW | `src-tauri/Cargo.toml:41` `velopack="=0.0.1298"` | 0.0.x semver = API instability; exact pin blocks security patches silently. | Comment intent + quarterly review note. |
+| LOW | `src-tauri/tauri.conf.json:24` csp | `style-src 'self' 'unsafe-inline'`. | Nonce/strict-dynamic once Tailwind supports hashed styles. |
+| LOW | `src-tauri/capabilities/default.json:7` | `core:default` broad superset. | Pin specific `core:*` perms in use. |
+| LOW | `src-tauri/capabilities/default.json:12` | `opener:default` unscoped. | Scope to known prefixes (update URL, docs URL). |
+| LOW-PARTIAL | `src-tauri/src/path_guard.rs:23-66` `validate_remote_child` | Destructive ops reject `/` root ✅ + backslash ✅. Case-insensitive remotes (Samba/macOS) still unguarded. | Per-segment case-fold or document Linux-only requirement. |
 
-## Backend — sync (`scan-sync-2026-05-11`)
+(B1 + B15 verified resolved 2026-05-17 — moved to Archive.)
 
-| Sev | File:line | Issue | Fix |
-|---|---|---|---|
-| MED | `sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
-| MED | `sync/auto_sync.rs:mark_failed` | `mark_failed` inserts after "giving up" log → unbounded `failed` map growth. | Return without insert post-giveup. Line ref stale; locate via `mark_failed` symbol. |
-| MED | `edit_trail.rs:read_raw:75` | Subdir w/ PID+short_id race can cross-delete concurrent reads. | `tempfile::NamedTempFile` direct in temp dir. |
-| LOW | `sync/auto_sync/watch.rs:try_watch` | Probe path uses `MAIN_SEPARATOR` (backslash on Win) — inconsistent w/ rest of codebase. | Build via `.to_string_lossy().replace('\\','/')`. |
-| LOW | `sync_snapshot.rs:compute_sha1` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
-| LOW | `sync/lock_presence.rs:201-205` | Stale-lock delete failures now log `warn` (✅ partial fix 2026-05-?), but no backoff counter — retry-loop still indefinite on persistent failure. | Add backoff counter. |
-
-## Backend — transport/sftp/tunnel/edit/update (`scan-transport-2026-05-11`)
+## Backend — sync (4 items)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| LOW | `sftp/mod.rs:close:274-285` | `workers` lock held across each `sftp.close()` await. | Clone Arcs, drop lock, close outside. |
-| LOW | `update_service.rs:RIFT_UPDATE_FEED:110-118` | Env-var local FileSource bypass not gated by build profile. | `#[cfg(debug_assertions)]` or signed marker file. |
-| LOW | `edit/in_place.rs:Drop:301-307` | Synchronous `fs::remove_dir_all` in async drop context. | `spawn_blocking` or explicit `async close_all()`. |
-| LOW | `transport/ssh_keygen.rs:generate:75-92` | Private key file inherits umask on POSIX. | `set_permissions(0o600)` on `#[cfg(unix)]`. |
-| INFO | `bridge/mod.rs:57` | Token in plaintext over loopback HTTP. | Accepted; documented. |
-| INFO | `transport/env.rs:hostname:16-24` | Spawns external `hostname` binary on non-Windows; ambient PATH risk. | Document. |
+| MED | `src-tauri/src/sync/auto_sync/flush.rs:37` | `flush_batch` awaits `safe_count_files` inline every delete-cycle. | Per-watch cached count, refresh on add/remove. |
+| LOW | `src-tauri/src/sync/auto_sync/watch.rs:40,64` `try_watch` | Probe path uses `MAIN_SEPARATOR` (backslash on Win) — inconsistent w/ rest of codebase. | Build via `.to_string_lossy().replace('\\','/')`. |
+| LOW | `src-tauri/src/state/sync_snapshot.rs:141` `compute_sha1` | Reads whole file (≤64 MiB) into heap per concurrent call. | Stream via BufReader 8 KiB. |
+| LOW | `src-tauri/src/sync/lock_presence.rs:213-216` | Stale-lock delete failures log `warn` ✅ but no backoff counter — retry-loop still indefinite on persistent failure. | Add backoff counter. |
+| INFO-MOOT | `src-tauri/src/sync/edit_trail.rs:75-80` `read_raw` | Subdir w/ PID+`short_id` race could cross-delete concurrent reads. `short_id` widened to 8 bytes 2026-05-12; PID+rand collision now astronomical. Keep tracked but no action needed. | Optional `NamedTempFile` migration. |
+
+(S2 verified resolved 2026-05-17 — moved to Archive.)
+
+## Backend — transport/sftp/tunnel/edit/update (5 items)
+
+| Sev | File:line | Issue | Fix |
+|---|---|---|---|
+| LOW | `src-tauri/src/sftp/mod.rs:278-282` `close` | `workers` lock held across each `sftp.close()` await. | Clone Arcs, drop lock, close outside. |
+| LOW | `src-tauri/src/update_service.rs:108-118` `RIFT_UPDATE_FEED` | Env-var local FileSource bypass not gated by build profile. | `#[cfg(debug_assertions)]` or signed marker file. |
+| LOW | `src-tauri/src/edit/in_place.rs:301-307` `Drop` | Synchronous `fs::remove_dir_all` in async drop context. Comment acknowledges. | `spawn_blocking` or explicit `async close_all()`. |
+| LOW | `src-tauri/src/transport/ssh_keygen.rs:75-76` `generate` | Private key file inherits umask on POSIX. | `set_permissions(0o600)` on `#[cfg(unix)]`. |
+| INFO | `src-tauri/src/bridge/mod.rs:57` | Token in plaintext over loopback HTTP. | Accepted; documented. |
+| INFO | `src-tauri/src/transport/env.rs:16-24` `hostname` | Spawns external `hostname` binary on non-Windows; ambient PATH risk. | Document. |
 
 ## Originally-listed but out of scope at filing time (still open)
 
 - `lib.rs:local_list_dir` profile containment — frontend contract change deferred.
 - Safe file-count caching — needs watch-level cache invalidation design.
-- Tunnel per-conn cancellation — already filed above (`tunnel/mod.rs:117`).
 
 ---
 
 # Archive — Resolved
 
-All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix. Line numbers reflect pre-cleanup tree.
+All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix (Rust) or `npm run check` (frontend). Line numbers reflect pre-cleanup tree.
+
+## Verification Pass 2026-05-17 (16 items resolved by v0.3/v0.4/v0.4.1 refactors)
+
+Re-verified against HEAD after 40 commits landed between audit-refresh (2026-05-16) and v0.4.1-alpha ship (2026-05-17). Files moved into subdirs during reorg; lines mostly shifted; underlying issues independently fixed.
+
+| # | Original anchor | Current state |
+|---:|---|---|
+| F3 | `AppShell.svelte:184` addEventListener leak | ✅ — `onMount` uses `win.onResized` w/ cleanup callback at L198-201; no raw addEventListener |
+| F4 | `Diagnostics.svelte:38-49` sync `clientHeight` | ✅ — `diagnostics/Diagnostics.svelte:37` drives `viewport = el.clientHeight` inside ResizeObserver only |
+| F5 | `connection.svelte.ts:249-321` `wireEvents()` no UI surface | ✅ — `wireError` state captured; AppShell `onMount` catches w/ "banner will offer retry" + `retryWire()` at L210 |
+| F6 | `RemotePane.svelte:89-95` basename conflict match | ✅ — `browser/RemotePane.svelte:105` uses `c.remote_path === e.full_path` |
+| F7 | `LocalPane.svelte:92-99` basename conflict match | ✅ — `browser/LocalPane.svelte:107-111` uses full-path equality w/ `\\` → `/` normalization |
+| F8 | `TwoPane.svelte:41-46` `toastTimer` leak | ✅ — `browser/TwoPane.svelte:161` clears in `onDestroy` |
+| F9 | `AppShell.svelte:196-204` TOFU `.then()` after destroy | ✅ — `alive` flag at L199-200 gates the handler |
+| F10 | `diagnostics.svelte.ts:174-181` 50ms busy-poll | ✅ — `state/diagnostics.svelte.ts:174-188` one-shot listener filtered to `drift_scan_result` |
+| F11 | `AddServer.svelte:148-151` triple `as unknown as` cast | ✅ — `dialogs/AddServer.svelte:138-149` clean `ServerProfile` literal |
+| F12 | `AppShell.svelte:62-85` commands array churn | ✅ — `AppShell.svelte:116-164` split into `sharedCommands` / `v02Commands` / `v03Commands` `$derived` |
+| F13 | `updates.svelte.ts:20` silent `catch {}` | ✅ — `state/updates.svelte.ts:22-24` `console.warn("app_version invoke failed", e)` |
+| F14 | `ConflictResolver.svelte:18-23` redundant `$effect` | ✅ — `conflicts/ConflictResolver.svelte` no `$effect` block in current file |
+| F15 | `AddServer.svelte:59-68` async IIFE | ✅ — `dialogs/AddServer.svelte:60-72` `cancelled` flag + cleanup return |
+| B1 | `lib.rs:diag_state_pump:313` + `diag_get_state:78` lock across await | ✅ — both sites use `let engine = { state.0.lock().await.clone() };` clone-and-drop (L81 + L324) |
+| B15 | `path_guard.rs:78-91` non-existent path NUL/overlong edge | ✅ — `path_guard.rs:141` `joined.parent() != Some(canon_parent.as_path())` assertion landed |
+| S2 | `sync/auto_sync.rs::mark_failed` unbounded `failed` map | ✅ — `sync/auto_sync/flush.rs:602-605` explicit `self.failed.remove()` on permanent giveup |
 
 ## Codex Fix-Pass 2026-05-11 (16 items)
 
@@ -155,4 +163,4 @@ Six prior Open items confirmed fixed in HEAD code by the 2026-05-16 audit. Moved
 - `lib.rs:local_list_dir` profile containment (no server_key input — frontend contract change).
 - `scan-lib` log redaction / capability tightening / CSP nonce — needs product decision.
 - `scan-sync` safe file-count cache — needs watch-level cache invalidation design.
-- `scan-transport` tunnel per-connection cancellation — needs tunnel task ownership refactor.
+- `scan-transport` tunnel per-connection cancellation — completed 2026-05-16 (see "Resolved between 2026-05-11 and 2026-05-16" above).

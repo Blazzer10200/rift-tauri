@@ -2,13 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 78–79 — 2026-05-17 — v0.4.1 right-pane refactor + cleanup
+## Session 80 — 2026-05-17 — audit verification pass
 
-**v0.4.1** dropped the dock-accordion model. Right side = one full page at a time, picked from a 40px right-edge `ActivityBar` (7 icons, drag-reorder). Tasks back in AssistantPage; dock primitives + `TasksPanel` deleted; `ui-prefs.svelte.ts` 325→58L; legacy storage keys migrated once on first launch. Four commits `aff9cd0`→`dc870e7` under `useV03Shell`; v0.2 pixel-identical. Spec: `docs/design/v0.4.1-right-pane-refactor.md`. `npm run check` 0/1; `scripts/cdp/smoke-v04-1.sh` 35/35 PASS.
+Re-ran 42-item audit against v0.4.1-alpha HEAD. v0.3/v0.4 refactors silently fixed **16** (13 fe + 3 be), **3 downgraded** to PARTIAL, **23 still real**. [docs/AUDIT.md](docs/AUDIT.md) reorganized — Open table HEAD-refreshed; Archive gained "Verification Pass 2026-05-17". No code changed.
 
-**S79 cleanup (uncommitted at write):** `src/lib/components/dock/panels/*` → `src/lib/components/right-pane/*` (3 import sites + 5 intra-file paths fixed; empty `dock/` deleted); `scratch/` added to `.gitignore`; HANDOFF trimmed under 600w. `npm run check` clean after rename.
+## Session 78–79 — 2026-05-17 — v0.4.1 right-pane refactor
 
-**Source state:** `0.4.1-alpha` committed; `scripts/release.ps1` NOT yet invoked. Quit Rift dev first (build collides w/ incremental rebuild lock).
+Dropped dock-accordion. Right side = one full page picked from 40px `ActivityBar`. `ui-prefs.svelte.ts` 325→58L; legacy keys migrate once. Commits `aff9cd0`→`8b984f9` under `useV03Shell`; v0.2 pixel-identical. `0.4.1-alpha` committed; `scripts/release.ps1` NOT invoked yet (quit Rift dev first — build collides w/ incremental rebuild lock).
 
 ---
 
@@ -21,6 +21,8 @@
 **CDP autonomous-verify live** — `scripts/run-dev.bat` sets WebView2 port; `npm run cdp:serve` wraps on 9223; drive via `bash scripts/cdp/c.sh state|eval|type|click|wait|shot|key`. Smoke: `scripts/cdp/smoke-v04-1.sh`.
 
 **v0.2 queue:** EACCES auto-fix-perms; auto-Mirror on detected rename; integration tests phase 1 (SftpClient trait); dry-run Mirror preview; `lib.rs` split → per-domain `commands/*.rs`; reqwest+ureq consolidation (blocked on velopack); LocalPane/RemotePane shared-logic extract; connection.connecting pill desync; Diagnostics canonical-skeleton.
+
+**Audit queue (post-S80):** 23 open (12 lib/config, 4 sync, 5 transport/edit, 2 frontend PARTIAL). Top MED: `editor_for` double-init, `LogForwarder`/`DiagEvent.file` path leakage, `flush_batch` inline count. Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
 **Multi-user:** Trey OFF Mirror until on latest + fresh-Pulled baseline.
 
