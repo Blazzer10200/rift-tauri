@@ -60,6 +60,54 @@
   function toggleTasks() {
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
+
+  /** Context-window cap for the model id reported by `system`/init.
+   *  1M-context variants carry the `[1m]` suffix on the model name; everything
+   *  else (sonnet/opus/haiku 4.x) is 200K by default. */
+  function contextWindowFor(model: string | null): number {
+    if (!model) return 200_000;
+    if (/\[1m\]/i.test(model)) return 1_000_000;
+    return 200_000;
+  }
+
+  function shortK(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 10_000) return `${Math.round(n / 1000)}K`;
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+    return String(n);
+  }
+
+  // Effective context the model is processing = uncached new input +
+  // cache-create + cache-read. Cache hits don't shrink what the model "sees"
+  // — they're billing optimization. Sum is what fills the window.
+  const ctxTokens = $derived(
+    assistant.lastTurnUsage
+      ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheRead + assistant.lastTurnUsage.cacheCreate
+      : 0,
+  );
+  const ctxWindow = $derived(contextWindowFor(assistant.lastModelId));
+  const ctxPct = $derived(ctxWindow > 0 ? Math.min(100, (ctxTokens / ctxWindow) * 100) : 0);
+  const ctxTone = $derived(ctxPct >= 90 ? "red" : ctxPct >= 70 ? "yellow" : "ok");
+  const ctxTitle = $derived.by(() => {
+    const u = assistant.lastTurnUsage;
+    if (!u) return "Context — send a message to populate";
+    const s = assistant.sessionUsage;
+    const cost =
+      assistant.totalCostUsd !== null && assistant.totalCostUsd !== undefined
+        ? ` · $${assistant.totalCostUsd.toFixed(4)}`
+        : "";
+    return (
+      `Context this turn: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} (${ctxPct.toFixed(1)}%)\n` +
+      `  • new input: ${u.input.toLocaleString()}\n` +
+      `  • cache read: ${u.cacheRead.toLocaleString()}\n` +
+      `  • cache create: ${u.cacheCreate.toLocaleString()}\n` +
+      `  • output: ${u.output.toLocaleString()}\n` +
+      `Session totals (${s.turns} turn${s.turns === 1 ? "" : "s"}):\n` +
+      `  • input: ${s.totalInput.toLocaleString()} · output: ${s.totalOutput.toLocaleString()}\n` +
+      `  • cache read: ${s.totalCacheRead.toLocaleString()} · cache create: ${s.totalCacheCreate.toLocaleString()}${cost}\n` +
+      `Model: ${assistant.lastModelId ?? "?"}`
+    );
+  });
 </script>
 
 <header class="head">
@@ -113,6 +161,14 @@
       >
         <TerminalSquare size={11}/>
         <span>{foreignShell.user} ({shortAgo(foreignShell.sinceMs)})</span>
+      </span>
+    {/if}
+
+    {#if ctxTokens > 0}
+      <span class="ctx-pill" data-tone={ctxTone} title={ctxTitle}>
+        <span class="ctx-bar"><span class="ctx-fill" style="width: {ctxPct}%"></span></span>
+        <span class="ctx-text">{shortK(ctxTokens)}<span class="ctx-sep">/</span>{shortK(ctxWindow)}</span>
+        <span class="ctx-pct">{Math.round(ctxPct)}%</span>
       </span>
     {/if}
 
@@ -230,6 +286,51 @@
     background: var(--warn-soft);
     border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
   }
+
+  .ctx-pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    cursor: help;
+    font-variant-numeric: tabular-nums;
+  }
+  .ctx-pill .ctx-bar {
+    position: relative;
+    width: 44px;
+    height: 4px;
+    background: var(--surface-hover);
+    border-radius: 999px;
+    overflow: hidden;
+  }
+  .ctx-pill .ctx-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 200ms ease-out, background 120ms;
+    border-radius: 999px;
+  }
+  .ctx-pill .ctx-text { color: var(--fg); }
+  .ctx-pill .ctx-sep { color: var(--fg-muted); margin: 0 2px; }
+  .ctx-pill .ctx-pct { color: var(--fg-muted); font-size: 10px; }
+  .ctx-pill[data-tone="yellow"] {
+    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .ctx-pill[data-tone="yellow"] .ctx-text { color: var(--warn); }
+  .ctx-pill[data-tone="yellow"] .ctx-fill { background: var(--warn); }
+  .ctx-pill[data-tone="red"] {
+    border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
+    background: color-mix(in oklch, var(--danger) 10%, transparent);
+    color: var(--danger);
+  }
+  .ctx-pill[data-tone="red"] .ctx-text { color: var(--danger); }
+  .ctx-pill[data-tone="red"] .ctx-fill { background: var(--danger); }
 
   .hdr-btn {
     display: inline-flex; align-items: center; gap: 5px;
