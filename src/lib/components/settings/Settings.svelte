@@ -231,7 +231,7 @@
             </span>
             <span class="v03-hint">
               Single-canvas chat-first layout with a customizable right-side dock.
-              Restart Rift after toggling — some components only read the flag at mount.
+              Toggling reloads the window so the new shell mounts cleanly.
             </span>
           </div>
           <label class="v03-switch" title={uiPrefs.useV03Shell ? "Disable v0.3 shell" : "Enable v0.3 shell"}>
@@ -766,12 +766,13 @@
 
         <div class="card asst-card">
           <h4 class="asst-h4">UI font</h4>
-          <p class="muted">Lexend has the strongest research backing for reading-rate improvement on dyslexic readers. System keeps the default Inter UI font.</p>
+          <p class="muted">Lexend has the strongest research backing for reading-rate improvement on dyslexic readers. Only applies while the master toggle above is on.</p>
           <div class="stt-lang-grid">
             <button
               type="button"
               class="stt-lang-pick"
               data-active={accessibility.font === "system"}
+              disabled={!accessibility.dyslexiaMode}
               onclick={() => accessibility.setFont("system")}
             >
               <span class="stt-lang-label">System default</span>
@@ -781,6 +782,7 @@
               type="button"
               class="stt-lang-pick"
               data-active={accessibility.font === "lexend"}
+              disabled={!accessibility.dyslexiaMode}
               onclick={() => accessibility.setFont("lexend")}
             >
               <span class="stt-lang-label">Lexend</span>
@@ -791,7 +793,7 @@
 
         <div class="card asst-card">
           <h4 class="asst-h4">Increased line + letter spacing</h4>
-          <p class="muted">Bumps line-height to 1.85 and adds letter-/word-spacing inside Assistant message bubbles and the composer. Other surfaces (Files, Sync, etc.) keep their compact density.</p>
+          <p class="muted">Bumps line-height to 1.85 and adds letter-/word-spacing inside Assistant message bubbles and the composer. Only applies while the master toggle above is on.</p>
           <div class="asst-row">
             <button
               type="button"
@@ -800,6 +802,7 @@
               aria-label="Increased line and letter spacing"
               aria-checked={accessibility.lineHeightBoost}
               data-on={accessibility.lineHeightBoost}
+              disabled={!accessibility.dyslexiaMode}
               onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}
             ><span class="switch-knob"></span></button>
             <span class="muted">

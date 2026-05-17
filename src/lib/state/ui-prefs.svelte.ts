@@ -39,6 +39,16 @@ class UiPrefs {
   setUseV03Shell(on: boolean) {
     this.useV03Shell = on;
     localStorage.setItem(V03_SHELL_KEY, on ? "1" : "0");
+    // S94: AppShell mounts a fundamentally different layout for v0.2 (page-
+    // tab shell, Settings is a routed page) vs v0.4.1 (chat-first shell,
+    // Settings is a modal). Live-flipping mid-Settings reparents the panel
+    // into a structure that effectively hides it — users saw the Settings
+    // page "disappear." Forcing a reload re-mounts everything with the new
+    // flag from the start, matching the existing "Restart Rift after
+    // toggling" guidance. Brief timeout lets the localStorage write commit.
+    if (typeof window !== "undefined") {
+      setTimeout(() => window.location.reload(), 120);
+    }
   }
 
   private apply() {

@@ -2,22 +2,23 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 93 — 2026-05-17 — v0.4.7-alpha: Settings → Accessibility
+## Session 94 — 2026-05-17 — v0.4.8-alpha hot-fix: a11y stuck-on + shell-switch disappears
 
-Phase 1 of the dyslexia-friendly arc. New section between Assistant + Speech (lucide `Accessibility` icon) — one master toggle + three dials:
+Two regressions reported right after v0.4.7 shipped.
 
-- **Master switch** — first-time-on seeds Lexend + line-height boost; forwards `dyslexiaMode: true` through `assistant_send` so [assistant/mod.rs](src-tauri/src/assistant/mod.rs) appends a per-turn addendum telling Claude to interpret phonetic/letter-swap typos + STT slur artifacts charitably. Zero per-turn cost.
-- **UI font** — System (Inter) ↔ Lexend (`@fontsource-variable/lexend`, ~150KB offline).
-- **Line + letter spacing** — 1.85 line-height + letter/word spacing bumps, scoped to `.bubble`/`.markdown-body`/textarea.
-- **Warm reading tint** — sepia overlay on bubbles + code only; rest of UI keeps dark theme.
+**(1) Dyslexia toggle stuck-on.** Master off cleared the addendum but font/spacing CSS persisted (dials wrote attrs unconditionally). Fix in [accessibility.svelte.ts](src/lib/state/accessibility.svelte.ts) `apply()`: dial attrs gated on master flag — off snaps to defaults; persisted values restored when re-enabled. Warm tint stays independent. Sub-buttons get `disabled={!dyslexiaMode}` for visual clarity.
 
-Store [accessibility.svelte.ts](src/lib/state/accessibility.svelte.ts) mirrors `ui-prefs.svelte.ts` (localStorage + `documentElement.dataset.a11y*`). CSS at bottom of `app.css`. Settings UI matches Speech section. Wired via `+layout.svelte`. 3-file bump 0.4.6 → 0.4.7-alpha. Auto-verifier clean. Phase 2 deferred.
+**(2) Appearance shell-toggle "disappeared" Settings.** AppShell renders Settings as a routed page in v0.2 / modal in v0.4.1; live-flipping mid-Settings reparents into a structure with no mount point. Fix in [ui-prefs.svelte.ts](src/lib/state/ui-prefs.svelte.ts) `setUseV03Shell`: `window.location.reload()` after 120ms — re-mounts cleanly with the new flag. Hint copy updated.
+
+3-file bump 0.4.7 → 0.4.8-alpha. Auto-verifier clean.
+
+**S93 recap (v0.4.7):** Settings → Accessibility, master toggle + 3 dials. Phase 2 still deferred.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.7-alpha** (S93 pending commit; v0.4.6 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.8-alpha** (S94 pending commit; v0.4.7 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
 **v0.4.1 shell** = default; `useV03Shell` toggle = experimental v0.2 fallback (storage key verbatim, never rename).
 
