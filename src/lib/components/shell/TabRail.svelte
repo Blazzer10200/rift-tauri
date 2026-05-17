@@ -1,29 +1,23 @@
 <script lang="ts">
-  import { FolderOpen, Activity, TriangleAlert, Cog, Download, RefreshCcw, Sparkles, ChevronRight, Pin, PinOff, ListChecks, History, Bot, TerminalSquare, Paperclip } from "lucide-svelte";
+  import { FolderOpen, Activity, TriangleAlert, Cog, Download, RefreshCcw, Sparkles, ChevronRight, PinOff } from "lucide-svelte";
   import { connection } from "../../state/connection.svelte";
   import { updates } from "../../state/updates.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
-  import type { PanelId } from "../../state/panel-types";
 
   type Tab = "browse" | "activity" | "sync" | "assistant" | "conflicts" | "settings" | "diagnostics";
-  type RailMode = "tabs" | "panels";
 
-  let { mode = "tabs", active, onChange, onPanelToggle, onOpenSettings }: {
-    mode?: RailMode;
+  let { active, onChange }: {
     active: Tab;
     onChange: (t: Tab) => void;
-    // Phase C Part 2: shift-click bypasses accordion mode (lets user keep
-    // multiple panels open at once). Plumbed via the second arg.
-    onPanelToggle?: (id: PanelId, opts?: { allowMulti?: boolean }) => void;
-    onOpenSettings?: () => void;
   } = $props();
 
   type RailTone = "accent" | "info" | "danger" | "neutral";
-  // `id` is intentionally `string` so the same shape holds tab IDs and panel IDs.
   type ItemDef = { id: string; label: string; icon: typeof FolderOpen; kbd: string; tone: RailTone; count?: () => number; countCls?: string; beta?: boolean };
   type ItemGroup = { id: string; items: ItemDef[] };
 
-  // v0.2 tab groups — workspace tools / AI / status / admin.
+  // v0.2 tab groups — workspace tools / AI / status / admin. The v0.3 panel-
+  // mode rail was dropped in S76; v0.4.1 has its own ActivityBar component
+  // for right-pane page selection, so TabRail is now v0.2-only.
   const tabGroups: ItemGroup[] = [
     {
       id: "workspace",
@@ -46,62 +40,17 @@
       ],
     },
   ];
-  const tabFooter: ItemDef[] = [
+  const footer: ItemDef[] = [
     { id: "settings", label: "Settings", icon: Cog, kbd: "6", tone: "neutral" },
   ];
 
-  // v0.3 panel groups — chat is permanent center; rail toggles dock panels.
-  const panelGroups: ItemGroup[] = [
-    {
-      id: "workspace",
-      items: [
-        { id: "files", label: "Files", icon: FolderOpen, kbd: "3", tone: "accent" },
-        { id: "sync",  label: "Sync",  icon: RefreshCcw, kbd: "2", tone: "accent" },
-      ],
-    },
-    {
-      id: "work",
-      items: [
-        { id: "tasks",   label: "Tasks",   icon: ListChecks, kbd: "1", tone: "accent" },
-        { id: "agents",  label: "Agents",  icon: Bot,        kbd: "5", tone: "info", beta: true },
-        { id: "history", label: "History", icon: History,    kbd: "4", tone: "neutral" },
-      ],
-    },
-    {
-      id: "tools",
-      items: [
-        { id: "terminal",    label: "Terminal",    icon: TerminalSquare, kbd: "6", tone: "neutral" },
-        { id: "attachments", label: "Attachments", icon: Paperclip,      kbd: "7", tone: "neutral" },
-      ],
-    },
-    {
-      id: "status",
-      items: [
-        { id: "activity", label: "Activity", icon: Activity, kbd: "8", tone: "info", count: () => connection.activityFeed.length, countCls: "" },
-      ],
-    },
-  ];
-  const panelFooter: ItemDef[] = [
-    { id: "settings", label: "Settings", icon: Cog, kbd: ",", tone: "neutral" },
-  ];
-
-  const groups = $derived(mode === "panels" ? panelGroups : tabGroups);
-  const footer = $derived(mode === "panels" ? panelFooter : tabFooter);
+  const groups = tabGroups;
 
   function isActive(itemId: string): boolean {
-    if (mode === "panels") {
-      if (itemId === "settings") return false;
-      return uiPrefs.panels[itemId as PanelId]?.open ?? false;
-    }
     return active === itemId;
   }
 
-  function handleClick(itemId: string, ev?: MouseEvent | KeyboardEvent) {
-    if (mode === "panels") {
-      if (itemId === "settings") { onOpenSettings?.(); return; }
-      onPanelToggle?.(itemId as PanelId, { allowMulti: !!ev?.shiftKey });
-      return;
-    }
+  function handleClick(itemId: string) {
     onChange(itemId as Tab);
   }
 
@@ -144,8 +93,8 @@
             class="rail-btn"
             data-active={isActive(t.id)}
             data-tone={t.tone}
-            data-panel-id={mode === "panels" ? t.id : null}
-            onclick={(e) => { handleClick(t.id, e); (e.currentTarget as HTMLButtonElement).blur(); }}
+            data-panel-id={null}
+            onclick={(e) => { handleClick(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
             title="{t.label} (Ctrl+{t.kbd})"
             type="button"
           >
@@ -173,8 +122,8 @@
             class="rail-btn"
             data-active={isActive(t.id)}
             data-tone={t.tone}
-            onclick={(e) => { handleClick(t.id, e); (e.currentTarget as HTMLButtonElement).blur(); }}
-            title="{t.label} ({mode === 'panels' ? 'Ctrl+,' : `Ctrl+${t.kbd}`})"
+            onclick={(e) => { handleClick(t.id); (e.currentTarget as HTMLButtonElement).blur(); }}
+            title="{t.label} (Ctrl+{t.kbd})"
             type="button"
           >
             <span class="rail-icon"><Icon size={16}/></span>

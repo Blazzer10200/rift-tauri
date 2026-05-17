@@ -7,21 +7,6 @@ export type PanelId =
   | "attachments"
   | "activity";
 
-export type DockSlot = "left" | "right";
-
-export type PanelState = {
-  open: boolean;
-  collapsed: boolean;
-  order: number;
-  height: number | null;
-  /** v0.4 — which side of the split dock the panel lives in. Older
-   *  localStorage records without this field migrate to "left" so existing
-   *  users see no visible change on upgrade. */
-  slot: DockSlot;
-};
-
-export type LayoutPreset = "minimal" | "standard" | "power";
-
 export const PANEL_IDS: readonly PanelId[] = [
   "sync",
   "files",
@@ -31,9 +16,3 @@ export const PANEL_IDS: readonly PanelId[] = [
   "attachments",
   "activity",
 ] as const;
-
-export const PRESETS: Record<LayoutPreset, readonly PanelId[]> = {
-  minimal: ["history"],
-  standard: ["sync", "files", "agents", "history"],
-  power: ["sync", "files", "agents", "history", "terminal", "activity", "attachments"],
-} as const;

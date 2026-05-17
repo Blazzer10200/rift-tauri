@@ -9,6 +9,7 @@
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
+  import { rightPane } from "../../state/right-pane.svelte";
   import {
     terminal,
     TERM_FONT_SIZE_MIN,
@@ -221,38 +222,20 @@
         </div>
 
         {#if uiPrefs.useV03Shell}
-          <div class="v03-toggle card v03-sub">
-            <div class="v03-toggle-l">
-              <span class="v03-title v03-sub-title">
-                One panel at a time (accordion)
-              </span>
-              <span class="v03-hint">
-                Expanding a panel auto-collapses the previously open one. Hold <kbd class="kbd">Shift</kbd> when
-                clicking a header (or press <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Shift</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">8</kbd>) to keep multiple panels open.
-              </span>
-            </div>
-            <label class="v03-switch" title={uiPrefs.dockAccordion ? "Allow multiple open panels" : "Switch to accordion mode"}>
-              <input
-                type="checkbox"
-                checked={uiPrefs.dockAccordion}
-                onchange={(e) => uiPrefs.setDockAccordion((e.currentTarget as HTMLInputElement).checked)}
-              />
-              <span class="v03-switch-track"></span>
-            </label>
-          </div>
-
-          <!-- v0.4 Layout sub-section: reset dock split, reset all tabs, kbd cheat sheet. -->
+          <!-- v0.4.1 Layout sub-section: reset the right pane, close all chat
+               tabs, kbd cheat sheet. The dock-accordion + split-dock-reset
+               controls were retired alongside the dock primitive. -->
           <div class="v03-toggle card v03-sub layout-card">
             <div class="v03-toggle-l">
               <span class="v03-title v03-sub-title">Layout</span>
               <span class="v03-hint">
-                v0.4 — chat tabs + split dock. Drag a panel header across the dock to move it
-                between the left and right slots; an internal divider appears once the right
-                slot has anything in it.
+                v0.4.1 — chat lives on the left; pick a tool from the activity bar on the right.
+                Drag activity-bar icons to reorder them — your <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">7</kbd>
+                shortcuts follow the bar's order.
               </span>
               <div class="layout-actions">
-                <button class="btn ghost sm" type="button" onclick={() => uiPrefs.setDockSplitPct(50)}>
-                  <RotateCcw size={11}/> Reset dock split
+                <button class="btn ghost sm" type="button" onclick={() => rightPane.reset()}>
+                  <RotateCcw size={11}/> Reset right pane
                 </button>
                 <button class="btn ghost sm" type="button" onclick={() => void assistantStore.closeAllTabs()}>
                   <X size={11}/> Close all chat tabs
@@ -263,7 +246,8 @@
                 <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">W</kbd><span>Close active tab</span></div>
                 <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Tab</kbd><span>Cycle tabs (Shift to reverse)</span></div>
                 <div class="kbd-row"><kbd class="kbd">Alt</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">9</kbd><span>Jump to tab N</span></div>
-                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">8</kbd><span>Toggle dock panel</span></div>
+                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">7</kbd><span>Toggle right-pane page</span></div>
+                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">0</kbd><span>Close right pane</span></div>
               </div>
             </div>
           </div>
