@@ -2,21 +2,19 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 91 — 2026-05-17 — v0.4.5-alpha: embedded-Claude allowlist + STT slur-tolerance
+## Session 92 — 2026-05-17 — v0.4.6-alpha HOT-FIX: `bypassPermissions` mode
 
-Both S91 priorities landed. CDP-verified.
+Second Assistant session hit `mcp__rift__remote_bash` "running in don't ask mode" denial — despite S91 allowlist including the tool. Root cause: [src-tauri/src/assistant/mod.rs:926](src-tauri/src/assistant/mod.rs#L926) passed `--permission-mode dontAsk`, which auto-DENIES anything that would prompt (MCP calls included — `--allowed-tools` doesn't short-circuit that gate). Switched to `bypassPermissions` — auto-allows; `--allowed-tools` remains the reachability gate. One-line change + explanatory comment, 3-file bump 0.4.5 → 0.4.6-alpha.
 
-**Allowlist (P1).** [src-tauri/src/assistant/mod.rs](src-tauri/src/assistant/mod.rs) `assistant_send` widened `--allowed-tools` in all three branches to the full CLI built-in surface via shared `BUILTINS` const. Added (over S88's `+Skill`): `Agent` (subagent spawn — `/plan`/`/quick-review`/`/check`), `AskUserQuestion`, `BashOutput`+`KillBash`+`KillShell` (auto-fired after `Bash run_in_background:true`), `ExitPlanMode`, `MultiEdit`, `NotebookEdit`, `SlashCommand`. MCP scope unchanged. Verified via CDP smoke: fresh chat tab → Bash + Agent-subagent spawn both completed cleanly, zero `permission|denied|not allowed` strings in body text.
+**S91 recap (v0.4.5 binary released earlier same day):** widened `--allowed-tools` to full CLI `BUILTINS` const + STT `maxAlternatives` 1→3 w/ `pickBestAlternate` helper. Trey auto-updated.
 
-**STT (P2).** [src/lib/state/stt.svelte.ts](src/lib/state/stt.svelte.ts) bumped `r.maxAlternatives` 1 → 3 + added `pickBestAlternate(res)` helper called from `onResult` — returns highest-confidence transcript, falls back to `alt[0]` when WebView2 returns 0 for every alternate (spec-allowed). Cleaner lower-ranked variants can now win. Vocabulary hints + Azure-direct fallback deferred (stretch).
-
-3-file version 0.4.4 → 0.4.5-alpha; Cargo.lock auto-syncs. CHANGELOG v0.4.5 extended; v0.4.3/v0.4.4 archived. **Pending:** commit + push; optional `release.ps1` for binary → Trey auto-updates.
+**Next arc (deferred):** dyslexia-friendly Assistant for Trey. Phase 1 = Settings → Accessibility (Lexend font, +line-height, cream bg, system-prompt hint). Phase 2 = SymSpell+Metaphone "did you mean" pill. Open Qs in chat.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.5-alpha** (S91 pending commit). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.6-alpha** (S92 hot-fix pending commit; v0.4.5 binary already released). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
 **v0.4.1 shell** = default; `useV03Shell` toggle = experimental v0.2 fallback (storage key verbatim, never rename).
 
@@ -49,5 +47,5 @@ Both S91 priorities landed. CDP-verified.
 - **v0.4.1 right-pane:** keep `useV03Shell` storage key. Width 320-1200, default 560. Left-edge-resize only.
 - **S87 context pill:** `recordTurnUsage(u, accumulate)` — only `result` envelope updates `sessionUsage`; both refresh `lastTurnUsage`. Effective ctx = `input + cache_read + cache_create`. `[1m]` suffix = 1M window.
 - **S87 image paste:** `assistant_send` flips `--input-format text → stream-json` when attachments present. 20 MiB cap + `image/*` gate.
-- **S91 allowlist:** `assistant_send` `--allowed-tools` MUST keep the full `BUILTINS` const (all CLI built-ins incl. Agent/BashOutput/KillBash/SlashCommand) in all three branches. Narrowing → per-tool denials in the Assistant tab.
+- **S91 allowlist + S92 mode:** `assistant_send` MUST keep `--permission-mode bypassPermissions` (NOT `dontAsk` — that auto-denies MCP calls) AND the full `BUILTINS` const in `--allowed-tools` (Agent/BashOutput/KillBash/SlashCommand etc) across all three branches. Both gates required; either change → per-tool denials in the Assistant.
 - **S88 STT:** WebView's `SpeechRecognition` writes directly to `assistant.composerDraft`. `baseDraft` snapshot on start preserves pre-existing text in append mode. `errno("not-allowed")` → friendly mic-perm message. Settings section id=`"speech"` (was `"voice"`). TTS is fully removed — do not reintroduce.
