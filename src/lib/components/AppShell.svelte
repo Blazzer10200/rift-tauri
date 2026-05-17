@@ -28,7 +28,7 @@
   import ActivityBar from "./shell/ActivityBar.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
   import { rightPane } from "../state/right-pane.svelte";
-  import { PANELS } from "./dock/panels";
+  import { PANELS } from "./right-pane";
   import { updates } from "../state/updates.svelte";
   import { terminal } from "../state/terminal.svelte";
   import { syncPage } from "../state/sync-page.svelte";

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PANELS } from "../dock/panels";
+  import { PANELS } from "../right-pane";
   import { rightPane, type ActivityBarId } from "$lib/state/right-pane.svelte";
 
   // Drag-to-reorder: source index captured on dragstart, drop index resolved

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PanelIcon } from "./index";
-  import TerminalPanel from "../../terminal/TerminalPanel.svelte";
+  import TerminalPanel from "../terminal/TerminalPanel.svelte";
 
   // PanelShell passes title + icon for the registry contract; the dock-mode
   // TerminalPanel branch renders its own tab strip + tool buttons, so these

@@ -1,14 +1,14 @@
 <script lang="ts">
   import type { PanelIcon } from "./index";
-  import ActivityFeed from "../../activity/ActivityFeed.svelte";
+  import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
-  // PanelShell passes title + icon; the body owns its own toolbar so these
-  // are accepted for the registry contract but not rendered.
+  // PanelShell passes title + icon for the registry contract; HistoryDrawer
+  // sheds its overlay + close button under uiPrefs.useV03Shell.
   let { }: { title: string; icon: PanelIcon } = $props();
 </script>
 
 <div class="wrap">
-  <ActivityFeed />
+  <HistoryDrawer />
 </div>
 
 <style>
