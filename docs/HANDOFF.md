@@ -4,7 +4,7 @@
 
 ## Sessions 78–87 — 2026-05-17 — v0.4.1 ship + context reader + image paste
 
-S78–86 arc archived. **S87** shipped v0.4.1-alpha to `rift-releases` (Velopack: full + delta + Setup.exe + Portable.zip), wrote `docs/TREY-SETUP.md` collaborator guide, added Assistant-tab **context-reader pill** (parses CLI `usage` blocks → per-turn `input+cache_read+cache_create` / model-window cap, color-tiered 70%/90%, hover tooltip w/ session totals; fixed double-count between `assistant`+`result` envelopes), and end-to-end **image paste** (Composer `onpaste` → chunked base64 → 40px thumb chip → backend switches to `--input-format stream-json` w/ text+image content blocks, 20 MiB cap both ends). All on `main`. Audit Open still 6 LOW upstream-blocked.
+S78–86 arc archived. **S87** shipped v0.4.1-alpha to `rift-releases` (Velopack full+delta+Setup+Portable), wrote `docs/TREY-SETUP.md`, added Assistant context-reader pill in AssistantHeader (CLI `usage` blocks → ctx/window cap, 70/90% tones, hover for session totals; double-count fixed), and end-to-end image paste (Composer paste → b64 chip → backend `--input-format stream-json` w/ text+image content blocks, 20 MiB cap). All on `main`. Audit Open still 6 LOW upstream-blocked.
 
 ---
 
@@ -16,7 +16,7 @@ S78–86 arc archived. **S87** shipped v0.4.1-alpha to `rift-releases` (Velopack
 
 **CDP autonomous-verify live** — `run-dev.bat` sets WebView2 port; `npm run cdp:serve` on 9223; drive via `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`. Smoke: `scripts/cdp/smoke-v04-1.sh`.
 
-**v0.2 queue (post-S86, each needs design — `/grill` or `/plan` first):** auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split; LocalPane/RemotePane full base-component extract (S86 shipped pane-utils slice only); Diagnostics canonical-skeleton; integration tests phase 1.
+**v0.2 queue (each needs `/grill` or `/plan` first):** auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split; LocalPane/RemotePane full base-component extract; Diagnostics canonical-skeleton; integration tests phase 1.
 
 **Audit queue (post-S86):** 6 LOW lib/config, all blocked upstream. Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
@@ -32,23 +32,15 @@ S78–86 arc archived. **S87** shipped v0.4.1-alpha to `rift-releases` (Velopack
 
 ## CRITICAL DON'T-TOUCH
 
-- russh `ring` + reqwest `rustls` only (NASM blocks aws-lc-rs).
-- `~/.rift/*.json` compat — keep `serde(flatten) extra`.
-- `VelopackApp::build().run()` MUST be first call in `lib.rs::run()`.
-- `bundle.targets: ["nsis"]` while `-alpha`/`-beta` (MSI rejects non-numeric semver).
-- DriftWatcher conflict-rename guard — never overwrite dirty local. `.rift-trail.jsonl` ignore rule mandatory (pull→push loop without).
+- russh `ring` + reqwest `rustls` only (NASM blocks aws-lc-rs). russh `Config{keepalive 20s/3, window 2 MiB, packet 32 KiB}` in `sftp::open_session`+`tunnel::start`.
+- `~/.rift/*.json` compat — keep `serde(flatten) extra`. `VelopackApp::build().run()` FIRST in `lib.rs::run()`. `bundle.targets:["nsis"]` while `-alpha`/`-beta`.
+- DriftWatcher conflict-rename guard — never overwrite dirty local. `.rift-trail.jsonl` ignore rule mandatory.
 - `GITHUB_OWNER`/`GITHUB_REPO` → public `rift-releases`, NOT source repo.
 - `path_guard.rs` frozen; `rename_via` strict; `rename_overwriting_via` ONLY for atomic upload tmp-swap.
-- `last_scan_entries` = `std::sync::Mutex` (NOT tokio) — notify handler context.
-- `force_pull_now`/`force_push_now` invariants preserved (v0.2.43).
-- **`FileAttributes::default()` for SETSTAT = data-loss** — use `empty()`.
-- `SftpClient::delete` routes by remote stat → dirs via `delete_recursive_via`.
-- `mkdir_p_via` chmods each segment 2775 (shared-group pushes).
-- Upload pre-flight SHA-collapse before raising CONFLICT (v0.2.32).
-- `DriftBucket::ToDelete` deletes LOCAL; `ToDeleteRemote` deletes REMOTE (mirror-on + has-baseline gate). Mass local-delete circuit breaker `(count*0.30).clamp(5,25)`; ToDeleteRemote bypasses.
-- Time displays MUST pass `[], { hour12: true }` (locale 24h on non-US).
-- `spawn_frontend_pump` 200/s rate-limit; critical stages bypass.
-- russh `Config { keepalive 20s/3, window 2 MiB, packet 32 KiB }` in `sftp::open_session` + `tunnel::start`.
+- `last_scan_entries` = `std::sync::Mutex` (NOT tokio). `force_pull_now`/`force_push_now` invariants preserved.
+- **`FileAttributes::default()` for SETSTAT = data-loss** — use `empty()`. `SftpClient::delete` routes by stat → dirs via `delete_recursive_via`. `mkdir_p_via` chmods 2775.
+- Upload pre-flight SHA-collapse before CONFLICT. `DriftBucket::ToDelete` deletes LOCAL; `ToDeleteRemote` deletes REMOTE (mirror+baseline gated). Mass-local-delete breaker `(count*0.30).clamp(5,25)`; ToDeleteRemote bypasses.
+- Time displays MUST pass `[], { hour12: true }`. `spawn_frontend_pump` 200/s rate-limit; critical stages bypass.
 - **v0.2.46+ data-integrity stack** (git log): `mkdir_p_strict_via`, batch pre-mkdir, lock-release, debounce/coalesce, `with_t` timeouts, stale-lock gates, RenameMode arms, Mirror typed-confirm, auto-reconnect window.
 - **v0.2.56:** Assistant tab self-execs MCP via `RIFT_MCP_SERVER=1` env branch in `lib.rs::run()` BEFORE Tauri loop; CLI passes `--mcp-config` + `--allowed-tools mcp__rift__*`.
 - **v0.4 chat tabs:** `openTabs` (`rift.ui.tabs.v1`) filters vs `assistant_list_conversations` on init. `send()` keys `isFirstTurn` off `convoCreatedAt` (NOT `currentConvoId`) so `newTab`-minted ids route as `--session-id`.
@@ -58,4 +50,4 @@ S78–86 arc archived. **S87** shipped v0.4.1-alpha to `rift-releases` (Velopack
 - **S86 pill desync:** `isHandshaking = $derived(connecting && status === null)` — UI labels read this; raw `connecting` still gates action buttons (anti-double-fire). Don't collapse.
 - **S86 file-count cache:** `FolderCountCache { AtomicU64 count, AtomicI64 last_refresh_secs }` keyed by `remote_root`. 5-min TTL → `safe_count_files`; otherwise optimistic `apply_count_delta(created, deleted)` from INPUT entries. `stop_watch` MUST evict cache. Threshold's 5..25 clamp forgives small drift.
 - **S87 context pill:** `recordTurnUsage(u, accumulate)` — both `assistant.message.usage` AND `result.usage` envelopes carry the SAME end-of-turn tally. Only `result` (`accumulate=true`) updates `sessionUsage`; both refresh `lastTurnUsage`. Don't accumulate on `assistant` or session totals 2× off. Effective context = `input + cache_read + cache_create`. `[1m]` model suffix = 1M window, else 200K.
-- **S87 image paste:** `assistant_send` gains optional `attachments: Vec<AssistantAttachment{mime,data_base64}>`. When present, CLI args flip `--input-format text` → `stream-json` and stdin gets one envelope `{type:"user",message:{role:"user",content:[{type:"text",text},{type:"image",source:{type:"base64",media_type,data}}]}}`. 20 MiB cap both sides + `image/*` mime gate. Empty-text + image = allowed.
+- **S87 image paste:** `assistant_send` gains optional `attachments: Vec<AssistantAttachment{mime,data_base64}>`. When present, CLI flips `--input-format text`→`stream-json`; stdin gets `{type:"user",message:{role:"user",content:[text-block, image-block(source.type=base64)]}}`. 20 MiB cap + `image/*` gate. Empty-text + image = allowed.
