@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { Send, Square, X } from "lucide-svelte";
+  import { Send, Square, X, Mic, Loader2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { stt } from "../../state/stt.svelte";
   import { tick } from "svelte";
 
   let { onsubmit }: { onsubmit: (text: string) => void } = $props();
@@ -211,6 +212,36 @@
     onsubmit(text);
     void tick().then(autosize);
   }
+
+  // S88: mic toggle. The stt store writes recognized text directly into
+  // `assistant.composerDraft` as it arrives (interim + final), so we just
+  // start/stop and let the autosizer catch up. Composer focus is restored
+  // on stop so the user can hit Enter without an extra click.
+  let micBusy = $state(false);
+  async function toggleMic() {
+    if (micBusy) return;
+    micBusy = true;
+    try {
+      void stt.init();
+      if (stt.recording) {
+        await stt.stop();
+        void tick().then(() => { autosize(); ta?.focus(); });
+      } else {
+        await stt.start();
+        void tick().then(() => ta?.focus());
+      }
+    } finally {
+      micBusy = false;
+    }
+  }
+  // Live autosize while transcription is streaming in.
+  $effect(() => {
+    if (stt.recording || stt.transcribing) {
+      const _v = assistant.composerDraft;
+      void _v;
+      void tick().then(autosize);
+    }
+  });
 
   // ── Image paste ─────────────────────────────────────────────────────────
   // Captures any image item on the clipboard when pasted into the textarea.
@@ -527,6 +558,24 @@
     {/if}
 
     <div class="composer" class:streaming={assistant.streaming}>
+      <button
+        class="micbtn"
+        class:recording={stt.recording}
+        class:transcribing={stt.transcribing}
+        type="button"
+        onclick={toggleMic}
+        disabled={micBusy || stt.transcribing}
+        title={stt.recording ? "Stop recording" : stt.transcribing ? "Transcribing…" : "Dictate (speech-to-text)"}
+        aria-label={stt.recording ? "Stop recording" : "Start recording"}
+      >
+        {#if stt.transcribing}
+          <Loader2 size={14} class="mic-spin" />
+        {:else if stt.recording}
+          <Square size={12} fill="currentColor" />
+        {:else}
+          <Mic size={14} />
+        {/if}
+      </button>
       <textarea
         bind:this={ta}
         bind:value={assistant.composerDraft}
@@ -638,6 +687,37 @@
     color: oklch(0.98 0.01 22);
   }
   .sendbtn.stop:hover { filter: brightness(1.1); }
+
+  .micbtn {
+    width: 30px; height: 30px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    align-self: flex-end;
+    transition: color 140ms, border-color 140ms, background 140ms, box-shadow 140ms;
+  }
+  .micbtn:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
+  .micbtn:disabled { opacity: 0.55; cursor: default; }
+  .micbtn.recording {
+    background: var(--danger);
+    color: oklch(0.98 0.01 22);
+    border-color: var(--danger);
+    animation: mic-pulse 1.1s ease-in-out infinite;
+  }
+  .micbtn.transcribing {
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+  }
+  :global(.mic-spin) { animation: mic-spin 0.9s linear infinite; }
+  @keyframes mic-spin { to { transform: rotate(360deg); } }
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 45%, transparent); }
+    50%      { box-shadow: 0 0 0 6px transparent; }
+  }
   .sendbtn.queue {
     background: color-mix(in oklch, var(--accent) 70%, var(--surface));
   }

@@ -2,6 +2,26 @@
 
 > Live changelog = current version only. Older entries live in `docs/archive/CHANGELOG-archive.md` (and `git log -- docs/CHANGELOG.md`).
 
+## v0.4.3-alpha — 2026-05-17 — Voice arc: text-to-speech + speech-to-text
+
+Two-direction voice integration. Both surface through a new **Settings → Voice** section and toggle from the Assistant header / Composer respectively.
+
+### Text-to-speech (Claude → audio)
+
+`msedge-tts` Rust crate calls Microsoft Edge's read-aloud endpoint (Azure Neural voices, free, no API key). `src-tauri/src/tts/mod.rs` owns a single tokio task that drains a sentence queue serially and emits MP3 b64 over `tts://audio`. Frontend [src/lib/state/tts.svelte.ts](src/lib/state/tts.svelte.ts) buffers streaming text per message id, splits on `/[.!?]+["')\]]?\s+/`, dispatches each completed sentence, and plays back-to-back via HTMLAudioElement. Cancel = generation counter bumps (drops in-flight + queued) plus local queue clear.
+
+AssistantHeader speaker toggle = single-click `enabled + auto_speak` on; click again mutes auto-speak (master stays on so per-message replay still works). MessageBubble gets a speaker icon next to copy for one-shot replay. Settings carries the voice picker (~500 Edge voices, English first), rate/pitch/volume sliders (-50..+50), and a Test button.
+
+### Speech-to-text (audio → composer)
+
+WebView2's built-in `SpeechRecognition` (Edge/Chromium → Azure when online) writes directly into `assistant.composerDraft`. Live interim text streams as the user speaks; final committed text replaces interim segments on each phrase commit. No Rust-side audio capture, no model download, no build deps. [src-tauri/src/stt/mod.rs](src-tauri/src/stt/mod.rs) only owns settings persistence at `~/.rift/stt-config.json`. Composer gets a mic button on the left — click to record (pulsing red), click again to stop (focus returns to textarea, cursor at end).
+
+Settings exposes language (12 BCP-47 locales), live-partials toggle, continuous mode toggle, append-vs-replace insertion mode. Microphone permission prompts once via WebView; subsequent uses are silent.
+
+### Why not whisper.cpp local
+
+Pivoted away from `whisper-rs` mid-session. Build-time libclang requirement on Windows broke `cargo run` w/o LLVM installed; bindgen route would have forced every dev (Trey included) to install LLVM. Web Speech API delivers comparable quality (same Azure backbone as the TTS path) with zero install footprint, true real-time streaming, and no first-launch model download. Trade-off: requires internet (so does Anthropic, so does the TTS).
+
 ## v0.4.2-alpha — 2026-05-17 — Hot-fix: embedded Claude's `Skill` tool
 
 Trey reported `/handoff`, `/check`, `/plan` etc. were rejected inside Rift's Assistant tab w/ "skills blocked." Root cause: `assistant_send` builds `--allowed-tools` as an explicit comma-list and `Skill` was missing from all three branches (full-config, scoped, scoped+remote-shell). The CLI's allowlist gate then denied the `Skill` tool even though `--disable-slash-commands` wasn't set. Added `Skill` to every branch in `assistant/mod.rs`; corrected the misleading `use_full_config` doc comment that claimed skills "always load via the CLI's own resolution" (true for command discovery, false for the tool gate).

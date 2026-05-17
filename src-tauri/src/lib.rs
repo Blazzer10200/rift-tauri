@@ -17,7 +17,9 @@ pub mod sftp;
 pub mod state;
 pub mod sync;
 pub mod terminal;
+pub mod stt;
 pub mod transport;
+pub mod tts;
 pub mod tunnel;
 pub mod update_service;
 
@@ -1692,6 +1694,11 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // TTS worker — single async task drains a per-process queue and
+            // emits `tts://audio` chunks. Lives for app lifetime.
+            app.manage(tts::TtsService::start(app.handle().clone()));
+            // STT recognition runs in the WebView (Web Speech API). Rust side
+            // only persists the user's STT preferences via stt::stt_*_config.
             // Diagnostics: stream bus events to the frontend (`diag://event`)
             // and emit a periodic pipeline-state snapshot (`diag://state`)
             // every 500ms. Both run for the life of the process.
@@ -1779,6 +1786,13 @@ pub fn run() {
             assistant::assistant_clear_root,
             assistant::assistant_remove_recent_root,
             assistant::assistant_list_workspace_files,
+            tts::tts_get_config,
+            tts::tts_set_config,
+            tts::tts_list_voices,
+            tts::tts_speak,
+            tts::tts_cancel,
+            stt::stt_get_config,
+            stt::stt_set_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

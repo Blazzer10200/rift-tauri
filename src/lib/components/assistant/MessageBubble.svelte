@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { User, Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
+  import { User, Sparkles, Copy, Check, Brain, ChevronDown, Volume2, Square } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import type { ChatMessage, ThinkingBlock } from "../../state/assistant.svelte";
+  import { tts } from "../../state/tts.svelte";
   import Markdown from "./Markdown.svelte";
 
   let { message, streaming = false }: { message: ChatMessage; streaming?: boolean } = $props();
@@ -110,6 +111,27 @@
           {#if modelLabel && costLabel}<span class="turn-sep">·</span>{/if}
           {#if costLabel}<span class="turn-cost">{costLabel}</span>{/if}
         </span>
+      {/if}
+      {#if !isUser && plainText.length > 0}
+        {#if tts.playing && tts.playingMessageId === message.id}
+          <button
+            class="copybtn"
+            type="button"
+            onclick={() => void tts.cancel()}
+            title="Stop reading"
+          >
+            <Square size={10} />
+          </button>
+        {:else}
+          <button
+            class="copybtn"
+            type="button"
+            onclick={() => void tts.replay(message.id, plainText)}
+            title="Read aloud"
+          >
+            <Volume2 size={11} />
+          </button>
+        {/if}
       {/if}
       {#if plainText.length > 0}
         <button class="copybtn" type="button" onclick={copy} title="Copy">
