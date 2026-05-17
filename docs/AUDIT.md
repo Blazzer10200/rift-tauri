@@ -2,35 +2,29 @@
 
 Single source of truth for code audit findings. Open items at top, archive below. Line numbers re-verified 2026-05-17 against HEAD (v0.4.1-alpha tree). Re-verify before fixing if HEAD has moved.
 
-Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 fix-pass closed 6 (B2/B4/B5/B9 + S6 + T4). S82 fix-pass closed 6 more (B7 + B11 + S4 + T1 + T2 + T3) + downgraded B16 to INFO. Total Open: 42 → **11 actionable**.
+Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged 2026-05-15. Verification pass 2026-05-17 moved 16 items to Archive (silently fixed by v0.3/v0.4 refactors) + downgraded 3 to PARTIAL. S81 fix-pass closed 6 (B2/B4/B5/B9 + S6 + T4). S82 fix-pass closed 6 (B7 + B11 + S4 + T1 + T2 + T3) + downgraded B16 to INFO. S83 fix-pass closed 3 more (B3 + F1 + F2). Total Open: 42 → **8 actionable**.
 
 ---
 
 # Open Findings
 
-## Frontend (3 items)
+## Frontend (0 actionable)
+
+All open frontend audit items resolved. F3–F15 fixed by v0.3/v0.4 refactors (verified 2026-05-17). F1 + F2 closed by S83 fix-pass — `$effect` cleanup now bumps `loadToken` so any in-flight `load()` bails at its existing token-mismatch guard.
+
+## Backend — lib / config / capabilities (5 LOW + 1 INFO)
 
 | Sev | File:line | Issue | Fix |
 |---|---|---|---|
-| MED-PARTIAL | `src/lib/components/browser/RemotePane.svelte:50-53` | `$effect` async `void load()` uses `loadToken` guard (race fixed) but no destroy-flag in cleanup; rejection caught into `error` state only. | Destroyed flag in effect cleanup; propagate fatal rejection. |
-| MED-PARTIAL | `src/lib/components/browser/LocalPane.svelte:50-53` | Same pattern as `RemotePane` (loadToken landed; cleanup-cancel didn't). | Same fix. |
-
-(F3-F15 verified resolved 2026-05-17 — moved to Archive.)
-
-## Backend — lib / config / capabilities (6 items)
-
-| Sev | File:line | Issue | Fix |
-|---|---|---|---|
-| MED | `src-tauri/src/diagnostics/mod.rs:277` `LogForwarder` | Forwards every log msg to frontend incl. error bodies w/ potential key paths. | Audit `log::error!/warn!` callers; add `RUST_LOG_DIAG_SCRUB` env flag. |
 | LOW | `src-tauri/src/profile/mod.rs:31-36` `bridge_token` | Plaintext in `~/.rift/rift.json`. Comment acknowledges. | Phase-6 tracking only — Stronghold/DPAPI/keyring. |
 | LOW | `src-tauri/src/state/paths.rs:68` `atomic_write_json` | `std::thread::sleep` retry loop on async cmd thread blocks Tokio worker. | `spawn_blocking` or async sleep + async save. |
 | LOW | `src-tauri/Cargo.toml:41-44` reqwest+ureq | Two HTTP stacks. | Defer — `velopack` 0.0.1298 `UpdateSource` is sync (ureq); reqwest is async elsewhere. Revisit when velopack ships async source. |
 | LOW | `src-tauri/tauri.conf.json:24` csp | `style-src 'self' 'unsafe-inline'`. | Nonce/strict-dynamic once Tailwind supports hashed styles. |
 | LOW | `src-tauri/capabilities/default.json:7` | `core:default` broad superset. | Pin specific `core:*` perms in use. |
 | LOW | `src-tauri/capabilities/default.json:12` | `opener:default` unscoped. | Scope to known prefixes (update URL, docs URL). |
-| INFO | `src-tauri/src/path_guard.rs:21` Linux-only containment | Containment is case-sensitive and assumes Linux remote (Samba/macOS unguarded). Documented inline. Accepted: Rift's deploy target IS Linux. | None — file in incident if a Samba/macOS user reports drift. |
+| INFO | `src-tauri/src/path_guard.rs:21` Linux-only containment | Containment is case-sensitive and assumes Linux remote. Accepted: Rift's deploy target IS Linux. | None — file as incident if a Samba/macOS user reports drift. |
 
-(B1 + B15 fixed by 2026-05-17 verification pass; B2 + B4 + B5 + B9 closed by S81; B7 + B11 closed + B16 → INFO by S82 — all in Archive.)
+(B1/B15 fixed by 2026-05-17 verification pass; B2/B4/B5/B9 by S81; B7/B11 + B16→INFO by S82; B3 by S83 — all in Archive.)
 
 ## Backend — sync (2 items)
 
@@ -61,6 +55,16 @@ Originally split across `audit/AUDIT-OPEN.md` + `audit/AUDIT-ARCHIVE.md`; merged
 # Archive — Resolved
 
 All items below: verified via `cargo check --manifest-path src-tauri/Cargo.toml` at time of fix (Rust) or `npm run check` (frontend). Line numbers reflect pre-cleanup tree.
+
+## S83 Fix-Pass 2026-05-17 (3 items)
+
+Frontend PARTIAL cleanup + MED LogForwarder scrub. `cargo check` 0.65s + `npm run check` 0 errors.
+
+| # | File:line | Change |
+|---:|---|---|
+| F1 | `src/lib/components/browser/RemotePane.svelte:50-58` | `$effect` cleanup now bumps `loadToken++`. In-flight `load()` bails at its existing `token !== loadToken` guard. No need for a separate cancellation flag — token IS the cancellation signal. |
+| F2 | `src/lib/components/browser/LocalPane.svelte:50-58` | Same `loadToken++` cleanup pattern as F1. |
+| B3 | `src-tauri/src/diagnostics/mod.rs:296-336 scrub_log_message + LogForwarder::log:355` | Added `scrub_log_message()` helper: replaces `$USERPROFILE`/`$HOME` (both backslash + forward-slash forms) with `~`, fully redacts messages containing `BEGIN OPENSSH/RSA/EC PRIVATE KEY` markers. Applied at `LogForwarder::log` boundary before bus broadcast. Disable via `RIFT_LOG_SCRUB=0` (dev only). |
 
 ## S82 Fix-Pass 2026-05-17 (6 items + 1 downgrade)
 

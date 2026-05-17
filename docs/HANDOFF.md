@@ -2,9 +2,9 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Sessions 81–82 — 2026-05-17 — audit fix-passes (12 items + 1 downgrade)
+## Sessions 81–83 — 2026-05-17 — audit fix-passes (15 items + 1 downgrade)
 
-S81 closed B2/B4/B5/B9 + S6 + T4 (`editor_for` race warn, `DiagEvent.file` basename, `DiagBus` atomic, `safe_profile_key` sentinel, lock backoff, ssh_keygen chmod). S82 closed B7/B11 + S4 + T1/T2/T3 (`RiftConfig` size guard, velopack pin doc, watch forward-slash probe, sftp close lock-drop, `RIFT_UPDATE_FEED` debug gate, `in_place` Drop detach) + B16 → INFO. `cargo check` clean both. **Audit Open: 23 → 11 actionable** (1 MED + 8 LOW + 2 PARTIAL frontend). Transport/sftp/edit functionally clean. Per-item detail in [docs/AUDIT.md](docs/AUDIT.md).
+S81 closed B2/B4/B5/B9 + S6 + T4. S82 closed B7/B11 + S4 + T1/T2/T3 + B16→INFO. S83 closed B3 (`LogForwarder` scrub: homedir→`~`, private-key body redaction, `RIFT_LOG_SCRUB=0` to disable) + F1/F2 (RemotePane/LocalPane `$effect` cleanup now bumps `loadToken` to invalidate in-flight loads). `cargo check` + `npm run check` both clean. **Audit Open: 23 → 8 actionable** (0 MED + 6 LOW lib/config + 1 MED + 1 LOW sync). Transport, frontend, lib/config-MED all functionally clean. Detail in [docs/AUDIT.md](docs/AUDIT.md).
 
 ## Sessions 78–80 — v0.4.1 refactor + audit re-verify
 
@@ -22,7 +22,7 @@ S78–79 dropped dock-accordion (right side = one full page from 40px `ActivityB
 
 **v0.2 queue:** EACCES auto-fix-perms; auto-Mirror on rename; integration tests phase 1; dry-run Mirror preview; `lib.rs` → `commands/*.rs` split; LocalPane/RemotePane shared-logic extract; connection.connecting pill desync; Diagnostics canonical-skeleton.
 
-**Audit queue (post-S82):** 11 open (6 lib/config, 2 sync, 0 transport, 2 frontend PARTIAL, 1 INFO). Remaining MED: `LogForwarder` log scrubbing, `flush_batch` inline `safe_count_files`. Full list in [docs/AUDIT.md](docs/AUDIT.md).
+**Audit queue (post-S83):** 8 open (6 LOW lib/config, 1 MED + 1 LOW sync). Only remaining MED: `flush_batch` inline `safe_count_files`. Most LOWs are upstream-blocked (velopack async, Tailwind hashed CSS, Phase-6 secrets). Full list in [docs/AUDIT.md](docs/AUDIT.md).
 
 **Multi-user:** Trey OFF Mirror until on latest + fresh-Pulled baseline.
 
