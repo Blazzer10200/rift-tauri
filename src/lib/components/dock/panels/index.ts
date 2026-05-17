@@ -2,7 +2,7 @@ import { ListTodo, RefreshCcw, FolderOpen, History, Bot, Terminal, Paperclip, Ac
 import type { PanelId } from "$lib/state/panel-types";
 
 import TasksStub from "./TasksStub.svelte";
-import SyncStub from "./SyncStub.svelte";
+import SyncPanel from "./SyncPanel.svelte";
 import FilesStub from "./FilesStub.svelte";
 import HistoryStub from "./HistoryStub.svelte";
 import AgentsStub from "./AgentsStub.svelte";
@@ -29,7 +29,7 @@ export type PanelDef = {
 // panel-types.ts (single source of truth shared with ui-prefs).
 export const PANELS: Record<PanelId, PanelDef> = {
   tasks:       { component: TasksStub,       title: "Tasks",       icon: ListTodo,   kbd: "1" },
-  sync:        { component: SyncStub,        title: "Sync",        icon: RefreshCcw, kbd: "2" },
+  sync:        { component: SyncPanel,       title: "Sync",        icon: RefreshCcw, kbd: "2" },
   files:       { component: FilesStub,       title: "Files",       icon: FolderOpen, kbd: "3" },
   history:     { component: HistoryStub,     title: "History",     icon: History,    kbd: "4" },
   agents:      { component: AgentsStub,      title: "Agents",      icon: Bot,        kbd: "5" },

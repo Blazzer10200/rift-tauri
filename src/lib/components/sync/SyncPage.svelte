@@ -10,6 +10,8 @@
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
   } from "lucide-svelte";
   import PageHeader from "../shell/PageHeader.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
+  import ConflictsPage from "../conflicts/ConflictsPage.svelte";
 
   // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
   // the Confirm button. Prevents accidental destructive remote deletes.
@@ -203,25 +205,19 @@
   }
 </script>
 
-<section class="page">
-  <PageHeader
-    icon={RefreshCcw}
-    title="Sync"
-    tone={!watcherOn ? "neutral" : isEmpty ? "ok" : "info"}
-    subtitle={watcherOn ? `Last scan ${scanAgeLabel()}` : "Not connected"}
-  >
-    {#snippet extras()}
-      {#if !watcherOn}
-        <span class="pill muted"><CircleAlert size={11}/> Not connected</span>
-      {:else if isEmpty}
-        <span class="pill ok"><span class="dot"></span> Everything synced</span>
-      {:else}
-        <span class="pill info">
-          {totals.total} pending · {groups.length} resource{groups.length === 1 ? "" : "s"}
-        </span>
-      {/if}
-    {/snippet}
-    {#snippet actions()}
+{#snippet headerPills()}
+  {#if !watcherOn}
+    <span class="pill muted"><CircleAlert size={11}/> Not connected</span>
+  {:else if isEmpty}
+    <span class="pill ok"><span class="dot"></span> Everything synced</span>
+  {:else}
+    <span class="pill info">
+      {totals.total} pending · {groups.length} resource{groups.length === 1 ? "" : "s"}
+    </span>
+  {/if}
+{/snippet}
+
+{#snippet toolbarActions()}
       <div class="kebab-wrap" bind:this={overflowRef}>
         <button
           class="btn ghost icon"
@@ -362,8 +358,39 @@
           {/if}
         {/if}
       </button>
-    {/snippet}
-  </PageHeader>
+{/snippet}
+
+<section class="page" class:v03={uiPrefs.useV03Shell}>
+  {#if !uiPrefs.useV03Shell}
+    <PageHeader
+      icon={RefreshCcw}
+      title="Sync"
+      tone={!watcherOn ? "neutral" : isEmpty ? "ok" : "info"}
+      subtitle={watcherOn ? `Last scan ${scanAgeLabel()}` : "Not connected"}
+    >
+      {#snippet extras()}{@render headerPills()}{/snippet}
+      {#snippet actions()}{@render toolbarActions()}{/snippet}
+    </PageHeader>
+  {:else}
+    <div class="v03-toolbar" role="toolbar" aria-label="Sync actions">
+      {@render toolbarActions()}
+    </div>
+  {/if}
+
+  {#if uiPrefs.useV03Shell && connection.conflictCount > 0}
+    <details class="conflicts-inline" open>
+      <summary class="conflicts-inline-summary">
+        <AlertTriangle size={12}/>
+        <span class="conflicts-inline-label">
+          {connection.conflictCount} conflict{connection.conflictCount === 1 ? "" : "s"}
+        </span>
+        <ChevronRight class="conflicts-inline-chev" size={12}/>
+      </summary>
+      <div class="conflicts-inline-body">
+        <ConflictsPage />
+      </div>
+    </details>
+  {/if}
 
   {#if syncPage.previewMode}
     <div class="banner preview" role="status" in:fade={{ duration: 120 }}>
@@ -1219,5 +1246,61 @@
   .empty-sub .dotsep { opacity: 0.6; }
   .empty-action {
     margin-top: 10px;
+  }
+
+  /* ── v0.3 panel-shell mode (flag-on) ─────────────────── */
+  .page.v03 .body { padding: 8px 12px 10px; }
+  .page.v03 .totals { padding: 8px 12px 4px; }
+  .page.v03 .banner { margin: 6px 12px 0; }
+  .page.v03 .shrink-banner { margin: 4px 12px 0; }
+  .page.v03 .footer { padding: 8px 12px; }
+
+  .v03-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+
+  .conflicts-inline {
+    margin: 6px 12px 0;
+    border: 1px solid color-mix(in oklch, var(--warn) 32%, transparent);
+    border-radius: var(--radius);
+    background: var(--warn-soft);
+    overflow: hidden;
+  }
+  .conflicts-inline-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    list-style: none;
+    color: var(--warn);
+    font-size: var(--fs-sm);
+    user-select: none;
+  }
+  .conflicts-inline-summary::-webkit-details-marker { display: none; }
+  .conflicts-inline-label { font-weight: 500; }
+  .conflicts-inline-summary :global(.conflicts-inline-chev) {
+    margin-left: auto;
+    transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .conflicts-inline[open] .conflicts-inline-summary :global(.conflicts-inline-chev) {
+    transform: rotate(90deg);
+  }
+  .conflicts-inline-body {
+    border-top: 1px solid color-mix(in oklch, var(--warn) 24%, transparent);
+    background: var(--bg);
+    /* ConflictsPage owns flex column + scroll — cap height so nested
+       scroll doesn't push the rest of the sync body off-screen. */
+    max-height: 320px;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
   }
 </style>
