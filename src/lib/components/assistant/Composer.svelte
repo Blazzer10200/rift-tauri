@@ -2,7 +2,12 @@
   import { Send, Square, X, Mic, Loader2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
-  import { tick } from "svelte";
+  import { tick, onMount } from "svelte";
+
+  // Mic-button visibility binds to stt.config.enabled, so load the backend
+  // stt config eagerly — otherwise users with STT enabled wouldn't see the
+  // mic until they opened Settings → Speech once.
+  onMount(() => { void stt.init(); });
 
   let { onsubmit }: { onsubmit: (text: string) => void } = $props();
 
@@ -558,6 +563,7 @@
     {/if}
 
     <div class="composer" class:streaming={assistant.streaming}>
+      {#if stt.config.enabled && stt.supported}
       <button
         class="micbtn"
         class:recording={stt.recording}
@@ -576,6 +582,7 @@
           <Mic size={14} />
         {/if}
       </button>
+      {/if}
       <textarea
         bind:this={ta}
         bind:value={assistant.composerDraft}

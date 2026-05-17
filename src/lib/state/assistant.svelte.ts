@@ -9,7 +9,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { uiPrefs } from "./ui-prefs.svelte";
-import { tts } from "./tts.svelte";
 
 export type WorkspaceState = {
   current: string | null;
@@ -297,8 +296,6 @@ class AssistantStore {
       await listen<{ exit_code: number }>("assistant://done", () => this.onDone()),
       await listen<string>("assistant://error", (e) => this.onError(e.payload)),
     );
-    // S88: TTS service init — loads persisted config + attaches audio listeners.
-    void tts.init();
     await this.refreshAuth();
     try {
       this.apiKey = await invoke<string | null>("assistant_get_api_key");
@@ -1064,9 +1061,6 @@ class AssistantStore {
       }
       return { ...m, blocks };
     });
-    // S88: feed live text into the TTS sentence chunker. No-op unless the user
-    // has both `enabled` + `auto_speak` on.
-    if (this.streamingMsgId) tts.feed(this.streamingMsgId, chunk);
   }
 
   private enqueueText(chunk: string) {
@@ -1415,8 +1409,6 @@ class AssistantStore {
         this.lastError = `Blank response — CLI emitted ${lines.length} line(s): ${fingerprint}.${tail}`;
       }
     }
-    // S88: flush the trailing TTS fragment (last sentence w/o terminator+ws).
-    if (this.streamingMsgId) tts.flush(this.streamingMsgId);
     this.streaming = false;
     this.streamingMsgId = null;
     this.seenToolUseIds.clear();
@@ -1440,8 +1432,6 @@ class AssistantStore {
     } catch (e) {
       console.warn("assistant_stop failed", e);
     }
-    // S88: stopping the turn also kills any in-flight or queued TTS audio.
-    void tts.cancel();
     // Backend emits assistant://done on kill — onDone() clears state.
   }
 

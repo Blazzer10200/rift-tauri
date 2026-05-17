@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X, TerminalSquare, Volume2, VolumeX } from "lucide-svelte";
+  import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { rightPane } from "../../state/right-pane.svelte";
-  import { tts } from "../../state/tts.svelte";
 
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
@@ -60,19 +59,6 @@
   }
   function toggleTasks() {
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
-  }
-
-  // S88: speaker toggle. Single click enables TTS + auto-speak; click again
-  // disables auto-speak (master `enabled` stays on for replay-on-demand). If
-  // currently mid-speech we stop the active playback too.
-  const speakerActive = $derived(tts.config.enabled && tts.config.auto_speak);
-  async function toggleSpeaker() {
-    if (speakerActive) {
-      await tts.setConfig({ auto_speak: false });
-      await tts.cancel();
-    } else {
-      await tts.setConfig({ enabled: true, auto_speak: true });
-    }
   }
 
   /** Context-window cap for the model id reported by `system`/init.
@@ -185,21 +171,6 @@
         <span class="ctx-pct">{Math.round(ctxPct)}%</span>
       </span>
     {/if}
-
-    <button
-      class="hdr-btn speaker-btn"
-      class:active={speakerActive}
-      class:playing={tts.playing}
-      type="button"
-      title={speakerActive ? "Auto-speak ON — click to mute" : "Speak assistant replies aloud"}
-      onclick={toggleSpeaker}
-    >
-      {#if speakerActive}
-        <Volume2 size={13} />
-      {:else}
-        <VolumeX size={13} />
-      {/if}
-    </button>
 
     <button
       class="hdr-btn"
@@ -411,13 +382,6 @@
     background: var(--accent-soft);
     color: var(--accent);
     border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  }
-  .speaker-btn.playing {
-    animation: speaker-pulse 1.2s ease-in-out infinite;
-  }
-  @keyframes speaker-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 35%, transparent); }
-    50%      { box-shadow: 0 0 0 5px transparent; }
   }
   .convo-chip {
     font-size: 10px;

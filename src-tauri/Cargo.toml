@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.4.3-alpha"
+version = "0.4.4-alpha"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -83,10 +83,6 @@ rand = "0.10"
 # side). WezTerm-backed, ConPTY on Win10+. v0.9.0 released 2026-02.
 portable-pty = "0.9"
 
-# S88: Text-to-speech via Microsoft Edge's read-aloud endpoint. Free, no API key,
-# Azure Neural voices (en-US-AriaNeural et al.), MP3 stream over WebSocket.
-# Pure Rust, no Python sidecar. Sync API runs on tokio blocking pool.
-msedge-tts = "0.3"
 # Speech-to-text runs in the WebView via the Web Speech API (Edge's built-in
 # Azure-backed recogniser). No backend crate needed — Rust side only persists
 # the user's STT preferences via the `stt` module.

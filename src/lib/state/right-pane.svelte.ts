@@ -65,7 +65,11 @@ class RightPane {
     if (this.activeId) this.everOpened = new Set([this.activeId]);
 
     const w = parseInt(localStorage.getItem(WIDTH_KEY) ?? "", 10);
-    if (Number.isFinite(w)) this.width = clampWidth(w);
+    if (Number.isFinite(w)) {
+      const clamped = clampWidth(w);
+      this.width = clamped;
+      if (clamped !== w) localStorage.setItem(WIDTH_KEY, String(clamped));
+    }
 
     try {
       const raw = localStorage.getItem(ORDER_KEY);

@@ -118,7 +118,7 @@ class SttStore {
       return false;
     }
     if (!this.config.enabled) {
-      this.lastError = "Speech-to-text is disabled. Enable it in Settings → Voice.";
+      this.lastError = "Speech-to-text is disabled. Enable it in Settings → Speech.";
       return false;
     }
     if (this.recording) return true;

@@ -17,34 +17,34 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Audit notes | `docs/AUDIT.md` (merged 2026-05-15 from `docs/audit/`) |
-| Design briefs | `docs/design/` (empty as of 2026-05-16; shipped briefs in `docs/archive/design/`) |
+| Design briefs | `docs/design/` (1 active: `assistant-roadmap.md` from S70; shipped briefs in `docs/archive/design/`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
 
-## Hot files (measured 2026-05-16)
+## Hot files (measured 2026-05-17)
 
 Files large enough to matter for agent scoping. Everything else is small enough for inline or `recon`.
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/sync/auto_sync.rs` | 1954 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/lib.rs` | 1771 | tauri command registry (52 cmds) |
-| `src-tauri/src/assistant/mod.rs` | 775 | claude CLI integration + auth + workspace |
-| `src-tauri/src/sync/auto_sync/flush.rs` | 610 | flush_batch pipeline (split out 2026-05-13) |
+| `src-tauri/src/sync/auto_sync.rs` | 1966 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
+| `src-tauri/src/lib.rs` | 1790 | tauri command registry (51 cmds) |
+| `src-tauri/src/assistant/mod.rs` | 1167 | claude CLI integration + auth + workspace |
+| `src-tauri/src/sync/auto_sync/flush.rs` | 653 | flush_batch pipeline (split out 2026-05-13) |
+| `src-tauri/src/assistant/mcp_server.rs` | 587 | stdio JSON-RPC MCP server |
 | `src-tauri/src/sync/drift_scanner.rs` | 555 | 3-way drift diff |
 | `src-tauri/src/sftp/list.rs` | 454 | exec-fast-path + worker fallback (split v0.2.49) |
-| `src-tauri/src/assistant/mcp_server.rs` | 447 | stdio JSON-RPC MCP server |
+| `src-tauri/src/diagnostics/mod.rs` | 446 | DiagBus + LogForwarder + frontend pump |
 | `src-tauri/src/sync/ignore.rs` | 441 | full WPF ignore-rule parity + tests |
+| `src-tauri/src/sync/lock_presence.rs` | 386 | .rift-lock advisory presence |
 | `src-tauri/src/sync/drift_watcher.rs` | 380 | pull_one / delete_local_one / register_conflict (auto-poll loop removed v0.2.38) |
+| `src-tauri/src/state/sync_snapshot.rs` | 375 | snapshot persistence |
 | `src-tauri/src/sftp/transfer.rs` | 368 | atomic upload/download + `with_t` op timeouts |
-| `src-tauri/src/state/sync_snapshot.rs` | 364 | snapshot persistence |
-| `src-tauri/src/diagnostics/mod.rs` | 358 | DiagBus + LogForwarder + frontend pump |
-| `src-tauri/src/sync/lock_presence.rs` | 343 | .rift-lock advisory presence |
-| `src-tauri/src/sync/auto_sync/watch.rs` | 341 | notify lifecycle + queue_path |
-| `src-tauri/src/sftp/mod.rs` | 302 | session core (split v0.2.49 from 1100L → 302L) |
+| `src-tauri/src/sync/auto_sync/watch.rs` | 349 | notify lifecycle + queue_path |
+| `src-tauri/src/sftp/mod.rs` | 307 | session core (split v0.2.49 from 1100L → 307L) |
 
-Frontend hot files: `SyncPage.svelte` 1223L, `Settings.svelte` 1060L, `assistant.svelte.ts` 1012L, `ActivityFeed.svelte` 951L, `TerminalPanel.svelte` 818L.
+Frontend hot files: `assistant.svelte.ts` 1585L, `Settings.svelte` 1505L, `SyncPage.svelte` 1307L, `ActivityFeed.svelte` 941L, `TerminalPanel.svelte` 851L.
 
 `auto_sync.rs` + `lib.rs` are approaching the 2000-line agent-split threshold — `lib.rs` split into per-domain `commands/*.rs` is queue item (e).
 

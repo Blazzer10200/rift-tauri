@@ -203,6 +203,13 @@ const KEY_DEFS = {
     Backspace: { code: 'Backspace', key: 'Backspace', windowsVirtualKeyCode: 8 },
     ArrowUp: { code: 'ArrowUp', key: 'ArrowUp', windowsVirtualKeyCode: 38 },
     ArrowDown: { code: 'ArrowDown', key: 'ArrowDown', windowsVirtualKeyCode: 40 },
+    ArrowLeft: { code: 'ArrowLeft', key: 'ArrowLeft', windowsVirtualKeyCode: 37 },
+    ArrowRight: { code: 'ArrowRight', key: 'ArrowRight', windowsVirtualKeyCode: 39 },
+    Space: { code: 'Space', key: ' ', windowsVirtualKeyCode: 32 },
+    Comma: { code: 'Comma', key: ',', windowsVirtualKeyCode: 188 },
+    Period: { code: 'Period', key: '.', windowsVirtualKeyCode: 190 },
+    Slash: { code: 'Slash', key: '/', windowsVirtualKeyCode: 191 },
+    Backquote: { code: 'Backquote', key: '`', windowsVirtualKeyCode: 192 },
 };
 // Digit + letter keys derived on demand so KEY_DEFS stays a single source of truth
 // for special-key mappings while still letting callers send Alt+1..9 / Ctrl+T / etc.

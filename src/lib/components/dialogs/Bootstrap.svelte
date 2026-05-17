@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import {
-    X, Download, Upload, AlertTriangle, Check, Folder, RefreshCw,
+    X, Download, AlertTriangle, Check, Folder, RefreshCw,
   } from "lucide-svelte";
 
   type BootstrapState =
