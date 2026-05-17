@@ -3,7 +3,7 @@
 //! The actual recognition runs in the WebView via the Web Speech API (Edge's
 //! built-in recogniser, Azure-backed when online). No Rust-side audio capture
 //! or model — this module only owns the persisted user settings so they
-//! survive restarts the same way TTS settings do.
+//! survive restarts.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

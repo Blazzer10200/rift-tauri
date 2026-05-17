@@ -4,7 +4,7 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Volume2 } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Mic } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
@@ -23,7 +23,7 @@
   } from "../../state/terminal.svelte";
   import { THEME_PRESETS } from "../terminal/themePresets";
 
-  type Section = "appearance" | "terminal" | "assistant" | "voice" | "servers" | "keys" | "about";
+  type Section = "appearance" | "terminal" | "assistant" | "speech" | "servers" | "keys" | "about";
 
   type ShellInfo = { id: string; label: string; program: string; args: string[]; available: boolean };
   let shells = $state<ShellInfo[]>([]);
@@ -118,7 +118,7 @@
     { id: "appearance", label: "Appearance", icon: Sparkles },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "assistant",  label: "Assistant",  icon: Sparkles },
-    { id: "voice",      label: "Voice",      icon: Volume2 },
+    { id: "speech",     label: "Speech",     icon: Mic },
     { id: "servers",    label: "Servers",    icon: Server },
     { id: "keys",       label: "SSH keys",   icon: Key },
     { id: "about",      label: "About",      icon: Info },
@@ -126,7 +126,6 @@
 
   // Assistant API-key field — value mirrors store, save commits to disk.
   import { assistant as assistantStore } from "../../state/assistant.svelte";
-  import { tts } from "../../state/tts.svelte";
   import { stt } from "../../state/stt.svelte";
   const STT_LANGS: { id: string; label: string }[] = [
     { id: "en-US", label: "English (US)" },
@@ -142,32 +141,10 @@
     { id: "ko-KR", label: "Korean" },
     { id: "zh-CN", label: "Chinese (Mandarin)" },
   ];
-  let voiceDdOpen = $state(false);
-  let voiceDdRef = $state<HTMLDivElement | undefined>();
-  let voiceTestText = $state("This is a test of the current voice.");
   $effect(() => {
-    if (section === "voice") {
-      void tts.init();
-      void tts.loadVoices();
+    if (section === "speech") {
       void stt.init();
     }
-  });
-  $effect(() => {
-    if (!voiceDdOpen) return;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (voiceDdRef && !voiceDdRef.contains(t)) voiceDdOpen = false;
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  });
-  const currentVoiceLabel = $derived.by(() => {
-    const sel = tts.config.voice;
-    if (!sel) return "Aria (en-US, default)";
-    const hit = tts.voices.find((v) => v.name === sel);
-    if (!hit) return sel;
-    const gender = hit.gender ? ` · ${hit.gender}` : "";
-    return `${hit.short_name} (${hit.locale}${gender})`;
   });
   let asstApiKeyDraft = $state("");
   let asstApiKeySaving = $state(false);
@@ -757,165 +734,9 @@
         </div>
       </div>
 
-    {:else if section === "voice"}
+    {:else if section === "speech"}
       <div>
-        <h3>Voice</h3>
-        <p class="help">
-          Speak assistant replies aloud using Microsoft Edge's Azure Neural voices —
-          free, no API key, no model download. Toggle <em>Auto-speak</em> in the
-          Assistant header to enable streaming sentence-by-sentence playback.
-        </p>
-
-        <div class="card asst-card">
-          <h4 class="asst-h4">Enable text-to-speech</h4>
-          <p class="muted">Master switch. Off = the speaker button + per-message replay are inert.</p>
-          <div class="asst-row">
-            <button
-              type="button"
-              class="switch"
-              role="switch"
-              aria-label="Enable text-to-speech"
-              aria-checked={tts.config.enabled}
-              data-on={tts.config.enabled}
-              onclick={() => void tts.setConfig({ enabled: !tts.config.enabled })}
-            ><span class="switch-knob"></span></button>
-            <span class="muted">
-              {#if tts.config.enabled}On — Rift can synthesize and play audio.{:else}Off — synthesis disabled.{/if}
-            </span>
-          </div>
-        </div>
-
-        <div class="card asst-card">
-          <h4 class="asst-h4">Auto-speak streaming replies</h4>
-          <p class="muted">When on, every completed sentence is spoken as the model streams it. Off = manual replay only.</p>
-          <div class="asst-row">
-            <button
-              type="button"
-              class="switch"
-              role="switch"
-              aria-label="Auto-speak streaming replies"
-              aria-checked={tts.config.auto_speak}
-              data-on={tts.config.auto_speak}
-              disabled={!tts.config.enabled}
-              onclick={() => void tts.setConfig({ auto_speak: !tts.config.auto_speak })}
-            ><span class="switch-knob"></span></button>
-            <span class="muted">
-              {#if !tts.config.enabled}Enable TTS first.{:else if tts.config.auto_speak}On.{:else}Off — use the speaker icon on each message to replay.{/if}
-            </span>
-          </div>
-        </div>
-
-        <div class="card asst-card">
-          <h4 class="asst-h4">Voice</h4>
-          <p class="muted">~500 Edge Neural voices — English locales listed first.</p>
-          <div class="voice-dd-wrap" bind:this={voiceDdRef}>
-            <button
-              type="button"
-              class="voice-dd-btn"
-              onclick={() => (voiceDdOpen = !voiceDdOpen)}
-              aria-haspopup="listbox"
-              aria-expanded={voiceDdOpen}
-            >
-              <span class="voice-dd-label">{currentVoiceLabel}</span>
-              <ChevronDown size={13}/>
-            </button>
-            {#if voiceDdOpen}
-              <div class="voice-dd-menu" role="listbox">
-                {#if tts.voicesLoading}
-                  <div class="voice-dd-empty">Loading voices…</div>
-                {:else if tts.voicesError}
-                  <div class="voice-dd-empty err">Failed: {tts.voicesError}</div>
-                {:else if tts.voices.length === 0}
-                  <div class="voice-dd-empty">No voices available.</div>
-                {:else}
-                  <button
-                    type="button"
-                    class="voice-dd-item"
-                    class:active={!tts.config.voice}
-                    onclick={() => { void tts.setConfig({ voice: "" }); voiceDdOpen = false; }}
-                  >
-                    <span class="voice-item-name">Aria <span class="voice-item-meta">(en-US, default)</span></span>
-                  </button>
-                  {#each tts.voices as v (v.name)}
-                    <button
-                      type="button"
-                      class="voice-dd-item"
-                      class:active={tts.config.voice === v.name}
-                      onclick={() => { void tts.setConfig({ voice: v.name }); voiceDdOpen = false; }}
-                    >
-                      <span class="voice-item-name">
-                        {v.short_name}
-                        <span class="voice-item-meta">
-                          ({v.locale}{v.gender ? ` · ${v.gender}` : ""})
-                        </span>
-                      </span>
-                    </button>
-                  {/each}
-                {/if}
-              </div>
-            {/if}
-          </div>
-        </div>
-
-        <div class="card asst-card">
-          <h4 class="asst-h4">Rate, pitch, volume</h4>
-          <p class="muted">Range -100 to +100, each percent of the natural baseline. 0 = unchanged.</p>
-          <div class="voice-slider-row">
-            <label class="voice-slider-label" for="voice-rate">Rate</label>
-            <input
-              id="voice-rate"
-              type="range" min="-50" max="50" step="5"
-              value={tts.config.rate}
-              oninput={(e) => void tts.setConfig({ rate: Number((e.target as HTMLInputElement).value) })}
-              class="voice-slider"
-            />
-            <span class="voice-slider-val mono">{tts.config.rate}%</span>
-          </div>
-          <div class="voice-slider-row">
-            <label class="voice-slider-label" for="voice-pitch">Pitch</label>
-            <input
-              id="voice-pitch"
-              type="range" min="-50" max="50" step="5"
-              value={tts.config.pitch}
-              oninput={(e) => void tts.setConfig({ pitch: Number((e.target as HTMLInputElement).value) })}
-              class="voice-slider"
-            />
-            <span class="voice-slider-val mono">{tts.config.pitch}%</span>
-          </div>
-          <div class="voice-slider-row">
-            <label class="voice-slider-label" for="voice-volume">Volume</label>
-            <input
-              id="voice-volume"
-              type="range" min="-50" max="50" step="5"
-              value={tts.config.volume}
-              oninput={(e) => void tts.setConfig({ volume: Number((e.target as HTMLInputElement).value) })}
-              class="voice-slider"
-            />
-            <span class="voice-slider-val mono">{tts.config.volume}%</span>
-          </div>
-        </div>
-
-        <div class="card asst-card">
-          <h4 class="asst-h4">Test voice</h4>
-          <p class="muted">Synthesises and plays the text below using the current settings.</p>
-          <div class="asst-row">
-            <input
-              class="input asst-input"
-              type="text"
-              bind:value={voiceTestText}
-              placeholder="Type something to speak…"
-            />
-            <button class="btn primary sm" type="button" onclick={() => void tts.testVoice(voiceTestText)}>
-              <Volume2 size={11}/> Speak
-            </button>
-            {#if tts.playing}
-              <button class="btn ghost sm" type="button" onclick={() => void tts.cancel()}>Stop</button>
-            {/if}
-          </div>
-          {#if tts.lastError}<p class="muted asst-warn">{tts.lastError}</p>{/if}
-        </div>
-
-        <h3 class="set-subhead">Speech-to-text (dictation)</h3>
+        <h3>Speech-to-text</h3>
         <p class="help">
           Talk into the mic and your words stream into the composer. Uses the
           WebView's built-in speech recognition (Microsoft Azure when online) —
@@ -1652,86 +1473,6 @@
   .asst-pill[data-tone="yellow"]  .asst-dot { background: var(--warn,    #fbbf24); }
   .asst-pill[data-tone="red"]     .asst-dot { background: var(--danger,  #f87171); }
   .asst-warn { color: var(--warn, #fbbf24); }
-
-  /* Voice settings */
-  .voice-dd-wrap { position: relative; margin-top: 8px; }
-  .voice-dd-btn {
-    width: 100%;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 10px;
-    padding: 8px 12px;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--fg);
-    font: inherit;
-    font-size: var(--fs-sm);
-    cursor: pointer;
-    transition: background 120ms, border-color 120ms;
-  }
-  .voice-dd-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-  .voice-dd-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .voice-dd-menu {
-    position: absolute; top: calc(100% + 4px); left: 0; right: 0;
-    z-index: 20;
-    max-height: 320px;
-    overflow-y: auto;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    box-shadow: 0 6px 18px rgba(0,0,0,0.35);
-    padding: 4px;
-  }
-  .voice-dd-empty {
-    padding: 10px 12px;
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-  }
-  .voice-dd-empty.err { color: var(--danger); }
-  .voice-dd-item {
-    display: block;
-    width: 100%;
-    text-align: left;
-    padding: 7px 10px;
-    background: transparent;
-    border: 0;
-    border-radius: var(--radius-xs);
-    color: var(--fg);
-    font: inherit;
-    font-size: var(--fs-sm);
-    cursor: pointer;
-  }
-  .voice-dd-item:hover { background: var(--surface-hover); }
-  .voice-dd-item.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .voice-item-name { display: inline-flex; gap: 6px; align-items: baseline; }
-  .voice-item-meta { color: var(--fg-muted); font-size: 11px; }
-  .voice-dd-item.active .voice-item-meta {
-    color: color-mix(in oklch, var(--accent) 70%, var(--fg-muted));
-  }
-
-  .voice-slider-row {
-    display: grid;
-    grid-template-columns: 64px 1fr 56px;
-    align-items: center;
-    gap: 12px;
-    margin-top: 10px;
-  }
-  .voice-slider-label { font-size: var(--fs-sm); color: var(--fg-muted); }
-  .voice-slider {
-    width: 100%;
-    accent-color: var(--accent);
-  }
-  .voice-slider-val { font-size: var(--fs-xs); color: var(--fg); text-align: right; }
-
-  .set-subhead {
-    margin: 28px 0 4px;
-    font-size: var(--fs-lg);
-    font-weight: 600;
-    color: var(--fg);
-  }
 
   .stt-lang-grid {
     display: grid;

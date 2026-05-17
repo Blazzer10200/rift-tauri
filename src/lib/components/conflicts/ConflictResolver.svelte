@@ -2,7 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import {
     AppWindow, Server, Copy, Terminal, Check, AlertTriangle,
-    ExternalLink, FileX2, Files,
+    FileX2, Files,
   } from "lucide-svelte";
   import { connection, type ConflictRecord } from "../../state/connection.svelte";
 
