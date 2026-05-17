@@ -393,18 +393,18 @@
         </div>
       </div>
 
-      <button
-        type="button"
-        class="view-btn"
-        onclick={() => uiPrefs.maximizePanel("sync")}
-        title="Maximize Sync into the main column"
-      >
-        <Maximize2 size={12}/>
-        <span>View drift in center</span>
-      </button>
-      <p class="summary-hint">
-        Drift table + Mirror toolbar need more room than the dock — maximize to work with sync.
-      </p>
+      <div class="summary-foot">
+        <span class="summary-meta">{watcherOn ? `scanned ${scanAgeLabel()}` : "—"}</span>
+        <button
+          type="button"
+          class="view-btn"
+          onclick={() => uiPrefs.maximizePanel("sync")}
+          title="Maximize Sync into the main column"
+        >
+          <Maximize2 size={11}/>
+          <span>Open</span>
+        </button>
+      </div>
     </div>
   {:else}
   {#if !uiPrefs.useV03Shell}
@@ -1353,22 +1353,22 @@
 
   /* Phase C+1: dock-mode summary card. Renders when v0.3 + not maximized. */
   .sync-summary {
-    display: flex; flex-direction: column; gap: 10px;
-    padding: 14px;
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 10px 12px 12px;
   }
   .summary-state {
     display: flex;
     padding: 0 2px;
   }
   .summary-counts {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px;
     margin-top: 2px;
   }
   .summary-counts .cnt {
     display: flex; flex-direction: column;
     align-items: center; justify-content: center;
-    padding: 10px 6px;
-    background: var(--bg-elev-1);
+    padding: 8px 6px;
+    background: var(--bg-elev-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     text-align: center;
@@ -1382,7 +1382,7 @@
     border-color: color-mix(in oklch, var(--info) 30%, transparent);
   }
   .summary-counts .n {
-    font-size: 20px;
+    font-size: 17px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     color: var(--fg);
@@ -1393,30 +1393,32 @@
   .summary-counts .l {
     font-size: var(--fs-xs);
     color: var(--fg-muted);
-    margin-top: 4px;
+    margin-top: 3px;
   }
-  .view-btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    height: 30px;
-    padding: 0 12px;
-    margin-top: 4px;
-    background: color-mix(in oklch, var(--accent) 10%, transparent);
-    border: 1px solid color-mix(in oklch, var(--accent) 40%, var(--border));
-    color: var(--fg);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font: inherit;
-    font-size: var(--fs-sm);
-    transition: background 120ms ease, border-color 120ms ease;
+  .summary-foot {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 2px;
   }
-  .view-btn:hover {
-    background: color-mix(in oklch, var(--accent) 18%, transparent);
-    border-color: color-mix(in oklch, var(--accent) 60%, var(--border));
-  }
-  .summary-hint {
-    margin: 4px 2px 0;
+  .summary-meta {
     font-size: var(--fs-xs);
     color: var(--fg-faint);
-    line-height: 1.45;
+  }
+  .view-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 24px;
+    padding: 0 10px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--fg-2);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--fs-xs);
+    transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  .view-btn:hover {
+    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border-strong));
+    color: var(--fg);
   }
 </style>

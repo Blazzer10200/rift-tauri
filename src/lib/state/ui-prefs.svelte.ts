@@ -11,8 +11,8 @@ const PRESET_PICKED_KEY = "rift.ui.preset-picked.v1";
 const V03_SHELL_KEY = "rift.ui.v03-shell.v1";
 const DOCK_ACCORDION_KEY = "rift.ui.dock-accordion.v1";
 
-const DOCK_WIDTH_MIN = 280;
-const DOCK_WIDTH_MAX = 560;
+const DOCK_WIDTH_MIN = 260;
+const DOCK_WIDTH_MAX = 460;
 const DOCK_WIDTH_DEFAULT = 320;
 
 function emptyPanelState(order: number): PanelState {
@@ -138,6 +138,18 @@ class UiPrefs {
     this.dockWidth = clampWidth(w);
     localStorage.setItem(DOCK_WIDTH_KEY, String(this.dockWidth));
     this.applyDockWidth();
+  }
+
+  // Drag-time path — state + CSS only, no localStorage write. Pair w/
+  // persistDockWidth() on pointerup. Synchronous localStorage on every
+  // pointermove was the jitter source (~100 writes/sec during a drag).
+  setDockWidthLive(w: number) {
+    this.dockWidth = clampWidth(w);
+    this.applyDockWidth();
+  }
+
+  persistDockWidth() {
+    localStorage.setItem(DOCK_WIDTH_KEY, String(this.dockWidth));
   }
 
   maximizePanel(id: PanelId | null) {

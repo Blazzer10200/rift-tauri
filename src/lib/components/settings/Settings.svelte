@@ -227,8 +227,8 @@
                 One panel at a time (accordion)
               </span>
               <span class="v03-hint">
-                Opening a dock panel auto-closes the previously open one. Hold <kbd class="kbd">Shift</kbd> while
-                clicking a rail icon (or press <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Shift</kbd>+<kbd class="kbd">N</kbd>) to keep multiple panels open.
+                Expanding a panel auto-collapses the previously open one. Hold <kbd class="kbd">Shift</kbd> when
+                clicking a header (or press <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Shift</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">8</kbd>) to keep multiple panels open.
               </span>
             </div>
             <label class="v03-switch" title={uiPrefs.dockAccordion ? "Allow multiple open panels" : "Switch to accordion mode"}>
