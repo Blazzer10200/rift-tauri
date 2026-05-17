@@ -21,3 +21,6 @@ scripts/cdp/.tmp/
 
 # Local timestamped backups dir created by tooling.
 backups/
+
+# Ad-hoc scratch space (notes, test snippets) — not part of the project.
+scratch/

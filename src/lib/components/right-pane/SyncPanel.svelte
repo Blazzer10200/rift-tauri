@@ -1,5 +1,5 @@
 <script lang="ts">
-  import SyncPage from "../../sync/SyncPage.svelte";
+  import SyncPage from "../sync/SyncPage.svelte";
   import type { PanelIcon } from "./index";
 
   // PanelShell always passes {title, icon} from PANELS; declare to satisfy

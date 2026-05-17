@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PANELS } from "../dock/panels";
+  import { PANELS } from "../right-pane";
   import { rightPane, type ActivityBarId } from "$lib/state/right-pane.svelte";
   import { PANEL_IDS } from "$lib/state/panel-types";
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { PanelIcon } from "./index";
-  import TwoPane from "../../browser/TwoPane.svelte";
+  import TwoPane from "../browser/TwoPane.svelte";
 
   // PanelShell legacy contract — title + icon accepted but unused since
   // TwoPane owns its own toolbar / tabstrip. v0.4.1 dropped the dock summary
