@@ -149,6 +149,10 @@ fn claude_command() -> Option<Command> {
 const STREAM_EVENT: &str = "assistant://stream";
 const DONE_EVENT: &str = "assistant://done";
 const ERROR_EVENT: &str = "assistant://error";
+/// Emitted when claude returns "No conversation found with session ID" on a
+/// --resume attempt. Payload `{session_id, prompt}`; frontend resets the
+/// matching tab's convoCreatedAt and re-sends the prompt as a first-turn.
+const SESSION_LOST_EVENT: &str = "assistant://session-lost";
 
 /// Output of `claude auth status` plus our locally-stored API-key flag.
 /// All fields camelCase to match the CLI's JSON shape verbatim.
@@ -1020,6 +1024,28 @@ pub async fn assistant_send(
         let _ = app.emit(DONE_EVENT, serde_json::json!({ "exit_code": status.code().unwrap_or(-1) }));
         Ok(())
     } else {
+        // Auto-recovery: claude's resume index sometimes loses track of valid
+        // session JSONLs (transient — observed after long-idle tabs / app
+        // rebuilds even when the JSONL is on disk). Emit a session-lost
+        // event so the frontend can null convoCreatedAt + re-send the same
+        // prompt as a fresh first-turn. Only fires on --resume failures
+        // (first-turn failures still go through the normal error path).
+        if !is_first_turn
+            && stderr_buf.contains("No conversation found with session ID:")
+        {
+            log::warn!(
+                "assistant_send: --resume {} failed (no conversation found) — emitting session-lost for frontend auto-recovery",
+                session_id
+            );
+            let _ = app.emit(
+                SESSION_LOST_EVENT,
+                serde_json::json!({
+                    "session_id": session_id,
+                    "prompt": prompt,
+                }),
+            );
+            return Ok(());
+        }
         let msg = format!(
             "claude exited with {} — {}",
             status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
