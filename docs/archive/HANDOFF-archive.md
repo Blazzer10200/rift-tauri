@@ -2,6 +2,22 @@
 
 > Retired session entries from `docs/HANDOFF.md`. Newest first. Pre-archive history also available via `git log -- docs/HANDOFF.md`.
 
+## Session 94 — 2026-05-17 — v0.4.8-alpha hot-fix: a11y stuck-on + shell-switch disappears
+
+Two regressions reported right after v0.4.7 shipped. (1) Dyslexia master toggle off cleared the addendum but font/spacing CSS persisted — dials wrote attrs unconditionally. Fixed in `accessibility.svelte.ts` `apply()`: dial attrs now gated on master flag, off snaps to defaults, persisted values restored when re-enabled. Warm tint stays independent. Sub-buttons get `disabled={!dyslexiaMode}` for visual clarity. (2) Appearance shell-toggle "disappeared" Settings — AppShell renders Settings as a routed page in v0.2 / modal in v0.4.1; live-flipping mid-Settings reparents into a structure with no mount point. Fixed in `ui-prefs.svelte.ts` `setUseV03Shell`: `window.location.reload()` after 120ms re-mounts cleanly. 3-file bump 0.4.7 → 0.4.8-alpha.
+
+## Session 93 — 2026-05-17 — v0.4.7-alpha: Settings → Accessibility
+
+Phase 1 of dyslexia-friendly arc. New section between Assistant + Speech with master toggle + 3 dials (UI font, line/letter spacing, warm reading tint). Master forwards `dyslexiaMode: true` through `assistant_send` so the Rust side appends a per-turn addendum telling Claude to interpret phonetic/letter-swap typos charitably. New `accessibility.svelte.ts` store mirrors `ui-prefs.svelte.ts` (localStorage + `documentElement.dataset.a11y*`). CSS at bottom of `app.css`. Settings UI matches Speech section.
+
+## Session 92 — 2026-05-17 — v0.4.6-alpha HOT-FIX: `bypassPermissions` mode
+
+`mcp__rift__remote_bash` denied with "running in don't ask mode" despite S91 allowlist including the tool. Root cause: `assistant/mod.rs:926` passed `--permission-mode dontAsk` which auto-DENIES anything that would prompt (MCP calls included — `--allowed-tools` doesn't short-circuit that gate). Switched to `bypassPermissions`. One-line change + comment.
+
+## Session 91 — 2026-05-17 — v0.4.5-alpha: full BUILTINS allowlist + STT alternates
+
+Widened `--allowed-tools` in all 3 branches of `assistant_send` to the full CLI built-in set via shared `BUILTINS` const (Agent, AskUserQuestion, BashOutput, KillBash, KillShell, ExitPlanMode, MultiEdit, NotebookEdit, SlashCommand on top of S88's `+Skill`). STT `maxAlternatives` 1 → 3 with `pickBestAlternate` helper that picks highest-confidence transcript.
+
 ## Session 90 — 2026-05-17 — v0.4.4-alpha source ship + stress-test fix-ups
 
 Autonomous CDP-driven stress test across every UI surface: ActivityBar (Ctrl+1..7 / Ctrl+0 / drag-reorder + persistence), chat tabs (Ctrl+T/W, Ctrl+Tab, Alt+1..9), right-pane × 7 (lazy-mount latch + width clamp 320..1200 + dblclick-snap), Settings × 7 sections (v0.3↔v0.2 shell round-trip, all STT/Assistant/Terminal toggles, language picker, diagnostic copy), Sync (drift scanner caught 1 pull in `[endure]`), Files (TwoPane nav + remote ctx menu), Terminal (PTY echo verified), Velopack ("Up to date" vs released 0.4.3). Status bar `isHandshaking` invariant held across reconnect.

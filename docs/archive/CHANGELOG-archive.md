@@ -2,6 +2,10 @@
 
 > Retired entries from `docs/CHANGELOG.md`. Newest first. Pre-archive history also available via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.8-alpha — 2026-05-17 — Hot-fix: dyslexia toggle "stuck on" + Appearance shell-switch "disappears"
+
+Two UX bugs reported immediately after the v0.4.7 ship. (1) Dyslexia master toggle correctly cleared the system-prompt addendum on the next turn, but the visual effects (Lexend font, increased line-height) stayed because `apply()` in `accessibility.svelte.ts` wrote font/line-height CSS attrs unconditionally. Fix: dial attrs now gated on the master flag — off snaps the visual back to system defaults; persisted sub-dial state preserved so re-enabling restores. (2) AppShell renders Settings as a routed page in v0.2 vs a modal in v0.4.1; live-flipping mid-Settings reparented into a structure with no mount point and the panel vanished. Fix: `setUseV03Shell` now calls `window.location.reload()` after 120ms (lets localStorage commit), re-mounting cleanly with the new flag. Hint copy updated.
+
 ## v0.4.7-alpha — 2026-05-17 — Settings → Accessibility (dyslexia-friendly Assistant)
 
 Trey-driven feature. New **Settings → Accessibility** section between *Assistant* and *Speech* (lucide `Accessibility` icon). One master toggle plus three independent dials, all persisted to localStorage and applied via `data-a11y-*` attributes on `<html>` so CSS overrides land instantly with no reflow shrapnel.
