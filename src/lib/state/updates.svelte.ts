@@ -1,6 +1,6 @@
 // Global update store. One instance per session: triggers a launch-time check,
-// caches the result, drives the popup dialog + sidebar pill, and lets
-// Settings/About + TabRail all reach into the same state.
+// caches the result, drives the popup dialog + sidebar pill, and lets the
+// Settings/About surface reach into the same state.
 
 import { invoke } from "@tauri-apps/api/core";
 

@@ -32,7 +32,7 @@ class SyncModalStore {
   // `busy` tracks the backend op lifecycle. Set true on start(), cleared by
   // complete/cancelled/fail. Independent of `open` — user can dismiss the
   // modal via "Run in background" while the op continues. Drives the
-  // TabRail Quick Actions disabled state and the modal's own listener gate.
+  // Quick Actions disabled state and the modal's own listener gate.
   busy = $state(false);
   phase = $state<SyncPhase>("scanning");
   mode = $state<SyncMode>("scan");
