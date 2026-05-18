@@ -2,14 +2,12 @@
   import { onMount, tick } from "svelte";
   import { MessagesSquare, Plus } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import AssistantHeader from "./AssistantHeader.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
   import Composer from "./Composer.svelte";
   import TasksDock from "./TasksDock.svelte";
-  import HistoryDrawer from "./HistoryDrawer.svelte";
-  import { rightPane } from "../../state/right-pane.svelte";
+  import { workspace } from "../../state/workspace.svelte";
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
@@ -58,15 +56,12 @@
   const showRemoteShellBanner = $derived(
     !assistant.remoteShellBannerSeen && assistant.remoteShellLastEvent !== null,
   );
-  // v0.4 — empty-tabs CTA. Under the v0.4.1 shell only; v0.2 path always
-  // shows the chat. Hides composer + chat scroller; renders a centered card
-  // w/ a "+ New chat" button and a History hint.
-  const showEmptyTabsCta = $derived(
-    uiPrefs.useV03Shell && assistant.openTabs.length === 0,
-  );
+  // v0.4 — empty-tabs CTA. Hides composer + chat scroller; renders a centered
+  // card w/ a "+ New chat" button and a History hint.
+  const showEmptyTabsCta = $derived(assistant.openTabs.length === 0);
 
   function openHistoryPanel() {
-    rightPane.setActive("history");
+    workspace.setActive("history");
   }
 </script>
 
@@ -74,9 +69,6 @@
   <AssistantHeader />
 
   <div class="layout">
-    {#if !uiPrefs.useV03Shell}
-      <HistoryDrawer />
-    {/if}
     <div class="chat">
       {#if showEmptyTabsCta}
         <div class="empty-tabs">

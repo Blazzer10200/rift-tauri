@@ -1,7 +1,8 @@
 <script lang="ts">
-  // v0.4 — Chat tabs bar. Browser-style tab strip mounted between the
-  // wire-error banner and the .body grid under uiPrefs.useV03Shell. Each tab
-  // is an entry in assistant.openTabs (convo id). Active tab = currentConvoId.
+  // v0.4 — Chat tabs bar. Browser-style tab strip mounted by AppShell between
+  // the wire-error banner and the .body grid whenever the Chat workspace is
+  // active. Each tab is an entry in assistant.openTabs (convo id). Active tab
+  // = currentConvoId.
   // DnD reorder via HTML5 drag-and-drop, tail-zone for append. Close button
   // stopPropagation so clicking it doesn't switch to the tab first.
 

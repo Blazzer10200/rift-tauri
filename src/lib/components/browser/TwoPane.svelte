@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onDestroy, onMount } from "svelte";
-  import { X, Plus, FolderOpen, Server } from "lucide-svelte";
+  import { X, Plus, Server } from "lucide-svelte";
   import { fly, scale } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { quintOut } from "svelte/easing";
@@ -11,34 +11,7 @@
   import RemotePane from "./RemotePane.svelte";
   import FlashToast from "../FlashToast.svelte";
   import SyncModal from "../sync/SyncModal.svelte";
-  import PageHeader from "../shell/PageHeader.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
-
-  const stateLabel = $derived(connection.status?.state ?? "idle");
-  const watches = $derived(connection.status?.watches ?? 0);
-  const pending = $derived(connection.status?.pending ?? 0);
-  const failed = $derived(connection.status?.failed ?? 0);
-
-  type HeaderTone = "accent" | "info" | "warn" | "danger" | "ok" | "neutral";
-  const headerTone = $derived.by<HeaderTone>(() => {
-    if (!connection.status) return "neutral";
-    if (connection.conflictCount > 0 || connection.status.state === "error") return "danger";
-    if (failed > 0 || connection.lockCount > 0) return "warn";
-    if (connection.status.state === "watching" || connection.status.state === "syncing") return "ok";
-    return "info";
-  });
-  const headerSubtitle = $derived.by(() => {
-    if (!connection.status) return "Not connected";
-    const parts: string[] = [];
-    parts.push(stateLabel);
-    parts.push(`${watches} ${watches === 1 ? "folder" : "folders"}`);
-    if (connection.conflictCount > 0) parts.push(`${connection.conflictCount} conflicts`);
-    else if (pending > 0) parts.push(`${pending} queued`);
-    else if (failed > 0) parts.push(`${failed} errors`);
-    else parts.push("all quiet");
-    return parts.join(" · ");
-  });
 
   type LocalEntry = {
     name: string; path: string; is_dir: boolean; size: number; mtime: number;
@@ -340,25 +313,7 @@
 
 </script>
 
-<div class="two-pane" class:v03={uiPrefs.useV03Shell}>
-  {#if !uiPrefs.useV03Shell}
-    <PageHeader
-      icon={FolderOpen}
-      title="Files"
-      tone={headerTone}
-      subtitle={headerSubtitle}
-    >
-      {#snippet actions()}
-        <button
-          type="button"
-          class="btn ghost sm"
-          onclick={newTab}
-          title="New tab (Ctrl+T)"
-        ><Plus size={12}/> New tab</button>
-      {/snippet}
-    </PageHeader>
-  {/if}
-
+<div class="two-pane">
   <div class="tabstrip-wrap">
     <div class="tabstrip">
       {#each browserTabs.tabs as t, i (t.id)}
@@ -466,22 +421,6 @@
     flex: 1; min-height: 0; min-width: 0;
     background: var(--bg);
     position: relative;
-    container-type: inline-size;
-  }
-  /* Phase C: under v0.3 the Files panel renders a compact summary in the dock
-     and the full TwoPane only when maximized — always wide. Disable container
-     query by suppressing the container scope so @container queries below
-     never match. */
-  .two-pane.v03 { container-type: normal; }
-  /* v0.2 only — dock-hosted panel can be < 600px wide; stack panes vertically
-     so each file browser keeps usable width. */
-  @container (max-width: 600px) {
-    .split {
-      grid-template-columns: 1fr !important;
-      grid-template-rows: 1fr 6px 1fr;
-    }
-    .divider { cursor: row-resize; }
-    .divider-grip { width: 28px; height: 2px; }
   }
   .tabstrip-wrap {
     position: relative;

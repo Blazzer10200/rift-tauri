@@ -1,11 +1,10 @@
 <script lang="ts">
   import {
-    ListChecks, Circle, CircleDot, CheckCircle2, Activity, Loader2, X,
+    ListChecks, Circle, CircleDot, CheckCircle2, Activity, Loader2,
     FileText, FolderTree, Search, ChevronRight, AlertCircle,
     FilePen, FilePlus, Terminal, Globe, Wrench,
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
 
   const counts = $derived.by(() => {
     const total = assistant.tasks.length;
@@ -107,22 +106,7 @@
   });
 </script>
 
-<aside class="dock" class:v03={uiPrefs.useV03Shell}>
-  {#if !uiPrefs.useV03Shell}
-    <header class="dock-head">
-      <div class="title">
-        <ListChecks size={13} />
-        <span>Tasks</span>
-        {#if counts.total > 0}
-          <span class="counter">{counts.done}/{counts.total}</span>
-        {/if}
-      </div>
-      <button class="closebtn" type="button" onclick={() => (assistant.ui.dockOpen = false)} title="Close dock">
-        <X size={13} />
-      </button>
-    </header>
-  {/if}
-
+<aside class="dock">
   <div class="section">
     {#if assistant.tasks.length === 0}
       <div class="empty-note">
@@ -243,23 +227,14 @@
 
 <style>
   .dock {
-    width: 280px;
-    flex-shrink: 0;
+    width: 100%;
+    flex: 1;
     display: flex; flex-direction: column;
-    background: var(--bg-elev-1);
-    border-left: 1px solid var(--border);
+    background: transparent;
     min-height: 0;
     overflow-x: hidden;
     overflow-y: auto;
     box-sizing: border-box;
-  }
-  /* Under v0.3, PanelShell owns the header + frame; the aside is just a body
-     and must fill whatever width the dock gives it. */
-  .dock.v03 {
-    width: 100%;
-    border-left: 0;
-    background: transparent;
-    flex: 1;
   }
   /* Custom scrollbar — match Rift's dark palette, hide horizontal artifacts. */
   .dock::-webkit-scrollbar { width: 8px; height: 0; }

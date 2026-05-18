@@ -8,7 +8,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { uiPrefs } from "./ui-prefs.svelte";
 import { accessibility } from "./accessibility.svelte";
 
 export type WorkspaceState = {
@@ -223,10 +222,9 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<"sonnet" | "opus" | "haiku">(loadModel());
-  // `dockOpen` drives the inline TasksDock in AssistantPage under both v0.2
-  // and v0.4.1 shells (Tasks returned to AssistantPage in v0.4.1).
-  // `historyOpen` is v0.2-only — under v0.4.1 History lives in the right
-  // pane and visibility is driven by `rightPane.activeId === "history"`.
+  // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
+  // is retained as a no-op flag for back-compat w/ any remaining slash
+  // command — History is now its own workspace, not an overlay.
   ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false });
 
   // Conversation history.
@@ -862,10 +860,10 @@ class AssistantStore {
       this.convoCreatedAt = Date.now();
       this.convoTitle = null;
     }
-    // v0.4: under v0.3 shell, ensure the active convo has a tab. Catches the
-    // raw newConversation→send path (slash /new under v0.2 etc.) so tabs are
-    // never out of sync with the streaming convo.
-    if (uiPrefs.useV03Shell && this.currentConvoId && !this.openTabs.includes(this.currentConvoId)) {
+    // v0.4: ensure the active convo has a tab. Catches the raw
+    // newConversation→send path (slash /new) so tabs never drift out of sync
+    // with the streaming convo.
+    if (this.currentConvoId && !this.openTabs.includes(this.currentConvoId)) {
       this.openTabs = [...this.openTabs, this.currentConvoId];
       this.persistTabs();
     }
@@ -1448,8 +1446,7 @@ class AssistantStore {
     switch (cmd.toLowerCase()) {
       case "clear":
       case "new":
-        if (uiPrefs.useV03Shell) void this.newTab();
-        else void this.newConversation();
+        void this.newTab();
         return true;
       case "history":
         this.ui.historyOpen = !this.ui.historyOpen;

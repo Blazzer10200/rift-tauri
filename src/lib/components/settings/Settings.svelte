@@ -9,7 +9,6 @@
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
-  import { rightPane } from "../../state/right-pane.svelte";
   import {
     terminal,
     TERM_FONT_SIZE_MIN,
@@ -222,59 +221,27 @@
         <h3>Appearance</h3>
         <p class="help">Theme, density, font, and shell-layout controls.</p>
 
-        <div class="v03-toggle card">
-          <div class="v03-toggle-l">
-            <span class="v03-title">
-              <Sparkles size={14} class="v03-ico"/>
-              Experimental v0.3 shell layout
-              <span class="v03-beta">beta</span>
-            </span>
-            <span class="v03-hint">
-              Single-canvas chat-first layout with a customizable right-side dock.
-              Toggling reloads the window so the new shell mounts cleanly.
-            </span>
+        <div class="layout-card card">
+          <span class="layout-title">Layout</span>
+          <span class="layout-hint">
+            Click an icon on the right-edge activity bar to swap the main pane.
+            Drag icons to reorder them — your <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">8</kbd>
+            shortcuts follow the bar's order.
+          </span>
+          <div class="layout-actions">
+            <button class="btn ghost sm" type="button" onclick={() => void assistantStore.closeAllTabs()}>
+              <X size={11}/> Close all chat tabs
+            </button>
           </div>
-          <label class="v03-switch" title={uiPrefs.useV03Shell ? "Disable v0.3 shell" : "Enable v0.3 shell"}>
-            <input
-              type="checkbox"
-              checked={uiPrefs.useV03Shell}
-              onchange={(e) => uiPrefs.setUseV03Shell((e.currentTarget as HTMLInputElement).checked)}
-            />
-            <span class="v03-switch-track"></span>
-          </label>
+          <div class="kbd-grid">
+            <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">T</kbd><span>New chat tab</span></div>
+            <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">W</kbd><span>Close active tab</span></div>
+            <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Tab</kbd><span>Cycle tabs (Shift to reverse)</span></div>
+            <div class="kbd-row"><kbd class="kbd">Alt</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">9</kbd><span>Jump to chat tab N</span></div>
+            <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">8</kbd><span>Switch workspace</span></div>
+            <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">0</kbd><span>Switch to Chat workspace</span></div>
+          </div>
         </div>
-
-        {#if uiPrefs.useV03Shell}
-          <!-- v0.4.1 Layout sub-section: reset the right pane, close all chat
-               tabs, kbd cheat sheet. The dock-accordion + split-dock-reset
-               controls were retired alongside the dock primitive. -->
-          <div class="v03-toggle card v03-sub layout-card">
-            <div class="v03-toggle-l">
-              <span class="v03-title v03-sub-title">Layout</span>
-              <span class="v03-hint">
-                v0.4.1 — chat lives on the left; pick a tool from the activity bar on the right.
-                Drag activity-bar icons to reorder them — your <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">7</kbd>
-                shortcuts follow the bar's order.
-              </span>
-              <div class="layout-actions">
-                <button class="btn ghost sm" type="button" onclick={() => rightPane.reset()}>
-                  <RotateCcw size={11}/> Reset right pane
-                </button>
-                <button class="btn ghost sm" type="button" onclick={() => void assistantStore.closeAllTabs()}>
-                  <X size={11}/> Close all chat tabs
-                </button>
-              </div>
-              <div class="kbd-grid">
-                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">T</kbd><span>New chat tab</span></div>
-                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">W</kbd><span>Close active tab</span></div>
-                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">Tab</kbd><span>Cycle tabs (Shift to reverse)</span></div>
-                <div class="kbd-row"><kbd class="kbd">Alt</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">9</kbd><span>Jump to tab N</span></div>
-                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">1</kbd>…<kbd class="kbd">7</kbd><span>Toggle right-pane page</span></div>
-                <div class="kbd-row"><kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">0</kbd><span>Close right pane</span></div>
-              </div>
-            </div>
-          </div>
-        {/if}
 
         <div class="soon card">
           <Sparkles size={18} class="soon-ico"/>
@@ -1115,67 +1082,19 @@
   .soon-title { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
   .soon-hint { color: var(--fg-muted); font-size: var(--fs-xs); max-width: 360px; line-height: 1.5; }
 
-  /* v0.3 experimental shell toggle — sits above the more-coming-soon card.
-     Single switch row; restart required so we leave it visually deliberate
-     (warn-toned border) but not alarming. */
-  .v03-toggle {
+  .layout-card {
     margin-top: 14px;
     padding: 14px 16px;
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    border: 1px solid color-mix(in oklch, var(--warn) 30%, var(--border));
-    background: color-mix(in oklch, var(--warn) 4%, var(--surface));
+    display: flex; flex-direction: column; gap: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
     border-radius: var(--radius);
   }
-  .v03-toggle-l { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-  .v03-title {
-    display: inline-flex; align-items: center; gap: 8px;
+  .layout-title {
     color: var(--fg); font-size: var(--fs-sm); font-weight: 600;
   }
-  .v03-toggle :global(.v03-ico) { color: var(--warn); }
-  .v03-beta {
-    padding: 1px 6px;
-    font-size: 9px; font-weight: 700;
-    background: var(--warn-soft); color: var(--warn);
-    border-radius: 4px;
-    letter-spacing: 0.06em; text-transform: uppercase;
-  }
-  .v03-hint { color: var(--fg-muted); font-size: var(--fs-xs); line-height: 1.5; max-width: 540px; }
-  .v03-switch { position: relative; display: inline-block; width: 38px; height: 22px; cursor: pointer; flex-shrink: 0; }
-  .v03-switch input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
-  .v03-switch-track {
-    position: absolute; inset: 0;
-    background: var(--bg-elev-3);
-    border: 1px solid var(--border-strong);
-    border-radius: 999px;
-    transition: background 120ms ease, border-color 120ms ease;
-  }
-  .v03-switch-track::before {
-    content: "";
-    position: absolute; top: 2px; left: 2px;
-    width: 16px; height: 16px;
-    background: var(--fg-muted);
-    border-radius: 50%;
-    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 120ms ease;
-  }
-  .v03-switch input:checked + .v03-switch-track {
-    background: color-mix(in oklch, var(--accent) 70%, transparent);
-    border-color: var(--accent);
-  }
-  .v03-switch input:checked + .v03-switch-track::before {
-    transform: translateX(16px);
-    background: var(--accent-fg);
-  }
-  .v03-switch input:focus-visible + .v03-switch-track { box-shadow: 0 0 0 2px var(--ring); }
-
-  /* Sub-toggle (accordion) — same shape as parent but neutral tone since
-     it's only visible when v0.3 is on (not experimental in its own right). */
-  .v03-toggle.v03-sub {
-    margin-top: 8px;
-    border-color: var(--border);
-    background: var(--surface);
-  }
-  .v03-sub-title { font-weight: 500; }
-  .v03-hint .kbd,
+  .layout-hint { color: var(--fg-muted); font-size: var(--fs-xs); line-height: 1.5; max-width: 540px; }
+  .layout-hint .kbd,
   .kbd-row .kbd {
     display: inline-block;
     margin: 0 1px;

@@ -3,8 +3,7 @@
 // open/closed, drawer height, the live tab list, and the user's default
 // shell preference.
 
-import { uiPrefs } from "./ui-prefs.svelte";
-import { rightPane } from "./right-pane.svelte";
+import { workspace } from "./workspace.svelte";
 
 export type TermStatus = "starting" | "running" | "exited" | "error";
 
@@ -198,14 +197,10 @@ class TerminalStore {
   }
 
   toggle() {
-    // Under v0.4.1 the embedded overlay is gone — the terminal lives in the
-    // right pane. Route through rightPane.toggle so Ctrl+` and every existing
-    // terminal.toggle() call site stays valid in both shells.
-    if (uiPrefs.useV03Shell) {
-      rightPane.toggle("terminal");
-      return;
-    }
-    this.setOpen(!this.open);
+    // Terminal lives as a workspace under the workspace shell. Route through
+    // workspace.setActive so every existing terminal.toggle() call site stays
+    // valid; the embedded-overlay dock path is gone.
+    workspace.setActive("terminal");
   }
 
   setHeight(h: number) {
