@@ -14,6 +14,8 @@ Two regressions reported right after v0.4.7 shipped.
 
 **S93 recap (v0.4.7):** Settings → Accessibility, master toggle + 3 dials. Phase 2 still deferred.
 
+**Pending — next session:** Trey-config sync. Blazzer has Trey's `~/.claude/` zip (consented). Three-way diff: rules/hooks/skills/INVARIANTS → straight copy from Blazzer; memory → carry generic eureka/reference/feedback only, rewrite `user_profile.md` for Trey, drop Blazzer's project-specific memory; CLAUDE.md → Trey-personalized (strip Blazzer's Active Projects + machine + email + screenshot path); settings.json → Pro-plan tuned (TREY-SETUP §4) merged w/ his per-user env. Deliver `claude-trey-sync/` dir w/ `APPLY.md` + `DIFF-REPORT.md`. Do NOT touch `.credentials.json` / `projects/` / `shell-snapshots/`.
+
 ---
 
 ## RESUME HERE — first read every new session
