@@ -2,23 +2,19 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 94 — 2026-05-17 — v0.4.8-alpha hot-fix: a11y stuck-on + shell-switch disappears
+## Session 95 — 2026-05-17 — v0.4.9-alpha: addendum overhaul (act-first, no-guess)
 
-Two regressions reported right after v0.4.7 shipped.
+Behavioral fix for the "AI is 50% dumber" complaint from Blazzer + Trey. S91-S94 cleared technical gates; this clears the laziness — Claude rambling before tool calls, guessing at file contents, re-reading files. [mod.rs:644](src-tauri/src/assistant/mod.rs#L644) `RIFT_SYSTEM_ADDENDUM_TOOLS` rewritten with explicit anti-laziness clauses: *"ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config"* + edit-then-verify + never guess + narrow reads + no re-reads. Added `MultiEdit` + `Agent` to advertised tool roster.
 
-**(1) Dyslexia toggle stuck-on.** Master off cleared the addendum but font/spacing CSS persisted (dials wrote attrs unconditionally). Fix in [accessibility.svelte.ts](src/lib/state/accessibility.svelte.ts) `apply()`: dial attrs gated on master flag — off snaps to defaults; persisted values restored when re-enabled. Warm tint stays independent. Sub-buttons get `disabled={!dyslexiaMode}` for visual clarity.
+Works across both machines because addenda are appended LAST → win tie-breakers vs inherited `~/.claude/` rules clusters. Single-line constraint preserved. Temporary fix — tomorrow may layer Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles. Today: unconditional baseline. 3-file bump 0.4.8 → 0.4.9-alpha. Auto-verifier clean.
 
-**(2) Appearance shell-toggle "disappeared" Settings.** AppShell renders Settings as a routed page in v0.2 / modal in v0.4.1; live-flipping mid-Settings reparents into a structure with no mount point. Fix in [ui-prefs.svelte.ts](src/lib/state/ui-prefs.svelte.ts) `setUseV03Shell`: `window.location.reload()` after 120ms — re-mounts cleanly with the new flag. Hint copy updated.
-
-3-file bump 0.4.7 → 0.4.8-alpha. Auto-verifier clean.
-
-**Pending — next session:** Trey-config sync. Blazzer has Trey's `~/.claude/` zip (consented). Three-way diff: copy rules/hooks/skills/INVARIANTS; memory → generic only + rewrite `user_profile.md` for Trey; CLAUDE.md → strip Blazzer's projects/machine/email; settings.json per TREY-SETUP §4. Deliver `claude-trey-sync/` + `APPLY.md` + `DIFF-REPORT.md`. NEVER touch `.credentials.json` / `projects/` / `shell-snapshots/`.
+**Pending:** (a) Trey-config sync (Trey's `~/.claude/` zip on Desktop, consented). (b) S95 follow-up: optional Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles for per-tab addendum control.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.8-alpha** (S94 pending commit; v0.4.7 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.9-alpha** (S95 pending commit; v0.4.8 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
 **v0.4.1 shell** = default; `useV03Shell` toggle = experimental v0.2 fallback (storage key verbatim, never rename).
 
