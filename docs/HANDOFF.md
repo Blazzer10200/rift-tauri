@@ -8,7 +8,7 @@ Behavioral fix for the "AI is 50% dumber" complaint from Blazzer + Trey. S91-S94
 
 Works across both machines because addenda are appended LAST → win tie-breakers vs inherited `~/.claude/` rules clusters. Single-line constraint preserved. Temporary fix — tomorrow may layer Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles. Today: unconditional baseline. 3-file bump 0.4.8 → 0.4.9-alpha. Auto-verifier clean.
 
-**Pending:** (a) Trey-config sync (Trey's `~/.claude/` zip on Desktop, consented). (b) S95 follow-up: optional Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles for per-tab addendum control.
+**Pending:** (a) **Velopack delta chain investigation — TOP PRIORITY** — Blazzer reports every Velopack update regresses him to an older baseline missing Appearance/Accessibility/Speech sections; build/_app/ verified to contain all 3 IDs in v0.4.9 bundle, so source is correct, install side is broken. Suspect rapid-fire S91→S95 deltas (5 releases / 1 day) chained patches that fail apply + roll back. Workaround tonight: manual Setup.exe install bypasses Velopack. (b) Trey-config sync (zip on Desktop, consented). (c) S95 follow-up: optional Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles.
 
 ---
 
