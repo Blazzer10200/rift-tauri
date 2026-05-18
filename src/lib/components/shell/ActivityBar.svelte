@@ -1,10 +1,13 @@
 <script lang="ts">
-  import { PANELS } from "../right-pane";
-  import { rightPane, type ActivityBarId } from "$lib/state/right-pane.svelte";
+  import { Settings as SettingsIcon } from "lucide-svelte";
+  import { WORKSPACES } from "../workspaces";
+  import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
 
-  // Drag-to-reorder: source index captured on dragstart, drop index resolved
-  // from event.target's data-index. Same HTML5 DnD pattern as ChatTabsBar +
-  // PanelShell. Visual hint via data-drop-target on the hover row.
+  let { onOpenSettings }: { onOpenSettings: () => void } = $props();
+
+  // Drag-to-reorder: same HTML5 DnD pattern as the v0.4.1 ActivityBar — source
+  // index captured on dragstart, drop resolved from the target row. Bottom
+  // group (gear) is not draggable; only top-group buttons participate.
   let dragSrc = $state<number | null>(null);
   let dropTarget = $state<number | null>(null);
 
@@ -12,7 +15,7 @@
     dragSrc = idx;
     if (ev.dataTransfer) {
       ev.dataTransfer.effectAllowed = "move";
-      ev.dataTransfer.setData("text/x-activitybar-id", rightPane.order[idx]);
+      ev.dataTransfer.setData("text/x-workspace-id", workspace.order[idx]);
     }
   }
   function onDragOver(idx: number, ev: DragEvent) {
@@ -24,7 +27,7 @@
   function onDrop(idx: number, ev: DragEvent) {
     if (dragSrc === null) return;
     ev.preventDefault();
-    rightPane.reorder(dragSrc, idx);
+    workspace.reorder(dragSrc, idx);
     dragSrc = null;
     dropTarget = null;
   }
@@ -34,33 +37,51 @@
   }
 </script>
 
-<nav class="activitybar" aria-label="Right pane tools">
-  {#each rightPane.order as id, idx (id)}
-    {@const def = PANELS[id as ActivityBarId]}
-    {@const isActive = rightPane.activeId === id}
-    {@const count = def.getCount?.() ?? 0}
-    {@const tone = def.getTone ?? "neutral"}
+<nav class="activitybar" aria-label="Workspaces">
+  <div class="ab-top">
+    {#each workspace.order as id, idx (id)}
+      {@const def = WORKSPACES[id as WorkspaceId]}
+      {@const isActive = workspace.activeId === id}
+      {@const count = def.disabled ? 0 : (def.getCount?.() ?? 0)}
+      {@const tone = def.getTone ?? "neutral"}
+      <button
+        class="ab-btn"
+        type="button"
+        data-active={isActive}
+        data-disabled={def.disabled ? "true" : "false"}
+        data-drop-target={dropTarget === idx}
+        disabled={def.disabled}
+        title={def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${idx + 1}`}
+        aria-label="{def.title} {isActive ? '(active)' : ''}"
+        aria-pressed={isActive}
+        draggable={!def.disabled}
+        onclick={() => { if (!def.disabled) workspace.setActive(id as WorkspaceId); }}
+        ondragstart={(e) => { if (!def.disabled) onDragStart(idx, e); }}
+        ondragover={(e) => onDragOver(idx, e)}
+        ondrop={(e) => onDrop(idx, e)}
+        ondragend={onDragEnd}
+      >
+        <span class="ab-icon"><def.icon size={16}/></span>
+        {#if !def.disabled && count > 0}
+          <span class="ab-count count-pip" data-tone={tone}>{count > 99 ? "99+" : count}</span>
+        {/if}
+      </button>
+    {/each}
+  </div>
+
+  <div class="ab-bottom">
+    <div class="ab-divider"></div>
     <button
       class="ab-btn"
       type="button"
-      data-active={isActive}
-      data-drop-target={dropTarget === idx}
-      title="{def.title} · Ctrl+{idx + 1}"
-      aria-label="{def.title} {isActive ? '(open)' : ''}"
-      aria-pressed={isActive}
-      draggable="true"
-      onclick={() => rightPane.toggle(id as ActivityBarId)}
-      ondragstart={(e) => onDragStart(idx, e)}
-      ondragover={(e) => onDragOver(idx, e)}
-      ondrop={(e) => onDrop(idx, e)}
-      ondragend={onDragEnd}
+      data-disabled="false"
+      onclick={onOpenSettings}
+      title="Settings · Ctrl+,"
+      aria-label="Settings"
     >
-      <span class="ab-icon"><def.icon size={16}/></span>
-      {#if count > 0}
-        <span class="ab-count count-pip" data-tone={tone}>{count > 99 ? "99+" : count}</span>
-      {/if}
+      <span class="ab-icon"><SettingsIcon size={16}/></span>
     </button>
-  {/each}
+  </div>
 </nav>
 
 <style>
@@ -75,6 +96,9 @@
     overflow: hidden;
     user-select: none;
   }
+  .ab-top    { display: flex; flex-direction: column; }
+  .ab-bottom { margin-top: auto; display: flex; flex-direction: column; }
+  .ab-divider { height: 1px; background: var(--border); margin: 4px 6px; }
   .ab-btn {
     position: relative;
     display: flex; align-items: center; justify-content: center;
@@ -107,6 +131,14 @@
   .ab-btn[data-drop-target="true"] {
     background: var(--accent-soft);
     box-shadow: inset 0 2px 0 var(--accent);
+  }
+  .ab-btn[data-disabled="true"] {
+    opacity: 0.38;
+    cursor: not-allowed;
+  }
+  .ab-btn[data-disabled="true"]:hover {
+    background: transparent;
+    color: var(--fg-muted);
   }
   .ab-icon {
     display: inline-flex; align-items: center; justify-content: center;

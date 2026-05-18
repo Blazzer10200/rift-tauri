@@ -1,8 +1,6 @@
 <script lang="ts">
-  import { Sparkles, ListChecks, History, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
+  import { Sparkles, ListChecks, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
-  import { rightPane } from "../../state/right-pane.svelte";
 
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
@@ -49,14 +47,7 @@
     }
   });
 
-  const historyOpen = $derived(
-    uiPrefs.useV03Shell ? rightPane.activeId === "history" : assistant.ui.historyOpen,
-  );
   const tasksOpen = $derived(assistant.ui.dockOpen);
-  function toggleHistory() {
-    if (uiPrefs.useV03Shell) rightPane.toggle("history");
-    else assistant.ui.historyOpen = !assistant.ui.historyOpen;
-  }
   function toggleTasks() {
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
@@ -176,30 +167,10 @@
       class="hdr-btn"
       type="button"
       title="New conversation"
-      onclick={() => {
-        if (uiPrefs.useV03Shell) void assistant.newTab();
-        else void assistant.newConversation();
-      }}
+      onclick={() => void assistant.newTab()}
     >
       <Plus size={13} />
     </button>
-
-    {#if !uiPrefs.useV03Shell}
-      <!-- v0.2 only: v0.3/v0.4.1 shell exposes History via the ActivityBar
-           on the right edge, so this button would be a duplicate there. -->
-      <button
-        class="hdr-btn"
-        class:active={historyOpen}
-        type="button"
-        title="Conversation history"
-        onclick={toggleHistory}
-      >
-        <History size={13} />
-        {#if assistant.conversations.length > 0}
-          <span class="convo-chip">{assistant.conversations.length}</span>
-        {/if}
-      </button>
-    {/if}
 
     <button
       class="dock-toggle"

@@ -9,8 +9,6 @@
     ChevronRight, CheckCircle2, CircleAlert, History,
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
   } from "lucide-svelte";
-  import PageHeader from "../shell/PageHeader.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import ConflictsPage from "../conflicts/ConflictsPage.svelte";
 
   // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
@@ -205,18 +203,6 @@
   }
 </script>
 
-{#snippet headerPills()}
-  {#if !watcherOn}
-    <span class="pill muted"><CircleAlert size={11}/> Not connected</span>
-  {:else if isEmpty}
-    <span class="pill ok"><span class="dot"></span> Everything synced</span>
-  {:else}
-    <span class="pill info">
-      {totals.total} pending · {groups.length} resource{groups.length === 1 ? "" : "s"}
-    </span>
-  {/if}
-{/snippet}
-
 {#snippet toolbarActions()}
       <div class="kebab-wrap" bind:this={overflowRef}>
         <button
@@ -360,24 +346,12 @@
       </button>
 {/snippet}
 
-<section class="page" class:v03={uiPrefs.useV03Shell}>
-  {#if !uiPrefs.useV03Shell}
-    <PageHeader
-      icon={RefreshCcw}
-      title="Sync"
-      tone={!watcherOn ? "neutral" : isEmpty ? "ok" : "info"}
-      subtitle={watcherOn ? `Last scan ${scanAgeLabel()}` : "Not connected"}
-    >
-      {#snippet extras()}{@render headerPills()}{/snippet}
-      {#snippet actions()}{@render toolbarActions()}{/snippet}
-    </PageHeader>
-  {:else}
-    <div class="v03-toolbar" role="toolbar" aria-label="Sync actions">
-      {@render toolbarActions()}
-    </div>
-  {/if}
+<section class="page">
+  <div class="v03-toolbar" role="toolbar" aria-label="Sync actions">
+    {@render toolbarActions()}
+  </div>
 
-  {#if uiPrefs.useV03Shell && connection.conflictCount > 0}
+  {#if connection.conflictCount > 0}
     <details class="conflicts-inline" open>
       <summary class="conflicts-inline-summary">
         <AlertTriangle size={12}/>
@@ -1248,12 +1222,12 @@
     margin-top: 10px;
   }
 
-  /* ── v0.3 panel-shell mode (flag-on) ─────────────────── */
-  .page.v03 .body { padding: 8px 12px 10px; }
-  .page.v03 .totals { padding: 8px 12px 4px; }
-  .page.v03 .banner { margin: 6px 12px 0; }
-  .page.v03 .shrink-banner { margin: 4px 12px 0; }
-  .page.v03 .footer { padding: 8px 12px; }
+  /* Workspace-mode spacing — was gated on .page.v03 before workspace shell. */
+  .page .body { padding: 8px 12px 10px; }
+  .page .totals { padding: 8px 12px 4px; }
+  .page .banner { margin: 6px 12px 0; }
+  .page .shrink-banner { margin: 4px 12px 0; }
+  .page .footer { padding: 8px 12px; }
 
   .v03-toolbar {
     display: flex;

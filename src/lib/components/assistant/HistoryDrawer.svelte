@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { History, X, Plus, Trash2, Pencil, Check, MessagesSquare, Search } from "lucide-svelte";
+  import { History, Plus, Trash2, Pencil, Check, MessagesSquare, Search, X } from "lucide-svelte";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
 
   let renameId = $state<string | null>(null);
   let renameDraft = $state("");
@@ -13,13 +12,6 @@
     if (!q) return assistant.conversations;
     return assistant.conversations.filter((c) => c.title.toLowerCase().includes(q));
   });
-
-  function close() {
-    assistant.ui.historyOpen = false;
-    renameId = null;
-    confirmDeleteId = null;
-    searchQuery = "";
-  }
 
   function startRename(c: ConversationMeta) {
     renameId = c.id;
@@ -58,11 +50,7 @@
   }
 </script>
 
-{#if uiPrefs.useV03Shell || assistant.ui.historyOpen}
-  {#if !uiPrefs.useV03Shell}
-    <div class="overlay" onclick={close} role="presentation"></div>
-  {/if}
-  <aside class="drawer" class:v03={uiPrefs.useV03Shell} aria-label="Conversation history">
+<aside class="drawer" aria-label="Conversation history">
     <header class="head">
       <div class="title">
         <History size={14} />
@@ -74,18 +62,10 @@
           class="iconbtn primary"
           type="button"
           title="New conversation"
-          onclick={() => {
-            if (uiPrefs.useV03Shell) void assistant.newTab();
-            else { void assistant.newConversation(); close(); }
-          }}
+          onclick={() => void assistant.newTab()}
         >
           <Plus size={13} /> New
         </button>
-        {#if !uiPrefs.useV03Shell}
-          <button class="iconbtn" type="button" title="Close" onclick={close}>
-            <X size={14} />
-          </button>
-        {/if}
       </div>
     </header>
 
@@ -142,10 +122,7 @@
               <button
                 class="row-main"
                 type="button"
-                onclick={() => {
-                  if (uiPrefs.useV03Shell) void assistant.openTab(c.id);
-                  else void assistant.loadConversation(c.id);
-                }}
+                onclick={() => void assistant.openTab(c.id)}
                 title="Open"
               >
                 <span class="row-title">{c.title}</span>
@@ -182,42 +159,16 @@
       {/if}
     </div>
   </aside>
-{/if}
 
 <style>
-  .overlay {
-    position: absolute;
-    inset: 0;
-    background: oklch(0 0 0 / 0.35);
-    z-index: 30;
-    animation: fade-in 180ms ease-out;
-  }
   .drawer {
-    position: absolute;
-    top: 0; bottom: 0; left: 0;
-    width: 320px;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-    box-shadow: 8px 0 32px oklch(0 0 0 / 0.4);
-    z-index: 31;
-    display: flex; flex-direction: column;
-    animation: slide-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  /* Under v0.3, PanelShell owns frame + close affordance; the drawer is just
-     a body that fills its dock panel. */
-  .drawer.v03 {
     position: static;
     width: 100%;
     height: 100%;
-    box-shadow: none;
-    border-right: 0;
-    background: transparent;
-    animation: none;
-    z-index: auto;
     flex: 1;
+    display: flex; flex-direction: column;
+    background: transparent;
   }
-  @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes slide-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
 
   .head {
     display: flex; align-items: center; justify-content: space-between;

@@ -5,15 +5,9 @@
   import { X } from "lucide-svelte";
   import { connection, type ServerProfile } from "../state/connection.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
-  import TabRail from "./shell/TabRail.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
   import Settings from "./settings/Settings.svelte";
   import ActivityToast from "./ActivityToast.svelte";
-  import TwoPane from "./browser/TwoPane.svelte";
-  import ActivityFeed from "./activity/ActivityFeed.svelte";
-  import SyncPage from "./sync/SyncPage.svelte";
-  import Diagnostics from "./diagnostics/Diagnostics.svelte";
-  import ConflictsPage from "./conflicts/ConflictsPage.svelte";
   import AddServer from "./dialogs/AddServer.svelte";
   import Bootstrap from "./dialogs/Bootstrap.svelte";
   import Keygen from "./dialogs/Keygen.svelte";
@@ -21,36 +15,19 @@
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
-  import TerminalPanel from "./terminal/TerminalPanel.svelte";
-  import AssistantPage from "./assistant/AssistantPage.svelte";
   import ChatTabsBar from "./shell/ChatTabsBar.svelte";
-  import RightPane from "./shell/RightPane.svelte";
+  import WorkspaceShell from "./shell/WorkspaceShell.svelte";
   import ActivityBar from "./shell/ActivityBar.svelte";
-  import { uiPrefs } from "../state/ui-prefs.svelte";
-  import { rightPane } from "../state/right-pane.svelte";
-  import { PANELS } from "./right-pane";
+  import { WORKSPACES } from "./workspaces";
+  import { workspace, type WorkspaceId } from "../state/workspace.svelte";
   import { updates } from "../state/updates.svelte";
-  import { terminal } from "../state/terminal.svelte";
   import { syncPage } from "../state/sync-page.svelte";
   import { assistant } from "../state/assistant.svelte";
 
-  type Tab = "browse" | "activity" | "sync" | "assistant" | "conflicts" | "settings" | "diagnostics";
   type SettingsSection = "appearance" | "terminal" | "assistant" | "servers" | "keys" | "about";
 
-  let active = $state<Tab>("browse");
   let settingsSection = $state<SettingsSection>("appearance");
-  // v0.3 shell: Settings becomes a slide-over modal. Both v0.2 and v0.3 paths
-  // share the `settingsSection` cursor — same target component, different host.
   let settingsModalOpen = $state(false);
-  // v0.2.55: lazy-mount + keep-alive — pages mount once on first visit
-  // and stay mounted (hidden via `hidden` attr) on tab switch. Drops the
-  // remount-flash where children re-ran onMount/transitions every switch.
-  let visited = $state<Set<Tab>>(new Set(["browse"]));
-  $effect(() => {
-    if (!visited.has(active)) {
-      visited = new Set([...visited, active]);
-    }
-  });
 
   // Dialog state
   let addServerOpen = $state(false);
@@ -105,16 +82,12 @@
 
   function gotoSettings(s: SettingsSection = "appearance") {
     settingsSection = s;
-    if (uiPrefs.useV03Shell) {
-      settingsModalOpen = true;
-    } else {
-      active = "settings";
-    }
+    settingsModalOpen = true;
   }
   function closeSettingsModal() { settingsModalOpen = false; }
 
   // ── command registry ──────────────────────────────────────────────
-  // Shared (both v0.2 and v0.3) — server + sync ops are surface-agnostic.
+  // Server + sync ops are surface-agnostic.
   const sharedCommands = $derived<Command[]>([
     { id: "switch-server", group: "Servers", title: "Manage servers…", subtitle: "Add, edit, or delete servers", shortcut: "Ctrl+P",
       run: () => gotoSettings("servers") },
@@ -133,35 +106,24 @@
       run: () => connection.loadServers() },
   ]);
 
-  const v02Commands = $derived<Command[]>([
-    { id: "tab-browse",   group: "Go to", title: "Files",    shortcut: "Ctrl+1", run: () => (active = "browse")   },
-    { id: "tab-sync",     group: "Go to", title: "Sync",     shortcut: "Ctrl+2", run: () => (active = "sync")     },
-    { id: "tab-assistant",group: "Go to", title: "Assistant",shortcut: "Ctrl+3", run: () => (active = "assistant")},
-    { id: "tab-conflicts",group: "Go to", title: "Conflicts",shortcut: "Ctrl+4", run: () => (active = "conflicts")},
-    { id: "tab-activity", group: "Go to", title: "Activity", shortcut: "Ctrl+5", run: () => (active = "activity") },
-    { id: "tab-settings", group: "Go to", title: "Settings", shortcut: "Ctrl+6", run: () => (active = "settings") },
-    { id: "tab-diagnostics", group: "Go to", title: "Sync Inspector", subtitle: "Live diagnostics for the sync pipeline", shortcut: "Ctrl+Shift+D",
-      run: () => (active = "diagnostics") },
+  const workspaceCommands = $derived<Command[]>([
+    ...workspace.order
+      .filter((id) => !WORKSPACES[id].disabled)
+      .map((id, idx) => {
+        const def = WORKSPACES[id];
+        return {
+          id: `workspace-${id}`,
+          group: "Workspace" as const,
+          title: `Switch to ${def.title}`,
+          shortcut: `Ctrl+${idx + 1}`,
+          run: () => workspace.setActive(id),
+        } as Command;
+      }),
+    { id: "workspace-chat", group: "Workspace", title: "Switch to Chat", shortcut: "Ctrl+0", run: () => workspace.setActive("chat") },
+    { id: "open-settings",  group: "App",       title: "Settings…",     shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
   ]);
 
-  const v03Commands = $derived<Command[]>([
-    ...rightPane.order.map((id, idx) => {
-      const def = PANELS[id];
-      return {
-        id: `right-pane-${id}`,
-        group: "Right pane" as const,
-        title: `Toggle ${def.title}`,
-        shortcut: `Ctrl+${idx + 1}`,
-        run: () => rightPane.toggle(id),
-      } as Command;
-    }),
-    { id: "right-pane-close", group: "Right pane", title: "Close right pane", shortcut: "Ctrl+0", run: () => rightPane.close() },
-    { id: "open-settings",    group: "App",        title: "Settings…",        shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
-  ]);
-
-  const commands = $derived<Command[]>(
-    uiPrefs.useV03Shell ? [...sharedCommands, ...v03Commands] : [...sharedCommands, ...v02Commands],
-  );
+  const commands = $derived<Command[]>([...sharedCommands, ...workspaceCommands]);
 
   // ── lifecycle ──────────────────────────────────────────────────────
   onMount(async () => {
@@ -232,16 +194,16 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
-    // Esc closes the Settings slide-over (v0.3 only — modal-shaped). v0.4.1
-    // dropped the panel-maximize feature, so Esc has no other shell meaning.
+    // Esc closes the Settings slide-over.
     if (e.key === "Escape" && settingsModalOpen) {
       e.preventDefault();
       closeSettingsModal();
       return;
     }
-    // v0.4 — Alt+1..9 jumps to chat tab N (1-indexed). Doesn't require meta;
-    // checked before the meta-gate. Gated on v0.3 since tabs only exist there.
-    if (uiPrefs.useV03Shell && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+    // Alt+1..9 → jump to chat tab N (1-indexed). Only fires inside the Chat
+    // workspace so it doesn't hijack from a focused Terminal / Files surface.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)
+        && workspace.activeId === "chat") {
       e.preventDefault();
       const idx = parseInt(e.key, 10) - 1;
       const target = assistant.openTabs[idx];
@@ -250,9 +212,10 @@
     }
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
-    // v0.4 — chat-tab keybinds (gated on v0.3). Ctrl+T new, Ctrl+W close
-    // active, Ctrl+Tab cycle. preventDefault keeps WebView2 from intercepting.
-    if (uiPrefs.useV03Shell && !e.altKey) {
+    // Chat-tab keybinds — same Chat-workspace gate so tabs only respond when
+    // the user is actually looking at the chat. preventDefault keeps WebView2
+    // from intercepting.
+    if (!e.altKey && workspace.activeId === "chat") {
       if (!e.shiftKey && e.key.toLowerCase() === "t") {
         e.preventDefault();
         void assistant.newTab();
@@ -270,49 +233,39 @@
         return;
       }
     }
-    // Ctrl+` toggles the embedded terminal — global so it works on every tab.
-    // Under v0.4.1 this routes to the Terminal right-pane page toggle.
+    // Ctrl+` → switch to Terminal workspace.
     if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
       e.preventDefault();
-      if (uiPrefs.useV03Shell) rightPane.toggle("terminal");
-      else terminal.toggle();
+      workspace.setActive("terminal");
       return;
     }
     const k = e.key.toLowerCase();
     if (e.shiftKey && k === "d") {
       e.preventDefault();
-      if (uiPrefs.useV03Shell) rightPane.toggle("activity"); // Diagnostics is v2; Activity is closest stand-in
-      else active = "diagnostics";
+      workspace.setActive("diagnostics");
       return;
     }
-    // Ctrl+0 closes the right pane under v0.4.1 (focus chat full-width).
-    if (uiPrefs.useV03Shell && !e.shiftKey && e.key === "0") {
+    // Ctrl+0 → return to Chat workspace (was "close right pane" in v0.4.1;
+    // closing has no meaning under the workspace shell).
+    if (!e.shiftKey && e.key === "0") {
       e.preventDefault();
-      rightPane.close();
+      workspace.setActive("chat");
       return;
     }
-    // Ctrl+1..7 — right-pane page toggles under v0.4.1, mapped by activity-bar
-    // order so a user-reordered bar matches its kbd shortcuts.
-    if (uiPrefs.useV03Shell && /^[1-7]$/.test(e.key)) {
+    // Ctrl+1..8 → workspace switch, mapped by activity-bar order so a user-
+    // reordered bar matches its kbd shortcuts. Skips disabled-stub entries.
+    if (/^[1-8]$/.test(e.key)) {
       e.preventDefault();
       const idx = parseInt(e.key, 10) - 1;
-      const id = rightPane.order[idx];
-      if (id) rightPane.toggle(id);
+      const id = workspace.order[idx] as WorkspaceId | undefined;
+      if (id && !WORKSPACES[id].disabled) workspace.setActive(id);
       return;
     }
     if (e.shiftKey) return;
     if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
-    // Ctrl+, opens Settings under v0.3 (modal). Under v0.2, Ctrl+P historically
-    // routed to Servers section — keep that for v0.2 compat.
-    if (e.key === "," && uiPrefs.useV03Shell) { e.preventDefault(); gotoSettings("appearance"); return; }
+    if (e.key === ",") { e.preventDefault(); gotoSettings("appearance"); return; }
     if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
-    if (uiPrefs.useV03Shell) return;
-    if (/^[1-6]$/.test(e.key)) {
-      e.preventDefault();
-      const tab = (["browse", "activity", "sync", "assistant", "conflicts", "settings"] as Tab[])[parseInt(e.key, 10) - 1];
-      active = tab;
-    }
   }
 
   // ── dialog launchers ───────────────────────────────────────────────
@@ -453,68 +406,15 @@
       </div>
     {/if}
 
-  {#if uiPrefs.useV03Shell}
-    <ChatTabsBar />
-    <div class="body" data-v04-1="true">
-      <main class="pane">
-        <AssistantPage />
-      </main>
-      <RightPane />
-      <ActivityBar />
-    </div>
-  {:else}
+    {#if workspace.activeId === "chat"}
+      <ChatTabsBar />
+    {/if}
     <div class="body">
-      <TabRail {active} onChange={(t) => (active = t)} />
-
       <main class="pane">
-        {#if visited.has("browse") || active === "browse"}
-          <div class="page-shell" hidden={active !== "browse"}>
-            <TwoPane onAddServer={() => openAddServer(null)} />
-          </div>
-        {/if}
-        {#if visited.has("activity") || active === "activity"}
-          <div class="page-shell" hidden={active !== "activity"}>
-            <ActivityFeed />
-          </div>
-        {/if}
-        {#if visited.has("sync") || active === "sync"}
-          <div class="page-shell" hidden={active !== "sync"}>
-            <SyncPage />
-          </div>
-        {/if}
-        {#if visited.has("assistant") || active === "assistant"}
-          <div class="page-shell" hidden={active !== "assistant"}>
-            <AssistantPage />
-          </div>
-        {/if}
-        {#if visited.has("conflicts") || active === "conflicts"}
-          <div class="page-shell" hidden={active !== "conflicts"}>
-            <ConflictsPage />
-          </div>
-        {/if}
-        {#if visited.has("settings") || active === "settings"}
-          <div class="page-shell" hidden={active !== "settings"}>
-            {#key settingsSection}
-              <Settings
-                initialSection={settingsSection}
-                onAddServer={() => openAddServer(null)}
-                onEditServer={(s) => openAddServer(s)}
-                onDeleteServer={(s) => deleteServer(s)}
-                onLaunchKeygen={() => (keygenOpen = true)}
-              />
-            {/key}
-          </div>
-        {/if}
-        {#if visited.has("diagnostics") || active === "diagnostics"}
-          <div class="page-shell" hidden={active !== "diagnostics"}>
-            <Diagnostics />
-          </div>
-        {/if}
+        <WorkspaceShell />
       </main>
+      <ActivityBar onOpenSettings={() => (settingsModalOpen = true)} />
     </div>
-
-    <TerminalPanel />
-  {/if}
   </div>
 
   <StatusBar />
@@ -581,7 +481,7 @@
 
   <ActivityToast />
 
-  {#if uiPrefs.useV03Shell && settingsModalOpen}
+  {#if settingsModalOpen}
     <div class="slideover-scrim" onclick={closeSettingsModal} role="presentation"></div>
     <aside class="slideover" aria-label="Settings">
       <button
@@ -647,33 +547,21 @@
     font: inherit;
   }
   .wire-error button:hover { background: rgba(255,255,255,0.08); }
+  /* Workspace shell: [main pane | 40px activity bar]. WorkspaceShell mounts
+     each workspace once-and-keeps-it via the everOpened latch — no width to
+     animate, so no grid-template-columns transition. */
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: var(--rail-w, 48px) minmax(0, 1fr);
-    transition: grid-template-columns 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    grid-template-columns: minmax(0, 1fr) 40px;
     min-height: 0;
     min-width: 0;
     overflow: visible;
     position: relative;
   }
-  /* v0.4.1 shell: no left rail. Three-column grid:
-     [chat | right-pane (0 when closed) | 40px activity bar].
-     --right-pane-w is driven by rightPane.svelte.ts (CSS var); collapses to
-     0px when activeId is null so chat takes everything except the bar. No
-     grid-template-columns transition — see v0.3 history for why pointer-
-     driven width was unbearable when eased. */
-  .body[data-v04-1="true"] {
-    grid-template-columns: minmax(0, 1fr) var(--right-pane-w, 0px) 40px;
-    transition: none;
-  }
   .pane {
     min-height: 0; min-width: 0;
     overflow: hidden;
-    display: flex; flex-direction: column;
-  }
-  .page-shell {
-    flex: 1; min-height: 0; min-width: 0;
     display: flex; flex-direction: column;
   }
 </style>

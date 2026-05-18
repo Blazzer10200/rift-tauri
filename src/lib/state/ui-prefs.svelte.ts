@@ -2,16 +2,10 @@ type Density = "compact" | "regular" | "comfy";
 
 const STORAGE_KEY = "rift.ui.density.v1";
 const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
-const V03_SHELL_KEY = "rift.ui.v03-shell.v1";
 
 class UiPrefs {
   density = $state<Density>("compact");
   railPinned = $state(false);
-  /** Storage key kept as `v03-shell` for upgrade compat — v0.4.1 reuses the
-   *  same toggle to switch between the v0.2 page-tab shell and the new
-   *  chat-first / right-pane shell. Rename of the storage slot would
-   *  silently flip existing users back to v0.2 on first launch. */
-  useV03Shell = $state(false);
 
   init() {
     if (typeof window === "undefined") return;
@@ -20,7 +14,6 @@ class UiPrefs {
       this.density = raw;
     }
     this.railPinned = localStorage.getItem(RAIL_PINNED_KEY) === "1";
-    this.useV03Shell = localStorage.getItem(V03_SHELL_KEY) === "1";
     this.apply();
   }
 
@@ -34,21 +27,6 @@ class UiPrefs {
     this.railPinned = !this.railPinned;
     localStorage.setItem(RAIL_PINNED_KEY, this.railPinned ? "1" : "0");
     this.applyRail();
-  }
-
-  setUseV03Shell(on: boolean) {
-    this.useV03Shell = on;
-    localStorage.setItem(V03_SHELL_KEY, on ? "1" : "0");
-    // S94: AppShell mounts a fundamentally different layout for v0.2 (page-
-    // tab shell, Settings is a routed page) vs v0.4.1 (chat-first shell,
-    // Settings is a modal). Live-flipping mid-Settings reparents the panel
-    // into a structure that effectively hides it — users saw the Settings
-    // page "disappear." Forcing a reload re-mounts everything with the new
-    // flag from the start, matching the existing "Restart Rift after
-    // toggling" guidance. Brief timeout lets the localStorage write commit.
-    if (typeof window !== "undefined") {
-      setTimeout(() => window.location.reload(), 120);
-    }
   }
 
   private apply() {

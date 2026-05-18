@@ -3,17 +3,16 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { TerminalSquare, ChevronDown, ChevronUp, Plus, X, Trash2, Search, Eraser } from "lucide-svelte";
+  import { TerminalSquare, ChevronDown, Plus, X, Trash2, Search, Eraser } from "lucide-svelte";
   import Terminal, { type SearchApi } from "./Terminal.svelte";
   import TerminalFindBar from "./TerminalFindBar.svelte";
-  import { terminal, TERM_HEIGHT_MIN } from "../../state/terminal.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
-  import { rightPane } from "../../state/right-pane.svelte";
+  import { terminal } from "../../state/terminal.svelte";
+  import { workspace } from "../../state/workspace.svelte";
 
-  // v0.4.1 hosts the terminal inside RightPane (one full-page surface). Under
-  // v0.2 the overlay chrome still drives visibility via `terminal.open`.
-  const isV03 = $derived(uiPrefs.useV03Shell);
-  const isVisible = $derived(isV03 ? rightPane.activeId === "terminal" : terminal.open);
+  // Workspace shell mounts TerminalPanel as the Terminal workspace; visibility
+  // tracks the active workspace so xterm sizing/refit triggers when the user
+  // returns to this surface (DOM stays mounted under everOpened latch).
+  const isVisible = $derived(workspace.activeId === "terminal");
 
   type ShellInfo = {
     id: string;
@@ -43,7 +42,6 @@
   let pickerOpen = $state(false);
   let pickerEl = $state<HTMLDivElement | undefined>();
   let panelEl = $state<HTMLElement | undefined>();
-  let resizing = $state(false);
   let findOpen = $state(false);
   let editingTabId = $state<string | null>(null);
   let editingValue = $state("");
@@ -127,16 +125,6 @@
       return 0;
     });
     return out;
-  });
-
-  // Collapsed strip subtitle: show the active tab's shell, OR the default
-  // shell if nothing's running, OR fall back to "Terminal".
-  const collapsedLabel = $derived.by(() => {
-    const active = terminal.tabs.find((t) => t.id === terminal.activeTabId);
-    if (active?.customLabel) return active.customLabel;
-    if (active?.shellLabel && active.shellLabel !== "Terminal") return active.shellLabel;
-    const def = shells.find((s) => s.id === terminal.defaultShellId);
-    return def?.label ?? "Terminal";
   });
 
   function onGlobalKey(e: KeyboardEvent) {
@@ -242,31 +230,6 @@
     pickerOpen = false;
     terminal.addTab(p.shellId, p.label, p.autoLaunch);
   }
-
-  function onDividerPointerDown(e: PointerEvent) {
-    e.preventDefault();
-    resizing = true;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-  function onDividerPointerMove(e: PointerEvent) {
-    if (!resizing) return;
-    const wrap = panelEl?.parentElement;
-    if (!wrap) return;
-    const rect = wrap.getBoundingClientRect();
-    const distFromBottom = rect.bottom - e.clientY;
-    const maxH = Math.max(TERM_HEIGHT_MIN, rect.height - 200);
-    let h = distFromBottom;
-    if (h < TERM_HEIGHT_MIN) h = TERM_HEIGHT_MIN;
-    if (h > maxH) h = maxH;
-    terminal.height = h;
-  }
-  function onDividerPointerUp(e: PointerEvent) {
-    if (!resizing) return;
-    resizing = false;
-    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
-    terminal.setHeight(terminal.height);
-  }
-  function resetHeight() { terminal.resetHeight(); }
 
   onDestroy(() => {
     if (unlistenDrop) { unlistenDrop(); unlistenDrop = null; }
@@ -460,68 +423,16 @@
   </div>
 {/snippet}
 
-{#if isV03}
-  <!-- v0.3 dock mode: PanelShell wraps this and owns visibility/height.
-       No drag divider, no inline height, no collapsed strip, no hide-self
-       button (PanelShell exposes Close via its panel menu). -->
-  <section
-    class="term-panel term-panel-v03"
-    bind:this={panelEl}
-    data-drop-active={dropActive}
-  >
-    {@render termInner(false)}
-  </section>
-{:else if terminal.open}
-  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-  <div
-    class="term-divider"
-    role="separator"
-    aria-orientation="horizontal"
-    aria-label="Resize terminal (drag, or double-click to reset)"
-    tabindex="0"
-    title="Drag to resize · double-click to reset"
-    data-resizing={resizing}
-    onpointerdown={onDividerPointerDown}
-    onpointermove={onDividerPointerMove}
-    onpointerup={onDividerPointerUp}
-    onpointercancel={onDividerPointerUp}
-    ondblclick={resetHeight}
-  ><span class="term-divider-grip" aria-hidden="true"></span></div>
-
-  <section
-    class="term-panel"
-    style="height: {terminal.height}px"
-    bind:this={panelEl}
-    data-resizing={resizing}
-    data-drop-active={dropActive}
-  >
-    {@render termInner(true)}
-  </section>
-{:else}
-  <button
-    type="button"
-    class="term-collapsed"
-    onclick={() => terminal.setOpen(true)}
-    title="Open terminal (Ctrl+`)"
-    aria-label="Open terminal"
-  >
-    <span class="term-collapsed-left">
-      <TerminalSquare size={12}/>
-      <span class="term-collapsed-label">Terminal</span>
-      {#if collapsedLabel !== "Terminal"}
-        <span class="term-collapsed-sub mono">· {collapsedLabel}</span>
-      {/if}
-      {#if terminal.tabs.length > 1}
-        <span class="term-collapsed-count mono">{terminal.tabs.length} tabs</span>
-      {/if}
-    </span>
-    <span class="term-collapsed-right">
-      <span class="term-collapsed-kbd mono">Ctrl+`</span>
-      <ChevronUp size={12}/>
-    </span>
-  </button>
-{/if}
+<!-- Workspace mode — WorkspaceShell wraps + sizes us; no inline height,
+     resize divider, or collapsed strip. The hide-self button is gone too
+     (the activity bar handles switching away). -->
+<section
+  class="term-panel term-panel-v03"
+  bind:this={panelEl}
+  data-drop-active={dropActive}
+>
+  {@render termInner(false)}
+</section>
 
 <style>
   .term-divider {
