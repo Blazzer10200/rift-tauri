@@ -1,12 +1,12 @@
 # Trey — Setup Guide
 
-Best-of-best setup for using Rift v0.4.1-alpha with Claude Code on the $20/mo Anthropic Pro plan. Read top to bottom, run the commands. ~10 min.
+Best-of-best setup for using Rift (v0.4.8-alpha +) with Claude Code on the $20/mo Anthropic Pro plan. Read top to bottom, run the commands. ~10 min.
 
 ---
 
-## 1. Update Rift to v0.4.1-alpha
+## 1. Update Rift to the latest
 
-Rift ships its own auto-updater (Velopack). Once v0.4.1-alpha publishes to `rift-releases` (Blazzer is shipping it now), launch Rift and accept the update prompt. The installer is `Setup.exe` — perUser NSIS, no admin needed.
+Rift ships its own auto-updater (Velopack). Launch Rift and accept the update prompt — currently **v0.4.8-alpha**. Installer is `Setup.exe` — perUser NSIS, no admin needed. Dyslexia-friendly mode lives in **Settings → Accessibility** (toggle it on; Lexend font + wider spacing + tells Claude not to nitpick typos).
 
 After update lands, **don't turn Mirror back on yet** — see step 2.
 
@@ -38,9 +38,17 @@ Drop this in `~/.claude/settings.json`:
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "model": "claude-sonnet-4-6",
   "autoUpdatesChannel": "stable",
+  "effortLevel": "medium",
   "env": {
     "CLAUDE_CODE_GIT_BASH_PATH": "C:\\Program Files\\Git\\bin\\bash.exe",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-4-5"
+    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-4-5",
+    "DISABLE_AUTO_COMPACT": "0"
+  },
+  "skillOverrides": {
+    "plan": "user-invocable-only",
+    "quick-review": "user-invocable-only",
+    "diagnose": "user-invocable-only",
+    "dream": "user-invocable-only"
   },
   "permissions": {
     "deny": ["Read(./.env)", "Bash(curl *)"]
@@ -48,9 +56,12 @@ Drop this in `~/.claude/settings.json`:
 }
 ```
 
-Key points:
+Key points (Pro-plan budget hygiene):
 - **Sonnet 4.6 default** — handles 90%+ of coding; far lower quota burn than Opus.
 - **Haiku for subagents** — recon/grep agents fire at ~5% the cost of Sonnet.
+- **`effortLevel: medium`** — caps output at ~2500 tok by default. Xhigh burns the 5-hour window ~3× faster on the Pro plan. Bump per-session with `/effort xhigh` if a task truly needs it.
+- **`DISABLE_AUTO_COMPACT: "0"`** — let Claude Code auto-compact at ~83% ctx. Pro plan can't afford to hit the 300K cliff where 4.7 accuracy craters.
+- **Skill overrides — fork-mode skills user-invocable-only** — `/plan`, `/quick-review`, `/diagnose`, `/dream` all spawn fork-mode subagents that burn ~10-30K tokens each. Keep them on-demand; don't let the harness auto-fire them.
 - **`autoUpdatesChannel: stable`** — avoids regression releases (v2.1.89+ caused 3-50x quota burn for some users).
 - **Opus on-demand only** — Pro has no separate Opus pool; every Opus turn competes with your Sonnet budget. Use `/model claude-opus-4-7` per-session when you need it for hard architectural work, then `/model claude-sonnet-4-6` back.
 
