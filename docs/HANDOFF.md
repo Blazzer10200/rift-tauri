@@ -12,8 +12,6 @@ Two regressions reported right after v0.4.7 shipped.
 
 3-file bump 0.4.7 → 0.4.8-alpha. Auto-verifier clean.
 
-**S93 recap (v0.4.7):** Settings → Accessibility, master toggle + 3 dials. Phase 2 still deferred.
-
 **Pending — next session:** Trey-config sync. Blazzer has Trey's `~/.claude/` zip (consented). Three-way diff: copy rules/hooks/skills/INVARIANTS; memory → generic only + rewrite `user_profile.md` for Trey; CLAUDE.md → strip Blazzer's projects/machine/email; settings.json per TREY-SETUP §4. Deliver `claude-trey-sync/` + `APPLY.md` + `DIFF-REPORT.md`. NEVER touch `.credentials.json` / `projects/` / `shell-snapshots/`.
 
 ---
