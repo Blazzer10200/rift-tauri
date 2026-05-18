@@ -56,7 +56,7 @@
   }
   /* Tone accent line — 2px stripe along the header's bottom edge in the
      page's tone color. Ties each tab visually to its tone, picks up the
-     same accent the TabRail indicator uses on the active rail item. */
+     same accent the activity-bar indicator uses on the active workspace. */
   .page-head::after {
     content: "";
     position: absolute;

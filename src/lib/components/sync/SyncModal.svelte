@@ -149,7 +149,7 @@
 
   // Listeners stay attached while the backend op is `busy`, even after the
   // user dismisses the modal via "Run in background". This way the busy flag
-  // clears when drift_scan_result fires, and TabRail can re-enable.
+  // clears when drift_scan_result fires, and the activity bar can re-enable.
   $effect(() => {
     if (syncModal.busy || syncModal.open) {
       if (!unlistenDiag && !unlistenActivity) {

@@ -435,53 +435,14 @@
 </section>
 
 <style>
-  .term-divider {
-    flex: 0 0 6px;
-    background: var(--bg-elev-3);
-    cursor: row-resize;
-    display: flex; align-items: center; justify-content: center;
-    transition: background 100ms ease;
-    touch-action: none;
-  }
-  .term-divider:hover,
-  .term-divider[data-resizing="true"] { background: var(--accent); }
-  .term-divider:focus-visible {
-    outline: none;
-    background: var(--accent);
-    box-shadow: 0 0 0 2px var(--ring);
-  }
-  .term-divider-grip {
-    width: 28px; height: 2px;
-    background: var(--fg-faint);
-    border-radius: 1px;
-    opacity: 0.6;
-    transition: opacity 100ms ease, background 100ms ease;
-  }
-  .term-divider:hover .term-divider-grip,
-  .term-divider[data-resizing="true"] .term-divider-grip {
-    opacity: 1; background: oklch(0.99 0 0);
-  }
-
   .term-panel {
-    flex: 0 0 auto;
+    flex: 1;
+    height: 100%;
     display: flex; flex-direction: column;
     background: var(--bg);
-    border-top: 1px solid var(--border);
     min-height: 0;
     min-width: 0;
     position: relative;
-  }
-  /* v0.3 dock mode: PanelShell owns the border + sizing. The panel fills the
-     dock-body slot top-to-bottom; the .wrap min-height in TerminalDockPanel
-     provides the floor (xterm has no natural height). */
-  .term-panel.term-panel-v03 {
-    flex: 1;
-    height: 100%;
-    border-top: 0;
-  }
-  .term-panel[data-resizing="true"] :global(*) {
-    user-select: none !important;
-    pointer-events: none;
   }
   .term-panel[data-drop-active="true"] {
     box-shadow: inset 0 0 0 2px var(--accent);
@@ -709,54 +670,4 @@
     flex-direction: column;
   }
 
-  .term-collapsed {
-    flex: 0 0 24px;
-    display: flex; align-items: center; justify-content: space-between;
-    width: 100%;
-    padding: 0 12px;
-    background: var(--bg-elev-1);
-    border: 0;
-    border-top: 1px solid var(--border);
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    text-align: left;
-    transition: background 100ms ease, color 100ms ease;
-  }
-  .term-collapsed:hover {
-    background: color-mix(in oklch, var(--accent) 6%, var(--bg-elev-1));
-    color: var(--fg);
-  }
-  .term-collapsed-left,
-  .term-collapsed-right {
-    display: inline-flex; align-items: center; gap: 8px;
-  }
-  .term-collapsed-left :global(svg) { color: var(--accent); opacity: 0.9; }
-  .term-collapsed-right :global(svg) { color: var(--fg-faint); }
-  .term-collapsed:hover .term-collapsed-right :global(svg) { color: var(--fg-muted); }
-  .term-collapsed-label { font-weight: 500; }
-  .term-collapsed-sub {
-    font-size: 10px;
-    color: var(--fg-faint);
-    letter-spacing: 0;
-  }
-  .term-collapsed:hover .term-collapsed-sub { color: var(--fg-muted); }
-  .term-collapsed-count {
-    font-size: 10px;
-    color: var(--fg-faint);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 1px 5px;
-    letter-spacing: 0;
-  }
-  .term-collapsed-kbd {
-    font-size: 10px;
-    color: var(--fg-faint);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    padding: 1px 5px;
-  }
 </style>

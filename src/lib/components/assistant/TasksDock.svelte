@@ -244,18 +244,6 @@
     border-radius: 4px;
   }
   .dock::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); }
-  .dock-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  .title {
-    display: flex; align-items: center; gap: 6px;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--fg);
-  }
   .counter {
     font-size: 10px;
     padding: 1px 6px;
@@ -264,15 +252,6 @@
     border-radius: 999px;
     margin-left: 2px;
   }
-  .closebtn {
-    background: transparent;
-    border: 0;
-    color: var(--fg-muted);
-    padding: 4px;
-    border-radius: 4px;
-    cursor: pointer;
-  }
-  .closebtn:hover { color: var(--fg); background: var(--surface-hover); }
 
   .section { padding: 10px 12px; }
   .empty-note {

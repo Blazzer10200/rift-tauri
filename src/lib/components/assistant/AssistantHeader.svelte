@@ -349,24 +349,6 @@
   }
   .ws-x:hover { opacity: 1; background: color-mix(in oklch, var(--accent) 18%, transparent); }
 
-  .hdr-btn.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  }
-  .convo-chip {
-    font-size: 10px;
-    padding: 1px 5px;
-    background: var(--surface-hover);
-    color: var(--fg-muted);
-    border-radius: 999px;
-    font-weight: 600;
-  }
-  .hdr-btn.active .convo-chip {
-    background: var(--accent);
-    color: var(--accent-fg);
-  }
-
   .dock-toggle {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 5px 9px;

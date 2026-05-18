@@ -1222,7 +1222,8 @@
     margin-top: 10px;
   }
 
-  /* Workspace-mode spacing — was gated on .page.v03 before workspace shell. */
+  /* Workspace-mode spacing — was gated on a panel-shell-only selector before
+     the workspace shell collapse. */
   .page .body { padding: 8px 12px 10px; }
   .page .totals { padding: 8px 12px 4px; }
   .page .banner { margin: 6px 12px 0; }

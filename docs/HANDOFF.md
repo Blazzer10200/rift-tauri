@@ -2,21 +2,23 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 95 — 2026-05-17 — v0.4.9-alpha: addendum overhaul (act-first, no-guess)
+## Session 96 — 2026-05-18 — v0.4.10-alpha: workspace shell
 
-Behavioral fix for the "AI is 50% dumber" complaint from Blazzer + Trey. S91-S94 cleared technical gates; this clears the laziness — Claude rambling before tool calls, guessing at file contents, re-reading files. [mod.rs:644](src-tauri/src/assistant/mod.rs#L644) `RIFT_SYSTEM_ADDENDUM_TOOLS` rewritten with explicit anti-laziness clauses: *"ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config"* + edit-then-verify + never guess + narrow reads + no re-reads. Added `MultiEdit` + `Agent` to advertised tool roster.
+Replaces the v0.2 / v0.4.1 dual-shell with a single workspace-swap shell — the 40px activity bar is now the navigator and each icon swaps the entire main pane. Eight reachable workspaces (Chat default · Sync · Files · Conflicts · Diagnostics · Terminal · Activity · History) plus Agents + Attachments disabled "Coming soon" tiles. Settings gear at the bottom of the rail (was palette/Ctrl+, only). ChatTabsBar mounts only inside Chat workspace.
 
-Works across both machines because addenda are appended LAST → win tie-breakers vs inherited `~/.claude/` rules clusters. Single-line constraint preserved. Temporary fix — tomorrow may layer Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles. Today: unconditional baseline. 3-file bump 0.4.8 → 0.4.9-alpha. Auto-verifier clean.
+Ship from [docs/design/workspace-shell.md](design/workspace-shell.md) — 3 commits (Phase 1 scaffold → Phase 2 cutover → Phase 3 demolition). Verified by [`scripts/cdp/smoke-v04-10.sh`](../scripts/cdp/smoke-v04-10.sh) — 74 PASS / 0 FAIL across shell/ab/default/swap/stub/settings/kbd/storage sections plus grep-cleanliness + file-deletion checks at Phase 3. ~956 LOC deleted (TabRail, RightPane, right-pane/*, panel-types, useV03Shell), ~150 LOC added (workspaces/, WorkspaceShell, DisabledWorkspace).
 
-**Pending:** (a) **Velopack delta chain investigation — TOP PRIORITY** — Blazzer reports every Velopack update regresses him to an older baseline missing Appearance/Accessibility/Speech sections; build/_app/ verified to contain all 3 IDs in v0.4.9 bundle, so source is correct, install side is broken. Suspect rapid-fire S91→S95 deltas (5 releases / 1 day) chained patches that fail apply + roll back. Workaround tonight: manual Setup.exe install bypasses Velopack. (b) Trey-config sync (zip on Desktop, consented). (c) S95 follow-up: optional Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles.
+Plan §10 open questions resolved by implementer (commits document rationale): Diagnostics + Sync badges skipped (no reactive frontend count); HistoryDrawer overlay/scrim/close-X dropped (workspace fills full pane); min-width unchanged (tauri.conf.json has no explicit min); TerminalPanel divider/resize/collapsed-strip removed; `Ctrl+Shift+D` now routes to Diagnostics (was Activity stand-in).
+
+**Pending:** (a) **Velopack delta chain investigation — STILL TOP PRIORITY** carried over from S95; v0.4.10 ship should reset the delta chain. (b) Trey-config sync. (c) Prune dead CSS warnings in TerminalPanel.svelte (~15 collapsed-strip / divider rules) + AssistantHeader (hdr-btn.active, convo-chip) + TasksDock (dock-head/title/closebtn) — cosmetic, doesn't affect runtime. (d) Drop unused width-resize handlers from TerminalPanel (panelEl is still bound but never resized).
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.9-alpha** (S95 pending commit; v0.4.8 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.10-alpha** (S96 pending commit; v0.4.8 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
-**v0.4.1 shell** = default; `useV03Shell` toggle = experimental v0.2 fallback (storage key verbatim, never rename).
+**Workspace shell** = single shell, no fallback. Activity bar on right swaps main pane. 8 reachable workspaces + 2 disabled stubs + settings gear. Order persists to `rift.ui.workspace-order.v1`; active to `rift.ui.workspace.v1`.
 
 **CDP autonomous-verify live** — `run-dev.bat` sets WebView2 port; `npm run cdp:serve` on 9223; `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`.
 
@@ -28,7 +30,7 @@ Works across both machines because addenda are appended LAST → win tie-breaker
 
 **Multi-user:** Trey OFF Mirror until on-latest. [docs/TREY-SETUP.md](docs/TREY-SETUP.md). v0.4.7 auto-updates him.
 
-**Don't reintroduce:** dock primitive, maximize-to-center, `PanelState.slot`, `dockSplitPct`, Tasks-as-peer, AddPanelMenu, TabRail under v0.4.1, OpRail/TopBar, whisper-rs (libclang dep), `msedge-tts` / TTS / speaker UI.
+**Don't reintroduce:** dock primitive, maximize-to-center, `PanelState.slot`, `dockSplitPct`, Tasks-as-peer, AddPanelMenu, TabRail / v0.2 tab-rail shell, OpRail/TopBar, RightPane sidecar + width-resize, `useV03Shell` toggle + storage key, whisper-rs (libclang dep), `msedge-tts` / TTS / speaker UI.
 
 ---
 
@@ -43,8 +45,9 @@ Works across both machines because addenda are appended LAST → win tie-breaker
 - `FileAttributes::default()` for SETSTAT = data-loss — use `empty()`. Upload pre-flight SHA-collapse before CONFLICT. `DriftBucket::ToDelete` deletes LOCAL; `ToDeleteRemote` deletes REMOTE (mirror+baseline gated).
 - Time displays MUST pass `[], { hour12: true }`. `spawn_frontend_pump` 200/s rate-limit; critical stages bypass.
 - **v0.2.56:** Assistant tab self-execs MCP via `RIFT_MCP_SERVER=1` env branch in `lib.rs::run()` BEFORE Tauri loop.
-- **v0.4 chat tabs:** `openTabs` filters vs `assistant_list_conversations` on init. `send()` keys `isFirstTurn` off `convoCreatedAt` (NOT `currentConvoId`).
-- **v0.4.1 right-pane:** keep `useV03Shell` storage key. Width 320-1200, default 560. Left-edge-resize only.
+- **v0.4 chat tabs:** `openTabs` filters vs `assistant_list_conversations` on init. `send()` keys `isFirstTurn` off `convoCreatedAt` (NOT `currentConvoId`). Chat-tab keybinds (Ctrl+T/W/Tab, Alt+1..9) gated on `workspace.activeId === "chat"`.
+- **v0.4.10 workspaces:** registry in [workspaces/index.ts](../src/lib/components/workspaces/index.ts). ActiveId persists to `rift.ui.workspace.v1`. ChatTabsBar mount gated on `workspace.activeId === "chat"`. DisabledWorkspace renders Agents/Attachments — do NOT remove these stub entries until real components ship (registry breaks if WorkspaceId enum members vanish).
+- **Activity bar layout:** top group (10 workspaces, reorderable, drag-persist to `rift.ui.workspace-order.v1`) + bottom group (settings gear, fixed). Adding a workspace = add to WorkspaceId enum + WORKSPACES registry + DEFAULT_ORDER + smoke test indices.
 - **S87 context pill:** `recordTurnUsage(u, accumulate)` — only `result` envelope updates `sessionUsage`; both refresh `lastTurnUsage`. Effective ctx = `input + cache_read + cache_create`. `[1m]` suffix = 1M window.
 - **S87 image paste:** `assistant_send` flips `--input-format text → stream-json` when attachments present. 20 MiB cap + `image/*` gate.
 - **S91 allowlist + S92 mode:** `assistant_send` MUST keep `--permission-mode bypassPermissions` (NOT `dontAsk` — that auto-denies MCP calls) AND the full `BUILTINS` const in `--allowed-tools` (Agent/BashOutput/KillBash/SlashCommand etc) across all three branches. Both gates required; either change → per-tool denials in the Assistant.

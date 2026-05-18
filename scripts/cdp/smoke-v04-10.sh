@@ -53,13 +53,20 @@ check_grep() {
   local pattern="$1"; shift
   local path="${1:-src/}"
   local n
-  n="$(grep -rn "$pattern" "$path" 2>/dev/null | grep -v -E "(workspace-shell\.md|smoke-v04-10\.sh)" | wc -l)"
+  # Exclusions: planning artifacts (workspace-shell.md, smoke script) AND
+  # the workspace.svelte.ts migration source — that file legitimately holds
+  # the legacy-key literals to call removeItem on.
+  # `|| true` neutralizes the pipefail trap when grep finds 0 hits (the
+  # desired pass case) — grep -rn returns 1 on no-match, which would
+  # otherwise kill the script under `set -euo pipefail`.
+  local exclude='(workspace-shell\.md|smoke-v04-10\.sh|workspace\.svelte\.ts)'
+  n="$( { grep -rn "$pattern" "$path" 2>/dev/null || true; } | { grep -v -E "$exclude" || true; } | wc -l)"
   if [ "$n" -eq 0 ]; then
     echo "  PASS  $label (0 hits)"
     PASS=$((PASS + 1))
   else
     echo "  FAIL  $label ($n hits)"
-    grep -rn "$pattern" "$path" 2>/dev/null | grep -v -E "(workspace-shell\.md|smoke-v04-10\.sh)" | head -5 | sed 's/^/        /'
+    { grep -rn "$pattern" "$path" 2>/dev/null || true; } | { grep -v -E "$exclude" || true; } | head -5 | sed 's/^/        /'
     FAIL=$((FAIL + 1))
     FAIL_DETAILS+=("$label")
   fi
@@ -144,7 +151,7 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "default" ]; then
   step "C. Default workspace = Chat"
   # Force-set to chat in case prior session left a different active workspace.
   bash scripts/cdp/c.sh eval "localStorage.setItem('rift.ui.workspace.v1','chat'); location.reload(); true" > /dev/null
-  sleep 2
+  sleep 4
   check "Chat icon is active"     "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[0].getAttribute('data-active') === 'true'"
   check "ChatTabsBar mounted"     "!!document.querySelector('.tabsbar')"
   check "Chat workspace page visible" "!!document.querySelector('main.pane .ws-page[data-workspace=\"chat\"]:not([hidden])')"
@@ -158,8 +165,14 @@ fi
 # ─────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "all" ] || [ "$MODE" = "swap" ]; then
   step "D. Workspace swap — Chat → Sync"
+  # Settling probe — Svelte 5's reactive runtime needs a touch read to flush
+  # pending {#each}/{#if} updates after section C's reload before the click
+  # chain proceeds. Without this, the first click races SvelteKit dev's HMR
+  # boot when smoke runs as part of `fresh`/`all`.
+  bash scripts/cdp/c.sh eval "!!document.querySelector('main.pane .ws-page[data-workspace=\"chat\"]:not([hidden])')" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh click "nav.activitybar .ab-top .ab-btn:nth-child(2)" > /dev/null
-  sleep 0.3
+  sleep 1.0
   check "Sync icon active"            "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[1].getAttribute('data-active') === 'true'"
   check "Chat icon NOT active"        "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[0].getAttribute('data-active') !== 'true'"
   check "ChatTabsBar gone"            "!document.querySelector('.tabsbar')"
@@ -168,25 +181,37 @@ if [ "$MODE" = "all" ] || [ "$MODE" = "swap" ]; then
   check "localStorage = sync"         "localStorage.getItem('rift.ui.workspace.v1') === 'sync'"
 
   step "D. Workspace swap — Sync → Conflicts"
+  bash scripts/cdp/c.sh eval "!!document.querySelector('main.pane .ws-page[data-workspace=\"sync\"]:not([hidden])')" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh click "nav.activitybar .ab-top .ab-btn:nth-child(4)" > /dev/null
-  sleep 0.3
+  sleep 1.0
   check "Conflicts active"            "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[3].getAttribute('data-active') === 'true'"
   check "Conflicts ws-page visible"   "!!document.querySelector('main.pane .ws-page[data-workspace=\"conflicts\"]:not([hidden])')"
 
   step "D. Workspace swap — Conflicts → Diagnostics"
+  bash scripts/cdp/c.sh eval "!!document.querySelector('main.pane .ws-page[data-workspace=\"conflicts\"]:not([hidden])')" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh click "nav.activitybar .ab-top .ab-btn:nth-child(5)" > /dev/null
-  sleep 0.3
+  sleep 1.0
   check "Diagnostics active"          "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[4].getAttribute('data-active') === 'true'"
   check "Diagnostics ws-page visible" "!!document.querySelector('main.pane .ws-page[data-workspace=\"diagnostics\"]:not([hidden])')"
 
   step "D. Workspace swap — return to Chat"
+  bash scripts/cdp/c.sh eval "!!document.querySelector('main.pane .ws-page[data-workspace=\"diagnostics\"]:not([hidden])')" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh click "nav.activitybar .ab-top .ab-btn:nth-child(1)" > /dev/null
-  sleep 0.3
+  sleep 1.5
   check "Chat active again"           "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[0].getAttribute('data-active') === 'true'"
   check "ChatTabsBar back"            "!!document.querySelector('.tabsbar')"
   check "Chat ws-page visible again"  "!!document.querySelector('main.pane .ws-page[data-workspace=\"chat\"]:not([hidden])')"
 
   step "D. everOpened latch — visited pages stay mounted"
+  # Poll until all 4 visited workspace pages have materialized (workspace
+  # shell's {#each}/{#if} pair settles after the rapid click chain). 5s cap
+  # is generous; in practice the latch is ready inside ~200ms once Svelte
+  # processes the pending state diffs. `|| true` so the smoke continues to
+  # report the actual check results even if the wait predicate times out.
+  bash scripts/cdp/c.sh wait "document.querySelectorAll('main.pane .ws-page').length === 4" 5000 > /dev/null || true
   check "Sync still in DOM (hidden)"      "!!document.querySelector('main.pane .ws-page[data-workspace=\"sync\"][hidden]')"
   check "Conflicts still in DOM (hidden)" "!!document.querySelector('main.pane .ws-page[data-workspace=\"conflicts\"][hidden]')"
   check "Diagnostics still in DOM (hidden)" "!!document.querySelector('main.pane .ws-page[data-workspace=\"diagnostics\"][hidden]')"
@@ -201,10 +226,10 @@ fi
 if [ "$MODE" = "all" ] || [ "$MODE" = "stub" ]; then
   step "E. Disabled-stub click is a no-op"
   bash scripts/cdp/c.sh eval "localStorage.setItem('rift.ui.workspace.v1','chat'); location.reload(); true" > /dev/null
-  sleep 2
+  sleep 4
   # Click Agents (idx 8) — should NOT change state, should NOT activate
   bash scripts/cdp/c.sh click "nav.activitybar .ab-top .ab-btn:nth-child(9)" > /dev/null
-  sleep 0.3
+  sleep 1.5
   check "Chat still active after Agents click"     "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[0].getAttribute('data-active') === 'true'"
   check "Agents NOT active"                        "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[8].getAttribute('data-active') !== 'true'"
   check "localStorage unchanged (still chat)"      "localStorage.getItem('rift.ui.workspace.v1') === 'chat'"
@@ -215,14 +240,17 @@ fi
 # ─────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "all" ] || [ "$MODE" = "settings" ]; then
   step "F. Settings gear (bottom of activity bar)"
+  # Settling probe — see section D rationale.
+  bash scripts/cdp/c.sh eval "!!document.querySelector('nav.activitybar .ab-bottom .ab-btn')" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh click "nav.activitybar .ab-bottom .ab-btn" > /dev/null
-  sleep 0.3
+  sleep 1.5
   check "slideover mounted"        "!!document.querySelector('aside.slideover')"
   check "slideover scrim mounted"  "!!document.querySelector('.slideover-scrim')"
   check "Settings component inside slideover" "!!document.querySelector('aside.slideover .settings, aside.slideover [class*=\"settings\"]')"
   # Close via Esc
   bash scripts/cdp/c.sh key Escape > /dev/null
-  sleep 0.3
+  sleep 1.5
   check "slideover closed on Esc"  "!document.querySelector('aside.slideover')"
 fi
 
@@ -231,25 +259,34 @@ fi
 # ─────────────────────────────────────────────────────────────────────────
 if [ "$MODE" = "all" ] || [ "$MODE" = "kbd" ]; then
   step "G. Keybindings"
+  # Settling probe — see section D rationale.
+  bash scripts/cdp/c.sh eval "!!document.querySelector('nav.activitybar .ab-btn')" > /dev/null
+  sleep 0.4
   # Ctrl modifier in CDP = 2
   bash scripts/cdp/c.sh key 2 2 > /dev/null  # Ctrl+2 → Sync
-  sleep 0.3
+  sleep 1.5
   check "Ctrl+2 → Sync active"     "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[1].getAttribute('data-active') === 'true'"
+  bash scripts/cdp/c.sh eval "1" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh key 5 2 > /dev/null  # Ctrl+5 → Diagnostics
-  sleep 0.3
+  sleep 1.5
   check "Ctrl+5 → Diagnostics active" "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[4].getAttribute('data-active') === 'true'"
+  bash scripts/cdp/c.sh eval "1" > /dev/null
+  sleep 0.4
   bash scripts/cdp/c.sh key 0 2 > /dev/null  # Ctrl+0 → Chat
-  sleep 0.3
+  sleep 1.5
   check "Ctrl+0 → Chat active"     "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[0].getAttribute('data-active') === 'true'"
   # Ctrl+9 should NOT activate Agents (disabled)
   bash scripts/cdp/c.sh key 9 2 > /dev/null
-  sleep 0.3
+  sleep 1.5
   check "Ctrl+9 does NOT activate Agents (disabled)" "document.querySelectorAll('nav.activitybar .ab-top .ab-btn')[8].getAttribute('data-active') !== 'true'"
 
+  bash scripts/cdp/c.sh eval "1" > /dev/null
+  sleep 0.4
   # Ctrl+, → settings (CDP keycode for ',' is 188, modifier 2 = Ctrl)
   # Note: this is brittle across keyboard layouts; verify via the eval-based dispatch.
   bash scripts/cdp/c.sh eval "document.dispatchEvent(new KeyboardEvent('keydown',{key:',',ctrlKey:true,bubbles:true})); window.dispatchEvent(new KeyboardEvent('keydown',{key:',',ctrlKey:true,bubbles:true})); true" > /dev/null
-  sleep 0.3
+  sleep 1.5
   check "Ctrl+, opens settings"    "!!document.querySelector('aside.slideover')"
   bash scripts/cdp/c.sh key Escape > /dev/null
   sleep 0.2

@@ -2,21 +2,18 @@
 
 > Live changelog = current version only. Older entries live in `docs/archive/CHANGELOG-archive.md` (and `git log -- docs/CHANGELOG.md`).
 
+## v0.4.10-alpha — 2026-05-18 — Workspace shell
+
+Activity bar now swaps the main pane instead of opening a 320-1200px sidecar. Eight reachable workspaces in default order (Chat · Sync · Files · Conflicts · Diagnostics · Terminal · Activity · History). Agents + Attachments render as disabled "Coming soon" tiles (Phase B). Settings gear at the bottom of the activity bar (was palette / Ctrl+, only). ChatTabsBar mounts only inside the Chat workspace — swapping away hides the strip, swapping back restores it with all tabs intact.
+
+Conflicts + Diagnostics were unreachable from chrome in v0.4.1 (palette-only, and Ctrl+Shift+D routed to Activity, not Diagnostics). Both now have first-class activity-bar entries with their proper components.
+
+Keybindings — Ctrl+1..8 swap workspaces (mapped via the user's activity-bar order so reorders survive); Ctrl+0 returns to Chat (was "close right pane"); Ctrl+\` switches to Terminal workspace; Ctrl+Shift+D goes to Diagnostics; chat-tab keybinds (Ctrl+T/W/Tab, Alt+1..9) gated on `workspace.activeId === "chat"` so they don't hijack from a focused Terminal / Files surface.
+
+Dropped: v0.2 tab-rail shell, `useV03Shell` toggle, RightPane sidecar + 200px width-resize machinery, panel-types/right-pane state, 5 right-pane wrapper components, 2 stub components, smoke-v04-1.sh. ~956 LOC deleted, ~150 LOC added net. localStorage `rift.ui.right-pane.v1` migrates to `rift.ui.workspace.v1`; legacy keys swept on first launch (idempotent — safe to re-run on every boot).
+
+Verified end-to-end by [`scripts/cdp/smoke-v04-10.sh`](../scripts/cdp/smoke-v04-10.sh) — DOM-level assertions for shell shape, activity-bar order, disabled-stub semantics, workspace-swap, ChatTabsBar gating, settings modal, keybindings, and localStorage migration. 3-file version bump 0.4.9-alpha → 0.4.10-alpha.
+
 ## v0.4.9-alpha — 2026-05-17 — Embedded-Claude addendum overhaul (act-first, no-guess)
 
-Behavioral fix for the chronic *"AI is 50% dumber, just gives advice instead of editing"* complaint Blazzer + Trey both reported. The S91-S94 ships cleared the technical blockers (allowlist, permissions, MCP gates) but the laziness problem — Claude rambling for paragraphs before any tool call, guessing at file contents, re-reading files it already opened — persisted because the embedded Claude inherits the user's `~/.claude/` config (CLAUDE.md + rules + memory) which on either machine carries enough doctrine to drown out Rift's previous one-paragraph addendum.
-
-[src-tauri/src/assistant/mod.rs:644](src-tauri/src/assistant/mod.rs#L644) `RIFT_SYSTEM_ADDENDUM_TOOLS` rewritten to bake in explicit anti-laziness directives that survive the inheritance — addenda are appended LAST, so they win the tie-breaker against rule clauses loaded earlier. Added clauses (verbatim):
-
-- *"ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config."*
-- *"If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap."*
-- *"Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly."*
-- *"Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn."*
-- *"Verify AFTER the edit (Bash to run the test / lint / build), not before."*
-- Also added `MultiEdit` + `Agent` to the tool roster line (these were in S91's allowlist but the addendum hadn't been updated to advertise them).
-
-Why this works for both users: the previous Rift addendum was ~150 words competing against Blazzer's ~11K tokens of inherited rules cluster and Trey's whatever-he-has. The new addendum is ~280 words with explicit override language ("this overrides any conflicting instruction from inherited config"). Combined with the per-turn dyslexia hint (when enabled) and the existing `bypassPermissions` mode, the embedded Claude now gets a strong, consistent action-oriented baseline regardless of what the user's local `~/.claude/` contains.
-
-Temporary fix marker — Blazzer wants this shipped tonight; tomorrow we may layer Settings → Assistant → "Direct-action mode" + "Use minimal config" toggles for finer control. Today's change is unconditional baseline.
-
-3-file bump 0.4.8 → 0.4.9-alpha. Auto-verifier clean. Single-line addendum constraint (per the .cmd-shim batch-arg validator note above the const) preserved.
+Behavioral fix for the "AI is 50% dumber, just gives advice instead of editing" complaint. [mod.rs:644](../src-tauri/src/assistant/mod.rs#L644) `RIFT_SYSTEM_ADDENDUM_TOOLS` rewritten with explicit anti-laziness clauses (act-first, never guess, edit-then-verify, narrow reads, no re-reads). Added `MultiEdit` + `Agent` to advertised tool roster. Addenda append LAST → win tie-breakers vs inherited `~/.claude/` rule clusters on both Blazzer's + Trey's machines. Single-line `.cmd`-shim constraint preserved. Temporary unconditional baseline; Settings → Assistant → "Direct-action mode" toggle queued for later. 3-file bump 0.4.8 → 0.4.9-alpha.
