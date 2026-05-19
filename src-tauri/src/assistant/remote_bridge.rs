@@ -48,7 +48,7 @@ struct Request {
 }
 
 /// Flat response shape — every field optional so a single struct handles bash
-/// output, lock status, and errors. Client distinguishes by `ok` + presence.
+/// output, lock status, sync status, and errors. Client distinguishes by `ok` + presence.
 #[derive(Debug, Default, Serialize)]
 struct Response {
     ok: bool,
@@ -68,6 +68,10 @@ struct Response {
     host: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     since: Option<String>,
+    /// Structured payload for non-bash ops (e.g. sync_status). Serialized as a
+    /// JSON object; the MCP tool layer formats it into a human-readable string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    data: Option<serde_json::Value>,
 }
 
 fn err(msg: impl Into<String>) -> Response {
@@ -169,6 +173,7 @@ async fn dispatch(app: &AppHandle, req: Request) -> Response {
             run_remote_bash(app, command, timeout).await
         }
         "shell_lock_status" => shell_lock_status(app).await,
+        "sync_status" => sync_status_op(app).await,
         other => err(format!("unknown op `{other}`")),
     }
 }
@@ -202,6 +207,24 @@ async fn shell_lock_status(app: &AppHandle) -> Response {
     } else {
         empty
     }
+}
+
+/// Return a live `AutoSyncStatus` snapshot. No lock required — read-only.
+/// Always available when the bridge is running, regardless of the remote-shell toggle.
+async fn sync_status_op(app: &AppHandle) -> Response {
+    let Some(eng) = engine(app).await else {
+        return Response {
+            ok: true,
+            data: Some(serde_json::json!({ "connected": false })),
+            ..Default::default()
+        };
+    };
+    let status = eng.status().await;
+    let data = match serde_json::to_value(&status) {
+        Ok(v) => v,
+        Err(e) => return err(format!("serialize status: {e}")),
+    };
+    Response { ok: true, data: Some(data), ..Default::default() }
 }
 
 async fn run_remote_bash(app: &AppHandle, command: String, timeout: Duration) -> Response {

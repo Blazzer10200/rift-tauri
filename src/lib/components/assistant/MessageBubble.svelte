@@ -207,11 +207,15 @@
     return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
   }
 
-  function elapsedFor(b: ThinkingBlock, startSeed: number): string {
-    // For done blocks use stored durationMs; for active, derive from tickNow.
-    // startSeed is unused but referenced so Svelte tracks tickNow dep below.
-    void startSeed;
+  function elapsedFor(b: ThinkingBlock, nowMs: number): string {
+    // Done block → stored duration. Active block → live ms-from-start so the
+    // role-row label ticks up as the model reasons (otherwise "Thinking …"
+    // sits frozen for the full 17-40s on Opus tool-use turns).
     if (b.status === "done" && b.durationMs != null) return formatDuration(b.durationMs);
+    if (b.status === "active") {
+      const ms = Math.max(0, nowMs - b.startedAt);
+      return formatDuration(ms);
+    }
     return "…";
   }
 

@@ -13,9 +13,9 @@
 pub mod mcp_server;
 pub mod remote_bridge;
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -24,26 +24,57 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
-/// PID of the currently-streaming `claude` child, if any. Set on spawn,
-/// cleared on exit. `assistant_stop` reads this to dispatch a kill — we use
-/// PID + platform-native kill (taskkill on Win, SIGTERM on Unix) instead of
-/// holding the `tokio::process::Child` across an await because the spawn
-/// task owns the Child to call `.wait()` on it.
-static CURRENT_CHILD_PID: Mutex<Option<u32>> = Mutex::new(None);
-/// Set by `assistant_stop`, cleared on next spawn. Lets the wait-task tell
+/// PID of every currently-streaming `claude` child, keyed by the CLI session
+/// ID we passed via `--session-id` / `--resume`. Set on spawn, removed on
+/// exit. `assistant_stop` reads the entry for a given session to dispatch a
+/// kill — we use PID + platform-native kill (taskkill on Win, SIGTERM on
+/// Unix) instead of holding the `tokio::process::Child` across an await
+/// because the spawn task owns the Child to call `.wait()` on it.
+///
+/// Per-session keying (vs prior single-slot global) lets multiple chat tabs
+/// stream simultaneously without their stop buttons clobbering each other.
+static SESSION_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+/// Sessions that the user explicitly stopped (via `assistant_stop`). Cleared
+/// when the wait-task reaps the stopped process. Lets the wait-task tell
 /// "user asked to stop" (emit done) apart from "CLI crashed silently w/ no
-/// stderr" (emit error). Without this, a hung claude that exited 1 w/o any
-/// stderr would silently look like a stop.
-static USER_STOPPED: AtomicBool = AtomicBool::new(false);
+/// stderr" (emit error).
+static SESSION_STOPPED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
-fn set_current_pid(pid: Option<u32>) {
-    if let Ok(mut g) = CURRENT_CHILD_PID.lock() {
-        *g = pid;
-    }
+fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> Option<R> {
+    SESSION_PIDS.lock().ok().map(|mut g| {
+        let map = g.get_or_insert_with(HashMap::new);
+        f(map)
+    })
 }
 
-fn get_current_pid() -> Option<u32> {
-    CURRENT_CHILD_PID.lock().ok().and_then(|g| *g)
+fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> Option<R> {
+    SESSION_STOPPED.lock().ok().map(|mut g| {
+        let set = g.get_or_insert_with(HashSet::new);
+        f(set)
+    })
+}
+
+fn set_session_pid(session_id: &str, pid: u32) {
+    with_session_pids(|m| { m.insert(session_id.to_string(), pid); });
+}
+
+fn clear_session_pid(session_id: &str) {
+    with_session_pids(|m| { m.remove(session_id); });
+}
+
+fn get_session_pid(session_id: &str) -> Option<u32> {
+    with_session_pids(|m| m.get(session_id).copied()).flatten()
+}
+
+fn mark_session_stopped(session_id: &str) {
+    with_session_stopped(|s| { s.insert(session_id.to_string()); });
+}
+
+/// Returns `true` and removes the entry if the session was marked stopped;
+/// `false` otherwise. Used by the wait-task to disambiguate user-stop from
+/// silent CLI crash.
+fn take_session_stopped(session_id: &str) -> bool {
+    with_session_stopped(|s| s.remove(session_id)).unwrap_or(false)
 }
 
 /// Cached absolute path to the user's `claude` CLI. Windows' `Command::new`
@@ -208,6 +239,13 @@ struct AssistantConfig {
     /// users. `None` = default (false).
     #[serde(default)]
     allow_remote_shell: Option<bool>,
+    /// Effort tier for extended thinking on non-Haiku models. Mirrors Claude
+    /// Code's own effort ladder. `"none"` skips extended thinking entirely
+    /// (fastest TTFT); `"quick"` ~2K thinking tokens (default — balanced);
+    /// `"deep"` 10K tokens (heavy reasoning, slowest). Haiku ignores this.
+    /// Per-turn override rides the `assistant_send` arg; this is the default.
+    #[serde(default)]
+    thinking_effort: Option<String>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -475,10 +513,12 @@ fn write_mcp_config(
     let mut env_map = serde_json::Map::new();
     env_map.insert("RIFT_MCP_SERVER".into(), Value::from("1"));
     env_map.insert("RIFT_MCP_ROOTS".into(), Value::from(roots_joined));
-    if remote_shell_enabled {
-        if let Some(b) = bridge {
-            env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(b.port.to_string()));
-            env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(b.token.clone()));
+    // Always pass bridge port+token so sync_status is available regardless of the
+    // remote-shell toggle. RIFT_REMOTE_SHELL_ENABLED gates only remote_bash.
+    if let Some(b) = bridge {
+        env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(b.port.to_string()));
+        env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(b.token.clone()));
+        if remote_shell_enabled {
             env_map.insert("RIFT_REMOTE_SHELL_ENABLED".into(), Value::from("1"));
         }
     }
@@ -608,6 +648,24 @@ pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn assistant_get_thinking_effort() -> Result<String, String> {
+    Ok(load_config()
+        .thinking_effort
+        .filter(|v| matches!(v.as_str(), "none" | "quick" | "deep"))
+        .unwrap_or_else(|| "quick".to_string()))
+}
+
+#[tauri::command]
+pub fn assistant_set_thinking_effort(value: String) -> Result<(), String> {
+    if !matches!(value.as_str(), "none" | "quick" | "deep") {
+        return Err(format!("invalid thinking_effort: {value}"));
+    }
+    let mut cfg = load_config();
+    cfg.thinking_effort = Some(value);
+    save_config(&cfg)
+}
+
+#[tauri::command]
 pub fn assistant_get_allow_remote_shell() -> Result<bool, String> {
     Ok(load_config().allow_remote_shell.unwrap_or(false))
 }
@@ -733,7 +791,7 @@ pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
 /// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped helpers; prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
+const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped helpers, and sync_status to get a live reading of the sync queue (pending uploads, failed, conflicts) at any point mid-conversation — call it when the user asks whether files are synced or a push completed, rather than relying on the stale per-turn snapshot in the system-reminder. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
@@ -902,10 +960,15 @@ pub async fn assistant_send(
     model: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
+    thinking_effort: Option<String>,
 ) -> Result<(), String> {
     let cfg = load_config();
     let use_api_key = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
     let model = model.unwrap_or_else(|| "sonnet".to_string());
+    // Effort tier: per-turn override wins, else stored default, else "quick".
+    let effort = thinking_effort
+        .or_else(|| cfg.thinking_effort.clone())
+        .unwrap_or_else(|| "quick".to_string());
 
     // Workspace root resolution — priority order:
     //   0. (Resume only) The cwd that was active when this session was created,
@@ -965,18 +1028,16 @@ pub async fn assistant_send(
     // Remote-shell tool only fires when the user toggled it on AND the parent
     // can stand up the loopback bridge. Bridge `start` is idempotent — first
     // call binds the listener; later calls return the cached info.
-    let allow_remote_shell = cfg.allow_remote_shell.unwrap_or(false);
-    let bridge_info = if allow_remote_shell {
-        match remote_bridge::start(app.clone()).await {
-            Ok(info) => Some(info),
-            Err(e) => {
-                log::warn!("assistant: bridge start failed, remote_bash disabled: {e}");
-                None
-            }
+    // Start bridge unconditionally — sync_status uses it even when remote_bash is off.
+    // Bridge is a read-only loopback IPC channel; remote_bash is gated separately.
+    let bridge_info = match remote_bridge::start(app.clone()).await {
+        Ok(info) => Some(info),
+        Err(e) => {
+            log::warn!("assistant: bridge start failed, sync_status + remote_bash disabled: {e}");
+            None
         }
-    } else {
-        None
     };
+    let allow_remote_shell = cfg.allow_remote_shell.unwrap_or(false);
     let remote_shell_enabled = allow_remote_shell && bridge_info.is_some();
 
     // Provision a temp MCP config when we have at least one root. Addendum
@@ -1093,9 +1154,9 @@ pub async fn assistant_send(
             // via the explicit-name entries.
             format!("{BUILTINS},mcp__*")
         } else if remote_shell_enabled {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__remote_bash")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__remote_bash")
         } else {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);
@@ -1118,19 +1179,28 @@ pub async fn assistant_send(
         }
     }
 
-    // Enable extended thinking for models that support it (opus, sonnet on
-    // 4.x+). Haiku skips silently. The plaintext reasoning is encrypted by
-    // the API in -p mode — what reaches us is `content_block_start` of type
-    // `thinking` + a `signature_delta` blob, with `thinking_delta` text
-    // arriving in some scenarios. UI surfaces the indicator + duration even
-    // when the text itself is redacted.
+    // Effort-gated extended thinking via the CLI's `--effort` flag. Haiku
+    // skips wholesale. Tier mapping mirrors Claude Code's own ladder:
+    //   none  → --effort low      (minimal thinking, fastest TTFT)
+    //   quick → --effort medium   (CC's default — balanced)
+    //   deep  → --effort high     (heavy reasoning)
+    // Earlier impl set `MAX_THINKING_TOKENS` env, but the CLI doesn't honor
+    // that env directly — `--effort` is the documented API. The plaintext
+    // reasoning is encrypted by the API in -p mode; what reaches us is
+    // `content_block_start` of type `thinking` + `signature_delta` w/
+    // `thinking_delta` text in some scenarios.
     if model != "haiku" {
-        cmd.env("MAX_THINKING_TOKENS", "10000");
+        let level = match effort.as_str() {
+            "none" => "low",
+            "deep" => "high",
+            _ /* "quick" or unknown */ => "medium",
+        };
+        cmd.arg("--effort").arg(level);
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} use_full_config={} mcp={} api_key={} remote_shell={}",
-        session_id, is_first_turn, model, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
+        "assistant_send: spawn session_id={} first_turn={} model={} effort={} use_full_config={} mcp={} api_key={} remote_shell={}",
+        session_id, is_first_turn, model, effort, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
@@ -1166,9 +1236,13 @@ pub async fn assistant_send(
         )
     };
 
-    USER_STOPPED.store(false, Ordering::SeqCst);
+    // Clear any stale stop marker for this session (e.g. retry after a
+    // previous stop) before we spawn.
+    take_session_stopped(&session_id);
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
-    set_current_pid(child.id());
+    if let Some(pid) = child.id() {
+        set_session_pid(&session_id, pid);
+    }
 
     // Write the user's prompt to stdin, then close it so the CLI knows the
     // input stream is complete and starts streaming back. With attachments,
@@ -1210,6 +1284,7 @@ pub async fn assistant_send(
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
 
     let app_out = app.clone();
+    let stream_sid = session_id.clone();
     let stdout_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         loop {
@@ -1219,12 +1294,22 @@ pub async fn assistant_send(
                     if trimmed.is_empty() {
                         continue;
                     }
-                    // Forward raw NDJSON line as-is; frontend parses.
-                    let _ = app_out.emit(STREAM_EVENT, trimmed);
+                    // Forward raw NDJSON line, tagged with the CLI session_id
+                    // so multi-tab UIs route the event to the right bubble.
+                    let _ = app_out.emit(
+                        STREAM_EVENT,
+                        serde_json::json!({ "session_id": stream_sid, "line": trimmed }),
+                    );
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    let _ = app_out.emit(ERROR_EVENT, format!("stdout read error: {e}"));
+                    let _ = app_out.emit(
+                        ERROR_EVENT,
+                        serde_json::json!({
+                            "session_id": stream_sid,
+                            "message": format!("stdout read error: {e}"),
+                        }),
+                    );
                     break;
                 }
             }
@@ -1243,18 +1328,27 @@ pub async fn assistant_send(
     });
 
     let status = child.wait().await.map_err(|e| format!("await claude: {e}"))?;
-    set_current_pid(None);
+    clear_session_pid(&session_id);
     let _ = stdout_task.await;
     let stderr_buf = stderr_task.await.unwrap_or_default();
 
     if status.success() {
-        let _ = app.emit(DONE_EVENT, serde_json::json!({ "exit_code": 0 }));
+        let _ = app.emit(
+            DONE_EVENT,
+            serde_json::json!({ "session_id": session_id, "exit_code": 0 }),
+        );
         Ok(())
-    } else if USER_STOPPED.swap(false, Ordering::SeqCst) {
+    } else if take_session_stopped(&session_id) {
         // User clicked Stop → assistant_stop killed the child. Emit done
         // (not error) so the UI clears the streaming flag and pops the
         // next queued message cleanly.
-        let _ = app.emit(DONE_EVENT, serde_json::json!({ "exit_code": status.code().unwrap_or(-1) }));
+        let _ = app.emit(
+            DONE_EVENT,
+            serde_json::json!({
+                "session_id": session_id,
+                "exit_code": status.code().unwrap_or(-1),
+            }),
+        );
         Ok(())
     } else {
         // Auto-recovery: claude's resume index sometimes loses track of valid
@@ -1284,21 +1378,27 @@ pub async fn assistant_send(
             status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
             stderr_buf.trim()
         );
-        let _ = app.emit(ERROR_EVENT, &msg);
+        let _ = app.emit(
+            ERROR_EVENT,
+            serde_json::json!({ "session_id": session_id, "message": msg.clone() }),
+        );
         Err(msg)
     }
 }
 
-/// Kill the currently-streaming `claude` child, if one is running.
+/// Kill the streaming `claude` child for a specific CLI session, if any.
 /// Platform-native: taskkill /F /PID on Windows, SIGTERM via libc on Unix.
-/// No-op (returns Ok) if no child is active.
+/// No-op (returns Ok) if no child is active for that session.
+///
+/// Per-session (vs the prior single-slot global) so a tab pressing Stop kills
+/// only its own stream — never another tab's.
 #[tauri::command]
-pub async fn assistant_stop() -> Result<(), String> {
-    let Some(pid) = get_current_pid() else {
+pub async fn assistant_stop(session_id: String) -> Result<(), String> {
+    let Some(pid) = get_session_pid(&session_id) else {
         return Ok(());
     };
-    USER_STOPPED.store(true, Ordering::SeqCst);
-    set_current_pid(None);
+    mark_session_stopped(&session_id);
+    clear_session_pid(&session_id);
 
     #[cfg(windows)]
     {

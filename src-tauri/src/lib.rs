@@ -1771,6 +1771,8 @@ pub fn run() {
             assistant::assistant_set_max_budget_usd,
             assistant::assistant_get_allow_remote_shell,
             assistant::assistant_set_allow_remote_shell,
+            assistant::assistant_get_thinking_effort,
+            assistant::assistant_set_thinking_effort,
             assistant::assistant_send,
             assistant::assistant_stop,
             assistant::assistant_list_conversations,

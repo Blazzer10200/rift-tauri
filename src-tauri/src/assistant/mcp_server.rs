@@ -295,6 +295,75 @@ fn remote_shell_enabled() -> bool {
     std::env::var("RIFT_REMOTE_SHELL_ENABLED").as_deref() == Ok("1")
 }
 
+/// Whether the loopback bridge is reachable from this MCP-child spawn.
+/// True whenever `RIFT_BRIDGE_PORT` + `RIFT_BRIDGE_TOKEN` are set, regardless
+/// of the remote-shell toggle. `sync_status` uses the bridge without needing
+/// the user to opt into remote-bash.
+fn bridge_enabled() -> bool {
+    std::env::var("RIFT_BRIDGE_PORT").is_ok() && std::env::var("RIFT_BRIDGE_TOKEN").is_ok()
+}
+
+/// Dial the parent Tauri's loopback bridge for a single read-only op (`sync_status`).
+/// Reuses the same TCP+NDJSON pattern as `tool_remote_bash` but is always
+/// available when the bridge is running — no remote-shell gate.
+fn tool_sync_status() -> Result<String, String> {
+    if !bridge_enabled() {
+        return Err("sync_status requires an active Rift server connection (no bridge env vars set)".into());
+    }
+    let port_s = std::env::var("RIFT_BRIDGE_PORT").map_err(|_| "RIFT_BRIDGE_PORT not set".to_string())?;
+    let token = std::env::var("RIFT_BRIDGE_TOKEN").map_err(|_| "RIFT_BRIDGE_TOKEN not set".to_string())?;
+    let port: u16 = port_s.parse().map_err(|e| format!("invalid RIFT_BRIDGE_PORT `{port_s}`: {e}"))?;
+
+    let req = json!({ "op": "sync_status", "token": token });
+    let addr: std::net::SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| format!("bridge addr parse: {e}"))?;
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .map_err(|e| format!("bridge connect: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    let payload = format!("{}\n", req);
+    stream.write_all(payload.as_bytes()).map_err(|e| format!("bridge write: {e}"))?;
+    stream.flush().ok();
+
+    let mut reader = io::BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line).map_err(|e| format!("bridge read: {e}"))?;
+    if line.trim().is_empty() {
+        return Err("bridge closed connection without a response".into());
+    }
+    let resp: Value = serde_json::from_str(line.trim())
+        .map_err(|e| format!("bridge parse: {e} (raw: {})", line.trim()))?;
+
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let msg = resp.get("error").and_then(|v| v.as_str()).unwrap_or("unknown bridge error");
+        return Err(msg.to_string());
+    }
+
+    let data = resp.get("data").cloned().unwrap_or(Value::Null);
+    if data.get("connected").and_then(|v| v.as_bool()) == Some(false) {
+        return Ok("Sync engine: not connected (no active server configured in Rift)".into());
+    }
+
+    let state   = data.get("state").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let pending  = data.get("pending").and_then(|v| v.as_u64()).unwrap_or(0);
+    let failed   = data.get("failed").and_then(|v| v.as_u64()).unwrap_or(0);
+    let conflicts = data.get("conflicts").and_then(|v| v.as_u64()).unwrap_or(0);
+    let watches  = data.get("watches").and_then(|v| v.as_u64()).unwrap_or(0);
+    let detail   = data.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+
+    let mut out = format!("Sync engine: {state}");
+    if !detail.is_empty() && detail != state {
+        out.push_str(&format!(" — {detail}"));
+    }
+    out.push('\n');
+    out.push_str(&format!(
+        "  pending: {pending}  failed: {failed}  conflicts: {conflicts}  watches: {watches}"
+    ));
+    Ok(out)
+}
+
 /// Dial the parent Tauri's loopback bridge and run a single `remote_bash`
 /// round-trip. Returns the formatted human-readable output (stdout + stderr +
 /// exit code) ready to hand to the model, or an error string. Blocking I/O
@@ -479,6 +548,17 @@ fn tools_list_payload() -> Value {
             }
         }),
     ];
+    if bridge_enabled() {
+        tools.push(json!({
+            "name": "sync_status",
+            "description": "Get a live snapshot of the Rift sync engine state — pending uploads, failed uploads, conflict count, watches, and engine state (idle/syncing/error/watching). Call this when the user asks whether files are synced, how many are queued, or whether a push completed. More accurate than the per-turn <system-reminder> snapshot because it queries the engine at call time.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }));
+    }
     if remote_shell_enabled() {
         tools.push(json!({
             "name": "remote_bash",
@@ -517,6 +597,7 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "read_file" => tool_read_file(&args, roots),
                 "list_dir" => tool_list_dir(&args, roots),
                 "grep" => tool_grep(&args, roots),
+                "sync_status" => tool_sync_status(),
                 "remote_bash" => tool_remote_bash(&args),
                 other => Err(format!("unknown tool: {other}")),
             };
