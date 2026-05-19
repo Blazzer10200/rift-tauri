@@ -145,6 +145,14 @@ $packArgs = @(
 if ($releaseNotesFile) {
     $packArgs += @('--releaseNotes', $releaseNotesFile)
 }
+# Optional: themed splash for the native Velopack installer dialog. Active
+# when `src-tauri/installer-splash.png` exists — drop a 560x140-ish PNG/GIF
+# matching the in-app theme there to swap the bland default.
+$splashPath = 'src-tauri/installer-splash.png'
+if (Test-Path $splashPath) {
+    Write-Host "  splash: $splashPath" -ForegroundColor DarkGray
+    $packArgs += @('--splashImage', $splashPath)
+}
 & vpk @packArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 

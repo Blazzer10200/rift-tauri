@@ -164,25 +164,26 @@
     <button
       class="hdr-btn"
       type="button"
-      title="New conversation"
+      title="New conversation (Ctrl+T)"
       onclick={() => void assistant.newTab()}
     >
       <Plus size={13} />
+      <span class="hdr-btn-label">New</span>
     </button>
 
-    <button
-      class="dock-toggle"
-      class:open={tasksOpen}
-      class:pulse
-      type="button"
-      onclick={toggleTasks}
-      title="Tasks panel"
-    >
-      <ListChecks size={13} />
-      {#if taskCount > 0}
+    {#if taskCount > 0}
+      <button
+        class="dock-toggle"
+        class:open={tasksOpen}
+        class:pulse
+        type="button"
+        onclick={toggleTasks}
+        title="Tasks panel"
+      >
+        <ListChecks size={13} />
         <span class="task-chip">{taskDone}/{taskCount}</span>
-      {/if}
-    </button>
+      </button>
+    {/if}
   {/snippet}
 </PageHeader>
 
@@ -289,13 +290,14 @@
   .ws-chip {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 6px 4px 10px;
-    background: var(--accent-soft);
-    border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--border));
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
     border-radius: 999px;
-    color: var(--accent);
+    color: var(--fg-2);
     font-size: var(--fs-xs);
     max-width: 200px;
   }
+  .ws-chip :global(svg) { color: var(--fg-muted); }
   .ws-chip .ws-name {
     font-weight: 600;
     overflow: hidden;
@@ -307,13 +309,13 @@
     border: 0;
     border-radius: 999px;
     padding: 1px;
-    color: var(--accent);
+    color: var(--fg-muted);
     cursor: pointer;
     display: inline-flex;
     opacity: 0.65;
-    transition: opacity 120ms, background 120ms;
+    transition: opacity 120ms, background 120ms, color 120ms;
   }
-  .ws-x:hover { opacity: 1; background: color-mix(in oklch, var(--accent) 18%, transparent); }
+  .ws-x:hover { opacity: 1; color: var(--fg); background: var(--surface-hover); }
 
   .dock-toggle {
     display: inline-flex; align-items: center; gap: 5px;

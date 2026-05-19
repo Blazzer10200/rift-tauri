@@ -2,6 +2,18 @@
 
 > Retired session entries from `docs/HANDOFF.md`. Newest first. Pre-archive history also available via `git log -- docs/HANDOFF.md`.
 
+
+## Session 109 — 2026-05-19 — v0.4.12-alpha shipped — UI shell redesign + security batch
+
+S105 through S109 collapsed into one ship batch. Per-tab streaming pipeline + telemetry overhaul + cache discovery (S105/S106) → IPC token strip + TOFU guard + mcp-config cleanup (#9.1/9.2/#10) → context-pill envelope fix (#1) → UI shell Phase 1 (StatusBar extend + PageHeader sweep across all 8 workspaces, S108) → Phase 2 (Sync dashboard rebuild: `WatchedFoldersTable` + `RecentActivityCard` + `DriftSummaryCard` w/ Activity deeplink, new `list_watched_folders` Tauri cmd) → Phase 3 (Composer `(?)` popover + pills on textarea row + `scrollbar-gutter: stable` (#6), Settings-as-workspace via `SettingsPage.svelte` + `dialogs.svelte.ts` callbacks store, gear dropped from ActivityBar, `Ctrl+,` flips to settings workspace, `+` button moved to right end of tab strip) → console noise sweep (#22) + dead-file cleanup.
+
+8 commits `4c7c9f9..c384034` + `2a97689`. Pushed `main`; release v0.4.12-alpha published to Blazzer10200/rift-releases w/ Setup.exe + nupkg (full + delta) + Portable.zip + RELEASES assets.
+
+> S105–S108 collapsed into the v0.4.12-alpha ship above. S104 → `git log`. S100 + S96–99 in [HANDOFF-archive.md](archive/HANDOFF-archive.md).
+
+
+---
+
 ## Session 100 — 2026-05-18 — Velopack stub-replacement bug fix
 
 Blazzer's v0.4.11 auto-update launched old UI. NSIS-first install wrote full 26MB binary to `%LOCALAPPDATA%\Rift\` root; Velopack only updates `current/` and relies on a 327KB `ExecutionStub.exe` at root that never landed (file-lock on first update). Fix: extracted stub from `packages/Rift-0.4.11-alpha-full.nupkg`, installed as root `rift-tauri.exe`. Watch: any NSIS-then-Velopack machine may share this symptom.

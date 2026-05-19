@@ -1573,21 +1573,62 @@ fn read_default_ssh_pub_key() -> Option<String> {
 }
 
 #[tauri::command]
-async fn check_for_updates() -> Result<Option<update_service::UpdateInfoDto>, String> {
+async fn check_for_updates(
+    svc: tauri::State<'_, std::sync::Arc<update_service::UpdateService>>,
+) -> Result<Option<update_service::UpdateInfoDto>, String> {
     // Velopack's check is blocking network I/O — run it on a blocking thread
     // so the runtime isn't parked on the github roundtrip.
-    tokio::task::spawn_blocking(|| update_service::UpdateService::new().check())
+    let svc = svc.inner().clone();
+    tokio::task::spawn_blocking(move || svc.check())
         .await
         .map_err(|e| format!("update check task: {e}"))?
 }
 
-/// Stop autosync + tunnel, then download and apply the pending update.
-/// Velopack's `apply_updates_and_restart` `exit(0)`s the process on success,
+/// Download the pending update package. Emits `update-progress` (i16 0..=100)
+/// during the download, then `update-downloaded` on success. Caller stays
+/// running — actually applying the update is a separate command.
+#[tauri::command]
+async fn download_update(
+    app: tauri::AppHandle,
+    svc: tauri::State<'_, std::sync::Arc<update_service::UpdateService>>,
+) -> Result<(), String> {
+    use tauri::Emitter;
+    let svc = svc.inner().clone();
+    let (tx, rx) = std::sync::mpsc::channel::<i16>();
+
+    // Pump progress to the webview on a side thread so the velopack download
+    // can stay synchronous on the blocking pool.
+    let pump_app = app.clone();
+    let pump = std::thread::spawn(move || {
+        while let Ok(pct) = rx.recv() {
+            let _ = pump_app.emit("update-progress", pct);
+        }
+    });
+
+    let result = tokio::task::spawn_blocking(move || svc.download(tx))
+        .await
+        .map_err(|e| format!("download task: {e}"))?;
+
+    // Receiver loop exits when the Sender (moved into `download`) drops.
+    let _ = pump.join();
+
+    match result {
+        Ok(()) => {
+            let _ = app.emit("update-downloaded", ());
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
+/// Stop autosync + tunnel, then apply the previously-downloaded update +
+/// relaunch. Velopack's `apply_updates_and_restart` `exit(0)`s on success,
 /// so this only returns on error.
 #[tauri::command]
-async fn apply_updates(
+async fn apply_pending_update(
     state: tauri::State<'_, AutoSyncState>,
     tunnel_state: tauri::State<'_, TunnelState>,
+    svc: tauri::State<'_, std::sync::Arc<update_service::UpdateService>>,
 ) -> Result<(), String> {
     {
         let mut g = state.0.lock().await;
@@ -1601,7 +1642,8 @@ async fn apply_updates(
             t.stop().await;
         }
     }
-    tokio::task::spawn_blocking(|| update_service::UpdateService::new().apply())
+    let svc = svc.inner().clone();
+    tokio::task::spawn_blocking(move || svc.apply())
         .await
         .map_err(|e| format!("apply task: {e}"))?
 }
@@ -1716,6 +1758,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
+        .manage(std::sync::Arc::new(update_service::UpdateService::new()))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
         .manage(terminal::TerminalState::default())
@@ -1771,7 +1814,8 @@ pub fn run() {
             probe_server_fingerprint,
             set_server_fingerprint,
             check_for_updates,
-            apply_updates,
+            download_update,
+            apply_pending_update,
             begin_edit_in_place,
             save_edit_in_place,
             close_edit_in_place,

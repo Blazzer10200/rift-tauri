@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { User, Sparkles, Copy, Check, Brain, ChevronDown, Loader2 } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, Loader2 } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
@@ -324,13 +324,11 @@
 </script>
 
 <div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
-  <div class="avatar" aria-hidden="true">
-    {#if isUser}
-      <User size={13} />
-    {:else}
+  {#if !isUser}
+    <div class="avatar" aria-hidden="true">
       <Sparkles size={13} />
-    {/if}
-  </div>
+    </div>
+  {/if}
 
   <div class="body">
     <div class="role-row">
@@ -460,6 +458,16 @@
     padding: 4px 0;
     animation: msg-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  /* User bubbles drop the avatar entirely + right-align — the bubble shape
+     already signals "you", and the position differentiates from Claude
+     without forcing a twin avatar column. */
+  .bubble[data-role="user"] {
+    grid-template-columns: 1fr;
+  }
+  .bubble[data-role="user"] .body {
+    align-items: flex-end;
+    display: flex; flex-direction: column;
+  }
   @keyframes msg-in {
     from { opacity: 0; transform: translateY(4px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -469,13 +477,6 @@
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     margin-top: 0;
-  }
-  .bubble[data-role="user"] .avatar {
-    background: var(--bg-elev-2);
-    color: var(--fg-muted);
-    border: 1px solid var(--border);
-  }
-  .bubble[data-role="assistant"] .avatar {
     background: var(--accent-soft);
     color: var(--accent);
   }
@@ -486,6 +487,7 @@
     margin-bottom: 2px;
     height: 16px;
   }
+  .bubble[data-role="user"] .role-row { justify-content: flex-end; }
   .role-name {
     font-size: var(--fs-xs);
     font-weight: 600;
@@ -499,20 +501,20 @@
     line-height: 1;
     padding: 2px 7px;
     border-radius: 999px;
-    background: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev-2));
-    border: 1px solid color-mix(in oklch, var(--accent) 14%, var(--border));
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
     white-space: nowrap;
     flex-shrink: 0;
-    margin-left: auto;
   }
   .turn-model { color: var(--fg-2); font-weight: 500; }
   .turn-sep { color: var(--fg-faint); }
   .turn-cost { color: var(--fg-muted); font-family: var(--font-mono, monospace); }
   .copybtn {
     opacity: 0;
+    margin-left: auto;
     background: transparent;
     border: 0;
     color: var(--fg-faint);
@@ -555,13 +557,13 @@
      between `</li>` and `<li>` in the marked output as a full line of
      empty space, stacking ~20px under every list item. */
   .bubble[data-role="user"] .text {
-    padding: 8px 12px;
-    background: var(--accent-soft);
-    border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
-    border-radius: 10px;
+    padding: 9px 13px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
     color: var(--fg);
-    align-self: flex-start;
-    max-width: min(100%, 78ch);
+    align-self: flex-end;
+    max-width: min(100%, 72ch);
     width: fit-content;
     white-space: pre-wrap;
   }

@@ -13,6 +13,10 @@
 // Source resolution priority:
 //   1. RIFT_UPDATE_FEED env var → local FileSource (offline dev / testing)
 //   2. GitHub release-repo via GithubSource (production path)
+//
+// v0.4.13: UpdateService becomes a managed singleton (Tauri State) so the
+// pending `UpdateInfo` survives between `download_update` and
+// `apply_pending_update` cmds. Progress events stream during download.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,7 +25,7 @@ use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 
 use velopack::sources::{FileSource, UpdateSource};
-use velopack::{VelopackAsset, VelopackAssetFeed, Error as VeloError};
+use velopack::{UpdateInfo, VelopackAsset, VelopackAssetFeed, Error as VeloError};
 use velopack::bundle::Manifest;
 
 /// Public release repo. Source repo is private; releases publish here so
@@ -39,22 +43,48 @@ const USER_AGENT: &str = concat!("Rift/", env!("CARGO_PKG_VERSION"));
 pub struct UpdateInfoDto {
     pub version: String,
     pub release_name: String,
+    pub size_bytes: u64,
+    pub notes_markdown: String,
+    pub release_url: String,
+    pub published_at: String,
+}
+
+/// GitHub-side release metadata not present on `VelopackAsset`. Cached during
+/// `get_release_feed` so `UpdateService::check` can hand it back to the UI.
+#[derive(Debug, Clone, Default)]
+struct ReleaseMeta {
+    html_url: String,
+    published_at: String,
+}
+
+type ReleaseMetaCache = Arc<Mutex<Option<ReleaseMeta>>>;
+
+struct Inner {
+    mgr: Option<velopack::UpdateManager>,
+    /// Shared w/ `GithubSource`. Populated when the source fetches a release.
+    meta: ReleaseMetaCache,
+    /// Held between `check`/`download` and `apply` so the same update plan is
+    /// reused without a second roundtrip + re-download.
+    pending: Option<UpdateInfo>,
 }
 
 pub struct UpdateService {
-    mgr: Option<velopack::UpdateManager>,
+    inner: Mutex<Inner>,
 }
 
 impl UpdateService {
     pub fn new() -> Self {
-        let mgr = match resolve_manager() {
+        let meta: ReleaseMetaCache = Arc::new(Mutex::new(None));
+        let mgr = match resolve_manager(meta.clone()) {
             Ok(m) => m,
             Err(e) => {
                 log::warn!("UpdateService init: {e}");
                 None
             }
         };
-        Self { mgr }
+        Self {
+            inner: Mutex::new(Inner { mgr, meta, pending: None }),
+        }
     }
 
     /// Check for an update. Returns Ok(None) when no source is configured or
@@ -62,16 +92,27 @@ impl UpdateService {
     /// UI banner stays hidden on dev boxes. Velopack's `check_for_updates`
     /// is blocking I/O — call from `spawn_blocking` context.
     pub fn check(&self) -> Result<Option<UpdateInfoDto>, String> {
-        let Some(mgr) = self.mgr.as_ref() else { return Ok(None) };
+        let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        let Some(mgr) = g.mgr.as_ref() else { return Ok(None) };
         match mgr.check_for_updates() {
             Ok(velopack::UpdateCheck::UpdateAvailable(info)) => {
-                let asset = AsRef::<velopack::VelopackAsset>::as_ref(&info);
-                Ok(Some(UpdateInfoDto {
+                let asset: &VelopackAsset = info.as_ref();
+                let meta = g.meta.lock().ok().and_then(|m| m.clone()).unwrap_or_default();
+                let dto = UpdateInfoDto {
                     version: asset.Version.clone(),
                     release_name: asset.FileName.clone(),
-                }))
+                    size_bytes: asset.Size,
+                    notes_markdown: asset.NotesMarkdown.clone(),
+                    release_url: meta.html_url,
+                    published_at: meta.published_at,
+                };
+                g.pending = Some(info);
+                Ok(Some(dto))
             }
-            Ok(_) => Ok(None),
+            Ok(_) => {
+                g.pending = None;
+                Ok(None)
+            }
             Err(e) => {
                 log::warn!("UpdateService.check: {e}");
                 Ok(None)
@@ -79,24 +120,31 @@ impl UpdateService {
         }
     }
 
-    /// Re-check, download, then apply + restart. Blocking I/O -- must be
-    /// called from a `spawn_blocking` context. `apply_updates_and_restart`
-    /// `exit(0)`s on success, so this only returns on error. Caller MUST
-    /// stop autosync + tunnel BEFORE invoking -- in-flight uploads die when
-    /// the process exits. The `apply_updates` Tauri command in `lib.rs`
-    /// already handles this; direct callers of this method must do it
-    /// themselves.
+    /// Download the pending update package, streaming `0..=100` progress
+    /// ticks through `progress`. Call `check` first to populate the pending
+    /// plan. Blocking I/O — must run on `spawn_blocking`.
+    pub fn download(&self, progress: Sender<i16>) -> Result<(), String> {
+        // Clone out under lock so we don't hold the mutex across blocking I/O.
+        let (mgr, info) = {
+            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let mgr = g.mgr.clone().ok_or_else(|| "no update source configured".to_string())?;
+            let info = g.pending.clone().ok_or_else(|| "no pending update — call check first".to_string())?;
+            (mgr, info)
+        };
+        mgr.download_updates(&info, Some(progress))
+            .map_err(|e| format!("download_updates: {e}"))
+    }
+
+    /// Apply the previously-downloaded update + relaunch. `exit(0)`s on
+    /// success, so only returns on error. Caller MUST stop autosync + tunnel
+    /// before invoking — in-flight uploads die when the process exits.
     pub fn apply(&self) -> Result<(), String> {
-        let Some(mgr) = self.mgr.as_ref() else {
-            return Err("no update source configured".into());
+        let (mgr, info) = {
+            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let mgr = g.mgr.clone().ok_or_else(|| "no update source configured".to_string())?;
+            let info = g.pending.clone().ok_or_else(|| "no pending update — call check first".to_string())?;
+            (mgr, info)
         };
-        let info = match mgr.check_for_updates() {
-            Ok(velopack::UpdateCheck::UpdateAvailable(info)) => info,
-            Ok(_) => return Err("no update available".into()),
-            Err(e) => return Err(format!("check_for_updates: {e}")),
-        };
-        mgr.download_updates(&info, None)
-            .map_err(|e| format!("download_updates: {e}"))?;
         mgr.apply_updates_and_restart(&info)
             .map_err(|e| format!("apply_updates_and_restart: {e}"))?;
         Ok(())
@@ -107,7 +155,7 @@ impl Default for UpdateService {
     fn default() -> Self { Self::new() }
 }
 
-fn resolve_manager() -> Result<Option<velopack::UpdateManager>, String> {
+fn resolve_manager(meta: ReleaseMetaCache) -> Result<Option<velopack::UpdateManager>, String> {
     // Local FileSource (RIFT_UPDATE_FEED) is dev-only — gated behind
     // `debug_assertions` so a release-build binary can't be tricked into
     // pointing at an attacker-controlled local update feed via env var.
@@ -121,7 +169,7 @@ fn resolve_manager() -> Result<Option<velopack::UpdateManager>, String> {
                 .map_err(|e| format!("UpdateManager(local feed): {e}"));
         }
     }
-    let src = GithubSource::new(GITHUB_OWNER, GITHUB_REPO, ALLOW_PRERELEASE);
+    let src = GithubSource::new(GITHUB_OWNER, GITHUB_REPO, ALLOW_PRERELEASE, meta);
     velopack::UpdateManager::new(src, None, None)
         .map(Some)
         .map_err(|e| format!("UpdateManager(github): {e}"))
@@ -143,15 +191,18 @@ pub struct GithubSource {
     allow_prerelease: bool,
     /// filename → browser_download_url, populated by get_release_feed.
     asset_urls: Arc<Mutex<HashMap<String, String>>>,
+    /// Outer cache shared w/ UpdateService — populated each feed fetch.
+    meta: ReleaseMetaCache,
 }
 
 impl GithubSource {
-    pub fn new(owner: &str, repo: &str, allow_prerelease: bool) -> Self {
+    pub fn new(owner: &str, repo: &str, allow_prerelease: bool, meta: ReleaseMetaCache) -> Self {
         Self {
             owner: owner.to_string(),
             repo: repo.to_string(),
             allow_prerelease,
             asset_urls: Arc::new(Mutex::new(HashMap::new())),
+            meta,
         }
     }
 
@@ -198,6 +249,14 @@ impl UpdateSource for GithubSource {
                     self.owner, self.repo, self.allow_prerelease
                 ))
             })?;
+
+        // Stash release-level metadata (notes body, html_url, published_at)
+        // for UpdateService::check to surface to the UI.
+        let html_url = target.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let published_at = target.get("published_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        if let Ok(mut g) = self.meta.lock() {
+            *g = Some(ReleaseMeta { html_url, published_at });
+        }
 
         let releases_name = format!("releases.{channel}.json");
         let assets = target

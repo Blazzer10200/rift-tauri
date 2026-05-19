@@ -13,6 +13,7 @@
   import Confirm from "./dialogs/Confirm.svelte";
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
+  import UpdateToast from "./UpdateToast.svelte";
   import ChatTabsBar from "./shell/ChatTabsBar.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
   import ActivityBar from "./shell/ActivityBar.svelte";
@@ -422,6 +423,7 @@
   {/if}
 
   <UpdateDialog />
+  <UpdateToast />
 
   <ActivityToast />
 
