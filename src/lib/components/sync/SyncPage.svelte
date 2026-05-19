@@ -10,6 +10,10 @@
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
   } from "lucide-svelte";
   import ConflictsPage from "../conflicts/ConflictsPage.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
+  import WatchedFoldersTable from "./WatchedFoldersTable.svelte";
+  import RecentActivityCard from "./RecentActivityCard.svelte";
+  import DriftSummaryCard from "./DriftSummaryCard.svelte";
 
   // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
   // the Confirm button. Prevents accidental destructive remote deletes.
@@ -347,9 +351,16 @@
 {/snippet}
 
 <section class="page">
-  <div class="v03-toolbar" role="toolbar" aria-label="Sync actions">
-    {@render toolbarActions()}
-  </div>
+  <PageHeader
+    icon={RefreshCcw}
+    title="Sync"
+    subtitle={connection.selected?.name ?? "No server selected"}
+    tone="info"
+  >
+    {#snippet actions()}
+      {@render toolbarActions()}
+    {/snippet}
+  </PageHeader>
 
   {#if connection.conflictCount > 0}
     <details class="conflicts-inline" open>
@@ -457,37 +468,27 @@
 
   <div class="body">
     {#if isEmpty}
-      <div class="empty" in:fade={{ duration: 160 }}>
-        {#if !watcherOn}
+      {#if !watcherOn}
+        <div class="empty" in:fade={{ duration: 160 }}>
           <div class="empty-icon muted"><CircleAlert size={28}/></div>
           <div class="empty-title">Not connected</div>
           <p class="empty-hint">Connect a server first, then rescan to see pending drift.</p>
-        {:else if syncPage.loading}
+        </div>
+      {:else if syncPage.loading}
+        <div class="empty" in:fade={{ duration: 160 }}>
           <div class="empty-icon muted"><span class="spin big"></span></div>
           <div class="empty-title">Scanning…</div>
           <p class="empty-hint">Reading both sides — hang tight.</p>
-        {:else}
-          <div class="empty-icon ok"><CheckCircle2 size={28}/></div>
-          <div class="empty-title">Everything in sync</div>
-          <p class="empty-hint">Both sides match. Local edits will appear here as drift.</p>
-          <div class="empty-sub">
-            <span>Last scan <span class="mono">{scanAgeLabel()}</span></span>
-            {#if connection.status?.watches}
-              <span class="dotsep">·</span>
-              <span>{connection.status.watches} folder{connection.status.watches === 1 ? "" : "s"} watched</span>
-            {/if}
+        </div>
+      {:else}
+        <div class="dashboard" in:fade={{ duration: 200 }}>
+          <WatchedFoldersTable />
+          <div class="dash-row">
+            <RecentActivityCard />
+            <DriftSummaryCard />
           </div>
-          <button
-            class="btn ghost sm empty-action"
-            type="button"
-            onclick={() => syncPage.rescan()}
-            disabled={!canSync}
-          >
-            <RefreshCw size={12} class={syncPage.busy ? "spin" : ""}/>
-            <span>Rescan now</span>
-          </button>
-        {/if}
-      </div>
+        </div>
+      {/if}
     {:else}
       <ul class="resources">
         {#each groups as g, i (g.resource)}
@@ -885,6 +886,22 @@
     overflow: auto;
     padding: 10px 18px 14px;
   }
+
+  /* Phase 2 dashboard — watched folders + recent activity + drift summary. */
+  .dashboard {
+    display: flex; flex-direction: column;
+    gap: 12px;
+    width: 100%;
+  }
+  .dash-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 12px;
+    min-width: 0;
+  }
+  @media (max-width: 900px) {
+    .dash-row { grid-template-columns: 1fr; }
+  }
   .empty {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     text-align: center;
@@ -897,7 +914,6 @@
     display: inline-flex; align-items: center; justify-content: center;
     margin-bottom: 4px;
   }
-  .empty-icon.ok    { background: var(--ok-soft);    color: var(--ok); }
   .empty-icon.muted { background: var(--bg-elev-2); color: var(--fg-muted); }
   .empty-title { font-size: var(--fs-md); font-weight: 600; color: var(--fg); }
   .empty-hint { margin: 0; color: var(--fg-muted); font-size: var(--fs-sm); max-width: 380px; }
@@ -1208,20 +1224,6 @@
   .sel-breakdown .br[data-tone="pull"]   { color: var(--info); }
   .sel-breakdown .br[data-tone="delete"] { color: var(--danger); }
 
-  /* ── v0.2.55 Phase A: empty-state subtitle + action ───── */
-  .empty-sub {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-top: 4px;
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-  }
-  .empty-sub .dotsep { opacity: 0.6; }
-  .empty-action {
-    margin-top: 10px;
-  }
-
   /* Workspace-mode spacing — was gated on a panel-shell-only selector before
      the workspace shell collapse. */
   .page .body { padding: 8px 12px 10px; }
@@ -1229,17 +1231,6 @@
   .page .banner { margin: 6px 12px 0; }
   .page .shrink-banner { margin: 4px 12px 0; }
   .page .footer { padding: 8px 12px; }
-
-  .v03-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 6px;
-    padding: 6px 12px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    flex-shrink: 0;
-  }
 
   .conflicts-inline {
     margin: 6px 12px 0;
