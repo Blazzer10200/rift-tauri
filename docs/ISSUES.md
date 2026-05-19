@@ -15,7 +15,7 @@
 
 ## 1. Assistant context counter is "jumpy" / inaccurate
 
-> **SHIPPED 2026-05-19 (uncommitted)** — per-turn semantics kept; `lastTurnUsage` now only updates on the `result` event, not on `envelope`. Pill sits on the previous turn's confirmed value through the in-flight turn and lands on the new value once result arrives -- single update per turn, no visible jump on complex turns where envelope+result diverge. S106 telemetry capture (`envelopeUsage` vs `resultUsage` on `currentTurnRecord`) is preserved so divergence metrics keep their signal. Verified clean via `npm run check` (0/0).
+> **SHIPPED v0.4.12-alpha** — per-turn semantics kept; `lastTurnUsage` now only updates on the `result` event, not on `envelope`. Pill sits on the previous turn's confirmed value through the in-flight turn and lands on the new value once result arrives -- single update per turn, no visible jump on complex turns where envelope+result diverge. S106 telemetry capture (`envelopeUsage` vs `resultUsage` on `currentTurnRecord`) is preserved so divergence metrics keep their signal. Verified clean via `npm run check` (0/0).
 
 - **Where:** [src/lib/components/assistant/AssistantHeader.svelte:85-89](../src/lib/components/assistant/AssistantHeader.svelte#L85-L89), [src/lib/state/assistant.svelte.ts:760](../src/lib/state/assistant.svelte.ts#L760) (line shifted from 560 → 760 post-S106 telemetry overhaul)
 - **S106 update (2026-05-19):** other session verified `envelopeUsage === resultUsage on simple turns`, so the double-write is visually invisible on no-thinking/no-tool turns. Pill-jumping is therefore most likely on complex turns where the two diverge (e.g. when the result event corrects a partial envelope after thinking blocks). Per-turn vs cumulative semantics decision still needed.
@@ -31,7 +31,7 @@
 
 ## 3. Speech-to-text — accuracy + send-cancel + duplicate-on-stop
 
-> **#3b SHIPPED 2026-05-19 (uncommitted)** — `stt.svelte.ts:131-149` `consume()` now calls `recognition.abort()` + resets `recording/transcribing/recognition`/timer. Likely also resolves #3c — verify next runtime. #3a (accuracy) remains.
+> **#3b SHIPPED v0.4.12-alpha** — `stt.svelte.ts:131-149` `consume()` now calls `recognition.abort()` + resets `recording/transcribing/recognition`/timer. Likely also resolves #3c — verify next runtime. #3a (accuracy) remains.
 
 - **Where:** [src/lib/state/stt.svelte.ts](../src/lib/state/stt.svelte.ts), [src/lib/components/assistant/Composer.svelte:212,219,235,245-260](../src/lib/components/assistant/Composer.svelte#L212)
 - **3a Accuracy:** General transcription quality needs polish — slurred input, technical terms ("Tauri", "Rift", "SFTP"), short utterances. Currently uses WebView2's Edge/Azure-backed `SpeechRecognition` w/ 3 alternates + best-confidence pick. *Ideas:* custom vocab/grammar (Web Speech doesn't support directly — would need swap to a Whisper-based pipeline), post-process punctuation pass, longer silence threshold.
@@ -54,6 +54,8 @@
 
 ## 6. Scrollbar collides w/ `+` button (top-right of assistant)
 
+> **SHIPPED v0.4.12-alpha (9d0bb55)** — Phase 3c: `+` button moved out of the scrollable `.strip` to the right end of `ChatTabsBar.svelte` w/ a 5px gap from the activity-bar boundary; `scrollbar-gutter: stable` on the chat-thread scroller in `AssistantPage.svelte` kills the horizontal jump when overflow appears.
+
 - **Where:** Source elusive from static grep. NOT the [ChatTabsBar](../src/lib/components/shell/ChatTabsBar.svelte) (that's horizontal w/ a 4px scrollbar). Most likely candidate: an `overflow-y: auto` on a parent container in [WorkspaceShell.svelte](../src/lib/components/shell/WorkspaceShell.svelte) or [AssistantPage.svelte:197](../src/lib/components/assistant/AssistantPage.svelte#L197) that doesn't reserve gutter space.
 - **Symptom:** Vertical scrollbar visually crowds the `+` (new conversation / new tab) button at the top-right of the Assistant pane. Aesthetic + likely click-target issue.
 - **Fix sketch:** Inspect via CDP (`bash scripts/cdp/c.sh eval ...`) to pinpoint the offending element. Options: move scrollbar to inner message list only, add right padding/margin so `+` clears it, `scrollbar-gutter: stable`, or overlay-style scrollbar.
@@ -72,7 +74,7 @@
 
 ## 9. Bridge token stored plaintext in two places + leaked via IPC (HIGH)
 
-> **9.1 + 9.2 SHIPPED 2026-05-19 (uncommitted).**
+> **9.1 + 9.2 SHIPPED v0.4.12-alpha.**
 > - **9.1** New `ServerProfilePublic` DTO (profile/mod.rs) omits `bridge_token`, replaces it w/ `hasBridgeToken: bool`. `list_servers` + `save_server` return it. `save_server` preserves the on-disk token when an edit submits an empty value (mirrors existing fingerprint preserve pattern). Frontend `ServerProfile` type updated; `AddServer.svelte` summary shows "existing token" on edit. Verified via CDP — `bridgeToken` field is gone from `list_servers` JSON.
 > - **9.2** `write_mcp_config` now chmods 0600 on Unix (Windows relies on NTFS inheritance from `%USERPROFILE%\.rift\`). New `pub fn cleanup_mcp_config_on_exit` removes `~/.rift/assistant/mcp-config.json` on `RunEvent::Exit` (lib.rs `.build().run(...)` hook). Best-effort, swallows errors. Verified — new binary boots cleanly and autosync runs.
 > - **9.3** OS keyring / Tauri 2 secure-storage still deferred (Phase 6).
@@ -91,7 +93,7 @@
 
 ## 10. Silent TOFU on first sync connect (MEDIUM, MITM window)
 
-> **SHIPPED 2026-05-19 (uncommitted)** — new `require_pinned_fingerprint(server_key, Option<&str>)` helper in lib.rs returns an actionable error string. Guard wired into three entry points: `scan_drift`, `start_autosync`, and (most importantly) `open_sftp_for` — the latter funnels ~9 IPC commands (remote_list_dir, upload/download, edit_in_place, sync_*, detect_bootstrap, etc.) so the single guard there closes the silent-TOFU window for all of them. Dead `persist_fingerprint_if_new` function removed (only sanctioned trust path is now `probe_server_fingerprint` → user confirm → `set_server_fingerprint`). Verified via CDP — autosync correctly transitions to `watching` for the pinned-fingerprint server.
+> **SHIPPED v0.4.12-alpha** — new `require_pinned_fingerprint(server_key, Option<&str>)` helper in lib.rs returns an actionable error string. Guard wired into three entry points: `scan_drift`, `start_autosync`, and (most importantly) `open_sftp_for` — the latter funnels ~9 IPC commands (remote_list_dir, upload/download, edit_in_place, sync_*, detect_bootstrap, etc.) so the single guard there closes the silent-TOFU window for all of them. Dead `persist_fingerprint_if_new` function removed (only sanctioned trust path is now `probe_server_fingerprint` → user confirm → `set_server_fingerprint`). Verified via CDP — autosync correctly transitions to `watching` for the pinned-fingerprint server.
 
 - **Where:** [src-tauri/src/lib.rs:393](../src-tauri/src/lib.rs#L393) (sync scan), [src-tauri/src/lib.rs:452](../src-tauri/src/lib.rs#L452) (`start_autosync`). Both contain: `if server.fingerprint.as_deref().unwrap_or("").is_empty() { persist_fingerprint_if_new(...) }` — empty fingerprint → silent accept-and-pin.
 - **Symptom:** First connection to a new server accepts ANY host key without user confirmation. MITM-during-onboarding risk.
@@ -101,7 +103,7 @@
 
 ## 11. Settings page dead UI cluster
 
-> **PARTIAL — SHIPPED 2026-05-19 (uncommitted):** removed unused `uiPrefs` import (L11), added `Palette` to lucide imports and assigned it to Appearance (kills the Sparkles dup), dropped dead `lg` modifier on `srv-dot` (L941), descriptive aria-labels on the three terminal toggles (`Blink cursor` / `Copy on select` / `Right-click paste`). **Remaining:** Appearance "More coming soon" placeholder (L246-251), empty SSH Keys section (L964-975), STT-namespaced font-picker class rename (L736-758) — all non-mechanical, deferred.
+> **PARTIAL — SHIPPED v0.4.12-alpha:** removed unused `uiPrefs` import (L11), added `Palette` to lucide imports and assigned it to Appearance (kills the Sparkles dup), dropped dead `lg` modifier on `srv-dot` (L941), descriptive aria-labels on the three terminal toggles (`Blink cursor` / `Copy on select` / `Right-click paste`). **Remaining:** Appearance "More coming soon" placeholder (L246-251), empty SSH Keys section (L964-975), STT-namespaced font-picker class rename (L736-758) — all non-mechanical, deferred.
 
 - **Where:** [src/lib/components/settings/Settings.svelte](../src/lib/components/settings/Settings.svelte) (verified inline):
   - **Line 11** — `uiPrefs` imported, never used in template or script (only hit in entire file).
@@ -115,7 +117,7 @@
 
 ## 12. Manual 3-file version bump is the #1 ship-failure mode
 
-> **SHIPPED 2026-05-19 (uncommitted)** — `scripts/bump.ps1` accepts a semver arg, regex-replaces the first version line in all three files, post-bump cross-checks all three match. Patterns dry-ran clean (1 match each, current version). Usage: `pwsh ./scripts/bump.ps1 0.4.12-alpha`. Em-dashes replaced w/ `--` to avoid PS5.1 BOM-loss mojibake on future Edits.
+> **SHIPPED v0.4.12-alpha** — `scripts/bump.ps1` accepts a semver arg, regex-replaces the first version line in all three files, post-bump cross-checks all three match. Patterns dry-ran clean (1 match each, current version). Usage: `pwsh ./scripts/bump.ps1 0.4.12-alpha`. Em-dashes replaced w/ `--` to avoid PS5.1 BOM-loss mojibake on future Edits.
 
 - **Where:** [package.json](../package.json), [src-tauri/Cargo.toml](../src-tauri/Cargo.toml), [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) — all three must match. [scripts/release.ps1:28-37](../scripts/release.ps1#L28-L37) detects mismatch and bails.
 - **Symptom:** Per CLAUDE.md gotcha #5 + HANDOFF history, this is the #1 ship-attempt failure mode. v0.2.49's first ship attempt died here. The script catches the mistake but doesn't fix it.
@@ -123,7 +125,7 @@
 
 ## 13. Release notes never flow into the GitHub release
 
-> **SHIPPED 2026-05-19 (uncommitted)** — `release.ps1` now extracts the top `## v<version>` entry body from `docs/CHANGELOG.md` (only when the entry version matches the bumped version, else warns and skips), writes to `$env:TEMP/rift-release-notes-<version>.md`, passes `--releaseNotes` to `vpk pack` (verified flag — `vpk upload github` has no such flag), cleans up on success. Dry-run extracted v0.4.11-alpha body cleanly (2155 chars).
+> **SHIPPED v0.4.12-alpha** — `release.ps1` now extracts the top `## v<version>` entry body from `docs/CHANGELOG.md` (only when the entry version matches the bumped version, else warns and skips), writes to `$env:TEMP/rift-release-notes-<version>.md`, passes `--releaseNotes` to `vpk pack` (verified flag — `vpk upload github` has no such flag), cleans up on success. Dry-run extracted v0.4.11-alpha body cleanly (2155 chars).
 
 - **Where:** [scripts/release.ps1:119-130](../scripts/release.ps1#L119-L130) — `vpk upload` args do not include `--releaseNotes` / `--releaseNotesFile`.
 - **Symptom:** Published GitHub release body is empty. CHANGELOG.md entry sits unused. Velopack client can't surface "what's new" in the in-app update dialog.
@@ -165,7 +167,7 @@
 
 ## 19. `apply_updates` IPC may not stop autosync before binary swap (RESOLVED — non-bug)
 
-> **RESOLVED 2026-05-19 (uncommitted)** — verified [lib.rs:1554-1573](../src-tauri/src/lib.rs#L1554-L1573) `apply_updates` already stops autosync (engine.stop) + tunnel (t.stop) BEFORE `spawn_blocking(|| UpdateService::new().apply())`. The audit re-read mistook the boundary — frontend correctly does NOT stop anything; the Tauri command layer owns it. Tightened doc comment at `update_service.rs:82-88` to make explicit that direct callers of `UpdateService::apply` must do their own stop, but the `apply_updates` command handles it.
+> **RESOLVED v0.4.12-alpha** — verified [lib.rs:1554-1573](../src-tauri/src/lib.rs#L1554-L1573) `apply_updates` already stops autosync (engine.stop) + tunnel (t.stop) BEFORE `spawn_blocking(|| UpdateService::new().apply())`. The audit re-read mistook the boundary — frontend correctly does NOT stop anything; the Tauri command layer owns it. Tightened doc comment at `update_service.rs:82-88` to make explicit that direct callers of `UpdateService::apply` must do their own stop, but the `apply_updates` command handles it.
 
 - **Where:** Comment at [src-tauri/src/update_service.rs:85-86](../src-tauri/src/update_service.rs#L85-L86) explicitly says "Caller MUST stop autosync + tunnel BEFORE invoking — in-flight uploads die when the process exits." Frontend [src/lib/state/updates.svelte.ts:40-50](../src/lib/state/updates.svelte.ts#L40-L50) just calls `invoke("apply_updates")` with no JS-side stop.
 - **Symptom (if confirmed):** In-flight SFTP uploads + tunnel sessions die mid-operation when process exits for binary swap. Possible orphaned `.rift-tmp` files on remote, possible partial uploads to the running FXServer.
@@ -291,12 +293,12 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - #14 No CI (deferred — pairs w/ #15 signing)
 
 **Tier 3 — UX + cleanup**
-- #11 Settings dead UI cluster — PARTIAL shipped 2026-05-19 (mechanical bits done; placeholder card + SSH Keys empty + font-picker class rename remain)
+- #11 Settings dead UI cluster — PARTIAL shipped v0.4.12-alpha (mechanical bits done; placeholder card + SSH Keys empty + font-picker class rename remain)
 - #2 Tool-block rendering rhythm
-- #22 Console noise
-- #6 Scrollbar collision
+- ~~#22 Console noise~~ — shipped v0.4.12-alpha (assistant.svelte.ts probes removed, stt warns downgraded)
+- ~~#6 Scrollbar collision~~ — shipped v0.4.12-alpha (Phase 3c — `+` button + `scrollbar-gutter: stable`)
 - #5 Status indicator placement
-- ~~#13 Release notes auto-flow~~ — shipped 2026-05-19 (`release.ps1` `--releaseNotes`)
+- ~~#13 Release notes auto-flow~~ — shipped v0.4.12-alpha (`release.ps1` `--releaseNotes`)
 
 **Tier 4 — strategic / longer-term**
 - #4 App-wide UX consistency sweep
