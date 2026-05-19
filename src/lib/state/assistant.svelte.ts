@@ -85,6 +85,11 @@ type ConversationRecord = {
   createdAt: number;
   updatedAt: number;
   messages: ChatMessage[];
+  // CLI session UUID (--session-id / --resume target). Decoupled from `id` in
+  // S103 so compaction can mint a fresh CLI session without breaking tab
+  // persistence. Optional for backward compat — legacy convos fall back to
+  // `id` on load.
+  cliSessionId?: string;
 };
 
 // Minimal stream-json envelope shape we care about.
@@ -237,6 +242,10 @@ class AssistantStore {
   //     the top tab bar. Tabs share the singleton stream pipeline (mid-stream
   //     switch = stop stream; concurrent live UI deferred to v0.4.1).
   currentConvoId = $state<string | null>(null);
+  // CLI session UUID for the active convo. Same as currentConvoId for fresh
+  // tabs; diverges only after compaction reminting (Phase C). Source of truth
+  // for what's passed to backend `assistant_send` as `sessionId`.
+  currentCliSessionId = $state<string | null>(null);
   conversations = $state<ConversationMeta[]>([]);
   openTabs = $state<string[]>([]);
   private convoCreatedAt: number | null = null;
@@ -340,7 +349,11 @@ class AssistantStore {
    *  the prompt. Tab-aware: ignore if the lost session isn't current
    *  (user switched tabs while the error was in flight). */
   private onSessionLost(payload: { session_id: string; prompt: string }) {
-    if (payload.session_id !== this.currentConvoId) return;
+    // Backend emits the CLI session id that failed to resume. After S103
+    // decoupling that may differ from currentConvoId (post-compaction); match
+    // on currentCliSessionId, falling back to currentConvoId for legacy.
+    const active = this.currentCliSessionId ?? this.currentConvoId;
+    if (payload.session_id !== active) return;
     if (this.streaming) this.streaming = false;
     // Drop the empty assistant message + the user message that failed.
     // send() will re-add them on retry.
@@ -491,6 +504,7 @@ class AssistantStore {
         createdAt: this.convoCreatedAt ?? Date.now(),
         updatedAt: Date.now(),
         messages: this.messages,
+        cliSessionId: this.currentCliSessionId ?? this.currentConvoId,
       };
       this.convoTitle = record.title;
       this.convoCreatedAt = record.createdAt;
@@ -520,6 +534,7 @@ class AssistantStore {
     this.dockAutoOpenedThisConvo = false;
     this.ui.dockOpen = false;
     this.currentConvoId = null;
+    this.currentCliSessionId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
     this.resetUsage();
@@ -534,6 +549,9 @@ class AssistantStore {
       const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
       this.messages = convo.messages ?? [];
       this.currentConvoId = convo.id;
+      // Legacy convos lack cliSessionId — fall back to id so --resume still
+      // hits the original JSONL. New convos persist cliSessionId explicitly.
+      this.currentCliSessionId = convo.cliSessionId ?? convo.id;
       this.convoCreatedAt = convo.createdAt;
       this.convoTitle = convo.title;
       this.tasks = [];
@@ -565,6 +583,7 @@ class AssistantStore {
         await this.closeTab(id);
       } else if (this.currentConvoId === id) {
         this.currentConvoId = null;
+        this.currentCliSessionId = null;
         this.convoCreatedAt = null;
         this.convoTitle = null;
         this.messages = [];
@@ -630,6 +649,7 @@ class AssistantStore {
     } else {
       if (this.streaming) await this.stop();
       this.currentConvoId = id;
+      this.currentCliSessionId = null;
       this.convoCreatedAt = null;
       this.convoTitle = null;
       this.messages = [];
@@ -662,6 +682,7 @@ class AssistantStore {
       if (next.length === 0) {
         this.messages = [];
         this.currentConvoId = null;
+        this.currentCliSessionId = null;
         this.convoCreatedAt = null;
         this.convoTitle = null;
         this.tasks = [];
@@ -678,6 +699,7 @@ class AssistantStore {
           await this.loadConversation(neighbor);
         } else {
           this.currentConvoId = neighbor;
+          this.currentCliSessionId = null;
           this.convoCreatedAt = null;
           this.convoTitle = null;
           this.messages = [];
@@ -705,6 +727,7 @@ class AssistantStore {
     const id = crypto.randomUUID();
     this.openTabs = [...this.openTabs, id];
     this.currentConvoId = id;
+    this.currentCliSessionId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
     this.messages = [];
@@ -757,6 +780,7 @@ class AssistantStore {
     }
     this.openTabs = [];
     this.currentConvoId = null;
+    this.currentCliSessionId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
     this.messages = [];
@@ -856,6 +880,12 @@ class AssistantStore {
     if (!this.currentConvoId) {
       this.currentConvoId = crypto.randomUUID();
     }
+    // First send for this tab mints the CLI session id. Default to the same
+    // UUID as the convo id (matches pre-S103 behavior); compaction later
+    // remints this to a fresh UUID without touching currentConvoId.
+    if (!this.currentCliSessionId) {
+      this.currentCliSessionId = this.currentConvoId;
+    }
     if (!this.convoCreatedAt) {
       this.convoCreatedAt = Date.now();
       this.convoTitle = null;
@@ -915,7 +945,7 @@ class AssistantStore {
     try {
       await invoke("assistant_send", {
         prompt: trimmed,
-        sessionId: this.currentConvoId,
+        sessionId: this.currentCliSessionId,
         isFirstTurn,
         model: this.model,
         attachments: turnAttachments.length > 0 ? turnAttachments : null,

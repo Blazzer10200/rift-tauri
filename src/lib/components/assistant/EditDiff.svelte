@@ -20,7 +20,8 @@
     | { kind: "del";  left: string; right: null }
     | { kind: "add";  left: null;   right: string }
     | { kind: "mod";  left: string; right: string }
-    | { kind: "meta"; text: string };
+    | { kind: "meta"; text: string }
+    | { kind: "gap";  lines: number };
 
   const pairs = $derived.by<DiffPair[] | null>(() => {
     const oldStr = typeof input.old_string === "string" ? input.old_string : null;
@@ -63,6 +64,30 @@
     return out;
   });
 
+  // Collapse runs of blank context lines so non-adjacent edits don't inflate
+  // the chip with literal source whitespace. A single blank ctx renders as a
+  // thin spacer row; 2+ consecutive blanks render as a `···` elision marker
+  // showing the count. del/add/mod blanks are preserved (they're meaningful).
+  const compactPairs = $derived.by<DiffPair[]>(() => {
+    if (!pairs) return [];
+    const out: DiffPair[] = [];
+    let blankRun = 0;
+    const flush = () => {
+      if (blankRun > 0) out.push({ kind: "gap", lines: blankRun });
+      blankRun = 0;
+    };
+    for (const p of pairs) {
+      if (p.kind === "ctx" && p.left === "" && p.right === "") {
+        blankRun++;
+        continue;
+      }
+      flush();
+      out.push(p);
+    }
+    flush();
+    return out;
+  });
+
   const filePath = $derived(typeof input.file_path === "string" ? input.file_path : null);
 
   function shortPath(p: string): string {
@@ -101,9 +126,13 @@
         <span>before</span>
         <span>after</span>
       </div>
-      {#each pairs as p, pi (pi)}
+      {#each compactPairs as p, pi (pi)}
         {#if p.kind === "meta"}
           <div class="diff-meta">{p.text}</div>
+        {:else if p.kind === "gap"}
+          <div class="diff-gap" data-multi={p.lines > 1} title={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
+            {#if p.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{p.lines} blank lines</span>{/if}
+          </div>
         {:else}
           <div class="diff-pair" data-kind={p.kind}>
             <span class="diff-cell side-l">
@@ -248,5 +277,36 @@
     padding: 2px 10px 3px;
     background: var(--bg-elev-2);
     font-size: var(--fs-xs);
+  }
+  /* Blank-context elision. Single blank ctx → thin spacer (preserves the
+     intentional visual gap the source had, but at ~6px instead of ~18px).
+     Multiple consecutive blanks → labeled `··· N blank lines` strip. */
+  .diff-gap {
+    grid-column: 1 / -1;
+    background: var(--surface);
+    border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+    border-bottom: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
+    height: 6px;
+  }
+  .diff-gap[data-multi="true"] {
+    height: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 3px 10px;
+    color: var(--fg-faint);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .gap-dots {
+    font-family: var(--font-mono, monospace);
+    color: var(--fg-muted);
+    letter-spacing: 0.18em;
+    font-size: 11px;
+  }
+  .gap-count {
+    font-variant-numeric: tabular-nums;
   }
 </style>

@@ -253,6 +253,12 @@ pub struct Conversation {
     pub created_at: i64,
     pub updated_at: i64,
     pub messages: serde_json::Value,
+    /// CLI session UUID (--session-id / --resume target). Decoupled from `id`
+    /// in S103 so compaction can mint a fresh CLI session without breaking
+    /// tab persistence. Legacy convos without this field deserialize cleanly
+    /// (Option default = None); frontend falls back to `id` on load.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli_session_id: Option<String>,
 }
 
 fn convo_path(id: &str) -> Result<PathBuf, String> {
