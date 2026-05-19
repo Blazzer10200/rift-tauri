@@ -1,10 +1,9 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Search, Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable } from "lucide-svelte";
+  import { Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable } from "lucide-svelte";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
 
-  let { onOpenPalette, onAddServer, onEditCurrent }: {
-    onOpenPalette: () => void;
+  let { onAddServer, onEditCurrent }: {
     onAddServer: () => void;
     onEditCurrent: (s: ServerProfile) => void;
   } = $props();
@@ -117,11 +116,6 @@
         <span class="mono dim">:{sel.bridgePort}</span>
       </div>
     {/if}
-    <button class="cmdk" onclick={onOpenPalette} type="button" title="Command palette (Ctrl+K)">
-      <Search size={12}/>
-      <span>Search or run a command</span>
-      <span class="kbd">Ctrl</span><span class="kbd">K</span>
-    </button>
     <div class="winctl">
       <button class="wb" onclick={() => win.minimize()} title="Minimize" type="button" aria-label="Minimize">
         <Minus size={10}/>
@@ -149,7 +143,7 @@
     padding-left: 12px;
   }
   /* Layout priority:
-     - .right (window controls + cmdk) stays flex-shrink:0 — always clickable.
+     - .right (window controls) stays flex-shrink:0 — always clickable.
      - .drag-fill takes ALL leftover space — that's the window-drag handle.
      - .left can shrink (server picker truncates) but doesn't grow past content. */
   .left      { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; height: 100%; }
@@ -244,25 +238,6 @@
   }
   .bridge-led.on { background: var(--ok); }
   .dim { color: var(--fg-subtle); }
-
-  .cmdk {
-    display: inline-flex; align-items: center; gap: 8px;
-    height: 26px; padding: 0 10px;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--fg-muted);
-    font: inherit; font-size: var(--fs-xs);
-    cursor: pointer; min-width: 220px;
-    transition: background 100ms ease, border-color 100ms ease;
-  }
-  .cmdk:hover {
-    background: var(--bg-elev-2);
-    color: var(--fg-2);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  }
-  .cmdk > span:nth-child(2) { flex: 1; text-align: left; }
-  .cmdk :global(.kbd) { background: var(--bg-elev-3); }
 
   .winctl { display: flex; height: 100%; margin-left: 4px; }
   .wb {

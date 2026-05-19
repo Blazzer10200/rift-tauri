@@ -2,21 +2,63 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 96 — 2026-05-18 — v0.4.10-alpha: workspace shell
+## Session 96 — 2026-05-18 — v0.4.10-alpha: workspace shell (shipped)
 
-Replaces the v0.2 / v0.4.1 dual-shell with a single workspace-swap shell — the 40px activity bar is now the navigator and each icon swaps the entire main pane. Eight reachable workspaces (Chat default · Sync · Files · Conflicts · Diagnostics · Terminal · Activity · History) plus Agents + Attachments disabled "Coming soon" tiles. Settings gear at the bottom of the rail (was palette/Ctrl+, only). ChatTabsBar mounts only inside Chat workspace.
+Single workspace-swap shell replacing v0.2 / v0.4.1 dual-shell. Activity bar (40px) navigates; 8 reachable workspaces (Chat · Sync · Files · Conflicts · Diagnostics · Terminal · Activity · History) + 2 disabled stubs (Agents, Attachments) + settings gear bottom of rail. ChatTabsBar gated on `workspace.activeId === "chat"`. 3 commits (2c48bc7 → 87e9345 → 7b96146); smoke 100/0 fresh, 97/3 non-fresh (sleep-2 race); `npm run check` 0/0; ~956 LOC deleted / ~150 added. Design: [docs/design/workspace-shell.md](design/workspace-shell.md). Details: `git log -p 2c48bc7..7b96146`.
 
-Ship from [docs/design/workspace-shell.md](design/workspace-shell.md) — 3 commits (Phase 1 scaffold → Phase 2 cutover → Phase 3 demolition). Verified by [`scripts/cdp/smoke-v04-10.sh`](../scripts/cdp/smoke-v04-10.sh) — 74 PASS / 0 FAIL across shell/ab/default/swap/stub/settings/kbd/storage sections plus grep-cleanliness + file-deletion checks at Phase 3. ~956 LOC deleted (TabRail, RightPane, right-pane/*, panel-types, useV03Shell), ~150 LOC added (workspaces/, WorkspaceShell, DisabledWorkspace).
+**Pending from S96:** (a) **Velopack delta chain investigation — TOP PRIORITY** (carried from S95, v0.4.10 ship resets chain). (b) Trey-config sync. (c) Dead CSS warnings: TerminalPanel (~15 collapsed-strip/divider rules), AssistantHeader (hdr-btn.active, convo-chip), TasksDock (dock-head/title/closebtn). (d) Drop unused width-resize handlers from TerminalPanel. (e) `smoke-v04-10.sh` sections C+F: `sleep 2 → 3` one-liner.
 
-Plan §10 open questions resolved by implementer (commits document rationale): Diagnostics + Sync badges skipped (no reactive frontend count); HistoryDrawer overlay/scrim/close-X dropped (workspace fills full pane); min-width unchanged (tauri.conf.json has no explicit min); TerminalPanel divider/resize/collapsed-strip removed; `Ctrl+Shift+D` now routes to Diagnostics (was Activity stand-in).
+## Session 97 — 2026-05-18 — cmdk palette REMOVED (user decision after 2nd failed attempt)
 
-**Pending:** (a) **Velopack delta chain investigation — STILL TOP PRIORITY** carried over from S95; v0.4.10 ship should reset the delta chain. (b) Trey-config sync. (c) Prune dead CSS warnings in TerminalPanel.svelte (~15 collapsed-strip / divider rules) + AssistantHeader (hdr-btn.active, convo-chip) + TasksDock (dock-head/title/closebtn) — cosmetic, doesn't affect runtime. (d) Drop unused width-resize handlers from TerminalPanel (panelEl is still bound but never resized).
+Bug from prior S97 attempt persisted. Tried external `class PaletteStore { open = $state(false) }` module store (anti-pattern from prior bare-local `$state`), then a propless variant where CommandPalette imported the store and read `palette.open` directly inside `{#if}` (mirrors working SyncModal pattern). Both attempts: store value flipped correctly under `palette.open = true`, but the CommandPalette-side `{#if palette.open}` block and a debug `$effect(() => console.log(palette.open))` never re-ran. AddServer / SyncModal use the same patterns and work — only this site was broken. Reactivity-source plumbing isn't the bug; root cause never identified.
+
+**User halted: removed the feature entirely.** No command palette in titlebar going forward. Surface decluttered.
+
+**Files deleted:**
+- `src/lib/state/palette.svelte.ts` (created this session)
+- `src/lib/components/dialogs/CommandPalette.svelte`
+
+**Files modified:**
+- [Titlebar.svelte](../src/lib/components/shell/Titlebar.svelte) — `.cmdk` button, `onOpenPalette` prop, `Search` lucide import, and `.cmdk` CSS rules all removed
+- [AppShell.svelte](../src/lib/components/AppShell.svelte) — CommandPalette mount, `palette` import, Ctrl+K keybind, and the entire `sharedCommands`/`workspaceCommands`/`commands` derived registry removed
+
+`npx svelte-check`: **0 errors, 0 warnings, 4026 files**. Not committed — user holding for the next session.
+
+**Lessons (workflow):** I CDP-probed compiled JS for 30+ min on the symptom side instead of cutting bait at the first failed direct fix. Same trap as S97's original attempt. Rule for next time: **2 failed direct attempts on a reactivity-shape bug → ship without the feature OR ask user before further archaeology**, don't grind on Svelte internals.
+
+**Workspace switching, settings, server picker, bridge indicator all unaffected.** Only the search-button → palette path is gone.
+
+## Session 98 — 2026-05-18 — assistant context inconsistency fix
+
+Assistant was reading stale/missing context. Two root causes in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs):
+
+1. **cwd pinned per session.** `--resume <uuid>` only searches the current cwd's `~/.claude/projects/<cwd-hash>/` ([anthropics/claude-code#35226](https://github.com/anthropics/claude-code/issues/35226) — no fallback). Workspace switches mid-conversation → resume aimed at wrong dir → session-lost → frontend popped messages, silently restarted. Now a sidecar `~/.rift/assistant/sessions/<uuid>.cwd` captures cwd on first turn and overrides root resolution on every subsequent turn. Legacy convos auto-migrate on their next resume. Deleted on `assistant_delete_conversation`.
+
+2. **Per-turn workspace context moved from `--append-system-prompt` → user-turn `<system-reminder>` block.** Live AutoSync state (foreign locks, sync queue, recent diag events) was being spliced into the system prompt every turn → busted the cache-prefix every turn (cache layout: system → tools → CLAUDE.md → conversation tail). Static addendum (tool list, ACT FIRST, dyslexia, remote_shell description) stays in `--append-system-prompt`; the per-turn snapshot now rides the user message. Newline-separated for readability since the stdin path has no argv constraint.
+
+Also added `--exclude-dynamic-system-prompt-sections` so the CLI's own cwd/env/git auto-injection also leaves the cached prefix.
+
+Backend-only; wire-compatible w/ existing `assistant_send` invocation. `cargo check` clean. Frontend untouched.
+
+## Session 99 — 2026-05-18 — Assistant cwd lands at common ancestor (FiveM workspace fix)
+
+Symptom: Assistant told user "Your FiveM server is running in a `[voice]` resource directory" — model's cwd had landed inside a single resource folder instead of `resources/` where every resource is visible. Same on Trey's machine.
+
+Root cause: AutoSync's `folders_clone()` yields one `FolderWatch` per resource. `roots[0]` was used as `cmd.current_dir`. Resources beginning with `[bracket]` (`[` = 0x5B in ASCII, before letters) sort first, so `[voice]/` won.
+
+Fix in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs): `common_ancestor()` helper computes the lexical common parent of all roots. When the AutoSync path produces >1 root (and there's no pinned sidecar + no explicit `current_root`), prepend the ancestor to `roots`. `roots[0]` is now e.g. `<server>/resources/` instead of `<server>/resources/[voice]/`. The individual folder roots stay in the list so MCP path-resolution behaviour is unchanged. Ancestor must (a) share a real path beyond fs root, (b) have a parent, (c) exist as a directory — otherwise we fall through to the old behaviour.
+
+S98 sidecar interaction: existing pinned conversations keep their captured cwd (preserves --resume continuity even if narrower); new conversations + legacy non-pinned conversations get the ancestor.
+
+`cargo check` clean. Backend-only.
+
+**Pending verify (combined S98+S99):** real-world send round-trip; multi-writer scenario (Trey machine); optional follow-up = surface CLI compaction events in UI so the user knows when earlier context got summarized.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.10-alpha** (S96 pending commit; v0.4.8 binary live in `rift-releases`). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.10-alpha** (committed — 3 commits; v0.4.8 binary live in `rift-releases`, not yet shipped via Velopack — delta chain investigation required first). Tauri 2 + Svelte 5 + Rust + russh. Velopack updater, NSIS perUser installer.
 
 **Workspace shell** = single shell, no fallback. Activity bar on right swaps main pane. 8 reachable workspaces + 2 disabled stubs + settings gear. Order persists to `rift.ui.workspace-order.v1`; active to `rift.ui.workspace.v1`.
 

@@ -13,7 +13,6 @@
   import Keygen from "./dialogs/Keygen.svelte";
   import Confirm from "./dialogs/Confirm.svelte";
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
-  import CommandPalette, { type Command } from "./dialogs/CommandPalette.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import ChatTabsBar from "./shell/ChatTabsBar.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
@@ -42,7 +41,6 @@
     isDanger: boolean;
     onResult: (ok: boolean) => void;
   }>({ open: false, title: "", body: "", isDanger: false, onResult: () => {} });
-  let paletteOpen = $state(false);
 
   // v0.2.55: auto-scan drift the moment a server is ready. Fires once
   // per server-key per session (latch in syncPage). Drops the
@@ -85,45 +83,6 @@
     settingsModalOpen = true;
   }
   function closeSettingsModal() { settingsModalOpen = false; }
-
-  // ── command registry ──────────────────────────────────────────────
-  // Server + sync ops are surface-agnostic.
-  const sharedCommands = $derived<Command[]>([
-    { id: "switch-server", group: "Servers", title: "Manage servers…", subtitle: "Add, edit, or delete servers", shortcut: "Ctrl+P",
-      run: () => gotoSettings("servers") },
-    { id: "add-server", group: "Servers", title: "Add server…", subtitle: "Configure a new SSH/SFTP target",
-      run: () => openAddServer() },
-    { id: "setup-key", group: "Servers", title: "SSH key setup…", subtitle: "Generate or copy your default ed25519 key",
-      run: () => (keygenOpen = true) },
-    { id: "bootstrap", group: "Sync", title: "Bootstrap from remote…",
-      subtitle: connection.selected ? `Pull missing files for ${connection.selected.name}` : "Connect a server first",
-      run: () => openBootstrap() },
-    { id: "connect",      group: "Sync",  title: "Connect",        subtitle: connection.selected ? `Start auto-sync for ${connection.selected.name}` : "Pick a server first",
-      run: () => connection.connect().catch((e) => console.error(e)) },
-    { id: "disconnect",   group: "Sync",  title: "Disconnect",     subtitle: "Stop auto-sync + tunnel",
-      run: () => connection.disconnect() },
-    { id: "reload",       group: "Servers", title: "Reload servers",
-      run: () => connection.loadServers() },
-  ]);
-
-  const workspaceCommands = $derived<Command[]>([
-    ...workspace.order
-      .filter((id) => !WORKSPACES[id].disabled)
-      .map((id, idx) => {
-        const def = WORKSPACES[id];
-        return {
-          id: `workspace-${id}`,
-          group: "Workspace" as const,
-          title: `Switch to ${def.title}`,
-          shortcut: `Ctrl+${idx + 1}`,
-          run: () => workspace.setActive(id),
-        } as Command;
-      }),
-    { id: "workspace-chat", group: "Workspace", title: "Switch to Chat", shortcut: "Ctrl+0", run: () => workspace.setActive("chat") },
-    { id: "open-settings",  group: "App",       title: "Settings…",     shortcut: "Ctrl+,", run: () => gotoSettings("appearance") },
-  ]);
-
-  const commands = $derived<Command[]>([...sharedCommands, ...workspaceCommands]);
 
   // ── lifecycle ──────────────────────────────────────────────────────
   onMount(async () => {
@@ -262,7 +221,6 @@
       return;
     }
     if (e.shiftKey) return;
-    if (k === "k") { e.preventDefault(); paletteOpen = true; return; }
     if (e.key === ",") { e.preventDefault(); gotoSettings("appearance"); return; }
     if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
@@ -393,7 +351,6 @@
 
 <div class="shell">
   <Titlebar
-    onOpenPalette={() => (paletteOpen = true)}
     onAddServer={() => openAddServer(null)}
     onEditCurrent={(s) => openAddServer(s)}
   />
@@ -470,12 +427,6 @@
       onClose={(choice: ReuploadChoice | null) => handleReupload(head, choice)}
     />
   {/if}
-
-  <CommandPalette
-    open={paletteOpen}
-    {commands}
-    onClose={() => (paletteOpen = false)}
-  />
 
   <UpdateDialog />
 
