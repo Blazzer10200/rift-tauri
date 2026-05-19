@@ -147,9 +147,12 @@
         txAdminUrl: txAdminUrl.trim() || null,
         bridgePort: Number.isFinite(bp) ? bp : null,
       };
+      // #9.1: never echo a token back to the backend that the renderer
+       // didn't see. An empty value during edit means "keep existing" --
+       // save_server preserves the on-disk token in that case.
       const payload = {
         ...profile,
-        bridgeToken: bridgeToken.trim() || editing?.bridgeToken || null,
+        bridgeToken: bridgeToken.trim() || null,
         fingerprint: editing?.fingerprint || null,
         addedAt: editing?.addedAt || null,
       };
@@ -316,7 +319,7 @@
               <span class="dim">remote</span><span>{remoteRoot.trim() || "—"}</span>
               <span class="dim">local</span><span>{localRoot.trim() || "—"}</span>
               <span class="dim">txAdmin</span><span>{txAdminUrl.trim() || "(none)"}</span>
-              <span class="dim">bridge</span><span>{bridgeToken.trim() ? `enabled · port ${bridgePort.trim()}` : "(disabled)"}</span>
+              <span class="dim">bridge</span><span>{bridgeToken.trim() ? `enabled · port ${bridgePort.trim()}` : (editing?.hasBridgeToken ? `enabled · port ${bridgePort.trim()} · existing token` : "(disabled)")}</span>
             </div>
           </div>
         {/if}
