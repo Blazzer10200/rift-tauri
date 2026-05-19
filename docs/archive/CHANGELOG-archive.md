@@ -2,6 +2,10 @@
 
 > Retired entries from `docs/CHANGELOG.md`. Newest first. Pre-archive history also available via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.9-alpha — 2026-05-17 — Embedded-Claude addendum overhaul (act-first, no-guess)
+
+Behavioral fix for the "AI is 50% dumber, just gives advice instead of editing" complaint. [mod.rs:644](../../src-tauri/src/assistant/mod.rs#L644) `RIFT_SYSTEM_ADDENDUM_TOOLS` rewritten with explicit anti-laziness clauses (act-first, never guess, edit-then-verify, narrow reads, no re-reads). Added `MultiEdit` + `Agent` to advertised tool roster. Addenda append LAST → win tie-breakers vs inherited `~/.claude/` rule clusters on both Blazzer's + Trey's machines. Single-line `.cmd`-shim constraint preserved. Temporary unconditional baseline; Settings → Assistant → "Direct-action mode" toggle queued for later. 3-file bump 0.4.8 → 0.4.9-alpha.
+
 ## v0.4.8-alpha — 2026-05-17 — Hot-fix: dyslexia toggle "stuck on" + Appearance shell-switch "disappears"
 
 Two UX bugs reported immediately after the v0.4.7 ship. (1) Dyslexia master toggle correctly cleared the system-prompt addendum on the next turn, but the visual effects (Lexend font, increased line-height) stayed because `apply()` in `accessibility.svelte.ts` wrote font/line-height CSS attrs unconditionally. Fix: dial attrs now gated on the master flag — off snaps the visual back to system defaults; persisted sub-dial state preserved so re-enabling restores. (2) AppShell renders Settings as a routed page in v0.2 vs a modal in v0.4.1; live-flipping mid-Settings reparented into a structure with no mount point and the panel vanished. Fix: `setUseV03Shell` now calls `window.location.reload()` after 120ms (lets localStorage commit), re-mounting cleanly with the new flag. Hint copy updated.
