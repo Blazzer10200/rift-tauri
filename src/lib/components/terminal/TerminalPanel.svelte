@@ -3,11 +3,12 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWebview } from "@tauri-apps/api/webview";
   import type { UnlistenFn } from "@tauri-apps/api/event";
-  import { TerminalSquare, ChevronDown, Plus, X, Trash2, Search, Eraser } from "lucide-svelte";
+  import { TerminalSquare, ChevronDown, Plus, X, Trash2, Search, Eraser, Terminal as TerminalIcon } from "lucide-svelte";
   import Terminal, { type SearchApi } from "./Terminal.svelte";
   import TerminalFindBar from "./TerminalFindBar.svelte";
   import { terminal } from "../../state/terminal.svelte";
   import { workspace } from "../../state/workspace.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
 
   // Workspace shell mounts TerminalPanel as the Terminal workspace; visibility
   // tracks the active workspace so xterm sizing/refit triggers when the user
@@ -426,18 +427,32 @@
 <!-- Workspace mode — WorkspaceShell wraps + sizes us; no inline height,
      resize divider, or collapsed strip. The hide-self button is gone too
      (the activity bar handles switching away). -->
-<section
-  class="term-panel term-panel-v03"
-  bind:this={panelEl}
-  data-drop-active={dropActive}
->
-  {@render termInner(false)}
-</section>
+<div class="term-wrap">
+  <PageHeader
+    icon={TerminalIcon}
+    title="Terminal"
+    subtitle="{terminal.tabs.length} session{terminal.tabs.length === 1 ? '' : 's'}"
+    tone="neutral"
+  />
+  <section
+    class="term-panel term-panel-v03"
+    bind:this={panelEl}
+    data-drop-active={dropActive}
+  >
+    {@render termInner(false)}
+  </section>
+</div>
 
 <style>
+  .term-wrap {
+    flex: 1;
+    display: flex; flex-direction: column;
+    min-height: 0; min-width: 0;
+    background: var(--bg);
+  }
   .term-panel {
     flex: 1;
-    height: 100%;
+    height: auto;
     display: flex; flex-direction: column;
     background: var(--bg);
     min-height: 0;

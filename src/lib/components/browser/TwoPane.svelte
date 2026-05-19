@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { onDestroy, onMount } from "svelte";
-  import { X, Plus, Server } from "lucide-svelte";
+  import { X, Plus, Server, FolderOpen } from "lucide-svelte";
   import { fly, scale } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { quintOut } from "svelte/easing";
@@ -12,6 +12,11 @@
   import FlashToast from "../FlashToast.svelte";
   import SyncModal from "../sync/SyncModal.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
+
+  const filesSubtitle = $derived(
+    connection.selected ? `${connection.selected.name} · resources` : "No server selected",
+  );
 
   type LocalEntry = {
     name: string; path: string; is_dir: boolean; size: number; mtime: number;
@@ -314,6 +319,7 @@
 </script>
 
 <div class="two-pane">
+  <PageHeader icon={FolderOpen} title="Files" subtitle={filesSubtitle} tone="accent" />
   <div class="tabstrip-wrap">
     <div class="tabstrip">
       {#each browserTabs.tabs as t, i (t.id)}

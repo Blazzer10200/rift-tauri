@@ -4,11 +4,10 @@
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
-  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Mic, Accessibility as A11yIcon } from "lucide-svelte";
+  import { Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, Palette, TerminalSquare, RotateCcw, ChevronDown, FolderOpen, Copy, Check, Eye, EyeOff, X, Mic, Accessibility as A11yIcon } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import {
     terminal,
     TERM_FONT_SIZE_MIN,
@@ -114,7 +113,7 @@
   // Appearance carries the v0.3 shell toggle now (and will pick up density /
   // font / accent later). Surfaced as the first nav item per convention.
   const sections: { id: Section; label: string; icon: typeof Cog }[] = [
-    { id: "appearance", label: "Appearance", icon: Sparkles },
+    { id: "appearance", label: "Appearance", icon: Palette },
     { id: "terminal",   label: "Terminal",   icon: TerminalSquare },
     { id: "assistant",  label: "Assistant",  icon: Sparkles },
     { id: "accessibility", label: "Accessibility", icon: A11yIcon },
@@ -455,7 +454,7 @@
               type="button"
               class="switch"
               role="switch"
-              aria-label="Toggle"
+              aria-label="Blink cursor"
               aria-checked={terminal.cursorBlink}
               data-on={terminal.cursorBlink}
               onclick={() => terminal.setCursorBlink(!terminal.cursorBlink)}
@@ -510,7 +509,7 @@
               type="button"
               class="switch"
               role="switch"
-              aria-label="Toggle"
+              aria-label="Copy on select"
               aria-checked={terminal.copyOnSelect}
               data-on={terminal.copyOnSelect}
               onclick={() => terminal.setCopyOnSelect(!terminal.copyOnSelect)}
@@ -526,7 +525,7 @@
               type="button"
               class="switch"
               role="switch"
-              aria-label="Toggle"
+              aria-label="Right-click paste"
               aria-checked={terminal.rightClickPaste}
               data-on={terminal.rightClickPaste}
               onclick={() => terminal.setRightClickPaste(!terminal.rightClickPaste)}
@@ -938,7 +937,7 @@
                 onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickServer(s); } }}
               >
                 <div class="srv-l">
-                  <span class="srv-dot lg"></span>
+                  <span class="srv-dot"></span>
                   <div>
                     <div class="mono srv-name">{s.name}</div>
                     <div class="mono dim">{s.user}@{s.host}{s.port !== 22 ? `:${s.port}` : ""}</div>

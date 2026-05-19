@@ -1,6 +1,7 @@
 <script lang="ts">
   import { History, Plus, Trash2, Pencil, Check, MessagesSquare, Search, X } from "lucide-svelte";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
 
   let renameId = $state<string | null>(null);
   let renameDraft = $state("");
@@ -51,13 +52,13 @@
 </script>
 
 <aside class="drawer" aria-label="Conversation history">
-    <header class="head">
-      <div class="title">
-        <History size={14} />
-        <span>History</span>
-        <span class="count">{assistant.conversations.length}</span>
-      </div>
-      <div class="actions">
+    <PageHeader
+      icon={History}
+      title="History"
+      subtitle="{assistant.conversations.length} conversation{assistant.conversations.length === 1 ? '' : 's'}"
+      tone="info"
+    >
+      {#snippet actions()}
         <button
           class="iconbtn primary"
           type="button"
@@ -66,8 +67,8 @@
         >
           <Plus size={13} /> New
         </button>
-      </div>
-    </header>
+      {/snippet}
+    </PageHeader>
 
     {#if assistant.conversations.length > 0}
       <div class="search">
@@ -170,27 +171,6 @@
     background: transparent;
   }
 
-  .head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 11px 14px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-elev-2);
-  }
-  .title {
-    display: flex; align-items: center; gap: 7px;
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--fg);
-  }
-  .count {
-    padding: 1px 7px;
-    background: var(--surface-hover);
-    color: var(--fg-muted);
-    border-radius: 999px;
-    font-size: 10px;
-    font-weight: 700;
-  }
-  .actions { display: flex; gap: 6px; }
   .iconbtn {
     display: inline-flex; align-items: center; gap: 4px;
     padding: 4px 9px;
