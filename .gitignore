@@ -18,6 +18,7 @@ src-tauri/src/state/rift-edits/
 
 # CDP wrapper scratch (screenshots, ws snapshots).
 scripts/cdp/.tmp/
+/.tmp/
 
 # Local timestamped backups dir created by tooling.
 backups/
