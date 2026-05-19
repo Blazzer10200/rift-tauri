@@ -189,65 +189,989 @@ function flattenToolResult(content: unknown): string {
   return "";
 }
 
+/** Telemetry record for a single Claude turn. Filled progressively as
+ *  envelopes arrive; finalized on done / error / session-lost. Captured into
+ *  AssistantStore.telemetry.turns so a `/diag` export can show the full
+ *  session shape (cache behavior, tool patterns, blank turns, model switches,
+ *  cost trend). */
+type TurnRecord = {
+  // Identity
+  ts: number;                                      // turn start (ms epoch)
+  convoId: string;
+  cliSessionId: string;
+  isFirstTurn: boolean;
+  model: "sonnet" | "opus" | "haiku";
+  effort: "none" | "quick" | "deep";
+  /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping).
+   *  Haiku doesn't get an effort flag → null. */
+  effortFlag: "low" | "medium" | "high" | null;
+  // Input
+  promptLen: number;
+  /** First ~120 chars of the user's prompt, post-trim. Lets a `/diag` reader
+   *  identify which turn was which without the raw text dump. */
+  promptPreview: string;
+  attachmentsCount: number;
+  attachmentsBytes: number;
+  // Usage (filled progressively — envelope = mid-stream, result = final)
+  envelopeUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  resultUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  modelId: string | null;                          // resolved "claude-sonnet-4-6" etc.
+  costUsd: number | null;
+  // Stream stats
+  deltaCount: number;
+  /** Number of `stream_event` envelopes received this turn. Zero is the
+   *  smoking gun for `--include-partial-messages` not being honored. */
+  streamEventCount: number;
+  /** Number of `assistant` envelopes (per-message snapshots). */
+  assistantEnvCount: number;
+  /** Longest pause btw consecutive `stream_event` envelopes this turn (ms).
+   *  CONFLATED w/ tool wall-time: a 12s Bash will register as a 12s gap b/c
+   *  the CLI sits idle waiting for `tool_result`. Cross-ref with the largest
+   *  `toolUses[].durationMs` of the same turn — if maxStreamGapMs ≈ that
+   *  tool's duration, it's just tool wait. If it's bigger or there's no
+   *  matching tool, it's a real API/network stall. */
+  maxStreamGapMs: number;
+  /** Per-tool record w/ wall timing + error status + a short input preview.
+   *  `completedAt` stays null if the `tool_result` never arrived (turn ended
+   *  early or tool hung). `inputPreview` is first ~120 chars of the most
+   *  diagnostic field (command for Bash, file_path for Read/Write/Edit,
+   *  pattern for Grep/Glob, url for WebFetch, query for WebSearch) — answers
+   *  "the Bash ran 12s, doing WHAT?". */
+  toolUses: {
+    name: string;
+    id: string;
+    startedAt: number;
+    completedAt: number | null;
+    durationMs: number | null;
+    isError: boolean | null;
+    inputPreview: string | null;
+  }[];
+  thinkingCount: number;
+  thinkingTotalMs: number;
+  /** Per-block detail filled in endThinking. Lets a `/diag` reader see if a
+   *  turn had one long think vs many short interleaved thinks. */
+  /** `charCount` stays 0 in `-p` mode (API encrypts thinking plaintext);
+   *  `hasSignature` is the truthier "did we get a real thinking block" signal. */
+  thinkingBlocks: { startedAt: number; durationMs: number; charCount: number; hasSignature: boolean }[];
+  envelopeFallback: boolean;                       // fired the "zero deltas, flush envelope" path
+  blankTurn: boolean;                              // ended w/ no text + no tools
+  // Timing
+  firstPaintAt: number | null;
+  doneAt: number | null;
+  endKind: "success" | "user-stop" | "session-lost" | "error" | null;
+  errorMsg?: string;
+};
+
+/** First-priority field to preview for each known tool. Returns first ~120
+ *  chars of that field's string value, or null. Keeps /diag readable while
+ *  still answering "what did this tool actually do?". */
+function previewToolInput(name: string, input: Record<string, unknown> | undefined): string | null {
+  if (!input) return null;
+  const fields = ["command", "file_path", "pattern", "path", "url", "query"] as const;
+  for (const f of fields) {
+    const v = input[f];
+    if (typeof v === "string" && v.length > 0) {
+      return v.length > 120 ? v.slice(0, 120) + "…" : v;
+    }
+  }
+  return null;
+}
+
+/** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/mod.rs. */
+function effortToFlag(
+  effort: "none" | "quick" | "deep",
+  model: "sonnet" | "opus" | "haiku",
+): "low" | "medium" | "high" | null {
+  if (model === "haiku") return null;
+  if (effort === "none") return "low";
+  if (effort === "deep") return "high";
+  return "medium";
+}
+
+/** Session-wide telemetry singleton. */
+class SessionTelemetry {
+  startedAt = Date.now();
+  turns: TurnRecord[] = [];
+  /** Non-turn lifecycle events: tab open/close/new/switch, slash commands,
+   *  workspace changes, session-lost recoveries, etc. Cheap to capture. */
+  events: { ts: number; kind: string; detail?: unknown }[] = [];
+
+  event(kind: string, detail?: unknown) {
+    this.events.push({ ts: Date.now(), kind, detail });
+  }
+
+  /** JSON snapshot for /diag clipboard export. */
+  snapshot() {
+    return {
+      startedAt: this.startedAt,
+      capturedAt: Date.now(),
+      durationMs: Date.now() - this.startedAt,
+      turnCount: this.turns.length,
+      summary: this.summarize(),
+      turns: this.turns,
+      events: this.events,
+    };
+  }
+
+  /** Per-session rollup. Self-summarizing JSON so a `/diag` reader doesn't
+   *  have to fold over `turns[]` to see the basics. */
+  private summarize() {
+    const byModel: Record<string, {
+      turns: number;
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      cacheCreateTokens: number;
+      thinkingTurns: number;
+      blankTurns: number;
+      envelopeFallbacks: number;
+      avgTtfpMs: number | null;
+      avgDoneMs: number | null;
+    }> = {};
+    let totalCost = 0;
+    let blank = 0;
+    let envFallback = 0;
+    let thinkingTurns = 0;
+    let toolCallTotal = 0;
+    let toolErrorTotal = 0;
+    let slowestTool: { name: string; durationMs: number; turnIdx: number } | null = null;
+    const toolNameCounts: Record<string, number> = {};
+    let slowestTurn: { idx: number; durationMs: number } | null = null;
+    let costliestTurn: { idx: number; costUsd: number } | null = null;
+    let firstTurnCostUsd: number | null = null;
+    let coldStartCacheCreate: number | null = null;
+    let totalOutputTokens = 0;
+    let totalStreamMs = 0;
+    let mostParallelTurn: { idx: number; maxConcurrentTools: number } | null = null;
+    let staleCacheTurns = 0;
+    const ttfps: number[] = [];
+    const doneTimes: number[] = [];
+    for (let i = 0; i < this.turns.length; i++) {
+      const t = this.turns[i];
+      // Skip user-stop / error turns w/ no resolved modelId from the byModel
+      // rollup — they otherwise create a phantom "opus"/"sonnet"/"haiku"
+      // bucket alongside the real "claude-opus-4-7" etc.
+      if (t.modelId == null && t.endKind !== "success") continue;
+      const key = t.modelId || t.model;
+      const bucket = byModel[key] ||= {
+        turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0,
+        cacheReadTokens: 0, cacheCreateTokens: 0,
+        thinkingTurns: 0, blankTurns: 0, envelopeFallbacks: 0,
+        avgTtfpMs: null, avgDoneMs: null,
+      };
+      bucket.turns += 1;
+      bucket.costUsd += t.costUsd ?? 0;
+      const u = t.resultUsage || t.envelopeUsage;
+      if (u) {
+        bucket.inputTokens += u.input;
+        bucket.outputTokens += u.output;
+        bucket.cacheReadTokens += u.cacheRead;
+        bucket.cacheCreateTokens += u.cacheCreate;
+      }
+      if (t.thinkingCount > 0) { bucket.thinkingTurns += 1; thinkingTurns += 1; }
+      if (t.blankTurn) { bucket.blankTurns += 1; blank += 1; }
+      if (t.envelopeFallback) { bucket.envelopeFallbacks += 1; envFallback += 1; }
+      totalCost += t.costUsd ?? 0;
+      if (t.firstPaintAt != null) ttfps.push(t.firstPaintAt - t.ts);
+      if (t.doneAt != null) {
+        const dur = t.doneAt - t.ts;
+        doneTimes.push(dur);
+        if (!slowestTurn || dur > slowestTurn.durationMs) slowestTurn = { idx: i, durationMs: dur };
+      }
+      if (t.costUsd != null && (!costliestTurn || t.costUsd > costliestTurn.costUsd)) {
+        costliestTurn = { idx: i, costUsd: t.costUsd };
+      }
+      // Tool rollup + parallelism detection via sweep-line over intervals.
+      const intervals: { ts: number; delta: 1 | -1 }[] = [];
+      for (const tu of t.toolUses) {
+        toolCallTotal += 1;
+        toolNameCounts[tu.name] = (toolNameCounts[tu.name] ?? 0) + 1;
+        if (tu.isError === true) toolErrorTotal += 1;
+        if (tu.durationMs != null && (!slowestTool || tu.durationMs > slowestTool.durationMs)) {
+          slowestTool = { name: tu.name, durationMs: tu.durationMs, turnIdx: i };
+        }
+        if (tu.completedAt != null) {
+          intervals.push({ ts: tu.startedAt, delta: 1 });
+          intervals.push({ ts: tu.completedAt, delta: -1 });
+        }
+      }
+      if (intervals.length > 0) {
+        intervals.sort((a, b) => a.ts - b.ts || b.delta - a.delta);
+        let active = 0;
+        let peak = 0;
+        for (const iv of intervals) {
+          active += iv.delta;
+          if (active > peak) peak = active;
+        }
+        if (!mostParallelTurn || peak > mostParallelTurn.maxConcurrentTools) {
+          mostParallelTurn = { idx: i, maxConcurrentTools: peak };
+        }
+      }
+      // Cold-start surfacing: the first turn typically pays the SessionStart
+      // 40-50K cache_creation tax; we record turn[0]'s cost+cacheCreate to
+      // make that tax legible without folding turns[].
+      if (i === 0) {
+        firstTurnCostUsd = t.costUsd ?? null;
+        const u0 = t.resultUsage || t.envelopeUsage;
+        coldStartCacheCreate = u0?.cacheCreate ?? null;
+      }
+      // Stale-cache flag: a continuation turn that paid full cache_create but
+      // got zero cache_read = the API isn't reusing our prefix. Flagged what
+      // surfaced the sonnet cache anomaly during effort A/B.
+      if (!t.isFirstTurn && t.endKind === "success") {
+        const uForCache = t.resultUsage || t.envelopeUsage;
+        if (uForCache && uForCache.cacheRead === 0 && uForCache.cacheCreate > 0) {
+          staleCacheTurns += 1;
+        }
+      }
+      // Streaming velocity accumulator.
+      if (t.firstPaintAt != null && t.doneAt != null && t.doneAt > t.firstPaintAt) {
+        const u = t.resultUsage || t.envelopeUsage;
+        if (u) {
+          totalOutputTokens += u.output;
+          totalStreamMs += t.doneAt - t.firstPaintAt;
+        }
+      }
+    }
+    // Per-model timing averages
+    for (const key of Object.keys(byModel)) {
+      const bucket = byModel[key];
+      const tns = this.turns.filter((t) => (t.modelId || t.model) === key);
+      const t1 = tns.map((t) => (t.firstPaintAt != null ? t.firstPaintAt - t.ts : null)).filter((n): n is number => n != null);
+      const t2 = tns.map((t) => (t.doneAt != null ? t.doneAt - t.ts : null)).filter((n): n is number => n != null);
+      bucket.avgTtfpMs = t1.length ? Math.round(t1.reduce((a, b) => a + b, 0) / t1.length) : null;
+      bucket.avgDoneMs = t2.length ? Math.round(t2.reduce((a, b) => a + b, 0) / t2.length) : null;
+    }
+    return {
+      totalTurns: this.turns.length,
+      totalCostUsd: Math.round(totalCost * 10000) / 10000,
+      blankTurns: blank,
+      envelopeFallbacks: envFallback,
+      thinkingTurns,
+      avgTtfpMs: ttfps.length ? Math.round(ttfps.reduce((a, b) => a + b, 0) / ttfps.length) : null,
+      avgDoneMs: doneTimes.length ? Math.round(doneTimes.reduce((a, b) => a + b, 0) / doneTimes.length) : null,
+      toolCallTotal,
+      toolErrorTotal,
+      toolNameCounts,
+      slowestTool,
+      slowestTurn,
+      costliestTurn,
+      firstTurnCostUsd,
+      coldStartCacheCreate,
+      mostParallelTurn,
+      staleCacheTurns,
+      outputTokensPerSec: totalStreamMs > 0
+        ? Math.round((totalOutputTokens / totalStreamMs) * 1000)
+        : null,
+      byModel,
+      eventCounts: this.events.reduce<Record<string, number>>((acc, e) => {
+        acc[e.kind] = (acc[e.kind] ?? 0) + 1;
+        return acc;
+      }, {}),
+    };
+  }
+
+  reset() {
+    this.startedAt = Date.now();
+    this.turns = [];
+    this.events = [];
+  }
+}
+
+/** Per-conversation streaming state. One TabState per open chat tab; the
+ *  AssistantStore holds a Map keyed by Rift convoId and delegates all
+ *  per-stream reads/writes (messages, activity, tasks, etc.) to the active
+ *  tab's state via getters. Concurrent live streaming on 2+ tabs works
+ *  because each tab has its own messages array + pacer state + thinking
+ *  tracking, and backend events route by session_id to the right tab.
+ *
+ *  Cross-cutting effects (dock open, tasksUpdatedAt bump, queue drain,
+ *  scheduleSave) reach back into AssistantStore via the callback hooks
+ *  set when the tab is created. */
+class TabState {
+  /** CLI session UUID — every assistant://stream|done|error event carries
+   *  this so the store can dispatch to the right tab. Mutable: compaction
+   *  remints it without destroying the TabState. */
+  cliSessionId: string;
+
+  messages = $state<ChatMessage[]>([]);
+  streaming = $state(false);
+  tasks = $state<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }[]>([]);
+  activity = $state<{ currentLabel: string | null; turnStartedAt: number | null }>({
+    currentLabel: null,
+    turnStartedAt: null,
+  });
+  lastError = $state<string | null>(null);
+  totalCostUsd = $state<number | null>(null);
+  lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
+  sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
+  lastModelId = $state<string | null>(null);
+  promptHistory = $state<string[]>([]);
+  /** Outbound message queue for THIS tab. send() pushes here when the tab is
+   *  already streaming; onDone() pops the next one. Per-tab so a queued msg
+   *  in Tab A can't drain into Tab B if the user switches mid-turn. */
+  queue = $state<{ id: string; text: string }[]>([]);
+
+  // Non-reactive per-stream internals.
+  streamingMsgId: string | null = null;
+  seenToolUseIds = new Set<string>();
+  deltaCount = 0;
+  envelopeTextBuffer = "";
+  rawLineLog: string[] = [];
+  pendingText = "";
+  drainHandle: ReturnType<typeof requestAnimationFrame> | null = null;
+  lastDrainAt = 0;
+  thinkingByIndex = new Map<number, { blockOffset: number; startedAt: number }>();
+  activeThinkingIndex: number | null = null;
+  /** Wall-clock of the most recent `stream_event` arrival. Null between turns.
+   *  Used to compute `maxStreamGapMs` on the in-flight TurnRecord. */
+  lastStreamEventAt: number | null = null;
+  dockAutoOpenedThisConvo = false;
+  /** Telemetry record for the in-flight turn. Set by AssistantStore.send()
+   *  before invoking the backend, filled by stream handlers, finalized in
+   *  onDone / onError. Null between turns. */
+  currentTurnRecord: TurnRecord | null = null;
+
+  /** Fired after a TodoWrite tool_use lands. Store uses it to bump
+   *  `ui.tasksUpdatedAt` and auto-open the dock the first time per convo. */
+  onTodoApplied?: (tab: TabState, opensDock: boolean) => void;
+  /** Fired on onDone — store handles scheduleSave + queue drain. */
+  onTurnComplete?: (tab: TabState) => void;
+  /** Translates a tool name + input into a short activity-bar label.
+   *  Lives on the store (knows nothing tab-specific); passed in via this hook
+   *  so TabState doesn't grow its own copy. */
+  shortToolLabel?: (name: string, input?: Record<string, unknown>) => string;
+
+  constructor(cliSessionId: string) {
+    this.cliSessionId = cliSessionId;
+  }
+
+  resetUsage() {
+    this.lastTurnUsage = null;
+    this.sessionUsage = { totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 };
+    this.lastModelId = null;
+  }
+
+  /** Called at the start of every send(). Clears per-turn pacer / thinking
+   *  / dedupe state and flips streaming on. */
+  beginTurn() {
+    this.lastError = null;
+    this.seenToolUseIds.clear();
+    this.deltaCount = 0;
+    this.envelopeTextBuffer = "";
+    this.rawLineLog = [];
+    if (this.drainHandle !== null) {
+      cancelAnimationFrame(this.drainHandle);
+      this.drainHandle = null;
+    }
+    this.pendingText = "";
+    this.thinkingByIndex.clear();
+    this.activeThinkingIndex = null;
+    this.lastStreamEventAt = null;
+    this.activity = { currentLabel: null, turnStartedAt: Date.now() };
+    this.streaming = true;
+  }
+
+  // ── streaming pipeline ────────────────────────────────────────────────
+
+  private mutateStreaming(fn: (m: ChatMessage) => ChatMessage) {
+    if (!this.streamingMsgId) return;
+    this.messages = this.messages.map((m) => (m.id === this.streamingMsgId ? fn(m) : m));
+  }
+
+  private beginThinking(index: number) {
+    if (this.thinkingByIndex.has(index)) return;
+    this.activeThinkingIndex = index;
+    const startedAt = Date.now();
+    this.mutateStreaming((m) => {
+      const blocks = m.blocks.slice();
+      this.thinkingByIndex.set(index, { blockOffset: blocks.length, startedAt });
+      blocks.push({
+        type: "thinking",
+        text: "",
+        hasSignature: false,
+        startedAt,
+        durationMs: null,
+        status: "active",
+      });
+      return { ...m, blocks };
+    });
+    this.activity = { ...this.activity, currentLabel: "Thinking…" };
+    if (this.currentTurnRecord) this.currentTurnRecord.thinkingCount += 1;
+  }
+
+  private mutateThinking(index: number, fn: (b: ThinkingBlock) => ThinkingBlock) {
+    const entry = this.thinkingByIndex.get(index);
+    if (!entry) return;
+    this.mutateStreaming((m) => {
+      const blocks = m.blocks.slice();
+      const target = blocks[entry.blockOffset];
+      if (target && target.type === "thinking") {
+        blocks[entry.blockOffset] = fn(target);
+      }
+      return { ...m, blocks };
+    });
+  }
+
+  private appendThinkingText(index: number, chunk: string) {
+    if (!chunk) return;
+    this.mutateThinking(index, (b) => ({ ...b, text: b.text + chunk }));
+  }
+
+  private markThinkingSignature(index: number) {
+    this.mutateThinking(index, (b) => (b.hasSignature ? b : { ...b, hasSignature: true }));
+  }
+
+  private endThinking(index: number) {
+    const entry = this.thinkingByIndex.get(index);
+    if (!entry) return;
+    const durationMs = Date.now() - entry.startedAt;
+    if (this.currentTurnRecord) {
+      this.currentTurnRecord.thinkingTotalMs += durationMs;
+      // Capture per-block detail. `charCount` stays 0 in -p mode (encrypted)
+      // but is wired in case a future API version emits plaintext deltas;
+      // `hasSignature` is the truthier "real thinking happened" signal today.
+      let charCount = 0;
+      let hasSignature = false;
+      const msg = this.streamingMsgId ? this.messages.find((m) => m.id === this.streamingMsgId) : null;
+      if (msg) {
+        const block = msg.blocks[entry.blockOffset];
+        if (block && block.type === "thinking") {
+          charCount = block.text.length;
+          hasSignature = block.hasSignature;
+        }
+      }
+      this.currentTurnRecord.thinkingBlocks.push({
+        startedAt: entry.startedAt,
+        durationMs,
+        charCount,
+        hasSignature,
+      });
+    }
+    this.mutateThinking(index, (b) => ({ ...b, status: "done", durationMs }));
+    if (this.activeThinkingIndex === index) {
+      this.activeThinkingIndex = null;
+      if (this.activity.currentLabel === "Thinking…") {
+        this.activity = { ...this.activity, currentLabel: null };
+      }
+    }
+    // Drop the entry so the CLI's agentic loop — which reuses `index=0` for
+    // each new thinking block after a tool round-trip — can re-`beginThinking`
+    // cleanly. Without this, `thinkingCount` stays at 1 and `thinkingBlocks`
+    // double-counts the same block w/ ever-growing cumulative durations.
+    this.thinkingByIndex.delete(index);
+  }
+
+  private ensureThinkingFromEnvelope(block: { thinking?: string; signature?: string }) {
+    if (!this.streamingMsgId) return;
+    const msg = this.messages.find((m) => m.id === this.streamingMsgId);
+    if (!msg) return;
+    const existing = msg.blocks.find((b) => b.type === "thinking") as ThinkingBlock | undefined;
+    const envText = typeof block.thinking === "string" ? block.thinking : "";
+    const envSig = !!block.signature && block.signature.length > 0;
+    if (existing) {
+      if (envText.length > existing.text.length || (envSig && !existing.hasSignature)) {
+        this.mutateStreaming((m) => ({
+          ...m,
+          blocks: m.blocks.map((b) =>
+            b.type === "thinking" && b === existing
+              ? { ...b, text: envText.length > b.text.length ? envText : b.text, hasSignature: b.hasSignature || envSig }
+              : b,
+          ),
+        }));
+      }
+      return;
+    }
+    this.mutateStreaming((m) => ({
+      ...m,
+      blocks: [
+        ...m.blocks,
+        {
+          type: "thinking",
+          text: envText,
+          hasSignature: envSig,
+          startedAt: Date.now(),
+          durationMs: null,
+          status: "done",
+        },
+      ],
+    }));
+  }
+
+  private appendText(chunk: string) {
+    if (!chunk) return;
+    this.mutateStreaming((m) => {
+      const blocks = m.blocks.slice();
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === "text") {
+        blocks[blocks.length - 1] = { type: "text", text: last.text + chunk };
+      } else {
+        blocks.push({ type: "text", text: chunk });
+      }
+      return { ...m, blocks };
+    });
+  }
+
+  private enqueueText(chunk: string) {
+    if (!chunk) return;
+    this.pendingText += chunk;
+    if (this.drainHandle === null) {
+      this.lastDrainAt = performance.now();
+      this.drainHandle = requestAnimationFrame(this.drainTick);
+    }
+  }
+
+  private drainTick = () => {
+    if (this.pendingText.length === 0) {
+      this.drainHandle = null;
+      return;
+    }
+    const now = performance.now();
+    const dt = Math.min(now - this.lastDrainAt, 100);
+    this.lastDrainAt = now;
+    const rate = Math.max(120, this.pendingText.length / 0.4);
+    const n = Math.min(this.pendingText.length, Math.max(1, Math.round((rate * dt) / 1000)));
+    const chunk = this.pendingText.slice(0, n);
+    this.pendingText = this.pendingText.slice(n);
+    this.appendText(chunk);
+    this.drainHandle = requestAnimationFrame(this.drainTick);
+  };
+
+  private flushPendingText() {
+    if (this.drainHandle !== null) {
+      cancelAnimationFrame(this.drainHandle);
+      this.drainHandle = null;
+    }
+    if (this.pendingText.length > 0) {
+      this.appendText(this.pendingText);
+      this.pendingText = "";
+    }
+  }
+
+  private applyTodoWrite(input: Record<string, unknown> | undefined): boolean {
+    const raw = (input?.todos ?? []) as Array<{ content?: string; status?: string }>;
+    const next = raw
+      .filter((t) => typeof t?.content === "string")
+      .map((t, i) => ({
+        id: `todo-${i}-${t.content!.slice(0, 24)}`,
+        content: t.content!,
+        status: (t.status === "in_progress" || t.status === "completed" ? t.status : "pending") as
+          | "pending"
+          | "in_progress"
+          | "completed",
+      }));
+    this.tasks = next;
+    if (next.length > 0 && !this.dockAutoOpenedThisConvo) {
+      this.dockAutoOpenedThisConvo = true;
+      return true;
+    }
+    return false;
+  }
+
+  private appendToolUse(block: { id: string; name: string; input?: Record<string, unknown> }) {
+    if (this.seenToolUseIds.has(block.id)) return;
+    this.seenToolUseIds.add(block.id);
+    if (this.currentTurnRecord) {
+      this.currentTurnRecord.toolUses.push({
+        name: block.name,
+        id: block.id,
+        startedAt: Date.now(),
+        completedAt: null,
+        durationMs: null,
+        isError: null,
+        inputPreview: previewToolInput(block.name, block.input),
+      });
+    }
+    if (block.name === "TodoWrite") {
+      const opensDock = this.applyTodoWrite(block.input);
+      this.onTodoApplied?.(this, opensDock);
+      return;
+    }
+    const DENY = new Set(["ToolSearch"]);
+    if (DENY.has(block.name)) return;
+    this.activity = {
+      ...this.activity,
+      currentLabel: this.shortToolLabel ? this.shortToolLabel(block.name, block.input) : block.name,
+    };
+    this.mutateStreaming((m) => ({
+      ...m,
+      blocks: [
+        ...m.blocks,
+        {
+          type: "tool",
+          id: block.id,
+          name: block.name,
+          input: block.input ?? {},
+          result: null,
+          isError: false,
+          status: "pending",
+        },
+      ],
+    }));
+  }
+
+  private recordTurnUsage(u: Record<string, unknown>, accumulate: boolean) {
+    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    const turn = {
+      input: num(u.input_tokens),
+      output: num(u.output_tokens),
+      cacheRead: num(u.cache_read_input_tokens),
+      cacheCreate: num(u.cache_creation_input_tokens),
+    };
+    if (turn.input + turn.output + turn.cacheRead + turn.cacheCreate === 0) return;
+    // Telemetry capture into the in-flight turn record. Both envelope +
+    // result land here so S106's `byModel` / divergence metrics keep their
+    // signal -- the pill below is the only thing that ignores envelope.
+    if (this.currentTurnRecord) {
+      if (accumulate) this.currentTurnRecord.resultUsage = turn;
+      else this.currentTurnRecord.envelopeUsage = turn;
+    }
+    // #1: only update the pill on the `result` event. Envelope arrives
+    // first w/ a partial count that the result corrects on complex turns
+    // (thinking blocks, tool loops); rendering both made the pill visibly
+    // jump. Pill now sits on the previous turn's confirmed value through
+    // the in-flight turn and lands on the new value once result arrives.
+    if (accumulate) {
+      this.lastTurnUsage = turn;
+      this.sessionUsage = {
+        totalInput: this.sessionUsage.totalInput + turn.input,
+        totalOutput: this.sessionUsage.totalOutput + turn.output,
+        totalCacheRead: this.sessionUsage.totalCacheRead + turn.cacheRead,
+        totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
+        turns: this.sessionUsage.turns + 1,
+      };
+    }
+  }
+
+  private fillToolResult(toolUseId: string, content: string, isError: boolean) {
+    if (this.currentTurnRecord) {
+      const rec = this.currentTurnRecord.toolUses.find((t) => t.id === toolUseId);
+      if (rec) {
+        const now = Date.now();
+        rec.completedAt = now;
+        rec.durationMs = now - rec.startedAt;
+        rec.isError = isError;
+      }
+    }
+    this.mutateStreaming((m) => ({
+      ...m,
+      blocks: m.blocks.map((b) =>
+        b.type === "tool" && b.id === toolUseId
+          ? { ...b, result: content, isError, status: isError ? "error" : "done" }
+          : b,
+      ),
+    }));
+  }
+
+  onStream(raw: string) {
+    if (this.rawLineLog.length >= 200) this.rawLineLog.shift();
+    this.rawLineLog.push(raw);
+    let env: StreamEnvelope;
+    try {
+      env = JSON.parse(raw) as StreamEnvelope;
+    } catch {
+      if (this.streaming && this.streamingMsgId && raw.length > 0) {
+        const prefix = this.deltaCount > 0 ? "\n" : "";
+        this.deltaCount++;
+        if (this.currentTurnRecord) {
+          this.currentTurnRecord.deltaCount = this.deltaCount;
+          if (this.currentTurnRecord.firstPaintAt == null) {
+            this.currentTurnRecord.firstPaintAt = Date.now();
+          }
+        }
+        this.enqueueText(prefix + raw);
+      }
+      return;
+    }
+    switch (env.type) {
+      case "stream_event": {
+        if (this.currentTurnRecord) {
+          this.currentTurnRecord.streamEventCount += 1;
+          const now = Date.now();
+          // Anchor against last event arrival, falling back to first-paint or
+          // turn-start so the metric is defined even on the first stream_event.
+          const last = this.lastStreamEventAt ?? this.currentTurnRecord.firstPaintAt ?? this.currentTurnRecord.ts;
+          const gap = now - last;
+          if (gap > this.currentTurnRecord.maxStreamGapMs) {
+            this.currentTurnRecord.maxStreamGapMs = gap;
+          }
+          this.lastStreamEventAt = now;
+        }
+        const ev = env.event;
+        const evType = ev?.type;
+        const idx = typeof ev?.index === "number" ? ev.index : null;
+        if (evType === "content_block_start" && ev?.content_block?.type === "thinking" && idx !== null) {
+          this.beginThinking(idx);
+        } else if (evType === "content_block_delta") {
+          const d = ev?.delta;
+          if (d?.type === "text_delta" && d.text) {
+            this.deltaCount++;
+            if (this.currentTurnRecord) {
+              this.currentTurnRecord.deltaCount = this.deltaCount;
+              if (this.currentTurnRecord.firstPaintAt == null) {
+                this.currentTurnRecord.firstPaintAt = Date.now();
+              }
+            }
+            this.enqueueText(d.text);
+          } else if (d?.type === "thinking_delta" && typeof d.thinking === "string" && idx !== null) {
+            this.appendThinkingText(idx, d.thinking);
+          } else if (d?.type === "signature_delta" && idx !== null) {
+            this.markThinkingSignature(idx);
+          }
+        } else if (evType === "content_block_stop" && idx !== null) {
+          this.endThinking(idx);
+        }
+        break;
+      }
+      case "assistant": {
+        if (this.currentTurnRecord) this.currentTurnRecord.assistantEnvCount += 1;
+        const msgUsage = (env.message as { usage?: Record<string, unknown> } | undefined)?.usage;
+        if (msgUsage) this.recordTurnUsage(msgUsage, false);
+        for (const block of env.message?.content ?? []) {
+          if (block.type === "tool_use") {
+            this.appendToolUse(block);
+          } else if (block.type === "text" && typeof block.text === "string") {
+            this.envelopeTextBuffer += block.text;
+          } else if (block.type === "thinking") {
+            this.ensureThinkingFromEnvelope(block);
+          }
+        }
+        break;
+      }
+      case "user": {
+        for (const block of env.message?.content ?? []) {
+          if (block.type === "tool_result") {
+            this.fillToolResult(
+              block.tool_use_id,
+              flattenToolResult(block.content),
+              block.is_error === true,
+            );
+          }
+        }
+        break;
+      }
+      case "result": {
+        if (typeof env.total_cost_usd === "number") {
+          this.totalCostUsd = (this.totalCostUsd ?? 0) + env.total_cost_usd;
+          const turnCost = env.total_cost_usd;
+          this.mutateStreaming((m) => ({ ...m, costUsd: turnCost }));
+          if (this.currentTurnRecord) this.currentTurnRecord.costUsd = turnCost;
+        }
+        const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
+        if (resultUsage) this.recordTurnUsage(resultUsage, true);
+        if (env.subtype && env.subtype !== "success") {
+          // Whitelist (S105 A3): known CLI error subtypes surface as user-visible
+          // errors; anything else logs but doesn't false-alarm. Pre-emptive guard
+          // for post-compaction CLI subtypes we haven't seen yet.
+          const KNOWN_ERRORS = new Set([
+            "error_max_turns",
+            "error_during_execution",
+            "error_max_thinking_tokens",
+          ]);
+          if (KNOWN_ERRORS.has(env.subtype)) {
+            this.lastError = `Run ended with subtype: ${env.subtype}`;
+          } else {
+            console.warn("[assistant] unrecognized result.subtype", env.subtype, env);
+          }
+        }
+        break;
+      }
+      case "system": {
+        const sysModel = typeof env.model === "string" ? env.model : null;
+        if (sysModel) {
+          this.lastModelId = sysModel;
+          this.mutateStreaming((m) => ({ ...m, model: sysModel }));
+          if (this.currentTurnRecord) this.currentTurnRecord.modelId = sysModel;
+        }
+        break;
+      }
+      default:
+        break;
+    }
+  }
+
+  onDone() {
+    this.flushPendingText();
+    let envelopeFallback = false;
+    let blankTurn = false;
+    if (this.deltaCount === 0 && this.envelopeTextBuffer.length > 0) {
+      this.appendText(this.envelopeTextBuffer);
+      envelopeFallback = true;
+    } else if (this.deltaCount === 0 && this.envelopeTextBuffer.length === 0) {
+      const msg = this.streamingMsgId
+        ? this.messages.find((m) => m.id === this.streamingMsgId)
+        : null;
+      const hadTools = !!msg && msg.blocks.some((b) => b.type === "tool");
+      if (!hadTools) blankTurn = true;
+      if (!hadTools) {
+        const lines = this.rawLineLog.slice();
+        console.warn("[assistant] turn ended with no text and no tools. Raw stream lines:", lines);
+        const types: string[] = [];
+        const nonJsonSamples: string[] = [];
+        for (const ln of lines) {
+          try {
+            const parsed = JSON.parse(ln) as { type?: string; subtype?: string };
+            types.push(parsed.subtype ? `${parsed.type}:${parsed.subtype}` : (parsed.type ?? "?"));
+          } catch {
+            types.push("non-json");
+            if (nonJsonSamples.length < 3) {
+              nonJsonSamples.push(ln.length > 240 ? ln.slice(0, 240) + "…" : ln);
+            }
+          }
+        }
+        const fingerprint = `[${types.join(", ")}]`;
+        const tail =
+          nonJsonSamples.length > 0
+            ? ` Non-JSON output: ${nonJsonSamples.map((s) => `"${s}"`).join(" | ")}`
+            : " Full NDJSON in DevTools console.";
+        this.lastError = `Blank response — CLI emitted ${lines.length} line(s): ${fingerprint}.${tail}`;
+      }
+    }
+    this.streaming = false;
+    this.streamingMsgId = null;
+    this.seenToolUseIds.clear();
+    this.activity = { ...this.activity, currentLabel: null };
+    // Finalize telemetry for this turn.
+    if (this.currentTurnRecord) {
+      this.currentTurnRecord.doneAt = Date.now();
+      this.currentTurnRecord.envelopeFallback = envelopeFallback;
+      this.currentTurnRecord.blankTurn = blankTurn;
+      if (!this.currentTurnRecord.endKind) {
+        this.currentTurnRecord.endKind = blankTurn ? "error" : "success";
+        if (blankTurn) this.currentTurnRecord.errorMsg = this.lastError ?? "blank turn";
+      }
+      this.currentTurnRecord = null;
+    }
+    this.onTurnComplete?.(this);
+  }
+
+  onError(msg: string) {
+    this.lastError = msg;
+    this.streaming = false;
+    if (this.drainHandle !== null) {
+      cancelAnimationFrame(this.drainHandle);
+      this.drainHandle = null;
+    }
+    this.pendingText = "";
+    if (this.streamingMsgId) {
+      const id = this.streamingMsgId;
+      this.messages = this.messages.filter((m) => !(m.id === id && m.blocks.length === 0));
+      this.streamingMsgId = null;
+    }
+    this.seenToolUseIds.clear();
+    // Finalize telemetry.
+    if (this.currentTurnRecord) {
+      this.currentTurnRecord.doneAt = Date.now();
+      this.currentTurnRecord.endKind = "error";
+      this.currentTurnRecord.errorMsg = msg;
+      this.currentTurnRecord = null;
+    }
+  }
+}
+
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
   authError = $state<string | null>(null);
 
-  messages = $state<ChatMessage[]>([]);
-  // Per-session streaming registry. Set membership = "this CLI session has a
-  // live `claude` child on the backend". Multi-tab safe: each tab's session
-  // tracks independently, so kicking off a fresh send in tab B doesn't get
-  // queued just because tab A is still streaming. Replaced as a new Set on
-  // every mutation for Svelte 5 reactivity (per rules/svelte.md). Reads via
-  // the `streaming` getter below, which derives from active currentCliSessionId.
-  private streamingSessions = $state(new Set<string>());
+  /** Per-conversation streaming state, keyed by Rift convoId. One entry per
+   *  open chat tab. The store's UI-facing `messages` / `streaming` / `activity`
+   *  / etc. getters delegate to `activeTab`; event handlers route by
+   *  `session_id` to whichever tab owns that CLI session. Concurrent live
+   *  streaming on 2+ tabs works because each tab carries its own messages
+   *  buffer, pacer state, and thinking tracker. */
+  private tabs = $state(new Map<string, TabState>());
 
-  /** `true` iff the ACTIVE tab's CLI session has a live backend stream.
-   *  Components read `assistant.streaming` exactly like before — the getter
-   *  preserves the singleton API while the underlying state is per-session. */
-  get streaming(): boolean {
-    const sid = this.currentCliSessionId;
-    return !!sid && this.streamingSessions.has(sid);
-  }
-  /** Setter exists so the dozen-or-so legacy `this.streaming = true|false`
-   *  sites keep working — they map to "add/remove the ACTIVE session". For
-   *  background-session cleanup (e.g. a bg tab's done event), call
-   *  `setSessionStreaming(sid, false)` directly. */
-  set streaming(v: boolean) {
-    const sid = this.currentCliSessionId;
-    if (!sid) return;
-    this.setSessionStreaming(sid, v);
+  /** The TabState bound to `currentConvoId`, or null if no tab is active.
+   *  Getter-derived so it tracks both `tabs` and `currentConvoId` reactively. */
+  get activeTab(): TabState | null {
+    return this.currentConvoId ? this.tabs.get(this.currentConvoId) ?? null : null;
   }
 
-  private setSessionStreaming(sid: string, on: boolean) {
-    const has = this.streamingSessions.has(sid);
-    if (on === has) return;
-    const next = new Set(this.streamingSessions);
-    if (on) next.add(sid); else next.delete(sid);
-    this.streamingSessions = next;
+  // ── Per-tab UI surface — delegated getters so components read
+  //    `assistant.messages` etc. exactly like before. Sentinel defaults
+  //    keep empty-state renders safe when no tab is active.
+  get messages(): ChatMessage[] { return this.activeTab?.messages ?? []; }
+  get streaming(): boolean { return this.activeTab?.streaming ?? false; }
+  get tasks() { return this.activeTab?.tasks ?? []; }
+  get activity() {
+    return this.activeTab?.activity ?? { currentLabel: null, turnStartedAt: null };
+  }
+  /** Fallback for store-level errors (auth, workspace, delete, etc.) when
+   *  no tab is active. Tab errors take precedence when a tab is present. */
+  private storeLastError = $state<string | null>(null);
+  get lastError(): string | null {
+    return this.activeTab ? this.activeTab.lastError : this.storeLastError;
+  }
+  set lastError(v: string | null) {
+    if (this.activeTab) this.activeTab.lastError = v;
+    else this.storeLastError = v;
+  }
+  get totalCostUsd(): number | null { return this.activeTab?.totalCostUsd ?? null; }
+  get lastTurnUsage() { return this.activeTab?.lastTurnUsage ?? null; }
+  get sessionUsage() {
+    return this.activeTab?.sessionUsage ?? { totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 };
+  }
+  get lastModelId(): string | null { return this.activeTab?.lastModelId ?? null; }
+  get promptHistory(): string[] { return this.activeTab?.promptHistory ?? []; }
+  get queue() { return this.activeTab?.queue ?? []; }
+  set queue(v: { id: string; text: string }[]) {
+    if (this.activeTab) this.activeTab.queue = v;
   }
 
-  lastError = $state<string | null>(null);
+  /** Look up the TabState whose CLI session matches the event's session_id.
+   *  Linear scan over open tabs is fine — typical user has <10. */
+  private tabByCliSession(sid: string): TabState | null {
+    for (const t of this.tabs.values()) {
+      if (t.cliSessionId === sid) return t;
+    }
+    return null;
+  }
+
+  /** Get-or-create the TabState for a convo. Used by send() on first turn
+   *  and by tab lifecycle methods. Reassigning the map triggers reactivity. */
+  private ensureTab(convoId: string, cliSessionId: string): TabState {
+    const existing = this.tabs.get(convoId);
+    if (existing) return existing;
+    const tab = new TabState(cliSessionId);
+    this.wireTab(tab);
+    const next = new Map(this.tabs);
+    next.set(convoId, tab);
+    this.tabs = next;
+    return tab;
+  }
+
+  /** Tear down a tab's TabState. Called from closeTab / closeAllTabs. */
+  private dropTab(convoId: string) {
+    if (!this.tabs.has(convoId)) return;
+    const next = new Map(this.tabs);
+    next.delete(convoId);
+    this.tabs = next;
+  }
+
+  /** Attach cross-cutting hooks to a freshly-minted TabState. */
+  private wireTab(tab: TabState) {
+    tab.shortToolLabel = (name, input) => this.shortToolLabel(name, input);
+    tab.onTodoApplied = (_t, opensDock) => {
+      this.ui.tasksUpdatedAt = Date.now();
+      if (opensDock) this.ui.dockOpen = true;
+    };
+    tab.onTurnComplete = (t) => this.handleTurnComplete(t);
+  }
+
   // Informational system notice (slash-command output, /help text, etc.).
   // Rendered as a dismissible info banner separate from error styling.
+  // Cross-cutting (not per-tab) — same notice shows regardless of which tab
+  // is active because it's typically user-action-triggered (slash command,
+  // workspace change, etc.).
   lastNotice = $state<string | null>(null);
-  totalCostUsd = $state<number | null>(null);
-  // Token-usage telemetry parsed from `assistant` + `result` envelopes.
-  // `lastTurnUsage` is the most recent turn's `message.usage` block; the
-  // `input + cache_read + cache_creation` sum is the effective context the
-  // model just processed (= "what the model is seeing this turn"), which is
-  // the right number for a context-utilization indicator. `sessionUsage`
-  // accumulates across turns for cost/throughput inspection.
-  lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
-  sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
-  // Resolved model id from the most recent CLI `system`/init event ("claude-sonnet-4-6"
-  // / "claude-opus-4-7" / "claude-opus-4-7[1m]" etc.). Used to pick the
-  // context-window cap for the header pill — 1M variant carries `[1m]` suffix.
-  lastModelId = $state<string | null>(null);
-  // Ring buffer of user prompts, newest last. Powers /retry and Up-arrow
-  // recall in the composer. Capped at 50 entries.
-  promptHistory = $state<string[]>([]);
+
+  /** Session-wide telemetry — every turn structurally captured + UI lifecycle
+   *  events. Drained via `/diag` slash command (clipboard JSON). Reset via
+   *  `/diag-clear`. Non-reactive: callers don't render off this, they only
+   *  serialize-and-export. */
+  telemetry = new SessionTelemetry();
 
   apiKey = $state<string | null>(null);
   useFullConfig = $state<boolean>(true);
@@ -277,10 +1201,9 @@ class AssistantStore {
   // block. `previewUrl` is a data URL for the in-composer thumbnail; it's
   // cheap to keep here since the same bytes are already in dataBase64.
   composerAttachments = $state<{ id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]>([]);
-  // Outbound message queue. send() appends here if a turn is already
-  // streaming; onDone() pops the next one. UI surfaces queued items as
-  // pills above the composer with an X to remove.
-  queue = $state<{ id: string; text: string }[]>([]);
+  // queue moved to TabState (S105 follow-up) — per-tab so a queued msg in
+  // Tab A can't drain into Tab B if the user switches mid-turn. UI binds via
+  // the `queue` getter below which delegates to activeTab.
   // User's chosen model — flipped by /model slash command. Carried through
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
@@ -313,15 +1236,8 @@ class AssistantStore {
   private convoCreatedAt: number | null = null;
   private convoTitle: string | null = null;
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
-  tasks = $state<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }[]>([]);
 
-  // Activity tracking — currently-running tool label and turn start timestamp
-  // for the elapsed timer. Reset on new send(). Per-tool counts come from
-  // enumerating message.blocks directly in the dock.
-  activity = $state<{
-    currentLabel: string | null;
-    turnStartedAt: number | null;
-  }>({ currentLabel: null, turnStartedAt: null });
+  // tasks + activity now live on TabState (see top-of-class getters).
 
   // Per-tab UI state cache. Survives tab switches so the composer draft,
   // staged attachments, and scroll position aren't wiped when the user clicks
@@ -337,40 +1253,43 @@ class AssistantStore {
   private tabScroll = new Map<string, number>();
 
   private unlistens: UnlistenFn[] = [];
-  private streamingMsgId: string | null = null;
-  private seenToolUseIds = new Set<string>();
-  private dockAutoOpenedThisConvo = false;
-  // Per-turn delta/envelope reconciliation. `--include-partial-messages` is
-  // expected to stream text via stream_event text_deltas, but CLI version
-  // drift or short responses sometimes emit zero deltas and ship the full
-  // text only in the final `assistant` envelope. Without a fallback the
-  // bubble renders blank. Track delta count + buffer envelope text; on
-  // turn end, if no deltas arrived, flush the envelope buffer into the bubble.
-  private deltaCount = 0;
-  private envelopeTextBuffer = "";
-  private rawLineLog: string[] = [];
-  // Streaming pacer — decouples visual paint from network burst cadence so
-  // CLI chunks of 200+ chars trickle out instead of slamming in. Base rate
-  // ~120 ch/s; any backlog auto-drains in ~400ms to stay responsive.
-  private pendingText = "";
-  private drainHandle: ReturnType<typeof requestAnimationFrame> | null = null;
-  private lastDrainAt = 0;
-  // Per-turn thinking tracking. `content_block_start`/`stop` carry an `index`
-  // identifying which block is open; we map that to the thinking block we
-  // pushed into the message so subsequent `thinking_delta` / `signature_delta`
-  // events land in the right place. `activeThinkingIndex` is the currently-
-  // open block's index, null when no thinking is in flight.
-  private thinkingByIndex = new Map<number, { blockOffset: number; startedAt: number }>();
-  private activeThinkingIndex: number | null = null;
+  // streamingMsgId / seenToolUseIds / dockAutoOpenedThisConvo / deltaCount /
+  // envelopeTextBuffer / rawLineLog / pendingText / drainHandle / lastDrainAt /
+  // thinkingByIndex / activeThinkingIndex now live on TabState.
 
   setModel(v: "sonnet" | "opus" | "haiku") {
+    if (this.model === v) return;
+    const prev = this.model;
     this.model = v;
     saveModel(v);
+    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    this.telemetry.event("model.change", { from: prev, to: v, midConvo });
+    if (midConvo) this.cacheBustHint("model");
   }
 
   setThinkingEffort(v: ThinkingEffort) {
+    if (this.thinkingEffort === v) return;
+    const prev = this.thinkingEffort;
     this.thinkingEffort = v;
     saveEffort(v);
+    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    this.telemetry.event("effort.change", { from: prev, to: v, midConvo });
+    if (midConvo) this.cacheBustHint("effort");
+  }
+
+  /** One-shot-per-session-per-kind notice when model/effort flips on a tab
+   *  that already has turns. Sonnet's cache empirically does NOT survive
+   *  effort changes (S106 measurement: 0 cacheRead on 3 consecutive sonnet
+   *  turns w/ effort flips vs healthy reuse without). Opus is more forgiving.
+   *  Notice is fire-once so it's a hint, not a nag. */
+  private cacheBustHintShown = { model: false, effort: false };
+  private cacheBustHint(kind: "model" | "effort") {
+    if (this.cacheBustHintShown[kind]) return;
+    this.cacheBustHintShown[kind] = true;
+    this.lastNotice =
+      kind === "effort"
+        ? "Heads up — changing effort mid-conversation can bust the prompt cache (esp. on Sonnet). Next turn may pay full cache_create."
+        : "Heads up — switching models mid-conversation rebuilds the prefix cache from scratch. Next turn will pay full cache_create.";
   }
 
   /** Snapshot the OUTGOING tab's composer + attachments into the cache.
@@ -421,28 +1340,21 @@ class AssistantStore {
   async init() {
     if (this.unlistens.length > 0) return;
     // Backend tags every stream/done/error event w/ the originating CLI
-    // session_id (S104). Routing rules:
-    //   * stream → only paint if event session == ACTIVE session. Background
-    //     tab's chunks are dropped from the UI (no per-tab message buffer
-    //     yet); the CLI still persists the JSONL on its side.
-    //   * done   → ALWAYS clear that session's streaming flag (otherwise
-    //     bg tabs would stay "streaming" forever, blocking re-sends). Run
-    //     the full active-tab cleanup only if it's the active session.
-    //   * error  → same as done — clear streaming for that session, surface
-    //     the message only if it's the active tab.
-    // Legacy payload shape (bare string) still accepted for forward-compat
-    // during dev hot-reload.
+    // session_id (S104). We route by session_id to the right TabState so
+    // background tabs can keep painting concurrently with the foreground.
+    // Legacy payload shape (bare string) routes to activeTab for forward-
+    // compat during dev hot-reload.
     this.unlistens.push(
       await listen<{ session_id?: string; line?: string } | string>(
         "assistant://stream",
         (e) => {
           if (typeof e.payload === "string") {
-            this.onStream(e.payload);
+            this.activeTab?.onStream(e.payload);
             return;
           }
           const { session_id, line } = e.payload ?? {};
-          if (session_id && session_id !== this.currentCliSessionId) return;
-          if (typeof line === "string") this.onStream(line);
+          const tab = session_id ? this.tabByCliSession(session_id) : this.activeTab;
+          if (tab && typeof line === "string") tab.onStream(line);
         },
       ),
       await listen<{ session_id?: string; exit_code?: number } | { exit_code: number }>(
@@ -450,26 +1362,20 @@ class AssistantStore {
         (e) => {
           const p = e.payload as { session_id?: string } | undefined;
           const sid = p?.session_id;
-          if (sid) {
-            this.setSessionStreaming(sid, false);
-            if (sid !== this.currentCliSessionId) return; // bg tab — no UI cleanup
-          }
-          this.onDone();
+          const tab = sid ? this.tabByCliSession(sid) : this.activeTab;
+          tab?.onDone();
         },
       ),
       await listen<{ session_id?: string; message?: string } | string>(
         "assistant://error",
         (e) => {
           if (typeof e.payload === "string") {
-            this.onError(e.payload);
+            this.activeTab?.onError(e.payload);
             return;
           }
           const { session_id, message } = e.payload ?? {};
-          if (session_id) {
-            this.setSessionStreaming(session_id, false);
-            if (session_id !== this.currentCliSessionId) return;
-          }
-          if (typeof message === "string") this.onError(message);
+          const tab = session_id ? this.tabByCliSession(session_id) : this.activeTab;
+          if (tab && typeof message === "string") tab.onError(message);
         },
       ),
     );
@@ -524,26 +1430,36 @@ class AssistantStore {
    *  the prompt. Tab-aware: ignore if the lost session isn't current
    *  (user switched tabs while the error was in flight). */
   private onSessionLost(payload: { session_id: string; prompt: string }) {
-    // Backend emits the CLI session id that failed to resume. After S103
-    // decoupling that may differ from currentConvoId (post-compaction); match
-    // on currentCliSessionId, falling back to currentConvoId for legacy.
-    const active = this.currentCliSessionId ?? this.currentConvoId;
-    if (payload.session_id !== active) return;
-    if (this.streaming) this.streaming = false;
+    // Find the tab whose CLI session failed (may not be the active tab if the
+    // user switched mid-recovery). After S103 decoupling cliSessionId may
+    // differ from convoId (post-compaction).
+    const tab = this.tabByCliSession(payload.session_id);
+    if (!tab) return;
+    this.telemetry.event("session.lost", { sid: payload.session_id, willRetry: tab === this.activeTab });
+    if (tab.currentTurnRecord) {
+      tab.currentTurnRecord.doneAt = Date.now();
+      tab.currentTurnRecord.endKind = "session-lost";
+      tab.currentTurnRecord = null;
+    }
+    tab.streaming = false;
     // Drop the empty assistant message + the user message that failed.
     // send() will re-add them on retry.
-    const msgs = this.messages.slice();
+    const msgs = tab.messages.slice();
     if (msgs.length >= 2 && msgs[msgs.length - 1].role === "assistant") {
       msgs.pop();
       if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
     }
-    this.messages = msgs;
-    this.streamingMsgId = null;
-    this.convoCreatedAt = null;
-    this.convoTitle = null;
-    this.lastError = null;
+    tab.messages = msgs;
+    tab.streamingMsgId = null;
+    tab.lastError = null;
     this.lastNotice = "Session was lost — retrying as a fresh start";
-    void this.send(payload.prompt);
+    // Auto-retry only when the lost tab is active. Bg-tab retry would require
+    // routing send() to a specific tab; for now the user re-clicks send.
+    if (this.activeTab === tab) {
+      this.convoCreatedAt = null;
+      this.convoTitle = null;
+      void this.send(payload.prompt);
+    }
   }
 
   private onLocksUpdate(locks: RemoteLockEvt[]) {
@@ -729,20 +1645,14 @@ class AssistantStore {
   async newConversation() {
     if (this.streaming) await this.stop();
     if (this.messages.length > 0) this.scheduleSave(true);
-    this.messages = [];
-    this.tasks = [];
+    if (this.currentConvoId) this.dropTab(this.currentConvoId);
     this.queue = [];
-    this.lastError = null;
     this.lastNotice = null;
-    this.totalCostUsd = null;
-    this.promptHistory = [];
-    this.dockAutoOpenedThisConvo = false;
     this.ui.dockOpen = false;
     this.currentConvoId = null;
     this.currentCliSessionId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
-    this.resetUsage();
   }
 
   async loadConversation(id: string) {
@@ -752,25 +1662,30 @@ class AssistantStore {
     }
     try {
       const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-      this.messages = convo.messages ?? [];
-      this.currentConvoId = convo.id;
       // Legacy convos lack cliSessionId — fall back to id so --resume still
       // hits the original JSONL. New convos persist cliSessionId explicitly.
-      this.currentCliSessionId = convo.cliSessionId ?? convo.id;
-      this.convoCreatedAt = convo.createdAt;
-      this.convoTitle = convo.title;
-      this.tasks = [];
-      this.queue = [];
-      this.lastError = null;
-      this.lastNotice = null;
-      this.totalCostUsd = null;
-      this.resetUsage();
-      this.promptHistory = this.messages
+      const cliSid = convo.cliSessionId ?? convo.id;
+      const tab = this.ensureTab(convo.id, cliSid);
+      // Re-hydrate from disk — overwrites in-memory state if the tab was
+      // previously open with stale data.
+      tab.messages = convo.messages ?? [];
+      tab.cliSessionId = cliSid;
+      tab.tasks = [];
+      tab.lastError = null;
+      tab.totalCostUsd = null;
+      tab.resetUsage();
+      tab.promptHistory = (convo.messages ?? [])
         .filter((m) => m.role === "user")
         .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())
         .filter((s) => s.length > 0)
         .slice(-50);
-      this.dockAutoOpenedThisConvo = false;
+      tab.dockAutoOpenedThisConvo = false;
+      this.currentConvoId = convo.id;
+      this.currentCliSessionId = cliSid;
+      this.convoCreatedAt = convo.createdAt;
+      this.convoTitle = convo.title;
+      this.queue = [];
+      this.lastNotice = null;
       this.ui.historyOpen = false;
       if (convo.model === "sonnet" || convo.model === "opus" || convo.model === "haiku") {
         this.setModel(convo.model);
@@ -787,11 +1702,14 @@ class AssistantStore {
         // Reuse closeTab so neighbor-pick + active-switch logic stays in one place.
         await this.closeTab(id);
       } else if (this.currentConvoId === id) {
+        this.dropTab(id);
         this.currentConvoId = null;
         this.currentCliSessionId = null;
         this.convoCreatedAt = null;
         this.convoTitle = null;
-        this.messages = [];
+      } else {
+        // Convo was open as a TabState (e.g. background) but not the active tab.
+        this.dropTab(id);
       }
       await this.refreshConversations();
     } catch (e) {
@@ -845,6 +1763,7 @@ class AssistantStore {
       this.persistTabs();
       return;
     }
+    this.telemetry.event("tab.switch", { from: this.currentConvoId, to: id });
     if (this.messages.length > 0 && this.currentConvoId) {
       this.scheduleSave(true);
     }
@@ -854,18 +1773,16 @@ class AssistantStore {
     if (inMeta) {
       await this.loadConversation(id);
     } else {
-      if (this.streaming) await this.stop();
+      // Fresh in-memory tab (no disk record yet). Mint a TabState with
+      // cliSessionId left blank — first send() fills it in. Don't stop()
+      // here: if another tab was streaming, leave it running in the bg.
+      this.ensureTab(id, id);
       this.currentConvoId = id;
       this.currentCliSessionId = null;
       this.convoCreatedAt = null;
       this.convoTitle = null;
-      this.messages = [];
-      this.tasks = [];
       this.queue = [];
-      this.lastError = null;
       this.lastNotice = null;
-      this.totalCostUsd = null;
-      this.dockAutoOpenedThisConvo = false;
     }
     // Restore incoming tab's composer + attachments (loadConversation cleared
     // them; we re-fill from cache if the user had a draft mid-typing).
@@ -880,12 +1797,12 @@ class AssistantStore {
     const idx = this.openTabs.indexOf(id);
     if (idx === -1) return;
     const wasActive = this.currentConvoId === id;
+    this.telemetry.event("tab.close", { convoId: id, wasActive });
     const next = this.openTabs.slice();
     next.splice(idx, 1);
     this.openTabs = next;
-    // Drop the closing tab's UI scratch (draft/attachments/scroll) — convo
-    // itself stays on disk via scheduleSave below, but in-memory composer
-    // state for that tab is intentionally retired.
+    // Drop the closing tab's UI scratch + TabState. The convo itself stays
+    // on disk via scheduleSave below; only in-memory streaming state is retired.
     this.pruneTabUi(id);
     if (wasActive) {
       // Save unsaved tail of the closing tab before switching/clearing.
@@ -893,18 +1810,16 @@ class AssistantStore {
         this.scheduleSave(true);
       }
       if (this.streaming) await this.stop();
+    }
+    this.dropTab(id);
+    if (wasActive) {
       if (next.length === 0) {
-        this.messages = [];
         this.currentConvoId = null;
         this.currentCliSessionId = null;
         this.convoCreatedAt = null;
         this.convoTitle = null;
-        this.tasks = [];
         this.queue = [];
-        this.lastError = null;
         this.lastNotice = null;
-        this.totalCostUsd = null;
-        this.dockAutoOpenedThisConvo = false;
       } else {
         // Right-priority: the entry that shifted into idx, else last.
         const neighbor = next[idx] ?? next[next.length - 1];
@@ -912,18 +1827,13 @@ class AssistantStore {
         if (inMeta) {
           await this.loadConversation(neighbor);
         } else {
+          this.ensureTab(neighbor, neighbor);
           this.currentConvoId = neighbor;
           this.currentCliSessionId = null;
           this.convoCreatedAt = null;
           this.convoTitle = null;
-          this.messages = [];
-          this.tasks = [];
           this.queue = [];
-          this.lastError = null;
           this.lastNotice = null;
-          this.totalCostUsd = null;
-          this.dockAutoOpenedThisConvo = false;
-          this.resetUsage();
         }
         this.restoreTabUi(neighbor);
       }
@@ -935,7 +1845,8 @@ class AssistantStore {
    *  render before the first send; convoCreatedAt stays null so send() still
    *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
   async newTab() {
-    if (this.streaming) await this.stop();
+    // Don't stop the previous tab's stream — newTab leaves background tabs
+    // streaming. Save unsaved tail of the previous tab before swapping.
     if (this.messages.length > 0 && this.currentConvoId) {
       this.scheduleSave(true);
     }
@@ -943,19 +1854,16 @@ class AssistantStore {
     this.stashTabUi(this.currentConvoId);
     const id = crypto.randomUUID();
     this.openTabs = [...this.openTabs, id];
+    // Fresh TabState — empty messages, no streaming. cliSessionId defaults
+    // to the convoId; first send() finalizes if needed.
+    this.ensureTab(id, id);
+    this.telemetry.event("tab.new", { convoId: id });
     this.currentConvoId = id;
     this.currentCliSessionId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
-    this.messages = [];
-    this.tasks = [];
     this.queue = [];
-    this.lastError = null;
     this.lastNotice = null;
-    this.totalCostUsd = null;
-    this.promptHistory = [];
-    this.dockAutoOpenedThisConvo = false;
-    this.resetUsage();
     // Fresh tab → empty composer (no cache entry yet).
     this.composerDraft = "";
     this.composerAttachments = [];
@@ -998,18 +1906,15 @@ class AssistantStore {
     if (this.messages.length > 0 && this.convoCreatedAt) {
       this.scheduleSave(true);
     }
+    // Drop every TabState; the convos persisted to disk above.
+    this.tabs = new Map();
     this.openTabs = [];
     this.currentConvoId = null;
     this.currentCliSessionId = null;
     this.convoCreatedAt = null;
     this.convoTitle = null;
-    this.messages = [];
-    this.tasks = [];
     this.queue = [];
-    this.lastError = null;
     this.lastNotice = null;
-    this.totalCostUsd = null;
-    this.dockAutoOpenedThisConvo = false;
     this.persistTabs();
   }
 
@@ -1085,14 +1990,13 @@ class AssistantStore {
     if (!trimmed && this.composerAttachments.length === 0) return;
     // Try-handle as a slash command first; if it matched, we're done.
     if (trimmed.startsWith("/") && this.runSlash(trimmed)) return;
-    // Already streaming → queue instead of dropping.
+    // Already streaming on this tab → queue instead of dropping.
     if (this.streaming) {
       this.queue = [...this.queue, { id: crypto.randomUUID(), text: trimmed }];
       return;
     }
     // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
-    // UUID and passes `--session-id`; subsequent turns pass `--resume` against
-    // the same UUID. The session is persisted under `~/.claude/projects/<cwd-hash>/`.
+    // UUID and passes `--session-id`; subsequent turns pass `--resume`.
     // v0.4: newTab() mints currentConvoId up-front so the tab can render
     // before send() — gate isFirstTurn on convoCreatedAt instead so the very
     // first send still passes --session-id, not --resume.
@@ -1117,29 +2021,53 @@ class AssistantStore {
       this.openTabs = [...this.openTabs, this.currentConvoId];
       this.persistTabs();
     }
-    this.streaming = true;
-    this.lastError = null;
+    // Get-or-create the TabState for this convo. Sync its cliSessionId in
+    // case it was minted by send() above.
+    const tab = this.ensureTab(this.currentConvoId, this.currentCliSessionId);
+    tab.cliSessionId = this.currentCliSessionId;
+    tab.beginTurn();
     this.lastNotice = null;
-    this.seenToolUseIds.clear();
-    this.deltaCount = 0;
-    this.envelopeTextBuffer = "";
-    this.rawLineLog = [];
-    if (this.drainHandle !== null) {
-      cancelAnimationFrame(this.drainHandle);
-      this.drainHandle = null;
-    }
-    this.pendingText = "";
-    this.thinkingByIndex.clear();
-    this.activeThinkingIndex = null;
-    this.activity = { currentLabel: null, turnStartedAt: Date.now() };
+    // Telemetry: build the turn record + attach to tab. TabState fills it as
+    // envelopes arrive; finalized in onDone/onError.
+    const attachBytes = this.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
+    const turnRecord: TurnRecord = {
+      ts: Date.now(),
+      convoId: this.currentConvoId,
+      cliSessionId: this.currentCliSessionId,
+      isFirstTurn,
+      model: this.model,
+      effort: this.thinkingEffort,
+      effortFlag: effortToFlag(this.thinkingEffort, this.model),
+      promptLen: trimmed.length,
+      promptPreview: trimmed.length > 120 ? trimmed.slice(0, 120) + "…" : trimmed,
+      attachmentsCount: this.composerAttachments.length,
+      attachmentsBytes: attachBytes,
+      envelopeUsage: null,
+      resultUsage: null,
+      modelId: null,
+      costUsd: null,
+      deltaCount: 0,
+      streamEventCount: 0,
+      assistantEnvCount: 0,
+      maxStreamGapMs: 0,
+      toolUses: [],
+      thinkingCount: 0,
+      thinkingTotalMs: 0,
+      thinkingBlocks: [],
+      envelopeFallback: false,
+      blankTurn: false,
+      firstPaintAt: null,
+      doneAt: null,
+      endKind: null,
+    };
+    this.telemetry.turns.push(turnRecord);
+    tab.currentTurnRecord = turnRecord;
     // Track for /retry and Up-arrow recall. De-dupe consecutive identicals.
-    if (this.promptHistory[this.promptHistory.length - 1] !== trimmed) {
-      this.promptHistory = [...this.promptHistory, trimmed].slice(-50);
+    if (tab.promptHistory[tab.promptHistory.length - 1] !== trimmed) {
+      tab.promptHistory = [...tab.promptHistory, trimmed].slice(-50);
     }
     // User bubble text: when paste-and-go with no text, show an attachment
-    // marker so the bubble isn't blank. Persistence is text-only (image data
-    // isn't saved into the convo JSON — claude has it on its side, and the
-    // marker makes the turn legible on reload).
+    // marker so the bubble isn't blank.
     const attachCount = this.composerAttachments.length;
     const bubbleText =
       trimmed.length > 0
@@ -1147,16 +2075,15 @@ class AssistantStore {
         : attachCount === 1
         ? "📎 1 image"
         : `📎 ${attachCount} images`;
-    this.messages = [
-      ...this.messages,
+    tab.messages = [
+      ...tab.messages,
       { id: crypto.randomUUID(), role: "user", blocks: [{ type: "text", text: bubbleText }] },
     ];
     const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [] };
-    this.messages = [...this.messages, asst];
-    this.streamingMsgId = asst.id;
+    tab.messages = [...tab.messages, asst];
+    tab.streamingMsgId = asst.id;
     // Snapshot attachments for this turn + clear the composer so a fast retype
-    // doesn't accidentally re-attach. Pass only the wire-relevant fields to
-    // the backend (drops previewUrl which is only for UI thumbnails).
+    // doesn't accidentally re-attach.
     const turnAttachments = this.composerAttachments.map((a) => ({
       mime: a.mime,
       dataBase64: a.dataBase64,
@@ -1173,7 +2100,7 @@ class AssistantStore {
         thinkingEffort: this.thinkingEffort,
       });
     } catch (e) {
-      this.onError(String(e));
+      tab.onError(String(e));
     }
   }
 
@@ -1200,195 +2127,20 @@ class AssistantStore {
     this.composerAttachments = [];
   }
 
-  private mutateStreaming(fn: (m: ChatMessage) => ChatMessage) {
-    if (!this.streamingMsgId) return;
-    this.messages = this.messages.map((m) => (m.id === this.streamingMsgId ? fn(m) : m));
-  }
-
-  private beginThinking(index: number) {
-    if (this.thinkingByIndex.has(index)) return;
-    this.activeThinkingIndex = index;
-    const startedAt = Date.now();
-    // Push a fresh thinking block into the current assistant message and
-    // remember its offset so subsequent deltas find it after other blocks
-    // are appended.
-    this.mutateStreaming((m) => {
-      const blocks = m.blocks.slice();
-      this.thinkingByIndex.set(index, { blockOffset: blocks.length, startedAt });
-      blocks.push({
-        type: "thinking",
-        text: "",
-        hasSignature: false,
-        startedAt,
-        durationMs: null,
-        status: "active",
-      });
-      return { ...m, blocks };
-    });
-    this.activity = { ...this.activity, currentLabel: "Thinking…" };
-  }
-
-  private mutateThinking(index: number, fn: (b: ThinkingBlock) => ThinkingBlock) {
-    const entry = this.thinkingByIndex.get(index);
-    if (!entry) return;
-    this.mutateStreaming((m) => {
-      const blocks = m.blocks.slice();
-      const target = blocks[entry.blockOffset];
-      if (target && target.type === "thinking") {
-        blocks[entry.blockOffset] = fn(target);
-      }
-      return { ...m, blocks };
-    });
-  }
-
-  private appendThinkingText(index: number, chunk: string) {
-    if (!chunk) return;
-    this.mutateThinking(index, (b) => ({ ...b, text: b.text + chunk }));
-  }
-
-  private markThinkingSignature(index: number) {
-    this.mutateThinking(index, (b) => (b.hasSignature ? b : { ...b, hasSignature: true }));
-  }
-
-  private endThinking(index: number) {
-    const entry = this.thinkingByIndex.get(index);
-    if (!entry) return;
-    const durationMs = Date.now() - entry.startedAt;
-    this.mutateThinking(index, (b) => ({ ...b, status: "done", durationMs }));
-    if (this.activeThinkingIndex === index) {
-      this.activeThinkingIndex = null;
-      // Don't clobber a tool label that may have come in between.
-      if (this.activity.currentLabel === "Thinking…") {
-        this.activity = { ...this.activity, currentLabel: null };
-      }
-    }
-  }
-
-  private ensureThinkingFromEnvelope(block: { thinking?: string; signature?: string }) {
-    // If a thinking block exists for the current message and is still empty,
-    // hydrate it from the envelope. Otherwise append a finalized one.
-    if (!this.streamingMsgId) return;
-    const msg = this.messages.find((m) => m.id === this.streamingMsgId);
-    if (!msg) return;
-    const existing = msg.blocks.find((b) => b.type === "thinking") as ThinkingBlock | undefined;
-    const envText = typeof block.thinking === "string" ? block.thinking : "";
-    const envSig = !!block.signature && block.signature.length > 0;
-    if (existing) {
-      if (envText.length > existing.text.length || (envSig && !existing.hasSignature)) {
-        this.mutateStreaming((m) => ({
-          ...m,
-          blocks: m.blocks.map((b) =>
-            b.type === "thinking" && b === existing
-              ? { ...b, text: envText.length > b.text.length ? envText : b.text, hasSignature: b.hasSignature || envSig }
-              : b,
-          ),
-        }));
-      }
-      return;
-    }
-    this.mutateStreaming((m) => ({
-      ...m,
-      blocks: [
-        ...m.blocks,
-        {
-          type: "thinking",
-          text: envText,
-          hasSignature: envSig,
-          startedAt: Date.now(),
-          durationMs: null,
-          status: "done",
-        },
-      ],
-    }));
-  }
-
-  private appendText(chunk: string) {
-    if (!chunk) return;
-    this.mutateStreaming((m) => {
-      const blocks = m.blocks.slice();
-      const last = blocks[blocks.length - 1];
-      if (last && last.type === "text") {
-        blocks[blocks.length - 1] = { type: "text", text: last.text + chunk };
-      } else {
-        blocks.push({ type: "text", text: chunk });
-      }
-      return { ...m, blocks };
-    });
-  }
-
-  private enqueueText(chunk: string) {
-    if (!chunk) return;
-    this.pendingText += chunk;
-    if (this.drainHandle === null) {
-      this.lastDrainAt = performance.now();
-      this.drainHandle = requestAnimationFrame(this.drainTick);
-    }
-  }
-
-  private drainTick = () => {
-    if (this.pendingText.length === 0) {
-      this.drainHandle = null;
-      return;
-    }
-    const now = performance.now();
-    const dt = Math.min(now - this.lastDrainAt, 100);
-    this.lastDrainAt = now;
-    const rate = Math.max(120, this.pendingText.length / 0.4);
-    const n = Math.min(
-      this.pendingText.length,
-      Math.max(1, Math.round((rate * dt) / 1000)),
-    );
-    const chunk = this.pendingText.slice(0, n);
-    this.pendingText = this.pendingText.slice(n);
-    this.appendText(chunk);
-    this.drainHandle = requestAnimationFrame(this.drainTick);
-  };
-
-  private flushPendingText() {
-    if (this.drainHandle !== null) {
-      cancelAnimationFrame(this.drainHandle);
-      this.drainHandle = null;
-    }
-    if (this.pendingText.length > 0) {
-      this.appendText(this.pendingText);
-      this.pendingText = "";
-    }
-  }
-
   /** User-driven pin from a chat checklist into the Tasks dock.
    *  Items arrive as plain text + checked flag from rendered HTML. */
   pinTasksFromChecklist(items: Array<{ content: string; checked: boolean }>) {
     if (items.length === 0) return;
-    this.tasks = items.map((t, i) => ({
+    const tab = this.activeTab;
+    if (!tab) return;
+    tab.tasks = items.map((t, i) => ({
       id: `pin-${Date.now()}-${i}`,
       content: t.content,
       status: t.checked ? "completed" : "pending",
     }));
     this.ui.tasksUpdatedAt = Date.now();
     this.ui.dockOpen = true;
-    this.dockAutoOpenedThisConvo = true;
-  }
-
-  private applyTodoWrite(input: Record<string, unknown> | undefined) {
-    const raw = (input?.todos ?? []) as Array<{ content?: string; status?: string }>;
-    const next = raw
-      .filter((t) => typeof t?.content === "string")
-      .map((t, i) => ({
-        id: `todo-${i}-${t.content!.slice(0, 24)}`,
-        content: t.content!,
-        status: (t.status === "in_progress" || t.status === "completed" ? t.status : "pending") as
-          | "pending"
-          | "in_progress"
-          | "completed",
-      }));
-    this.tasks = next;
-    this.ui.tasksUpdatedAt = Date.now();
-    // First TodoWrite of a conversation auto-opens the dock once. If user
-    // closes it after, we respect that — no re-open on subsequent updates.
-    if (next.length > 0 && !this.dockAutoOpenedThisConvo) {
-      this.ui.dockOpen = true;
-      this.dockAutoOpenedThisConvo = true;
-    }
+    tab.dockAutoOpenedThisConvo = true;
   }
 
   private shortToolLabel(name: string, input?: Record<string, unknown>): string {
@@ -1431,285 +2183,46 @@ class AssistantStore {
     return base;
   }
 
-  private appendToolUse(block: { id: string; name: string; input?: Record<string, unknown> }) {
-    if (this.seenToolUseIds.has(block.id)) return;
-    this.seenToolUseIds.add(block.id);
-    // TodoWrite is intercepted — routes to Tasks dock instead of an inline card.
-    if (block.name === "TodoWrite") {
-      this.applyTodoWrite(block.input);
-      return;
-    }
-    // Surface all whitelisted workspace tools — Claude Code built-ins
-    // (Read/Write/Edit/Bash/Glob/Grep/WebFetch/WebSearch) and Rift's MCP
-    // variants. Deny-list CLI-internal helpers we never want in the chat UI.
-    const DENY = new Set(["ToolSearch"]);
-    if (DENY.has(block.name)) return;
-    this.activity = { ...this.activity, currentLabel: this.shortToolLabel(block.name, block.input) };
-    // Tool calls render inline in the chat now (ToolChip + EditDiff). The
-    // dock is reserved for TodoWrite-driven multi-step plans, so we no
-    // longer auto-open on the first tool call. `applyTodoWrite` still
-    // opens it when a real plan lands.
-    this.mutateStreaming((m) => ({
-      ...m,
-      blocks: [
-        ...m.blocks,
-        {
-          type: "tool",
-          id: block.id,
-          name: block.name,
-          input: block.input ?? {},
-          result: null,
-          isError: false,
-          status: "pending",
-        },
-      ],
-    }));
-  }
+  // appendToolUse / recordTurnUsage / resetUsage / fillToolResult / onStream /
+  // onDone / onError all moved to TabState. Cross-cutting effects (queue drain,
+  // save, dock-open) reach back through the callback hooks set in wireTab().
 
-  /** Parse a `usage` block from a stream-json envelope and update
-   *  `lastTurnUsage` always; only the `result` envelope (`accumulate=true`)
-   *  contributes to `sessionUsage` since both `assistant.message.usage` and
-   *  `result.usage` carry the same end-of-turn tally — accumulating both
-   *  would double-count. `lastTurnUsage` (per-turn live view) takes whichever
-   *  comes last, which is `result` in practice. Fields default to 0 when
-   *  absent so partial blocks don't poison the counters. */
-  private recordTurnUsage(u: Record<string, unknown>, accumulate: boolean) {
-    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-    const turn = {
-      input: num(u.input_tokens),
-      output: num(u.output_tokens),
-      cacheRead: num(u.cache_read_input_tokens),
-      cacheCreate: num(u.cache_creation_input_tokens),
-    };
-    // Skip empty-usage echoes (some envelopes carry a {} usage on retry).
-    if (turn.input + turn.output + turn.cacheRead + turn.cacheCreate === 0) return;
-    this.lastTurnUsage = turn;
-    if (accumulate) {
-      this.sessionUsage = {
-        totalInput: this.sessionUsage.totalInput + turn.input,
-        totalOutput: this.sessionUsage.totalOutput + turn.output,
-        totalCacheRead: this.sessionUsage.totalCacheRead + turn.cacheRead,
-        totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
-        turns: this.sessionUsage.turns + 1,
-      };
-    }
-  }
-
-  /** Reset all token-usage telemetry for a fresh conversation. Called from
-   *  `newConversation`, `newTab`, and `loadConversation` (different convo on
-   *  disk means stale counters). */
-  private resetUsage() {
-    this.lastTurnUsage = null;
-    this.sessionUsage = { totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 };
-    this.lastModelId = null;
-  }
-
-  private fillToolResult(toolUseId: string, content: string, isError: boolean) {
-    this.mutateStreaming((m) => ({
-      ...m,
-      blocks: m.blocks.map((b) =>
-        b.type === "tool" && b.id === toolUseId
-          ? { ...b, result: content, isError, status: isError ? "error" : "done" }
-          : b,
-      ),
-    }));
-  }
-
-  private onStream(raw: string) {
-    // Ring-buffer raw lines so a blank-turn fallback or post-mortem can dump them.
-    if (this.rawLineLog.length >= 200) this.rawLineLog.shift();
-    this.rawLineLog.push(raw);
-    let env: StreamEnvelope;
-    try {
-      env = JSON.parse(raw) as StreamEnvelope;
-    } catch {
-      // Non-JSON line on stdout — happens when the CLI silently downgrades
-      // from stream-json to plain text (version/flag drift). Render it as
-      // assistant text so the bubble isn't blank. Increment deltaCount to
-      // suppress the envelope fallback in onDone().
-      if (this.streaming && this.streamingMsgId && raw.length > 0) {
-        const prefix = this.deltaCount > 0 ? "\n" : "";
-        this.deltaCount++;
-        this.enqueueText(prefix + raw);
-      } else {
-        console.debug("assistant stream: non-JSON line (idle)", raw);
-      }
-      return;
-    }
-    switch (env.type) {
-      case "stream_event": {
-        const ev = env.event;
-        const evType = ev?.type;
-        const idx = typeof ev?.index === "number" ? ev.index : null;
-        if (evType === "content_block_start" && ev?.content_block?.type === "thinking" && idx !== null) {
-          this.beginThinking(idx);
-        } else if (evType === "content_block_delta") {
-          const d = ev?.delta;
-          if (d?.type === "text_delta" && d.text) {
-            this.deltaCount++;
-            this.enqueueText(d.text);
-          } else if (d?.type === "thinking_delta" && typeof d.thinking === "string" && idx !== null) {
-            this.appendThinkingText(idx, d.thinking);
-          } else if (d?.type === "signature_delta" && idx !== null) {
-            this.markThinkingSignature(idx);
-          }
-        } else if (evType === "content_block_stop" && idx !== null) {
-          this.endThinking(idx);
-        }
-        break;
-      }
-      case "assistant": {
-        // Capture every tool_use block so its card renders before the
-        // tool_result arrives. Text blocks are normally streamed via
-        // stream_event deltas, but we also buffer their final text here as
-        // a fallback for when --include-partial-messages emits zero deltas
-        // (CLI version drift, certain short responses). Flushed in onDone()
-        // if deltaCount stayed 0.
-        const msgUsage = (env.message as { usage?: Record<string, unknown> } | undefined)?.usage;
-        if (msgUsage) this.recordTurnUsage(msgUsage, false);
-        for (const block of env.message?.content ?? []) {
-          if (block.type === "tool_use") {
-            this.appendToolUse(block);
-          } else if (block.type === "text" && typeof block.text === "string") {
-            this.envelopeTextBuffer += block.text;
-          } else if (block.type === "thinking") {
-            // Final form of a thinking block. If we never saw stream events
-            // for it (e.g. older CLI w/o partial-message support for
-            // thinking), synthesize one now from the envelope alone.
-            this.ensureThinkingFromEnvelope(block);
-          }
-        }
-        break;
-      }
-      case "user": {
-        // Tool results from the CLI side.
-        for (const block of env.message?.content ?? []) {
-          if (block.type === "tool_result") {
-            this.fillToolResult(
-              block.tool_use_id,
-              flattenToolResult(block.content),
-              block.is_error === true,
-            );
-          }
-        }
-        break;
-      }
-      case "result": {
-        if (typeof env.total_cost_usd === "number") {
-          // CLI emits the cost FOR THIS RUN — accumulate across turns so
-          // /cost reports the full session, not just the last turn.
-          this.totalCostUsd = (this.totalCostUsd ?? 0) + env.total_cost_usd;
-          // Pin per-turn cost to the streaming assistant message so the
-          // bubble can render a tiny "$0.0042" pill next to "Claude".
-          const turnCost = env.total_cost_usd;
-          this.mutateStreaming((m) => ({ ...m, costUsd: turnCost }));
-        }
-        // The result envelope carries the final, server-confirmed usage —
-        // sometimes more accurate than the streamed `assistant` event's
-        // usage when partial-message buffering is in play.
-        const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
-        if (resultUsage) this.recordTurnUsage(resultUsage, true);
-        if (env.subtype && env.subtype !== "success") {
-          this.lastError = `Run ended with subtype: ${env.subtype}`;
-        }
-        break;
-      }
-      case "system": {
-        // CLI emits a `{type:"system",subtype:"init",...,model:"..."}` line
-        // at the start of every spawn. Capture the resolved model id so the
-        // bubble's per-turn badge shows what actually ran (e.g. "sonnet" alias
-        // → "claude-sonnet-4-6"). Also pinned on the store for the
-        // context-window pill to pick the right cap (200K vs 1M).
-        const sysModel = typeof env.model === "string" ? env.model : null;
-        if (sysModel) {
-          this.lastModelId = sysModel;
-          this.mutateStreaming((m) => ({ ...m, model: sysModel }));
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  }
-
-  private onDone() {
-    // Drain any text still sitting in the pacer buffer before deciding whether
-    // we need the envelope fallback — pending counts as "deltas arrived."
-    this.flushPendingText();
-    // Fallback: zero text deltas this turn → CLI shipped full text only in
-    // the final assistant envelope. Flush it now so the bubble isn't blank.
-    if (this.deltaCount === 0 && this.envelopeTextBuffer.length > 0) {
-      this.appendText(this.envelopeTextBuffer);
-      console.debug(
-        `[assistant] envelope-fallback flushed ${this.envelopeTextBuffer.length} chars (zero deltas this turn)`,
-      );
-    } else if (this.deltaCount === 0 && this.envelopeTextBuffer.length === 0) {
-      // Genuinely blank turn — dump raw NDJSON to console AND surface to UI
-      // so the user doesn't need DevTools to diagnose. Skip if any tool calls
-      // fired (those are visible inline and a text-less assistant turn is valid).
-      const msg = this.streamingMsgId
-        ? this.messages.find((m) => m.id === this.streamingMsgId)
-        : null;
-      const hadTools = !!msg && msg.blocks.some((b) => b.type === "tool");
-      if (!hadTools) {
-        const lines = this.rawLineLog.slice();
-        console.warn(
-          "[assistant] turn ended with no text and no tools. Raw stream lines:",
-          lines,
-        );
-        // Pretty-print the envelope types we did see — a quick fingerprint of
-        // what the CLI emitted. Full lines are in console.
-        const types: string[] = [];
-        const nonJsonSamples: string[] = [];
-        for (const ln of lines) {
-          try {
-            const parsed = JSON.parse(ln) as { type?: string; subtype?: string };
-            types.push(parsed.subtype ? `${parsed.type}:${parsed.subtype}` : (parsed.type ?? "?"));
-          } catch {
-            types.push("non-json");
-            if (nonJsonSamples.length < 3) {
-              nonJsonSamples.push(ln.length > 240 ? ln.slice(0, 240) + "…" : ln);
-            }
-          }
-        }
-        const fingerprint = `[${types.join(", ")}]`;
-        const tail =
-          nonJsonSamples.length > 0
-            ? ` Non-JSON output: ${nonJsonSamples.map((s) => `"${s}"`).join(" | ")}`
-            : " Full NDJSON in DevTools console.";
-        this.lastError = `Blank response — CLI emitted ${lines.length} line(s): ${fingerprint}.${tail}`;
-      }
-    }
-    this.streaming = false;
-    this.streamingMsgId = null;
-    this.seenToolUseIds.clear();
-    this.activity = { ...this.activity, currentLabel: null };
-    // Persist the just-completed turn. Debounced so a queued message that
-    // fires the next turn within ~700ms only writes once.
+  /** Called by TabState.onTurnComplete via the callback wired in wireTab().
+   *  Persists the just-completed turn (debounced) and drains the queue if
+   *  the turn that finished was on the active tab. Bg-tab queue drain is
+   *  deferred until the user returns to that tab — auto-sending into a
+   *  background tab while the user is composing in the foreground would be
+   *  surprising. Known follow-up: scheduleSave still scoped to active tab,
+   *  so a bg-tab turn waits until tab activation for persistence (covered
+   *  on close via flushNow). */
+  private handleTurnComplete(tab: TabState) {
     this.scheduleSave();
-    // Drain the next queued message, if any. Run on next tick so the just-
-    // finished assistant turn is fully painted before we kick off another.
-    if (this.queue.length > 0) {
-      const [next, ...rest] = this.queue;
-      this.queue = rest;
+    if (tab === this.activeTab && tab.queue.length > 0 && !tab.streaming) {
+      const [next, ...rest] = tab.queue;
+      tab.queue = rest;
       queueMicrotask(() => void this.send(next.text));
     }
   }
 
+  /** Stop the active tab's in-flight stream. Pre-clears the tab's streaming
+   *  flag synchronously so any late `done` event for this session is
+   *  idempotent (the kill propagates the late event AFTER the user may have
+   *  already switched tabs). Background tabs keep streaming. */
   async stop() {
-    if (!this.streaming) return;
-    const sid = this.currentCliSessionId;
-    if (!sid) return;
-    // Synchronously clear this session's streaming flag + active-tab cleanup
-    // BEFORE awaiting the kill. The backend emits a done event after the
-    // child reaps, but if the user has already switched tabs by then the
-    // event's session_id won't match currentCliSessionId and the UI cleanup
-    // wouldn't run — leaving `streaming` stuck at true and blocking the
-    // new tab's first send. Pre-clearing here makes the late event idempotent.
-    this.setSessionStreaming(sid, false);
-    this.streamingMsgId = null;
-    this.seenToolUseIds.clear();
-    this.activity = { ...this.activity, currentLabel: null };
+    const tab = this.activeTab;
+    if (!tab || !tab.streaming) return;
+    const sid = tab.cliSessionId;
+    tab.streaming = false;
+    tab.streamingMsgId = null;
+    tab.seenToolUseIds.clear();
+    tab.activity = { ...tab.activity, currentLabel: null };
+    // Telemetry finalize as user-stop before the late done event lands.
+    if (tab.currentTurnRecord) {
+      tab.currentTurnRecord.doneAt = Date.now();
+      tab.currentTurnRecord.endKind = "user-stop";
+      tab.currentTurnRecord = null;
+    }
+    this.telemetry.event("turn.stop", { convoId: tab.cliSessionId });
     try {
       await invoke("assistant_stop", { sessionId: sid });
     } catch (e) {
@@ -1768,10 +2281,62 @@ class AssistantStore {
           "Rift MCP: read_file / list_dir / grep (workspace-scoped helpers)" +
           (this.allowRemoteShell ? "; remote_bash (russh exec on the active SSH session)." : ".");
         return true;
+      case "diag": {
+        const snap = this.telemetry.snapshot();
+        const json = JSON.stringify(snap, null, 2);
+        const sizeKb = Math.round(json.length / 102.4) / 10;
+        navigator.clipboard
+          .writeText(json)
+          .then(() => {
+            this.lastNotice = `Telemetry copied — ${snap.turnCount} turn(s), ${snap.events.length} event(s), ${sizeKb}KB. Paste into a code block here.`;
+          })
+          .catch((e) => { this.lastError = `Clipboard write failed: ${String(e)}`; });
+        return true;
+      }
+      case "diag-clear":
+        this.telemetry.reset();
+        this.lastNotice = "Telemetry buffer cleared — fresh capture starting now.";
+        return true;
+      case "stats": {
+        // Inline-readable session summary — same data as /diag's `summary`
+        // block but rendered as a short notice line so you can pattern-hunt
+        // without dumping JSON. Cheap to fire repeatedly mid-session.
+        const snap = this.telemetry.snapshot();
+        const s = snap.summary;
+        if (s.totalTurns === 0) {
+          this.lastNotice = "No turns captured yet this session — send a message first.";
+          return true;
+        }
+        const slowT = s.slowestTurn ? ` slowest turn #${s.slowestTurn.idx} ${(s.slowestTurn.durationMs / 1000).toFixed(1)}s` : "";
+        const costT = s.costliestTurn ? ` costliest #${s.costliestTurn.idx} $${s.costliestTurn.costUsd.toFixed(3)}` : "";
+        const slowTool = s.slowestTool ? ` slowest tool ${s.slowestTool.name} ${(s.slowestTool.durationMs / 1000).toFixed(1)}s` : "";
+        const stale = s.staleCacheTurns > 0 ? ` ⚠ ${s.staleCacheTurns} stale-cache turn(s)` : "";
+        const tps = s.outputTokensPerSec != null ? `, ${s.outputTokensPerSec} tok/s` : "";
+        this.lastNotice =
+          `${s.totalTurns} turn(s), $${s.totalCostUsd.toFixed(3)}, ` +
+          `avg TTFP ${s.avgTtfpMs ?? "—"}ms, ${s.toolCallTotal} tool call(s)${tps}.` +
+          slowT + costT + slowTool + stale;
+        return true;
+      }
+      case "openincli": {
+        const sid = this.currentCliSessionId;
+        const ws = this.workspace.current;
+        if (!sid) {
+          this.lastError = "No active session yet — send a message first.";
+          return true;
+        }
+        const cmd = ws ? `cd "${ws}" && claude --resume ${sid}` : `claude --resume ${sid}`;
+        navigator.clipboard
+          .writeText(cmd)
+          .then(() => { this.lastNotice = `Copied to clipboard: ${cmd}`; })
+          .catch((e) => { this.lastError = `Clipboard write failed: ${String(e)}`; });
+        return true;
+      }
       case "help":
         this.lastNotice =
-          "Slash commands: /new · /history · /model · /retry · /copy · /stop · /tools · /cost · /help. " +
-          "Aliases: /clear → /new. Up-arrow recalls previous prompts.";
+          "Slash commands: /new · /history · /model · /retry · /copy · /stop · /tools · /cost · /openincli · /diag · /diag-clear · /help. " +
+          "Aliases: /clear → /new. /openincli copies a `claude --resume` command for the standalone CLI. " +
+          "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
         return true;
       default:
         return false;
@@ -1782,20 +2347,21 @@ class AssistantStore {
    *  pair from the visible history so the retry looks like a redo, not a
    *  duplicate. Aborts an in-flight stream first. */
   async retryLast() {
-    const last = this.promptHistory[this.promptHistory.length - 1];
-    if (!last) {
+    const tab = this.activeTab;
+    const last = tab?.promptHistory[tab.promptHistory.length - 1];
+    if (!last || !tab) {
       this.lastError = "No previous prompt to retry.";
       return;
     }
-    if (this.streaming) {
+    if (tab.streaming) {
       await this.stop();
     }
     // Strip the trailing assistant turn (if any) and the matching user turn
     // so the replayed history doesn't double-include the prompt.
-    const msgs = this.messages.slice();
+    const msgs = tab.messages.slice();
     if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
     if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
-    this.messages = msgs;
+    tab.messages = msgs;
     await this.send(last);
   }
 
@@ -1832,33 +2398,21 @@ class AssistantStore {
     this.lastNotice = null;
   }
 
-  private onError(msg: string) {
-    this.lastError = msg;
-    this.streaming = false;
-    if (this.drainHandle !== null) {
-      cancelAnimationFrame(this.drainHandle);
-      this.drainHandle = null;
-    }
-    this.pendingText = "";
-    if (this.streamingMsgId) {
-      const id = this.streamingMsgId;
-      this.messages = this.messages.filter(
-        (m) => !(m.id === id && m.blocks.length === 0),
-      );
-      this.streamingMsgId = null;
-    }
-    this.seenToolUseIds.clear();
-  }
-
+  /** Hard-reset everything visible in the active tab. Used by external
+   *  callers that need a "wipe this conversation" — not the same as
+   *  newTab/newConversation which also touch tab lifecycle. */
   clear() {
-    this.messages = [];
-    this.lastError = null;
+    const tab = this.activeTab;
+    if (tab) {
+      tab.messages = [];
+      tab.lastError = null;
+      tab.totalCostUsd = null;
+      tab.tasks = [];
+      tab.promptHistory = [];
+      tab.dockAutoOpenedThisConvo = false;
+    }
     this.lastNotice = null;
-    this.totalCostUsd = null;
-    this.tasks = [];
     this.queue = [];
-    this.promptHistory = [];
-    this.dockAutoOpenedThisConvo = false;
     this.ui.dockOpen = false;
   }
 }
