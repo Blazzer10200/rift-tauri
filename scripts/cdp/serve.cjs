@@ -39,7 +39,12 @@ async function getTarget() {
     const res = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json`);
     if (!res.ok) throw new Error(`CDP /json HTTP ${res.status}`);
     const list = await res.json();
-    const page = list.find(t => t.type === 'page');
+    // Pick the Rift page, not DevTools window (also type=page when user has F12 open).
+    const isRift = (t) =>
+        t.type === 'page' &&
+        !/^devtools:\/\//.test(t.url || '') &&
+        !/^DevTools\b/.test(t.title || '');
+    const page = list.find(isRift) || list.find(t => t.type === 'page');
     if (!page) throw new Error('no page target in CDP list');
     return page;
 }
