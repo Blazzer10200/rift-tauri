@@ -13,7 +13,7 @@
 pub mod mcp_server;
 pub mod remote_bridge;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -264,6 +264,91 @@ fn convo_path(id: &str) -> Result<PathBuf, String> {
     Ok(conversations_dir()?.join(format!("{id}.json")))
 }
 
+/// Sidecar holding the workspace cwd that was active when a session was first
+/// created. The claude CLI stores its transcript JSONL under
+/// `~/.claude/projects/<cwd-hash>/<uuid>.jsonl`, and `--resume <uuid>` only
+/// searches the CURRENT cwd's hash dir — it does NOT fall back across dirs
+/// (anthropics/claude-code#35226). So if the user's active workspace changes
+/// between turns (folder swap, autosync engine flip, root vanishes), the
+/// resume target moves and the session goes silently stale ("session lost"
+/// → frontend pops messages → all history dropped). Pinning cwd per session
+/// keeps every turn aimed at the same JSONL.
+fn session_cwd_path(id: &str) -> Result<PathBuf, String> {
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(format!("invalid session id: {id}"));
+    }
+    let home = dirs_home()?;
+    let dir = home.join(".rift").join("assistant").join("sessions");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir sessions: {e}"))?;
+    Ok(dir.join(format!("{id}.cwd")))
+}
+
+fn save_session_cwd(id: &str, cwd: &Path) {
+    if let Ok(p) = session_cwd_path(id) {
+        let s = cwd.to_string_lossy();
+        if let Err(e) = std::fs::write(&p, s.as_bytes()) {
+            log::warn!("assistant: save session cwd {}: {e}", p.display());
+        }
+    }
+}
+
+fn load_session_cwd(id: &str) -> Option<PathBuf> {
+    let p = session_cwd_path(id).ok()?;
+    let s = std::fs::read_to_string(&p).ok()?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
+fn delete_session_cwd(id: &str) {
+    if let Ok(p) = session_cwd_path(id) {
+        let _ = std::fs::remove_file(&p);
+    }
+}
+
+/// Lexical common ancestor of a set of paths. Returns `None` if the paths
+/// share nothing beyond filesystem root, if the result has no parent (drive
+/// or fs root), or if the result is not a directory on disk.
+///
+/// Motivation: when AutoSync watches a FiveM server, each resource directory
+/// (e.g. `[voice]/`, `[ox]/`, `qbx_core/`) becomes its own FolderWatch with
+/// its own `local_root`. `roots[0]` ends up at whichever sorts first — for
+/// FiveM that's an `[bracket]` resource (`[` = 0x5B, before letters) — and
+/// the Assistant's cwd lands inside that single resource rather than at
+/// `resources/` where every resource is visible. Substituting the common
+/// ancestor in as `roots[0]` fixes the "workspace is just `[voice]`" gripe.
+fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
+    let mut iter = paths.iter();
+    let first = iter.next()?;
+    let mut common: Vec<std::path::Component> = first.components().collect();
+    for p in iter {
+        let other: Vec<_> = p.components().collect();
+        let new_len = common
+            .iter()
+            .zip(other.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        common.truncate(new_len);
+        if common.is_empty() {
+            return None;
+        }
+    }
+    let mut result = PathBuf::new();
+    for c in &common {
+        result.push(c.as_os_str());
+    }
+    if result.as_os_str().is_empty() || result.parent().is_none() {
+        return None;
+    }
+    if !result.is_dir() {
+        return None;
+    }
+    Some(result)
+}
+
 #[tauri::command]
 pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
     let dir = conversations_dir()?;
@@ -326,6 +411,7 @@ pub fn assistant_save_conversation(convo: Conversation) -> Result<(), String> {
 #[tauri::command]
 pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
     let p = convo_path(&id)?;
+    delete_session_cwd(&id);
     match std::fs::remove_file(&p) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -645,11 +731,11 @@ const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding 
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
-/// Build a single-line per-turn addendum that describes the live AutoSync /
-/// LockPresence state — foreign locks held by other users, sync queue depth,
-/// recent DiagBus stage events. Concatenated onto `RIFT_SYSTEM_ADDENDUM_TOOLS`
-/// per turn so the model sees fresh multi-writer state. Returns an empty
-/// string when no AutoSync engine is active (no signal worth surfacing).
+/// Build a per-turn snapshot of the live AutoSync / LockPresence state —
+/// foreign locks held by other users, sync queue depth, recent DiagBus stage
+/// events. Wrapped in a `<system-reminder>` on the USER turn (not the system
+/// prompt) so the cached system prefix stays stable across turns. Returns
+/// an empty string when no AutoSync engine is active.
 async fn gather_workspace_context(state: &crate::AutoSyncState) -> String {
     let engine = { state.0.lock().await.clone() };
     let Some(engine) = engine else { return String::new(); };
@@ -703,9 +789,9 @@ async fn gather_workspace_context(state: &crate::AutoSyncState) -> String {
 
     parts.push("If you read a file more than ~30 s ago, re-read before editing — another writer may have changed it.".into());
 
-    // Force single-line for the Rust 1.77 batch-arg validator (CVE-2024-24576).
-    let joined = parts.join(" ");
-    joined.replace('\n', " ").replace('\r', " ")
+    // Newline-separated for readability inside the <system-reminder> block.
+    // No argv constraint here (rides stdin, not process args).
+    parts.join("\n")
 }
 
 fn rel_age(when: chrono::DateTime<chrono::Utc>) -> String {
@@ -816,15 +902,22 @@ pub async fn assistant_send(
     let model = model.unwrap_or_else(|| "sonnet".to_string());
 
     // Workspace root resolution — priority order:
+    //   0. (Resume only) The cwd that was active when this session was created,
+    //      loaded from the sidecar. Pins every turn to the same
+    //      `~/.claude/projects/<cwd-hash>/<uuid>.jsonl` so --resume succeeds
+    //      even after the user opens a different workspace.
     //   1. The user's explicitly-opened folder (`current_root` in config).
-    //      Set by `assistant_set_root`; cleared by `assistant_clear_root`.
-    //      Matches VS Code's "open folder" model — one root at a time.
-    //   2. AutoSync server folders if any are connected. Keeps the FiveM/RedM
-    //      flow working unchanged when the user hasn't opened a folder.
+    //   2. AutoSync server folders if any are connected.
     //   3. Empty → no-tools turn + no-workspace addendum.
-    // Validate the configured root still exists; if it was deleted/moved
-    // out-of-band, fall through to AutoSync rather than fail the turn.
-    let roots: Vec<PathBuf> = if let Some(root) = cfg.current_root.as_ref().filter(|p| p.is_dir()) {
+    // Validate every candidate still exists on disk; missing dir → fall through.
+    let pinned_cwd: Option<PathBuf> = if is_first_turn {
+        None
+    } else {
+        load_session_cwd(&session_id).filter(|p| p.is_dir())
+    };
+    let mut roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
+        vec![p]
+    } else if let Some(root) = cfg.current_root.as_ref().filter(|p| p.is_dir()) {
         vec![root.clone()]
     } else {
         let guard = state.0.lock().await;
@@ -838,6 +931,30 @@ pub async fn assistant_send(
             })
             .unwrap_or_default()
     };
+    // When AutoSync surfaces N folders (one per FiveM resource), the
+    // alphabetically-first wins as cwd — typically a `[bracket]` resource
+    // ('[' = 0x5B). Prepend the lexical common ancestor so the model's cwd
+    // lands at the parent (e.g. `<server>/resources/`) and every resource is
+    // visible. Only applies to the AutoSync path (multiple roots, no pin,
+    // no explicit current_root) — existing pinned conversations keep their
+    // captured cwd to preserve session continuity even if it's narrower.
+    if pinned_cwd.is_none() && cfg.current_root.is_none() && roots.len() > 1 {
+        if let Some(anc) = common_ancestor(&roots) {
+            if !roots.iter().any(|r| r == &anc) {
+                roots.insert(0, anc);
+            }
+        }
+    }
+    // Pin the cwd on first turn so every subsequent --resume aims at the same
+    // session JSONL even if the user later switches workspace folders. Also
+    // covers the legacy-migration path: existing pre-pin conversations have
+    // no sidecar on disk; the first turn after upgrade captures whatever
+    // workspace is currently active and locks the session there.
+    if let Some(first) = roots.first() {
+        if is_first_turn || pinned_cwd.is_none() {
+            save_session_cwd(&session_id, first);
+        }
+    }
 
     // Remote-shell tool only fires when the user toggled it on AND the parent
     // can stand up the loopback bridge. Bridge `start` is idempotent — first
@@ -857,7 +974,10 @@ pub async fn assistant_send(
     let remote_shell_enabled = allow_remote_shell && bridge_info.is_some();
 
     // Provision a temp MCP config when we have at least one root. Addendum is
-    // a `String` (not &'static str) so we can append per-turn workspace state.
+    // a `String` (not &'static str) so we can append per-session toggles
+    // (remote_shell, dyslexia) — anything that changes PER TURN goes through
+    // the user-turn <system-reminder> path below instead, to keep the system
+    // prompt cache-stable.
     let (mcp_config_path, mut addendum) = if roots.is_empty() {
         (None, RIFT_SYSTEM_ADDENDUM_NO_WS.to_string())
     } else {
@@ -870,13 +990,6 @@ pub async fn assistant_send(
         }
     };
 
-    // S73: splice live multi-writer state onto the addendum. Single-line so
-    // the .cmd-shim batch-arg validator (Rust 1.77+) accepts it.
-    let ws_ctx = gather_workspace_context(&state).await;
-    if !ws_ctx.is_empty() {
-        addendum.push(' ');
-        addendum.push_str(&ws_ctx);
-    }
     if remote_shell_enabled {
         addendum.push_str(" A `mcp__rift__remote_bash` tool is available — runs a shell command over SSH against the active remote server (reuses the auto-sync engine's russh session). Use sparingly for ops work (status checks, pm2 restart, etc.); a workspace-scoped advisory lock serializes calls between users.");
     }
@@ -926,6 +1039,12 @@ pub async fn assistant_send(
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
     cmd.arg("-p")
         .arg("--append-system-prompt").arg(addendum)
+        // Moves the CLI's own per-machine sections (cwd, env info, memory
+        // paths, git status) out of the system prompt and into the first user
+        // message. Keeps the cached system-prompt prefix stable across users
+        // and across our own per-turn workspace-context injection, which now
+        // also rides the user message via <system-reminder>.
+        .arg("--exclude-dynamic-system-prompt-sections")
         .arg("--output-format").arg("stream-json")
         .arg("--input-format").arg(if has_attachments { "stream-json" } else { "text" })
         .arg("--verbose")
@@ -1019,6 +1138,24 @@ pub async fn assistant_send(
         session_id, is_first_turn, model, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
     );
 
+    // Build the per-turn user-message text BEFORE spawning so the child
+    // doesn't sit idle on stdin while we lock state. Live workspace state
+    // (foreign locks, sync queue, recent diag events) rides the USER message
+    // via a <system-reminder> block instead of `--append-system-prompt`. A
+    // dynamic system prompt invalidates the cache prefix every turn (cache
+    // layout: system → tools → CLAUDE.md → conversation tail); moving fresh
+    // per-turn data into the user turn keeps the prefix cache-stable. Multi-
+    // line is fine inside the user text (rides stdin, no argv constraint).
+    let ws_ctx = gather_workspace_context(&state).await;
+    let effective_prompt = if ws_ctx.is_empty() {
+        prompt.clone()
+    } else {
+        format!(
+            "<system-reminder>\n{}\n</system-reminder>\n\n{}",
+            ws_ctx, prompt
+        )
+    };
+
     USER_STOPPED.store(false, Ordering::SeqCst);
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     set_current_pid(child.id());
@@ -1031,7 +1168,7 @@ pub async fn assistant_send(
         use tokio::io::AsyncWriteExt;
         let payload: Vec<u8> = if has_attachments {
             let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
-            content.push(serde_json::json!({ "type": "text", "text": prompt }));
+            content.push(serde_json::json!({ "type": "text", "text": effective_prompt }));
             for a in &attachments {
                 content.push(serde_json::json!({
                     "type": "image",
@@ -1051,7 +1188,7 @@ pub async fn assistant_send(
             line.push(b'\n');
             line
         } else {
-            prompt.as_bytes().to_vec()
+            effective_prompt.as_bytes().to_vec()
         };
         if let Err(e) = stdin.write_all(&payload).await {
             return Err(format!("write prompt to stdin: {e}"));
