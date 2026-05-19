@@ -16,8 +16,9 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Backend | `src-tauri/src/` |
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
-| Audit notes | `docs/AUDIT.md` (merged 2026-05-15 from `docs/audit/`) |
-| Design briefs | `docs/design/` (1 active: `assistant-roadmap.md` from S70; shipped briefs in `docs/archive/design/`) |
+| Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
+| Audit fix-log (historical) | `docs/archive/AUDIT-fix-log.md` (S81-S86 + Codex passes) |
+| Design briefs | `docs/design/` (1 active: `assistant-compaction.md`; shipped briefs in `docs/archive/design/`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
