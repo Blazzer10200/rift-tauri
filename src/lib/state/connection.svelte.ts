@@ -13,8 +13,19 @@ export type ServerProfile = {
   fingerprint?: string | null;
   txAdminUrl?: string | null;
   bridgePort?: number | null;
-  bridgeToken?: string | null;
+  /** #9.1: token never crosses the IPC boundary. Backend signals presence
+   *  via this flag so the UI can render "bridge configured" state. To set
+   *  or rotate the token, send it on `save_server`; an empty value during
+   *  edit means "keep existing". */
+  hasBridgeToken?: boolean;
   addedAt?: string | null;
+};
+
+/** Payload for `save_server` — distinct from the read-side `ServerProfile`
+ *  because the write path is the only place the renderer ever supplies a
+ *  raw `bridgeToken`. */
+export type ServerProfileWritable = Omit<ServerProfile, "hasBridgeToken"> & {
+  bridgeToken?: string | null;
 };
 
 export type AutoSyncState = "idle" | "syncing" | "error" | "disabled" | "watching";
@@ -122,6 +133,14 @@ class ConnectionStore {
   /** Always replace (new Set(...)) — in-place .add()/.delete() is not reactive in runes mode. */
   dirtyEdits = $state<Set<string>>(new Set());
   pendingReuploads = $state<EditChangedEvent[]>([]);
+  /** ms-epoch of the most recent successful scan/sync completion. Stamped on
+   *  start_autosync resolve and on every `drift_scan_result` diag event. Null
+   *  until the first scan lands. Surfaced by StatusBar as "last scan Xs ago". */
+  lastScanAt = $state<number | null>(null);
+  /** Phase 2 sync→activity deeplink. SyncPage WatchedFoldersTable row click sets
+   *  this to the resource name + flips workspace to "activity"; ActivityFeed reads
+   *  it once on mount and clears. Null between handoffs. */
+  activityFilter = $state<string | null>(null);
 
   selected = $derived(
     this.selectedKey
@@ -256,6 +275,7 @@ class ConnectionStore {
       folders,
     });
     this.status = status;
+    this.lastScanAt = Date.now();
   }
 
   async deleteServer(key: string) {
@@ -282,6 +302,8 @@ class ConnectionStore {
         await listen<{ stage: string }>("diag://event", (e) => {
           if (e.payload.stage === "connection_wedged") {
             this.handleConnectionWedged();
+          } else if (e.payload.stage === "drift_scan_result") {
+            this.lastScanAt = Date.now();
           }
         }),
       );
@@ -469,6 +491,7 @@ class ConnectionStore {
     this.status = null;
     this.locks = [];
     this.conflicts = [];
+    this.lastScanAt = null;
   }
 }
 

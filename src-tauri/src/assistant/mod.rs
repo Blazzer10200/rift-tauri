@@ -246,6 +246,16 @@ struct AssistantConfig {
     /// Per-turn override rides the `assistant_send` arg; this is the default.
     #[serde(default)]
     thinking_effort: Option<String>,
+    /// Auto-compact threshold as fraction of context window (0.0-1.0). `None` =
+    /// disabled (manual only). User has `DISABLE_AUTO_COMPACT=1` set globally
+    /// so default to None — opt-in, not opt-out. See `docs/design/assistant-compaction.md`.
+    #[serde(default)]
+    auto_compact_threshold: Option<f32>,
+    /// Model alias for the one-shot summarize call. `None` = "haiku" (cheap +
+    /// fast; sufficient for prose summarization w/ explicit preservation prompt).
+    /// $0.91 at 900K vs $2.73 on sonnet.
+    #[serde(default)]
+    compact_model: Option<String>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -534,7 +544,37 @@ fn write_mcp_config(
     });
     let s = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
     std::fs::write(&path, s).map_err(|e| format!("write mcp-config: {e}"))?;
+
+    // #9.2: tighten permissions so the on-disk bridge token isn't world-
+    // readable in the interval between write + delete-on-exit. On Unix:
+    // explicit 0600. On Windows: rely on NTFS inheritance from
+    // `%USERPROFILE%\.rift\` (already user-only by default); explicit DACL
+    // tightening is deferred until Tauri 2 secure-storage lands (#9.3).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+
     Ok(path)
+}
+
+/// #9.2: best-effort removal of `~/.rift/assistant/mcp-config.json` on app
+/// exit so the bridge token doesn't sit on disk between sessions. The token
+/// becomes stale the moment the process exits (new one generated next run),
+/// but a leaked stale token is still strictly more information than a
+/// non-existent file. Errors are logged + swallowed -- a cleanup failure
+/// must not block app shutdown.
+pub fn cleanup_mcp_config_on_exit() {
+    let Ok(home) = dirs_home() else { return };
+    let path = home.join(".rift").join("assistant").join("mcp-config.json");
+    if !path.exists() {
+        return;
+    }
+    match std::fs::remove_file(&path) {
+        Ok(()) => log::info!("assistant: removed stale mcp-config.json on exit"),
+        Err(e) => log::warn!("assistant: failed to remove mcp-config.json on exit: {e}"),
+    }
 }
 
 /// CLI auth-status JSON shape from `claude auth status`.
@@ -662,6 +702,38 @@ pub fn assistant_set_thinking_effort(value: String) -> Result<(), String> {
     }
     let mut cfg = load_config();
     cfg.thinking_effort = Some(value);
+    save_config(&cfg)
+}
+
+#[tauri::command]
+pub fn assistant_get_auto_compact_threshold() -> Result<Option<f32>, String> {
+    Ok(load_config()
+        .auto_compact_threshold
+        .filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0))
+}
+
+#[tauri::command]
+pub fn assistant_set_auto_compact_threshold(value: Option<f32>) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.auto_compact_threshold = value.filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0);
+    save_config(&cfg)
+}
+
+#[tauri::command]
+pub fn assistant_get_compact_model() -> Result<String, String> {
+    Ok(load_config()
+        .compact_model
+        .filter(|v| matches!(v.as_str(), "haiku" | "sonnet" | "opus"))
+        .unwrap_or_else(|| "haiku".to_string()))
+}
+
+#[tauri::command]
+pub fn assistant_set_compact_model(value: String) -> Result<(), String> {
+    if !matches!(value.as_str(), "haiku" | "sonnet" | "opus") {
+        return Err(format!("invalid compact_model: {value}"));
+    }
+    let mut cfg = load_config();
+    cfg.compact_model = Some(value);
     save_config(&cfg)
 }
 

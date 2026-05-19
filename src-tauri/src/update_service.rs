@@ -79,11 +79,13 @@ impl UpdateService {
         }
     }
 
-    /// Re-check, download, then apply + restart. Blocking I/O — must be
+    /// Re-check, download, then apply + restart. Blocking I/O -- must be
     /// called from a `spawn_blocking` context. `apply_updates_and_restart`
     /// `exit(0)`s on success, so this only returns on error. Caller MUST
-    /// stop autosync + tunnel BEFORE invoking — in-flight uploads die when
-    /// the process exits.
+    /// stop autosync + tunnel BEFORE invoking -- in-flight uploads die when
+    /// the process exits. The `apply_updates` Tauri command in `lib.rs`
+    /// already handles this; direct callers of this method must do it
+    /// themselves.
     pub fn apply(&self) -> Result<(), String> {
         let Some(mgr) = self.mgr.as_ref() else {
             return Err("no update source configured".into());

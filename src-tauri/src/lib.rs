@@ -207,6 +207,35 @@ async fn sync_get_drift_snapshot(
     })
 }
 
+#[derive(serde::Serialize)]
+pub struct WatchedFolderInfo {
+    pub name: String,
+    pub remote_root: String,
+    pub file_count: u64,
+}
+
+/// Dashboard list of watched folders — name + remote_root + cached file count.
+/// Empty when no engine is bound. Lock count + last-event timestamp are
+/// derived frontend-side from `connection.locks` + `connection.activityFeed`.
+#[tauri::command]
+async fn list_watched_folders(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<Vec<WatchedFolderInfo>, String> {
+    let g = state.0.lock().await;
+    Ok(match g.as_ref() {
+        Some(engine) => engine
+            .watched_folders_dashboard()
+            .into_iter()
+            .map(|(name, remote_root, file_count)| WatchedFolderInfo {
+                name,
+                remote_root,
+                file_count,
+            })
+            .collect(),
+        None => Vec::new(),
+    })
+}
+
 /// Folders the last reconcile aborted via the suspicious-shrink guard.
 /// Frontend uses this to render the rebaseline banner. v0.2.49.
 #[tauri::command]
@@ -380,6 +409,14 @@ async fn scan_drift(
         .ok_or_else(|| format!("no server with key '{server_key}'"))?
         .clone();
 
+    // #10: refuse to connect when no fingerprint is pinned. The user-facing
+    // `probe_server_fingerprint` + `set_server_fingerprint` flow (AddServer
+    // dialog, frontend `connection.connect()`) must run first so the user
+    // explicitly trusts the host key. Without this guard, any caller that
+    // skips the dialog (e.g. a future IPC path, a test harness) would
+    // silently TOFU on the next connect.
+    require_pinned_fingerprint(&server_key, server.fingerprint.as_deref())?;
+
     let key_path = std::path::PathBuf::from(&server.key_path);
     let client = sftp::SftpClient::connect(sftp::ConnectArgs {
         host: &server.host,
@@ -390,9 +427,6 @@ async fn scan_drift(
         write_probe_root: Some(&server.remote_root),
     })
     .await?;
-    if server.fingerprint.as_deref().unwrap_or("").is_empty() {
-        persist_fingerprint_if_new(&server_key, client.fingerprint());
-    }
 
     let snap = state::SyncSnapshot::new(&server.key)
         .map_err(|e| format!("snapshot init: {e}"))?;
@@ -439,6 +473,10 @@ async fn start_autosync(
         .ok_or_else(|| format!("no server with key '{server_key}'"))?
         .clone();
 
+    // #10: refuse to connect without a pinned fingerprint. See `scan_drift`
+    // for full rationale -- frontend probe-and-confirm must run first.
+    require_pinned_fingerprint(&server_key, server.fingerprint.as_deref())?;
+
     let key_path = std::path::PathBuf::from(&server.key_path);
     let client = sftp::SftpClient::connect(sftp::ConnectArgs {
         host: &server.host,
@@ -449,9 +487,6 @@ async fn start_autosync(
         write_probe_root: Some(&server.remote_root),
     })
     .await?;
-    if server.fingerprint.as_deref().unwrap_or("").is_empty() {
-        persist_fingerprint_if_new(&server_key, client.fingerprint());
-    }
     let sftp_arc = Arc::new(client);
 
     // LockPresence: always available; advisory regardless of bridge config.
@@ -740,8 +775,8 @@ async fn retry_failed(state: tauri::State<'_, AutoSyncState>) -> Result<(), Stri
 // ─── Phase 2 (UI shell) — server picker / last-selected commands ─────────────
 
 #[tauri::command]
-fn list_servers() -> Result<Vec<profile::ServerProfile>, String> {
-    Ok(profile::RiftConfig::load()?.servers)
+fn list_servers() -> Result<Vec<profile::ServerProfilePublic>, String> {
+    Ok(profile::RiftConfig::load()?.servers.iter().map(Into::into).collect())
 }
 
 #[tauri::command]
@@ -766,7 +801,7 @@ fn set_last_selected(key: String) -> Result<(), String> {
 fn save_server(
     profile: profile::ServerProfile,
     edit_key: Option<String>,
-) -> Result<profile::ServerProfile, String> {
+) -> Result<profile::ServerProfilePublic, String> {
     let mut cfg = profile::RiftConfig::load().or_else(|_| Ok::<_, String>(profile::RiftConfig::default()))?;
 
     let mut next = profile;
@@ -793,6 +828,12 @@ fn save_server(
             if next.fingerprint.as_deref().unwrap_or("").is_empty() {
                 next.fingerprint = cfg.servers[pos].fingerprint.clone();
             }
+            // #9.1: preserve bridge_token if the form didn't supply one. The
+            // renderer no longer receives the token from list_servers, so an
+            // empty value on edit means "unchanged", not "clear it".
+            if next.bridge_token.as_deref().unwrap_or("").is_empty() {
+                next.bridge_token = cfg.servers[pos].bridge_token.clone();
+            }
             cfg.servers[pos] = next.clone();
         }
         None => {
@@ -811,7 +852,7 @@ fn save_server(
     }
 
     cfg.save()?;
-    Ok(next)
+    Ok((&next).into())
 }
 
 #[tauri::command]
@@ -828,38 +869,29 @@ fn delete_server(key: String) -> Result<(), String> {
     cfg.save()
 }
 
-/// Persist a freshly-captured fingerprint to a server profile. Idempotent — no
-/// write if the profile already had the same value. Closes the 1i TOFU loop.
-fn persist_fingerprint_if_new(server_key: &str, fingerprint: &str) {
-    if fingerprint.is_empty() {
-        return;
+/// #10: defense-in-depth guard against silent TOFU. Sync entry paths
+/// (`scan_drift`, `start_autosync`) must refuse to connect when no
+/// fingerprint is pinned in the profile -- the frontend's
+/// `probe_server_fingerprint` + user-confirm flow is the only sanctioned
+/// way to capture a host key. Without this guard, an unhandled callsite
+/// would silently accept whatever key the remote presents on first
+/// connect (MITM-during-onboarding window).
+fn require_pinned_fingerprint(server_key: &str, fingerprint: Option<&str>) -> Result<(), String> {
+    if fingerprint.unwrap_or("").trim().is_empty() {
+        return Err(format!(
+            "server '{server_key}' has no pinned fingerprint -- run probe_server_fingerprint + \
+             set_server_fingerprint (AddServer dialog) to capture and confirm the host key first"
+        ));
     }
-    let mut cfg = match profile::RiftConfig::load() {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("persist_fingerprint_if_new load failed for {server_key}: {e}");
-            return;
-        }
-    };
-    let Some(pos) = cfg.servers.iter().position(|s| s.key == server_key) else { return };
-    if cfg.servers[pos].fingerprint.as_deref().unwrap_or("") == fingerprint {
-        return;
-    }
-    if cfg.servers[pos].fingerprint.is_some() {
-        // Profile had a different pinned fingerprint — DON'T silently overwrite.
-        // The connect would've been rejected by the substring match anyway.
-        log::warn!(
-            "fingerprint mismatch for {server_key}; keeping pinned value"
-        );
-        return;
-    }
-    cfg.servers[pos].fingerprint = Some(fingerprint.to_string());
-    if let Err(e) = cfg.save() {
-        log::warn!("persist fingerprint for {server_key}: {e}");
-    }
+    Ok(())
 }
 
-// ─── Phase 3 (Browser) — local + remote dir listing + batch transfer ─────────
+// `persist_fingerprint_if_new` removed 2026-05-19 with #10: silent TOFU is
+// no longer allowed at any sync entry path. The only sanctioned trust-on-
+// first-use flow is `probe_server_fingerprint` -> user confirm dialog ->
+// `set_server_fingerprint`, all gated through the AddServer dialog.
+
+// ─── Phase 3 (Browser) -- local + remote dir listing + batch transfer ─────────
 
 /// Browser-pane LocalEntry shape. Distinct from `local_fs::LocalEntry` because
 /// the frontend pre-dates the canonical version and uses a flatter
@@ -899,6 +931,11 @@ async fn open_sftp_for(server_key: &str) -> Result<sftp::SftpClient, String> {
         .find(server_key)
         .ok_or_else(|| format!("no server with key '{server_key}'"))?
         .clone();
+    // #10: refuse without a pinned fingerprint. Every SFTP-touching IPC
+    // command funnels through here -- remote_list_dir, upload/download,
+    // edit_in_place, sync_* -- so this is the single chokepoint that
+    // closes the silent-TOFU window for all of them.
+    require_pinned_fingerprint(server_key, server.fingerprint.as_deref())?;
     let key_path = std::path::PathBuf::from(&server.key_path);
     let client = sftp::SftpClient::connect(sftp::ConnectArgs {
         host: &server.host,
@@ -909,10 +946,6 @@ async fn open_sftp_for(server_key: &str) -> Result<sftp::SftpClient, String> {
         write_probe_root: Some(&server.remote_root),
     })
     .await?;
-    // 1i TOFU close — first-connect captures fingerprint, persist it.
-    if server.fingerprint.as_deref().unwrap_or("").is_empty() {
-        persist_fingerprint_if_new(server_key, client.fingerprint());
-    }
     Ok(client)
 }
 
@@ -1513,10 +1546,11 @@ async fn probe_server_fingerprint(server_key: String) -> Result<String, String> 
     Ok(fp)
 }
 
-/// Audit C2 — write a user-confirmed fingerprint to a profile. Distinct from
-/// `persist_fingerprint_if_new` (silent TOFU): this is the explicit-trust path
-/// triggered by the confirmation dialog, and it overwrites any prior value
-/// because the user has just decided.
+/// Audit C2 -- write a user-confirmed fingerprint to a profile. The
+/// explicit-trust path triggered by the AddServer confirmation dialog.
+/// Overwrites any prior value because the user has just decided. Combined
+/// with #10's `require_pinned_fingerprint` guard, this is the only way a
+/// fingerprint ever lands in `~/.rift/rift.json` -- silent TOFU is dead.
 #[tauri::command]
 fn set_server_fingerprint(server_key: String, fingerprint: String) -> Result<(), String> {
     if fingerprint.trim().is_empty() {
@@ -1749,6 +1783,7 @@ pub fn run() {
             sync_pull_pending,
             sync_push_pending,
             sync_get_drift_snapshot,
+            list_watched_folders,
             sync_get_aborted_shrunk,
             sync_rebaseline_folder,
             sync_apply_selected,
@@ -1773,6 +1808,10 @@ pub fn run() {
             assistant::assistant_set_allow_remote_shell,
             assistant::assistant_get_thinking_effort,
             assistant::assistant_set_thinking_effort,
+            assistant::assistant_get_auto_compact_threshold,
+            assistant::assistant_set_auto_compact_threshold,
+            assistant::assistant_get_compact_model,
+            assistant::assistant_set_compact_model,
             assistant::assistant_send,
             assistant::assistant_stop,
             assistant::assistant_list_conversations,
@@ -1787,6 +1826,16 @@ pub fn run() {
             stt::stt_get_config,
             stt::stt_set_config,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|_app_handle, event| {
+            // #9.2: scrub the on-disk bridge token from `~/.rift/assistant/
+            // mcp-config.json` on app exit. The token in that file becomes
+            // stale the instant the process exits (new one generated next
+            // run), but a leaked stale token is still strictly more info
+            // than a missing file. Best-effort -- swallow errors.
+            if let tauri::RunEvent::Exit = event {
+                assistant::cleanup_mcp_config_on_exit();
+            }
+        });
 }

@@ -38,6 +38,49 @@ pub struct ServerProfile {
     pub bridge_port: Option<u16>,
 }
 
+/// IPC-safe view of `ServerProfile`. Omits `bridge_token` (secret) and
+/// replaces it with `has_bridge_token: bool` so the UI can still render
+/// "bridge configured" state without seeing the token value. Used as the
+/// return type of every Tauri command that surfaces a server to the
+/// renderer (#9.1 — keep secrets off the IPC boundary).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerProfilePublic {
+    pub key: String,
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub key_path: String,
+    pub remote_root: String,
+    pub local_root: String,
+    pub fingerprint: Option<String>,
+    pub tx_admin_url: Option<String>,
+    pub added_at: Option<String>,
+    pub bridge_port: Option<u16>,
+    pub has_bridge_token: bool,
+}
+
+impl From<&ServerProfile> for ServerProfilePublic {
+    fn from(p: &ServerProfile) -> Self {
+        Self {
+            key: p.key.clone(),
+            name: p.name.clone(),
+            host: p.host.clone(),
+            port: p.port,
+            user: p.user.clone(),
+            key_path: p.key_path.clone(),
+            remote_root: p.remote_root.clone(),
+            local_root: p.local_root.clone(),
+            fingerprint: p.fingerprint.clone(),
+            tx_admin_url: p.tx_admin_url.clone(),
+            added_at: p.added_at.clone(),
+            bridge_port: p.bridge_port,
+            has_bridge_token: p.bridge_token.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct RiftConfig {
