@@ -1,9 +1,6 @@
 <script lang="ts">
-  import { Settings as SettingsIcon } from "lucide-svelte";
   import { WORKSPACES } from "../workspaces";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
-
-  let { onOpenSettings }: { onOpenSettings: () => void } = $props();
 
   // Drag-to-reorder: same HTML5 DnD pattern as the v0.4.1 ActivityBar — source
   // index captured on dragstart, drop resolved from the target row. Bottom
@@ -69,19 +66,6 @@
     {/each}
   </div>
 
-  <div class="ab-bottom">
-    <div class="ab-divider"></div>
-    <button
-      class="ab-btn"
-      type="button"
-      data-disabled="false"
-      onclick={onOpenSettings}
-      title="Settings · Ctrl+,"
-      aria-label="Settings"
-    >
-      <span class="ab-icon"><SettingsIcon size={16}/></span>
-    </button>
-  </div>
 </nav>
 
 <style>
@@ -97,8 +81,6 @@
     user-select: none;
   }
   .ab-top    { display: flex; flex-direction: column; }
-  .ab-bottom { margin-top: auto; display: flex; flex-direction: column; }
-  .ab-divider { height: 1px; background: var(--border); margin: 4px 6px; }
   .ab-btn {
     position: relative;
     display: flex; align-items: center; justify-content: center;

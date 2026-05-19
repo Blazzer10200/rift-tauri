@@ -137,16 +137,16 @@
       ondrop={onTailDrop}
       role="presentation"
     ></div>
-    <button
-      class="new-tab"
-      type="button"
-      title="New chat (Ctrl+T)"
-      aria-label="New chat"
-      onclick={onNewTab}
-    >
-      <Plus size={13}/>
-    </button>
   </div>
+  <button
+    class="new-tab"
+    type="button"
+    title="New chat (Ctrl+T)"
+    aria-label="New chat"
+    onclick={onNewTab}
+  >
+    <Plus size={13}/>
+  </button>
 </div>
 
 <style>
@@ -278,7 +278,9 @@
     justify-content: center;
     width: 28px;
     height: 26px;
-    margin: 4px 4px 0 2px;
+    /* Phase 3c: sit at the right end of the tabsbar with a 5px gap from the
+       activity-bar boundary. No longer scrolls with the tab strip. */
+    margin: 4px 5px 0 4px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 5px;

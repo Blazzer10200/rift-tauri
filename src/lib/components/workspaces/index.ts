@@ -2,7 +2,7 @@ import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
   MessageSquare, RefreshCcw, FolderOpen, AlertTriangle, Stethoscope,
-  Terminal, Activity, History, Bot, Paperclip,
+  Terminal, Activity, History, Bot, Paperclip, Settings as SettingsIcon,
 } from "lucide-svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SyncPage from "../sync/SyncPage.svelte";
@@ -12,6 +12,7 @@ import Diagnostics from "../diagnostics/Diagnostics.svelte";
 import TerminalPanel from "../terminal/TerminalPanel.svelte";
 import ActivityFeed from "../activity/ActivityFeed.svelte";
 import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
+import SettingsPage from "../settings/SettingsPage.svelte";
 import DisabledWorkspace from "./DisabledWorkspace.svelte";
 import { connection } from "$lib/state/connection.svelte";
 import { assistant } from "$lib/state/assistant.svelte";
@@ -52,4 +53,5 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
                  getCount: () => assistant.conversations.length, getTone: "info" },
   agents:      { component: DisabledWorkspace, title: "Agents",      icon: Bot,           kbd: "",  disabled: true },
   attachments: { component: DisabledWorkspace, title: "Attachments", icon: Paperclip,     kbd: "",  disabled: true },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "9" },
 };

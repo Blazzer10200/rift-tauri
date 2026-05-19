@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Send, Square, X, Mic, Loader2 } from "lucide-svelte";
+  import { Send, Square, X, Mic, Loader2, HelpCircle } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
   import { tick, onMount } from "svelte";
@@ -26,6 +26,8 @@
     { name: "stop",    desc: "Halt the current turn" },
     { name: "tools",   desc: "List available workspace tools" },
     { name: "cost",    desc: "Show session cost" },
+    { name: "stats",   desc: "Session telemetry summary (inline)" },
+    { name: "diag",    desc: "Copy full telemetry JSON to clipboard" },
     { name: "help",    desc: "List slash commands" },
   ];
 
@@ -282,6 +284,21 @@
     }
     return btoa(bin);
   }
+
+  // Phase 3a: hint popover replaces the dedicated hint row. Click toggles;
+  // global mousedown closes on outside click.
+  let hintOpen = $state(false);
+  let hintWrap = $state<HTMLDivElement | null>(null);
+  function onDocHintMousedown(ev: MouseEvent) {
+    if (!hintOpen) return;
+    if (hintWrap && ev.target instanceof Node && !hintWrap.contains(ev.target)) {
+      hintOpen = false;
+    }
+  }
+  $effect(() => {
+    window.addEventListener("mousedown", onDocHintMousedown);
+    return () => window.removeEventListener("mousedown", onDocHintMousedown);
+  });
 
   let attachError = $state<string | null>(null);
   async function onPaste(e: ClipboardEvent) {
@@ -602,6 +619,26 @@
         {/if}
       </button>
       {/if}
+      <div class="hint-wrap" bind:this={hintWrap}>
+        <button
+          type="button"
+          class="hintbtn"
+          onclick={() => (hintOpen = !hintOpen)}
+          aria-expanded={hintOpen}
+          aria-label="Composer hints"
+          title="Keyboard shortcuts"
+        >
+          <HelpCircle size={14} />
+        </button>
+        {#if hintOpen}
+          <div class="hint-pop" role="dialog">
+            <div class="hint-row"><kbd>Enter</kbd><span>send</span></div>
+            <div class="hint-row"><kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span></div>
+            <div class="hint-row"><kbd>/</kbd><span>commands</span></div>
+            <div class="hint-row"><kbd>@</kbd><span>mention file</span></div>
+          </div>
+        {/if}
+      </div>
       <textarea
         bind:this={ta}
         bind:value={assistant.composerDraft}
@@ -618,6 +655,32 @@
           : "Ask Claude — paste images, or type / for commands"}
         rows="1"
       ></textarea>
+      {#if assistant.model !== "haiku"}
+        <button
+          type="button"
+          class="effort-pill"
+          class:effort-none={currentEffort.id === "none"}
+          class:effort-quick={currentEffort.id === "quick"}
+          class:effort-deep={currentEffort.id === "deep"}
+          onclick={cycleEffort}
+          title={currentEffort.hint + " — click to cycle"}
+        >
+          <span class="pill-label">{currentEffort.label}</span>
+        </button>
+      {/if}
+      <button
+        type="button"
+        class="model-pill"
+        onclick={() => { modelPickerOpen = !modelPickerOpen; void tick().then(() => ta?.focus()); }}
+        title="Switch model"
+      >
+        {#if currentModel}
+          <span class="pill-label">{currentModel.label}</span>
+          <span class="pill-version">{currentModel.version}</span>
+        {:else}
+          model: {assistant.model}
+        {/if}
+      </button>
       <button
         class="sendbtn"
         class:stop={mode === "stop"}
@@ -633,38 +696,6 @@
         </span>
       </button>
     </div>
-  </div>
-
-  <div class="hint">
-    <span><kbd>Enter</kbd> send</span>
-    <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
-    <span><kbd>/</kbd> commands</span>
-    {#if assistant.model !== "haiku"}
-      <button
-        type="button"
-        class="effort-pill"
-        class:effort-none={currentEffort.id === "none"}
-        class:effort-quick={currentEffort.id === "quick"}
-        class:effort-deep={currentEffort.id === "deep"}
-        onclick={cycleEffort}
-        title={currentEffort.hint + " — click to cycle"}
-      >
-        <span class="pill-label">{currentEffort.label}</span>
-      </button>
-    {/if}
-    <button
-      type="button"
-      class="model-pill"
-      onclick={() => { modelPickerOpen = !modelPickerOpen; void tick().then(() => ta?.focus()); }}
-      title="Switch model"
-    >
-      {#if currentModel}
-        <span class="pill-label">{currentModel.label}</span>
-        <span class="pill-version">{currentModel.version}</span>
-      {:else}
-        model: {assistant.model}
-      {/if}
-    </button>
   </div>
 </div>
 
@@ -945,14 +976,62 @@
     margin-top: 2px;
   }
 
-  .hint {
-    margin-top: 7px;
-    display: flex; gap: 14px; align-items: center;
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-    padding-left: 4px;
+  /* Phase 3a: hint popover. Replaces the dedicated hint row; lives adjacent
+     to the mic in the composer row. Pop animates fade + 4px translate-y +
+     scale 0.98→1 over 140ms. */
+  .hint-wrap {
+    position: relative;
+    display: inline-flex;
+    align-self: flex-end;
   }
-  .hint kbd {
+  .hintbtn {
+    width: 26px; height: 26px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent;
+    color: var(--fg-faint);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 140ms ease-out, background 140ms ease-out, border-color 140ms ease-out;
+  }
+  .hintbtn:hover { color: var(--fg-muted); background: var(--surface-hover); }
+  .hintbtn[aria-expanded="true"] {
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 25%, transparent);
+    background: var(--accent-soft);
+  }
+  .hintbtn:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
+  }
+  .hint-pop {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    min-width: 180px;
+    padding: 8px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 10px 24px oklch(0 0 0 / 0.35);
+    z-index: 12;
+    display: flex; flex-direction: column; gap: 6px;
+    animation: hint-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: bottom left;
+  }
+  @keyframes hint-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hint-pop { animation: none; }
+  }
+  .hint-row {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: var(--fs-xs);
+    color: var(--fg-muted);
+  }
+  .hint-row kbd {
     font-family: inherit;
     font-size: 10px;
     padding: 1px 5px;
@@ -961,8 +1040,9 @@
     border-radius: 3px;
     color: var(--fg-muted);
   }
+
   .model-pill {
-    margin-left: 6px;
+    align-self: flex-end;
     display: inline-flex; align-items: center; gap: 5px;
     padding: 2px 4px 2px 9px;
     background: var(--bg-elev-2);
@@ -973,11 +1053,12 @@
     cursor: pointer;
     font: inherit;
     font-size: var(--fs-xs);
+    height: 26px;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
 
   .effort-pill {
-    margin-left: auto;
+    align-self: flex-end;
     display: inline-flex; align-items: center;
     padding: 2px 9px;
     background: var(--bg-elev-2);
@@ -988,6 +1069,7 @@
     font: inherit;
     font-size: var(--fs-xs);
     font-weight: 600;
+    height: 26px;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
   .effort-pill:hover {
