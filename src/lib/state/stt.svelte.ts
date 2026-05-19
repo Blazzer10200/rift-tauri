@@ -101,7 +101,7 @@ class SttStore {
       this.config = await invoke<SttConfig>("stt_get_config");
       this.configLoaded = true;
     } catch (e) {
-      console.warn("[stt] load config failed:", e);
+      console.debug("[stt] load config failed:", e);
       this.configLoaded = true;
     }
   }
@@ -126,13 +126,27 @@ class SttStore {
     }
   }
 
-  /** Composer-side hook: the current draft was just sent / cleared. Resets
-   *  the transcript baseline so queued late finals don't re-paste it. */
+  /** Composer-side hook: the current draft was just sent / cleared. Hard-
+   *  stops the recogniser so the mic doesn't keep recording after send, and
+   *  drops the transcript baseline so any in-flight late finals can't re-
+   *  paste the just-sent text. `consumed=true` is a belt-and-suspenders
+   *  guard for onResult/onEnd, but abort() is what actually releases the mic. */
   consume() {
+    if (this.recognition) {
+      try {
+        this.recognition.abort();
+      } catch {
+        /* recogniser may already be stopped */
+      }
+    }
     this.baseDraft = "";
     this.finalText = "";
     this.consumed = true;
     this.lastTranscript = "";
+    this.recording = false;
+    this.transcribing = false;
+    this.recognition = null;
+    this.clearTranscribeTimer();
   }
 
   /** Begin live recognition. Returns false if unavailable / disabled. */
@@ -199,7 +213,7 @@ class SttStore {
         }
       }, 4000);
     } catch (e) {
-      console.warn("[stt] stop failed:", e);
+      console.debug("[stt] stop failed:", e);
     }
     return this.lastTranscript;
   }
@@ -263,7 +277,7 @@ class SttStore {
     this.lastError = friendly;
     // `no-speech` / `aborted` are routine; don't toast loudly.
     if (e.error !== "no-speech" && e.error !== "aborted") {
-      console.warn("[stt] recognition error:", e.error, e.message);
+      console.debug("[stt] recognition error:", e.error, e.message);
     }
   }
 

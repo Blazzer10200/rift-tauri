@@ -1,19 +1,23 @@
-# Rift release pipeline — local execution.
+# Rift release pipeline -- local execution.
 #
 # Reads version from package.json (must match Cargo.toml), runs `npm run tauri
 # build`, packs with Velopack, publishes to GitHub releases. Unsigned for now
-# (audit H4 — signing deferred until cert + AAS budget is in place).
+# (audit H4 -- signing deferred until cert + AAS budget is in place).
 #
 # Two-repo split: source lives in private `rift-tauri`, releases publish to
 # public `rift-releases` so unauthenticated AutoSource clients can fetch
-# updates. Velopack-rust 0.0.1298 has no auth in AutoSource — the public
+# updates. Velopack-rust 0.0.1298 has no auth in AutoSource -- the public
 # releases repo is the only no-fork path.
 #
 # Prereqs on PATH: npm, vpk (`dotnet tool install -g vpk`), gh (logged in).
 #
-# Bump versions BEFORE running this script (package.json + Cargo.toml in
-# lockstep) — never auto-bumps. Use `/git-ship` for the full version-bump
-# pipeline; this script is the publish step only.
+# Bump versions BEFORE running this script -- use `scripts/bump.ps1 <version>`
+# to write the three lockstep files (package.json + Cargo.toml + tauri.conf.json)
+# in one shot. This script never auto-bumps; use `/git-ship` for the full
+# bump-and-publish pipeline.
+#
+# Release notes are pulled from the top entry of `docs/CHANGELOG.md`. The top
+# entry's version must match the bumped version or the notes are skipped.
 #
 # Usage:  pwsh ./scripts/release.ps1
 
@@ -38,6 +42,38 @@ if ($pkg.version -ne $cargoVer -or $pkg.version -ne $tauriCfg.version) {
 $version = $pkg.version
 $tag = "v$version"
 Write-Host "Version: $version (tag $tag)" -ForegroundColor Green
+
+# --- Preflight: extract release notes from CHANGELOG --------------------
+# Pull the top `## v<version>` entry body. Only used if the top entry's
+# version matches the bumped version -- otherwise we'd ship stale notes from
+# a prior release. Silently skipped (warn only) if missing; release still ships.
+$releaseNotesFile = $null
+$changelogPath = 'docs/CHANGELOG.md'
+if (Test-Path $changelogPath) {
+    $clText = [System.IO.File]::ReadAllText($changelogPath)
+    $entryPattern = '(?ms)^## v(?<ver>[^\s]+)[^\r\n]*\r?\n(?<body>.*?)(?=^## v|\z)'
+    $entryRx = New-Object System.Text.RegularExpressions.Regex $entryPattern
+    $m = $entryRx.Match($clText)
+    if ($m.Success) {
+        $topVer = $m.Groups['ver'].Value
+        if ($topVer -eq $version) {
+            $body = $m.Groups['body'].Value.Trim()
+            if ($body) {
+                $releaseNotesFile = Join-Path ([System.IO.Path]::GetTempPath()) "rift-release-notes-$version.md"
+                [System.IO.File]::WriteAllText($releaseNotesFile, $body)
+                Write-Host "Release notes: top CHANGELOG entry ($($body.Length) chars)" -ForegroundColor Green
+            } else {
+                Write-Host "Warning: CHANGELOG entry for v$version has empty body -- skipping notes" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "Warning: CHANGELOG top entry is v$topVer, not v$version -- skipping notes" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "Warning: no '## v...' entries found in $changelogPath -- skipping notes" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "Warning: $changelogPath not found -- skipping notes" -ForegroundColor Yellow
+}
 
 # --- Preflight: tools ----------------------------------------------------
 foreach ($t in @('npm', 'vpk', 'gh')) {
@@ -67,7 +103,7 @@ try {
     }
 } catch [System.Management.Automation.RuntimeException] {
     if ($_.Exception.Message -like '*already exists*') { throw }
-    # else: not-found — proceed
+    # else: not-found -- proceed
 }
 
 # --- Build ---------------------------------------------------------------
@@ -106,6 +142,9 @@ $packArgs = @(
     '--icon', "$staging/icon.ico",
     '-o', 'Releases'
 )
+if ($releaseNotesFile) {
+    $packArgs += @('--releaseNotes', $releaseNotesFile)
+}
 & vpk @packArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 
@@ -114,7 +153,7 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 # the release/tag. --publish marks it published (not draft).
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
 $ghToken = (gh auth token).Trim()
-if (-not $ghToken) { throw 'gh auth token returned empty — run `gh auth login` first' }
+if (-not $ghToken) { throw 'gh auth token returned empty -- run `gh auth login` first' }
 
 $uploadArgs = @(
     'upload', 'github',
@@ -136,4 +175,7 @@ gh release view $tag --repo $releaseRepo
 
 # --- Cleanup -------------------------------------------------------------
 Remove-Item -Recurse -Force $staging
+if ($releaseNotesFile -and (Test-Path $releaseNotesFile)) {
+    Remove-Item -Force $releaseNotesFile
+}
 Write-Host "Done. Tag: $tag" -ForegroundColor Green
