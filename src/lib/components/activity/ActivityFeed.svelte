@@ -11,7 +11,7 @@
   import EmptyState from "../shell/EmptyState.svelte";
   import { syncPage } from "../../state/sync-page.svelte";
 
-  type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "error" | "system";
+  type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "block" | "error" | "system";
 
   let filter = $state("");
   let group = $state<Group>("all");
@@ -45,6 +45,7 @@
     { id: "drift",    label: "Drift",     tone: "warn" },
     { id: "conflict", label: "Conflicts", tone: "danger" },
     { id: "bridge",   label: "Bridge",    tone: "info" },
+    { id: "block",    label: "Blocks",    tone: "warn" },
     { id: "error",    label: "Errors",    tone: "danger" },
     { id: "system",   label: "System",    tone: "neutral" },
   ];
@@ -171,6 +172,24 @@
   // ones down.
   const GROUP_WINDOW_MS = 5_000;
   const GROUP_MIN_RUN = 2;
+
+  // Group-row aggregates. Group header used to render "—" in size + dur even
+  // when children had real numbers; now it shows the run's total bytes + max
+  // latency so the user gets a one-glance scope without expanding the group.
+  function groupSize(rows: ActivityRow[]): number | null {
+    let total = 0; let any = false;
+    for (const r of rows) {
+      if (r.size_bytes != null) { total += r.size_bytes; any = true; }
+    }
+    return any ? total : null;
+  }
+  function groupMaxLatency(rows: ActivityRow[]): number | null {
+    let max = 0; let any = false;
+    for (const r of rows) {
+      if (r.latency_ms != null) { max = Math.max(max, r.latency_ms); any = true; }
+    }
+    return any ? max : null;
+  }
 
   // Longest common prefix across rel_paths in a run. Drives the "path" column
   // of a group header — beats "9 items" because the user wants to see WHICH
@@ -421,7 +440,6 @@
       <div class="th action">Action</div>
       <div class="th size">Size</div>
       <div class="th dur">Dur</div>
-      <div class="th actor">Actor</div>
     </div>
 
     <div class="tbody" bind:this={tbody}>
@@ -500,11 +518,11 @@
                 <span class="chev" data-expanded={item.expanded}>
                   {#if item.expanded}<ChevronDown size={11}/>{:else}<ChevronRight size={11}/>{/if}
                 </span>
-                {r0.action}
+                <span class="action-text">{r0.action}</span>
+                {#if r0.actor}<span class="actor-chip mono" title="Actor">{r0.actor}</span>{/if}
               </div>
-              <div class="td size mono">—</div>
-              <div class="td dur mono">—</div>
-              <div class="td actor mono">{r0.actor ?? "—"}</div>
+              <div class="td size mono" title="Total across {item.rows.length} events">{fmtSize(groupSize(item.rows))}</div>
+              <div class="td dur mono" title="Max latency across {item.rows.length} events">{fmtLatency(groupMaxLatency(item.rows))}</div>
             </div>
           {:else if item.type === "groupChild"}
             {@const r = item.row}
@@ -528,10 +546,12 @@
               </div>
               <div class="td resource mono">{fmtResource(r.resource)}</div>
               <div class="td path mono" title={pathOf(r)}>{pathOf(r) || "—"}</div>
-              <div class="td action" title={r.action}>{r.action}</div>
+              <div class="td action" title={r.action}>
+                <span class="action-text">{r.action}</span>
+                {#if r.actor}<span class="actor-chip mono" title="Actor">{r.actor}</span>{/if}
+              </div>
               <div class="td size mono">{fmtSize(r.size_bytes)}</div>
               <div class="td dur mono">{fmtLatency(r.latency_ms)}</div>
-              <div class="td actor mono">{r.actor ?? "—"}</div>
             </div>
             {#if isSelected}
               {@render detailStrip(r, v)}
@@ -558,10 +578,12 @@
               </div>
               <div class="td resource mono">{fmtResource(r.resource)}</div>
               <div class="td path mono" title={pathOf(r)}>{pathOf(r) || "—"}</div>
-              <div class="td action" title={r.action}>{r.action}</div>
+              <div class="td action" title={r.action}>
+                <span class="action-text">{r.action}</span>
+                {#if r.actor}<span class="actor-chip mono" title="Actor">{r.actor}</span>{/if}
+              </div>
               <div class="td size mono">{fmtSize(r.size_bytes)}</div>
               <div class="td dur mono">{fmtLatency(r.latency_ms)}</div>
-              <div class="td actor mono">{r.actor ?? "—"}</div>
             </div>
             {#if isSelected}
               {@render detailStrip(r, v)}
@@ -733,10 +755,9 @@
       54px                 /* kind   */
       110px                /* res    */
       minmax(160px, 1fr)   /* path   */
-      minmax(240px, 360px) /* action */
+      minmax(240px, 1fr)   /* action (now also carries actor as a chip) */
       72px                 /* size   */
-      64px                 /* dur    */
-      110px;               /* actor  */
+      64px;                /* dur    */
     align-items: center;
     column-gap: 12px;
     padding: 0 12px;
@@ -764,6 +785,15 @@
     border-bottom: 1px solid var(--border);
     cursor: pointer;
     user-select: none;
+    animation: row-flash 900ms ease-out 1;
+  }
+  @keyframes row-flash {
+    0%   { background: color-mix(in oklch, var(--accent-soft) 75%, transparent); }
+    100% { background: transparent; }
+  }
+  /* User prefers reduced motion → drop the flash entirely. */
+  @media (prefers-reduced-motion: reduce) {
+    .tr { animation: none; }
   }
   .tr:last-child { border-bottom: 0; }
   .tr:hover { background: var(--surface-hover); }
@@ -802,9 +832,31 @@
   .td.kind { display: inline-flex; align-items: center; gap: 6px; }
   .td.resource { color: var(--fg-muted); }
   .td.path { color: var(--fg); }
-  .td.action { display: inline-flex; align-items: center; gap: 4px; }
+  .td.action {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-width: 0;
+  }
+  .action-text {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .actor-chip {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center;
+    padding: 1px 6px;
+    border-radius: 7px;
+    background: var(--bg-elev-3);
+    color: var(--fg-subtle);
+    font-size: 10px;
+    line-height: 1.4;
+    max-width: 96px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tr.group .actor-chip {
+    background: color-mix(in oklch, var(--bg-elev-3) 80%, var(--surface));
+  }
   .td.size, .td.dur { text-align: right; color: var(--fg-muted); font-size: var(--fs-xs); }
-  .td.actor { color: var(--fg-subtle); font-size: var(--fs-xs); }
 
   .kchip {
     width: 22px; height: 22px;
@@ -929,13 +981,14 @@
   }
   .action-flash { bottom: 56px; }
 
-  /* Hide the Actor column on narrower viewports — keeps the table readable
-     when the window is shrunk near min-width (1280px). */
+  /* Narrow viewports: tighten the path col so action+actor chip stay
+     visible. Actor is now folded into the action cell as a chip, so no
+     column hiding is needed. */
   @media (max-width: 1400px) {
     .thead, .tr {
       grid-template-columns:
-        124px 54px 110px minmax(160px, 1fr) minmax(220px, 320px) 72px 64px;
+        110px 50px 96px minmax(140px, 1fr) minmax(200px, 1fr) 64px 56px;
     }
-    .th.actor, .td.actor { display: none; }
+    .actor-chip { max-width: 72px; }
   }
 </style>

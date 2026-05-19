@@ -2,6 +2,14 @@
 
 > Retired session entries from `docs/HANDOFF.md`. Newest first. Pre-archive history also available via `git log -- docs/HANDOFF.md`.
 
+## Session 100 — 2026-05-18 — Velopack stub-replacement bug fix
+
+Blazzer's v0.4.11 auto-update launched old UI. NSIS-first install wrote full 26MB binary to `%LOCALAPPDATA%\Rift\` root; Velopack only updates `current/` and relies on a 327KB `ExecutionStub.exe` at root that never landed (file-lock on first update). Fix: extracted stub from `packages/Rift-0.4.11-alpha-full.nupkg`, installed as root `rift-tauri.exe`. Watch: any NSIS-then-Velopack machine may share this symptom.
+
+## Session 96–99 — 2026-05-18 — workspace shell + assistant fixes
+
+S96: v0.4.10 workspace-swap shell (`2c48bc7→7b96146`). S97: CommandPalette removed (Svelte 5 reactivity bug, unresolved). S98: assistant cwd pinned via sidecar `~/.rift/assistant/sessions/<uuid>.cwd`. S99: common-ancestor cwd when AutoSync yields >1 root. All in v0.4.11-alpha (`66a15ec`).
+
 ## Session 94 — 2026-05-17 — v0.4.8-alpha hot-fix: a11y stuck-on + shell-switch disappears
 
 Two regressions reported right after v0.4.7 shipped. (1) Dyslexia master toggle off cleared the addendum but font/spacing CSS persisted — dials wrote attrs unconditionally. Fixed in `accessibility.svelte.ts` `apply()`: dial attrs now gated on master flag, off snaps to defaults, persisted values restored when re-enabled. Warm tint stays independent. Sub-buttons get `disabled={!dyslexiaMode}` for visual clarity. (2) Appearance shell-toggle "disappeared" Settings — AppShell renders Settings as a routed page in v0.2 / modal in v0.4.1; live-flipping mid-Settings reparents into a structure with no mount point. Fixed in `ui-prefs.svelte.ts` `setUseV03Shell`: `window.location.reload()` after 120ms re-mounts cleanly. 3-file bump 0.4.7 → 0.4.8-alpha.

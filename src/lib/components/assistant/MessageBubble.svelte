@@ -1,30 +1,129 @@
 <script lang="ts">
-  import { User, Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
+  import { User, Sparkles, Copy, Check, Brain, ChevronDown, Loader2 } from "lucide-svelte";
   import { onDestroy } from "svelte";
-  import type { ChatMessage, ThinkingBlock } from "../../state/assistant.svelte";
+  import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
+  import EditDiff from "./EditDiff.svelte";
+  import ToolChip from "./ToolChip.svelte";
+  import StepGroup from "./StepGroup.svelte";
+
+  // Tool blocks that render inline as a full side-by-side diff (vs the
+  // compact ToolChip). Edit-family only — everything else gets a chip.
+  function isInlineDiffTool(name: string): boolean {
+    const sn = name.replace(/^mcp__rift__/, "");
+    return sn === "Edit" || sn === "MultiEdit";
+  }
+
+  // Detect a "Step N — title" header line in assistant prose. Matches at the
+  // start of a line, tolerates leading bold/markdown-header/whitespace. The
+  // header line is consumed by the StepGroup marker; any text before it
+  // becomes pre-group prose, any text after it stays inside the group.
+  function parseStepHeader(text: string): { stepNum: number; pre: string; head: string; rest: string } | null {
+    const lines = text.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*(?:#{1,6}\s+)?(?:\*\*)?Step\s+(\d+)\s*[—–\-:→»]\s*(.*?)(?:\*\*)?\s*$/i);
+      if (m) {
+        const stepNum = parseInt(m[1], 10);
+        const head = (m[2] ?? "").replace(/[*_`]+$/, "").trim() || `Step ${stepNum}`;
+        return {
+          stepNum,
+          pre: lines.slice(0, i).join("\n").trim(),
+          head,
+          rest: lines.slice(i + 1).join("\n").trim(),
+        };
+      }
+    }
+    return null;
+  }
+
+  type StepStatus = "neutral" | "pending" | "done" | "error";
+  type StepUnit =
+    | { kind: "loose"; block: Block; key: string }
+    | {
+        kind: "step";
+        stepNum: number;
+        headerText: string;
+        children: Block[];
+        status: StepStatus;
+        key: string;
+      };
+
+  // Roll up a step's tool children into a single status. Mirrors the chip
+  // status semantics (pending = at least one running, error = at least one
+  // errored, done = every tool resolved cleanly, neutral = no tools).
+  function rollupStatus(children: Block[]): StepStatus {
+    let saw = false, anyPending = false, anyError = false;
+    for (const c of children) {
+      if (c.type !== "tool") continue;
+      saw = true;
+      if (c.status === "error" || c.isError) anyError = true;
+      else if (c.status === "pending") anyPending = true;
+    }
+    if (!saw) return "neutral";
+    if (anyError) return "error";
+    if (anyPending) return "pending";
+    return "done";
+  }
 
   let { message, streaming = false }: { message: ChatMessage; streaming?: boolean } = $props();
 
   let copied = $state(false);
   let expandedThinking = $state(new Set<number>());
-  // Live tick so `active` thinking blocks show real-time elapsed seconds.
-  // Only runs while at least one active block is present in this bubble.
+  // Live tick so `active` thinking blocks + the role-row heartbeat show
+  // real-time elapsed seconds. Runs while either an active thinking block
+  // is present OR this bubble is the in-flight streaming message.
   let tickNow = $state(Date.now());
   const hasActiveThinking = $derived(
     streaming && message.blocks.some((b) => b.type === "thinking" && b.status === "active"),
   );
   let tickHandle: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    if (hasActiveThinking && !tickHandle) {
-      tickHandle = setInterval(() => (tickNow = Date.now()), 250);
-    } else if (!hasActiveThinking && tickHandle) {
+    if ((hasActiveThinking || streaming) && !tickHandle) {
+      tickHandle = setInterval(() => (tickNow = Date.now()), 500);
+    } else if (!hasActiveThinking && !streaming && tickHandle) {
       clearInterval(tickHandle);
       tickHandle = null;
     }
   });
   onDestroy(() => {
     if (tickHandle) clearInterval(tickHandle);
+  });
+
+  // Role-row heartbeat — elapsed since turn start. Re-reads tickNow so it
+  // updates every 500ms while streaming.
+  const heartbeatLabel = $derived.by<string | null>(() => {
+    if (!streaming) return null;
+    const start = assistant.activity.turnStartedAt;
+    if (!start) return null;
+    void tickNow;
+    const s = Math.floor((Date.now() - start) / 1000);
+    return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  });
+
+  // Whimsical fallbacks for the bare "Thinking…" stage label. Cycles
+  // every ~2.4s while streaming so the user feels the heartbeat is real
+  // instead of staring at a static word. Per-tool labels ("Reading X",
+  // "Running cargo check") flow through unchanged — only the plain
+  // "Thinking" baseline gets the swap.
+  const WHIM_WORDS = [
+    "Thinking", "Sussing", "Spelunking", "Pondering", "Brewing",
+    "Reckoning", "Mulling", "Cogitating", "Hatching", "Conjuring",
+    "Noodling", "Untangling",
+  ];
+  let whimTick = $state(0);
+  $effect(() => {
+    if (!streaming) return;
+    const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
+    return () => clearInterval(id);
+  });
+  // Empty-bubble stage label: prefer the global activity.currentLabel
+  // ("Reading auto_sync.rs", "Running cargo check", …); when it's the
+  // bare "Thinking" baseline, cycle through the whim pool.
+  const stageLabel = $derived.by(() => {
+    if (!streaming) return null;
+    const raw = assistant.activity.currentLabel ?? "Thinking…";
+    if (/^thinking/i.test(raw)) return `${WHIM_WORDS[whimTick]}…`;
+    return raw;
   });
 
   const plainText = $derived(
@@ -90,6 +189,72 @@
   const costLabel = $derived(
     typeof message.costUsd === "number" ? `$${message.costUsd.toFixed(4)}` : null,
   );
+
+  // Walk the message's blocks and group them into "steps" — visual units
+  // headed by a `Step N — title` text line. Loose blocks (pre-step prose,
+  // reasoning, leading tool calls) render flat above the first group.
+  const grouped = $derived.by<StepUnit[]>(() => {
+    const units: StepUnit[] = [];
+    let current: { stepNum: number; headerText: string; children: Block[] } | null = null;
+    const flush = () => {
+      if (current) {
+        units.push({
+          kind: "step",
+          ...current,
+          status: rollupStatus(current.children),
+          key: `s_${current.stepNum}_${units.length}`,
+        });
+        current = null;
+      }
+    };
+    for (let i = 0; i < message.blocks.length; i++) {
+      const b = message.blocks[i];
+      // Reasoning blocks always render flat (they live at the top of a turn).
+      if (b.type === "thinking") {
+        flush();
+        units.push({ kind: "loose", block: b, key: `l_t${i}` });
+        continue;
+      }
+      if (b.type === "text") {
+        const parsed = parseStepHeader(b.text);
+        if (parsed) {
+          if (parsed.pre) {
+            const preBlock: Block = { type: "text", text: parsed.pre };
+            if (current) current.children.push(preBlock);
+            else units.push({ kind: "loose", block: preBlock, key: `l_p${i}` });
+          }
+          flush();
+          current = {
+            stepNum: parsed.stepNum,
+            headerText: parsed.head,
+            children: parsed.rest ? [{ type: "text", text: parsed.rest }] : [],
+          };
+          continue;
+        }
+        if (current) current.children.push(b);
+        else units.push({ kind: "loose", block: b, key: `l_${i}` });
+        continue;
+      }
+      // Tool blocks: attach to current step, or render loose if no step yet.
+      if (current) current.children.push(b);
+      else units.push({ kind: "loose", block: b, key: `l_${i}` });
+    }
+    flush();
+    return units;
+  });
+
+  // Auto-collapse helpers for the each-loop — total step count + key of
+  // the last step. Both drive the rule "collapse done mid-turn steps when
+  // the turn has ≥4 steps, but never collapse the last one (most recent
+  // context) or pending/error steps (need visibility)".
+  const stepCount = $derived(grouped.reduce((n, u) => n + (u.kind === "step" ? 1 : 0), 0));
+  const lastStepKey = $derived.by<string | null>(() => {
+    for (let i = grouped.length - 1; i >= 0; i--) {
+      const u = grouped[i];
+      if (u.kind === "step") return u.key;
+    }
+    return null;
+  });
 </script>
 
 <div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
@@ -104,6 +269,11 @@
   <div class="body">
     <div class="role-row">
       <span class="role-name">{isUser ? "You" : "Claude"}</span>
+      {#if !isUser && streaming}
+        <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
+        {#if stageLabel}{#key stageLabel}<span class="whim" title="Current activity">{stageLabel}</span>{/key}{/if}
+        {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
+      {/if}
       {#if !isUser && (modelLabel || costLabel)}
         <span class="turn-badge" title="Model · per-turn cost">
           {#if modelLabel}<span class="turn-model">{modelLabel}</span>{/if}
@@ -123,7 +293,7 @@
     </div>
 
     <div class="content">
-      {#each message.blocks as b, bi (bi)}
+      {#snippet renderBlock(b: Block, bi: number)}
         {#if b.type === "text" && b.text.length > 0}
           {#if isUser}
             <div class="text">{b.text}</div>
@@ -164,12 +334,47 @@
               <div class="reasoning-body"><Markdown text={b.text} /></div>
             {/if}
           </div>
+        {:else if b.type === "tool" && isInlineDiffTool(b.name)}
+          {#if b.name === "MultiEdit" && Array.isArray(b.input.edits)}
+            {#each (b.input.edits as Array<Record<string, unknown>>) as edit, ei (ei)}
+              <EditDiff input={{ ...edit, file_path: b.input.file_path }} />
+            {/each}
+          {:else}
+            <EditDiff input={b.input} />
+          {/if}
+        {:else if b.type === "tool"}
+          <ToolChip tool={b} />
+        {/if}
+      {/snippet}
+
+      {#each grouped as unit, ui (unit.key)}
+        {#if unit.kind === "loose"}
+          {@render renderBlock(unit.block, ui)}
+        {:else}
+          {@const isLast = unit.key === lastStepKey}
+          {@const collapsible = stepCount >= 4 && unit.status === "done" && !isLast}
+          {@const toolCount = unit.children.reduce((n, b) => n + (b.type === "tool" ? 1 : 0), 0)}
+          {@const childSummary = toolCount > 0 ? `${toolCount} tool${toolCount === 1 ? "" : "s"}` : null}
+          <StepGroup
+            stepNum={unit.stepNum}
+            headerText={unit.headerText}
+            status={unit.status}
+            {collapsible}
+            {childSummary}
+          >
+            {#snippet children()}
+              {#each unit.children as child, ci (ci)}
+                {@render renderBlock(child, ci)}
+              {/each}
+            {/snippet}
+          </StepGroup>
         {/if}
       {/each}
 
       {#if !isUser && streaming && !hasContent}
-        <div class="thinking">
-          <span class="d"></span><span class="d"></span><span class="d"></span>
+        <div class="stage-row">
+          <Loader2 size={12} class="stage-spin" />
+          <span class="stage-text">{stageLabel}</span>
         </div>
       {/if}
     </div>
@@ -247,7 +452,22 @@
 
   .content {
     display: flex; flex-direction: column;
-    gap: 4px;
+    gap: 6px;
+  }
+  /* Per-block reveal — each direct child gently materializes on mount.
+     Streaming chunks inside an already-mounted block don't re-trigger;
+     the existing caret + bottom-mask handle in-place text growth. */
+  .content > .text,
+  .content > .reasoning {
+    animation: block-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes block-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .content > .text,
+    .content > .reasoning { animation: none; }
   }
   .text {
     word-wrap: break-word;
@@ -349,44 +569,74 @@
     background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
   }
 
-  .thinking {
-    display: flex; gap: 4px;
+  /* Liveness — live dot + heartbeat timer in role-row while streaming. */
+  .live-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent);
+    animation: live-pulse 1.4s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes live-pulse {
+    0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent); }
+    50%      { opacity: 1;    box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent); }
+  }
+  .heartbeat {
+    font-size: 10px;
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+  /* Whim/activity chip — sits between live-dot and heartbeat. Same
+     visual weight as heartbeat but italic + non-mono to feel like a
+     status word, not a counter. */
+  .whim {
+    font-size: 10.5px;
+    color: var(--accent);
+    font-style: italic;
+    letter-spacing: 0.01em;
+    animation: whim-fade 320ms ease-out;
+  }
+  @keyframes whim-fade {
+    from { opacity: 0; transform: translateY(-1px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .whim { animation: none; }
+  }
+  .mono { font-family: var(--font-mono, monospace); }
+
+  /* Stage row — replaces the bare 3-dot block when bubble is empty. Uses
+     the global activity.currentLabel so the user sees what step is live
+     ("Thinking…", "Reading auto_sync.rs", "Running cargo check…"). */
+  .stage-row {
+    display: inline-flex; align-items: center; gap: 7px;
     padding: 4px 0;
+    font-size: var(--fs-sm);
+    color: var(--fg-muted);
   }
-  .thinking .d {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: var(--fg-subtle);
-    animation: pulse 1.1s ease-in-out infinite;
+  .stage-text {
+    font-style: italic;
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
   }
-  .thinking .d:nth-child(2) { animation-delay: 0.15s; }
-  .thinking .d:nth-child(3) { animation-delay: 0.3s; }
+  .stage-row :global(.stage-spin) {
+    color: var(--accent);
+    animation: stage-spin 1s linear infinite;
+  }
+  @keyframes stage-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
   @keyframes pulse {
     0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
     30% { opacity: 1; transform: scale(1); }
   }
 
-  /* Streaming-only chrome — blinking tail caret + soft fade on the last line
-     so newly-arriving text looks like it's materializing in. Mask is applied
-     to the whole content column; once a line is no longer the last one it
-     pops to full opacity (the "reveal" feel). */
+  /* Streaming-only chrome — soft fade on the last line so newly-arriving
+     text looks like it's materializing in. The role-row live-dot + whim
+     label + heartbeat already carry the "still streaming" signal — no
+     trailing caret (it leaked across bubbles + felt jittery). */
   .bubble[data-streaming="true"] .content {
-    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.4) 100%);
-    mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.4) 100%);
-  }
-  .bubble[data-streaming="true"] .content > .text:last-of-type :global(p:last-of-type)::after,
-  .bubble[data-streaming="true"] .content > .text:last-of-type :global(li:last-child)::after {
-    content: "▍";
-    display: inline-block;
-    margin-left: 2px;
-    font-weight: 200;
-    opacity: 0.55;
-    color: currentColor;
-    vertical-align: -1px;
-    animation: caret-blink 1s ease-in-out infinite;
-  }
-  @keyframes caret-blink {
-    0%, 55% { opacity: 0.55; }
-    78% { opacity: 0; }
-    100% { opacity: 0.55; }
+    -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.55) 100%);
+    mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.55) 100%);
   }
 </style>

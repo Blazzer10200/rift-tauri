@@ -1141,20 +1141,40 @@ class AssistantStore {
   private shortToolLabel(name: string, input?: Record<string, unknown>): string {
     const base = name.replace(/^mcp__rift__/, "");
     const inp = input ?? {};
-    // Claude Code built-ins (PascalCase) + Rift MCP variants (snake_case).
+    const trim = (s: string, n = 70) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+    // File ops — Claude Code built-ins (PascalCase) + Rift MCP variants (snake_case).
     if ((base === "Read" || base === "read_file") && typeof (inp.file_path ?? inp.path) === "string")
       return `read ${inp.file_path ?? inp.path}`;
     if (base === "Write" && typeof inp.file_path === "string") return `write ${inp.file_path}`;
     if (base === "Edit" && typeof inp.file_path === "string") return `edit ${inp.file_path}`;
-    if (base === "Bash" && typeof inp.command === "string") {
-      const c = inp.command as string;
-      return `$ ${c.length > 70 ? c.slice(0, 69) + "…" : c}`;
+    if (base === "MultiEdit" && typeof inp.file_path === "string") {
+      const n = Array.isArray(inp.edits) ? (inp.edits as unknown[]).length : 0;
+      return `edit ${inp.file_path} (${n})`;
     }
+    if (base === "NotebookEdit" && typeof inp.notebook_path === "string") return `notebook ${inp.notebook_path}`;
+    // Shell.
+    if (base === "Bash" && typeof inp.command === "string") return `$ ${trim(inp.command as string)}`;
+    if (base === "BashOutput") return `bash output`;
+    if (base === "KillBash" || base === "KillShell") return `kill bg shell`;
+    if (base === "remote_bash" && typeof inp.command === "string") return `remote $ ${trim(inp.command as string)}`;
+    // Search / nav.
     if (base === "Glob" && typeof inp.pattern === "string") return `glob ${inp.pattern}`;
     if ((base === "Grep" || base === "grep") && typeof inp.pattern === "string") return `grep "${inp.pattern}"`;
+    if (base === "list_dir" && typeof inp.path === "string") return `list ${inp.path}`;
+    // Web.
     if (base === "WebFetch" && typeof inp.url === "string") return `fetch ${inp.url}`;
     if (base === "WebSearch" && typeof inp.query === "string") return `search "${inp.query}"`;
-    if (base === "list_dir" && typeof inp.path === "string") return `list ${inp.path}`;
+    // Agentic / planning / meta.
+    if (base === "Agent" && typeof inp.subagent_type === "string") return `agent: ${inp.subagent_type}`;
+    if (base === "Agent" && typeof inp.description === "string") return `agent: ${trim(inp.description as string, 50)}`;
+    if (base === "AskUserQuestion") return `asking…`;
+    if (base === "ExitPlanMode") return `exit plan mode`;
+    if (base === "SlashCommand" && typeof inp.command === "string") return `slash ${inp.command}`;
+    if (base === "Skill" && typeof inp.skill === "string") return `skill ${inp.skill}`;
+    if (base === "TodoWrite") {
+      const n = Array.isArray(inp.todos) ? (inp.todos as unknown[]).length : 0;
+      return `todos · ${n}`;
+    }
     return base;
   }
 
@@ -1172,12 +1192,10 @@ class AssistantStore {
     const DENY = new Set(["ToolSearch"]);
     if (DENY.has(block.name)) return;
     this.activity = { ...this.activity, currentLabel: this.shortToolLabel(block.name, block.input) };
-    // First tool call of a conversation auto-opens the dock — same UX as the
-    // first TodoWrite. Respects user's manual close after that.
-    if (!this.dockAutoOpenedThisConvo) {
-      this.ui.dockOpen = true;
-      this.dockAutoOpenedThisConvo = true;
-    }
+    // Tool calls render inline in the chat now (ToolChip + EditDiff). The
+    // dock is reserved for TodoWrite-driven multi-step plans, so we no
+    // longer auto-open on the first tool call. `applyTodoWrite` still
+    // opens it when a real plan lands.
     this.mutateStreaming((m) => ({
       ...m,
       blocks: [
