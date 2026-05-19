@@ -107,7 +107,7 @@
     padding-left: 11px;
     margin: 1px 0;
     border-radius: 0 4px 4px 0;
-    animation: step-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: step-in 360ms cubic-bezier(0.16, 1, 0.3, 1);
     transition: border-left-color 200ms ease-out;
   }
   .step:hover {
@@ -121,15 +121,27 @@
   }
   .step[data-status="pending"] {
     border-left-color: color-mix(in oklch, var(--accent) 55%, transparent);
-    animation: step-in 240ms cubic-bezier(0.22, 1, 0.36, 1), rail-pulse 1.8s ease-in-out infinite;
+    animation: step-in 360ms cubic-bezier(0.16, 1, 0.3, 1), rail-pulse 1.8s ease-in-out infinite 360ms;
   }
   @keyframes rail-pulse {
     0%, 100% { border-left-color: color-mix(in oklch, var(--accent) 40%, transparent); }
     50%      { border-left-color: color-mix(in oklch, var(--accent) 75%, transparent); }
   }
+  /* Entrance: noticeable slide+fade so new mid-stream steps actually register
+     against the simultaneous auto-collapse of the prior step. The brief
+     border-left-color flash at 0% decays into the resting status color over
+     the 360ms, reading as a soft accent pop on the rail. rail-pulse is delayed
+     by the entrance duration so the two don't fight on pending steps. */
   @keyframes step-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
+    0%   {
+      opacity: 0;
+      transform: translateY(10px);
+      border-left-color: color-mix(in oklch, var(--accent) 80%, transparent);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
   .step[data-has-num="false"] {
     grid-template-columns: 1fr;
@@ -261,6 +273,7 @@
     padding-top: 0;
   }
   @media (prefers-reduced-motion: reduce) {
+    .step, .step[data-status="pending"] { animation: none; }
     .children-wrap, .children-inner, .step-chev { transition: none; }
     .child-summary { animation: none; }
   }

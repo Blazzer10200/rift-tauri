@@ -77,11 +77,13 @@ Five phases. Each ships as its own version bump and can be reverted independentl
 
 **Goal:** confirm the load-bearing CLI behaviors before committing to the design, and lay the field for the real work.
 
-A1. **Live probe.** Hand-driven via CDP:
+A1. **Live probe.** Hand-driven via CDP + side Bash:
    - Start a convo, send 3 turns. Confirm `~/.claude/projects/<cwd-hash>/<uuid>.jsonl` exists and grows by O(turn-content) per turn, not O(N²).
    - Kill the streaming child mid-turn (assistant_stop) and confirm subsequent `--resume <uuid>` against the same uuid still works (= we can compact safely after aborting a turn).
    - Manually mint a fresh UUID in dev console and call `assistant_send` with it + `isFirstTurn: true` → confirm `--session-id <new-uuid>` lands in a new JSONL alongside the old one (both files present in the cwd-hash dir).
    - Trigger a one-shot `claude -p --resume <uuid> --model haiku` from a separate Bash with prompt "summarize this in 200 tokens"; capture the NDJSON. Confirm a `result.usage` envelope arrives + `total_cost_usd` is non-zero + the streamed text is usable summary content.
+   - **`--max-budget-usd` reality check.** `claude --help` to confirm the flag exists per-invocation (vs. only in `~/.claude/settings.json`). If it's settings-only, B2's hard-cap strategy needs to use a wrapped settings file via `CLAUDE_CONFIG_DIR` for the one-shot call. Load-bearing for B2 — verify before designing further.
+   - **`<system-reminder>` durability across turns.** Send turn 1 with a synthetic `<system-reminder>` carrying a unique sentinel string (e.g. `RIFT_COMPACT_SENTINEL_42`). Send turn 2 asking "what sentinel did the prior reminder contain?". If the model recalls it → reminders persist in cache and C5's seed-via-reminder approach holds. If it can't → C5 needs to splice the summary into the user turn text instead. Load-bearing for C5.
    - Skip the GH #5034 probe — confirmed closed-won't-fix and not on our hot path.
 
 A2. **Decouple Rift convo id from CLI session id.** In `assistant.svelte.ts`, add a `cliSessionId: string | null` field to `ConversationRecord` (default = same as `id` for legacy convos). Initialize on first send. The `assistant_send` invoke passes `cliSessionId`, not `currentConvoId`. Frontend continues to identify the chat by `currentConvoId`. This is the precondition for compaction: we need to be able to remint `cliSessionId` without breaking tab persistence / history.
@@ -127,9 +129,14 @@ pub struct SummarizeResult {
 }
 ```
 
-B2. **Implementation:** spawn `claude -p --resume <session_id> --output-format stream-json --verbose --model haiku --max-budget-usd 0.50` (hard cap on summarize cost). Pipe a prompt like:
+B2. **Implementation:** spawn `claude -p --resume <session_id> --output-format stream-json --verbose --model haiku --max-budget-usd 1.50` (hard cap on summarize cost — matches the per-call ceiling computed below). Pipe a prompt like:
 
-> The user is approaching their context window cap. Produce a structured summary of this conversation that another instance of you could read in <2K tokens and pick up where we left off without losing critical state. Preserve verbatim: (1) any pending TodoWrite items + their statuses, (2) file paths actively being worked on + the last revision direction for each, (3) decisions explicitly made by the user, (4) open questions or blockers. Drop: tool-call mechanics, exploratory dead-ends, verbose tool outputs. Focus: {focus_or_"general continuation"}. Output format: 4 sections — "Active task", "Files in play", "Decisions", "Open questions". No preamble or sign-off.
+> The user is approaching their context window cap. Produce a structured summary of this conversation that another instance of you could read in <2K tokens and pick up where we left off without losing critical state. Preserve verbatim: (1) the active TodoWrite list below, (2) file paths actively being worked on + the last revision direction for each, (3) decisions explicitly made by the user, (4) open questions or blockers. Drop: tool-call mechanics, exploratory dead-ends, verbose tool outputs. Focus: {focus_or_"general continuation"}. Output format: 4 sections — "Active task", "Files in play", "Decisions", "Open questions". No preamble or sign-off.
+>
+> Active TodoWrite tasks (preserve verbatim under "Active task"):
+> {tasks_or_"(none)"}
+
+Frontend populates `{tasks}` from `assistant.tasks` (current TodoWrite snapshot) before invoking; backend interpolates server-side into the spawned `claude -p` prompt.
 
 B3. **NDJSON parse.** Reuse the existing stream parser shape — capture the `result.usage` for cost reporting, accumulate text deltas from `stream_event:content_block_delta:text_delta`. Don't emit `assistant://stream` events (this call is internal, not UI-visible).
 
@@ -148,6 +155,8 @@ B5. **No threshold logic yet.** Settings row in Phase D wires this to a debug bu
 Haiku is the obvious default — 3× cheaper than Sonnet, sufficient for prose summarization. Opus is over-budget and its newer tokenizer chunks text ~35% denser, so even more tokens for same input. No 1M-context surcharge on any model.
 
 `--max-budget-usd 1.50` hard-caps the call (covers Haiku w/ ~60% headroom for tokenizer drift; rejects Sonnet runs that should be flagged before they fire).
+
+**Cold-cache surcharge** (verified S103 probe 2026-05-19): each one-shot `claude -p --resume` is a fresh CLI process, so SessionStart hooks fire and load ~46K tokens of memory/git context into `cache_creation_input_tokens` (~$0.05 fixed overhead per call). Spawn with `CLAUDE_DISABLE_HOOKS=1` in the child env to skip — the SessionStart payload is irrelevant for a one-shot summarize and burns ~5% of the budget per call. Probe receipt: empty-resume call cost $0.0586 w/ 9 input tokens + 46K cache_creation, confirming the surcharge math.
 
 **Verify:** add a `/summarize` debug slash command in `runSlash` that calls `summarizeCurrentSession()` and renders the result in `lastNotice`. Manual dev verification only — no shipped behavior.
 
@@ -191,7 +200,7 @@ C3. **`compactConversation()` flow** in `AssistantStore`:
    4. Mint `newSessionId = crypto.randomUUID()`.
    5. Backend call `assistant_remint_session(convoId, oldSessionId, newSessionId)` which: copies the cwd sidecar from old → new, leaves the old CLI JSONL on disk untouched (no destructive cleanup yet — Phase E can add an archival sweep).
    6. Push compaction record to `compactionHistory`.
-   7. Replace `messages` with: `[boundary message, ...messages.slice(-3)]` (keep last 3 turns visible for continuity). The boundary message carries the summary. Full pre-boundary history is still on disk in the convo JSON — UI can render an "expand archived" affordance.
+   7. Keep the full `messages` array intact on the persisted `ConversationRecord`; introduce a `boundaryAtIndex: number` field on the most recent compaction record that points at the first message index AFTER the boundary. The UI computes a `visibleMessages` derived view that returns `[boundary message, ...messages.slice(boundaryAtIndex - 3)]` when not expanded, full array when expanded. No sidecar file — pre-boundary history stays in the main convo JSON so a failed write never strands data.
    8. Set `cliSessionId = newSessionId`, `convoCreatedAt = null` (so next send fires `--session-id`, not `--resume`), `resetUsage()`, `lastNotice = "Conversation compacted — $X spent, Y% → Z% context"`.
    9. Persist via `scheduleSave(flush=true)`.
 
@@ -239,7 +248,7 @@ D3. **Pre-emption banner.** When `ctxPct >= threshold - 10pp` (5pp of warning), 
 
 E1. **Pre/post stats in boundary bubble.** "Ctx 87% → est 12% · $0.43 saved per future turn (assumed)". Comes from `lastTurnUsage` at compaction time vs. the seeded summary's token count from the SummarizeResult.
 
-E2. **"Expand archived turns" affordance** in `MessageBubble.svelte` for boundary blocks. Reads the original `compactionHistory[N].priorSessionId` and pulls messages from a sidecar archive file `~/.rift/assistant/conversations/<convo>.archive.json` (new file — Phase C step 7 writes the archived slice here on compaction, instead of leaving the full array in the main convo JSON).
+E2. **"Expand archived turns" affordance** in `MessageBubble.svelte` for boundary blocks. Click on the boundary pill flips `visibleMessages` to return the full `messages` array (Phase C7 already preserves the full history in the main convo JSON). No new file format, no extra IO — just toggle a `$state` flag on the boundary block.
 
 E3. **Compact-on-tab-close prompt.** When closing a tab w/ ctxPct > 50%, offer "Compact and keep, or just close?" before destroying tab state. Optional; user may find it annoying.
 

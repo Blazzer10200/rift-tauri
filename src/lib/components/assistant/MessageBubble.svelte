@@ -14,26 +14,92 @@
     return sn === "Edit" || sn === "MultiEdit";
   }
 
-  // Detect a "Step N — title" header line in assistant prose. Matches at the
-  // start of a line, tolerates leading bold/markdown-header/whitespace. The
-  // header line is consumed by the StepGroup marker; any text before it
-  // becomes pre-group prose, any text after it stays inside the group.
-  function parseStepHeader(text: string): { stepNum: number; pre: string; head: string; rest: string } | null {
+  // Detect every "Step N — title" header line in a text block. Returns an
+  // ordered list of prose segments interleaved with header markers so that a
+  // single text block containing multiple headers (e.g. "## Step 1 — A\n##
+  // Step 2 — B") splits into multiple step groups instead of collapsing the
+  // tail into the first group's body.
+  type TextSegment =
+    | { kind: "prose"; text: string }
+    | { kind: "header"; stepNum: number; title: string };
+  const STEP_HEADER_LINE = /^\s*(?:#{1,6}\s+)?(?:\*\*)?Step\s+(\d+)\s*[—–\-:→»]\s*(.*?)(?:\*\*)?\s*$/i;
+  function parseTextBlock(text: string): TextSegment[] {
+    const out: TextSegment[] = [];
     const lines = text.split("\n");
-    for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/^\s*(?:#{1,6}\s+)?(?:\*\*)?Step\s+(\d+)\s*[—–\-:→»]\s*(.*?)(?:\*\*)?\s*$/i);
+    let prose: string[] = [];
+    const flushProse = () => {
+      const joined = prose.join("\n").trim();
+      if (joined) out.push({ kind: "prose", text: joined });
+      prose = [];
+    };
+    for (const line of lines) {
+      const m = line.match(STEP_HEADER_LINE);
       if (m) {
+        flushProse();
         const stepNum = parseInt(m[1], 10);
-        const head = (m[2] ?? "").replace(/[*_`]+$/, "").trim() || `Step ${stepNum}`;
-        return {
-          stepNum,
-          pre: lines.slice(0, i).join("\n").trim(),
-          head,
-          rest: lines.slice(i + 1).join("\n").trim(),
-        };
+        const title = (m[2] ?? "").replace(/[*_`]+$/, "").trim() || `Step ${stepNum}`;
+        out.push({ kind: "header", stepNum, title });
+      } else {
+        prose.push(line);
       }
     }
-    return null;
+    flushProse();
+    return out;
+  }
+
+  // When the model interleaves a tool call mid-header (e.g. emits "## S",
+  // calls Bash, then continues "tep 1 — Long bash\n## Step 2 — …"), the text
+  // arrives in two separate blocks separated by tool blocks. marked.js parses
+  // the first chunk as a tear-shaped <h2>S</h2> and the second chunk as
+  // prose, killing the header. This pre-pass detects that pattern (a text
+  // block that's only a partial header prefix — `## ` plus a word fragment
+  // with no terminator) and surgically reconstructs the first complete header
+  // line, leaving any remaining tail (e.g. a *second* "## Step 2 …" header)
+  // as its own text block AFTER the intervening tool calls — so the tools
+  // attach to the recovered first step, not the second.
+  const PARTIAL_HEADER = /^\s*#{1,6}\s+(?:\*\*)?[A-Za-z]+\s*$/;
+  function reconcileSplitHeaders(blocks: Block[]): Block[] {
+    const out: Block[] = [];
+    let i = 0;
+    while (i < blocks.length) {
+      const b = blocks[i];
+      if (b.type !== "text" || !PARTIAL_HEADER.test(b.text)) {
+        out.push(b);
+        i++;
+        continue;
+      }
+      // Lookahead — collect non-text blocks until the next text block.
+      let j = i + 1;
+      const interim: Block[] = [];
+      while (j < blocks.length && blocks[j].type !== "text") {
+        interim.push(blocks[j]);
+        j++;
+      }
+      const tail = j < blocks.length && blocks[j].type === "text" ? blocks[j] : null;
+      if (!tail) {
+        out.push(b);
+        i++;
+        continue;
+      }
+      const merged = b.text + tail.text;
+      // Confirm the merge actually produces a Step header — otherwise this
+      // partial wasn't a header at all, leave both blocks alone.
+      if (!/(?:^|\n)\s*(?:#{1,6}\s+)?(?:\*\*)?Step\s+\d+/i.test(merged)) {
+        out.push(b);
+        i++;
+        continue;
+      }
+      // Split the merged text at the first newline — that's the end of the
+      // recovered header line. Everything after stays as the tail block.
+      const firstNl = merged.indexOf("\n");
+      const firstLine = firstNl === -1 ? merged : merged.slice(0, firstNl);
+      const remainder = firstNl === -1 ? "" : merged.slice(firstNl + 1);
+      out.push({ type: "text", text: firstLine });
+      out.push(...interim);
+      if (remainder.trim()) out.push({ type: "text", text: remainder });
+      i = j + 1;
+    }
+    return out;
   }
 
   type StepStatus = "neutral" | "pending" | "done" | "error";
@@ -133,7 +199,6 @@
       .trim(),
   );
 
-  const hasContent = $derived(message.blocks.length > 0);
   const isUser = $derived(message.role === "user");
 
   function formatDuration(ms: number): string {
@@ -207,8 +272,9 @@
         current = null;
       }
     };
-    for (let i = 0; i < message.blocks.length; i++) {
-      const b = message.blocks[i];
+    const blocks = reconcileSplitHeaders(message.blocks);
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i];
       // Reasoning blocks always render flat (they live at the top of a turn).
       if (b.type === "thinking") {
         flush();
@@ -216,23 +282,18 @@
         continue;
       }
       if (b.type === "text") {
-        const parsed = parseStepHeader(b.text);
-        if (parsed) {
-          if (parsed.pre) {
-            const preBlock: Block = { type: "text", text: parsed.pre };
-            if (current) current.children.push(preBlock);
-            else units.push({ kind: "loose", block: preBlock, key: `l_p${i}` });
+        const segments = parseTextBlock(b.text);
+        for (let si = 0; si < segments.length; si++) {
+          const seg = segments[si];
+          if (seg.kind === "header") {
+            flush();
+            current = { stepNum: seg.stepNum, headerText: seg.title, children: [] };
+          } else {
+            const proseBlock: Block = { type: "text", text: seg.text };
+            if (current) current.children.push(proseBlock);
+            else units.push({ kind: "loose", block: proseBlock, key: `l_${i}_${si}` });
           }
-          flush();
-          current = {
-            stepNum: parsed.stepNum,
-            headerText: parsed.head,
-            children: parsed.rest ? [{ type: "text", text: parsed.rest }] : [],
-          };
-          continue;
         }
-        if (current) current.children.push(b);
-        else units.push({ kind: "loose", block: b, key: `l_${i}` });
         continue;
       }
       // Tool blocks: attach to current step, or render loose if no step yet.
@@ -271,7 +332,6 @@
       <span class="role-name">{isUser ? "You" : "Claude"}</span>
       {#if !isUser && streaming}
         <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
-        {#if stageLabel}{#key stageLabel}<span class="whim" title="Current activity">{stageLabel}</span>{/key}{/if}
         {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
       {/if}
       {#if !isUser && (modelLabel || costLabel)}
@@ -291,6 +351,18 @@
         </button>
       {/if}
     </div>
+
+    {#if !isUser && streaming && stageLabel}
+      {@const isShell = /^\$\s/.test(stageLabel)}
+      <div class="stream-status" title={stageLabel}>
+        <Loader2 size={11} class="stage-spin" />
+        {#key stageLabel}
+          <span class="stream-status-text" class:mono={isShell} class:prose={!isShell}>
+            {stageLabel}
+          </span>
+        {/key}
+      </div>
+    {/if}
 
     <div class="content">
       {#snippet renderBlock(b: Block, bi: number)}
@@ -371,12 +443,6 @@
         {/if}
       {/each}
 
-      {#if !isUser && streaming && !hasContent}
-        <div class="stage-row">
-          <Loader2 size={12} class="stage-spin" />
-          <span class="stage-text">{stageLabel}</span>
-        </div>
-      {/if}
     </div>
   </div>
 </div>
@@ -433,6 +499,9 @@
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-left: auto;
   }
   .turn-model { color: var(--fg-2); font-weight: 500; }
   .turn-sep { color: var(--fg-faint); }
@@ -588,44 +657,56 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
   }
-  /* Whim/activity chip — sits between live-dot and heartbeat. Same
-     visual weight as heartbeat but italic + non-mono to feel like a
-     status word, not a counter. */
-  .whim {
-    font-size: 10.5px;
-    color: var(--accent);
-    font-style: italic;
-    letter-spacing: 0.01em;
-    animation: whim-fade 320ms ease-out;
+  .mono { font-family: var(--font-mono, monospace); }
+
+  /* Stream status sub-row — single source of truth for the live activity
+     label (formerly split across role-row `.whim` + bubble-empty `.stage-row`).
+     Sits directly under role-row, full-width, single-line truncated. Keeps
+     long bash commands and absolute paths out of the role-row so the model
+     badge + heartbeat never get pushed off-screen. */
+  .stream-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: min(100%, 78ch);
+    margin: -1px 0 4px;
+    color: var(--fg-muted);
+    animation: status-fade 260ms ease-out;
   }
-  @keyframes whim-fade {
+  .stream-status :global(.stage-spin) {
+    color: var(--accent);
+    flex-shrink: 0;
+    animation: stage-spin 1s linear infinite;
+  }
+  .stream-status-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 11px;
+    letter-spacing: 0.01em;
+    line-height: 1.3;
+  }
+  .stream-status-text.prose {
+    font-style: italic;
+    color: color-mix(in oklch, var(--accent) 75%, var(--fg-muted));
+  }
+  .stream-status-text.mono {
+    font-family: var(--font-mono, monospace);
+    font-size: 10.5px;
+    color: var(--fg-muted);
+  }
+  @keyframes status-fade {
     from { opacity: 0; transform: translateY(-1px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @media (prefers-reduced-motion: reduce) {
-    .whim { animation: none; }
-  }
-  .mono { font-family: var(--font-mono, monospace); }
-
-  /* Stage row — replaces the bare 3-dot block when bubble is empty. Uses
-     the global activity.currentLabel so the user sees what step is live
-     ("Thinking…", "Reading auto_sync.rs", "Running cargo check…"). */
-  .stage-row {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 4px 0;
-    font-size: var(--fs-sm);
-    color: var(--fg-muted);
-  }
-  .stage-text {
-    font-style: italic;
-    font-family: var(--font-mono, monospace);
-    font-size: 12px;
-  }
-  .stage-row :global(.stage-spin) {
-    color: var(--accent);
-    animation: stage-spin 1s linear infinite;
-  }
   @keyframes stage-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .stream-status { animation: none; }
+    .stream-status :global(.stage-spin) { animation: none; }
+  }
   @keyframes pulse {
     0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
     30% { opacity: 1; transform: scale(1); }

@@ -2,6 +2,28 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 103 — 2026-05-19 — Chat polish + Compaction Phase A (not released)
+
+**Chat UI** — 5 improvements, all committed-WIP:
+- **StepGroup slide-in** — 240ms→360ms, 4px→10px, ease-out-expo (`cubic-bezier(0.16,1,0.3,1)`), brief accent rail flash at entry, `rail-pulse` delayed 360ms on pending so they don't fight.
+- **Stream-status sub-row** — activity label moved OUT of role-row into a dedicated `.stream-status` row below it. Single-line ellipsis-truncated, spinner inline, mono for `$ ...` commands vs italic for prose stages. Killed `.whim`, `.stage-row`, orphan `hasContent` derived.
+- **Turn-badge right-anchored** — `margin-left:auto` + `white-space:nowrap` + `flex-shrink:0`; model/cost pill never wraps or gets pushed off-screen.
+- **EditDiff blank-line collapse** — new `gap` kind; single blank ctx → 6px dashed spacer, 2+ consecutive blanks → `··· N blank lines ···` strip. Non-ctx blanks (intentional model edits) untouched.
+- **Split-header tear fix** — `reconcileSplitHeaders` pre-pass detects `## S` → tool → `tep 1 — ...` model interleaving, reconstructs the first full header + keeps tool under the right step. `parseTextBlock` replaces `parseStepHeader` — returns all segment headers in one text block instead of just the first, so `## Step 1 ... ## Step 2 ...` in one chunk splits cleanly.
+
+**CDP workflow** — [CLAUDE.md](../CLAUDE.md) now has a DOM-vs-`shot` decision table. Triggers that MUST fire a shot: user pastes UI screenshot, CSS edit lands, "look at the UI" prompt, before claiming UI done.
+
+**Live binary updated** — release build swapped into `C:\Users\BLAZZER\AppData\Local\Rift\current\rift-tauri.exe`. Backup at `.bak-S102-S103`. No Velopack/release push.
+
+**Compaction Phase A — in progress:**
+- **A1 (3/5 probes)** — `--max-budget-usd` confirmed per-invocation flag ✓. One-shot `claude -p --resume <uuid> --model haiku --output-format stream-json` works, `result.usage` + cost present ✓. Multi-JSONL coexist in cwd dir ✓. Cold-cache finding: each one-shot pay ~$0.05 surcharge from SessionStart hook; fix = `CLAUDE_DISABLE_HOOKS=1` in child env. Probes 4+5 (kill-resume + system-reminder sentinel) queued for next session — need live dev UI driving.
+- **A2 (complete)** — decoupled `currentCliSessionId` from `currentConvoId`. Frontend: new `$state` field, all 7 reset/mint paths updated, `send()` passes `currentCliSessionId` to backend, `loadConversation` restores with legacy fallback. Backend: `cli_session_id: Option<String>` on `Conversation` struct (`#[serde(default, skip_serializing_if)]`). Zero behavior change today — both IDs identical until Phase C remint.
+- **A3/A4/A5 + Phases B–E** — not started.
+
+**Compaction doc nits patched** — [docs/design/assistant-compaction.md](design/assistant-compaction.md): cost cap 0.50→1.50, C7/E2 archive contradiction resolved (full array stays in main convo JSON, `visibleMessages` is a derived view), B2 TodoWrite task interpolation added, 2 extra A1 probe items, cold-cache finding + `CLAUDE_DISABLE_HOOKS=1` mitigation documented.
+
+---
+
 ## Session 102 — 2026-05-19 — Assistant chat rhythm overhaul (shipped, not released)
 
 Multi-batch UI/UX pass on the Assistant chat. Committed only; `/git-ship` deferred (versions still v0.4.11-alpha).
@@ -18,7 +40,7 @@ Multi-batch UI/UX pass on the Assistant chat. Committed only; `/git-ship` deferr
 
 ## Session 101 — 2026-05-19 — Compaction design research (no code shipped)
 
-Plan written, ready to execute: **[docs/design/assistant-compaction.md](docs/design/assistant-compaction.md)** (5 phases, risk register, all file anchors). Rift owns compaction end-to-end since CLI `/compact` is interactive-only (GH #14472) + `DISABLE_AUTO_COMPACT=1` globally. Haiku 4.5 default summarize; `prior_context_summary: Option<String>` on `assistant_send`; `role: "system"` boundary messages (3 additive edits); 5-min cooldown. **Next:** Phase A1 CDP live probe — mint fresh uuid mid-dev, test one-shot `--resume haiku` summarize.
+Plan at [docs/design/assistant-compaction.md](design/assistant-compaction.md). A1 probes + A2 code picked up in S103.
 
 ---
 
@@ -36,7 +58,7 @@ Plan written, ready to execute: **[docs/design/assistant-compaction.md](docs/des
 
 **Voice:** Settings → Speech (STT only); v0.4.5 picks highest-conf of 3 alternates. **A11y:** Settings → Accessibility (dyslexia-friendly mode, font, spacing, warm tint — v0.4.7).
 
-**Active work:** (a) **Assistant chat rhythm (S102)** — committed, NOT released. Resume by picking from the proposed-next list: soft slide-in for new mid-stream steps, auto-expand the in-progress step as it advances, OR a new area. (b) **Compaction (S101)** — full plan at [docs/design/assistant-compaction.md](docs/design/assistant-compaction.md), Phase A1 CDP live probe pending.
+**Active work:** (a) **Compaction (S101/S103)** — full plan at [docs/design/assistant-compaction.md](design/assistant-compaction.md). A1 3/5 done, A2 complete. **Next: A3** (whitelist `result.subtype` at [assistant.svelte.ts:~1380](../src/lib/state/assistant.svelte.ts#L1380)), then A4 (add `auto_compact_threshold`/`compact_model` to `AssistantConfig` in [mod.rs:177](../src-tauri/src/assistant/mod.rs#L177)), then A5 (no UI), then Phase B (summarize primitive). (b) **Chat UI (S102/S103)** — all items shipped to WIP commit, nothing remaining from the proposed-next list. Clean base for new asks.
 
 **v0.2 queue** (needs `/grill` or `/plan`): auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split (1790L); LocalPane/RemotePane base extract; integration tests phase 1. A11y stretch: SymSpell+Metaphone "did you mean" pill; STT vocab hints / Azure-direct.
 

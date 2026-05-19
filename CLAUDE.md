@@ -76,9 +76,22 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 1. `scripts/run-dev.bat` already sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Always start dev via this batch (not raw `npm run tauri dev`) so CDP is exposed.
 2. Start the wrapper once per dev session: `npm run cdp:serve` (background). It holds one persistent ws to WebView2 and exposes `127.0.0.1:9223`. ~40-60ms per call.
 3. Drive via `bash scripts/cdp/c.sh {health|state|eval|type|click|wait|shot|shutdown}`. Full docs: `scripts/cdp/README.md`.
-4. **Prefer `/state` + `/eval` (DOM reads) over screenshots.** Per-screenshot is ~$0.07 at Opus 4.7 rates; DOM reads are free. Screenshot only when pixels matter (layout / animation / contrast).
-5. Webview only — titlebar / drag region / OS dialogs are invisible to CDP. If a native-chrome bug appears, ask the user OR queue a Windows-MCP setup.
-6. CDP is dev-only. Prod builds don't expose the port.
+4. **`shot` workflow** — `bash scripts/cdp/c.sh shot jpeg 65` writes to `scripts/cdp/.tmp/snap-*.jpeg` and returns the path. `Read` the path; image renders inline (multimodal). ~$0.07/shot at Opus 4.7 rates.
+5. **DOM vs shot decision table — DON'T skip the shot when these triggers fire:**
+
+   | Trigger | Tool | Why |
+   |---|---|---|
+   | "what is mounted / how many bubbles / current model" | `state` | DOM probe is free + sufficient |
+   | "did element X mount / what's its className / offsetHeight" | `eval` | Same — DOM has the answer |
+   | **User pastes a screenshot of the UI** | **`shot` immediately** | Compare your current state to what they see before reasoning |
+   | **CSS edit (animation, spacing, color, layout, size)** | **`shot` after HMR** | DOM `getComputedStyle` proves the property changed; only pixels prove it LOOKS right |
+   | **"look at the chat / see how it looks / examine the UI"** | **`shot` first, then probe** | The user is asking about pixels, not structure |
+   | **Before claiming a UI change "done"** | **`shot` once** | DOM-only verification on visual work = unverified |
+   | "Is component overflowing / wrapping / colliding" | **`shot`** | Layout bugs are pixel-level; DOM lies about visual collision |
+
+   Rule of thumb: if the answer is "looks right" / "looks wrong", you need pixels. If the answer is "yes mounted" / "value is 360ms", DOM is fine.
+6. Webview only — titlebar / drag region / OS dialogs are invisible to CDP. If a native-chrome bug appears, ask the user OR queue a Windows-MCP setup.
+7. CDP is dev-only. Prod builds don't expose the port.
 
 ## Project gotchas
 
