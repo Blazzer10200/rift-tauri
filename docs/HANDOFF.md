@@ -2,57 +2,27 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 96 — 2026-05-18 — v0.4.10-alpha: workspace shell (shipped)
+## Session 102 — 2026-05-19 — Assistant chat rhythm overhaul (shipped, not released)
 
-Single workspace-swap shell replacing v0.2 / v0.4.1 dual-shell. Activity bar (40px) navigates; 8 reachable workspaces (Chat · Sync · Files · Conflicts · Diagnostics · Terminal · Activity · History) + 2 disabled stubs (Agents, Attachments) + settings gear bottom of rail. ChatTabsBar gated on `workspace.activeId === "chat"`. 3 commits (2c48bc7 → 87e9345 → 7b96146); smoke 100/0 fresh, 97/3 non-fresh (sleep-2 race); `npm run check` 0/0; ~956 LOC deleted / ~150 added. Design: [docs/design/workspace-shell.md](design/workspace-shell.md). Details: `git log -p 2c48bc7..7b96146`.
+Multi-batch UI/UX pass on the Assistant chat. Committed only; `/git-ship` deferred (versions still v0.4.11-alpha).
 
-**Pending from S96:** (a) **Velopack delta chain investigation — TOP PRIORITY** (carried from S95, v0.4.10 ship resets chain). (b) Trey-config sync. (c) Dead CSS warnings: TerminalPanel (~15 collapsed-strip/divider rules), AssistantHeader (hdr-btn.active, convo-chip), TasksDock (dock-head/title/closebtn). (d) Drop unused width-resize handlers from TerminalPanel. (e) `smoke-v04-10.sh` sections C+F: `sleep 2 → 3` one-liner.
+**New:** [EditDiff.svelte](../src/lib/components/assistant/EditDiff.svelte) (jsdiff side-by-side, Edit/MultiEdit only); [ToolChip.svelte](../src/lib/components/assistant/ToolChip.svelte) (every non-Edit tool: per-tool kv input rows + terminal/code/list/plain result blocks); [StepGroup.svelte](../src/lib/components/assistant/StepGroup.svelte) (`Step N — title` → numbered marker + accent rail + status rings + auto-collapse).
 
-## Session 97 — 2026-05-18 — cmdk palette REMOVED (user decision after 2nd failed attempt)
+**Modified:** [MessageBubble.svelte](../src/lib/components/assistant/MessageBubble.svelte) parses step headers, rolls up tool status, cycles whim words (12-word pool, 2.4s) in role-row when no per-tool label, auto-collapses done steps when ≥4 total (grid-template-rows 1fr↔0fr 280ms; last/pending/error stay expanded). [AssistantPage.svelte:101](../src/lib/components/assistant/AssistantPage.svelte#L101) scopes streaming to last assistant msg (caret leak fix); caret CSS removed. [AssistantHeader.svelte:55](../src/lib/components/assistant/AssistantHeader.svelte#L55) recognizes Sonnet 4.5/4.6 + Opus 4.6/4.7 as 1M context. [TasksDock.svelte](../src/lib/components/assistant/TasksDock.svelte) ~480→~135L (Tasks-only). [stt.svelte.ts](../src/lib/state/stt.svelte.ts) `consume()` kills post-send re-paste. [assistant/mod.rs:981](../src-tauri/src/assistant/mod.rs#L981) per-session toggles moved to user-turn `<system-reminder>` (cache-stable).
 
-Bug from prior S97 attempt persisted. Tried external `class PaletteStore { open = $state(false) }` module store (anti-pattern from prior bare-local `$state`), then a propless variant where CommandPalette imported the store and read `palette.open` directly inside `{#if}` (mirrors working SyncModal pattern). Both attempts: store value flipped correctly under `palette.open = true`, but the CommandPalette-side `{#if palette.open}` block and a debug `$effect(() => console.log(palette.open))` never re-ran. AddServer / SyncModal use the same patterns and work — only this site was broken. Reactivity-source plumbing isn't the bug; root cause never identified.
+**Verified:** `npm run check` 0/0 throughout; CDP-driven probes per batch.
 
-**User halted: removed the feature entirely.** No command palette in titlebar going forward. Surface decluttered.
+**Next candidates:** soft slide-in for new mid-stream steps; auto-expand the in-progress step as it advances. Skipped (info-loss): per-tool whim variants, full chain rail.
 
-**Files deleted:**
-- `src/lib/state/palette.svelte.ts` (created this session)
-- `src/lib/components/dialogs/CommandPalette.svelte`
+---
 
-**Files modified:**
-- [Titlebar.svelte](../src/lib/components/shell/Titlebar.svelte) — `.cmdk` button, `onOpenPalette` prop, `Search` lucide import, and `.cmdk` CSS rules all removed
-- [AppShell.svelte](../src/lib/components/AppShell.svelte) — CommandPalette mount, `palette` import, Ctrl+K keybind, and the entire `sharedCommands`/`workspaceCommands`/`commands` derived registry removed
+## Session 101 — 2026-05-19 — Compaction design research (no code shipped)
 
-`npx svelte-check`: **0 errors, 0 warnings, 4026 files**. Not committed — user holding for the next session.
+Plan written, ready to execute: **[docs/design/assistant-compaction.md](docs/design/assistant-compaction.md)** (5 phases, risk register, all file anchors). Rift owns compaction end-to-end since CLI `/compact` is interactive-only (GH #14472) + `DISABLE_AUTO_COMPACT=1` globally. Haiku 4.5 default summarize; `prior_context_summary: Option<String>` on `assistant_send`; `role: "system"` boundary messages (3 additive edits); 5-min cooldown. **Next:** Phase A1 CDP live probe — mint fresh uuid mid-dev, test one-shot `--resume haiku` summarize.
 
-**Lessons (workflow):** I CDP-probed compiled JS for 30+ min on the symptom side instead of cutting bait at the first failed direct fix. Same trap as S97's original attempt. Rule for next time: **2 failed direct attempts on a reactivity-shape bug → ship without the feature OR ask user before further archaeology**, don't grind on Svelte internals.
+---
 
-**Workspace switching, settings, server picker, bridge indicator all unaffected.** Only the search-button → palette path is gone.
-
-## Session 98 — 2026-05-18 — assistant context inconsistency fix
-
-Assistant was reading stale/missing context. Two root causes in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs):
-
-1. **cwd pinned per session.** `--resume <uuid>` only searches the current cwd's `~/.claude/projects/<cwd-hash>/` ([anthropics/claude-code#35226](https://github.com/anthropics/claude-code/issues/35226) — no fallback). Workspace switches mid-conversation → resume aimed at wrong dir → session-lost → frontend popped messages, silently restarted. Now a sidecar `~/.rift/assistant/sessions/<uuid>.cwd` captures cwd on first turn and overrides root resolution on every subsequent turn. Legacy convos auto-migrate on their next resume. Deleted on `assistant_delete_conversation`.
-
-2. **Per-turn workspace context moved from `--append-system-prompt` → user-turn `<system-reminder>` block.** Live AutoSync state (foreign locks, sync queue, recent diag events) was being spliced into the system prompt every turn → busted the cache-prefix every turn (cache layout: system → tools → CLAUDE.md → conversation tail). Static addendum (tool list, ACT FIRST, dyslexia, remote_shell description) stays in `--append-system-prompt`; the per-turn snapshot now rides the user message. Newline-separated for readability since the stdin path has no argv constraint.
-
-Also added `--exclude-dynamic-system-prompt-sections` so the CLI's own cwd/env/git auto-injection also leaves the cached prefix.
-
-Backend-only; wire-compatible w/ existing `assistant_send` invocation. `cargo check` clean. Frontend untouched.
-
-## Session 99 — 2026-05-18 — Assistant cwd lands at common ancestor (FiveM workspace fix)
-
-Symptom: Assistant told user "Your FiveM server is running in a `[voice]` resource directory" — model's cwd had landed inside a single resource folder instead of `resources/` where every resource is visible. Same on Trey's machine.
-
-Root cause: AutoSync's `folders_clone()` yields one `FolderWatch` per resource. `roots[0]` was used as `cmd.current_dir`. Resources beginning with `[bracket]` (`[` = 0x5B in ASCII, before letters) sort first, so `[voice]/` won.
-
-Fix in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs): `common_ancestor()` helper computes the lexical common parent of all roots. When the AutoSync path produces >1 root (and there's no pinned sidecar + no explicit `current_root`), prepend the ancestor to `roots`. `roots[0]` is now e.g. `<server>/resources/` instead of `<server>/resources/[voice]/`. The individual folder roots stay in the list so MCP path-resolution behaviour is unchanged. Ancestor must (a) share a real path beyond fs root, (b) have a parent, (c) exist as a directory — otherwise we fall through to the old behaviour.
-
-S98 sidecar interaction: existing pinned conversations keep their captured cwd (preserves --resume continuity even if narrower); new conversations + legacy non-pinned conversations get the ancestor.
-
-`cargo check` clean. Backend-only.
-
-**Pending verify (combined S98+S99):** real-world send round-trip; multi-writer scenario (Trey machine); optional follow-up = surface CLI compaction events in UI so the user knows when earlier context got summarized.
+> S100 (Velopack stub fix) + S96–99 (workspace shell + assistant fixes) archived to [docs/archive/HANDOFF-archive.md](archive/HANDOFF-archive.md). Velopack watch: any NSIS-then-Velopack machine may have stale root binary (shortcut launches old version even after successful update).
 
 ---
 
@@ -65,6 +35,8 @@ S98 sidecar interaction: existing pinned conversations keep their captured cwd (
 **CDP autonomous-verify live** — `run-dev.bat` sets WebView2 port; `npm run cdp:serve` on 9223; `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`.
 
 **Voice:** Settings → Speech (STT only); v0.4.5 picks highest-conf of 3 alternates. **A11y:** Settings → Accessibility (dyslexia-friendly mode, font, spacing, warm tint — v0.4.7).
+
+**Active work:** (a) **Assistant chat rhythm (S102)** — committed, NOT released. Resume by picking from the proposed-next list: soft slide-in for new mid-stream steps, auto-expand the in-progress step as it advances, OR a new area. (b) **Compaction (S101)** — full plan at [docs/design/assistant-compaction.md](docs/design/assistant-compaction.md), Phase A1 CDP live probe pending.
 
 **v0.2 queue** (needs `/grill` or `/plan`): auto-Mirror on rename; dry-run Mirror preview; EACCES auto-fix-perms; `lib.rs`→`commands/*.rs` split (1790L); LocalPane/RemotePane base extract; integration tests phase 1. A11y stretch: SymSpell+Metaphone "did you mean" pill; STT vocab hints / Azure-direct.
 

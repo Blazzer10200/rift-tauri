@@ -193,12 +193,14 @@
     if (c.name === "model") {
       // Open the model picker instead of inserting `/model ` text.
       assistant.composerDraft = "";
+      stt.consume();
       modelPickerOpen = true;
       void tick().then(() => ta?.focus());
       return;
     }
     // Direct-fire commands skip the textarea round-trip entirely.
     assistant.composerDraft = "";
+    stt.consume();
     onsubmit(`/${c.name}`);
     void tick().then(autosize);
   }
@@ -214,6 +216,7 @@
     // Allow attachments-only sends (paste-and-go); only block if both empty.
     if (!text && assistant.composerAttachments.length === 0) return;
     assistant.composerDraft = "";
+    stt.consume();
     onsubmit(text);
     void tick().then(autosize);
   }

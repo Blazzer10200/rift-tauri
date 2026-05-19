@@ -98,8 +98,13 @@
             <EmptyState {needsAuth} />
           {:else}
             <div class="messages" bind:this={messagesEl}>
-              {#each assistant.messages as m (m.id)}
-                <MessageBubble message={m} streaming={assistant.streaming} />
+              {#each assistant.messages as m, mi (m.id)}
+                <MessageBubble
+                  message={m}
+                  streaming={assistant.streaming
+                    && mi === assistant.messages.length - 1
+                    && m.role === "assistant"}
+                />
               {/each}
               {#if assistant.lastError}
                 <div class="error">⚠ {assistant.lastError}</div>

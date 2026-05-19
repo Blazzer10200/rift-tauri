@@ -81,6 +81,17 @@ class SttStore {
   private baseDraft = "";
   // Accumulated final-only transcript across the current recording session.
   private finalText = "";
+  // Set true when the composer has consumed the current draft (send / slash
+  // fire). Late-arriving onResult / onEnd writes are dropped until the next
+  // start() — otherwise queued finals re-paste what the user just sent.
+  private consumed = false;
+  // Watchdog timer for the post-stop "transcribing" window. Some WebView2
+  // builds never fire onend after stop() if no finals are pending; without
+  // this the mic button stays disabled forever.
+  private transcribeTimer: ReturnType<typeof setTimeout> | null = null;
+  // Debounce token for setConfig-driven restart — prevents double-start
+  // when the user toggles multiple options in quick succession.
+  private restartToken = 0;
 
   async init() {
     if (this.initStarted) return;
@@ -104,11 +115,24 @@ class SttStore {
       this.lastError = `Save settings failed: ${e}`;
     }
     if (this.recording && this.recognition) {
-      // Restart recognition so language/continuous/interim changes take effect.
+      // Restart recognition so language/continuous/interim changes take
+      // effect. Debounced via token so rapid toggles don't double-start.
+      const token = ++this.restartToken;
       this.recognition.abort();
       this.recording = false;
-      void this.start();
+      setTimeout(() => {
+        if (token === this.restartToken) void this.start();
+      }, 120);
     }
+  }
+
+  /** Composer-side hook: the current draft was just sent / cleared. Resets
+   *  the transcript baseline so queued late finals don't re-paste it. */
+  consume() {
+    this.baseDraft = "";
+    this.finalText = "";
+    this.consumed = true;
+    this.lastTranscript = "";
   }
 
   /** Begin live recognition. Returns false if unavailable / disabled. */
@@ -127,6 +151,8 @@ class SttStore {
     this.lastError = null;
     this.baseDraft = this.config.append_to_draft ? assistant.composerDraft : "";
     this.finalText = "";
+    this.consumed = false;
+    this.clearTranscribeTimer();
 
     const r = new Ctor();
     r.lang = this.config.language || "en-US";
@@ -162,6 +188,16 @@ class SttStore {
     try {
       this.recognition.stop();
       this.transcribing = true;
+      // Watchdog: if onend doesn't fire within 4s (seen on some WebView2
+      // builds when no finals are pending), force-clear the transcribing
+      // flag so the mic button isn't stuck disabled.
+      this.clearTranscribeTimer();
+      this.transcribeTimer = setTimeout(() => {
+        if (this.transcribing) {
+          this.transcribing = false;
+          this.recognition = null;
+        }
+      }, 4000);
     } catch (e) {
       console.warn("[stt] stop failed:", e);
     }
@@ -176,14 +212,30 @@ class SttStore {
     } catch {
       /* recogniser may already be stopped */
     }
-    assistant.composerDraft = this.baseDraft;
+    // Only restore the pre-recording draft if the user hasn't already sent.
+    // Restoring after a send re-pastes the original text the user just shipped.
+    if (!this.consumed) {
+      assistant.composerDraft = this.baseDraft;
+    }
     this.finalText = "";
     this.recording = false;
     this.transcribing = false;
     this.recognition = null;
+    this.clearTranscribeTimer();
+  }
+
+  private clearTranscribeTimer() {
+    if (this.transcribeTimer) {
+      clearTimeout(this.transcribeTimer);
+      this.transcribeTimer = null;
+    }
   }
 
   private onResult(e: SpeechRecognitionEvent) {
+    // After a send/clear, drop late-arriving results so they don't re-paste
+    // the committed text. Caller (Composer) restarts via toggleMic if the
+    // user wants to keep dictating.
+    if (this.consumed) return;
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
@@ -216,13 +268,15 @@ class SttStore {
   }
 
   private onEnd() {
-    // Commit any interim text by re-composing with empty interim.
-    if (this.recognition) {
+    // Commit any interim text by re-composing with empty interim — but only
+    // if the draft hasn't been consumed (send), to avoid re-pasting.
+    if (this.recognition && !this.consumed) {
       assistant.composerDraft = this.composeDraft(this.finalText, "");
     }
     this.recording = false;
     this.transcribing = false;
     this.recognition = null;
+    this.clearTranscribeTimer();
   }
 }
 

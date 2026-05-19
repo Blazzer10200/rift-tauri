@@ -53,11 +53,15 @@
   }
 
   /** Context-window cap for the model id reported by `system`/init.
-   *  1M-context variants carry the `[1m]` suffix on the model name; everything
-   *  else (sonnet/opus/haiku 4.x) is 200K by default. */
+   *  Sonnet 4.5/4.6 and Opus 4.6/4.7 default to the 1M-context beta in
+   *  Claude Code; Haiku 4.5 + older models stay at 200K. Explicit `[1m]`
+   *  suffix (Rift's intermediate alias format) always wins. */
   function contextWindowFor(model: string | null): number {
     if (!model) return 200_000;
     if (/\[1m\]/i.test(model)) return 1_000_000;
+    const id = model.toLowerCase();
+    if (id.includes("haiku")) return 200_000;
+    if (/sonnet-4-[56]/.test(id) || /opus-4-[67]/.test(id)) return 1_000_000;
     return 200_000;
   }
 
@@ -68,9 +72,16 @@
     return String(n);
   }
 
-  // Effective context the model is processing = uncached new input +
-  // cache-create + cache-read. Cache hits don't shrink what the model "sees"
-  // — they're billing optimization. Sum is what fills the window.
+  // "New" content this turn = uncached input + cache-create. This is what
+  // the user actually paid full price for and what newly entered the cache.
+  // cache_read is prior turns' cached content being re-read; it counts
+  // toward window utilization but isn't new spend.
+  const newTokens = $derived(
+    assistant.lastTurnUsage
+      ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheCreate
+      : 0,
+  );
+  // Total prompt size for the latest turn — full window utilization.
   const ctxTokens = $derived(
     assistant.lastTurnUsage
       ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheRead + assistant.lastTurnUsage.cacheCreate
@@ -87,16 +98,21 @@
       assistant.totalCostUsd !== null && assistant.totalCostUsd !== undefined
         ? ` · $${assistant.totalCostUsd.toFixed(4)}`
         : "";
+    const hint =
+      ctxPct >= 85
+        ? "\n\nWindow nearly full — start a new chat (Ctrl+T) to drop the accumulated tool-result history."
+        : ctxPct >= 70
+          ? "\n\nCache is growing — Ctrl+T for a fresh chat if responses start lagging."
+          : "";
     return (
       `Context this turn: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} (${ctxPct.toFixed(1)}%)\n` +
-      `  • new input: ${u.input.toLocaleString()}\n` +
-      `  • cache read: ${u.cacheRead.toLocaleString()}\n` +
-      `  • cache create: ${u.cacheCreate.toLocaleString()}\n` +
+      `  • new this turn: ${newTokens.toLocaleString()} (input ${u.input.toLocaleString()} + cache-create ${u.cacheCreate.toLocaleString()})\n` +
+      `  • cache read: ${u.cacheRead.toLocaleString()} (replayed from prior turns)\n` +
       `  • output: ${u.output.toLocaleString()}\n` +
       `Session totals (${s.turns} turn${s.turns === 1 ? "" : "s"}):\n` +
       `  • input: ${s.totalInput.toLocaleString()} · output: ${s.totalOutput.toLocaleString()}\n` +
       `  • cache read: ${s.totalCacheRead.toLocaleString()} · cache create: ${s.totalCacheCreate.toLocaleString()}${cost}\n` +
-      `Model: ${assistant.lastModelId ?? "?"}`
+      `Model: ${assistant.lastModelId ?? "?"}${hint}`
     );
   });
 </script>

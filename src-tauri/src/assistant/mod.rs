@@ -973,33 +973,22 @@ pub async fn assistant_send(
     };
     let remote_shell_enabled = allow_remote_shell && bridge_info.is_some();
 
-    // Provision a temp MCP config when we have at least one root. Addendum is
-    // a `String` (not &'static str) so we can append per-session toggles
-    // (remote_shell, dyslexia) — anything that changes PER TURN goes through
-    // the user-turn <system-reminder> path below instead, to keep the system
-    // prompt cache-stable.
-    let (mcp_config_path, mut addendum) = if roots.is_empty() {
-        (None, RIFT_SYSTEM_ADDENDUM_NO_WS.to_string())
+    // Provision a temp MCP config when we have at least one root. Addendum
+    // stays cache-stable — only the two static strings ever land in
+    // `--append-system-prompt`. Per-session/per-turn toggles (remote_shell,
+    // dyslexia) ride the user-turn <system-reminder> path below so toggling
+    // them mid-session never invalidates the cached system-prompt prefix.
+    let (mcp_config_path, addendum) = if roots.is_empty() {
+        (None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
         match write_mcp_config(&roots, bridge_info.as_ref(), remote_shell_enabled) {
-            Ok(p) => (Some(p), RIFT_SYSTEM_ADDENDUM_TOOLS.to_string()),
+            Ok(p) => (Some(p), RIFT_SYSTEM_ADDENDUM_TOOLS),
             Err(e) => {
                 log::warn!("assistant: failed to provision MCP config, falling back to no-tools: {e}");
-                (None, RIFT_SYSTEM_ADDENDUM_NO_WS.to_string())
+                (None, RIFT_SYSTEM_ADDENDUM_NO_WS)
             }
         }
     };
-
-    if remote_shell_enabled {
-        addendum.push_str(" A `mcp__rift__remote_bash` tool is available — runs a shell command over SSH against the active remote server (reuses the auto-sync engine's russh session). Use sparingly for ops work (status checks, pm2 restart, etc.); a workspace-scoped advisory lock serializes calls between users.");
-    }
-    // S93 dyslexia-friendly mode: the user has flagged that they (or someone
-    // sharing the workspace) has dyslexia and/or uses voice-to-text. This
-    // hint nudges Claude to interpret typos and slurred-speech artifacts
-    // charitably rather than asking pedantic clarifying questions.
-    if dyslexia_mode.unwrap_or(false) {
-        addendum.push_str(" The user has enabled dyslexia-friendly mode and may also use voice-to-text; phonetic typos (e.g. \"wair\"/\"where\", \"nite\"/\"night\"), letter-swap typos (b/d, p/q), and slurred-speech transcription artifacts are expected. Interpret the most likely intended meaning charitably and proceed; only ask for clarification when the meaning is genuinely ambiguous, not for ordinary typos. Avoid pointing out spelling/grammar unless the user asks.");
-    }
 
     // Pipe the user's prompt via stdin instead of `-p <arg>`. The CLI accepts
     // prompt text on stdin when `-p` is bare; this keeps every arg short and
@@ -1140,19 +1129,34 @@ pub async fn assistant_send(
 
     // Build the per-turn user-message text BEFORE spawning so the child
     // doesn't sit idle on stdin while we lock state. Live workspace state
-    // (foreign locks, sync queue, recent diag events) rides the USER message
-    // via a <system-reminder> block instead of `--append-system-prompt`. A
-    // dynamic system prompt invalidates the cache prefix every turn (cache
-    // layout: system → tools → CLAUDE.md → conversation tail); moving fresh
-    // per-turn data into the user turn keeps the prefix cache-stable. Multi-
-    // line is fine inside the user text (rides stdin, no argv constraint).
+    // (foreign locks, sync queue, recent diag events) + per-session toggles
+    // (remote_shell, dyslexia) ride the USER message via a <system-reminder>
+    // block instead of `--append-system-prompt`. A dynamic system prompt
+    // invalidates the cache prefix every turn (cache layout: system → tools
+    // → CLAUDE.md → conversation tail); keeping fresh per-turn data on the
+    // user turn keeps the prefix cache-stable. Multi-line is fine here
+    // (rides stdin, no argv constraint).
+    let mut reminder_parts: Vec<String> = Vec::new();
     let ws_ctx = gather_workspace_context(&state).await;
-    let effective_prompt = if ws_ctx.is_empty() {
+    if !ws_ctx.is_empty() {
+        reminder_parts.push(ws_ctx);
+    }
+    if remote_shell_enabled {
+        reminder_parts.push("Remote-shell tool `mcp__rift__remote_bash` is available — runs over the auto-sync engine's russh session against the active SFTP server. Use sparingly for ops work (status checks, pm2 restart, etc.); a workspace-scoped advisory lock serializes calls between users.".into());
+    }
+    // S93 dyslexia-friendly mode: hint Claude to interpret phonetic typos +
+    // voice-to-text artifacts charitably instead of asking pedantic
+    // clarifying questions.
+    if dyslexia_mode.unwrap_or(false) {
+        reminder_parts.push("Dyslexia-friendly mode + voice-to-text are enabled for this user. Phonetic typos (e.g. \"wair\"/\"where\", \"nite\"/\"night\"), letter-swap typos (b/d, p/q), and slurred-speech transcription artifacts are expected. Interpret the most likely intended meaning charitably and proceed; only ask for clarification when meaning is genuinely ambiguous. Don't comment on spelling/grammar unless the user asks.".into());
+    }
+    let effective_prompt = if reminder_parts.is_empty() {
         prompt.clone()
     } else {
         format!(
             "<system-reminder>\n{}\n</system-reminder>\n\n{}",
-            ws_ctx, prompt
+            reminder_parts.join("\n\n"),
+            prompt
         )
     };
 
