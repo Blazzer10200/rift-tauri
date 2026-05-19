@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { connection } from "../../state/connection.svelte";
   import { syncModal } from "../../state/sync-modal.svelte";
-  import { Lock, RefreshCw, Download, Upload } from "lucide-svelte";
+  import { Lock, RefreshCw, Download, Upload, AlertTriangle, Hourglass, Network } from "lucide-svelte";
   import { fade } from "svelte/transition";
 
   // Background-mode escape hatch: while a sync op is busy but the modal is
@@ -31,6 +33,35 @@
   const failed = $derived(connection.status?.failed ?? 0);
   const locks = $derived(connection.lockCount);
   const conflicts = $derived(connection.conflictCount);
+
+  // Phase 1: bridge slot. The S107 #9.1 `hasBridgeToken` flag indicates the
+  // profile holds a bridge token at all; we only surface the pill when the
+  // server is also actively connected (otherwise it's misleading).
+  const bridgeOn = $derived(!!connection.selected?.hasBridgeToken && watcherOn);
+
+  // Phase 1: last-scan tick. Re-evaluate every 5s so "Xs ago" stays fresh
+  // without re-render storms. Reactivity hinges on `now` being $state.
+  let now = $state(Date.now());
+  $effect(() => {
+    const id = setInterval(() => { now = Date.now(); }, 5000);
+    return () => clearInterval(id);
+  });
+  const lastScanLabel = $derived.by(() => {
+    const t = connection.lastScanAt;
+    if (!t) return null;
+    const sec = Math.max(0, Math.floor((now - t) / 1000));
+    if (sec < 60) return `${sec}s ago`;
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    return `${Math.floor(sec / 3600)}h ago`;
+  });
+
+  // Phase 1: app version pulled once at module init via the existing
+  // `app_version` Tauri cmd (lib.rs:362). Renders on the right edge.
+  let version = $state<string | null>(null);
+  onMount(async () => {
+    try { version = await invoke<string>("app_version"); }
+    catch (e) { console.error("app_version invoke failed", e); }
+  });
 
   async function toggleWatcher() {
     if (!connection.selected || connection.connecting) return;
@@ -70,12 +101,58 @@
     </button>
   {/if}
 
+  {#if queue > 0}
+    <div class="sep"></div>
+    <div class="grp" title="Pending queue depth (debouncing + in-flight uploads)" transition:fade={{ duration: 100 }}>
+      <Hourglass size={11}/>
+      <span class="lbl">queue</span>
+      <span class="mono val">{queue}</span>
+    </div>
+  {/if}
+
+  {#if failed > 0}
+    <div class="sep"></div>
+    <div class="grp" title="Failed transfers awaiting retry" transition:fade={{ duration: 100 }}>
+      <span class="lbl">failed</span>
+      <span class="mono val warn">{failed}</span>
+    </div>
+  {/if}
+
+  {#if conflicts > 0}
+    <div class="sep"></div>
+    <div class="grp" title="Unresolved conflicts — open the Conflicts workspace" transition:fade={{ duration: 100 }}>
+      <AlertTriangle size={11}/>
+      <span class="lbl">conflicts</span>
+      <span class="mono val danger">{conflicts}</span>
+    </div>
+  {/if}
+
   <div class="flex-spacer"></div>
+
+  {#if lastScanLabel}
+    <div class="grp" title="Time since last drift scan / sync completion" transition:fade={{ duration: 100 }}>
+      <span class="lbl">last scan</span>
+      <span class="mono val">{lastScanLabel}</span>
+    </div>
+  {/if}
 
   {#if locks > 0}
     <div class="grp" title="Active lock files held by this client" transition:fade={{ duration: 100 }}>
       <Lock size={11}/>
       <span class="mono val warn">{locks}</span>
+    </div>
+  {/if}
+
+  {#if bridgeOn}
+    <div class="grp bridge" title="Bridge token configured — txAdmin/RCON enabled" transition:fade={{ duration: 100 }}>
+      <Network size={11}/>
+      <span class="lbl">bridge</span>
+    </div>
+  {/if}
+
+  {#if version}
+    <div class="grp version" title="Rift version">
+      <span class="mono val faint">v{version}</span>
     </div>
   {/if}
 </div>
@@ -94,6 +171,8 @@
   .lbl { color: var(--fg-subtle); }
   .val { color: var(--fg-2); }
   .val.warn { color: var(--warn); }
+  .val.danger { color: var(--danger); }
+  .val.faint { color: var(--fg-faint); }
   .sep { width: 1px; height: 12px; background: var(--border); }
   .flex-spacer { flex: 1; }
   .led {
@@ -145,4 +224,7 @@
   .state-toggle:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
   .state-toggle:disabled { cursor: not-allowed; opacity: 0.6; }
   .state-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
+  .bridge { color: var(--info); }
+  .bridge .lbl { color: inherit; }
 </style>

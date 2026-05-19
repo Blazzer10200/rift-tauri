@@ -75,7 +75,8 @@
         interim.push(blocks[j]);
         j++;
       }
-      const tail = j < blocks.length && blocks[j].type === "text" ? blocks[j] : null;
+      const candidate = j < blocks.length ? blocks[j] : null;
+      const tail = candidate && candidate.type === "text" ? candidate : null;
       if (!tail) {
         out.push(b);
         i++;

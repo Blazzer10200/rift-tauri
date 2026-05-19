@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Sparkles, ListChecks, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
 
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
@@ -37,9 +38,6 @@
     const t = assistant.ui.tasksUpdatedAt;
     if (t > lastSeenUpdate) {
       lastSeenUpdate = t;
-      // Pulse only when TasksDock is closed — open surface already shows the
-      // change. v0.4.1 collapses both paths to assistant.ui.dockOpen since
-      // TasksDock now lives inside AssistantPage in both shells.
       if (!assistant.ui.dockOpen && taskCount > 0) {
         pulse = true;
         setTimeout(() => (pulse = false), 700);
@@ -52,10 +50,7 @@
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
 
-  /** Context-window cap for the model id reported by `system`/init.
-   *  Sonnet 4.5/4.6 and Opus 4.6/4.7 default to the 1M-context beta in
-   *  Claude Code; Haiku 4.5 + older models stay at 200K. Explicit `[1m]`
-   *  suffix (Rift's intermediate alias format) always wins. */
+  /** Context-window cap for the model id reported by `system`/init. */
   function contextWindowFor(model: string | null): number {
     if (!model) return 200_000;
     if (/\[1m\]/i.test(model)) return 1_000_000;
@@ -72,16 +67,11 @@
     return String(n);
   }
 
-  // "New" content this turn = uncached input + cache-create. This is what
-  // the user actually paid full price for and what newly entered the cache.
-  // cache_read is prior turns' cached content being re-read; it counts
-  // toward window utilization but isn't new spend.
   const newTokens = $derived(
     assistant.lastTurnUsage
       ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheCreate
       : 0,
   );
-  // Total prompt size for the latest turn — full window utilization.
   const ctxTokens = $derived(
     assistant.lastTurnUsage
       ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheRead + assistant.lastTurnUsage.cacheCreate
@@ -117,16 +107,8 @@
   });
 </script>
 
-<header class="head">
-  <div class="left">
-    <div class="brand">
-      <span class="brand-icon"><Sparkles size={14} /></span>
-      <span class="brand-name">Assistant</span>
-      <span class="beta" title="Beta — use at your own risk. Tool capabilities are evolving.">beta</span>
-    </div>
-  </div>
-
-  <div class="right">
+<PageHeader icon={Sparkles} title="Chat" tone="accent">
+  {#snippet actions()}
     {#if assistant.workspace.current}
       <span class="ws-chip" title={assistant.workspace.current}>
         <Folder size={11}/>
@@ -201,42 +183,10 @@
         <span class="task-chip">{taskDone}/{taskCount}</span>
       {/if}
     </button>
-
-  </div>
-</header>
+  {/snippet}
+</PageHeader>
 
 <style>
-  .head {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 12px;
-    padding: 9px 16px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-  .left, .right { display: flex; align-items: center; gap: 8px; }
-  .brand {
-    display: flex; align-items: center; gap: 7px;
-    font-size: var(--fs-md);
-    font-weight: 600;
-    color: var(--fg);
-  }
-  .brand-icon {
-    display: flex; align-items: center; justify-content: center;
-    color: var(--accent);
-  }
-  .beta {
-    font-size: 9px;
-    font-weight: 700;
-    padding: 2px 6px;
-    background: var(--warn-soft);
-    color: var(--warn);
-    border-radius: 4px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    cursor: help;
-  }
-
   .auth-warn {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 10px;
@@ -401,5 +351,4 @@
     background: var(--accent-soft);
     color: var(--accent);
   }
-
 </style>

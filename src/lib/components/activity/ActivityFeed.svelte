@@ -8,12 +8,16 @@
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { fmtRelative } from "../../utils/time";
   import PageToolbar from "../shell/PageToolbar.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
   import { syncPage } from "../../state/sync-page.svelte";
 
   type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "block" | "error" | "system";
 
-  let filter = $state("");
+  // Sync→Activity deeplink (Phase 2): WatchedFoldersTable sets connection.activityFilter,
+  // we consume on mount + clear so the user can still type freely afterward.
+  let filter = $state(connection.activityFilter ?? "");
+  if (connection.activityFilter) connection.activityFilter = null;
   let group = $state<Group>("all");
   let paused = $state(false);
   let frozen = $state<ActivityRow[]>([]);
@@ -381,6 +385,39 @@
 </script>
 
 <section class="feed">
+  <PageHeader
+    icon={ActivityIcon}
+    title="Activity"
+    subtitle="{connection.activityFeed.length} event{connection.activityFeed.length === 1 ? '' : 's'}"
+    tone="info"
+  >
+    {#snippet actions()}
+      <button
+        class="btn sm"
+        class:warn={paused}
+        class:ghost={!paused}
+        type="button"
+        onclick={togglePause}
+        title={paused ? "Resume feed" : "Pause feed"}
+      >
+        {#if paused}
+          <Play size={11}/> Resume
+        {:else}
+          <Pause size={11}/> Pause
+        {/if}
+      </button>
+      <button
+        class="btn ghost sm"
+        type="button"
+        onclick={() => connection.clearActivity()}
+        disabled={connection.activityFeed.length === 0}
+        title="Clear feed"
+      >
+        <Trash2 size={11}/> Clear
+      </button>
+    {/snippet}
+  </PageHeader>
+
   <PageToolbar>
     <div class="segctl">
       {#each groups as g (g.id)}
@@ -405,30 +442,6 @@
       placeholder="Filter resource / file / action…"
       bind:value={filter}
     />
-
-    <button
-      class="btn sm"
-      class:warn={paused}
-      class:ghost={!paused}
-      type="button"
-      onclick={togglePause}
-      title={paused ? "Resume feed" : "Pause feed"}
-    >
-      {#if paused}
-        <Play size={11}/> Resume
-      {:else}
-        <Pause size={11}/> Pause
-      {/if}
-    </button>
-    <button
-      class="btn ghost sm"
-      type="button"
-      onclick={() => connection.clearActivity()}
-      disabled={connection.activityFeed.length === 0}
-      title="Clear feed"
-    >
-      <Trash2 size={11}/> Clear
-    </button>
   </PageToolbar>
 
   <div class="table">

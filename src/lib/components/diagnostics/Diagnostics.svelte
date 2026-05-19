@@ -3,10 +3,11 @@
   import {
     Activity, AlertTriangle, Ban, Clock, FileWarning, FolderSync,
     GitPullRequestArrow, Lock, Network, Pause, Play, Trash2,
-    Zap, Info, ClipboardCopy, Check,
+    Zap, Info, ClipboardCopy, Check, Stethoscope,
   } from "lucide-svelte";
   import { diagnostics, type DiagLevel, type DiagStage } from "../../state/diagnostics.svelte";
   import { connection } from "../../state/connection.svelte";
+  import PageHeader from "../shell/PageHeader.svelte";
 
   let expanded = $state<number | null>(null);
   let copyState = $state<"idle" | "copying" | "ok" | "err">("idle");
@@ -150,6 +151,22 @@
 </script>
 
 <section class="diag">
+  <PageHeader
+    icon={Stethoscope}
+    title="Diagnostics"
+    subtitle="{diagnostics.events.length} event{diagnostics.events.length === 1 ? '' : 's'} captured"
+    tone="info"
+  >
+    {#snippet actions()}
+      <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} title={diagnostics.paused ? "Resume capture" : "Pause capture"}>
+        {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
+      </button>
+      <button class="btn ghost sm" type="button" onclick={() => diagnostics.clear()} disabled={diagnostics.events.length === 0} title="Clear captured events">
+        <Trash2 size={11}/> Clear
+      </button>
+    {/snippet}
+  </PageHeader>
+
   <div class="tiles">
     {#each tiles as t (t.label)}
       <div class="tile" data-tone={t.tone}>
@@ -182,14 +199,6 @@
         </span>
       {/if}
     </button>
-    <div class="aux">
-      <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} title={diagnostics.paused ? "Resume capture" : "Pause capture"}>
-        {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
-      </button>
-      <button class="btn ghost sm" type="button" onclick={() => diagnostics.clear()} disabled={diagnostics.events.length === 0} title="Clear captured events">
-        <Trash2 size={11}/> Clear
-      </button>
-    </div>
   </div>
 
   <div class="list" bind:this={scroller}>
@@ -304,8 +313,6 @@
   .hero-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
   .hero-title { color: var(--fg); font-size: var(--fs-md); font-weight: 600; }
   .hero-sub { color: var(--fg-muted); font-size: var(--fs-xs); }
-
-  .aux { display: inline-flex; gap: 6px; align-items: center; }
 
   .list {
     flex: 1; min-height: 0; overflow: auto;
