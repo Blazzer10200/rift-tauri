@@ -195,6 +195,10 @@
   .scroll {
     flex: 1; min-height: 0;
     overflow-y: auto;
+    /* Phase 3c (#6): reserve the gutter even when content fits — prevents the
+       horizontal jump when overflow appears + stops the scrollbar from
+       colliding with the activity bar at the right edge. */
+    scrollbar-gutter: stable;
     padding: 16px 18px 4px;
     display: flex; flex-direction: column;
   }

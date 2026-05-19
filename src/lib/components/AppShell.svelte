@@ -2,11 +2,10 @@
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { X } from "lucide-svelte";
   import { connection, type ServerProfile } from "../state/connection.svelte";
+  import { dialogs } from "../state/dialogs.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
-  import Settings from "./settings/Settings.svelte";
   import ActivityToast from "./ActivityToast.svelte";
   import AddServer from "./dialogs/AddServer.svelte";
   import Bootstrap from "./dialogs/Bootstrap.svelte";
@@ -22,11 +21,6 @@
   import { updates } from "../state/updates.svelte";
   import { syncPage } from "../state/sync-page.svelte";
   import { assistant } from "../state/assistant.svelte";
-
-  type SettingsSection = "appearance" | "terminal" | "assistant" | "servers" | "keys" | "about";
-
-  let settingsSection = $state<SettingsSection>("appearance");
-  let settingsModalOpen = $state(false);
 
   // Dialog state
   let addServerOpen = $state(false);
@@ -78,11 +72,9 @@
     return () => clearInterval(id);
   });
 
-  function gotoSettings(s: SettingsSection = "appearance") {
-    settingsSection = s;
-    settingsModalOpen = true;
+  function gotoSettings() {
+    workspace.setActive("settings");
   }
-  function closeSettingsModal() { settingsModalOpen = false; }
 
   // ── lifecycle ──────────────────────────────────────────────────────
   onMount(async () => {
@@ -94,10 +86,17 @@
     await connection.loadServers();
     await connection.refreshStatus();
     if (!connection.selectedKey && connection.servers.length === 0) {
-      gotoSettings("servers");
+      gotoSettings();
     }
     updates.checkOnLaunch();
   });
+
+  // Phase 3b: SettingsPage workspace pulls callbacks from this store. AppShell
+  // owns the dialog state, so wire them once at the top level.
+  dialogs.onAddServer = () => openAddServer(null);
+  dialogs.onEditServer = (s) => openAddServer(s);
+  dialogs.onDeleteServer = (s) => void deleteServer(s);
+  dialogs.onLaunchKeygen = () => (keygenOpen = true);
 
   // Borderless-window maximize compensation. Win32 draws maximized
   // `decorations: false` windows ~8px past each screen edge (invisible
@@ -153,12 +152,6 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
-    // Esc closes the Settings slide-over.
-    if (e.key === "Escape" && settingsModalOpen) {
-      e.preventDefault();
-      closeSettingsModal();
-      return;
-    }
     // Alt+1..9 → jump to chat tab N (1-indexed). Only fires inside the Chat
     // workspace so it doesn't hijack from a focused Terminal / Files surface.
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)
@@ -211,9 +204,9 @@
       workspace.setActive("chat");
       return;
     }
-    // Ctrl+1..8 → workspace switch, mapped by activity-bar order so a user-
+    // Ctrl+1..9 → workspace switch, mapped by activity-bar order so a user-
     // reordered bar matches its kbd shortcuts. Skips disabled-stub entries.
-    if (/^[1-8]$/.test(e.key)) {
+    if (/^[1-9]$/.test(e.key)) {
       e.preventDefault();
       const idx = parseInt(e.key, 10) - 1;
       const id = workspace.order[idx] as WorkspaceId | undefined;
@@ -221,8 +214,8 @@
       return;
     }
     if (e.shiftKey) return;
-    if (e.key === ",") { e.preventDefault(); gotoSettings("appearance"); return; }
-    if (k === "p") { e.preventDefault(); gotoSettings("servers"); return; }
+    if (e.key === ",") { e.preventDefault(); gotoSettings(); return; }
+    if (k === "p") { e.preventDefault(); gotoSettings(); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
   }
 
@@ -370,7 +363,7 @@
       <main class="pane">
         <WorkspaceShell />
       </main>
-      <ActivityBar onOpenSettings={() => (settingsModalOpen = true)} />
+      <ActivityBar />
     </div>
   </div>
 
@@ -431,30 +424,6 @@
   <UpdateDialog />
 
   <ActivityToast />
-
-  {#if settingsModalOpen}
-    <div class="slideover-scrim" onclick={closeSettingsModal} role="presentation"></div>
-    <aside class="slideover" aria-label="Settings">
-      <button
-        class="slideover-close"
-        type="button"
-        onclick={closeSettingsModal}
-        title="Close (Esc)"
-        aria-label="Close settings"
-      >
-        <X size={14}/>
-      </button>
-      {#key settingsSection}
-        <Settings
-          initialSection={settingsSection}
-          onAddServer={() => openAddServer(null)}
-          onEditServer={(s) => openAddServer(s)}
-          onDeleteServer={(s) => deleteServer(s)}
-          onLaunchKeygen={() => (keygenOpen = true)}
-        />
-      {/key}
-    </aside>
-  {/if}
 
 </div>
 

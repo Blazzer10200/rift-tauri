@@ -6,11 +6,13 @@
 
 export type WorkspaceId =
   | "chat" | "sync" | "files" | "conflicts" | "diagnostics"
-  | "terminal" | "activity" | "history" | "agents" | "attachments";
+  | "terminal" | "activity" | "history" | "agents" | "attachments"
+  | "settings";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
   "chat", "sync", "files", "conflicts", "diagnostics",
   "terminal", "activity", "history", "agents", "attachments",
+  "settings",
 ] as const;
 
 const ACTIVE_KEY = "rift.ui.workspace.v1";
