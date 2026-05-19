@@ -51,6 +51,11 @@ export type ThinkingBlock = {
   text: string;
   // Encrypted signature blob received (presence flag — we don't render it).
   hasSignature: boolean;
+  // Wall-clock start (ms epoch) — set on content_block_start. Used by the
+  // bubble to render a live elapsed counter during active reasoning. Without
+  // this the UI sat at "Thinking …" for the full 17-40s of an Opus reasoning
+  // block; the live counter converts dead air into a heartbeat.
+  startedAt: number;
   // Wall-clock duration of the reasoning step. Null while still active.
   durationMs: number | null;
   status: "active" | "done";
@@ -134,6 +139,9 @@ type RemoteShellEvt = {
 };
 
 const MODEL_KEY = "rift.assistant.model";
+const EFFORT_KEY = "rift.assistant.thinkingEffort";
+
+export type ThinkingEffort = "none" | "quick" | "deep";
 
 function loadModel(): "sonnet" | "opus" | "haiku" {
   try {
@@ -148,6 +156,24 @@ function loadModel(): "sonnet" | "opus" | "haiku" {
 function saveModel(v: "sonnet" | "opus" | "haiku") {
   try {
     if (typeof localStorage !== "undefined") localStorage.setItem(MODEL_KEY, v);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+function loadEffort(): ThinkingEffort {
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(EFFORT_KEY) : null;
+    if (v === "none" || v === "quick" || v === "deep") return v;
+  } catch {
+    /* SSR or storage disabled */
+  }
+  return "quick";
+}
+
+function saveEffort(v: ThinkingEffort) {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(EFFORT_KEY, v);
   } catch {
     /* storage disabled */
   }
@@ -169,7 +195,39 @@ class AssistantStore {
   authError = $state<string | null>(null);
 
   messages = $state<ChatMessage[]>([]);
-  streaming = $state(false);
+  // Per-session streaming registry. Set membership = "this CLI session has a
+  // live `claude` child on the backend". Multi-tab safe: each tab's session
+  // tracks independently, so kicking off a fresh send in tab B doesn't get
+  // queued just because tab A is still streaming. Replaced as a new Set on
+  // every mutation for Svelte 5 reactivity (per rules/svelte.md). Reads via
+  // the `streaming` getter below, which derives from active currentCliSessionId.
+  private streamingSessions = $state(new Set<string>());
+
+  /** `true` iff the ACTIVE tab's CLI session has a live backend stream.
+   *  Components read `assistant.streaming` exactly like before — the getter
+   *  preserves the singleton API while the underlying state is per-session. */
+  get streaming(): boolean {
+    const sid = this.currentCliSessionId;
+    return !!sid && this.streamingSessions.has(sid);
+  }
+  /** Setter exists so the dozen-or-so legacy `this.streaming = true|false`
+   *  sites keep working — they map to "add/remove the ACTIVE session". For
+   *  background-session cleanup (e.g. a bg tab's done event), call
+   *  `setSessionStreaming(sid, false)` directly. */
+  set streaming(v: boolean) {
+    const sid = this.currentCliSessionId;
+    if (!sid) return;
+    this.setSessionStreaming(sid, v);
+  }
+
+  private setSessionStreaming(sid: string, on: boolean) {
+    const has = this.streamingSessions.has(sid);
+    if (on === has) return;
+    const next = new Set(this.streamingSessions);
+    if (on) next.add(sid); else next.delete(sid);
+    this.streamingSessions = next;
+  }
+
   lastError = $state<string | null>(null);
   // Informational system notice (slash-command output, /help text, etc.).
   // Rendered as a dismissible info banner separate from error styling.
@@ -227,6 +285,10 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<"sonnet" | "opus" | "haiku">(loadModel());
+  // Extended-thinking budget tier. "none" = no extended thinking (fastest);
+  // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
+  // Haiku ignores this server-side. Persisted to localStorage.
+  thinkingEffort = $state<ThinkingEffort>(loadEffort());
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
   // is retained as a no-op flag for back-compat w/ any remaining slash
   // command — History is now its own workspace, not an overlay.
@@ -261,6 +323,19 @@ class AssistantStore {
     turnStartedAt: number | null;
   }>({ currentLabel: null, turnStartedAt: null });
 
+  // Per-tab UI state cache. Survives tab switches so the composer draft,
+  // staged attachments, and scroll position aren't wiped when the user clicks
+  // away to check another convo. Saved in openTab/closeTab/newTab before the
+  // active id flips; restored after the flip. Entries pruned when a tab is
+  // closed (the convo itself stays on disk; only the in-memory UI scratch is
+  // dropped).
+  private tabDrafts = new Map<string, string>();
+  private tabAttachments = new Map<
+    string,
+    { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]
+  >();
+  private tabScroll = new Map<string, number>();
+
   private unlistens: UnlistenFn[] = [];
   private streamingMsgId: string | null = null;
   private seenToolUseIds = new Set<string>();
@@ -293,16 +368,110 @@ class AssistantStore {
     saveModel(v);
   }
 
+  setThinkingEffort(v: ThinkingEffort) {
+    this.thinkingEffort = v;
+    saveEffort(v);
+  }
+
+  /** Snapshot the OUTGOING tab's composer + attachments into the cache.
+   *  Call BEFORE flipping currentConvoId. Pass the convoId being left.
+   *  Scroll position is captured separately by AssistantPage. */
+  private stashTabUi(id: string | null) {
+    if (!id) return;
+    if (this.composerDraft.length > 0) {
+      this.tabDrafts.set(id, this.composerDraft);
+    } else {
+      this.tabDrafts.delete(id);
+    }
+    if (this.composerAttachments.length > 0) {
+      this.tabAttachments.set(id, this.composerAttachments);
+    } else {
+      this.tabAttachments.delete(id);
+    }
+  }
+
+  /** Pull cached composer + attachments for the INCOMING tab. Call AFTER
+   *  flipping currentConvoId. Missing entry → blank state. */
+  private restoreTabUi(id: string | null) {
+    this.composerDraft = (id && this.tabDrafts.get(id)) || "";
+    this.composerAttachments = (id && this.tabAttachments.get(id)) || [];
+  }
+
+  /** AssistantPage writes the active tab's scrollTop here on scroll, then
+   *  reads it back on tab activation. Kept in the store so it survives
+   *  remounts without re-querying the DOM. */
+  setTabScroll(id: string, top: number) {
+    this.tabScroll.set(id, top);
+  }
+  getTabScroll(id: string): number | undefined {
+    return this.tabScroll.get(id);
+  }
+
+  /** Drop all per-tab UI scratch for a closed tab. */
+  private pruneTabUi(id: string) {
+    this.tabDrafts.delete(id);
+    this.tabAttachments.delete(id);
+    this.tabScroll.delete(id);
+  }
+
   clearQueue() {
     this.queue = [];
   }
 
   async init() {
     if (this.unlistens.length > 0) return;
+    // Backend tags every stream/done/error event w/ the originating CLI
+    // session_id (S104). Routing rules:
+    //   * stream → only paint if event session == ACTIVE session. Background
+    //     tab's chunks are dropped from the UI (no per-tab message buffer
+    //     yet); the CLI still persists the JSONL on its side.
+    //   * done   → ALWAYS clear that session's streaming flag (otherwise
+    //     bg tabs would stay "streaming" forever, blocking re-sends). Run
+    //     the full active-tab cleanup only if it's the active session.
+    //   * error  → same as done — clear streaming for that session, surface
+    //     the message only if it's the active tab.
+    // Legacy payload shape (bare string) still accepted for forward-compat
+    // during dev hot-reload.
     this.unlistens.push(
-      await listen<string>("assistant://stream", (e) => this.onStream(e.payload)),
-      await listen<{ exit_code: number }>("assistant://done", () => this.onDone()),
-      await listen<string>("assistant://error", (e) => this.onError(e.payload)),
+      await listen<{ session_id?: string; line?: string } | string>(
+        "assistant://stream",
+        (e) => {
+          if (typeof e.payload === "string") {
+            this.onStream(e.payload);
+            return;
+          }
+          const { session_id, line } = e.payload ?? {};
+          if (session_id && session_id !== this.currentCliSessionId) return;
+          if (typeof line === "string") this.onStream(line);
+        },
+      ),
+      await listen<{ session_id?: string; exit_code?: number } | { exit_code: number }>(
+        "assistant://done",
+        (e) => {
+          const p = e.payload as { session_id?: string } | undefined;
+          const sid = p?.session_id;
+          if (sid) {
+            this.setSessionStreaming(sid, false);
+            if (sid !== this.currentCliSessionId) return; // bg tab — no UI cleanup
+          }
+          this.onDone();
+        },
+      ),
+      await listen<{ session_id?: string; message?: string } | string>(
+        "assistant://error",
+        (e) => {
+          if (typeof e.payload === "string") {
+            this.onError(e.payload);
+            return;
+          }
+          const { session_id, message } = e.payload ?? {};
+          if (session_id) {
+            this.setSessionStreaming(session_id, false);
+            if (session_id !== this.currentCliSessionId) return;
+          }
+          if (typeof message === "string") this.onError(message);
+        },
+      ),
     );
     await this.refreshAuth();
     try {
@@ -341,6 +510,12 @@ class AssistantStore {
     await this.refreshConversations();
     await this.refreshWorkspace();
     await this.restoreTabs();
+
+    // Best-effort flush on window close so we don't lose the last turn
+    // sitting inside the 700ms scheduleSave debounce. See flushNow() doc.
+    if (typeof window !== "undefined") {
+      window.addEventListener("beforeunload", () => this.flushNow());
+    }
   }
 
   /** Auto-recovery: claude's --resume index lost track of our session JSONL.
@@ -484,6 +659,36 @@ class AssistantStore {
       .trim()
       .replace(/\s+/g, " ");
     return text.length > 60 ? text.slice(0, 60) + "…" : text || "New conversation";
+  }
+
+  /** Best-effort synchronous flush of the active convo. Wired to
+   *  `beforeunload` in init() — without this, a window close within the
+   *  scheduleSave 700ms debounce loses the last turn. We fire the IPC
+   *  without awaiting (browser drops pending promises on unload), but the
+   *  Tauri runtime typically completes the in-flight invoke before the
+   *  process actually exits. Not a guarantee against hard crashes; closes
+   *  the common close/quit gap. */
+  flushNow() {
+    if (!this.currentConvoId || this.messages.length === 0) return;
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+    }
+    const record: ConversationRecord = {
+      id: this.currentConvoId,
+      title: this.convoTitle ?? this.deriveTitle(),
+      model: this.model,
+      createdAt: this.convoCreatedAt ?? Date.now(),
+      updatedAt: Date.now(),
+      messages: this.messages,
+      cliSessionId: this.currentCliSessionId ?? this.currentConvoId,
+    };
+    this.convoTitle = record.title;
+    this.convoCreatedAt = record.createdAt;
+    // Fire-and-forget — no await, no refreshConversations.
+    void invoke("assistant_save_conversation", { convo: record }).catch((e) => {
+      console.warn("flushNow save failed", e);
+    });
   }
 
   /** Persist the current conversation. Debounced — callers can fire freely;
@@ -643,6 +848,8 @@ class AssistantStore {
     if (this.messages.length > 0 && this.currentConvoId) {
       this.scheduleSave(true);
     }
+    // Stash outgoing tab's composer + attachments before any state change.
+    this.stashTabUi(this.currentConvoId);
     const inMeta = this.conversations.some((c) => c.id === id);
     if (inMeta) {
       await this.loadConversation(id);
@@ -660,6 +867,9 @@ class AssistantStore {
       this.totalCostUsd = null;
       this.dockAutoOpenedThisConvo = false;
     }
+    // Restore incoming tab's composer + attachments (loadConversation cleared
+    // them; we re-fill from cache if the user had a draft mid-typing).
+    this.restoreTabUi(id);
     this.persistTabs();
   }
 
@@ -673,6 +883,10 @@ class AssistantStore {
     const next = this.openTabs.slice();
     next.splice(idx, 1);
     this.openTabs = next;
+    // Drop the closing tab's UI scratch (draft/attachments/scroll) — convo
+    // itself stays on disk via scheduleSave below, but in-memory composer
+    // state for that tab is intentionally retired.
+    this.pruneTabUi(id);
     if (wasActive) {
       // Save unsaved tail of the closing tab before switching/clearing.
       if (this.messages.length > 0 && this.convoCreatedAt) {
@@ -711,6 +925,7 @@ class AssistantStore {
           this.dockAutoOpenedThisConvo = false;
           this.resetUsage();
         }
+        this.restoreTabUi(neighbor);
       }
     }
     this.persistTabs();
@@ -724,6 +939,8 @@ class AssistantStore {
     if (this.messages.length > 0 && this.currentConvoId) {
       this.scheduleSave(true);
     }
+    // Snapshot outgoing tab's composer state before we mint the new one.
+    this.stashTabUi(this.currentConvoId);
     const id = crypto.randomUUID();
     this.openTabs = [...this.openTabs, id];
     this.currentConvoId = id;
@@ -739,6 +956,9 @@ class AssistantStore {
     this.promptHistory = [];
     this.dockAutoOpenedThisConvo = false;
     this.resetUsage();
+    // Fresh tab → empty composer (no cache entry yet).
+    this.composerDraft = "";
+    this.composerAttachments = [];
     this.persistTabs();
   }
 
@@ -950,6 +1170,7 @@ class AssistantStore {
         model: this.model,
         attachments: turnAttachments.length > 0 ? turnAttachments : null,
         dyslexiaMode: accessibility.dyslexiaMode,
+        thinkingEffort: this.thinkingEffort,
       });
     } catch (e) {
       this.onError(String(e));
@@ -998,6 +1219,7 @@ class AssistantStore {
         type: "thinking",
         text: "",
         hasSignature: false,
+        startedAt,
         durationMs: null,
         status: "active",
       });
@@ -1072,6 +1294,7 @@ class AssistantStore {
           type: "thinking",
           text: envText,
           hasSignature: envSig,
+          startedAt: Date.now(),
           durationMs: null,
           status: "done",
         },
@@ -1475,12 +1698,23 @@ class AssistantStore {
 
   async stop() {
     if (!this.streaming) return;
+    const sid = this.currentCliSessionId;
+    if (!sid) return;
+    // Synchronously clear this session's streaming flag + active-tab cleanup
+    // BEFORE awaiting the kill. The backend emits a done event after the
+    // child reaps, but if the user has already switched tabs by then the
+    // event's session_id won't match currentCliSessionId and the UI cleanup
+    // wouldn't run — leaving `streaming` stuck at true and blocking the
+    // new tab's first send. Pre-clearing here makes the late event idempotent.
+    this.setSessionStreaming(sid, false);
+    this.streamingMsgId = null;
+    this.seenToolUseIds.clear();
+    this.activity = { ...this.activity, currentLabel: null };
     try {
-      await invoke("assistant_stop");
+      await invoke("assistant_stop", { sessionId: sid });
     } catch (e) {
       console.warn("assistant_stop failed", e);
     }
-    // Backend emits assistant://done on kill — onDone() clears state.
   }
 
   removeQueued(id: string) {

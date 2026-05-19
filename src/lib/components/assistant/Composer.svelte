@@ -189,6 +189,22 @@
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
 
+  // Effort ladder. Haiku skips extended thinking server-side regardless, so
+  // hide the pill on Haiku to avoid implying it does something. Cycle on click:
+  // none → quick → deep → none.
+  type EffortOpt = { id: "none" | "quick" | "deep"; label: string; hint: string };
+  const EFFORT_OPTIONS: EffortOpt[] = [
+    { id: "none",  label: "Fast",  hint: "No extended thinking — fastest reply" },
+    { id: "quick", label: "Quick", hint: "Light thinking (~2K tokens) — balanced" },
+    { id: "deep",  label: "Deep",  hint: "Heavy thinking (10K tokens) — slowest, best on hard asks" },
+  ];
+  const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
+  function cycleEffort() {
+    const i = EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort);
+    const next = EFFORT_OPTIONS[(i + 1) % EFFORT_OPTIONS.length];
+    assistant.setThinkingEffort(next.id);
+  }
+
   function pickSlash(c: SlashCmd) {
     if (c.name === "model") {
       // Open the model picker instead of inserting `/model ` text.
@@ -623,6 +639,19 @@
     <span><kbd>Enter</kbd> send</span>
     <span><kbd>Shift</kbd>+<kbd>Enter</kbd> newline</span>
     <span><kbd>/</kbd> commands</span>
+    {#if assistant.model !== "haiku"}
+      <button
+        type="button"
+        class="effort-pill"
+        class:effort-none={currentEffort.id === "none"}
+        class:effort-quick={currentEffort.id === "quick"}
+        class:effort-deep={currentEffort.id === "deep"}
+        onclick={cycleEffort}
+        title={currentEffort.hint + " — click to cycle"}
+      >
+        <span class="pill-label">{currentEffort.label}</span>
+      </button>
+    {/if}
     <button
       type="button"
       class="model-pill"
@@ -933,7 +962,7 @@
     color: var(--fg-muted);
   }
   .model-pill {
-    margin-left: auto;
+    margin-left: 6px;
     display: inline-flex; align-items: center; gap: 5px;
     padding: 2px 4px 2px 9px;
     background: var(--bg-elev-2);
@@ -945,6 +974,41 @@
     font: inherit;
     font-size: var(--fs-xs);
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+  }
+
+  .effort-pill {
+    margin-left: auto;
+    display: inline-flex; align-items: center;
+    padding: 2px 9px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--fg-2);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+  }
+  .effort-pill:hover {
+    background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));
+    color: var(--fg);
+    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+  }
+  .effort-none {
+    color: oklch(0.78 0.14 145);
+    border-color: color-mix(in oklch, oklch(0.78 0.14 145) 35%, var(--border));
+    background: color-mix(in oklch, oklch(0.78 0.14 145) 8%, var(--bg-elev-2));
+  }
+  .effort-quick {
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    background: color-mix(in oklch, var(--accent) 8%, var(--bg-elev-2));
+  }
+  .effort-deep {
+    color: oklch(0.75 0.16 50);
+    border-color: color-mix(in oklch, oklch(0.75 0.16 50) 40%, var(--border));
+    background: color-mix(in oklch, oklch(0.75 0.16 50) 10%, var(--bg-elev-2));
   }
   .pill-label { font-weight: 600; }
   .pill-version {

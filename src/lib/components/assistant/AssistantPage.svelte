@@ -17,11 +17,19 @@
   // stream-event delta lands, making it impossible to scroll up to read
   // earlier turns while streaming.
   let stickToBottom = $state(true);
+  // Tracks the convo whose scrollTop was last persisted, so on a tab switch
+  // we know which slot to fill on scroll events.
+  let lastActiveConvo: string | null = null;
 
   function onScroll() {
     if (!scrollEl) return;
     const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
     stickToBottom = gap < 80;
+    // Persist per-tab scroll position so switching away + back lands where we
+    // were, not unconditionally pinned to bottom.
+    if (assistant.currentConvoId) {
+      assistant.setTabScroll(assistant.currentConvoId, scrollEl.scrollTop);
+    }
   }
 
   onMount(() => {
@@ -48,6 +56,30 @@
     void _len; void _streaming;
     void tick().then(() => {
       if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
+    });
+  });
+
+  // Tab-switch scroll restore. Watches currentConvoId; on change, restore the
+  // cached scrollTop for the incoming tab. Default to bottom if no cache
+  // entry yet. Skips the very first run (no outgoing tab to remember).
+  $effect(() => {
+    const cur = assistant.currentConvoId;
+    if (cur === lastActiveConvo) return;
+    lastActiveConvo = cur;
+    if (!cur || !scrollEl) return;
+    const cached = assistant.getTabScroll(cur);
+    void tick().then(() => {
+      if (!scrollEl) return;
+      if (cached != null) {
+        scrollEl.scrollTop = cached;
+        // If we restored close enough to bottom, keep stick-to-bottom on so
+        // new stream deltas auto-follow.
+        const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+        stickToBottom = gap < 80;
+      } else {
+        scrollEl.scrollTop = scrollEl.scrollHeight;
+        stickToBottom = true;
+      }
     });
   });
 
