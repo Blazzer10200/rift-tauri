@@ -25,3 +25,6 @@ backups/
 
 # Ad-hoc scratch space (notes, test snippets) — not part of the project.
 scratch/
+
+# Session state — overnight plans, audit logs, transient agent notes. Local only.
+state/
