@@ -1,18 +1,90 @@
-// Global update store. One instance per session: triggers a launch-time check,
-// caches the result, drives the popup dialog + sidebar pill, and lets the
-// Settings/About surface reach into the same state.
+// Global update store. One instance per session: triggers a launch-time
+// check, caches the result, drives the popup dialog + StatusBar pill +
+// corner toast, and pumps download progress from the backend.
+//
+// State machine:
+//   idle → checking → available → downloading → ready → applying
+//                  ↘ uptodate
+//                  ↘ error (recoverable, retryable)
+//
+// `dismissedVersion` is persisted in localStorage so a snoozed update for
+// version X doesn't pop the toast again every relaunch. A NEWER version
+// supersedes — the toast will fire for the new tag even if the prior was
+// snoozed.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-export type UpdateInfo = { version: string; releaseName: string };
-export type UpdateState = "idle" | "checking" | "available" | "uptodate" | "error" | "applying";
+export type UpdateInfo = {
+  version: string;
+  releaseName: string;
+  sizeBytes: number;
+  notesMarkdown: string;
+  releaseUrl: string;
+  publishedAt: string;
+};
+
+export type UpdateState =
+  | "idle"
+  | "checking"
+  | "available"
+  | "downloading"
+  | "ready"
+  | "applying"
+  | "uptodate"
+  | "error";
+
+const DISMISSED_KEY = "rift.updates.dismissed-version";
+
+function loadDismissed(): string | null {
+  try { return localStorage.getItem(DISMISSED_KEY); } catch { return null; }
+}
+function saveDismissed(v: string | null) {
+  try {
+    if (v) localStorage.setItem(DISMISSED_KEY, v);
+    else   localStorage.removeItem(DISMISSED_KEY);
+  } catch { /* private mode etc — non-fatal */ }
+}
 
 class UpdateStore {
   state = $state<UpdateState>("idle");
   info = $state<UpdateInfo | null>(null);
   error = $state("");
   currentVersion = $state("?");
+  progress = $state(0);
   dialogOpen = $state(false);
+  toastVisible = $state(false);
+  dismissedVersion = $state<string | null>(loadDismissed());
+
+  private progressUnlisten: UnlistenFn | null = null;
+  private downloadedUnlisten: UnlistenFn | null = null;
+
+  /** True when there's an unsnoozed update waiting for user action. */
+  get pillVisible(): boolean {
+    return (
+      (this.state === "available" || this.state === "ready") &&
+      !this.toastVisible &&
+      !this.dialogOpen
+    );
+  }
+
+  /** Human-readable "12.4 MB" style. */
+  get sizeLabel(): string {
+    const b = this.info?.sizeBytes ?? 0;
+    if (b <= 0) return "";
+    const mb = b / (1024 * 1024);
+    if (mb >= 1) return `${mb.toFixed(1)} MB`;
+    return `${(b / 1024).toFixed(0)} KB`;
+  }
+
+  /** ISO date → "May 19, 2026". Empty string if backend didn't fill it. */
+  get publishedLabel(): string {
+    const raw = this.info?.publishedAt ?? "";
+    if (!raw) return "";
+    try {
+      return new Date(raw).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
+    } catch { return raw; }
+  }
 
   async refresh() {
     this.state = "checking";
@@ -24,38 +96,93 @@ class UpdateStore {
     }
     try {
       const res = await invoke<UpdateInfo | null>("check_for_updates");
-      if (res) { this.info = res; this.state = "available"; }
-      else     { this.info = null; this.state = "uptodate"; }
+      if (res) {
+        this.info = res;
+        this.state = "available";
+      } else {
+        this.info = null;
+        this.state = "uptodate";
+      }
     } catch (e) {
       this.error = String(e);
       this.state = "error";
     }
   }
 
-  /**
-   * Apply the pending update. Stops autosync, downloads, then exits the
-   * process to swap binaries — control never returns on success. On error
-   * the dialog stays open so the user can retry or close.
-   */
-  async apply() {
+  /** Download the pending package. Tauri streams `update-progress` events. */
+  async download() {
     if (this.state !== "available") return;
+    this.state = "downloading";
+    this.progress = 0;
+    this.error = "";
+    try {
+      await this.ensureListeners();
+      await invoke<void>("download_update");
+      // `update-downloaded` event flips us to `ready`; defensive set here in
+      // case the event fires before this await resolves.
+      if ((this.state as UpdateState) !== "ready") this.state = "ready";
+    } catch (e) {
+      this.error = String(e);
+      this.state = "error";
+    }
+  }
+
+  /** Apply the staged download + restart. Control never returns on success. */
+  async applyNow() {
+    if (this.state !== "ready") return;
     this.state = "applying";
     this.error = "";
     try {
-      await invoke<void>("apply_updates");
+      await invoke<void>("apply_pending_update");
     } catch (e) {
       this.error = String(e);
       this.state = "error";
     }
   }
 
-  /** Called once on app launch from AppShell.onMount. Sidebar pill shows on its own. */
-  async checkOnLaunch() {
-    await this.refresh();
+  /** Snooze the current available version — toast + pill stay quiet until a
+   *  newer version ships. Closes the dialog if open. */
+  snooze() {
+    if (this.info?.version) {
+      this.dismissedVersion = this.info.version;
+      saveDismissed(this.info.version);
+    }
+    this.toastVisible = false;
+    this.dialogOpen = false;
   }
 
-  open()  { this.dialogOpen = true; }
+  dismissToast() { this.toastVisible = false; }
+
+  /** Called once on app launch from AppShell.onMount. */
+  async checkOnLaunch() {
+    await this.refresh();
+    if (
+      this.state === "available" &&
+      this.info &&
+      this.info.version !== this.dismissedVersion
+    ) {
+      this.toastVisible = true;
+    }
+  }
+
+  open()  { this.dialogOpen = true; this.toastVisible = false; }
   close() { this.dialogOpen = false; }
+
+  private async ensureListeners() {
+    if (!this.progressUnlisten) {
+      this.progressUnlisten = await listen<number>("update-progress", (e) => {
+        const pct = typeof e.payload === "number" ? e.payload : Number(e.payload);
+        if (!Number.isFinite(pct)) return;
+        this.progress = Math.max(0, Math.min(100, Math.round(pct)));
+      });
+    }
+    if (!this.downloadedUnlisten) {
+      this.downloadedUnlisten = await listen<unknown>("update-downloaded", () => {
+        this.progress = 100;
+        this.state = "ready";
+      });
+    }
+  }
 }
 
 export const updates = new UpdateStore();

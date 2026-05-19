@@ -3,8 +3,9 @@
   import { invoke } from "@tauri-apps/api/core";
   import { connection } from "../../state/connection.svelte";
   import { syncModal } from "../../state/sync-modal.svelte";
-  import { Lock, RefreshCw, Download, Upload, AlertTriangle, Hourglass, Network } from "lucide-svelte";
+  import { Lock, RefreshCw, Download, Upload, AlertTriangle, Hourglass, Network, Sparkles } from "lucide-svelte";
   import { fade } from "svelte/transition";
+  import { updates } from "../../state/updates.svelte";
 
   // Background-mode escape hatch: while a sync op is busy but the modal is
   // dismissed, surface a pill in the status bar so the user can re-open and
@@ -150,6 +151,21 @@
     </div>
   {/if}
 
+  {#if updates.pillVisible && updates.info}
+    <button
+      class="grp update-pill"
+      type="button"
+      onclick={() => updates.open()}
+      title="Update available — click to view"
+      transition:fade={{ duration: 120 }}
+    >
+      <span class="upd-dot"></span>
+      <Sparkles size={11}/>
+      <span class="lbl">update</span>
+      <span class="mono val">v{updates.info.version}</span>
+    </button>
+  {/if}
+
   {#if version}
     <div class="grp version" title="Rift version">
       <span class="mono val faint">v{version}</span>
@@ -227,4 +243,35 @@
 
   .bridge { color: var(--info); }
   .bridge .lbl { color: inherit; }
+
+  .update-pill {
+    background: transparent;
+    border: 0;
+    color: var(--accent);
+    cursor: pointer;
+    padding: 0 6px;
+    margin: 0 -2px;
+    height: 18px;
+    border-radius: var(--radius-xs);
+    font: inherit;
+    font-size: var(--fs-xs);
+    display: inline-flex; align-items: center; gap: 6px;
+    transition: background 100ms ease, color 100ms ease;
+  }
+  .update-pill:hover { background: color-mix(in oklch, var(--accent) 14%, transparent); }
+  .update-pill .lbl { color: inherit; }
+  .update-pill .val { color: var(--accent); }
+  .upd-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 55%, transparent);
+    animation: upd-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes upd-pulse {
+    0%, 100% { opacity: 0.55; transform: scale(0.85); }
+    50%      { opacity: 1;    transform: scale(1.15); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .upd-dot { animation: none; opacity: 0.9; }
+  }
 </style>

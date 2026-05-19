@@ -166,10 +166,11 @@
     gap: 0;
     padding: 0 4px;
     overflow-x: auto;
-    scrollbar-width: thin;
+    overflow-y: hidden;
+    scrollbar-width: none;
   }
-  .strip::-webkit-scrollbar { height: 4px; }
-  .strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .strip::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  .strip::-webkit-scrollbar-button { display: none; }
 
   .tab {
     flex: 0 1 220px;
@@ -190,6 +191,14 @@
     user-select: none;
     transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
     position: relative;
+    animation: tab-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes tab-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tab { animation: none; }
   }
   .tab:hover {
     background: var(--surface-hover);

@@ -677,6 +677,7 @@
         {#if currentModel}
           <span class="pill-label">{currentModel.label}</span>
           <span class="pill-version">{currentModel.version}</span>
+          <span class="pill-caret" aria-hidden="true">▾</span>
         {:else}
           model: {assistant.model}
         {/if}
@@ -702,20 +703,24 @@
 <style>
   .composer-wrap {
     padding: 10px 18px 14px;
-    max-width: 860px;
+    max-width: min(960px, 88ch);
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
   }
   .composer-shell { position: relative; }
   .composer {
-    display: flex; align-items: flex-end; gap: 8px;
-    padding: 8px 8px 8px 12px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 6px 6px 10px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
-    transition: border-color 140ms ease-out, box-shadow 140ms ease-out;
+    transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  /* Textarea grows up while controls bottom-align — when the textarea is
+     multiline, controls hug the bottom row of text. Single-line stays
+     visually centered courtesy of align-items: center on .composer. */
+  .composer:has(textarea:not(:placeholder-shown)) { align-items: flex-end; }
   .composer:focus-within {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-soft);
@@ -726,8 +731,8 @@
   textarea {
     flex: 1;
     resize: none;
-    min-height: 22px; max-height: 220px;
-    padding: 6px 0;
+    min-height: 26px; max-height: 220px;
+    padding: 5px 4px;
     background: transparent;
     border: 0; outline: none;
     color: var(--fg);
@@ -735,22 +740,25 @@
     font-size: var(--fs-md);
     line-height: 1.5;
     overflow-y: auto;
+    align-self: stretch;
   }
   textarea::placeholder { color: var(--fg-subtle); }
 
   .sendbtn {
     position: relative;
-    width: 32px; height: 32px;
+    width: 28px; height: 28px;
     display: flex; align-items: center; justify-content: center;
     background: var(--accent);
     color: var(--accent-fg);
-    border: 0; border-radius: 10px;
+    border: 0; border-radius: 8px;
     cursor: pointer;
     transition: background 200ms ease-out, transform 140ms ease-out, opacity 140ms ease-out, color 200ms ease-out;
     flex-shrink: 0;
     overflow: hidden;
+    align-self: center;
   }
   .sendbtn:hover:not(:disabled) { background: var(--accent-hover); transform: scale(1.04); }
+  .sendbtn:active:not(:disabled) { transform: scale(0.96); }
   .sendbtn:disabled { opacity: 0.4; cursor: default; }
   .sendbtn.stop {
     background: var(--danger);
@@ -759,18 +767,19 @@
   .sendbtn.stop:hover { filter: brightness(1.1); }
 
   .micbtn {
-    width: 30px; height: 30px;
+    width: 26px; height: 26px;
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
-    color: var(--fg-muted);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    color: var(--fg-faint);
+    border: 1px solid transparent;
+    border-radius: 7px;
     cursor: pointer;
     flex-shrink: 0;
-    align-self: flex-end;
-    transition: color 140ms, border-color 140ms, background 140ms, box-shadow 140ms;
+    align-self: center;
+    opacity: 0.7;
+    transition: color 140ms, border-color 140ms, background 140ms, box-shadow 140ms, opacity 140ms;
   }
-  .micbtn:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
+  .micbtn:hover:not(:disabled) { color: var(--fg-muted); background: var(--surface-hover); opacity: 1; }
   .micbtn:disabled { opacity: 0.55; cursor: default; }
   .micbtn.recording {
     background: var(--danger);
@@ -875,8 +884,8 @@
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
     margin-bottom: 8px;
     padding: 6px 10px;
-    background: color-mix(in oklch, var(--accent) 8%, var(--surface));
-    border: 1px dashed color-mix(in oklch, var(--accent) 35%, var(--border));
+    background: var(--bg-elev-1);
+    border: 1px dashed var(--border-strong);
     border-radius: 10px;
     font-size: var(--fs-xs);
   }
@@ -982,19 +991,20 @@
   .hint-wrap {
     position: relative;
     display: inline-flex;
-    align-self: flex-end;
+    align-self: center;
   }
   .hintbtn {
-    width: 26px; height: 26px;
+    width: 22px; height: 22px;
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
     color: var(--fg-faint);
     border: 1px solid transparent;
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
-    transition: color 140ms ease-out, background 140ms ease-out, border-color 140ms ease-out;
+    opacity: 0.65;
+    transition: color 140ms ease-out, background 140ms ease-out, border-color 140ms ease-out, opacity 140ms ease-out;
   }
-  .hintbtn:hover { color: var(--fg-muted); background: var(--surface-hover); }
+  .hintbtn:hover { color: var(--fg-muted); background: var(--surface-hover); opacity: 1; }
   .hintbtn[aria-expanded="true"] {
     color: var(--accent);
     border-color: color-mix(in oklch, var(--accent) 25%, transparent);
@@ -1042,9 +1052,9 @@
   }
 
   .model-pill {
-    align-self: flex-end;
+    align-self: center;
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 4px 2px 9px;
+    padding: 2px 6px 2px 9px;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     border-radius: 999px;
@@ -1053,23 +1063,24 @@
     cursor: pointer;
     font: inherit;
     font-size: var(--fs-xs);
-    height: 26px;
+    height: 24px;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
 
   .effort-pill {
-    align-self: flex-end;
+    align-self: center;
     display: inline-flex; align-items: center;
-    padding: 2px 9px;
+    padding: 0 9px;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     border-radius: 999px;
     color: var(--fg-2);
     cursor: pointer;
     font: inherit;
-    font-size: var(--fs-xs);
+    font-size: 10px;
     font-weight: 600;
-    height: 26px;
+    height: 22px;
+    letter-spacing: 0.02em;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
   .effort-pill:hover {
@@ -1101,6 +1112,14 @@
     background: color-mix(in oklch, var(--accent) 12%, transparent);
     border-radius: 999px;
   }
+  .pill-caret {
+    font-size: 8px;
+    color: var(--fg-faint);
+    margin-left: 1px;
+    line-height: 1;
+    transition: color 140ms ease-out, transform 140ms ease-out;
+  }
+  .model-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
   .model-pill:hover {
     background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));
     color: var(--fg);

@@ -227,14 +227,27 @@
   .empty {
     flex: 1;
     display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    padding: 32px 20px;
+    align-items: center; justify-content: flex-start;
+    padding: 12vh 20px 32px;
     min-height: 0;
     gap: 18px;
   }
-  /* No-workspace state: pull content up so the Open-folder CTA reads as the
-     primary moment, not buried below 200px of whitespace. */
-  .empty.no-ws { justify-content: flex-start; padding-top: 14vh; }
+  /* Stagger child entrance so the empty state feels composed top-down,
+     not slammed in as one block. */
+  .empty > * {
+    animation: empty-child-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .empty > :nth-child(1) { animation-delay: 0ms; }
+  .empty > :nth-child(2) { animation-delay: 60ms; }
+  .empty > :nth-child(3) { animation-delay: 100ms; }
+  .empty > :nth-child(4) { animation-delay: 140ms; }
+  @keyframes empty-child-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .empty > * { animation: none; }
+  }
 
   .hero {
     max-width: 520px;
@@ -252,6 +265,13 @@
     box-shadow:
       0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent),
       0 12px 32px color-mix(in oklch, var(--accent) 18%, transparent);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .glyph { animation: glyph-breathe 4.2s ease-in-out infinite; }
+  }
+  @keyframes glyph-breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.04); }
   }
   .hero h2 {
     margin: 0;
@@ -276,7 +296,7 @@
     align-items: center;
     gap: 12px;
     width: 100%;
-    max-width: 440px;
+    max-width: 520px;
     padding: 14px 14px 14px 16px;
     border-radius: 12px;
     background: var(--surface);
@@ -285,6 +305,7 @@
     font: inherit;
     color: var(--fg);
   }
+  .ws-card.primary:active { transform: translateY(0) scale(0.985); }
   .ws-card.primary {
     cursor: pointer;
     background: linear-gradient(180deg,
@@ -371,7 +392,7 @@
   /* ── Recents — quiet, compact list under the primary CTA ───────────────── */
   .recents-block {
     width: 100%;
-    max-width: 440px;
+    max-width: 520px;
     display: flex; flex-direction: column;
     gap: 6px;
   }
@@ -468,6 +489,7 @@
     border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
     transform: translateX(2px);
   }
+  .card:active { transform: translateX(2px) scale(0.985); }
   .card-icon {
     width: 26px; height: 26px;
     display: flex; align-items: center; justify-content: center;
@@ -483,14 +505,14 @@
     line-height: 1.3;
   }
   .card-prompt {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--fg-faint);
-    line-height: 1.35;
+    line-height: 1.4;
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
     -webkit-box-orient: vertical;
   }
 
