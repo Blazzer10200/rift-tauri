@@ -549,6 +549,23 @@ impl AutoSyncEngine {
         self.folders.iter().map(|kv| kv.value().clone()).collect()
     }
 
+    /// Dashboard snapshot — name + remote_root + last-known file count from the
+    /// FolderCountCache (zero if cold). Reads only; never triggers a walkdir.
+    pub fn watched_folders_dashboard(&self) -> Vec<(String, String, u64)> {
+        self.folders
+            .iter()
+            .map(|kv| {
+                let fw = kv.value();
+                let count = self
+                    .local_file_counts
+                    .get(&fw.remote_root)
+                    .map(|c| c.count.load(std::sync::atomic::Ordering::Relaxed))
+                    .unwrap_or(0);
+                (fw.resource_name.clone(), fw.remote_root.clone(), count)
+            })
+            .collect()
+    }
+
     /// Walk the last-scan cache and inject every ToPush entry into the dirty
     /// queue (skipping ones already there, ones whose local file vanished
     /// since the scan, and ones whose folder watch no longer exists).
