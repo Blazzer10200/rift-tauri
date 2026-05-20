@@ -2,28 +2,24 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 121 — 2026-05-20 — Phase 6 OS-keychain + backend HIGH/MED close-out (19 issues)
+## Session 122 — 2026-05-20 — sync rebuild-detection + assistant UI polish
 
-Full lane breakdown in `docs/CHANGELOG.md` (v0.4.18-alpha entry). Issue numbers (19):
+Full lane in `docs/CHANGELOG.md` (v0.4.19-alpha). Two clusters:
 
-- **Phase 6 (3):** #37 #9.3 #38 (keyring crate + Windows DACL on mcp-config)
-- **Backend HIGH/MED tail (14):** #45 #63 #102 #103 #106 #108 #112 #113 #119 #120 #125 #127 #129 #131
-- **Hygiene (2):** #27 #32 (plus #26 + #101 verified non-bug / already-shipped)
-
-`cargo check` clean (same pre-existing `private_interfaces` warn).
-
-**Backend HIGH/MED tier is now closed.** Remaining open backend: **#81 (full DiagBus — heavy)** is the only meaty one; the rest is LOW/INFO tail. **FE Wave-2 MEDs #146-#149 + #151-#177 untouched — that's the biggest remaining lane** (~30 items).
+- **Sync (3 fixes against Vite/Webpack rebuild-loop):** `.rift-rebuild` sentinel (scanner + watch suppress while fresh), zero-config rebuild-pair detection (unlink+create within 1500ms in same dir w/ matching hashed-filename signature → drop the Deleted), periodic failed-slot retry on the existing 5s root tick.
+- **Assistant UI:** `--chat-col-max` CSS var bumped column 720→1100px + recentered; EditDiff collapsed-by-default w/ click-to-expand; single-side diff renders as unified one-column; StatusHub merged into composer's top edge w/ shared border + Stop consolidated; status-label path truncation; tab bar active-indicator top-stripe.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.18-alpha** (S121 shipped). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.19-alpha** (S122 shipped). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Next session's first move:**
 1. **FE Wave-2 MEDs** — #146-#149 + #151-#177 (30 items, biggest remaining lane).
 2. **#81 (full DiagBus)** if backend-heavy session preferred.
-3. LOW/INFO tail polish.
+3. UI polish continuation: right rail compression + grouping, titlebar hierarchy, context-window utilization indicator near composer model pill (`ISSUES.md #1` left-overs).
+4. LOW/INFO tail polish.
 
 **Phase 6 keychain runtime verification on first launch:** old plaintext `bridgeToken` / `apiKey` values get auto-lifted to Windows Credential Manager on first `RiftConfig::load()` + `assistant::load_config()` call. Check `cmdkey /list:rift` for `rift/bridge.<server_key>` + `rift/assistant.api_key` entries. JSON files post-migration should NOT contain `bridgeToken` / `apiKey` fields.
 

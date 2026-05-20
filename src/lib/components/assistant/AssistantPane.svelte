@@ -5,7 +5,6 @@
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
   import Composer from "./Composer.svelte";
-  import StatusHub from "./StatusHub.svelte";
 
   let {
     tabId,
@@ -205,8 +204,6 @@
     </button>
   {/if}
 
-  <StatusHub {tabId} />
-
   {#if focused && (lastError || showNotice || showShellBanner)}
     <div class="alerts">
       {#if showShellBanner}
@@ -234,7 +231,7 @@
   {/if}
 
   {#if focused}
-    <Composer onsubmit={(text) => assistant.send(text)} />
+    <Composer {tabId} onsubmit={(text) => assistant.send(text)} />
   {:else}
     <div class="pane-focus-hint">Click to focus this pane</div>
   {/if}
@@ -333,7 +330,7 @@
   .messages {
     display: flex; flex-direction: column;
     gap: 20px;
-    max-width: min(960px, 88ch);
+    max-width: var(--chat-col-max);
     width: 100%;
     margin: 0 auto;
   }
@@ -358,7 +355,7 @@
     flex-shrink: 0;
     margin: 10px auto 14px;
     padding: 8px 14px;
-    max-width: min(960px, 88ch);
+    max-width: var(--chat-col-max);
     width: calc(100% - 36px);
     text-align: center;
     font-size: var(--fs-xs);
@@ -407,7 +404,7 @@
     display: flex; flex-direction: column;
     gap: 6px;
     padding: 6px 18px 0;
-    max-width: min(960px, 88ch);
+    max-width: var(--chat-col-max);
     width: 100%;
     margin: 0 auto;
   }

@@ -453,6 +453,27 @@ impl AutoSyncEngine {
                                 now.duration_since(*marked_at) < stale_cutoff
                             });
                         }
+                        // Periodic failed-slot retry. Pre-fix, a `failed` entry
+                        // sat indefinitely once the user moved on from the
+                        // Push button — its `next_retry` expired but nothing
+                        // promoted it back to `dirty`. Tick the drain whenever
+                        // at least one entry's backoff has elapsed; the
+                        // promote-loop inside `flush_all_now` skips entries
+                        // whose `next_retry` is still in the future.
+                        if !root_engine.failed.is_empty() {
+                            let now_t = Utc::now();
+                            let has_ready = root_engine
+                                .failed
+                                .iter()
+                                .any(|kv| kv.value().next_retry <= now_t);
+                            if has_ready {
+                                let e = root_engine.clone();
+                                let h = tokio::spawn(async move {
+                                    let _ = e.flush_all_now(None).await;
+                                });
+                                root_engine.track_background(h);
+                            }
+                        }
                         for kv in root_engine.folders.iter() {
                             let local = kv.value().local_root.clone();
                             let resource = kv.value().resource_name.clone();

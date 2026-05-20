@@ -21,7 +21,31 @@ use super::{
     CEILING_MS, DEBOUNCE_MS,
 };
 use crate::diagnostics::{self, DiagLevel, DiagStage};
+use crate::sync::drift_scanner::is_rebuild_sentinel_fresh;
 use crate::sync::ignore;
+
+/// Window during which a Created event in a directory cancels a sibling Deleted
+/// event with the same hashed-filename signature. Covers the unlink-then-write
+/// sequence emitted by Vite/Webpack/esbuild on a fresh build.
+const REBUILD_PAIR_WINDOW_MS: i64 = 1500;
+
+/// Recognize a hashed-asset filename of the form `<prefix>-<hash>.<ext>` where
+/// `<hash>` is at least 6 alnum/underscore chars. Returns `(prefix, ext)` so
+/// two files in the same dir from successive builds (`index-AbCd.js` /
+/// `index-XyZw.js`) collapse to the same key. Files without a `-` separator
+/// or with a short suffix (`app-v2.js`) return None — no false positives.
+fn hashed_filename_signature(path: &std::path::Path) -> Option<(String, String)> {
+    let name = path.file_name()?.to_str()?;
+    let (stem, ext_part) = name.rsplit_once('.')?;
+    let (prefix, hash) = stem.rsplit_once('-')?;
+    if prefix.is_empty() || hash.len() < 6 {
+        return None;
+    }
+    if !hash.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return None;
+    }
+    Some((prefix.to_string(), format!(".{ext_part}")))
+}
 
 impl AutoSyncEngine {
     pub async fn try_watch(&self, spec: FolderSpec) -> Result<bool, String> {
@@ -306,10 +330,93 @@ impl AutoSyncEngine {
             }
         }
         let Some(watch_key) = owner else { return };
+
+        // Rebuild sentinel: tooling-cooperative path. `.rift-rebuild` at the
+        // watched-folder root suppresses queueing of ALL events for that root
+        // while fresh — paired with the drift_scanner-side skip, deletes that
+        // happen mid-build never propagate.
+        if let Some(local_root) = self
+            .folders
+            .get(&watch_key)
+            .map(|v| v.value().local_root.clone())
+        {
+            if is_rebuild_sentinel_fresh(&local_root.join(".rift-rebuild")) {
+                self.ignored_total.fetch_add(1, Ordering::Relaxed);
+                self.ignored_by_rule
+                    .entry("rift-rebuild".to_string())
+                    .and_modify(|n| *n += 1)
+                    .or_insert(1);
+                diagnostics::emit_with_fields(
+                    DiagStage::Ignored,
+                    DiagLevel::Debug,
+                    None,
+                    Some(&path_str),
+                    "ignored [rift-rebuild]",
+                    serde_json::json!({ "rule": "rift-rebuild", "kind": format!("{kind:?}") }),
+                );
+                return;
+            }
+        }
+
         let now = Utc::now();
         let debounce = chrono::Duration::milliseconds(DEBOUNCE_MS as i64);
         let ceiling = chrono::Duration::milliseconds(CEILING_MS as i64);
         let watch_key_for_lock = watch_key.clone();
+
+        // Rebuild-detection (heuristic path — no tooling cooperation required).
+        // A Created/Modified event with a hashed-filename signature lands shortly
+        // after the build's unlink of the previous hashed twin. If a Deleted
+        // entry with the same `<prefix>.<ext>` signature is still in the dirty
+        // queue within the pair window, drop it: it's the build's `rm` half of
+        // an unlink-then-write rebuild, not a real user-initiated delete.
+        if matches!(kind, ChangeKind::Created | ChangeKind::Modified) {
+            if let (Some(parent), Some(new_sig)) =
+                (path.parent(), hashed_filename_signature(&path))
+            {
+                let cutoff = now - chrono::Duration::milliseconds(REBUILD_PAIR_WINDOW_MS);
+                let victims: Vec<PathBuf> = self
+                    .dirty
+                    .iter()
+                    .filter_map(|kv| {
+                        let other = kv.value();
+                        if other.kind != ChangeKind::Deleted {
+                            return None;
+                        }
+                        if other.path.parent() != Some(parent) {
+                            return None;
+                        }
+                        if other.first_seen < cutoff {
+                            return None;
+                        }
+                        let old_sig = hashed_filename_signature(&other.path)?;
+                        if old_sig == new_sig {
+                            Some(kv.key().clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if !victims.is_empty() {
+                    let n = victims.len() as u64;
+                    for v in &victims {
+                        self.dirty.remove(v);
+                        diagnostics::emit_for(
+                            DiagStage::Ignored,
+                            DiagLevel::Debug,
+                            None,
+                            Some(&v.to_string_lossy()),
+                            "rebuild-pair: dropped sibling Deleted",
+                        );
+                    }
+                    self.ignored_total.fetch_add(n, Ordering::Relaxed);
+                    self.ignored_by_rule
+                        .entry("rebuild-pair".to_string())
+                        .and_modify(|c| *c += n)
+                        .or_insert(n);
+                }
+            }
+        }
+
         let first_dirty = match self.dirty.entry(path.clone()) {
             Entry::Occupied(mut occupied) => {
                 let existing = occupied.get_mut();
