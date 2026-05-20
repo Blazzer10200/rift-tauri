@@ -2,11 +2,9 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 112 — 2026-05-20 — Multi-wave codebase audit complete (no source edits)
+## Session 112 — 2026-05-20 — Multi-wave codebase audit (no source edits)
 
-**27-agent audit, 3 waves, read-only.** Wave 1 backend (11 agents, 105 findings), Wave 2 frontend (8 agents, 80 findings), Wave 3 cross-cutting (8 agents, 47 findings). **232 total findings folded into `docs/ISSUES.md` #34-#265.** Severity: **16 HIGH** / 96 MED / 103 LOW / 14 INFO + 8 dupes collapsed. Three audit commits on `main` (`d36c501` wave 1, `cb3ec5e` wave 2, `3006cd3` wave 3) — **unpushed, origin/main 3 behind**. Per-agent reports + 3 SYNTHESIS files at `state/audit-2026-05-20/` (gitignored). Plan that ran the show: `state/audit-2026-05-20/AUDIT-PLAN.md`.
-
-Spot-checked Top 5 ship-blockers vs source — all confirmed real.
+27-agent read-only audit, 3 waves. **232 findings folded into `docs/ISSUES.md` #34-#265** (16 HIGH / 96 MED / 103 LOW / 14 INFO + 8 dupes). Commits `d36c501` (W1 backend 105) / `cb3ec5e` (W2 frontend 80) / `3006cd3` (W3 cross-cutting 47) on `main`, **unpushed (origin 3 behind)**. Per-agent reports + SYNTHESIS files at `state/audit-2026-05-20/` (gitignored). Top 5 ship-blockers spot-checked against source — all confirmed real.
 
 ---
 
@@ -18,23 +16,19 @@ Spot-checked Top 5 ship-blockers vs source — all confirmed real.
 
 ### Top 5 ship-blockers — fix as v0.4.14-alpha hotfix (one commit batch, ~30 LOC across 5 files)
 
-| # | Where | What | Fix sketch |
-|---|---|---|---|
-| **#36** | `src-tauri/src/lib.rs:805` | `save_server` `.or_else(\|_\| Ok(default()))` swallows config-load errors → entire server list overwritten on next save (data-loss) | Drop `.or_else`; propagate error w/ `.map_err(\|e\| format!(...))?` |
-| **#74** | `src-tauri/src/sync/drift_scanner.rs:228` | `walk_local` panic in `spawn_blocking` → `.unwrap_or_default()` returns empty `local_map` → bypasses guard at L241 → mass ToPull overwrites real local files | Match on `JoinError`; abort scan w/ `FolderScan::ScanFailed` variant |
-| **#41** | `src-tauri/src/.../remote_bridge.rs:250-258` | Bridge lock leak on exec error → permanently blocks ALL users on that remote root | RAII guard struct (`BridgeLockGuard`) w/ `Drop` impl releasing lock |
-| **#219** | `src-tauri/src/lib.rs:1743` | No `panic::set_hook` installed → every async-task panic dies silently | Install hook after `LogForwarder` setup; route to `tracing::error!` + DiagBus |
-| **#163** | `src/lib/components/assistant/UpdateDialog.svelte:409` | `scrollbar-gutter: stable` reintroduced — direct **CRITICAL DON'T-TOUCH violation** (HANDOFF said it leaks WebView2 arrow-buttons) | Delete the line |
+| # | file:line | Symptom → fix |
+|---|---|---|
+| **#36** | `lib.rs:805` | `save_server` `.or_else(\|_\|Ok(default()))` on config load → server list nuked on next save. **Fix:** drop fallback, propagate error via `.map_err(...)?`. |
+| **#74** | `sync/drift_scanner.rs:228` | `walk_local` panic → `.unwrap_or_default()` empty map → bypasses L241 guard → mass ToPull overwrites local. **Fix:** match `JoinError`, abort scan. |
+| **#41** | `remote_bridge.rs:250-258` | Bridge lock leak on exec error → blocks all users on that remote. **Fix:** `BridgeLockGuard` RAII w/ `Drop`. |
+| **#219** | `lib.rs:1743` | No `panic::set_hook` → silent async-task panics app-wide. **Fix:** install hook after `LogForwarder`, route to `tracing::error!` + DiagBus. |
+| **#163** | `UpdateDialog.svelte:409` | `scrollbar-gutter: stable` reintroduced — **DON'T-TOUCH violation**. **Fix:** delete line. |
 
-Verify each: `cargo check --manifest-path src-tauri/Cargo.toml` for #36/#74/#41/#219, `npm run check` for #163.
+Verify: `cargo check` for #36/#74/#41/#219, `npm run check` for #163.
 
-### Remaining HIGH severity (11) — triage into v0.4.15+ batches after hotfix
+### After hotfix
 
-4 frontend + 4 backend + 3 cross-cutting. Pull list from `docs/ISSUES.md` `## Priority tiers` section once the Top 5 are shipped.
-
-### Existing pre-audit priorities (still valid, lower urgency than HIGH findings)
-
-(a) Drop `src-tauri/installer-splash.png` for themed installer. (b) Compaction Phase B (`docs/design/assistant-compaction.md`). (c) bg-tab session-lost retry on cwd-hash mismatch. (d) expose `xhigh`/`max` effort tiers. (e) `lib.rs` split into `commands/*.rs` (ISSUES #20).
+Remaining **11 HIGH** (4 FE + 4 BE + 3 cross-cutting) → triage into v0.4.15+ batches from `docs/ISSUES.md` Priority Tiers. Pre-audit queue still valid but lower urgency: (a) installer-splash.png, (b) Compaction Phase B, (c) bg-tab session-lost retry, (d) `xhigh`/`max` effort tiers, (e) `lib.rs` → `commands/*.rs` split.
 
 ---
 
