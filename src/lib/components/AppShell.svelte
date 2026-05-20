@@ -185,6 +185,17 @@
         void assistant.cycleTab(e.shiftKey ? -1 : 1);
         return;
       }
+      // Ctrl+\ → add a new pane (right of focused). Ctrl+Shift+\ → close
+      // focused pane. Both no-op at edges (cap reached / last pane).
+      if (e.key === "\\") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          assistant.closePane(assistant.focusedPaneIdx);
+        } else {
+          assistant.addPane();
+        }
+        return;
+      }
     }
     // Ctrl+` → switch to Terminal workspace.
     if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
@@ -475,7 +486,7 @@
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(0, 1fr) 44px;
     min-height: 0;
     min-width: 0;
     overflow: visible;

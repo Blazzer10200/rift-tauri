@@ -467,8 +467,12 @@ impl AutoSyncEngine {
                             let sizes_match = info.size == snap.local_size
                                 && info.size == snap.remote_size;
                             if sizes_match && snap.sha1.is_some() {
-                                let local_sha =
-                                    SyncSnapshot::compute_sha1(&entry.path);
+                                let path_for_sha = entry.path.clone();
+                                let local_sha = tokio::task::spawn_blocking(move || {
+                                    SyncSnapshot::compute_sha1(&path_for_sha)
+                                })
+                                .await
+                                .unwrap_or(None);
                                 if local_sha.is_some() && local_sha == snap.sha1 {
                                     let remote_sha =
                                         self.sftp.get_remote_sha1(&remote).await;
@@ -578,7 +582,12 @@ impl AutoSyncEngine {
                     self.cache.set(&remote, info.size, info.last_modified);
                     if let Some((lsize, lmtime)) = stat_local(&entry.path) {
                         let sha = if lsize <= SHA1_MAX_BYTES {
-                            SyncSnapshot::compute_sha1(&entry.path)
+                            let path_for_sha = entry.path.clone();
+                            tokio::task::spawn_blocking(move || {
+                                SyncSnapshot::compute_sha1(&path_for_sha)
+                            })
+                            .await
+                            .unwrap_or(None)
                         } else {
                             None
                         };
