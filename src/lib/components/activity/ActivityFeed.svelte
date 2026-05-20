@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import {
     RefreshCw, Download, Trash2, AlertTriangle, Check,
     GitBranch, Network, Lock, XCircle, Info, Pause, Play,
@@ -35,8 +36,8 @@
   let burstCount = $state(0);
   let userScrolledAway = $state(false);
   let newSinceScroll = $state(0);
-  let lastFeedLen = 0;
-  let recentArrivals: number[] = [];
+  let lastFeedLen = $state(0);
+  let recentArrivals = $state<number[]>([]);
   const BURST_WINDOW_MS = 1_000;
   const BURST_THRESHOLD = 5;
 
@@ -78,7 +79,8 @@
   // newSinceScroll when the display is frozen (burst OR user-scrolled-away).
   $effect(() => {
     const len = connection.activityFeed.length;
-    const delta = Math.max(0, len - lastFeedLen);
+    const delta = Math.max(0, len - untrack(() => lastFeedLen));
+    if (delta === 0) return;
     if (delta > 0) {
       const now = Date.now();
       for (let i = 0; i < delta; i++) recentArrivals.push(now);

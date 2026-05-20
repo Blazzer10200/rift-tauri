@@ -238,7 +238,11 @@ pub struct AutoSyncEngine {
     /// Replaced on each `kick_drift_reconcile`; `cancel_drift_reconcile`
     /// fires the stored token (no-op when None). std::sync::Mutex because
     /// `kick_drift_reconcile` is sync (notify event handler can call it).
-    current_scan_cancel: std::sync::Mutex<Option<CancellationToken>>,
+    /// The u64 nonce tags each install so the cleanup guard can confirm it
+    /// is clearing its own token and not a subsequently installed one.
+    current_scan_cancel: std::sync::Mutex<Option<(u64, CancellationToken)>>,
+    /// Monotonic counter — incremented on every install into `current_scan_cancel`.
+    cancel_nonce: std::sync::atomic::AtomicU64,
 
     /// Cached entries from the most recent scan (drift_watcher tick OR
     /// kick_drift_reconcile). `force_pull_now` dispatches from this cache
@@ -268,6 +272,12 @@ pub struct AutoSyncEngine {
     mirror_mode: AtomicBool,
     ignored_total: AtomicU64,
     ignored_by_rule: DashMap<String, u64>,
+    /// #45: Count of FS events the bounded notify→tokio channel had to drop
+    /// because the consumer side was stalled. Per-engine lifetime counter,
+    /// monotonically increasing. Logged at Error level on every 100th drop
+    /// so a sustained burst (webpack rebuild + stalled flush) is visible
+    /// instead of vanishing into per-event Warn noise.
+    dropped_events: AtomicU64,
 
     /// Paths Rift just wrote to via download_file_atomic. The Windows
     /// atomic-replace pattern fires Delete+Modify fs-events on the real
@@ -327,6 +337,7 @@ impl AutoSyncEngine {
             conflicts: DashMap::new(),
             manual_delete_suppress_until: DashMap::new(),
             current_scan_cancel: std::sync::Mutex::new(None),
+            cancel_nonce: std::sync::atomic::AtomicU64::new(0),
             last_scan_entries: std::sync::Mutex::new(Vec::new()),
             last_aborted_shrunk: std::sync::Mutex::new(Vec::new()),
             state: Mutex::new((AutoSyncState::Idle, String::new())),
@@ -334,6 +345,7 @@ impl AutoSyncEngine {
             mirror_mode: AtomicBool::new(false),
             ignored_total: AtomicU64::new(0),
             ignored_by_rule: DashMap::new(),
+            dropped_events: AtomicU64::new(0),
             recently_written: DashMap::new(),
             watcher: Mutex::new(None),
             event_task: Mutex::new(None),
@@ -349,15 +361,29 @@ impl AutoSyncEngine {
         // bursts (git checkout, webpack hot-rebuild). Try-send + drop-with-warn
         // is the only non-blocking option since the watcher closure is sync.
         let (tx, rx) = mpsc::channel::<Event>(2048);
+        let drop_counter = engine.clone();
         let watcher = notify::recommended_watcher(move |res: notify::Result<Event>| {
             if let Ok(ev) = res {
                 if tx.try_send(ev).is_err() {
-                    log::warn!("autosync FS event channel full (cap=2048); dropping event");
-                    diagnostics::emit(
-                        DiagStage::QueueDropped,
-                        DiagLevel::Warn,
-                        "FS event channel full (cap=2048); event dropped",
-                    );
+                    // #45: per-event Warn was invisible during bursts; escalate
+                    // to Error every 100th drop so sustained pressure surfaces
+                    // in the diag bus.
+                    let n = drop_counter.dropped_events.fetch_add(1, Ordering::Relaxed) + 1;
+                    if n.is_multiple_of(100) {
+                        log::error!("autosync FS event channel: {n} events dropped cumulatively (cap=2048)");
+                        diagnostics::emit(
+                            DiagStage::QueueDropped,
+                            DiagLevel::Error,
+                            &format!("FS event channel saturation: {n} events dropped"),
+                        );
+                    } else {
+                        log::warn!("autosync FS event channel full (cap=2048); dropping event (total={n})");
+                        diagnostics::emit(
+                            DiagStage::QueueDropped,
+                            DiagLevel::Warn,
+                            "FS event channel full (cap=2048); event dropped",
+                        );
+                    }
                 }
             }
         })
@@ -627,10 +653,12 @@ impl AutoSyncEngine {
             return true;
         }
         // best-effort state read — if the lock is held briefly elsewhere,
-        // treat as not pushing rather than block.
+        // #43: treat lock contention as "pushing" (safer direction). Returning
+        // false on Err(_) let the pull loop race the tail of a flush_batch
+        // that was holding state.lock(); a pull could overwrite mid-upload.
         match self.state.try_lock() {
             Ok(g) => matches!(g.0, AutoSyncState::Syncing),
-            Err(_) => false,
+            Err(_) => true,
         }
     }
 
@@ -744,8 +772,9 @@ impl AutoSyncEngine {
         eprintln!("[rift] force_push_now: entry");
         let ct = CancellationToken::new();
         let ct_for_task = ct.clone();
+        let my_nonce = self.cancel_nonce.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut g) = self.current_scan_cancel.lock() {
-            *g = Some(ct);
+            *g = Some((my_nonce, ct));
         }
         let engine = self.clone();
         let h = tokio::spawn(async move {
@@ -1087,8 +1116,9 @@ impl AutoSyncEngine {
         // Replace any prior in-flight token. Old scan keeps its own clone — if it
         // was mid-folder it will check on the next iteration; if it already
         // finished the cancel is a harmless no-op.
+        let my_nonce = self.cancel_nonce.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut g) = self.current_scan_cancel.lock() {
-            *g = Some(ct);
+            *g = Some((my_nonce, ct));
         }
         let h = tokio::spawn(async move {
             diagnostics::emit(
@@ -1199,10 +1229,10 @@ impl AutoSyncEngine {
                     "by_resource": breakdown,
                 }),
             );
-            // Clear token slot if it's still ours (another kick could have replaced it).
+            // Clear token slot only if our nonce still owns it (identity, not state).
             if let Ok(mut g) = engine.current_scan_cancel.lock() {
                 if let Some(stored) = g.as_ref() {
-                    if stored.is_cancelled() == ct_for_task.is_cancelled() {
+                    if stored.0 == my_nonce {
                         *g = None;
                     }
                 }
@@ -1522,8 +1552,9 @@ impl AutoSyncEngine {
         // long-running op, whichever it is.
         let ct = CancellationToken::new();
         let ct_for_task = ct.clone();
+        let my_nonce = self.cancel_nonce.fetch_add(1, Ordering::Relaxed);
         if let Ok(mut g) = self.current_scan_cancel.lock() {
-            *g = Some(ct);
+            *g = Some((my_nonce, ct));
         }
         let engine = self.clone();
         let h = tokio::spawn(async move {
@@ -1542,7 +1573,24 @@ impl AutoSyncEngine {
             let cached: Vec<crate::sync::DriftEntry> = {
                 let g = match engine.last_scan_entries.lock() {
                     Ok(g) => g,
-                    Err(_) => return,
+                    Err(e) => {
+                        // #48: silent return left the SyncModal hung waiting
+                        // for a DriftScanResult event that never arrived.
+                        // Surface the poison + emit a closing event so the UI
+                        // unblocks instead of freezing.
+                        log::error!("force_pull_now: last_scan_entries mutex poisoned: {e}");
+                        diagnostics::emit(
+                            DiagStage::System,
+                            DiagLevel::Error,
+                            "force_pull_now aborted: scan cache mutex poisoned",
+                        );
+                        diagnostics::emit(
+                            DiagStage::DriftScanResult,
+                            DiagLevel::Error,
+                            "pull-now aborted (cache lock poisoned)",
+                        );
+                        return;
+                    }
                 };
                 g.clone()
             };
@@ -1761,10 +1809,10 @@ impl AutoSyncEngine {
                     "from_cache": true,
                 }),
             );
-            // Clear token slot if it's still ours.
+            // Clear token slot only if our nonce still owns it (identity, not state).
             if let Ok(mut g) = engine.current_scan_cancel.lock() {
                 if let Some(stored) = g.as_ref() {
-                    if stored.is_cancelled() == ct_for_task.is_cancelled() {
+                    if stored.0 == my_nonce {
                         *g = None;
                     }
                 }
@@ -1778,8 +1826,8 @@ impl AutoSyncEngine {
     /// `cancelled: true` ScanResult; the modal surfaces that as "cancelled".
     pub fn cancel_drift_reconcile(&self) {
         if let Ok(g) = self.current_scan_cancel.lock() {
-            if let Some(ct) = g.as_ref() {
-                ct.cancel();
+            if let Some(entry) = g.as_ref() {
+                entry.1.cancel();
             }
         }
     }

@@ -223,9 +223,15 @@ impl<'a> DriftScanner<'a> {
         // Walk runs on a blocking thread so a multi-thousand-file resource
         // folder doesn't stall the tokio runtime mid-scan.
         let local_root = Path::new(&f.local_root);
+        // #74: a panic inside walk_local previously fell back to .unwrap_or_default(),
+        // producing an empty local_map that silently bypassed the data-safety guard
+        // below (`!local_map.is_empty()`) and let the diff downstream mark every
+        // remote file as ToPull — a mass-overwrite of local changes. Treat a join
+        // error as SuspiciousEmptyAborted so the folder is reported to the UI and
+        // skipped, never silently mass-pulled.
         let local_map: HashMap<String, LocalStat> = {
             let local_root_owned = local_root.to_path_buf();
-            tokio::task::spawn_blocking(move || {
+            match tokio::task::spawn_blocking(move || {
                 let mut m = HashMap::new();
                 if local_root_owned.exists() {
                     walk_local(&local_root_owned, &local_root_owned, &mut m);
@@ -233,7 +239,27 @@ impl<'a> DriftScanner<'a> {
                 m
             })
             .await
-            .unwrap_or_default()
+            {
+                Ok(m) => m,
+                Err(e) => {
+                    crate::diagnostics::emit_with_fields(
+                        crate::diagnostics::DiagStage::DriftScanProgress,
+                        crate::diagnostics::DiagLevel::Error,
+                        Some(&f.resource_name),
+                        None,
+                        format!("local walk task panicked: {e}"),
+                        serde_json::json!({ "remote_root": f.remote_root }),
+                    );
+                    let baseline_count = self
+                        .snapshot
+                        .map(|s| s.count_under(&f.remote_root) as u32)
+                        .unwrap_or(0);
+                    return FolderScan::SuspiciousEmptyAborted {
+                        baseline_count,
+                        listing_count: 0,
+                    };
+                }
+            }
         };
 
         // Critical data-safety guard: empty remote + non-empty local. Confirm

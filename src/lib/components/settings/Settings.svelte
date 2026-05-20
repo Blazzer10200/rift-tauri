@@ -153,12 +153,19 @@
   let asstMaxBudgetDraft = $state<number | null>(null);
   let asstMaxBudgetSaving = $state(false);
   let asstMaxBudgetMsg = $state<string | null>(null);
+  // #150: only re-seed drafts when entering the Assistant section, not on every
+  // store mutation. untrack() prevents apiKey/maxBudgetUsd reads from being
+  // tracked deps — otherwise any later store write (Save, init() resolve,
+  // workspace change) would clobber an in-progress edit. We await init() so
+  // the very first visit picks up resolved values instead of pre-init defaults.
   $effect(() => {
-    if (section === "assistant") {
-      void assistantStore.init();
-      asstApiKeyDraft = assistantStore.apiKey ?? "";
-      asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
-    }
+    if (section !== "assistant") return;
+    untrack(() => {
+      void assistantStore.init().then(() => {
+        asstApiKeyDraft = assistantStore.apiKey ?? "";
+        asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
+      });
+    });
   });
   async function saveAsstApiKey() {
     asstApiKeySaving = true;

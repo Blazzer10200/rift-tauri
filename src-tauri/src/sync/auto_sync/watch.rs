@@ -103,11 +103,15 @@ impl AutoSyncEngine {
         // root. Backlog cleanup for dirs Rift created pre-v0.2.31 (umask 0022
         // → 0755 → teammates couldn't push into them). v0.2.31's mkdir_p_via
         // handles new dirs; this catches the rest. Async + best-effort.
+        // #35: track this spawn via track_background so engine.stop() aborts it
+        // alongside other tasks. Previously untracked → kept issuing chmod
+        // against a disconnected/reconnected session after stop().
         let sftp = self.sftp.clone();
         let root_for_heal = remote_root.clone();
-        tokio::spawn(async move {
+        let h = tokio::spawn(async move {
             sftp.heal_owned_dirs(&root_for_heal).await;
         });
+        self.track_background(h);
 
         let count = self.folders.len();
         let (cur_state, _) = *self.state.lock().await;
@@ -120,11 +124,19 @@ impl AutoSyncEngine {
     }
 
     pub(super) async fn stop_watch(&self, remote_root: &str) {
+        // #44: unwatch FIRST so notify stops emitting events for this root,
+        // THEN remove from the folders map. Reverse order leaves a small
+        // window where FS events arrive for an already-removed root and
+        // queue_path silently drops them.
+        let local_root = match self.folders.get(remote_root) {
+            Some(e) => e.value().local_root.clone(),
+            None => return,
+        };
+        if let Some(w) = self.watcher.lock().await.as_mut() {
+            let _ = w.unwatch(&local_root);
+        }
         let Some((_, fw)) = self.folders.remove(remote_root) else { return };
         self.local_file_counts.remove(remote_root);
-        if let Some(w) = self.watcher.lock().await.as_mut() {
-            let _ = w.unwatch(&fw.local_root);
-        }
         self.log(&format!("stopped watching {}", fw.resource_name));
         let count = self.folders.len();
         let (cur_state, _) = *self.state.lock().await;
@@ -186,11 +198,17 @@ impl AutoSyncEngine {
                     let engine = self.clone();
                     let h = tokio::spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                        engine.pending_dir_reconcile.store(false, Ordering::Release);
                         if engine.disposed.load(Ordering::SeqCst) {
+                            engine.pending_dir_reconcile.store(false, Ordering::Release);
                             return;
                         }
+                        // #46: kick BEFORE clearing the flag. A new Create(Dir)
+                        // arriving in the gap between clear and kick (old order)
+                        // would pass compare_exchange → second 500ms reconcile
+                        // + double SFTP scan. Kick-then-clear closes that window:
+                        // events during the kick see flag=true and dedupe.
                         engine.kick_drift_reconcile();
+                        engine.pending_dir_reconcile.store(false, Ordering::Release);
                     });
                     self.track_background(h);
                 }

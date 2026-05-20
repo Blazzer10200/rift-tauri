@@ -492,8 +492,18 @@ class SessionTelemetry {
 class TabState {
   /** CLI session UUID — every assistant://stream|done|error event carries
    *  this so the store can dispatch to the right tab. Mutable: compaction
-   *  remints it without destroying the TabState. */
-  cliSessionId: string;
+   *  remints it without destroying the TabState.
+   *  #143: now $state so reassignment (compaction reminting) is reactive. */
+  cliSessionId = $state<string>("");
+  /** #143: per-tab convo metadata. Was store-level before; moved to TabState
+   *  so a 700ms scheduleSave debounce can't dispatch against whichever tab
+   *  is active when the timer fires. */
+  convoCreatedAt = $state<number | null>(null);
+  convoTitle = $state<string | null>(null);
+  /** #145: per-tab save debounce timer — was store-level (single slot).
+   *  Each tab tracking its own timer means flushNow() on beforeunload can
+   *  iterate every unsaved tab instead of dropping background-tab edits. */
+  saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   messages = $state<ChatMessage[]>([]);
   streaming = $state(false);
@@ -738,7 +748,7 @@ class TabState {
     this.drainHandle = requestAnimationFrame(this.drainTick);
   };
 
-  private flushPendingText() {
+  flushPendingText() {
     if (this.drainHandle !== null) {
       cancelAnimationFrame(this.drainHandle);
       this.drainHandle = null;
@@ -1144,7 +1154,14 @@ class AssistantStore {
 
   /** Tear down a tab's TabState. Called from closeTab / closeAllTabs. */
   private dropTab(convoId: string) {
-    if (!this.tabs.has(convoId)) return;
+    const tab = this.tabs.get(convoId);
+    if (!tab) return;
+    // #139: cancel the outstanding rAF + finalize any pending text BEFORE
+    // removing the tab from the map. Without this, drainTick continues firing
+    // on the next frame and writes to the dropped TabState — pendingText
+    // grows in a tab that nobody renders, and the rAF chain self-perpetuates
+    // (drainTick re-arms itself at the tail).
+    tab.flushPendingText();
     const next = new Map(this.tabs);
     next.delete(convoId);
     this.tabs = next;
@@ -1227,15 +1244,29 @@ class AssistantStore {
   //     the top tab bar. Tabs share the singleton stream pipeline (mid-stream
   //     switch = stop stream; concurrent live UI deferred to v0.4.1).
   currentConvoId = $state<string | null>(null);
-  // CLI session UUID for the active convo. Same as currentConvoId for fresh
-  // tabs; diverges only after compaction reminting (Phase C). Source of truth
-  // for what's passed to backend `assistant_send` as `sessionId`.
-  currentCliSessionId = $state<string | null>(null);
   conversations = $state<ConversationMeta[]>([]);
   openTabs = $state<string[]>([]);
-  private convoCreatedAt: number | null = null;
-  private convoTitle: string | null = null;
-  private saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // #143: currentCliSessionId / convoCreatedAt / convoTitle now live on
+  // TabState. These getters/setters delegate to the active tab so existing
+  // call sites keep working unchanged. Writes when activeTab is null no-op,
+  // which matches the prior teardown pattern (dropTab → store-field=null
+  // was effectively clearing already-gone state).
+  get currentCliSessionId(): string | null {
+    const t = this.activeTab;
+    return t ? (t.cliSessionId || null) : null;
+  }
+  set currentCliSessionId(v: string | null) {
+    if (this.activeTab) this.activeTab.cliSessionId = v ?? "";
+  }
+  private get convoCreatedAt(): number | null { return this.activeTab?.convoCreatedAt ?? null; }
+  private set convoCreatedAt(v: number | null) {
+    if (this.activeTab) this.activeTab.convoCreatedAt = v;
+  }
+  private get convoTitle(): string | null { return this.activeTab?.convoTitle ?? null; }
+  private set convoTitle(v: string | null) {
+    if (this.activeTab) this.activeTab.convoTitle = v;
+  }
 
   // tasks + activity now live on TabState (see top-of-class getters).
 
@@ -1565,9 +1596,11 @@ class AssistantStore {
     }
   }
 
-  /** Derive a human-friendly title from the first user message. */
-  private deriveTitle(): string {
-    const first = this.messages.find((m) => m.role === "user");
+  /** Derive a human-friendly title from the first user message. #145: now
+   *  takes the tab as an arg so a debounced doSave reads from the originating
+   *  tab's messages, not whichever tab is active when the timer fires. */
+  private deriveTitle(tab: TabState): string {
+    const first = tab.messages.find((m) => m.role === "user");
     if (!first) return "New conversation";
     const text = first.blocks
       .map((b) => (b.type === "text" ? b.text : ""))
@@ -1577,58 +1610,64 @@ class AssistantStore {
     return text.length > 60 ? text.slice(0, 60) + "…" : text || "New conversation";
   }
 
-  /** Best-effort synchronous flush of the active convo. Wired to
+  /** Build the on-disk record + fire-and-forget save for a single tab.
+   *  Shared by flushNow + scheduleSave so the snapshot semantics live in one
+   *  place. #145: cliSessionId / createdAt / title all sourced from the tab
+   *  passed in, not store-level — debounced save can't redirect mid-flight. */
+  private buildSaveRecord(convoId: string, tab: TabState): ConversationRecord {
+    return {
+      id: convoId,
+      title: tab.convoTitle ?? this.deriveTitle(tab),
+      model: this.model,
+      createdAt: tab.convoCreatedAt ?? Date.now(),
+      updatedAt: Date.now(),
+      messages: tab.messages,
+      cliSessionId: tab.cliSessionId || convoId,
+    };
+  }
+
+  /** Best-effort synchronous flush of all open tabs. Wired to
    *  `beforeunload` in init() — without this, a window close within the
    *  scheduleSave 700ms debounce loses the last turn. We fire the IPC
    *  without awaiting (browser drops pending promises on unload), but the
    *  Tauri runtime typically completes the in-flight invoke before the
-   *  process actually exits. Not a guarantee against hard crashes; closes
-   *  the common close/quit gap. */
+   *  process actually exits.
+   *  #145: iterate every tab with content, not just the active one. A
+   *  background-tab turn that finished mid-debounce would otherwise be lost. */
   flushNow() {
-    if (!this.currentConvoId || this.messages.length === 0) return;
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
+    for (const [convoId, tab] of this.tabs) {
+      if (tab.messages.length === 0) continue;
+      if (tab.saveTimer) {
+        clearTimeout(tab.saveTimer);
+        tab.saveTimer = null;
+      }
+      const record = this.buildSaveRecord(convoId, tab);
+      tab.convoTitle = record.title;
+      tab.convoCreatedAt = record.createdAt;
+      void invoke("assistant_save_conversation", { convo: record }).catch((e) => {
+        console.warn("flushNow save failed", e);
+      });
     }
-    const record: ConversationRecord = {
-      id: this.currentConvoId,
-      title: this.convoTitle ?? this.deriveTitle(),
-      model: this.model,
-      createdAt: this.convoCreatedAt ?? Date.now(),
-      updatedAt: Date.now(),
-      messages: this.messages,
-      cliSessionId: this.currentCliSessionId ?? this.currentConvoId,
-    };
-    this.convoTitle = record.title;
-    this.convoCreatedAt = record.createdAt;
-    // Fire-and-forget — no await, no refreshConversations.
-    void invoke("assistant_save_conversation", { convo: record }).catch((e) => {
-      console.warn("flushNow save failed", e);
-    });
   }
 
   /** Persist the current conversation. Debounced — callers can fire freely;
-   *  only one disk write per ~700ms. Set `flush=true` to write immediately. */
+   *  only one disk write per ~700ms per tab. Set `flush=true` to write
+   *  immediately. #145: snapshots (tab, convoId) at call time so a 700ms
+   *  delay can't dispatch the save against whichever tab is active when the
+   *  timer fires. */
   private scheduleSave(flush = false) {
-    if (!this.currentConvoId || this.messages.length === 0) return;
-    if (this.saveTimer) {
-      clearTimeout(this.saveTimer);
-      this.saveTimer = null;
+    const convoId = this.currentConvoId;
+    const tab = this.activeTab;
+    if (!tab || !convoId || tab.messages.length === 0) return;
+    if (tab.saveTimer) {
+      clearTimeout(tab.saveTimer);
+      tab.saveTimer = null;
     }
     const doSave = async () => {
-      this.saveTimer = null;
-      if (!this.currentConvoId) return;
-      const record: ConversationRecord = {
-        id: this.currentConvoId,
-        title: this.convoTitle ?? this.deriveTitle(),
-        model: this.model,
-        createdAt: this.convoCreatedAt ?? Date.now(),
-        updatedAt: Date.now(),
-        messages: this.messages,
-        cliSessionId: this.currentCliSessionId ?? this.currentConvoId,
-      };
-      this.convoTitle = record.title;
-      this.convoCreatedAt = record.createdAt;
+      tab.saveTimer = null;
+      const record = this.buildSaveRecord(convoId, tab);
+      tab.convoTitle = record.title;
+      tab.convoCreatedAt = record.createdAt;
       try {
         await invoke("assistant_save_conversation", { convo: record });
         await this.refreshConversations();
@@ -1637,7 +1676,7 @@ class AssistantStore {
       }
     };
     if (flush) void doSave();
-    else this.saveTimer = setTimeout(doSave, 700);
+    else tab.saveTimer = setTimeout(doSave, 700);
   }
 
   /** Start a fresh conversation. Flushes the current one first so nothing
@@ -1774,13 +1813,12 @@ class AssistantStore {
       await this.loadConversation(id);
     } else {
       // Fresh in-memory tab (no disk record yet). Mint a TabState with
-      // cliSessionId left blank — first send() fills it in. Don't stop()
-      // here: if another tab was streaming, leave it running in the bg.
+      // cliSessionId seeded from convoId — first send() finalizes. Don't
+      // stop() here: if another tab was streaming, leave it running in the
+      // bg. #143: per-tab fields are already null on the fresh TabState;
+      // writing them via store setters would clobber cliSessionId.
       this.ensureTab(id, id);
       this.currentConvoId = id;
-      this.currentCliSessionId = null;
-      this.convoCreatedAt = null;
-      this.convoTitle = null;
       this.queue = [];
       this.lastNotice = null;
     }
@@ -1827,11 +1865,10 @@ class AssistantStore {
         if (inMeta) {
           await this.loadConversation(neighbor);
         } else {
+          // #143: ensureTab seeds the fresh tab's cliSessionId to neighbor;
+          // don't store-write null afterwards or the setter clobbers it.
           this.ensureTab(neighbor, neighbor);
           this.currentConvoId = neighbor;
-          this.currentCliSessionId = null;
-          this.convoCreatedAt = null;
-          this.convoTitle = null;
           this.queue = [];
           this.lastNotice = null;
         }
@@ -1859,9 +1896,9 @@ class AssistantStore {
     this.ensureTab(id, id);
     this.telemetry.event("tab.new", { convoId: id });
     this.currentConvoId = id;
-    this.currentCliSessionId = null;
-    this.convoCreatedAt = null;
-    this.convoTitle = null;
+    // #143: per-tab fields default to null/<id> on the freshly minted
+    // TabState; writing through the store setters here would clobber
+    // cliSessionId back to "" (loses ensureTab's seed value).
     this.queue = [];
     this.lastNotice = null;
     // Fresh tab → empty composer (no cache entry yet).
@@ -1892,6 +1929,12 @@ class AssistantStore {
   async closeOtherTabs(keepId: string) {
     const others = this.openTabs.filter((id) => id !== keepId);
     if (others.length === 0) return;
+    // #144: tear down per-tab state for removed tabs so tabs Map +
+    // tabDrafts/tabAttachments/tabScroll don't accumulate over long sessions.
+    for (const id of others) {
+      this.dropTab(id);
+      this.pruneTabUi(id);
+    }
     this.openTabs = [keepId];
     if (this.currentConvoId !== keepId) {
       await this.loadConversation(keepId);
@@ -1922,7 +1965,13 @@ class AssistantStore {
     const idx = this.openTabs.indexOf(anchorId);
     if (idx === -1 || idx === this.openTabs.length - 1) return;
     const kept = this.openTabs.slice(0, idx + 1);
+    const removed = this.openTabs.slice(idx + 1);
     const removedActive = this.currentConvoId && !kept.includes(this.currentConvoId);
+    // #144
+    for (const id of removed) {
+      this.dropTab(id);
+      this.pruneTabUi(id);
+    }
     this.openTabs = kept;
     if (removedActive) {
       await this.loadConversation(anchorId);
@@ -2000,31 +2049,28 @@ class AssistantStore {
     // v0.4: newTab() mints currentConvoId up-front so the tab can render
     // before send() — gate isFirstTurn on convoCreatedAt instead so the very
     // first send still passes --session-id, not --resume.
-    const isFirstTurn = !this.convoCreatedAt;
     if (!this.currentConvoId) {
       this.currentConvoId = crypto.randomUUID();
     }
-    // First send for this tab mints the CLI session id. Default to the same
-    // UUID as the convo id (matches pre-S103 behavior); compaction later
-    // remints this to a fresh UUID without touching currentConvoId.
-    if (!this.currentCliSessionId) {
-      this.currentCliSessionId = this.currentConvoId;
+    // #143: per-tab fields live on TabState now — ensureTab BEFORE touching
+    // them so the writes don't no-op via the store's activeTab=null setter
+    // path. ensureTab seeds cliSessionId to convoId for fresh tabs; compaction
+    // remints it later without recreating the tab.
+    const tab = this.ensureTab(this.currentConvoId, this.currentConvoId);
+    const isFirstTurn = !tab.convoCreatedAt;
+    if (!tab.cliSessionId) {
+      tab.cliSessionId = this.currentConvoId;
     }
-    if (!this.convoCreatedAt) {
-      this.convoCreatedAt = Date.now();
-      this.convoTitle = null;
+    if (!tab.convoCreatedAt) {
+      tab.convoCreatedAt = Date.now();
+      tab.convoTitle = null;
     }
-    // v0.4: ensure the active convo has a tab. Catches the raw
-    // newConversation→send path (slash /new) so tabs never drift out of sync
-    // with the streaming convo.
-    if (this.currentConvoId && !this.openTabs.includes(this.currentConvoId)) {
+    // v0.4: catches the raw newConversation→send path (slash /new) so tabs
+    // never drift out of sync with the streaming convo.
+    if (!this.openTabs.includes(this.currentConvoId)) {
       this.openTabs = [...this.openTabs, this.currentConvoId];
       this.persistTabs();
     }
-    // Get-or-create the TabState for this convo. Sync its cliSessionId in
-    // case it was minted by send() above.
-    const tab = this.ensureTab(this.currentConvoId, this.currentCliSessionId);
-    tab.cliSessionId = this.currentCliSessionId;
     tab.beginTurn();
     this.lastNotice = null;
     // Telemetry: build the turn record + attach to tab. TabState fills it as
@@ -2033,7 +2079,7 @@ class AssistantStore {
     const turnRecord: TurnRecord = {
       ts: Date.now(),
       convoId: this.currentConvoId,
-      cliSessionId: this.currentCliSessionId,
+      cliSessionId: tab.cliSessionId,
       isFirstTurn,
       model: this.model,
       effort: this.thinkingEffort,
@@ -2092,7 +2138,7 @@ class AssistantStore {
     try {
       await invoke("assistant_send", {
         prompt: trimmed,
-        sessionId: this.currentCliSessionId,
+        sessionId: tab.cliSessionId,
         isFirstTurn,
         model: this.model,
         attachments: turnAttachments.length > 0 ? turnAttachments : null,

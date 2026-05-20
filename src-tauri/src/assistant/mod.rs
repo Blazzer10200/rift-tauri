@@ -16,7 +16,7 @@ pub mod remote_bridge;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Mutex, OnceLock};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,18 +40,35 @@ static SESSION_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
 /// stderr" (emit error).
 static SESSION_STOPPED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 
+// #63: Recover from mutex poison instead of `.lock().ok()` returning None.
+// The previous silent-skip turned every callsite (`set_session_pid`,
+// `clear_session_pid`, `get_session_pid`, `mark_session_stopped`) into a
+// no-op once any panic poisoned the lock — `assistant_stop` then returned
+// Ok without killing the child, orphaning it. `into_inner()` is safe here:
+// these maps are append/remove on String keys with no cross-field invariant
+// that a panic could break.
 fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> Option<R> {
-    SESSION_PIDS.lock().ok().map(|mut g| {
-        let map = g.get_or_insert_with(HashMap::new);
-        f(map)
-    })
+    let mut g = match SESSION_PIDS.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            log::error!("SESSION_PIDS mutex poisoned — recovering inner state");
+            p.into_inner()
+        }
+    };
+    let map = g.get_or_insert_with(HashMap::new);
+    Some(f(map))
 }
 
 fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> Option<R> {
-    SESSION_STOPPED.lock().ok().map(|mut g| {
-        let set = g.get_or_insert_with(HashSet::new);
-        f(set)
-    })
+    let mut g = match SESSION_STOPPED.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            log::error!("SESSION_STOPPED mutex poisoned — recovering inner state");
+            p.into_inner()
+        }
+    };
+    let set = g.get_or_insert_with(HashSet::new);
+    Some(f(set))
 }
 
 fn set_session_pid(session_id: &str, pid: u32) {
@@ -79,89 +96,116 @@ fn take_session_stopped(session_id: &str) -> bool {
 
 /// Cached absolute path to the user's `claude` CLI. Windows' `Command::new`
 /// does NOT apply PATHEXT lookup (no auto-append of `.cmd`/`.exe`), so we
-/// resolve once via `where.exe claude` (or `which` on Unix) and reuse the
-/// absolute path for all spawn sites. None = no CLI on PATH.
-static CLAUDE_EXE: OnceLock<Option<PathBuf>> = OnceLock::new();
+/// resolve via `where.exe claude` (or `which` on Unix) and reuse the
+/// absolute path for all spawn sites. Outer `Option` = is-cached;
+/// inner = path-or-not.
+///
+/// #64: previously `OnceLock<Option<PathBuf>>` — cached forever per process.
+/// An upgrade or reinstall of the CLI required a full Rift restart. The
+/// fast path now stats the cached file; a missing-file triggers a fresh
+/// re-resolution, so CLI installs/moves take effect on the next spawn.
+static CLAUDE_EXE: Mutex<Option<Option<PathBuf>>> = Mutex::new(None);
+
+fn resolve_claude_exe_uncached() -> Option<PathBuf> {
+    let (program, args): (&str, &[&str]) = if cfg!(windows) {
+        ("where.exe", &["claude"])
+    } else {
+        ("which", &["claude"])
+    };
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    // `where.exe` prints one path per line. On Windows we MUST prefer
+    // `.exe` over `.cmd`/`.bat` — Rust 1.77+ refuses to safely escape
+    // newlines/special chars for batch-file invocation (CVE-2024-24576
+    // mitigation, fails as "batch file arguments are invalid"). The
+    // multi-line `--append-system-prompt` payload + Human:/Assistant:
+    // history chain both contain newlines, so a `.cmd` shim is
+    // unusable here. Native Claude Code installs `.exe` directly.
+    let text = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    if cfg!(windows) {
+        // 1) .exe on PATH wins.
+        if let Some(p) = lines.iter().find(|l| l.to_ascii_lowercase().ends_with(".exe")) {
+            return Some(PathBuf::from(*p));
+        }
+        // 2) Native installer drops claude.exe at known LOCALAPPDATA
+        // locations but doesn't always wire it into PATH (the npm
+        // shim claims `where.exe claude` first). Probe directly.
+        if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
+            let candidates = [
+                PathBuf::from(&lad).join("AnthropicClaude").join("claude.exe"),
+                PathBuf::from(&lad).join("Programs").join("AnthropicClaude").join("claude.exe"),
+            ];
+            for c in candidates {
+                if c.is_file() {
+                    return Some(c);
+                }
+            }
+        }
+        // 2b) npm-installed claude bundles the real claude.exe inside
+        // its node_modules dir. The shim on PATH is `claude.cmd`
+        // which forwards via `%*` — and cmd.exe arg forwarding
+        // silently mangles `--output-format stream-json` so the CLI
+        // downgrades to plain text output. Calling the bundled .exe
+        // directly avoids the shim entirely.
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let bundled = PathBuf::from(&appdata)
+                .join("npm")
+                .join("node_modules")
+                .join("@anthropic-ai")
+                .join("claude-code")
+                .join("bin")
+                .join("claude.exe");
+            if bundled.is_file() {
+                return Some(bundled);
+            }
+        }
+        // 3) Fall back to .cmd/.bat. assistant_send keeps spawn args
+        // newline-free (system addendum is single-line, prompt goes
+        // via stdin) so the Rust 1.77 batch-args validator accepts it.
+        lines
+            .iter()
+            .find(|l| l.to_ascii_lowercase().ends_with(".cmd"))
+            .or_else(|| lines.first())
+            .map(|s| PathBuf::from(*s))
+    } else {
+        lines.first().map(|s| PathBuf::from(*s))
+    }
+}
 
 fn resolve_claude_exe() -> Option<PathBuf> {
-    CLAUDE_EXE
-        .get_or_init(|| {
-            let (program, args): (&str, &[&str]) = if cfg!(windows) {
-                ("where.exe", &["claude"])
-            } else {
-                ("which", &["claude"])
-            };
-            let mut cmd = std::process::Command::new(program);
-            cmd.args(args).stderr(Stdio::null());
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                cmd.creation_flags(CREATE_NO_WINDOW);
+    // Fast path: return cached value if the file still exists. is_file()
+    // catches the "CLI uninstalled or moved" case without forcing a full
+    // re-resolution every call.
+    {
+        let g = match CLAUDE_EXE.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some(cached) = g.as_ref() {
+            match cached {
+                Some(p) if p.is_file() => return Some(p.clone()),
+                None => return None, // cached "no CLI on PATH"
+                _ => {} // cached path is stale → re-resolve below
             }
-            let out = cmd.output().ok()?;
-            if !out.status.success() {
-                return None;
-            }
-            // `where.exe` prints one path per line. On Windows we MUST prefer
-            // `.exe` over `.cmd`/`.bat` — Rust 1.77+ refuses to safely escape
-            // newlines/special chars for batch-file invocation (CVE-2024-24576
-            // mitigation, fails as "batch file arguments are invalid"). The
-            // multi-line `--append-system-prompt` payload + Human:/Assistant:
-            // history chain both contain newlines, so a `.cmd` shim is
-            // unusable here. Native Claude Code installs `.exe` directly.
-            let text = String::from_utf8_lossy(&out.stdout);
-            let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-            if cfg!(windows) {
-                // 1) .exe on PATH wins.
-                if let Some(p) = lines.iter().find(|l| l.to_ascii_lowercase().ends_with(".exe")) {
-                    return Some(PathBuf::from(*p));
-                }
-                // 2) Native installer drops claude.exe at known LOCALAPPDATA
-                // locations but doesn't always wire it into PATH (the npm
-                // shim claims `where.exe claude` first). Probe directly.
-                if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
-                    let candidates = [
-                        PathBuf::from(&lad).join("AnthropicClaude").join("claude.exe"),
-                        PathBuf::from(&lad).join("Programs").join("AnthropicClaude").join("claude.exe"),
-                    ];
-                    for c in candidates {
-                        if c.is_file() {
-                            return Some(c);
-                        }
-                    }
-                }
-                // 2b) npm-installed claude bundles the real claude.exe inside
-                // its node_modules dir. The shim on PATH is `claude.cmd`
-                // which forwards via `%*` — and cmd.exe arg forwarding
-                // silently mangles `--output-format stream-json` so the CLI
-                // downgrades to plain text output. Calling the bundled .exe
-                // directly avoids the shim entirely.
-                if let Some(appdata) = std::env::var_os("APPDATA") {
-                    let bundled = PathBuf::from(&appdata)
-                        .join("npm")
-                        .join("node_modules")
-                        .join("@anthropic-ai")
-                        .join("claude-code")
-                        .join("bin")
-                        .join("claude.exe");
-                    if bundled.is_file() {
-                        return Some(bundled);
-                    }
-                }
-                // 3) Fall back to .cmd/.bat. assistant_send keeps spawn args
-                // newline-free (system addendum is single-line, prompt goes
-                // via stdin) so the Rust 1.77 batch-args validator accepts it.
-                lines
-                    .iter()
-                    .find(|l| l.to_ascii_lowercase().ends_with(".cmd"))
-                    .or_else(|| lines.first())
-                    .map(|s| PathBuf::from(*s))
-            } else {
-                lines.first().map(|s| PathBuf::from(*s))
-            }
-        })
-        .clone()
+        }
+    }
+    // Slow path: re-resolve, then cache.
+    let resolved = resolve_claude_exe_uncached();
+    if let Ok(mut g) = CLAUDE_EXE.lock() {
+        *g = Some(resolved.clone());
+    }
+    resolved
 }
 
 /// Build a `tokio::process::Command` for `claude`, hiding the console window
@@ -337,6 +381,31 @@ fn session_cwd_path(id: &str) -> Result<PathBuf, String> {
     Ok(dir.join(format!("{id}.cwd")))
 }
 
+/// #220: canonical UUID shape check — 36 chars, 8-4-4-4-12 hex w/ hyphens at
+/// fixed positions. Accepts uppercase + lowercase hex (Claude CLI is
+/// case-insensitive). Rejects path-traversal segments, leading dashes,
+/// whitespace, and anything else that could escape an argv slot or filename.
+fn is_valid_session_id(s: &str) -> bool {
+    if s.len() != 36 {
+        return false;
+    }
+    for (i, b) in s.as_bytes().iter().enumerate() {
+        match i {
+            8 | 13 | 18 | 23 => {
+                if *b != b'-' {
+                    return false;
+                }
+            }
+            _ => {
+                if !b.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
 fn save_session_cwd(id: &str, cwd: &Path) {
     if let Ok(p) = session_cwd_path(id) {
         let s = cwd.to_string_lossy();
@@ -490,7 +559,30 @@ fn load_config() -> AssistantConfig {
 fn save_config(cfg: &AssistantConfig) -> Result<(), String> {
     let p = config_path()?;
     let s = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(&p, s).map_err(|e| format!("write {}: {e}", p.display()))
+    // #65: tmp+rename to match assistant_save_conversation. Two Tauri-command
+    // setters racing on read-modify-write (e.g. set_api_key + set_max_budget
+    // back-to-back) previously produced a torn or empty config.json under a
+    // direct std::fs::write — the second writer truncated mid-flight.
+    let tmp = p.with_extension("json.tmp");
+    std::fs::write(&tmp, s).map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, &p).map_err(|e| format!("rename {}: {e}", p.display()))?;
+    Ok(())
+}
+
+/// RAII guard that deletes the per-session MCP config file when dropped.
+/// Ensures cleanup on normal exit, early-return errors, and panics alike.
+struct McpConfigGuard(PathBuf);
+
+impl Drop for McpConfigGuard {
+    fn drop(&mut self) {
+        if self.0.exists() {
+            if let Err(e) = std::fs::remove_file(&self.0) {
+                log::warn!("assistant: failed to remove per-session mcp-config on drop: {e}");
+            } else {
+                log::debug!("assistant: removed per-session mcp-config {:?}", self.0);
+            }
+        }
+    }
 }
 
 /// Write the Rift MCP server config the CLI will read via `--mcp-config`.
@@ -503,7 +595,11 @@ fn save_config(cfg: &AssistantConfig) -> Result<(), String> {
 /// child also gets `RIFT_BRIDGE_PORT` + `RIFT_BRIDGE_TOKEN` so its
 /// `remote_bash` tool can dial the parent Tauri's loopback bridge. The bridge
 /// itself reuses the AutoSync engine's live russh session for the exec.
+///
+/// `session_id` is appended to the filename so concurrent `assistant_send`
+/// calls (multi-tab) each get their own file — no cross-tab cred leak.
 fn write_mcp_config(
+    session_id: &str,
     roots: &[PathBuf],
     bridge: Option<&remote_bridge::BridgeInfo>,
     remote_shell_enabled: bool,
@@ -511,7 +607,11 @@ fn write_mcp_config(
     let home = dirs_home()?;
     let dir = home.join(".rift").join("assistant");
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir ~/.rift/assistant: {e}"))?;
-    let path = dir.join("mcp-config.json");
+    // Per-session filename prevents concurrent assistant_send calls (multi-tab)
+    // from racing over a single shared file. sanitize: replace path-unsafe
+    // chars so the session UUID is a valid filename component on all OSes.
+    let safe_id = session_id.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
+    let path = dir.join(format!("mcp-config-{safe_id}.json"));
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     let roots_joined = roots
@@ -559,21 +659,37 @@ fn write_mcp_config(
     Ok(path)
 }
 
-/// #9.2: best-effort removal of `~/.rift/assistant/mcp-config.json` on app
-/// exit so the bridge token doesn't sit on disk between sessions. The token
-/// becomes stale the moment the process exits (new one generated next run),
-/// but a leaked stale token is still strictly more information than a
-/// non-existent file. Errors are logged + swallowed -- a cleanup failure
-/// must not block app shutdown.
+/// #9.2: best-effort removal of all per-session MCP config files on app exit
+/// so bridge tokens don't sit on disk between sessions. Tokens become stale
+/// the moment the process exits (new ones generated next run), but leaked
+/// stale tokens are still strictly more information than non-existent files.
+/// Globs `mcp-config-*.json` to catch any files left behind by crashed or
+/// cancelled sessions, plus the legacy fixed `mcp-config.json` name.
+/// Errors are logged + swallowed — cleanup failure must not block app shutdown.
 pub fn cleanup_mcp_config_on_exit() {
     let Ok(home) = dirs_home() else { return };
-    let path = home.join(".rift").join("assistant").join("mcp-config.json");
-    if !path.exists() {
-        return;
+    let dir = home.join(".rift").join("assistant");
+
+    // Legacy fixed-path (pre-per-session fix) — remove if present.
+    let legacy = dir.join("mcp-config.json");
+    if legacy.exists() {
+        match std::fs::remove_file(&legacy) {
+            Ok(()) => log::info!("assistant: removed legacy mcp-config.json on exit"),
+            Err(e) => log::warn!("assistant: failed to remove legacy mcp-config.json on exit: {e}"),
+        }
     }
-    match std::fs::remove_file(&path) {
-        Ok(()) => log::info!("assistant: removed stale mcp-config.json on exit"),
-        Err(e) => log::warn!("assistant: failed to remove mcp-config.json on exit: {e}"),
+
+    // Per-session files: glob mcp-config-*.json.
+    let Ok(entries) = std::fs::read_dir(&dir) else { return };
+    for entry in entries.flatten() {
+        let fname = entry.file_name();
+        let name = fname.to_string_lossy();
+        if name.starts_with("mcp-config-") && name.ends_with(".json") {
+            match std::fs::remove_file(entry.path()) {
+                Ok(()) => log::info!("assistant: removed stale {} on exit", name),
+                Err(e) => log::warn!("assistant: failed to remove {} on exit: {e}", name),
+            }
+        }
     }
 }
 
@@ -1034,6 +1150,14 @@ pub async fn assistant_send(
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
 ) -> Result<(), String> {
+    // #220: validate session_id is a canonical UUID (8-4-4-4-12 lowercase hex)
+    // BEFORE any use. Renderer-supplied — must not flow into CLI args or
+    // sidecar filename without check. Blocks leading-dash flag injection
+    // into `--session-id`/`--resume` AND path-traversal segments in
+    // save_session_cwd's filename derivation.
+    if !is_valid_session_id(&session_id) {
+        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+    }
     let cfg = load_config();
     let use_api_key = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
     let model = model.unwrap_or_else(|| "sonnet".to_string());
@@ -1117,14 +1241,17 @@ pub async fn assistant_send(
     // `--append-system-prompt`. Per-session/per-turn toggles (remote_shell,
     // dyslexia) ride the user-turn <system-reminder> path below so toggling
     // them mid-session never invalidates the cached system-prompt prefix.
-    let (mcp_config_path, addendum) = if roots.is_empty() {
-        (None, RIFT_SYSTEM_ADDENDUM_NO_WS)
+    let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
+        (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(&roots, bridge_info.as_ref(), remote_shell_enabled) {
-            Ok(p) => (Some(p), RIFT_SYSTEM_ADDENDUM_TOOLS),
+        match write_mcp_config(&session_id, &roots, bridge_info.as_ref(), remote_shell_enabled) {
+            Ok(p) => {
+                let guard = McpConfigGuard(p.clone());
+                (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
+            }
             Err(e) => {
                 log::warn!("assistant: failed to provision MCP config, falling back to no-tools: {e}");
-                (None, RIFT_SYSTEM_ADDENDUM_NO_WS)
+                (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
             }
         }
     };
@@ -1314,6 +1441,20 @@ pub async fn assistant_send(
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     if let Some(pid) = child.id() {
         set_session_pid(&session_id, pid);
+    }
+
+    // #39: race window between the pre-spawn clear and set_session_pid means a
+    // concurrent `assistant_stop` arriving in that window would find no PID,
+    // return Ok, and silently drop the stop intent. Re-check the stopped flag
+    // now that the PID is registered — if a stop landed during spawn, honor
+    // it by killing the child immediately so the wait loop sees the exit and
+    // emits the normal stop-path done event.
+    if take_session_stopped(&session_id) {
+        log::info!("assistant_send: stop arrived during spawn for {session_id} — killing child");
+        let _ = child.start_kill();
+        // Re-set the marker so the post-wait take_ at the failure branch
+        // recognizes this as a user-initiated stop, not a crash.
+        mark_session_stopped(&session_id);
     }
 
     // Write the user's prompt to stdin, then close it so the CLI knows the

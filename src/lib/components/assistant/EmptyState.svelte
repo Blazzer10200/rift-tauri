@@ -115,15 +115,13 @@
       <p class="muted">Or open <strong>Settings → Assistant</strong> and paste an <code>sk-ant-api03-…</code> key.</p>
     </div>
   {:else}
-    <!-- Hero — headline adapts to workspace state -->
+    <!-- Hero — headline adapts to workspace state. Subtitle suppressed when a
+         workspace is already wired (the workspace card below repeats the same
+         info — keep one source). -->
     <div class="hero">
-      <div class="glyph"><Sparkles size={26} /></div>
-      {#if hasRoot}
+      <div class="glyph"><Sparkles size={22} /></div>
+      {#if hasRoot || hasSynced}
         <h2>What's on your mind?</h2>
-        <p class="sub">Working in <strong>{leafName(assistant.workspace.current!)}</strong> — ask anything.</p>
-      {:else if hasSynced}
-        <h2>What's on your mind?</h2>
-        <p class="sub">Working in synced workspace <strong>{server!.name}</strong> — ask anything.</p>
       {:else}
         <h2>Open a folder to begin</h2>
         <p class="sub">Point Claude at any project on your disk — it'll read, list, and grep on demand.</p>
@@ -227,10 +225,10 @@
   .empty {
     flex: 1;
     display: flex; flex-direction: column;
-    align-items: center; justify-content: flex-start;
-    padding: 12vh 20px 32px;
+    align-items: center; justify-content: center;
+    padding: 24px 20px;
     min-height: 0;
-    gap: 18px;
+    gap: 14px;
   }
   /* Stagger child entrance so the empty state feels composed top-down,
      not slammed in as one block. */
@@ -256,8 +254,8 @@
     gap: 4px;
   }
   .glyph {
-    width: 52px; height: 52px;
-    margin-bottom: 10px;
+    width: 44px; height: 44px;
+    margin-bottom: 6px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     background: var(--accent-soft);
@@ -471,13 +469,13 @@
   }
   .card {
     display: grid;
-    grid-template-columns: 26px 1fr;
+    grid-template-columns: 22px 1fr;
     align-items: center;
-    gap: 12px;
-    padding: 10px 14px;
+    gap: 10px;
+    padding: 8px 12px;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 8px;
     color: var(--fg-2);
     cursor: pointer;
     text-align: left;
@@ -491,9 +489,9 @@
   }
   .card:active { transform: translateX(2px) scale(0.985); }
   .card-icon {
-    width: 26px; height: 26px;
+    width: 22px; height: 22px;
     display: flex; align-items: center; justify-content: center;
-    border-radius: 7px;
+    border-radius: 6px;
     background: color-mix(in oklch, var(--accent) 14%, transparent);
     color: var(--accent);
   }
@@ -504,16 +502,16 @@
     color: var(--fg);
     line-height: 1.3;
   }
+  /* Show the full prompt as a single ellipsised teaser — title is what users
+     scan; the prompt body sells what'll get pasted once they click. Two-line
+     clamp burned vertical real estate w/o adding scan value. */
   .card-prompt {
     font-size: 12px;
     color: var(--fg-faint);
-    line-height: 1.4;
+    line-height: 1.35;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
+    white-space: nowrap;
   }
 
   /* ── Auth-help block (needsAuth path) ──────────────────────────────────── */

@@ -238,7 +238,11 @@ async fn run_remote_bash(app: &AppHandle, command: String, timeout: Duration) ->
     let remote_root = first.remote_root.clone();
     let lock_key = shell_lock_key(&remote_root);
 
-    if let Some(locks) = eng.locks() {
+    // #41: RAII guard ensures the lock is released even if `exec_bash` panics or
+    // the surrounding future is cancelled mid-await. The previous explicit
+    // release call ran only on the normal-return path and leaked the lock on
+    // any abnormal exit, permanently blocking every other user on this remote.
+    let _lock_guard = if let Some(locks) = eng.locks() {
         if let Some(foreign) = locks.find_lock_by_other(&lock_key) {
             return err(format!(
                 "remote shell is locked by {} on {} (since {}); retry shortly",
@@ -248,14 +252,13 @@ async fn run_remote_bash(app: &AppHandle, command: String, timeout: Duration) ->
             ));
         }
         locks.acquire(&lock_key).await;
-    }
+        Some(BridgeLockGuard { locks, key: lock_key.clone() })
+    } else {
+        None
+    };
 
     let sftp = eng.sftp();
     let exec_result = sftp.exec_bash(&command, timeout).await;
-
-    if let Some(locks) = eng.locks() {
-        locks.release(&lock_key).await;
-    }
 
     use tauri::Emitter;
     let _ = app.emit("assistant://remote-shell-fired", serde_json::json!({
@@ -278,6 +281,24 @@ fn to_bash_response(out: ExecOutput) -> Response {
         exit_code: out.exit_code,
         truncated: Some(out.truncated),
         ..Response::default()
+    }
+}
+
+/// Drop-released wrapper around a held remote-bash lock. On drop, spawns an
+/// async task to call `release` so the lock survives panics and future
+/// cancellation without leaking. See #41.
+struct BridgeLockGuard {
+    locks: std::sync::Arc<crate::sync::lock_presence::LockPresence>,
+    key: String,
+}
+
+impl Drop for BridgeLockGuard {
+    fn drop(&mut self) {
+        let locks = self.locks.clone();
+        let key = std::mem::take(&mut self.key);
+        tokio::spawn(async move {
+            locks.release(&key).await;
+        });
     }
 }
 

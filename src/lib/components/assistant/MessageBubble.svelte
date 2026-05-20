@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, Loader2 } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
@@ -337,11 +337,9 @@
         <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
         {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
       {/if}
-      {#if !isUser && (modelLabel || costLabel)}
-        <span class="turn-badge" title="Model · per-turn cost">
-          {#if modelLabel}<span class="turn-model">{modelLabel}</span>{/if}
-          {#if modelLabel && costLabel}<span class="turn-sep">·</span>{/if}
-          {#if costLabel}<span class="turn-cost">{costLabel}</span>{/if}
+      {#if !isUser && streaming && modelLabel}
+        <span class="turn-badge" title="Model for this turn">
+          <span class="turn-model">{modelLabel}</span>
         </span>
       {/if}
       {#if plainText.length > 0}
@@ -354,18 +352,6 @@
         </button>
       {/if}
     </div>
-
-    {#if !isUser && streaming && stageLabel}
-      {@const isShell = /^\$\s/.test(stageLabel)}
-      <div class="stream-status" title={stageLabel}>
-        <Loader2 size={11} class="stage-spin" />
-        {#key stageLabel}
-          <span class="stream-status-text" class:mono={isShell} class:prose={!isShell}>
-            {stageLabel}
-          </span>
-        {/key}
-      </div>
-    {/if}
 
     <div class="content">
       {#snippet renderBlock(b: Block, bi: number)}
@@ -447,6 +433,17 @@
       {/each}
 
     </div>
+
+    {#if !isUser && !streaming && (modelLabel || costLabel)}
+      <div class="turn-footer" title="Turn complete">
+        <span class="footer-line" aria-hidden="true"></span>
+        <span class="footer-meta">
+          {#if modelLabel}<span class="foot-model">{modelLabel}</span>{/if}
+          {#if modelLabel && costLabel}<span class="foot-sep">·</span>{/if}
+          {#if costLabel}<span class="foot-cost">{costLabel}</span>{/if}
+        </span>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -666,54 +663,37 @@
   }
   .mono { font-family: var(--font-mono, monospace); }
 
-  /* Stream status sub-row — single source of truth for the live activity
-     label (formerly split across role-row `.whim` + bubble-empty `.stage-row`).
-     Sits directly under role-row, full-width, single-line truncated. Keeps
-     long bash commands and absolute paths out of the role-row so the model
-     badge + heartbeat never get pushed off-screen. */
-  .stream-status {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    max-width: min(100%, 78ch);
-    margin: -1px 0 4px;
-    color: var(--fg-muted);
-    animation: status-fade 260ms ease-out;
+  /* End-of-turn footer — the stream-status row used to live below role-row
+     for in-flight signaling; it was easy to miss when scrolled to the input,
+     so the live label moved to <StatusHub /> above the composer. The footer
+     here closes a finished assistant turn with a subtle divider + model · cost,
+     giving the user a clear "done" beat instead of just trailing prose. */
+  .turn-footer {
+    display: flex; align-items: center; gap: 10px;
+    margin-top: 14px;
+    padding-top: 8px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+    animation: footer-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .stream-status :global(.stage-spin) {
-    color: var(--accent);
-    flex-shrink: 0;
-    animation: stage-spin 1s linear infinite;
+  .footer-line { display: none; }
+  .footer-meta {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10px;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
   }
-  .stream-status-text {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    font-size: 11px;
-    letter-spacing: 0.01em;
-    line-height: 1.3;
-  }
-  .stream-status-text.prose {
-    font-style: italic;
-    color: color-mix(in oklch, var(--accent) 75%, var(--fg-muted));
-  }
-  .stream-status-text.mono {
-    font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
-    color: var(--fg-muted);
-  }
-  @keyframes status-fade {
-    from { opacity: 0; transform: translateY(-1px); }
+  .foot-model { color: var(--fg-muted); font-weight: 500; }
+  .foot-sep { color: var(--fg-faint); opacity: 0.6; }
+  .foot-cost { color: var(--fg-muted); font-family: var(--font-mono, monospace); }
+  @keyframes footer-in {
+    from { opacity: 0; transform: translateY(-2px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @keyframes stage-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
-    .stream-status { animation: none; }
-    .stream-status :global(.stage-spin) { animation: none; }
+    .turn-footer { animation: none; }
   }
+
   @keyframes pulse {
     0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
     30% { opacity: 1; transform: scale(1); }
