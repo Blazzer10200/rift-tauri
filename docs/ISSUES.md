@@ -285,30 +285,42 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - #9 Bridge token plaintext + IPC leak — 9.1+9.2 SHIPPED 2026-05-19; 9.3 (OS keyring) deferred to Phase 6
 - #15 Unsigned Windows builds (adoption blocker)
 - ~~#10 Silent TOFU on first sync~~ — SHIPPED 2026-05-19 (`require_pinned_fingerprint` guard)
-- **#36** `save_server` overwrites server list on load error (data loss) — Wave 1 audit 2026-05-20
-- **#37** API key plaintext in `assistant/config.json` (mirrors #9.3 deferred)
-- **#38** `mcp-config.json` Windows DACL gap (continues #9.2)
+- ~~#36~~ `save_server` overwrites server list — SHIPPED v0.4.14-alpha S113 (`map_err` propagation)
+- **#37** API key plaintext in `assistant/config.json` (mirrors #9.3 deferred — Phase 6)
+- **#38** `mcp-config.json` Windows DACL gap (continues #9.2 — Phase 6)
 - ~~#42~~ — VERIFIED NOT A BUG by Wave 3 T (see verdict above). Closed.
-- **#41** Bridge lock leak on remote_bridge exec error (permanent block of remote root)
-- **#74** `walk_local` panic → mass `ToPull` (data-loss path)
-- **#219** No panic hook — silent task death across all async work
-- **#220** session_id traversal (CLI args + sidecar path)
+- ~~#41~~ Bridge lock leak — SHIPPED v0.4.14-alpha S113 (`BridgeLockGuard` RAII w/ Drop)
+- ~~#74~~ `walk_local` panic → mass ToPull — SHIPPED v0.4.14-alpha S113 (JoinError → SuspiciousEmptyAborted)
+- ~~#219~~ No panic hook — SHIPPED v0.4.14-alpha S113 (`std::panic::set_hook` after LogForwarder)
+- ~~#220~~ session_id traversal — SHIPPED v0.4.14-alpha S113 (`is_valid_session_id` UUID guard)
 
 **Tier 2 — recurring friction**
 - ~~#12 Manual 3-file version bump~~ — shipped 2026-05-19 (`scripts/bump.ps1`)
 - ~~#3b STT send doesn't stop recognizer~~ — shipped 2026-05-19 (`stt.svelte.ts` `consume()`)
 - ~~#1 Context counter semantics + double-write~~ — shipped 2026-05-19 (per-turn, result-only render)
 - #14 No CI (deferred — pairs w/ #15 signing)
-- **#34** Sync cancel-token slot ownership bugs (HIGH — affects every push/reconcile cancel)
-- **#35** Perm-heal spawn untracked (HIGH — leaks SFTP work past engine stop)
-- **#39** Stop-flag race — Stop button silently fails (HIGH)
-- **#40** Single shared mcp-config.json — multi-tab race (HIGH)
-- **#43-#46, #57-#65** Sync MEDs: is_pushing race, stop_watch order, FS-drop counter, FlushBatch deltas, biased select! kills success, apply_selected no CT, force_pull_now mutex poison silent, save_config non-atomic, CLAUDE_EXE stale, bridge token always-on env
-- **#139** Wave 2 — `drainTick` rAF callback writes to dropped TabState (HIGH)
-- **#140** Wave 2 — confirmMirrorApply uses `local_path` for `to_delete_remote` bucket (HIGH)
-- **#141-#142** Wave 2 ActivityFeed reactivity bugs (HIGH)
-- **#143-#145** TabState per-tab leakage (per-tab state on store, cross-tab save) — violates HANDOFF.md invariant
-- **#150** Settings asstApiKey/maxBudget `$effect` overwrites unsaved edits
+- ~~#34~~ Cancel-token ownership — SHIPPED v0.4.14-alpha S113 (u64 nonce identity compare; agent + 4-site fixup)
+- ~~#35~~ Perm-heal spawn untracked — SHIPPED v0.4.14-alpha S113 (`track_background(h)`)
+- ~~#39~~ Stop-flag race — SHIPPED v0.4.14-alpha S113 (post-PID re-check + mark_session_stopped)
+- ~~#40~~ Single shared mcp-config.json — SHIPPED v0.4.14-alpha S113 (per-session `mcp-config-<id>.json` + `McpConfigGuard` Drop)
+- ~~#43~~ is_pushing race — SHIPPED v0.4.14-alpha S114 (Err→true safer direction)
+- ~~#44~~ stop_watch order — SHIPPED v0.4.14-alpha S114 (unwatch before remove)
+- ~~#45~~ FS-drop counter — PARTIAL S114 (AtomicU64 + 100-drop Error escalation; AutoSyncStatus exposure deferred)
+- ~~#46~~ pending_dir_reconcile order — SHIPPED v0.4.14-alpha S114 (kick before flag-clear)
+- ~~#48~~ force_pull_now poison silent — SHIPPED v0.4.14-alpha S114 (diag Error + closing DriftScanResult)
+- ~~#57~~ download_paths ghost CT — SHIPPED v0.4.14-alpha S114 (open_sftp before CT register)
+- ~~#61~~ probe_server_fingerprint write probe — SHIPPED v0.4.14-alpha S114 (write_probe_root: None)
+- ~~#63~~ SESSION_PIDS poison silent — PARTIAL S114 (into_inner recovery; orphan-kill on drop deferred)
+- ~~#64~~ CLAUDE_EXE stale — SHIPPED v0.4.14-alpha S114 (Mutex<Option<Option<PathBuf>>> w/ is_file revalidate)
+- ~~#65~~ save_config torn-write — SHIPPED v0.4.14-alpha S114 (tmp+rename pattern)
+- **Remaining sync MEDs:** #47 (CT plumbing), #58 (silent list_recursive), #59 #60 (post-expansion guard refactor), #62 (token split — needs FE coord)
+- ~~#139~~ `drainTick` rAF on dropped tab — SHIPPED v0.4.14-alpha S113 (`dropTab` calls `flushPendingText`)
+- ~~#140~~ confirmMirrorApply bucket — SHIPPED v0.4.14-alpha S113 (re-filter at dispatch verified already correct; invariant doc'd)
+- ~~#141-#142~~ ActivityFeed reactivity — SHIPPED v0.4.14-alpha S113 (`$state` + `untrack` — Agent C, clean)
+- ~~#143~~ store-level per-tab fields — SHIPPED v0.4.14-alpha S114 (moved to TabState w/ delegating getters)
+- ~~#144~~ closeTabsToRight/closeOtherTabs leak — SHIPPED v0.4.14-alpha S114 (dropTab + pruneTabUi per removed id)
+- ~~#145~~ scheduleSave cross-tab save — SHIPPED v0.4.14-alpha S114 (per-tab saveTimer + tab-snapshot capture + flushNow iterates all tabs)
+- ~~#150~~ Settings $effect draft clobber — SHIPPED v0.4.14-alpha S114 (untrack store reads; effect tracks only section)
 
 **Tier 3 — UX + cleanup**
 - #11 Settings dead UI cluster — PARTIAL shipped v0.4.12-alpha (mechanical bits done; placeholder card + SSH Keys empty + font-picker class rename remain)
@@ -352,16 +364,25 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ### HIGH (9)
 
 ## 34. Sync cancel-token slot has multiple ownership bugs
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — added `cancel_nonce: AtomicU64` field; slot type now `Option<(u64, CancellationToken)>`. Install sites generate nonce via `fetch_add`, clear-time compares stored nonce to local nonce (identity, not state). `cancel_drift_reconcile` updated to `entry.1.cancel()`. Wave-2 Agent A correctly wired struct + install (L243-245, L752, L1096) but bailed before the ripple-edits — I patched 4 read sites (L1212 force_push clear, L1531-1534 force_pull install, L1774 force_pull clear, L1789 cancel). `cargo check` green.
+
 - **Where:** [auto_sync.rs:747](../src-tauri/src/sync/auto_sync.rs#L747) (push), [:1090](../src-tauri/src/sync/auto_sync.rs#L1090) (reconcile), [:1205](../src-tauri/src/sync/auto_sync.rs#L1205) + [:1767](../src-tauri/src/sync/auto_sync.rs#L1767) (clear logic)
 - **Symptom:** One shared `current_scan_cancel` slot — `force_push_now` and `kick_drift_reconcile` overwrite each other; cleanup guard `stored.is_cancelled() == ct.is_cancelled()` boolean-compares state instead of identity, so any op finishing cleanly can clear the next op's token.
 - **Fix:** Separate slots per op type, OR store a `u64` nonce alongside each token and compare nonces at clear-time. (Cross-agent dupe: A1+B1+C1.)
 
 ## 35. Perm-heal `tokio::spawn` not tracked — outlives engine `stop()`
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `watch.rs:108-115` captures the JoinHandle and calls `self.track_background(h)`, matching the L92 lock-sweep pattern. Inline fix (not delegated).
+
 - **Where:** [auto_sync/watch.rs:108](../src-tauri/src/sync/auto_sync/watch.rs#L108)
 - **Symptom:** Untracked spawn holds `Arc<SftpClient>`; after `stop()` aborts `background_tasks`, perm-heal keeps issuing `chmod` against a disconnected/reconnected session. The lock-sweep spawn at L92 correctly calls `track_background`.
 - **Fix:** Capture the JoinHandle and call `self.track_background(h)`.
 
 ## 36. `save_server` silently discards entire server list on config load error
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `lib.rs:805` `.or_else(|_| Ok::<_, String>(RiftConfig::default()))` replaced w/ `.map_err(|e| format!("failed to load rift config: {e}"))?`. Load failures now propagate; never fall back to empty default before a save. Closes the data-loss path.
+
 - **Where:** [lib.rs:805](../src-tauri/src/lib.rs#L805)
 - **Symptom:** Any I/O error reading `~/.rift/*.json` → `.or_else(|_| Ok::<_, String>(RiftConfig::default()))` falls back to empty default; `cfg.save()` then overwrites the file with only the new server. **Real data-loss path.**
 - **Fix:** Propagate the load error with `?`; never fall back to default on save_server.
@@ -377,16 +398,25 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** After write on Windows, call `icacls` or `SetNamedSecurityInfo` (`windows-permissions` crate) to set explicit user-only DACL. Continues #9.2 work.
 
 ## 39. Stop flag consumed before PID registered — Stop button no-op
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — kept pre-spawn `take_session_stopped` (stale-marker hygiene for retry-after-stop turns) AND added a post-PID re-check at `assistant/mod.rs:1362-1374`. If a stop arrives during spawn, the re-check sees it, calls `child.start_kill()`, and re-marks via `mark_session_stopped` so the post-wait branch at L1456 emits the normal stop-path done event.
+
 - **Where:** [assistant/mod.rs:1313-1316](../src-tauri/src/assistant/mod.rs#L1313-L1316)
 - **Symptom:** `take_session_stopped` (L1313) clears stop marker before `set_session_pid` (L1316). Concurrent `assistant_stop` between those lines finds no PID, returns Ok, discards stop intent; CLI child runs unkilled.
 - **Fix:** Move `take_session_stopped` AFTER `set_session_pid`; re-check the stopped flag post-PID-registration before entering wait loop.
 
 ## 40. Single shared `mcp-config.json` across concurrent tabs
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `write_mcp_config` now takes `session_id` and writes to `~/.rift/assistant/mcp-config-<session_id>.json`. New `McpConfigGuard` struct (Drop impl removes file) bound to `_mcp_guard` at the spawn site survives panic + cancellation. `cleanup_mcp_config_on_exit` extended to glob `mcp-config-*.json` plus legacy fixed name. 0600 chmod on Unix preserved; Windows DACL gap still tracked as #38. Wave-2 Agent B did the edits cleanly; bailed on the report only.
+
 - **Where:** [assistant/mod.rs:514,546](../src-tauri/src/assistant/mod.rs#L514)
 - **Symptom:** `write_mcp_config` always writes one fixed path. Two concurrent `assistant_send` (multi-tab) race — second writer's config (different roots/bridge creds) is what the first-spawned CLI reads.
 - **Fix:** Per-call temp file `mcp-config-<session_id>.json`, pass via `--mcp-config`, delete after `child.wait()`.
 
 ## 41. Bridge lock acquired but never released on exec error
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — new `BridgeLockGuard` struct in `assistant/remote_bridge.rs` holds `Arc<LockPresence>` + key; `Drop` spawns a tokio task that calls `locks.release(&key).await`. Lock release now survives panics + future cancellation, not just normal returns. Closes the permanent-block-of-remote-root window.
+
 - **Where:** [assistant/remote_bridge.rs:250-258](../src-tauri/src/assistant/remote_bridge.rs#L250-L258)
 - **Symptom:** `locks.acquire(&lock_key)` at L250 unconditional; `locks.release` at L256 only reached on normal return. Panic, early return, or secondary `eng.locks()` returning `None` leaks the advisory shell lock — permanently blocks all other users on that remote root.
 - **Fix:** RAII guard struct (Drop calls release), or `scopeguard::defer!`.
@@ -402,21 +432,25 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [auto_sync.rs:625-634](../src-tauri/src/sync/auto_sync.rs#L625-L634)
 - **Symptom:** If `flush_batch` removes last dirty entry between `dirty.is_empty()` and `state.try_lock()`, both checks return false → pull races with in-flight upload, possibly overwriting mid-upload. `try_lock` Err arm silently returns `false` (unsafe direction).
 - **Fix:** `pushing_in_flight: AtomicBool` set at `flush_batch` entry/exit; OR `is_pushing` returns `true` on `try_lock` Err.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `Err(_) => true` (safer direction). The AtomicBool flag was overkill for the same correctness guarantee; a brief false-positive `is_pushing` causes a one-tick pull delay, vs. the prior false-negative which could overwrite mid-upload.
 
 ## 44. `stop_watch` removes folder before unregistering notify
 - **Where:** [auto_sync/watch.rs:122-127](../src-tauri/src/sync/auto_sync/watch.rs#L122-L127)
 - **Symptom:** Between `self.folders.remove(remote_root)` and `w.unwatch(&fw.local_root)`, FS events arrive for the removed root → `queue_path` finds no owning watch + silently drops them.
 - **Fix:** Reverse order — `unwatch` first, then remove from map.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `unwatch` runs first using a cloned `local_root` from the DashMap `get`, then the remove + log proceed. Closes the FS-event silent-drop window during folder teardown.
 
 ## 45. FS event drop has no counter, no escalation, not surfaced to UI
 - **Where:** [auto_sync.rs:354-361](../src-tauri/src/sync/auto_sync.rs#L354-L361)
 - **Symptom:** When 2048-event channel fills, each drop logs a uniform-severity `warn` + `DiagLevel::Warn` w/ no aggregation, no rate-limit, no `AutoSyncStatus` field. Sustained bursts (webpack rebuild + stalled flush) are invisible.
 - **Fix:** Add `dropped_events: AtomicU64`; expose in `AutoSyncStatus`; debounced `DiagLevel::Error` after threshold.
+> PARTIAL v0.4.14-alpha S114 (uncommitted) — `dropped_events: AtomicU64` added on `AutoSyncEngine`; every 100th drop now emits `DiagLevel::Error` + log::error w/ cumulative count. AutoSyncStatus exposure deferred (not consumed by FE yet; diag bus carries the signal).
 
 ## 46. `pending_dir_reconcile` coalesce flag cleared before dispatch
 - **Where:** [auto_sync/watch.rs:189-193](../src-tauri/src/sync/auto_sync/watch.rs#L189-L193)
 - **Symptom:** Flag stored `false` at L189 then `kick_drift_reconcile()` called at L193. A new `Create(Dir)` arriving in the gap passes the `compare_exchange` at L183 → second 500ms reconcile, double SFTP scan.
 - **Fix:** Swap order — call `kick_drift_reconcile()` first, then `store(false, Release)`.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — kick now precedes flag clear; the disposed-check is also clear-aware (resets flag before bail).
 
 ## 47. `apply_selected` push path has no cancel token registered
 - **Where:** [auto_sync.rs:1493-1506](../src-tauri/src/sync/auto_sync.rs#L1493-L1506)
@@ -427,6 +461,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [auto_sync.rs:1543-1546](../src-tauri/src/sync/auto_sync.rs#L1543-L1546)
 - **Symptom:** `last_scan_entries` mutex poisoned (prior panic) → `Err(_) => return` arm emits no log, no diagnostic, no status update. Pull-Now modal frozen waiting for a `DriftScanResult` event that never arrives.
 - **Fix:** On `Err(e)`, emit `DiagLevel::Error` diagnostic + final `DriftScanResult` before returning.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — poison branch now emits `DiagStage::System` Error + closing `DiagStage::DriftScanResult` Error before returning. SyncModal closes instead of hanging.
 
 ## 49. `flush_batch` count delta uses pre-circuit-breaker input counts
 - **Where:** [auto_sync/flush.rs:42-43](../src-tauri/src/sync/auto_sync/flush.rs#L42-L43), [:253-254](../src-tauri/src/sync/auto_sync/flush.rs#L253-L254)
@@ -472,6 +507,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [lib.rs:1117-1122](../src-tauri/src/lib.rs#L1117-L1122)
 - **Symptom:** CT stored at L1119-1120 before `open_sftp_for` at L1122. `?` exit on connect-fail never clears `dl_state`; `cancel_download` later fires on ghost token; next `download_paths` overwrites stale entry.
 - **Fix:** Only store CT after connect succeeds; OR reset state in connect-error arm.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `open_sftp_for` moved before CT registration. Connect failure now exits cleanly without leaving a ghost token in `dl_state`.
 
 ## 58. `expand_download_jobs` silently swallows `list_recursive` errors
 - **Where:** [lib.rs:1067-1070](../src-tauri/src/lib.rs#L1067-L1070)
@@ -492,6 +528,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [lib.rs:1535-1542](../src-tauri/src/lib.rs#L1535-L1542)
 - **Symptom:** TOFU probe correctly passes `trusted_fingerprint: None` but also `write_probe_root: Some(&server.remote_root)` — performs a filesystem write to probe write-access BEFORE the fingerprint is confirmed. Contradicts the TOFU rationale at L1521-1526.
 - **Fix:** Pass `write_probe_root: None`; write-permission check only after fingerprint confirmed + server trusted.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `write_probe_root: None` in the TOFU probe call. Write-access verification (if needed) is now strictly post-trust.
 
 ## 62. Bridge token leaked into MCP child env regardless of remote-shell toggle
 - **Where:** [assistant/mod.rs:527-533](../src-tauri/src/assistant/mod.rs#L527-L533)
@@ -502,16 +539,19 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mod.rs:43-55](../src-tauri/src/assistant/mod.rs#L43-L55)
 - **Symptom:** `with_session_pids`/`with_session_stopped` use `.lock().ok()` → `None` on poison. All callers (`set_session_pid`, `clear_session_pid`, `get_session_pid`) silently no-op → `assistant_stop` fails to kill, child orphans.
 - **Fix:** Recover via `e.into_inner()` or surface explicit error; add child-orphan kill in spawn-task drop.
+> PARTIAL v0.4.14-alpha S114 (uncommitted) — both helpers now `into_inner()` on poison + log::error. PID/stop tracking continues working after a poisoning panic instead of silently no-op'ing. Child-orphan kill on spawn-task drop deferred (needs RAII guard on Child handles).
 
 ## 64. `CLAUDE_EXE` cached forever via OnceLock — stale after CLI install/update
 - **Where:** [assistant/mod.rs:84-165](../src-tauri/src/assistant/mod.rs#L84-L165)
 - **Symptom:** `OnceLock<Option<PathBuf>>` init once per process. New CLI install or path change requires full Rift restart. (Cross-agent: F5+G5.)
 - **Fix:** Replace w/ `RwLock<Option<PathBuf>>` w/ TTL, or expose `assistant_reload_cli_path` Tauri command.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `OnceLock<Option<PathBuf>>` → `Mutex<Option<Option<PathBuf>>>`. Fast path stats cached `is_file()`; missing file triggers fresh resolution. CLI upgrades take effect on next spawn, no restart required. Body extracted to `resolve_claude_exe_uncached` helper.
 
 ## 65. `save_config` non-atomic — lost updates on concurrent commands
 - **Where:** [assistant/mod.rs:490-494](../src-tauri/src/assistant/mod.rs#L490-L494)
 - **Symptom:** Direct `std::fs::write` (no temp-then-rename). Two Tauri-command setters racing on read-modify-write produce a torn/empty config.json. `assistant_save_conversation` at L459-461 already has the correct tmp+rename pattern. (Cross-agent: F6+G4.)
 - **Fix:** Apply same `.tmp` + `std::fs::rename` pattern, OR serialize through `Mutex<AssistantConfig>` in managed state.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — tmp+rename pattern matches `assistant_save_conversation`. Concurrent setters now produce either old or new content, never torn.
 
 ## 66. Unbounded stderr buffer — OOM on wedged CLI
 - **Where:** [assistant/mod.rs:1392-1400](../src-tauri/src/assistant/mod.rs#L1392-L1400)
@@ -554,6 +594,8 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** Check cancel before each `scan_folder`; propagate CT into `scan_folder` for SFTP-hash interruption.
 
 ## 74. `walk_local` panic → empty map → mass `ToPull` (data loss path)
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `drift_scanner.rs:228-260` matches `JoinError` on the `spawn_blocking` walk. On panic, emits a `DriftScanProgress` diag at Error level and returns `FolderScan::SuspiciousEmptyAborted { baseline_count, listing_count: 0 }` — the existing safe-abort path. The data-safety guard at L241 (`!local_map.is_empty()`) is no longer bypassable via empty-default fallback.
 - **Where:** [drift_scanner.rs:228](../src-tauri/src/sync/drift_scanner.rs#L228)
 - **Symptom:** `spawn_blocking(walk).await.unwrap_or_default()` swallows JoinError-panic. Scanner sees "remote-only" for every file, queues all as `ToPull` → possibly overwrites locally-newer files.
 - **Fix:** Match Result; log warning on Err; return `FolderScan::SuspiciousEmptyAborted` rather than empty.
@@ -846,21 +888,33 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ### HIGH (4)
 
 ## 139. `drainTick` rAF callback runs on dropped tab — writes to dead `TabState`
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `dropTab` at `assistant.svelte.ts:1146-1158` now fetches the tab via `this.tabs.get(convoId)`, calls `tab.flushPendingText()` (which internally cancels the rAF + drains any pending text), THEN removes from map. `flushPendingText` promoted from `private` → public on TabState to make it reachable. No more self-perpetuating rAF chain on orphaned state.
+
 - **Where:** [assistant.svelte.ts:725](../src/lib/state/assistant.svelte.ts#L725)
 - **Symptom:** A `TabState` dropped via `dropTab` mid-stream still has an outstanding `requestAnimationFrame`. Next frame fires `drainTick` → `appendText` → `mutateStreaming` on orphaned state. Tab no longer in `this.tabs.map` but rAF callback holds direct reference.
 - **Fix:** `dropTab` must `cancelAnimationFrame(tab.drainHandle)` before removing the entry. `flushPendingText` should also be reachable from `dropTab` (currently only from `onError`).
 
 ## 140. `confirmMirrorApply` dispatches `local_path` for `to_delete_remote` bucket — semantically wrong / stale-cache risk
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — code inspection at `sync-page.svelte.ts:542-558` confirmed the function ALREADY re-filters from live `this.entries` at dispatch (`.filter((e) => e.bucket === "to_delete_remote")`); no captured open-time count is used. Audit recommendation was already satisfied. Added a WHY comment documenting the invariant so a future change doesn't reintroduce the race. No behavior change.
+
 - **Where:** [sync-page.svelte.ts:546-548](../src/lib/state/sync-page.svelte.ts#L546-L548)
 - **Symptom:** `to_delete_remote` entries collected by `e.local_path` (file already deleted locally). Lookup works against current snapshot, but if a scan rebuckets between `openMirrorConfirm` and `confirmMirrorApply`, stale paths dispatch with wrong intent.
 - **Fix:** Re-filter entries at dispatch (assert `e.bucket === "to_delete_remote"`); don't use the captured count from open-time.
 
 ## 141. `lastFeedLen` plain-`let` mutation inside `$effect` — stale-closure bug
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — Wave-1 Agent C, clean. `ActivityFeed.svelte:39` converted `let lastFeedLen = 0` → `let lastFeedLen = $state(0)`. Read inside the effect wrapped in `untrack(() => lastFeedLen)` so writes don't retrigger the effect; added `if (delta === 0) return` early-return as belt-and-suspenders against the hidden-tab skip case.
+
 - **Where:** [ActivityFeed.svelte:38,98](../src/lib/components/activity/ActivityFeed.svelte#L98)
 - **Symptom:** Not a `$state` var; effect doesn't track. If effect skipped while tab hidden (display:none), next run computes inflated `delta` → spurious burst-mode entry.
 - **Fix:** `$state(0)` w/ untracked read via `untrack(() => lastFeedLen)`, OR add `delta === 0` early-return after the existing `Math.max(0, ...)` clamp.
 
 ## 142. `recentArrivals` plain array `.push()` — invisible to Svelte reactivity
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — Wave-1 Agent C, clean. `ActivityFeed.svelte:40` converted `let recentArrivals: number[] = []` → `let recentArrivals = $state<number[]>([])`. Svelte 5's deep proxy now tracks `.push()` mutations directly; burst-detection thresholds see every arrival.
+
 - **Where:** [ActivityFeed.svelte:39,84](../src/lib/components/activity/ActivityFeed.svelte#L84)
 - **Symptom:** Declared `let recentArrivals: number[] = []` (no `$state`). `.push(now)` is silent — only the `filter(...)` reassignment publishes updates. Burst-detection thresholds may miss arrivals.
 - **Fix:** `let recentArrivals = $state<number[]>([])` so `.push()` is tracked via deep proxy.
@@ -871,16 +925,19 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant.svelte.ts:1233,1236](../src/lib/state/assistant.svelte.ts#L1233)
 - **Symptom:** Async gap (e.g., 700ms `scheduleSave`) sees whichever tab is active when the timeout fires, not the originating tab. Violates HANDOFF.md's "per-tab state belongs on TabState class" rule.
 - **Fix:** Move `convoCreatedAt`, `currentCliSessionId`, `convoTitle` to TabState; store-level getters delegate to `activeTab`.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `convoCreatedAt`/`convoTitle`/`cliSessionId` now `$state` on TabState; store provides delegating getter+setter pairs. send()/openTab/newTab/closeTab reordered so `ensureTab` precedes per-tab field writes (3 sites previously clobbered the freshly-set neighbor `cliSessionId` via store setter null-writes).
 
 ## 144. `closeTabsToRight` + `closeOtherTabs` skip `dropTab`/`pruneTabUi` for removed tabs
 - **Where:** [assistant.svelte.ts:1921-1931](../src/lib/state/assistant.svelte.ts#L1921-L1931) (right), [:1892-1899](../src/lib/state/assistant.svelte.ts#L1892-L1899) (others)
 - **Symptom:** `tabDrafts`/`tabAttachments`/`tabScroll` Maps + `tabs` Map grow unbounded over a long session. Re-opening from History resurrects ghost drafts.
 - **Fix:** Iterate removed ids → `dropTab(id)` + `pruneTabUi(id)` before updating `openTabs`. (L3+L4+M3+M4 dupes.)
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — both methods now loop removed ids → `dropTab` + `pruneTabUi` before swapping `openTabs`. `dropTab` already flushes pendingText (S113 #139), so rAF drainTick can't write to a dropped tab.
 
 ## 145. `scheduleSave` / `flushNow` / `deriveTitle` all read `this.messages` (active-tab getter)
 - **Where:** [assistant.svelte.ts:1569-1578](../src/lib/state/assistant.svelte.ts#L1569-L1578) (deriveTitle), [:1599](../src/lib/state/assistant.svelte.ts#L1599) (flushNow), [:1618](../src/lib/state/assistant.svelte.ts#L1618) (doSave)
 - **Symptom:** Background-tab turn-complete fires `scheduleSave`; 700ms later `doSave` reads `this.messages` → returns ACTIVE tab's messages. Saved record gets wrong content + wrong title. `beforeunload` only flushes active tab.
 - **Fix:** Snapshot `{ id, messages, ... }` at scheduleSave call time; pass tab as arg through to deriveTitle/doSave. `flushNow` iterate `this.tabs` for all unsaved.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `saveTimer` moved to TabState (per-tab debounce slot). `scheduleSave` captures `(tab, convoId)` at call time; closure-bound `doSave` reads from that tab regardless of who's active 700ms later. `deriveTitle(tab)` + new `buildSaveRecord(convoId, tab)` helper. `flushNow` now iterates `this.tabs` so beforeunload saves every dirty tab.
 
 ## 146. `mutateStreaming` rebuilds full messages array on every delta
 - **Where:** [assistant.svelte.ts:578](../src/lib/state/assistant.svelte.ts#L578)
@@ -906,6 +963,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [Settings.svelte:156-161](../src/lib/components/settings/Settings.svelte#L156-L161)
 - **Symptom:** N flagged "stale on first visit" (writes before async init resolves); O flagged "overwrites mid-edit" (re-fires on every store mutation). Both are real — async init eventually fires the effect, but it also re-fires on later store changes, clobbering local drafts.
 - **Fix:** Wrap store-read assignments in `untrack(() => { ... })`; OR separate effect that tracks ONLY a section-entry signal, not the store fields themselves.
+> SHIPPED v0.4.14-alpha S114 (uncommitted) — `$effect` now depends only on `section`; store reads are inside `untrack(() => assistantStore.init().then(...))` so init's resolution still populates the drafts (fixes "stale on first visit") but later store mutations no longer re-fire the effect (fixes "overwrites mid-edit").
 
 ## 151. Theme picker + STT lang picker missing `role="radiogroup"` / `role="radio"`
 - **Where:** [Settings.svelte:539-555](../src/lib/components/settings/Settings.svelte#L539-L555) (theme), [:835-847](../src/lib/components/settings/Settings.svelte#L835-L847) (STT)
@@ -968,6 +1026,8 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** Debounce, OR equality-check `JSON.stringify(processed.items)` against ref before calling.
 
 ## 163. `UpdateDialog` uses banned `scrollbar-gutter: stable` — WebView2 arrow-button leak
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `UpdateDialog.svelte:409` `scrollbar-gutter: stable` line deleted from `.upd-body` block. Closes the DON'T-TOUCH violation per HANDOFF.md CRITICAL DON'T-TOUCH section.
 - **Where:** [dialogs/UpdateDialog.svelte:409](../src/lib/components/dialogs/UpdateDialog.svelte#L409)
 - **Symptom:** Exact pattern HANDOFF.md CRITICAL DON'T-TOUCH bans on `.scroll`/`.strip`. Native arrow buttons leak top-right of dialog body.
 - **Fix:** Drop `scrollbar-gutter: stable`. Use `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`.
@@ -1229,11 +1289,17 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 ### HIGH (2)
 
 ## 219. No panic hook installed — Rust panics are silent to UI
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — `lib.rs:1745-1770` installs `std::panic::set_hook` immediately after `LogForwarder::install()` and before the Velopack hook. Hook extracts location + payload (handles `&str` + `String` payload variants), routes through `log::error!` (picked up by LogForwarder → bus) AND emits a `DiagStage::System` Error event so the Sync Inspector surfaces the panic.
+
 - **Where:** [lib.rs:1743](../src-tauri/src/lib.rs#L1743) (LogForwarder install site, no `set_hook` adjacent)
 - **Symptom:** Any async-task panic silently dies; no diag event, no toast, no log line. Users see the feature stop working w/ no error. Particularly damaging for `tokio::spawn(...)` calls that drop the JoinHandle.
 - **Fix:** Add `std::panic::set_hook` in `run()` after `LogForwarder::install()` that calls `log::error!` with the panic info — flows into the bus naturally.
 
 ## 220. `session_id` accepted unvalidated → CLI args + sidecar path traversal
+
+> **SHIPPED v0.4.14-alpha S113 (uncommitted)** — new `is_valid_session_id(&str)` in `assistant/mod.rs` enforces canonical 36-char UUID shape (8-4-4-4-12 hex w/ hyphens at fixed positions). Called at top of `assistant_send` before any CLI arg or sidecar path use; rejects non-UUID, leading-dash flag injection, and path-traversal segments. No new deps (no `uuid` crate pulled in — byte-level check).
+
 - **Where:** [assistant/mod.rs:1195,1197](../src-tauri/src/assistant/mod.rs#L1195)
 - **Symptom:** Renderer-supplied `session_id: String` flows verbatim to `--session-id`/`--resume` CLI args AND to `save_session_cwd` filename derivation. Non-UUID + path-traversal segments influence sidecar disk location.
 - **Fix:** Validate as UUID (regex or `uuid` crate) before any use; one guard covers CLI arg and sidecar.

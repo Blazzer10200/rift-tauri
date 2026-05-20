@@ -542,6 +542,11 @@ class SyncPageStore {
   async confirmMirrorApply() {
     this.busy = true;
     this.errorMsg = null;
+    // #140: re-filter at dispatch time. The open-time count from
+    // openMirrorConfirm is stale if a rescan rebuckets entries between open
+    // and apply — using the captured count or pre-collected paths can ship
+    // entries with the wrong bucket / wrong intent. Read live `entries` and
+    // assert the bucket inline.
     const paths = this.entries
       .filter((e) => e.bucket === "to_delete_remote")
       .map((e) => e.local_path);

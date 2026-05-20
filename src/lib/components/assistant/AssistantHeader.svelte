@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { Sparkles, ListChecks, Plus, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
+  import { ListChecks, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import PageHeader from "../shell/PageHeader.svelte";
 
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
@@ -18,9 +17,6 @@
 
   const foreignShell = $derived(assistant.remoteShellLockedByOther);
 
-  // Auth status surfaces here ONLY when degraded — green/healthy state is
-  // implicit (no clutter). The model name lives in the composer pill, not
-  // up here: showing both was redundant and made the header feel busy.
   const authWarn = $derived.by(() => {
     const a = assistant.auth;
     if (!a) return null;
@@ -50,7 +46,6 @@
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
 
-  /** Context-window cap for the model id reported by `system`/init. */
   function contextWindowFor(model: string | null): number {
     if (!model) return 200_000;
     if (/\[1m\]/i.test(model)) return 1_000_000;
@@ -107,8 +102,8 @@
   });
 </script>
 
-<PageHeader icon={Sparkles} title="Chat" tone="accent">
-  {#snippet actions()}
+<div class="ah-bar">
+  <div class="ah-left">
     {#if assistant.workspace.current}
       <span class="ws-chip" title={assistant.workspace.current}>
         <Folder size={11}/>
@@ -131,7 +126,9 @@
         <span class="hdr-btn-label">Open folder</span>
       </button>
     {/if}
+  </div>
 
+  <div class="ah-right">
     {#if authWarn}
       <span
         class="auth-warn"
@@ -161,16 +158,6 @@
       </span>
     {/if}
 
-    <button
-      class="hdr-btn"
-      type="button"
-      title="New conversation (Ctrl+T)"
-      onclick={() => void assistant.newTab()}
-    >
-      <Plus size={13} />
-      <span class="hdr-btn-label">New</span>
-    </button>
-
     {#if taskCount > 0}
       <button
         class="dock-toggle"
@@ -184,10 +171,28 @@
         <span class="task-chip">{taskDone}/{taskCount}</span>
       </button>
     {/if}
-  {/snippet}
-</PageHeader>
+  </div>
+</div>
 
 <style>
+  .ah-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 14px;
+    min-height: 34px;
+    background: var(--bg-elev-1);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .ah-left, .ah-right {
+    display: flex; align-items: center; gap: 8px;
+    min-width: 0;
+  }
+  .ah-left { flex: 1; min-width: 0; }
+  .ah-right { flex-shrink: 0; }
+
   .auth-warn {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 3px 10px;
@@ -295,7 +300,7 @@
     border-radius: 999px;
     color: var(--fg-2);
     font-size: var(--fs-xs);
-    max-width: 200px;
+    max-width: 240px;
   }
   .ws-chip :global(svg) { color: var(--fg-muted); }
   .ws-chip .ws-name {

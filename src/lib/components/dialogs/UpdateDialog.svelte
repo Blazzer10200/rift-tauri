@@ -406,7 +406,6 @@
   .upd-body {
     padding: 16px 18px;
     overflow-y: auto;
-    scrollbar-gutter: stable;
     display: flex; flex-direction: column; gap: 12px;
   }
   .lead { color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.5; margin: 0; }

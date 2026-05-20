@@ -802,7 +802,10 @@ fn save_server(
     profile: profile::ServerProfile,
     edit_key: Option<String>,
 ) -> Result<profile::ServerProfilePublic, String> {
-    let mut cfg = profile::RiftConfig::load().or_else(|_| Ok::<_, String>(profile::RiftConfig::default()))?;
+    // #36: NEVER fall back to default() on load error — a transient I/O hiccup
+    // would otherwise overwrite the entire server list on the subsequent save.
+    let mut cfg = profile::RiftConfig::load()
+        .map_err(|e| format!("failed to load rift config: {e}"))?;
 
     let mut next = profile;
     if next.name.trim().is_empty() {
@@ -1114,12 +1117,16 @@ async fn download_paths(
         path_guard::validate_local_child(&server, local)
             .map_err(|e| format!("download local guard: {e}"))?;
     }
+    // #57: open SFTP BEFORE registering the cancel token. Previous order left
+    // a ghost CT in `dl_state` if connect failed via `?`, so a subsequent
+    // `cancel_download` fired against the stale token and the next
+    // `download_paths` overwrote a slot that should have been clear.
+    let client = open_sftp_for(&server_key).await?;
     let ct = CancellationToken::new();
     {
         let mut g = dl_state.0.lock().await;
         *g = Some(ct.clone());
     }
-    let client = open_sftp_for(&server_key).await?;
     let _ = app.emit("autosync://activity", &ActivityRow {
         at: chrono::Utc::now(),
         resource: "manual".to_string(),
@@ -1532,13 +1539,19 @@ async fn probe_server_fingerprint(server_key: String) -> Result<String, String> 
         .clone();
     let key_path = std::path::PathBuf::from(&server.key_path);
     reject_path_traversal(&key_path, "key_path")?;
+    // #61: TOFU probe deliberately runs WITHOUT a pinned fingerprint to
+    // capture what the server presents. Performing a write probe against an
+    // unverified host before user confirmation contradicts that rationale —
+    // a malicious MitM would receive a write attempt on the user's behalf.
+    // Write-permission check moves to set_server_fingerprint after trust
+    // is established.
     let client = sftp::SftpClient::connect(sftp::ConnectArgs {
         host: &server.host,
         port: server.port,
         user: &server.user,
         key_path: &key_path,
         trusted_fingerprint: None,
-        write_probe_root: Some(&server.remote_root),
+        write_probe_root: None,
     })
     .await?;
     let fp = client.fingerprint().to_string();
@@ -1741,6 +1754,31 @@ pub fn run() {
     // LogForwarder also mirrors every log line into the diagnostics bus so
     // the Sync Inspector picks them up alongside structured pipeline events.
     diagnostics::LogForwarder::install();
+
+    // #219: install a global panic hook so async-task panics don't die silently.
+    // Routes through tracing::error! (picked up by LogForwarder) AND emits a
+    // diagnostics event so the Sync Inspector surfaces the panic to the user.
+    std::panic::set_hook(Box::new(|info| {
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".into());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
+            .unwrap_or("<non-string panic payload>");
+        log::error!("panic at {location}: {payload}");
+        diagnostics::emit_with_fields(
+            diagnostics::DiagStage::System,
+            diagnostics::DiagLevel::Error,
+            None,
+            None,
+            format!("panic at {location}: {payload}"),
+            serde_json::json!({ "location": location, "payload": payload }),
+        );
+    }));
 
     velopack::VelopackApp::build().run();
 
