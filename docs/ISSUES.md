@@ -281,15 +281,18 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - ~~#19 `apply_updates` autosync-stop~~ — verified 2026-05-19, non-bug (Tauri cmd already handles it; doc tightened)
 
 **Tier 1 — ship blockers / data safety**
-- #21 Zero test coverage
+- #21 Zero test coverage — see #265 for plan; reality 35 tests in 10 files; uncovered HIGH-risk modules listed
 - #9 Bridge token plaintext + IPC leak — 9.1+9.2 SHIPPED 2026-05-19; 9.3 (OS keyring) deferred to Phase 6
 - #15 Unsigned Windows builds (adoption blocker)
 - ~~#10 Silent TOFU on first sync~~ — SHIPPED 2026-05-19 (`require_pinned_fingerprint` guard)
 - **#36** `save_server` overwrites server list on load error (data loss) — Wave 1 audit 2026-05-20
 - **#37** API key plaintext in `assistant/config.json` (mirrors #9.3 deferred)
 - **#38** `mcp-config.json` Windows DACL gap (continues #9.2)
-- **#42** Conflict copy may re-upload to remote if watch-event ignore-check uses absolute path
+- ~~#42~~ — VERIFIED NOT A BUG by Wave 3 T (see verdict above). Closed.
 - **#41** Bridge lock leak on remote_bridge exec error (permanent block of remote root)
+- **#74** `walk_local` panic → mass `ToPull` (data-loss path)
+- **#219** No panic hook — silent task death across all async work
+- **#220** session_id traversal (CLI args + sidecar path)
 
 **Tier 2 — recurring friction**
 - ~~#12 Manual 3-file version bump~~ — shipped 2026-05-19 (`scripts/bump.ps1`)
@@ -1212,5 +1215,269 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 218. AppShell `onResized` listener pattern is correct but uses parallel `alive`/`shellAlive`
 - **Where:** [AppShell.svelte:106-122](../src/lib/components/AppShell.svelte#L106-L122)
 - **Fix:** See #174 — consolidate aliveness flags.
+
+---
+
+## Audit 2026-05-20 — Wave 3 (cross-cutting)
+
+> 8 parallel `operator` agents. Reports persisted at `state/audit-2026-05-20/{T..AA}-*.md`; synthesis at `SYNTHESIS-wave3.md`. Six of eight bailed skeleton-only and were SendMessage-recovered. Y was re-spawned tighter after the agent-dispatch-guard hook blocked the original 38-line prompt.
+
+### Wave 1 #42 cross-verification — NOT A REAL BUG
+
+Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/watch.rs#L245) + [sync/ignore.rs:91-97,157](../src-tauri/src/sync/ignore.rs#L91-L157). `classify()` extracts basename via `rsplit('/').next()` before `.rift-conflict.` substring check. Absolute vs relative path makes no difference for the conflict-copy marker rule. **#42 is closed/INFO.** Frontend safety chip from #158 is still useful but not security-critical.
+
+### HIGH (2)
+
+## 219. No panic hook installed — Rust panics are silent to UI
+- **Where:** [lib.rs:1743](../src-tauri/src/lib.rs#L1743) (LogForwarder install site, no `set_hook` adjacent)
+- **Symptom:** Any async-task panic silently dies; no diag event, no toast, no log line. Users see the feature stop working w/ no error. Particularly damaging for `tokio::spawn(...)` calls that drop the JoinHandle.
+- **Fix:** Add `std::panic::set_hook` in `run()` after `LogForwarder::install()` that calls `log::error!` with the panic info — flows into the bus naturally.
+
+## 220. `session_id` accepted unvalidated → CLI args + sidecar path traversal
+- **Where:** [assistant/mod.rs:1195,1197](../src-tauri/src/assistant/mod.rs#L1195)
+- **Symptom:** Renderer-supplied `session_id: String` flows verbatim to `--session-id`/`--resume` CLI args AND to `save_session_cwd` filename derivation. Non-UUID + path-traversal segments influence sidecar disk location.
+- **Fix:** Validate as UUID (regex or `uuid` crate) before any use; one guard covers CLI arg and sidecar.
+
+### MED (16)
+
+## 221. `model` param accepted unvalidated → leading-dash flag injection into Claude CLI
+- **Where:** [assistant/mod.rs:1039,1180](../src-tauri/src/assistant/mod.rs#L1039)
+- **Symptom:** Model value starting with `-` interpreted by CLI's arg parser as a flag (`--model --some-flag`).
+- **Fix:** Allowlist `"sonnet"|"opus"|"haiku"`, or reject leading dash via `[a-zA-Z0-9._-]+` w/o leading `-`.
+
+## 222. `stderr_task.await.unwrap_or_default()` silently drops JoinError
+- **Where:** [assistant/mod.rs:1405](../src-tauri/src/assistant/mod.rs#L1405)
+- **Symptom:** Stderr drain panic (OOM) → blank stderr → user sees "claude exited with 1 — " w/ no diagnosis.
+- **Fix:** `.unwrap_or_else(|e| format!("(stderr task panicked: {e})"))` + `log::error!`.
+
+## 223. `create_dir_all` for download staging dirs silently ignored
+- **Where:** [lib.rs:1066,1084,1090](../src-tauri/src/lib.rs#L1066)
+- **Symptom:** Dir-create failure (perms, path length) → opaque "no such file" SFTP error w/ no upstream cause.
+- **Fix:** `.map_err(|e| format!("mkdir: {e}"))?` or log + warn.
+
+## 224. `try_read_lock` `.ok()?` conflates absent-lock vs SFTP-error
+- **Where:** [lock_presence.rs:359](../src-tauri/src/sync/lock_presence.rs#L359)
+- **Symptom:** SFTP failure → returns None → caller treats as "no lock held" → permits write that could collide w/ another user's active lock.
+- **Fix:** Separate error cases; on SFTP error log warn + return sentinel → caller treats as unknown / skip write.
+
+## 225. `eprintln!` in sync handlers + drift scanner bypass log + diag bus
+- **Where:** [lib.rs:132,134,136,165,167,169,183,185,187,190,192](../src-tauri/src/lib.rs#L132) + [drift_scanner.rs:272](../src-tauri/src/sync/drift_scanner.rs#L272)
+- **Symptom:** Stderr-only — never reach LogForwarder, diag bus, or UI. Shipped binaries produce no signal.
+- **Fix:** Replace all 12 `eprintln!` with `log::info!` / `log::debug!`. Drift-scanner's `eprintln!` at L272 is also redundant w/ the `emit_with_fields` at L276 — delete it.
+
+## 226. Broadcast bus lag silently counted, no log/diag event
+- **Where:** [diagnostics/mod.rs:439-441](../src-tauri/src/diagnostics/mod.rs#L439-L441)
+- **Symptom:** `RecvError::Lagged(n)` → `bus_lag_total += n` w/o emit; only visible via 500ms `diag://state` if Diagnostics tab open.
+- **Fix:** Add `log::warn!("diag bus lagged: {n} events dropped")` after `record_bus_lag(n)`.
+
+## 227. `scrub_log_message` misses `BEGIN ED25519 PRIVATE KEY` (and DSA)
+- **Where:** [diagnostics/mod.rs:347-350](../src-tauri/src/diagnostics/mod.rs#L347-L350)
+- **Symptom:** Three PEM headers guarded; Ed25519 (PKCS#8) + DSA pass through to renderer unredacted. Real risk b/c Ed25519 is most common SSH key type now.
+- **Fix:** Add `|| out.contains("BEGIN ED25519 PRIVATE KEY") || out.contains("BEGIN DSA PRIVATE KEY")`, OR single regex `BEGIN .* PRIVATE KEY`.
+
+## 228. `dialog:default` capability + plugin registered, never called from frontend
+- **Where:** [capabilities/default.json:13](../src-tauri/capabilities/default.json#L13) + [lib.rs:1758](../src-tauri/src/lib.rs#L1758) + [Cargo.toml:20](../src-tauri/Cargo.toml#L20)
+- **Symptom:** Native OS dialog plugin exposed to renderer with zero usage — XSS payload could call into OS dialogs. All dialogs are custom Svelte components.
+- **Fix:** Remove `tauri_plugin_dialog::init()`, `"dialog:default"` cap entry, and `tauri-plugin-dialog` Cargo dep. Run `cargo check`.
+
+## 229. `opener:default` too broad — only `openUrl`/`openPath`/`revealItemInDir` used
+- **Where:** [capabilities/default.json:12](../src-tauri/capabilities/default.json#L12)
+- **Symptom:** Full opener plugin surface granted; only 3 functions in actual use across 6 components.
+- **Fix:** Replace `"opener:default"` with explicit `"opener:allow-open-url"`, `"opener:allow-open-path"`, `"opener:allow-reveal-item-in-dir"`. Complements #31.
+
+## 230. `core:default` bundles unused `core:path`, `core:app`, `core:menu`, `core:resources`
+- **Where:** [capabilities/default.json:7](../src-tauri/capabilities/default.json#L7)
+- **Symptom:** Zero frontend imports of `@tauri-apps/api/path` or `@tauri-apps/api/app`; no menu/tray API usage.
+- **Fix:** Enumerate `core:default` expansion; pin to explicit `core:event:default` + `core:window:default` only. Drops 4 unused sub-caps. Extends #30.
+
+## 231. Cargo.toml version regex not anchored to `[package]` section
+- **Where:** [scripts/release.ps1:34](../scripts/release.ps1#L34), [scripts/bump.ps1:57-63](../scripts/bump.ps1#L57-L63)
+- **Symptom:** First `version = "..."` in Cargo.toml is currently the package — fragile to layout change. Workspace merge or dep-block-before-`[package]` would silently write the wrong field.
+- **Fix:** Anchor pattern: `(?ms)\[package\].*?^\s*version\s*=\s*"([^"]+)"`.
+
+## 232. `vpk upload github` missing `--channel` — implicit `win` default coupling
+- **Where:** [scripts/release.ps1:166-178](../scripts/release.ps1#L166-L178) + [update_service.rs:173](../src-tauri/src/update_service.rs#L173) `UpdateManager::new(src, None, None)`
+- **Symptom:** Both sides default to `win` but neither documents it. Multi-channel rollout would silently diverge w/o compile- or runtime-error.
+- **Fix:** Explicit `--channel win` to vpk + `Some("win")` to `UpdateManager::new`.
+
+## 233. `Releases/` blanket-ignored but `assets.win.json` + `releases.win.json` may be in working tree
+- **Where:** [.gitignore:1](../.gitignore#L1) + `Releases/*.json` artifacts
+- **Symptom:** Local pack regenerates feed files; if accidentally shipped from local rather than GitHub-uploaded, clients hit stale packages.
+- **Fix:** Verify `git ls-files Releases/` empty; add comment in release.ps1 that local files are pack-state only, canonical feed is GitHub asset.
+
+## 234. `mutateStreaming` O(n) message scan + array realloc per streaming token
+- **Where:** [assistant.svelte.ts:580](../src/lib/state/assistant.svelte.ts#L580)
+- **Symptom:** Hundreds of tokens/sec during streaming → hundreds of full message-array `.map(...)` + replace per turn. Frame drops in long convos. (Re-cite of Wave 2 #146 with HIGH-severity bump.)
+- **Fix:** Cache `streamingMsgIdx` on `send()`, direct `messages[idx] = fn(messages[idx])`; reset in `onDone`.
+
+## 235. `compute_sha1` blocks tokio executor in flush + rebaseline paths
+- **Where:** [auto_sync/flush.rs:471](../src-tauri/src/sync/auto_sync/flush.rs#L471), [auto_sync.rs:1290-1308](../src-tauri/src/sync/auto_sync.rs#L1290-L1308)
+- **Symptom:** `std::fs::File` + `BufReader::read` loop inside `process_entry_body` (a `tokio::spawn` future). Per-file SHA1 up to 64MiB blocks the executor thread.
+- **Fix:** Wrap in `tokio::task::spawn_blocking(|| SyncSnapshot::compute_sha1(path)).await`. Same fix for rebaseline pass — move SHA inside the existing `spawn_blocking` closure.
+
+## 236. N+1 SFTP downloads in `lock_presence::poll_once` + heartbeat
+- **Where:** [lock_presence.rs:304-337](../src-tauri/src/sync/lock_presence.rs#L304-L337), [:265-283](../src-tauri/src/sync/lock_presence.rs#L265-L283), [:353-364](../src-tauri/src/sync/lock_presence.rs#L353-L364)
+- **Symptom:** Per-lock `try_read_lock` is serial: `download_file` → tmpdir → read → cleanup. 10 locks × 30-60ms Tailscale RTT = ~300ms blocked. Plus per-poll temp-dir churn.
+- **Fix:** Replace `download_file` w/ `sftp.exec("cat {path}")` (avoid tmpdir), parallelize via `FuturesUnordered`. Same fan-out for heartbeat upload loop.
+
+### LOW (28)
+
+## 237. `thinking_effort` raw value log-injection vector
+- **Where:** [assistant/mod.rs:1041-1043,1273-1276](../src-tauri/src/assistant/mod.rs#L1041-L1043)
+- **Symptom:** Newlines/ANSI in renderer-supplied string land in log stream unescaped (CLI arg itself safe — normalized).
+- **Fix:** Log `level` post-normalize, not raw `effort`.
+
+## 238. `scrubUser` concrete Rust-side gaps in DiagBus emit
+- **Where:** [auto_sync/watch.rs:71](../src-tauri/src/sync/auto_sync/watch.rs#L71); [diagnostics/mod.rs](../src-tauri/src/diagnostics/mod.rs)
+- **Symptom:** Concrete site for #8 — `watch refused (ignored path): C:\Users\<username>\...` flows through DiagBus unredacted.
+- **Fix:** Apply Rust-side `scrub_user()` in `LogForwarder` or at DiagBus emit. Completes #8.
+
+## 239. `SESSION_PIDS`/`SESSION_STOPPED` `.lock().ok()` — re-confirmed
+- **Where:** [assistant/mod.rs:44,51](../src-tauri/src/assistant/mod.rs#L44)
+- **Note:** Dup of #63; T+U confirmed STILL present in v0.4.13. Promote priority.
+
+## 240. `aborted_shrunk()` mutex-poison silently returns empty vec
+- **Where:** [auto_sync.rs:1227](../src-tauri/src/sync/auto_sync.rs#L1227)
+- **Symptom:** Poison → empty vec → rebaseline banner never shown.
+- **Fix:** `.unwrap_or_else(|p| { log::error!(...); p.into_inner() })`.
+
+## 241. MCP bridge socket `set_read_timeout`/`set_write_timeout` swallowed
+- **Where:** [mcp_server.rs:323,324,411,412](../src-tauri/src/assistant/mcp_server.rs#L323)
+- **Symptom:** `let _ = stream.set_read_timeout(...)` → hung remote_bash blocks stdio thread indefinitely.
+- **Fix:** Log warn on failure at minimum.
+
+## 242. MCP bridge `stream.flush().ok()` drops flush errors
+- **Where:** [mcp_server.rs:328,418](../src-tauri/src/assistant/mcp_server.rs#L328)
+- **Symptom:** Broken pipe → followup `read_line` blocks → misleading "bridge closed without response" instead of true write failure.
+- **Fix:** Propagate via `.map_err(|e| format!("bridge flush: {e}"))?`.
+
+## 243. STT `serde_json::from_slice(&bytes).unwrap_or_default()` accepts corrupt config
+- **Where:** [stt/mod.rs:77](../src-tauri/src/stt/mod.rs#L77)
+- **Symptom:** Partial-write/crash → config silently wiped to defaults; API key + model selection lost w/o warning.
+- **Fix:** `.unwrap_or_else(|e| { log::warn!("stt-config parse failed ({e}), using defaults"); default })`.
+
+## 244. `edit_trail.rs read_raw .ok()?` destroys trail history on SFTP error
+- **Where:** [edit_trail.rs:81](../src-tauri/src/sync/edit_trail.rs#L81)
+- **Symptom:** Download error → returns None → `append` overwrites file with only the new entry, silently destroying all prior trail history.
+- **Fix:** Distinguish "not found" (normal first-write) from "download failed" (skip write cycle).
+
+## 245. Terminal PTY session ID `unwrap_or(0)` → duplicate-key on clock skew
+- **Where:** [terminal/mod.rs:186](../src-tauri/src/terminal/mod.rs#L186)
+- **Symptom:** Pre-1970 clock skew (VM, embedded) yields `"term-0"` deterministic key; second spawn overwrites first → leaked PTY + reader thread.
+- **Fix:** Use `AtomicU64` counter, or random fallback. Add existence check before insert.
+
+## 246. Rate-limit critical bypass has no secondary ceiling
+- **Where:** [diagnostics/mod.rs:415-425](../src-tauri/src/diagnostics/mod.rs#L415-L425)
+- **Symptom:** 7 critical event types bypass 200/s cap. Pathological `RemoteScanResult` loop floods Svelte reactivity.
+- **Fix:** Secondary `critical_emitted` counter cap (50/s), or document invariant.
+
+## 247. No tracing spans on hot paths (flush, scan, SFTP)
+- **Where:** [auto_sync/flush.rs:35](../src-tauri/src/sync/auto_sync/flush.rs#L35), [drift_scanner.rs:122](../src-tauri/src/sync/drift_scanner.rs#L122), [sftp/transfer.rs:20](../src-tauri/src/sftp/transfer.rs#L20)
+- **Symptom:** No structured timing or hierarchical causality. Only `latency_ms` in `log_activity_rich`.
+- **Fix:** Short-term: entry/exit `log::debug!` w/ timing. Long-term: `tracing` + `tracing-log` bridge.
+
+## 248. Frontend connection errors never reach diag bus
+- **Where:** [connection.svelte.ts:230,475](../src/lib/state/connection.svelte.ts#L230)
+- **Symptom:** `connect failed` + `auto-reconnect failed` only `console.error`'d → Diagnostics panel never shows them.
+- **Fix:** Add `diag_log_frontend_error` Tauri cmd publishing `DiagStage::System` / `DiagLevel::Error`.
+
+## 249. `diag_state_pump` emits every 500ms regardless of subscribers
+- **Where:** [lib.rs:343,386](../src-tauri/src/lib.rs#L343)
+- **Symptom:** Persistent background serialization+emit even when Diagnostics tab closed.
+- **Fix:** `diag_active: AtomicBool` toggled by subscribe/unsubscribe; OR pull model via `diag_get_state`.
+
+## 250. STT console.debug calls — #22 partial regression
+- **Where:** [stt.svelte.ts:104,216,280](../src/lib/state/stt.svelte.ts#L104)
+- **Symptom:** ISSUES #22 listed `:104,:202,:266` as shipped. Current lines `104,216,280` suggest fix missed or line numbers shifted.
+- **Fix:** Verify; remove or gate on `dev` flag.
+
+## 251. Release staging copy hardcoded to 2 files — DLL/redistributable gap
+- **Where:** [scripts/release.ps1:126-130](../scripts/release.ps1#L126-L130)
+- **Symptom:** Only `rift-tauri.exe` + `icon.ico` copied. Future Tauri/WebView2 redistributables would be silently absent from `vpk pack` payload.
+- **Fix:** Comment intent explicitly, OR add `*.dll` glob.
+
+## 252. `GithubSource::get_release_feed` per_page=10 — pagination gap
+- **Where:** [update_service.rs:229](../src-tauri/src/update_service.rs#L229)
+- **Symptom:** `Releases/` has 14 tags already; if newest eligible doesn't carry `releases.win.json`, walker errors out instead of paginating.
+- **Fix:** `per_page=50` + pagination loop following `Link: <url>; rel="next"`.
+
+## 253. `release.ps1` `Read-Host` silently exits 1 in CI pipe (no TTY)
+- **Where:** [scripts/release.ps1:86-92](../scripts/release.ps1#L86-L92)
+- **Symptom:** Non-TTY stdin returns empty string → exit 1 w/ no log explaining why.
+- **Fix:** Replace w/ `Write-Host` + `-Force` parameter; explicit error message.
+
+## 254. `rendered` $derived.by in ActivityFeed — full O(n) regroup on every event
+- **Where:** [ActivityFeed.svelte:218](../src/lib/components/activity/ActivityFeed.svelte#L218)
+- **Symptom:** During sync burst, full re-derivation chain triggers every event.
+- **Fix:** Stable base + burst accumulator; or debounce $derived via setTimeout batching.
+
+## 255. `DriftSummaryCard` $derived.by — O(entries) Map rebuild per drift event
+- **Where:** [DriftSummaryCard.svelte:18](../src/lib/components/sync/DriftSummaryCard.svelte#L18)
+- **Fix:** Move group-by into store as derived field; component reads pre-aggregated.
+
+## 256. `Diagnostics.svelte` two O(n) linear scans on every event push
+- **Where:** [Diagnostics.svelte:127-128](../src/lib/components/diagnostics/Diagnostics.svelte#L127-L128)
+- **Symptom:** `find(e => e.stage === "...")` from front; matching event always near tail.
+- **Fix:** `findLast`, or maintain `Map<stage, at>` index in store.
+
+## 257. `selBreakdown` rebuilds Map even when selection unchanged
+- **Where:** [SyncPage.svelte:117](../src/lib/components/sync/SyncPage.svelte#L117)
+- **Symptom:** Mixed dependency (`entries` + `selected`) → over-invalidates on entry stream-in.
+- **Fix:** Memoize `byPath` map in store (changes only on entries).
+
+## 258. 39 `format_push_string` clippy hits in MCP server
+- **Where:** [mcp_server.rs:185](../src-tauri/src/assistant/mcp_server.rs#L185) (representative)
+- **Symptom:** `out.push_str(&format!(...))` allocates intermediate `String` each call. 39 sites in tight loops.
+- **Fix:** `write!(out, "...", ...)` from `std::fmt::Write` — zero intermediate alloc.
+
+## 259. `compute_sha1` in drift scanner sequential per file (SSH exec round-trip)
+- **Where:** [drift_scanner.rs:384,422,445](../src-tauri/src/sync/drift_scanner.rs#L384)
+- **Symptom:** `get_remote_sha1` calls SSH exec serially within scan loop. Up to 10×RTT wall time per scan.
+- **Fix:** Collect into batch; `FuturesUnordered` bounded by `hash_budget`.
+
+## 260. Dead function `scanAgeLabel()`
+- **Where:** [SyncPage.svelte:201](../src/lib/components/sync/SyncPage.svelte#L201)
+- **Fix:** Delete L201-207.
+
+## 261. setTimeout handles not stored in AssistantHeader pulse, ActivityFeed flash, MessageBubble copy
+- **Where:** [AssistantHeader.svelte:43](../src/lib/components/assistant/AssistantHeader.svelte#L43), [ActivityFeed.svelte:362](../src/lib/components/activity/ActivityFeed.svelte#L362), [MessageBubble.svelte:242](../src/lib/components/assistant/MessageBubble.svelte#L242)
+- **Note:** Re-confirmation of #159, #168 — plus new MessageBubble copy timer.
+- **Fix:** Store handles; clear in `$effect` return / `onDestroy`. Pairs with existing Wave 2 entries.
+
+## 262. SyncPage / Settings / Diagnostics use `onMount/onDestroy` instead of `$effect` (HMR-unsafe)
+- **Where:** [SyncPage.svelte:66-67](../src/lib/components/sync/SyncPage.svelte#L66-L67), [Settings.svelte:43](../src/lib/components/settings/Settings.svelte#L43), [Diagnostics.svelte:39](../src/lib/components/diagnostics/Diagnostics.svelte#L39)
+- **Symptom:** Lifecycle-correct but inconsistent w/ adopted `$effect`-return pattern. Three sites left.
+- **Fix:** Migrate to `$effect(() => { ...add...; return () => ...remove... })`.
+
+## 263. `UpdateStore` listeners are intentional singletons but undocumented
+- **Where:** [updates.svelte.ts:171](../src/lib/state/updates.svelte.ts#L171)
+- **Fix:** Add comment: `// intentional: app-lifetime singleton`.
+
+## 264. `deleteThresholdHint()` single-use helper — inline candidate (INFO)
+- **Where:** [SyncPage.svelte:195](../src/lib/components/sync/SyncPage.svelte#L195)
+- **Fix:** Leave for readability or inline. No action required.
+
+### Z — Test gap plan (single tracker entry)
+
+## 265. Test strategy + priority ranking
+- **Where:** `state/audit-2026-05-20/Z-test-gap.md` (full plan)
+- **Symptom:** ISSUES #21 said "zero tests"; reality: 35 `#[test]` fns in 10 files (ignore.rs 14, auto_sync/path.rs 6, bootstrap 4, others). Uncovered HIGH-risk: `drift_scanner.rs`, `state/sync_snapshot.rs`, `sftp/transfer.rs`, `auto_sync/flush.rs`, `assistant/remote_bridge.rs`, `assistant/mod.rs`, `assistant.svelte.ts`, `sync-page.svelte.ts`, `path_guard.rs`, `drift_watcher.rs`.
+- **Structural blockers:** No `SftpOps` trait (concrete `SftpClient`); `AutoSyncEngine` needs `AppHandle`; `SyncSnapshot::new` writes to `~/.rift/`; `BRIDGE: OnceLock` set-once. Recommended sequencing: Wave A (no infra) → B (`SyncSnapshot::for_path` + `tempfile`) → C (`SftpOps` trait + mock SFTP) → D (`DiagSink` trait + Tauri `mock_builder`).
+- **Fix sketch:** Follow Wave A first — `path_guard` containment, `sync_snapshot` serialization, flush circuit-breaker math, `sync-page.svelte.ts` bucket display, `assistant.svelte.ts` usage accumulator. Updates #21.
+
+### AA top-10 clippy perf lints (table for triage)
+
+| # | Rule | Count | Representative | Fix |
+|---|------|-------|----------------|-----|
+| 1 | `format_push_string` | 39 | [mcp_server.rs:185](../src-tauri/src/assistant/mcp_server.rs#L185) | `write!(out, ...)` (see #258) |
+| 2 | `redundant_closure_for_method_calls` | ~12 | [mcp_server.rs:205](../src-tauri/src/assistant/mcp_server.rs#L205) | Method-ref instead of closure |
+| 3 | `map_unwrap_or` | 3 | [mcp_server.rs:174](../src-tauri/src/assistant/mcp_server.rs#L174) | `map_or(default, f)` |
+| 4 | `needless_pass_by_value` | 3 | [assistant/mod.rs:447](../src-tauri/src/assistant/mod.rs#L447) | `&str` over `String` |
+| 5 | `uninlined_format_args` | ~8 | [mcp_server.rs:188](../src-tauri/src/assistant/mcp_server.rs#L188) | Inline vars in format str |
+| 6 | `unnecessary_sort_by` | 1 | [assistant/mod.rs:442](../src-tauri/src/assistant/mod.rs#L442) | `sort_by_key(\|b\| Reverse(...))` |
+| 7 | `map_unwrap_or` (Option) | 1 | [assistant/mod.rs:428](../src-tauri/src/assistant/mod.rs#L428) | `map_or` |
+| 8 | `redundant_else` | 1 | [drift_scanner.rs:245](../src-tauri/src/sync/drift_scanner.rs#L245) | Flatten else |
+| 9 | `manual_let_else` | ~8 | [mcp_server.rs:164](../src-tauri/src/assistant/mcp_server.rs#L164) | `let Ok(x) = ... else { ... }` |
+| 10 | `match_same_arms` | 1 | [mcp_server.rs:642](../src-tauri/src/assistant/mcp_server.rs#L642) | Merge arms |
 
 ---
