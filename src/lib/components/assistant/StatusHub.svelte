@@ -7,10 +7,19 @@
   import { Loader2, Square } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
+  // Optional tabId — when omitted, falls back to the active tab (single-pane
+  // mode compat). Split-pane mode passes the pane's tabId so each pane shows
+  // its own stream status independently.
+  let { tabId = null }: { tabId?: string | null } = $props();
+  const tab = $derived(tabId !== null ? assistant.tabFor(tabId) : null);
+  const streaming = $derived(tab ? tab.streaming : assistant.streaming);
+  const turnStartedAt = $derived(tab ? tab.activity.turnStartedAt : assistant.activity.turnStartedAt);
+  const currentLabel = $derived(tab ? tab.activity.currentLabel : assistant.activity.currentLabel);
+
   let tickNow = $state(Date.now());
   let tickHandle: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    if (assistant.streaming) {
+    if (streaming) {
       if (!tickHandle) tickHandle = setInterval(() => (tickNow = Date.now()), 500);
     } else if (tickHandle) {
       clearInterval(tickHandle);
@@ -28,14 +37,14 @@
   ];
   let whimTick = $state(0);
   $effect(() => {
-    if (!assistant.streaming) return;
+    if (!streaming) return;
     const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
     return () => clearInterval(id);
   });
 
   const elapsed = $derived.by<string | null>(() => {
-    if (!assistant.streaming) return null;
-    const start = assistant.activity.turnStartedAt;
+    if (!streaming) return null;
+    const start = turnStartedAt;
     if (!start) return null;
     void tickNow;
     const s = Math.floor((Date.now() - start) / 1000);
@@ -43,8 +52,8 @@
   });
 
   const label = $derived.by<string | null>(() => {
-    if (!assistant.streaming) return null;
-    const raw = assistant.activity.currentLabel ?? "Thinking…";
+    if (!streaming) return null;
+    const raw = currentLabel ?? "Thinking…";
     if (/^thinking/i.test(raw)) return `${WHIM_WORDS[whimTick]}…`;
     return raw;
   });
@@ -52,11 +61,18 @@
   const isShell = $derived(label != null && /^\$\s/.test(label));
 
   function onStop() {
+    // In split-pane mode, stop targets the pane's tab via focus. Single-pane
+    // falls through to the active-tab stop.
+    if (tabId && assistant.splitActive) {
+      // Focus the pane that owns this tab so stop() hits the right session.
+      const idx = assistant.panes.findIndex((p) => p.tabId === tabId);
+      if (idx !== -1) assistant.setFocusedPane(idx);
+    }
     void assistant.stop();
   }
 </script>
 
-{#if assistant.streaming && label}
+{#if streaming && label}
   <div class="hub" role="status" aria-live="polite">
     <Loader2 size={12} class="spin" />
     {#key label}

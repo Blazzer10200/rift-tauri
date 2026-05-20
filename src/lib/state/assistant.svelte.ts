@@ -1080,6 +1080,17 @@ class TabState {
   }
 }
 
+/** Per-pane reference into the openTabs list. v2 split UI: `panes` is always
+ *  an array of length ≥1. Length 1 = single-pane (no visible split). Length
+ *  2..MAX_PANES = horizontal split. Each pane shows the chat for its `tabId`;
+ *  `null` tabId = empty pane (drop a tab into it from the tabsbar). */
+export type PaneState = { tabId: string | null };
+
+/** Hard cap on horizontal panes. 4 × min-width 320px = 1280px — fits any
+ *  modern window. Bump if you're on ultrawide; UI is array-driven so the
+ *  only knob is this constant. */
+export const MAX_PANES = 4;
+
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
@@ -1128,6 +1139,197 @@ class AssistantStore {
   get queue() { return this.activeTab?.queue ?? []; }
   set queue(v: { id: string; text: string }[]) {
     if (this.activeTab) this.activeTab.queue = v;
+  }
+
+  /** Public read accessor for a tab's state — used by AssistantPane /
+   *  StatusHub in split mode so each pane scopes its rendering to its own
+   *  tab rather than the activeTab. Returns null for unknown ids. */
+  tabFor(id: string | null): TabState | null {
+    return id ? this.tabs.get(id) ?? null : null;
+  }
+
+  get splitActive(): boolean {
+    return this.panes.length > 1;
+  }
+
+  /** Returns the focused pane's tabId. Always defined (panes always length≥1). */
+  get focusedPaneTabId(): string | null {
+    return this.panes[this.focusedPaneIdx]?.tabId ?? this.currentConvoId;
+  }
+
+  get canAddPane(): boolean {
+    return this.panes.length < MAX_PANES;
+  }
+
+  /** Add a new pane to the right of the focused one. Caps at MAX_PANES.
+   *  New pane is auto-filled with the next openTab not already in any pane,
+   *  else stays empty (drop a tab in from the tabsbar). Focus moves to new
+   *  pane. Persists. */
+  addPane() {
+    if (this.panes.length >= MAX_PANES) return;
+    const taken = new Set(this.panes.map((p) => p.tabId).filter((x): x is string => !!x));
+    const fill = this.openTabs.find((id) => !taken.has(id)) ?? null;
+    const insertAt = this.focusedPaneIdx + 1;
+    const next = this.panes.slice();
+    next.splice(insertAt, 0, { tabId: fill });
+    this.panes = next;
+    this.telemetry.event("pane.add", { count: next.length, fill });
+    // Focus the freshly-added pane so subsequent newTab/openTab assigns to it.
+    this.stashTabUi(this.currentConvoId);
+    this.focusedPaneIdx = insertAt;
+    if (fill) {
+      const inMeta = this.conversations.some((c) => c.id === fill);
+      if (inMeta && !this.tabs.get(fill)) {
+        void this.loadConversation(fill);
+      } else {
+        this.currentConvoId = fill;
+      }
+    }
+    this.restoreTabUi(fill);
+    this.persistTabs();
+  }
+
+  /** Close a pane (the pane container, not the tab inside it). Tabs stay in
+   *  openTabs — closing a pane just unhooks it. Last pane never closes (always
+   *  length≥1). Focused idx is clamped to the new array bounds. Persists. */
+  closePane(idx: number) {
+    if (this.panes.length <= 1) return;
+    if (idx < 0 || idx >= this.panes.length) return;
+    const next = this.panes.slice();
+    next.splice(idx, 1);
+    this.panes = next;
+    this.telemetry.event("pane.close", { remaining: next.length });
+    // Clamp focused. If we closed the focused pane (or one before it), shift left.
+    let newFocus = this.focusedPaneIdx;
+    if (idx < this.focusedPaneIdx) newFocus -= 1;
+    else if (idx === this.focusedPaneIdx) newFocus = Math.min(idx, next.length - 1);
+    newFocus = Math.max(0, Math.min(newFocus, next.length - 1));
+    if (newFocus !== this.focusedPaneIdx) {
+      this.setFocusedPane(newFocus);
+    } else {
+      this.persistTabs();
+    }
+  }
+
+  /** Move focus to a pane. Stashes outgoing composer draft + restores incoming
+   *  so each pane carries its own draft. No-op in single-pane mode. */
+  setFocusedPane(idx: number) {
+    if (idx < 0 || idx >= this.panes.length) return;
+    if (this.focusedPaneIdx === idx && this.currentConvoId === this.panes[idx].tabId) return;
+    this.stashTabUi(this.currentConvoId);
+    this.focusedPaneIdx = idx;
+    const next = this.panes[idx].tabId;
+    if (next) {
+      const inMeta = this.conversations.some((c) => c.id === next);
+      if (inMeta && !this.tabs.get(next)) {
+        void this.loadConversation(next);
+      } else {
+        this.currentConvoId = next;
+      }
+    } else {
+      this.currentConvoId = null;
+    }
+    this.restoreTabUi(next);
+    this.persistTabs();
+  }
+
+  /** Assign a tab to the currently-focused pane. Called by openTab/newTab so
+   *  the focused pane's slot follows the active selection. Works in both
+   *  single-pane (length=1) and split modes. */
+  private assignFocusedPane(tabId: string | null) {
+    const cur = this.panes[this.focusedPaneIdx];
+    if (!cur || cur.tabId === tabId) return;
+    const next = this.panes.slice();
+    next[this.focusedPaneIdx] = { tabId };
+    this.panes = next;
+  }
+
+  /** Drop a tab from the tabsbar into a specific pane.
+   *  - Single-pane mode (panes.length===1) + dropping a DIFFERENT tab on a
+   *    half → enter 2-pane split (existing behavior).
+   *  - Multi-pane mode → if target pane already holds this tab, just focus it.
+   *    If a SIBLING pane holds it, swap. Else assign + focus.
+   *  - paneIdx === panes.length is a sentinel meaning "drop in a new pane at
+   *    the end" — auto-adds (cap-aware) and assigns. */
+  dropTabIntoPane(tabId: string, paneIdx: number) {
+    if (!this.openTabs.includes(tabId)) return;
+    if (paneIdx < 0) return;
+
+    // Sentinel: "add new pane at end". Cap-respecting.
+    if (paneIdx >= this.panes.length) {
+      if (this.panes.length >= MAX_PANES) return;
+      const next = this.panes.slice();
+      next.push({ tabId });
+      this.panes = next;
+      const newIdx = next.length - 1;
+      this.stashTabUi(this.currentConvoId);
+      this.focusedPaneIdx = newIdx;
+      const inMeta = this.conversations.some((c) => c.id === tabId);
+      if (inMeta && !this.tabs.get(tabId)) {
+        void this.loadConversation(tabId);
+      } else {
+        this.currentConvoId = tabId;
+      }
+      this.restoreTabUi(tabId);
+      this.persistTabs();
+      return;
+    }
+
+    if (this.panes.length === 1) {
+      // Single-pane → drop on a half = enter split. paneIdx is 0 or 1 from
+      // the half-detect. If the dragged tab IS the only-pane tab, ignore.
+      if (tabId === this.currentConvoId) return;
+      const other = paneIdx === 0 ? 1 : 0;
+      const next: PaneState[] = [{ tabId: null }, { tabId: null }];
+      next[paneIdx] = { tabId };
+      next[other] = { tabId: this.currentConvoId };
+      this.panes = next;
+      this.telemetry.event("pane.split.on", { via: "drag", p0: next[0].tabId, p1: next[1].tabId });
+    } else {
+      // Already split: same tab in target = focus only.
+      if (this.panes[paneIdx].tabId === tabId) {
+        this.setFocusedPane(paneIdx);
+        return;
+      }
+      // Same tab in a SIBLING pane = swap (mirror UX).
+      const siblingIdx = this.panes.findIndex((p, i) => i !== paneIdx && p.tabId === tabId);
+      if (siblingIdx !== -1) {
+        const swapped = this.panes.slice();
+        swapped[siblingIdx] = { tabId: this.panes[paneIdx].tabId };
+        swapped[paneIdx] = { tabId };
+        this.panes = swapped;
+        this.setFocusedPane(paneIdx);
+        return;
+      }
+      const next = this.panes.slice();
+      next[paneIdx] = { tabId };
+      this.panes = next;
+    }
+    // Move focus to the freshly-dropped pane + sync currentConvoId.
+    this.stashTabUi(this.currentConvoId);
+    this.focusedPaneIdx = paneIdx;
+    if (tabId !== this.currentConvoId) {
+      const inMeta = this.conversations.some((c) => c.id === tabId);
+      if (inMeta && !this.tabs.get(tabId)) {
+        void this.loadConversation(tabId);
+      } else {
+        this.currentConvoId = tabId;
+      }
+    }
+    this.restoreTabUi(tabId);
+    this.persistTabs();
+  }
+
+  /** When a tab closes, scrub it from any pane that pointed at it. Panes
+   *  become empty (null); the pane container stays so the user can drop a
+   *  different tab in or close the pane manually. */
+  private scrubTabFromPanes(id: string) {
+    let changed = false;
+    const next = this.panes.map((p) => {
+      if (p.tabId === id) { changed = true; return { tabId: null }; }
+      return p;
+    });
+    if (changed) this.panes = next;
   }
 
   /** Look up the TabState whose CLI session matches the event's session_id.
@@ -1246,6 +1448,15 @@ class AssistantStore {
   currentConvoId = $state<string | null>(null);
   conversations = $state<ConversationMeta[]>([]);
   openTabs = $state<string[]>([]);
+  /** v2 split-pane state. Always an array of length 1..MAX_PANES. Length 1 =
+   *  single-pane (no visible split). `currentConvoId` always mirrors
+   *  `panes[focusedPaneIdx].tabId` so existing send/openTab/closeTab paths
+   *  keep working without per-pane branching. */
+  panes = $state<PaneState[]>([{ tabId: null }]);
+  focusedPaneIdx = $state(0);
+  /** Set on tab dragstart so AssistantPane can render drop affordance.
+   *  Cleared on dragend. Cross-component drag state. */
+  draggingTabId = $state<string | null>(null);
 
   // #143: currentCliSessionId / convoCreatedAt / convoTitle now live on
   // TabState. These getters/setters delegate to the active tab so existing
@@ -1761,7 +1972,12 @@ class AssistantStore {
     try {
       localStorage.setItem(
         "rift.ui.tabs.v1",
-        JSON.stringify({ openTabs: this.openTabs, activeTabId: this.currentConvoId }),
+        JSON.stringify({
+          openTabs: this.openTabs,
+          activeTabId: this.currentConvoId,
+          panes: this.panes,
+          focusedPaneIdx: this.focusedPaneIdx,
+        }),
       );
     } catch { /* localStorage unavailable */ }
   }
@@ -1770,7 +1986,12 @@ class AssistantStore {
     try {
       const raw = localStorage.getItem("rift.ui.tabs.v1");
       if (!raw) return;
-      const parsed = JSON.parse(raw) as { openTabs?: unknown; activeTabId?: unknown };
+      const parsed = JSON.parse(raw) as {
+        openTabs?: unknown;
+        activeTabId?: unknown;
+        panes?: unknown;
+        focusedPaneIdx?: unknown;
+      };
       const ids = Array.isArray(parsed.openTabs)
         ? parsed.openTabs.filter((s): s is string => typeof s === "string")
         : [];
@@ -1782,6 +2003,26 @@ class AssistantStore {
         await this.loadConversation(active);
       } else if (valid.length > 0) {
         await this.loadConversation(valid[0]);
+      }
+      // Restore split state — N-pane shape. Accepts length 1..MAX_PANES.
+      // Stale tab refs are pruned to null (pane survives, empty). Legacy
+      // null/missing keeps single-pane default.
+      if (Array.isArray(parsed.panes) && parsed.panes.length >= 1 && parsed.panes.length <= MAX_PANES) {
+        const norm = (p: unknown): PaneState => {
+          const id = (p as { tabId?: unknown })?.tabId;
+          return { tabId: typeof id === "string" && valid.includes(id) ? id : null };
+        };
+        const restored = parsed.panes.map(norm);
+        // Keep at least one pane; if all restored panes are empty and we're
+        // single-length, that's fine — assignFocusedPane will fill on next open.
+        this.panes = restored.length > 0 ? restored : [{ tabId: null }];
+        const fi = typeof parsed.focusedPaneIdx === "number" ? parsed.focusedPaneIdx : 0;
+        this.focusedPaneIdx = Math.max(0, Math.min(fi, this.panes.length - 1));
+        // Sync currentConvoId to focused pane if needed.
+        const focused = this.panes[this.focusedPaneIdx].tabId;
+        if (focused && focused !== this.currentConvoId) {
+          await this.loadConversation(focused);
+        }
       }
       this.persistTabs();
     } catch (e) {
@@ -1825,6 +2066,7 @@ class AssistantStore {
     // Restore incoming tab's composer + attachments (loadConversation cleared
     // them; we re-fill from cache if the user had a draft mid-typing).
     this.restoreTabUi(id);
+    this.assignFocusedPane(id);
     this.persistTabs();
   }
 
@@ -1842,6 +2084,7 @@ class AssistantStore {
     // Drop the closing tab's UI scratch + TabState. The convo itself stays
     // on disk via scheduleSave below; only in-memory streaming state is retired.
     this.pruneTabUi(id);
+    this.scrubTabFromPanes(id);
     if (wasActive) {
       // Save unsaved tail of the closing tab before switching/clearing.
       if (this.messages.length > 0 && this.convoCreatedAt) {
@@ -1873,6 +2116,7 @@ class AssistantStore {
           this.lastNotice = null;
         }
         this.restoreTabUi(neighbor);
+        this.assignFocusedPane(neighbor);
       }
     }
     this.persistTabs();
@@ -1904,6 +2148,7 @@ class AssistantStore {
     // Fresh tab → empty composer (no cache entry yet).
     this.composerDraft = "";
     this.composerAttachments = [];
+    this.assignFocusedPane(id);
     this.persistTabs();
   }
 

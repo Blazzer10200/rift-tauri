@@ -1314,34 +1314,42 @@ impl AutoSyncEngine {
             .await
             .map_err(|e| format!("local walk: {e}"))?;
 
-        let mut new_entries: std::collections::HashMap<String, crate::state::sync_snapshot::Entry> =
-            std::collections::HashMap::new();
-        let mut local_only = 0usize;
-        for (rel, (rsize, rmtime)) in &remote_rel {
-            if let Some((lsize, lmtime, lpath)) = local_rel.get(rel) {
-                let key = format!("{remote_root_trim}/{rel}");
-                let sha = if *lsize <= crate::state::sync_snapshot::SHA1_MAX_BYTES {
-                    crate::state::SyncSnapshot::compute_sha1(lpath)
-                } else {
-                    None
-                };
-                new_entries.insert(
-                    key,
-                    crate::state::sync_snapshot::Entry {
-                        local_size: *lsize,
-                        local_mtime_utc: *lmtime,
-                        remote_size: *rsize,
-                        remote_mtime_utc: *rmtime,
-                        sha1: sha,
-                    },
-                );
+        let prefix_for_walk = remote_root_trim.clone();
+        let (new_entries, local_only) = tokio::task::spawn_blocking(move || {
+            let mut new_entries: std::collections::HashMap<
+                String,
+                crate::state::sync_snapshot::Entry,
+            > = std::collections::HashMap::new();
+            let mut local_only = 0usize;
+            for (rel, (rsize, rmtime)) in &remote_rel {
+                if let Some((lsize, lmtime, lpath)) = local_rel.get(rel) {
+                    let key = format!("{prefix_for_walk}/{rel}");
+                    let sha = if *lsize <= crate::state::sync_snapshot::SHA1_MAX_BYTES {
+                        crate::state::SyncSnapshot::compute_sha1(lpath)
+                    } else {
+                        None
+                    };
+                    new_entries.insert(
+                        key,
+                        crate::state::sync_snapshot::Entry {
+                            local_size: *lsize,
+                            local_mtime_utc: *lmtime,
+                            remote_size: *rsize,
+                            remote_mtime_utc: *rmtime,
+                            sha1: sha,
+                        },
+                    );
+                }
             }
-        }
-        for rel in local_rel.keys() {
-            if !remote_rel.contains_key(rel) {
-                local_only += 1;
+            for rel in local_rel.keys() {
+                if !remote_rel.contains_key(rel) {
+                    local_only += 1;
+                }
             }
-        }
+            (new_entries, local_only)
+        })
+        .await
+        .map_err(|e| format!("rebaseline SHA pass: {e}"))?;
 
         let (old_count, new_count) = self
             .snapshot

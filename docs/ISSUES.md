@@ -1377,11 +1377,17 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Fix:** Cache `streamingMsgIdx` on `send()`, direct `messages[idx] = fn(messages[idx])`; reset in `onDone`.
 
 ## 235. `compute_sha1` blocks tokio executor in flush + rebaseline paths
+
+> **SHIPPED v0.4.15-alpha (uncommitted)** — three sites wrapped in `tokio::task::spawn_blocking`: `flush.rs:471` (phantom-conflict SHA-equality check), `flush.rs:581` (post-upload baseline SHA capture), and `auto_sync.rs` rebaseline pass — entire `for (rel, ...) in &remote_rel { ... compute_sha1 ... }` loop moved into a single `spawn_blocking` closure that returns `(new_entries, local_only)`. SHA work no longer pins executor threads during flush or full-tree rebaseline.
+
 - **Where:** [auto_sync/flush.rs:471](../src-tauri/src/sync/auto_sync/flush.rs#L471), [auto_sync.rs:1290-1308](../src-tauri/src/sync/auto_sync.rs#L1290-L1308)
 - **Symptom:** `std::fs::File` + `BufReader::read` loop inside `process_entry_body` (a `tokio::spawn` future). Per-file SHA1 up to 64MiB blocks the executor thread.
 - **Fix:** Wrap in `tokio::task::spawn_blocking(|| SyncSnapshot::compute_sha1(path)).await`. Same fix for rebaseline pass — move SHA inside the existing `spawn_blocking` closure.
 
 ## 236. N+1 SFTP downloads in `lock_presence::poll_once` + heartbeat
+
+> **SHIPPED v0.4.15-alpha (uncommitted) — parallelize subset.** Both serial loops fanned out via `FuturesUnordered`: `refresh_my_locks` heartbeat upload (`lock_presence.rs:265-283`) and `poll_once` per-entry `try_read_lock` read (`:304-337`). 10 locks now complete in ~1 RTT wall-time instead of 10× serial. Post-processing (stale-delete + push into `found`) kept serial after each future resolves — simpler than racing with the delete side-effect. `try_read_lock` tmpdir thrash at `:353-364` left as-is (separate concern from the N+1 fan-out — `cat`-exec replacement deferred since `shell_quote` is `pub(super)` and a `cat_remote` helper on `SftpClient` is out of scope here).
+
 - **Where:** [lock_presence.rs:304-337](../src-tauri/src/sync/lock_presence.rs#L304-L337), [:265-283](../src-tauri/src/sync/lock_presence.rs#L265-L283), [:353-364](../src-tauri/src/sync/lock_presence.rs#L353-L364)
 - **Symptom:** Per-lock `try_read_lock` is serial: `download_file` → tmpdir → read → cleanup. 10 locks × 30-60ms Tailscale RTT = ~300ms blocked. Plus per-poll temp-dir churn.
 - **Fix:** Replace `download_file` w/ `sftp.exec("cat {path}")` (avoid tmpdir), parallelize via `FuturesUnordered`. Same fan-out for heartbeat upload loop.

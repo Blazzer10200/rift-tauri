@@ -262,22 +262,37 @@ impl LockPresence {
                 }
             })
             .collect();
-        for lock_path in due {
-            if !self.my_locks.contains(&lock_path) {
-                self.last_heartbeat.remove(&lock_path);
-                continue;
-            }
-            let body = serde_json::json!({
-                "user": self.my_user,
-                "host": self.my_host,
-                "since": Utc::now().to_rfc3339(),
-            });
-            if self
-                .sftp
-                .upload_bytes(body.to_string().as_bytes(), &lock_path)
-                .await
-                .is_ok()
-            {
+        use futures::stream::{FuturesUnordered, StreamExt};
+        let due_mine: Vec<String> = due
+            .into_iter()
+            .filter(|lp| {
+                if !self.my_locks.contains(lp) {
+                    self.last_heartbeat.remove(lp);
+                    false
+                } else {
+                    true
+                }
+            })
+            .collect();
+        let now_iso = Utc::now().to_rfc3339();
+        let mut up_tasks: FuturesUnordered<_> = due_mine
+            .into_iter()
+            .map(|lock_path| {
+                let body = serde_json::json!({
+                    "user": self.my_user.clone(),
+                    "host": self.my_host.clone(),
+                    "since": now_iso.clone(),
+                })
+                .to_string();
+                let sftp = Arc::clone(&self.sftp);
+                async move {
+                    let ok = sftp.upload_bytes(body.as_bytes(), &lock_path).await.is_ok();
+                    (lock_path, ok)
+                }
+            })
+            .collect();
+        while let Some((lock_path, ok)) = up_tasks.next().await {
+            if ok {
                 self.last_heartbeat.insert(lock_path, Instant::now());
             }
         }
@@ -299,6 +314,7 @@ impl LockPresence {
             }
         };
 
+        use futures::stream::{FuturesUnordered, StreamExt};
         let mut found: Vec<RemoteLock> = Vec::new();
         for folder in &folders {
             let entries = match self
@@ -309,11 +325,16 @@ impl LockPresence {
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            for e in entries {
-                if self.my_locks.contains(&e.full_path) {
-                    continue;
-                }
-                let body = match self.try_read_lock(&e.full_path).await {
+            let mut read_tasks: FuturesUnordered<_> = entries
+                .into_iter()
+                .filter(|e| !self.my_locks.contains(&e.full_path))
+                .map(|e| async move {
+                    let body = self.try_read_lock(&e.full_path).await;
+                    (e, body)
+                })
+                .collect();
+            while let Some((e, body_opt)) = read_tasks.next().await {
+                let body = match body_opt {
                     Some(b) => b,
                     None => continue,
                 };

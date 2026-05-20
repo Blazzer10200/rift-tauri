@@ -4,7 +4,7 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare } from "lucide-svelte";
+  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
   let dragFromIdx = $state<number | null>(null);
@@ -12,6 +12,20 @@
 
   const tabs = $derived(assistant.openTabs);
   const activeId = $derived(assistant.currentConvoId);
+  const splitActive = $derived(assistant.splitActive);
+  const canAddPane = $derived(assistant.canAddPane);
+  const paneCount = $derived(assistant.panes.length);
+
+  /** Returns the 1-based pane index whose slot points at `id`, only when
+   *  that pane is NOT the focused one (so we don't double-mark the active
+   *  tab's pane label — the .active style already covers it). Else null. */
+  function paneIndexFor(id: string): number | null {
+    if (!splitActive) return null;
+    const idx = assistant.panes.findIndex((p) => p.tabId === id);
+    if (idx === -1) return null;
+    if (idx === assistant.focusedPaneIdx) return null;
+    return idx + 1;
+  }
 
   const titleById = $derived.by(() => {
     const m = new Map<string, string>();
@@ -26,7 +40,7 @@
   }
 
   function isStreamingTab(id: string): boolean {
-    return assistant.streaming && assistant.currentConvoId === id;
+    return assistant.tabFor(id)?.streaming ?? false;
   }
 
   function onTabClick(id: string) {
@@ -44,6 +58,7 @@
 
   function onDragStart(e: DragEvent, idx: number) {
     dragFromIdx = idx;
+    assistant.draggingTabId = tabs[idx] ?? null;
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = "move";
       e.dataTransfer.setData("text/plain", String(idx));
@@ -84,6 +99,7 @@
   function onDragEnd() {
     dragFromIdx = null;
     dragOverIdx = null;
+    assistant.draggingTabId = null;
   }
 
   // -------- right-side chat status chips (absorbed from AssistantHeader) -----
@@ -193,6 +209,7 @@
     {#each tabs as id, idx (id)}
       <div
         class="tab"
+        class:in-pane={paneIndexFor(id) !== null}
         class:active={id === activeId}
         class:drop-target={dragOverIdx === idx && dragFromIdx !== null && dragFromIdx !== idx}
         role="tab"
@@ -216,6 +233,9 @@
           {/if}
         </span>
         <span class="title">{titleFor(id)}</span>
+        {#if paneIndexFor(id) !== null}
+          <span class="pane-badge" title="Open in pane {paneIndexFor(id)}">{paneIndexFor(id)}</span>
+        {/if}
         <button
           class="close"
           type="button"
@@ -302,6 +322,23 @@
         <span class="task-chip">{taskDone}/{taskCount}</span>
       </button>
     {/if}
+
+    <button
+      class="split-toggle"
+      class:active={splitActive}
+      type="button"
+      onclick={() => assistant.addPane()}
+      disabled={!canAddPane}
+      title={canAddPane
+        ? `Add pane (Ctrl+\\) — ${paneCount} of 4`
+        : `Max panes reached (${paneCount}/4)`}
+      aria-label="Add pane"
+    >
+      <SplitSquareHorizontal size={12} />
+      {#if splitActive}
+        <span class="split-count">{paneCount}</span>
+      {/if}
+    </button>
   </div>
 
   <button
@@ -386,6 +423,32 @@
   }
   .tab.drop-target {
     box-shadow: -2px 0 0 var(--accent);
+  }
+  /* Split-pane indicator — when a non-focused pane owns this tab, mark it
+     with a dim accent underline. The numbered .pane-badge tells the user
+     WHICH pane (1-4). Focused-pane tabs use the normal .active style. */
+  .tab.in-pane::before {
+    content: "";
+    position: absolute;
+    left: 6px; right: 6px;
+    bottom: 2px;
+    height: 2px;
+    border-radius: 2px;
+    background: color-mix(in oklch, var(--accent) 45%, transparent);
+    opacity: 0.7;
+  }
+  .pane-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 14px; height: 14px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--accent) 18%, var(--bg-elev-2));
+    color: color-mix(in oklch, var(--accent) 80%, var(--fg));
+    font-size: 9px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    flex-shrink: 0;
   }
 
   .icon {
@@ -603,6 +666,36 @@
     border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
   }
   .dock-toggle.pulse { animation: dock-pulse 700ms ease-out; }
+
+  .split-toggle {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 3px;
+    min-width: 26px; height: 22px;
+    padding: 0 5px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--fg-muted);
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+  .split-toggle:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
+  .split-toggle.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+  }
+  .split-toggle:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .split-count {
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
   @keyframes dock-pulse {
     0%   { box-shadow: 0 0 0 0 var(--accent-soft); border-color: var(--accent); }
     60%  { box-shadow: 0 0 0 6px transparent; }
