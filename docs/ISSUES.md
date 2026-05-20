@@ -277,6 +277,9 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 
 ## Priority tiers
 
+**S120 (uncommitted) — Wave-2 backend MED + LOW sweep, ~40 issues SHIPPED.** Full lane breakdown in `docs/HANDOFF.md`. New SHIPPED: #54 #55 #56 #68 #70 #72 #73 #75 #77 #79 #80 #83 #84 #86 #91 #93 #94 #95 #97 #98 #101 #105 #110 #111 #114 #116 #117 #118 #121 #122 #123 #124 #126 #128 #130 #132 #133 #136 #137 #138. Pending `/git-ship` → v0.4.17-alpha.
+
+
 **Tier 0 — verify before anything else**
 - ~~#19 `apply_updates` autosync-stop~~ — verified 2026-05-19, non-bug (Tauri cmd already handles it; doc tightened)
 
@@ -499,16 +502,19 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [lib.rs:421](../src-tauri/src/lib.rs#L421)
 - **Symptom:** No consult of `AutoSyncState` — always `SftpClient::connect` fresh. Two concurrent SSH sessions for same server during normal use → server `MaxSessions` pressure.
 - **Fix:** Pass `AutoSyncState`; reuse engine's SFTP client when `server_key` matches.
+> SHIPPED v0.4.17-alpha S120 — `scan_drift` now takes `AutoSyncState`; checks `engine.profile_key() == server_key` and reuses `engine.sftp()` + `engine.snapshot()` when matched. Cold path (no engine for that server) still connects fresh and closes after. Snapshot reuse also avoids `set` race between flush loop and ad-hoc scanner.
 
 ## 55. `resolve_conflicts_bulk` skips canonicalization vs `validate_watched_local_path`
 - **Where:** [lib.rs:727](../src-tauri/src/lib.rs#L727)
 - **Symptom:** `owns_local_path` called with raw `PathBuf::from(p)`. Symlink / relative-prefix paths pass `reject_path_traversal` (`..`-only check) then fail `owns_local_path` silently → pushed as `false` with no error surfaced.
 - **Fix:** Canonicalize before ownership check; extract `validate_and_own` helper shared with [lib.rs:621-653](../src-tauri/src/lib.rs#L621-L653).
+> SHIPPED v0.4.17-alpha S120 — new `canonicalize_owned_path(engine, raw, label)` helper factored out of `validate_watched_local_path` so bulk callers can avoid the state-lock overhead. `resolve_conflicts_bulk` uses it inline; per-row failure emits a Block activity row w/ the actual reason instead of silent `false`.
 
 ## 56. `delete_server` doesn't stop the active engine before deleting profile
 - **Where:** [lib.rs:858](../src-tauri/src/lib.rs#L858)
 - **Symptom:** Removes profile from disk; engine continues w/ live SFTP/watchers/locks for a server that no longer exists in config — and can never be cleanly stopped via UI.
 - **Fix:** Make async; accept `AutoSyncState` + `TunnelState`; stop active engine when key matches, or return error requiring frontend disconnect first.
+> SHIPPED v0.4.17-alpha S120 — `delete_server` now `async` w/ `AutoSyncState` + `TunnelState`. Engine stops before profile delete when `profile_key() == key`; tunnel teardown follows. Mirrors `stop_autosync` ordering.
 
 ## 57. `download_paths` cancellation token not cleared on SFTP connect failure
 - **Where:** [lib.rs:1117-1122](../src-tauri/src/lib.rs#L1117-L1122)
@@ -580,6 +586,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mcp_server.rs:650-653](../src-tauri/src/assistant/mcp_server.rs#L650-L653)
 - **Symptom:** Malformed JSON silently `continue`s. MCP 2025-03-26 spec requires `-32700 Parse error` response when id is derivable; current code doesn't try.
 - **Fix:** Attempt to parse minimal `{"id": ...}` before discarding; if id found, send `-32700`.
+> SHIPPED v0.4.17-alpha S120 — `IdOnly` probe parses minimal `{id}` on parse-fail; emits `-32700` JSON-RPC response when id derivable. Malformed payloads without id still drop silently (no addressable id to reply to).
 
 ## 69. MCP `handle_conn` unauthorized write may not flush before drop
 - **Where:** [assistant/remote_bridge.rs:144-147](../src-tauri/src/assistant/remote_bridge.rs#L144-L147)
@@ -591,6 +598,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mcp_server.rs:656-659](../src-tauri/src/assistant/mcp_server.rs#L656-L659)
 - **Symptom:** `serde_json::to_string(&r)` fail → `continue`. MCP client hangs waiting for the response that never arrives.
 - **Fix:** On serialize fail, `return` from `run_stdio` or write to stderr + `break`. Don't continue.
+> SHIPPED v0.4.17-alpha S120 — serialize-fail arm now `return`s instead of `continue`. MCP child exits cleanly, parent observes disconnect (vs hanging waiting for the lost response).
 
 ## 71. MCP `tool_grep` reads whole file before 8KB binary check
 - **Where:** [assistant/mcp_server.rs:253-258](../src-tauri/src/assistant/mcp_server.rs#L253-L258)
@@ -602,11 +610,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mcp_server.rs:551-561](../src-tauri/src/assistant/mcp_server.rs#L551-L561), [:600](../src-tauri/src/assistant/mcp_server.rs#L600)
 - **Symptom:** Tools list shows `sync_status` while bridge env vars set, but call path at L600 invokes `tool_sync_status` unconditionally; internal check exists but is redundant. Env-stripped MCP launchers cause silent disappearance.
 - **Fix:** Guard call-path w/ `bridge_enabled()` same as list-path; add comment making env-static assumption explicit.
+> SHIPPED v0.4.17-alpha S120 — `tools/call` match arms now use `"sync_status" if bridge_enabled()` + `"remote_bash" if remote_shell_enabled()`. Env-stripped MCP launchers see "unknown tool" (callable + listable parity).
 
 ## 73. Drift scanner cancel race — folder loop continues past cancel signal
 - **Where:** [drift_scanner.rs:138](../src-tauri/src/sync/drift_scanner.rs#L138)
 - **Symptom:** Cancel within the batch-listing `select!` window doesn't mark `cancelled` for the per-folder phase. `scan_folder` already started will complete fully even if user cancelled.
 - **Fix:** Check cancel before each `scan_folder`; propagate CT into `scan_folder` for SFTP-hash interruption.
+> SHIPPED v0.4.17-alpha S120 — `scan_folder` signature now takes `cancel: Option<&CancellationToken>`. Pre-iteration check inside the all_keys loop short-circuits the per-entry hash budget so an in-flight folder honors Cancel between SFTP hash calls. Outer pre-folder check already in place.
 
 ## 74. `walk_local` panic → empty map → mass `ToPull` (data loss path)
 
@@ -619,6 +629,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [drift_scanner.rs:464](../src-tauri/src/sync/drift_scanner.rs#L464)
 - **Symptom:** No baseline + sizes match + hash budget exhausted → mtime equality falls through to `ToPush` (local wins). A re-extracted/rsync'd copy has identical mtime → arbitrary classification.
 - **Fix:** When sizes match + budget zero, bucket as `Conflict` w/ explicit reason; or don't deduct budget for the opportunistic-equality path.
+> SHIPPED v0.4.17-alpha S120 — size-equal + mtime-mismatch + content-unverified now buckets as `Conflict` w/ reason "sizes match but mtimes diverged (content unverified)" instead of arbitrary mtime-newer-wins. Re-extracted / rsync'd identical copies no longer silently push or pull.
 
 ## 76. `delete_local_one` empty-dir cleanup can walk above resource root
 - **Where:** [drift_watcher.rs:293](../src-tauri/src/sync/drift_watcher.rs#L293)
@@ -630,6 +641,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [lock_presence.rs:167](../src-tauri/src/sync/lock_presence.rs#L167)
 - **Symptom:** `my_locks.insert` before `sftp.upload_bytes`. `poll_once` skips entries in `my_locks` (L313); if two concurrent `acquire()` race on same path, second returns "already own" but first then fails → lock removed from `my_locks` but never on remote.
 - **Fix:** Insert into `my_locks` only after `upload_bytes` Ok; use separate `pending_lock` set for in-flight reservation.
+> SHIPPED v0.4.17-alpha S120 — added `pending_locks: DashSet<String>` for in-flight reservation. `acquire()` first checks `my_locks.contains` (confirmed-owned short-circuit), then `pending_locks.insert` (race-loser bails). `my_locks.insert` happens only on upload success. Pending set is cleared on both paths.
 
 ## 78. FiveM bypass requires trailing slash — bare `web/build` dir mis-ignored
 - **Where:** [sync/ignore.rs:197](../src-tauri/src/sync/ignore.rs#L197)
@@ -641,11 +653,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sync/ignore.rs:205](../src-tauri/src/sync/ignore.rs#L205)
 - **Symptom:** `if !A { if !B { continue } }` is logically correct (skip when both fail) but reads as "skip when match", one mutation away from inversion bug. Clippy flags `redundant_else`.
 - **Fix:** Rewrite as positive-flow guard `if lower.contains(needle) || lower.starts_with(leading) { ... }`.
+> SHIPPED v0.4.17-alpha S120 — collapsed nested `!A { !B { continue } }` into a single positive-flow `if !lower.contains(&needle) && !lower.starts_with(&leading) { continue; }`. Equivalent logic, harder to invert by accident.
 
 ## 80. `atomic_write_json` temp file collides on concurrent saves of same snapshot
 - **Where:** [state/paths.rs:53](../src-tauri/src/state/paths.rs#L53)
 - **Symptom:** `path.with_extension("json.tmp")` is deterministic. `SyncSnapshot::set` (flush loop) and `replace_under` (rebaseline) both call `save_locked` → same `snapshot-<key>.json.tmp` truncates the other's in-flight write.
 - **Fix:** Append `{pid}` or random suffix; or use `tempfile::NamedTempFile` in same dir.
+> SHIPPED v0.4.17-alpha S120 — tmp name now `<basename>.<pid>-<counter>.json.tmp` (`AtomicU64` counter, per-call). `set` flush loop and `replace_under` rebaseline can no longer truncate each other's tmp. Rename target still canonical.
 
 ## 81. `SyncSnapshot::set`/`forget` silently discard save errors
 - **Where:** [state/sync_snapshot.rs:74](../src-tauri/src/state/sync_snapshot.rs#L74), [:80](../src-tauri/src/state/sync_snapshot.rs#L80)
@@ -663,11 +677,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sftp/mod.rs:281-288](../src-tauri/src/sftp/mod.rs#L281-L288)
 - **Symptom:** `close()` iterates `w.sftp.close()` but never drops/clears `Worker.handle`. Held `Arc<Worker>` clones (from batch ops) keep SSH session alive past intended close. Up to 4 leaked sessions per `SftpClient`.
 - **Fix:** After SFTP-close loop, clear `self.workers` to release Arc references; or explicit `Arc::try_unwrap` per worker.
+> SHIPPED v0.4.17-alpha S120 — `close()` drains the `Mutex<Vec<Arc<Worker>>>` via `std::mem::take` instead of cloning. Canonical store releases strong refs immediately; only in-flight batch ops keep workers alive past close (cooperative shutdown w/ those is a separate concern).
 
 ## 84. `rename_via` TOCTOU — exists-check + rename non-atomic
 - **Where:** [sftp/ops.rs:158-165](../src-tauri/src/sftp/ops.rs#L158-L165)
 - **Symptom:** SFTP has no conditional-rename primitive; check + rename has inherent race. Lock-presence write-back uses this and may silently overwrite a concurrent writer.
 - **Fix:** Document explicitly; for authoritative-overwrite paths prefer `rename_overwriting_via` w/ explicit intent.
+> SHIPPED v0.4.17-alpha S120 — doc-comment added above `rename_via` calling out the known TOCTOU and pointing at `rename_overwriting_via` for intent-clarity. No behavior change.
 
 ## 85. `list_recursive_batch` belt-and-braces retry has no timeout
 - **Where:** [sftp/list.rs:179-193](../src-tauri/src/sftp/list.rs#L179-L193)
@@ -679,6 +695,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sftp/ops.rs:98-154](../src-tauri/src/sftp/ops.rs#L98-L154)
 - **Symptom:** `symlink_metadata`/`read_dir`/`remove_file`/`remove_dir` all uncapped. A wedged session during multi-file delete blocks the entire delete-drift path.
 - **Fix:** Wrap each op in `with_t(T_QUICK, ...)` / `with_t(T_NORMAL, ...)` matching transfer.rs discipline.
+> SHIPPED v0.4.17-alpha S120 — added file-local `ops_with_t` + `OPS_T_QUICK` / `OPS_T_NORMAL` constants (to avoid promoting transfer.rs's helpers cross-module). Each SFTP op in `delete_recursive_via` now timeout-bounded.
 
 ## 87. `upload_bytes` write timeout leaks SFTP file handle
 - **Where:** [sftp/transfer.rs:215-216](../src-tauri/src/sftp/transfer.rs#L215-L216)
@@ -708,6 +725,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 91. `enqueue_for_flush_batch` declared `async` with no `.await`
 - **Where:** [auto_sync.rs:916](../src-tauri/src/sync/auto_sync.rs#L916) — body L916-967 all sync DashMap ops.
 - **Fix:** Drop `async`; update [lib.rs:675](../src-tauri/src/lib.rs#L675) caller.
+> SHIPPED v0.4.17-alpha S120 — `async` dropped; Tauri-cmd caller in lib.rs + internal caller in `resolve_conflict::ForceLocal` arm both updated to drop `.await`.
 
 ## 92. `ActivityRow::default()` uses deprecated chrono associated-fn form
 - **Where:** [auto_sync.rs:124](../src-tauri/src/sync/auto_sync.rs#L124) — `DateTime::<Utc>::from_timestamp(0,0).unwrap_or_else(Utc::now)`.

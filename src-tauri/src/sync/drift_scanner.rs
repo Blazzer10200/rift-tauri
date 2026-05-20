@@ -191,7 +191,7 @@ impl<'a> DriftScanner<'a> {
                 .get(&f.remote_root)
                 .cloned()
                 .unwrap_or_default();
-            let folder_result = self.scan_folder(f, &remote_hits).await;
+            let folder_result = self.scan_folder(f, &remote_hits, cancel).await;
             match folder_result {
                 FolderScan::Drift(mut v) => entries.append(&mut v),
                 FolderScan::RemoteMissing => {
@@ -217,7 +217,12 @@ impl<'a> DriftScanner<'a> {
         }
     }
 
-    async fn scan_folder(&self, f: &FolderTarget, remote_hits: &[RemoteEntry]) -> FolderScan {
+    async fn scan_folder(
+        &self,
+        f: &FolderTarget,
+        remote_hits: &[RemoteEntry],
+        cancel: Option<&CancellationToken>,
+    ) -> FolderScan {
         let mut hash_budget: i32 = REMOTE_HASH_BUDGET_PER_FOLDER;
         // Local recursive walk. Full ignore-rule parity now via `ignore::should_ignore`.
         // Walk runs on a blocking thread so a multi-thousand-file resource
@@ -290,6 +295,13 @@ impl<'a> DriftScanner<'a> {
         // dropped >50% — so a legitimate workflow that bulk-deletes <50% of a
         // resource still propagates correctly.
         if let Some(snap) = self.snapshot {
+            // #138: `count_under` returns the number of files (not dirs)
+            // recorded in the snapshot under this prefix. Snapshot rows are
+            // keyed by full remote path AND only files are ever inserted
+            // (`SyncSnapshot::set` is called by entry-level dispatch, never
+            // on directory metadata). The compared listing count below must
+            // therefore filter out `is_dir` entries to make the >50%-shrink
+            // arithmetic apples-to-apples — see filter on the next line.
             let baseline_n = snap.count_under(&f.remote_root);
             // Count just the file entries from remote_hits — dirs returned by
             // some listing paths (worker SFTP) inflate the count otherwise.
@@ -355,6 +367,15 @@ impl<'a> DriftScanner<'a> {
 
         let mut entries = Vec::new();
         for rel in all_keys {
+            // #73: per-entry cancel check. Each iteration may issue 0-2
+            // `get_remote_sha1` calls (jitter detect + false-conflict
+            // collapse); without this, an in-flight scan_folder would
+            // complete fully even after the user clicked Cancel.
+            if let Some(ct) = cancel {
+                if ct.is_cancelled() {
+                    break;
+                }
+            }
             let l = local_map.get(rel);
             let r = remote_map.get(rel);
             let has_local = l.is_some();
@@ -487,7 +508,17 @@ impl<'a> DriftScanner<'a> {
                     }
                     continue;
                 }
-                if ls.mtime >= rs.mtime {
+                // #75: sizes match but mtime tolerance failed AND we couldn't
+                // confirm content-equality (hash failed / budget exhausted /
+                // file too big). Arbitrary mtime-newer wins risks silent
+                // overwrite of a re-extracted/rsync'd identical copy — surface
+                // as Conflict so the user resolves explicitly.
+                if ls.size == rs.size {
+                    (
+                        DriftBucket::Conflict,
+                        "no baseline — sizes match but mtimes diverged (content unverified)".into(),
+                    )
+                } else if ls.mtime >= rs.mtime {
                     (DriftBucket::ToPush, "no baseline — local newer on first scan".into())
                 } else {
                     (DriftBucket::ToPull, "no baseline — remote newer on first scan".into())
@@ -544,11 +575,16 @@ fn walk_local(root: &Path, dir: &Path, out: &mut HashMap<String, LocalStat>) {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if ignore::should_ignore(name) {
-            continue;
-        }
         let Ok(meta) = entry.metadata() else { continue };
+        // #137: split-by-kind. Dirs get the bare-name probe so a `node_modules/`
+        // is pruned BEFORE we descend. Files get the rel-path probe (which is
+        // a strict superset of bare-name for files — `should_ignore("foo.log")`
+        // is also reachable via the rel-path string). One ignore call per
+        // entry instead of two.
         if meta.is_dir() {
+            if ignore::should_ignore(name) {
+                continue;
+            }
             walk_local(root, &path, out);
             continue;
         }

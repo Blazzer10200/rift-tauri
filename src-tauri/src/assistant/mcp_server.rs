@@ -617,8 +617,11 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "read_file" => tool_read_file(&args, roots),
                 "list_dir" => tool_list_dir(&args, roots),
                 "grep" => tool_grep(&args, roots),
-                "sync_status" => tool_sync_status(),
-                "remote_bash" => tool_remote_bash(&args),
+                // #72: gate call-path the same way the list-path gates the
+                // tool declaration. Env-stripped MCP launchers see "unknown
+                // tool" instead of a silent ignore + no response.
+                "sync_status" if bridge_enabled() => tool_sync_status(),
+                "remote_bash" if remote_shell_enabled() => tool_remote_bash(&args),
                 other => Err(format!("unknown tool: {other}")),
             };
             match res {
@@ -669,13 +672,38 @@ pub fn run_stdio() {
         }
         let req: RpcRequest = match serde_json::from_str(line) {
             Ok(r) => r,
-            Err(_) => continue, // ignore garbage lines
+            // #68: MCP 2025-03-26 spec requires -32700 Parse error reply
+            // when an id is derivable from the malformed payload. Try a
+            // minimal `{id: ...}` parse before discarding.
+            Err(_) => {
+                #[derive(Deserialize)]
+                struct IdOnly { id: Option<Value> }
+                if let Ok(probe) = serde_json::from_str::<IdOnly>(line) {
+                    if let Some(id) = probe.id {
+                        let err_resp = RpcResponse {
+                            jsonrpc: "2.0",
+                            id,
+                            result: None,
+                            error: Some(RpcError { code: -32700, message: "parse error".into() }),
+                        };
+                        if let Ok(s) = serde_json::to_string(&err_resp) {
+                            if writeln!(out, "{}", s).is_err() { return; }
+                            if out.flush().is_err() { return; }
+                        }
+                    }
+                }
+                continue;
+            }
         };
         let resp = handle_request(req, &roots);
         if let Some(r) = resp {
             let s = match serde_json::to_string(&r) {
                 Ok(s) => s,
-                Err(_) => continue,
+                // #70: a serialize failure means the client is waiting for a
+                // response that will never arrive. `continue` would hang the
+                // peer; bail the loop so the stdio child exits and the parent
+                // sees the disconnect.
+                Err(_) => return,
             };
             if writeln!(out, "{}", s).is_err() {
                 return;

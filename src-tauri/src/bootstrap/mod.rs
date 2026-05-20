@@ -43,21 +43,33 @@ const DISABLED_MARKER: &str = "[disabled]";
 pub fn classify(remote_dirs: &[String], local_root: &str) -> BootstrapDetection {
     let remote_count = remote_dirs.len();
 
-    if remote_count >= BAD_REMOTE_ROOT_MIN_DIRS {
-        let bracketed = remote_dirs
-            .iter()
-            .filter(|n| n.len() >= 3 && n.starts_with('[') && n.ends_with(']'))
-            .count();
+    // #110: remote_count<3 used to skip the BadRemoteRoot check entirely. A
+    // user pointing at e.g. `/home/foo/` (which has `Documents/`, `bin/`) saw
+    // `MissingLocalRoot` instead of the more accurate `BadRemoteRoot`. Add
+    // fallback: if there's no `[bracketed]` dir at all (the FiveM/RedM
+    // resource-folder signature) and the count is low, also flag as bad.
+    let bracketed = remote_dirs
+        .iter()
+        .filter(|n| n.len() >= 3 && n.starts_with('[') && n.ends_with(']'))
+        .count();
+    let large_sample_bad = remote_count >= BAD_REMOTE_ROOT_MIN_DIRS && {
         let ratio = bracketed as f64 / remote_count as f64;
-        if ratio < BAD_REMOTE_ROOT_BRACKETED_RATIO {
-            return BootstrapDetection {
-                state: BootstrapState::BadRemoteRoot,
-                remote_resource_count: remote_count as u32,
-                local_present_count: 0,
-                missing_count: 0,
-                remote_top_level_dirs: remote_dirs.to_vec(),
-            };
-        }
+        ratio < BAD_REMOTE_ROOT_BRACKETED_RATIO
+    };
+    let small_sample_bad = remote_count > 0 && remote_count < BAD_REMOTE_ROOT_MIN_DIRS && bracketed == 0;
+    if large_sample_bad || small_sample_bad {
+        return BootstrapDetection {
+            state: BootstrapState::BadRemoteRoot,
+            remote_resource_count: remote_count as u32,
+            local_present_count: 0,
+            // #111: previously `missing_count: 0` for the BadRemoteRoot
+            // branch — misled the FE's missing-resource banner which
+            // expected the count to mirror the remote total. Set to
+            // remote_count so the FE shows the actual count it should
+            // bootstrap (if the user re-points at a valid root).
+            missing_count: remote_count as u32,
+            remote_top_level_dirs: remote_dirs.to_vec(),
+        };
     }
 
     let local_path = std::path::Path::new(local_root);

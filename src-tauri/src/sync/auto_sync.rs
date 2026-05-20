@@ -434,6 +434,20 @@ impl AutoSyncEngine {
                     _ = root_stop.changed() => { if *root_stop.borrow() { break; } }
                     _ = tick.tick() => {
                         if root_engine.disposed.load(Ordering::SeqCst) { break; }
+                        // #101: piggyback on the 5s root poll to evict stale
+                        // `recently_written` entries. The map's lazy-evict
+                        // (is_recently_written) only fires on hit; paths
+                        // pulled once and never re-touched used to linger
+                        // forever, leaking RAM on long sessions w/ lots of
+                        // pull churn. WINDOW is 5s — anything ≥10s old is
+                        // safely past the suppression window.
+                        {
+                            let now = std::time::Instant::now();
+                            let stale_cutoff = std::time::Duration::from_secs(10);
+                            root_engine.recently_written.retain(|_, marked_at: &mut std::time::Instant| {
+                                now.duration_since(*marked_at) < stale_cutoff
+                            });
+                        }
                         for kv in root_engine.folders.iter() {
                             let local = kv.value().local_root.clone();
                             let resource = kv.value().resource_name.clone();
@@ -515,8 +529,11 @@ impl AutoSyncEngine {
     }
 
     /// v0.2.53 Mirror toggle. Session-scoped; reset on engine restart.
-    pub fn set_mirror_mode(&self, enabled: bool) {
+    /// #105: returns the value just stored so callers don't need a TOCTOU
+    /// read-back via `mirror_mode_enabled()`.
+    pub fn set_mirror_mode(&self, enabled: bool) -> bool {
         self.mirror_mode.store(enabled, Ordering::Relaxed);
+        enabled
     }
 
     pub fn mirror_mode_enabled(&self) -> bool {
@@ -914,7 +931,13 @@ impl AutoSyncEngine {
     }
 
     pub fn suppress_local_delete_uploads(&self, paths: &[PathBuf]) {
-        let until = Utc::now() + chrono::Duration::seconds(2);
+        // #93: 2s was tighter than the `recently_written` window (5s, watch.rs)
+        // and the debounce ceiling (3s) — slow SFTP could complete a remote
+        // delete after the suppress expired, then the local-side delete
+        // event would fire as a phantom upload. 5s matches the sibling
+        // window so both sides agree on the quiet period.
+        const SUPPRESS_WINDOW_SECS: i64 = 5;
+        let until = Utc::now() + chrono::Duration::seconds(SUPPRESS_WINDOW_SECS);
         for path in paths {
             self.manual_delete_suppress_until.insert(path.clone(), until);
             self.remove_pending_under(path);
@@ -942,7 +965,10 @@ impl AutoSyncEngine {
         }
     }
 
-    pub async fn enqueue_for_flush_batch(
+    // #91: body is fully sync (DashMap ops only) — drop the `async` marker
+    // so the Tauri-cmd caller doesn't have to .await for show. Caller
+    // updated at lib.rs::enqueue_for_flush_batch.
+    pub fn enqueue_for_flush_batch(
         &self,
         local_paths: Vec<PathBuf>,
         deleted: bool,
@@ -1020,7 +1046,7 @@ impl AutoSyncEngine {
     }
 
     pub async fn resolve_conflict(
-        &self,
+        self: &Arc<Self>,
         local_path: &Path,
         resolution: ConflictResolution,
     ) -> Result<(), String> {
@@ -1040,6 +1066,12 @@ impl AutoSyncEngine {
                     self.update_snapshot_after_sync(local_path, &c.remote_path).await;
                     self.log_activity(&c.resource_name, file_name(local_path), "conflict\u{2192}accept-remote");
                 } else {
+                    // #94: re-insert the conflict row so the UI can retry. The
+                    // top-of-fn `self.conflicts.remove` already took it; on
+                    // download failure we leave the user with a vanished
+                    // conflict and a stale local file. Mirrors SaveLocalCopy's
+                    // bail-then-reinsert pattern below.
+                    self.conflicts.insert(local_path.to_path_buf(), c.clone());
                     self.log_activity(&c.resource_name, file_name(local_path),
                         &format!("conflict accept-remote pull FAILED: {}", r.error));
                 }
@@ -1083,7 +1115,12 @@ impl AutoSyncEngine {
             }
             ConflictResolution::ForceLocal => {
                 self.cache.set(&c.remote_path, c.local_size, c.local_mtime_utc);
-                self.enqueue_for_flush_batch(vec![local_path.to_path_buf()], false, true).await;
+                self.enqueue_for_flush_batch(vec![local_path.to_path_buf()], false, true);
+                // #95: enqueue alone left the entry sitting in dirty until
+                // the next debounce tick (could be seconds on a quiet
+                // window). Kick the reconcile so force-local takes effect
+                // promptly.
+                self.kick_drift_reconcile();
                 self.log_activity(&c.resource_name, file_name(local_path), "conflict\u{2192}force-local");
             }
         }
@@ -1270,6 +1307,14 @@ impl AutoSyncEngine {
         self: &Arc<Self>,
         remote_subpath: &str,
     ) -> Result<(usize, usize, usize), String> {
+        // #97: disposal check before any work. Without this, a rebaseline
+        // initiated during teardown ran to completion against a half-stopped
+        // engine — SFTP list against a closed session, blocking-walk on a
+        // gone root, and a snapshot write into state that's about to be
+        // overwritten by the next engine.
+        if self.disposed.load(Ordering::SeqCst) {
+            return Err("engine disposed".into());
+        }
         let remote_root = format!(
             "{}/{}",
             self.profile.remote_root.trim_end_matches('/'),
@@ -1476,6 +1521,10 @@ impl AutoSyncEngine {
                 to_dispatch_deletes.extend(deletes);
             }
 
+            // #136: capture spawn-time totals; the Vecs below get consumed.
+            let pulls_dispatched = pulls.len() as u32;
+            let local_deletes_dispatched = to_dispatch_deletes.len() as u32;
+            let remote_deletes_dispatched = remote_deletes.len() as u32;
             let sem = Arc::new(tokio::sync::Semaphore::new(4));
             let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
             for entry in pulls {
@@ -1558,12 +1607,44 @@ impl AutoSyncEngine {
                     enqueued_push = true;
                 }
             }
+            // #136: capture counts before the await loop. handles is moved
+            // into the loop below, and the input Vecs were consumed by their
+            // earlier `for entry in` loops, so the counts have to come from
+            // the spawn-time tallies.
+            let pushes_enqueued = if enqueued_push { 1u32 } else { 0u32 };
             for h in handles {
                 let _ = h.await;
             }
             if enqueued_push {
                 engine.flush_all_now(Some(ct_for_task.clone())).await;
             }
+            // #136: emit a closing DriftScanResult so the modal's spinner
+            // closes. Without this, the UI tracks the start of work via the
+            // initial diag burst but never sees a terminal event — Sync
+            // modal stays at "Applying…" until next action emits something.
+            let cancelled = ct_for_task.is_cancelled();
+            diagnostics::emit_with_fields(
+                DiagStage::DriftScanResult,
+                DiagLevel::Info,
+                None,
+                None,
+                if cancelled {
+                    "apply-selected cancelled".to_string()
+                } else {
+                    format!(
+                        "apply-selected dispatched: pulls={pulls_dispatched}, local_deletes={local_deletes_dispatched}, remote_deletes={remote_deletes_dispatched}, pushes_enqueued={pushes_enqueued}"
+                    )
+                },
+                serde_json::json!({
+                    "entries": 0,
+                    "pull_dispatched": pulls_dispatched,
+                    "local_delete_dispatched": local_deletes_dispatched,
+                    "remote_delete_dispatched": remote_deletes_dispatched,
+                    "enqueued_for_push": pushes_enqueued,
+                    "cancelled": cancelled,
+                    "origin": "apply_selected",
+                }),
+            );
         });
         self.track_background(h);
     }

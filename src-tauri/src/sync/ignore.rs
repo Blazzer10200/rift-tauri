@@ -207,13 +207,13 @@ pub fn classify(path: &str) -> Option<&'static str> {
         // IGNORE_SEGMENTS entries are kept lowercase by convention so we can
         // skip the per-iteration `.to_ascii_lowercase()` allocation on the
         // synthesized needle. Validated by the lowercase-segments unit test.
+        // #79: positive-flow guard — match on either embedded `/seg/` or
+        // leading `seg/` (relative paths). One mutation away from inversion
+        // bug in the prior nested-negation form.
         let needle = format!("/{seg}/");
-        if !lower.contains(&needle) {
-            // Also match leading-no-slash form for relative paths starting with the seg.
-            let leading = format!("{seg}/");
-            if !lower.starts_with(&leading) {
-                continue;
-            }
+        let leading = format!("{seg}/");
+        if !lower.contains(&needle) && !lower.starts_with(&leading) {
+            continue;
         }
         if is_fivem_ui_output && (*seg == "build" || *seg == "dist") {
             continue;

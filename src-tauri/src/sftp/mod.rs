@@ -274,13 +274,15 @@ impl SftpClient {
     pub async fn close(self) {
         let _ = self.sftp.close().await;
         // Tear down worker pool — each worker holds its own SSH connection,
-        // leaking them would orphan russh background tasks. Snapshot the
-        // worker Arcs under the lock, drop the lock, THEN await each close
-        // so a slow close on one worker can't keep the lock held against
-        // any concurrent observer.
+        // leaking them would orphan russh background tasks. #83: DRAIN the
+        // shared Vec (mem::take) instead of cloning so the canonical store
+        // releases its strong refs the moment we hand the local Vec to the
+        // close loop. After the loop ends, Arc count drops to whatever any
+        // in-flight batch op still holds — once they finish, Workers drop +
+        // russh handles drop + sessions terminate.
         let workers: Vec<Arc<Worker>> = {
-            let g = self.workers.lock().await;
-            g.iter().cloned().collect()
+            let mut g = self.workers.lock().await;
+            std::mem::take(&mut *g)
         };
         for w in workers {
             let _ = w.sftp.close().await;

@@ -111,7 +111,15 @@ pub async fn start(app: AppHandle) -> Result<BridgeInfo, String> {
         readonly_token: readonly_token.clone(),
     };
     if BRIDGE.set(info.clone()).is_err() {
-        return Ok(BRIDGE.get().unwrap().clone());
+        // #118: `unwrap` would panic if the racing initializer is somehow
+        // still in flight (theoretically impossible w/ OnceLock semantics
+        // but defensive — a future refactor could change the type and the
+        // panic would slip through). Return the won race's value or a
+        // clear error.
+        return BRIDGE
+            .get()
+            .cloned()
+            .ok_or_else(|| "bridge OnceLock race-loss with no winning value".to_string());
     }
     log::info!("assistant remote_bridge: listening on 127.0.0.1:{port}");
 
