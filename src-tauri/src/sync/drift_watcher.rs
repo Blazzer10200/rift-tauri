@@ -351,12 +351,33 @@ pub(crate) fn register_conflict(engine: &Arc<AutoSyncEngine>, entry: crate::sync
     // Build a ConflictRecord and surface in the existing UI.
     let local_path = PathBuf::from(&entry.local_path);
     let snap = engine.snapshot().try_get(&entry.remote_path);
+    // #124: re-stat local right before building the record so the conflict
+    // dialog reflects on-disk state at decision time, not scan-time. A
+    // user can save/edit the local file between scan and the conflict
+    // modal showing up; using the scan-time mtime would mis-frame the
+    // comparison ("local is older" when it's actually newer than remote).
+    // Mirrors the pull_one re-stat pattern at L132.
+    let (local_size, local_mtime) = match std::fs::metadata(&local_path) {
+        Ok(meta) => {
+            let lmtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| chrono::DateTime::<Utc>::from_timestamp(d.as_secs() as i64, 0))
+                .unwrap_or_else(Utc::now);
+            (meta.len() as i64, lmtime)
+        }
+        Err(_) => (
+            entry.local_size,
+            entry.local_mtime.unwrap_or_else(Utc::now),
+        ),
+    };
     let record = ConflictRecord {
         local_path: entry.local_path.clone(),
         remote_path: entry.remote_path.clone(),
         resource_name: entry.resource_name.clone(),
-        local_size: entry.local_size,
-        local_mtime_utc: entry.local_mtime.unwrap_or_else(Utc::now),
+        local_size,
+        local_mtime_utc: local_mtime,
         remote_size: entry.remote_size,
         remote_mtime_utc: entry.remote_mtime.unwrap_or_else(Utc::now),
         last_known_size: snap.as_ref().map(|s| s.remote_size).unwrap_or(0),

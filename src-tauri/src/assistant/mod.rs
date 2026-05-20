@@ -355,8 +355,10 @@ pub struct Conversation {
 
 fn convo_path(id: &str) -> Result<PathBuf, String> {
     // Guard against `..` / path separators in the id — only accept the
-    // hex/uuid shape we generate (alphanumeric + dashes).
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    // hex/uuid shape we generate (alphanumeric + dashes). #132: also cap
+    // length so a hostile caller can't smuggle a path bomb past the charset
+    // filter via a 10kB id.
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err(format!("invalid conversation id: {id}"));
     }
     Ok(conversations_dir()?.join(format!("{id}.json")))
@@ -372,7 +374,9 @@ fn convo_path(id: &str) -> Result<PathBuf, String> {
 /// → frontend pops messages → all history dropped). Pinning cwd per session
 /// keeps every turn aimed at the same JSONL.
 fn session_cwd_path(id: &str) -> Result<PathBuf, String> {
-    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    // #132: length cap mirrors convo_path; UUIDs are 36 chars, give some
+    // slack for future ID shape evolution but stop pathological inputs.
+    if id.is_empty() || id.len() > 64 || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return Err(format!("invalid session id: {id}"));
     }
     let home = dirs_home()?;
@@ -467,6 +471,13 @@ fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
         return None;
     }
     if !result.is_dir() {
+        // #133: silent None fell through to caller's `roots[0]` fallback. A
+        // brand-new resource folder that doesn't yet exist on disk would
+        // narrow cwd unexpectedly. Surface so DiagBus shows the regression.
+        log::warn!(
+            "common_ancestor: '{}' is not a directory; caller will fall back to roots[0]",
+            result.display()
+        );
         return None;
     }
     Some(result)
@@ -534,12 +545,29 @@ pub fn assistant_save_conversation(convo: Conversation) -> Result<(), String> {
 #[tauri::command]
 pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
     let p = convo_path(&id)?;
-    delete_session_cwd(&id);
+    // #114: load BEFORE delete so we can find the decoupled `cli_session_id`
+    // (post-S103 these can differ from the Rift convo id after a compaction).
+    // Without this, the cwd sidecar under the cli session UUID never gets
+    // cleaned up — orphan accumulation under `~/.rift/assistant/sessions/`.
+    let cli_session_id = std::fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Conversation>(&s).ok())
+        .and_then(|c| c.cli_session_id);
     match std::fs::remove_file(&p) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(format!("delete {}: {e}", p.display())),
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("delete {}: {e}", p.display())),
     }
+    // Delete sidecars only after the convo record is gone — a half-deleted
+    // convo with intact sidecars is recoverable; a deleted sidecar with a
+    // surviving convo would silently lose its pinned cwd.
+    delete_session_cwd(&id);
+    if let Some(cli_id) = cli_session_id {
+        if cli_id != id {
+            delete_session_cwd(&cli_id);
+        }
+    }
+    Ok(())
 }
 
 fn dirs_home() -> Result<PathBuf, String> {
@@ -1282,7 +1310,22 @@ pub async fn assistant_send(
     const ATTACHMENT_BYTES_CAP: usize = 20 * 1024 * 1024;
     let attachments = attachments.unwrap_or_default();
     if !attachments.is_empty() {
-        let total: usize = attachments.iter().map(|a| a.data_base64.len() * 3 / 4).sum();
+        // #116: `len * 3 / 4` is approximate — pasted base64 can contain
+        // whitespace/CRLF that inflates the encoded length but doesn't add
+        // to decoded bytes. Strip whitespace before the divide so the cap
+        // reflects real decoded size; otherwise users see "too large"
+        // errors on attachments that decode to ≤ cap.
+        let total: usize = attachments
+            .iter()
+            .map(|a| {
+                let trimmed_len = a
+                    .data_base64
+                    .bytes()
+                    .filter(|b| !b.is_ascii_whitespace())
+                    .count();
+                trimmed_len.saturating_mul(3) / 4
+            })
+            .sum();
         if total > ATTACHMENT_BYTES_CAP {
             return Err(format!(
                 "Attachment(s) too large: {} bytes > cap {}",
@@ -1475,6 +1518,14 @@ pub async fn assistant_send(
     // input stream is complete and starts streaming back. With attachments,
     // serialize a stream-json `user` envelope (text + image blocks);
     // otherwise pipe the bare prompt for text input-format.
+    // #117: previously a silent None branch left the child waiting on stdin
+    // forever — claude blocks reading EOF before producing output. Fail
+    // loudly + kill the child so the wait loop unblocks instead of hanging
+    // until the user clicks Stop.
+    if child.stdin.is_none() {
+        let _ = child.start_kill();
+        return Err("claude stdin unavailable — process killed".into());
+    }
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
         let payload: Vec<u8> = if has_attachments {

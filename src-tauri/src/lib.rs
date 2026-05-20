@@ -296,8 +296,7 @@ async fn sync_set_mirror_mode(
     let Some(engine) = engine else {
         return Err("not connected".into());
     };
-    engine.set_mirror_mode(enabled);
-    Ok(engine.mirror_mode_enabled())
+    Ok(engine.set_mirror_mode(enabled))
 }
 
 #[tauri::command]
@@ -402,6 +401,7 @@ pub struct ScanFolderInput {
 async fn scan_drift(
     server_key: String,
     folders: Vec<ScanFolderInput>,
+    state: tauri::State<'_, AutoSyncState>,
 ) -> Result<sync::ScanResult, String> {
     let cfg = profile::RiftConfig::load()?;
     let server = cfg
@@ -417,6 +417,45 @@ async fn scan_drift(
     // silently TOFU on the next connect.
     require_pinned_fingerprint(&server_key, server.fingerprint.as_deref())?;
 
+    let targets: Vec<sync::FolderTarget> = folders
+        .into_iter()
+        .map(|f| {
+            let remote_root = format!(
+                "{}/{}",
+                server.remote_root.trim_end_matches('/'),
+                f.remote_subpath.trim_start_matches('/')
+            );
+            let local_root = std::path::Path::new(&server.local_root)
+                .join(f.remote_subpath.replace('/', std::path::MAIN_SEPARATOR_STR))
+                .to_string_lossy()
+                .to_string();
+            sync::FolderTarget {
+                resource_name: f.resource_name,
+                local_root,
+                remote_root,
+            }
+        })
+        .collect();
+
+    // #54: reuse the active engine's SFTP session + snapshot when the
+    // engine's profile matches. Two concurrent SSH sessions to the same
+    // server (engine + ad-hoc scan_drift) pressure server `MaxSessions`
+    // and double keepalive churn. Snapshot reuse also avoids a `set` race
+    // between the engine's flush loop and a fresh scanner's seed-writes.
+    let engine_match = {
+        let g = state.0.lock().await;
+        g.as_ref()
+            .filter(|e| e.profile_key() == server_key.as_str())
+            .cloned()
+    };
+    if let Some(engine) = engine_match {
+        let sftp = engine.sftp();
+        let snap = engine.snapshot();
+        let scanner = sync::DriftScanner::new(&sftp, Some(&snap));
+        return Ok(scanner.scan(&targets).await);
+    }
+
+    // Cold path — no engine for this server, connect fresh and close after.
     let key_path = std::path::PathBuf::from(&server.key_path);
     let client = sftp::SftpClient::connect(sftp::ConnectArgs {
         host: &server.host,
@@ -440,27 +479,6 @@ async fn scan_drift(
         }
     };
     let scanner = sync::DriftScanner::new(&client, Some(&snap));
-
-    let targets: Vec<sync::FolderTarget> = folders
-        .into_iter()
-        .map(|f| {
-            let remote_root = format!(
-                "{}/{}",
-                server.remote_root.trim_end_matches('/'),
-                f.remote_subpath.trim_start_matches('/')
-            );
-            let local_root = std::path::Path::new(&server.local_root)
-                .join(f.remote_subpath.replace('/', std::path::MAIN_SEPARATOR_STR))
-                .to_string_lossy()
-                .to_string();
-            sync::FolderTarget {
-                resource_name: f.resource_name,
-                local_root,
-                remote_root,
-            }
-        })
-        .collect();
-
     let result = scanner.scan(&targets).await;
     client.close().await;
     Ok(result)
@@ -627,6 +645,42 @@ async fn get_autosync_status(
     }
 }
 
+/// #55: shared canonicalize + ownership check, factored out of
+/// `validate_watched_local_path`. Used inline by `resolve_conflicts_bulk`
+/// where per-row failure should emit an activity row instead of aborting
+/// the whole batch. Takes a borrowed engine ref directly so bulk callers
+/// can hold the AutoSyncState lock once and dispatch many checks.
+fn canonicalize_owned_path(
+    engine: &sync::AutoSyncEngine,
+    raw: &str,
+    label: &str,
+) -> Result<PathBuf, String> {
+    let p = PathBuf::from(raw);
+    reject_path_traversal(&p, label)?;
+    let canon = if p.exists() {
+        p.canonicalize()
+            .map_err(|e| format!("canonicalize {label} '{}': {e}", p.display()))?
+    } else {
+        let parent = p
+            .parent()
+            .ok_or_else(|| format!("{label}: '{}' has no parent", p.display()))?;
+        let name = p
+            .file_name()
+            .ok_or_else(|| format!("{label}: '{}' has no filename", p.display()))?;
+        let parent = parent
+            .canonicalize()
+            .map_err(|e| format!("canonicalize {label} parent '{}': {e}", parent.display()))?;
+        parent.join(name)
+    };
+    if canon.parent().is_none() {
+        return Err(format!("{label}: refusing filesystem root '{}'", canon.display()));
+    }
+    if !engine.owns_local_path(&canon) {
+        return Err(format!("{label}: '{}' is outside watched roots", canon.display()));
+    }
+    Ok(canon)
+}
+
 async fn validate_watched_local_path(
     state: &tauri::State<'_, AutoSyncState>,
     path: &str,
@@ -681,7 +735,7 @@ async fn enqueue_for_flush_batch(
             return Err(format!("enqueue path outside watched roots: {}", p.display()));
         }
     }
-    Ok(engine.enqueue_for_flush_batch(bufs, deleted, bypass_preflight).await)
+    Ok(engine.enqueue_for_flush_batch(bufs, deleted, bypass_preflight))
 }
 
 #[tauri::command]
@@ -720,32 +774,26 @@ async fn resolve_conflicts_bulk(
     };
     let mut out = Vec::with_capacity(local_paths.len());
     for p in &local_paths {
-        let buf = PathBuf::from(p);
-        if reject_path_traversal(&buf, "local_path").is_err() {
-            let _ = app.emit("autosync://activity", &ActivityRow {
-                at: chrono::Utc::now(),
-                resource: "bulk".to_string(),
-                file: basename_for_log(p),
-                action: "conflict resolve blocked: path traversal".to_string(),
-                kind: ActivityKind::Block,
-                ..Default::default()
-            });
-            out.push(false);
-            continue;
-        }
-        if !engine.owns_local_path(&buf) {
-            let _ = app.emit("autosync://activity", &ActivityRow {
-                at: chrono::Utc::now(),
-                resource: "bulk".to_string(),
-                file: basename_for_log(p),
-                action: "conflict resolve blocked: outside watched roots".to_string(),
-                kind: ActivityKind::Block,
-                ..Default::default()
-            });
-            out.push(false);
-            continue;
-        }
-        let res = engine.resolve_conflict(&buf, resolution).await;
+        // #55: canonicalize before ownership check (raw `PathBuf::from(p)`
+        // passed the `..`-only `reject_path_traversal` then silently failed
+        // `owns_local_path` for symlink / relative-prefix paths — pushed as
+        // `false` w/ no surfaced reason).
+        let canon = match canonicalize_owned_path(engine, p, "local_path") {
+            Ok(c) => c,
+            Err(msg) => {
+                let _ = app.emit("autosync://activity", &ActivityRow {
+                    at: chrono::Utc::now(),
+                    resource: "bulk".to_string(),
+                    file: basename_for_log(p),
+                    action: format!("conflict resolve blocked: {msg}"),
+                    kind: ActivityKind::Block,
+                    ..Default::default()
+                });
+                out.push(false);
+                continue;
+            }
+        };
+        let res = engine.resolve_conflict(&canon, resolution).await;
         let ok = res.is_ok();
         let row = if ok {
             ActivityRow {
@@ -868,7 +916,36 @@ fn save_server(
 }
 
 #[tauri::command]
-fn delete_server(key: String) -> Result<(), String> {
+async fn delete_server(
+    key: String,
+    state: tauri::State<'_, AutoSyncState>,
+    tunnel_state: tauri::State<'_, TunnelState>,
+) -> Result<(), String> {
+    // #56: stop the active engine + tunnel BEFORE the profile is gone from
+    // disk. The prior fn was sync + didn't touch state, so deleting a server
+    // that was actively running left the engine with live SFTP/watchers/locks
+    // for a profile that no longer existed in config — and unstoppable via
+    // the UI (no key to look up). Mirrors `stop_autosync`'s order: engine
+    // first, then tunnel (bridge calls drain on engine.stop()).
+    {
+        let mut g = state.0.lock().await;
+        let take_engine = g
+            .as_ref()
+            .map(|e| e.profile_key() == key.as_str())
+            .unwrap_or(false);
+        if take_engine {
+            if let Some(engine) = g.take() {
+                engine.stop().await;
+            }
+        }
+    }
+    {
+        let mut tg = tunnel_state.0.lock().await;
+        if let Some(t) = tg.take() {
+            t.stop().await;
+        }
+    }
+
     let mut cfg = profile::RiftConfig::load()?;
     let before = cfg.servers.len();
     cfg.servers.retain(|s| s.key != key);

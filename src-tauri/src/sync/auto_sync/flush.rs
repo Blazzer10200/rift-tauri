@@ -538,8 +538,29 @@ impl AutoSyncEngine {
                                     }
                                 }
                             }
-                            let (local_size, local_mtime) = stat_local(&entry.path)
-                                .unwrap_or((0, Utc::now()));
+                            // #98: don't synthesize `(0, Utc::now())` when the
+                            // local file vanished mid-preflight. A zero-size
+                            // ConflictRecord misleads the UI and breaks the
+                            // resolve flow ("Save local copy" with no local
+                            // file to move). Treat vanished-local as Fail so
+                            // the dirty queue retries (file may be returning
+                            // from a temp-swap rename) instead of materializing
+                            // a phantom conflict.
+                            let (local_size, local_mtime) = match stat_local(&entry.path) {
+                                Some(s) => s,
+                                None => {
+                                    self.log_activity(
+                                        &fw.resource_name,
+                                        file_name(&entry.path),
+                                        "preflight: local file vanished — deferring",
+                                    );
+                                    self.log(&format!(
+                                        "{}: local file vanished mid-preflight",
+                                        entry.path.display()
+                                    ));
+                                    return EntryResult::Fail;
+                                }
+                            };
                             let record = ConflictRecord {
                                 local_path: entry.path.to_string_lossy().to_string(),
                                 remote_path: remote.clone(),

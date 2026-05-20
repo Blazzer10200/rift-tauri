@@ -58,6 +58,11 @@ pub struct LockPresence {
     my_user: String,
     my_host: String,
     my_locks: DashSet<String>,
+    /// #77: in-flight `acquire()` reservations. Separated from `my_locks`
+    /// so a second concurrent `acquire()` on the same path can't return
+    /// "already own" while the first hasn't actually written remote yet.
+    /// Cleared on upload success (promoted to `my_locks`) or failure.
+    pending_locks: DashSet<String>,
     last_heartbeat: DashMap<String, Instant>,
     active_by_path: RwLock<HashMap<String, RemoteLock>>,
     scoped_provider: Mutex<Option<ScopedFoldersFn>>,
@@ -81,6 +86,7 @@ impl LockPresence {
             my_user,
             my_host,
             my_locks: DashSet::new(),
+            pending_locks: DashSet::new(),
             last_heartbeat: DashMap::new(),
             stale_delete_fails: DashMap::new(),
             active_by_path: RwLock::new(HashMap::new()),
@@ -137,7 +143,13 @@ impl LockPresence {
                 let _ = sftp.delete(&p).await;
             }
         });
-        let _ = tokio::time::timeout(Duration::from_secs(2), cleanup).await;
+        // #123: abort the spawned cleanup task on timeout. Otherwise a
+        // wedged SFTP session could keep the cleanup future running past
+        // stop() return, delaying shutdown observably.
+        let abort = cleanup.abort_handle();
+        if tokio::time::timeout(Duration::from_secs(2), cleanup).await.is_err() {
+            abort.abort();
+        }
     }
 
     pub fn find_lock_by_other(&self, remote_file: &str) -> Option<RemoteLock> {
@@ -164,8 +176,16 @@ impl LockPresence {
             return;
         }
         let lock_path = format!("{remote_file}.rift-lock");
-        if !self.my_locks.insert(lock_path.clone()) {
-            return; // already own
+        // #77: confirmed-owned short-circuit.
+        if self.my_locks.contains(&lock_path) {
+            return;
+        }
+        // #77: in-flight reservation. Two concurrent acquire()s race here;
+        // the loser sees `false` and bails. Without this, the loser would
+        // see my_locks-as-reservation and return "already own" even if the
+        // winner's upload subsequently failed — leaving no lock on remote.
+        if !self.pending_locks.insert(lock_path.clone()) {
+            return;
         }
         let body = serde_json::json!({
             "user": self.my_user,
@@ -173,9 +193,10 @@ impl LockPresence {
             "since": Utc::now().to_rfc3339(),
         });
         let bytes = body.to_string();
-        if self.sftp.upload_bytes(bytes.as_bytes(), &lock_path).await.is_err() {
-            self.my_locks.remove(&lock_path);
-        } else {
+        let upload_ok = self.sftp.upload_bytes(bytes.as_bytes(), &lock_path).await.is_ok();
+        self.pending_locks.remove(&lock_path);
+        if upload_ok {
+            self.my_locks.insert(lock_path.clone());
             self.last_heartbeat.insert(lock_path, Instant::now());
         }
     }
@@ -342,7 +363,28 @@ impl LockPresence {
                     .map(|d| d.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now());
                 if (Utc::now() - since).num_seconds() > STALE_SEC {
-                    let _ = self.sftp.delete(&e.full_path).await;
+                    // #121: mirror sweep_stale_mine's cap. Without it, a
+                    // foreign stale lock that the server refuses to delete
+                    // (perm denied, file held by an OS lock) re-attempts +
+                    // re-logs on every poll cycle. Cap at STALE_DELETE_MAX_FAILS.
+                    let skip = self
+                        .stale_delete_fails
+                        .get(&e.full_path)
+                        .map(|c| *c >= STALE_DELETE_MAX_FAILS)
+                        .unwrap_or(false);
+                    if skip {
+                        continue;
+                    }
+                    let result = self.sftp.delete(&e.full_path).await;
+                    if result.success {
+                        self.stale_delete_fails.remove(&e.full_path);
+                    } else {
+                        let mut entry = self
+                            .stale_delete_fails
+                            .entry(e.full_path.clone())
+                            .or_insert(0);
+                        *entry = entry.saturating_add(1);
+                    }
                     continue;
                 }
                 let file_being_edited = if e.full_path.ends_with(".rift-lock") {
@@ -377,12 +419,20 @@ impl LockPresence {
             short_id()
         ));
         let _ = std::fs::create_dir_all(&scratch);
-        let local = self.sftp.download_file(remote_lock_path, &scratch).await.ok()?;
-        let text = std::fs::read_to_string(&local).ok();
-        let _ = std::fs::remove_file(&local);
+        // #122: prior `download_file ... .ok()?` short-circuited before the
+        // remove_dir on failure → scratch dir leaked under TEMP indefinitely
+        // (one orphan per failed poll). Match arms ensure every return path
+        // drains the scratch dir.
+        let result: Option<LockBody> = match self.sftp.download_file(remote_lock_path, &scratch).await {
+            Ok(local) => {
+                let text = std::fs::read_to_string(&local).ok();
+                let _ = std::fs::remove_file(&local);
+                text.and_then(|t| serde_json::from_str::<LockBody>(&t).ok())
+            }
+            Err(_) => None,
+        };
         let _ = std::fs::remove_dir(&scratch);
-        let text = text?;
-        serde_json::from_str::<LockBody>(&text).ok()
+        result
     }
 
 }

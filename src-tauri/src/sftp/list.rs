@@ -78,8 +78,16 @@ impl SftpClient {
             });
             let results = futures::future::join_all(futs).await;
             for (root, res) in results {
-                if let Ok(v) = res {
-                    out.insert(root, v);
+                match res {
+                    Ok(v) => {
+                        out.insert(root, v);
+                    }
+                    // #130: surface exec fast-path degradation so a chronically
+                    // failing path is visible in logs instead of silently
+                    // shunting every scan to the slower SFTP worker pool.
+                    Err(e) => {
+                        log::debug!("list exec fast-path failed for {root}, falling back to sftp: {e}");
+                    }
                 }
             }
             // If every root succeeded via exec, skip the SFTP worker spin-up.
