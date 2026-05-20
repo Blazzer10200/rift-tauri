@@ -2,28 +2,30 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 120 — 2026-05-20 — Wave-2 backend MED+LOW sweep (~40 issues, shipped)
+## Session 121 — 2026-05-20 — Phase 6 OS-keychain + backend HIGH/MED close-out (19 issues)
 
-Full lane breakdown in `docs/CHANGELOG.md` (v0.4.17-alpha entry). Issue numbers (40):
+Full lane breakdown in `docs/CHANGELOG.md` (v0.4.18-alpha entry). Issue numbers (19):
 
-- **MEDs (14):** #54 #55 #56 #68 #70 #72 #73 #75 #77 #79 #80 #83 #84 #86 #91
-- **LOWs (24):** #93 #94 #95 #97 #98 #101 #105 #110 #111 #114 #116 #117 #118 #121 #122 #123 #124 #126 #128 #130 #132 #133 #136
-- **INFOs (2):** #137 #138
+- **Phase 6 (3):** #37 #9.3 #38 (keyring crate + Windows DACL on mcp-config)
+- **Backend HIGH/MED tail (14):** #45 #63 #102 #103 #106 #108 #112 #113 #119 #120 #125 #127 #129 #131
+- **Hygiene (2):** #27 #32 (plus #26 + #101 verified non-bug / already-shipped)
 
-`cargo check` clean (1 pre-existing `private_interfaces` warn in `update_service.rs:199`).
+`cargo check` clean (same pre-existing `private_interfaces` warn).
 
-**Remaining open backend** for next picks: #45 #63 #81 (full DiagBus) #102 #103 #106 #108 #112 #113 #119 #120 #125 #127 #129 #131. Phase 6 OS-keychain (#37/#38/#9.3) is the next big lift. FE Wave-2 MEDs #146-#149 + #151-#177 untouched.
+**Backend HIGH/MED tier is now closed.** Remaining open backend: **#81 (full DiagBus — heavy)** is the only meaty one; the rest is LOW/INFO tail. **FE Wave-2 MEDs #146-#149 + #151-#177 untouched — that's the biggest remaining lane** (~30 items).
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.17-alpha** (S120 shipped). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.18-alpha** (S121 shipped). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Next session's first move:**
-1. Phase 6 OS-keychain (#37 / #38 / #9.3) — Stronghold / Tauri 2 secure-store.
-2. Wave-2 FE MEDs: #146-#149 + #151-#177.
-3. Remaining backend list above (S120 session block).
+1. **FE Wave-2 MEDs** — #146-#149 + #151-#177 (30 items, biggest remaining lane).
+2. **#81 (full DiagBus)** if backend-heavy session preferred.
+3. LOW/INFO tail polish.
+
+**Phase 6 keychain runtime verification on first launch:** old plaintext `bridgeToken` / `apiKey` values get auto-lifted to Windows Credential Manager on first `RiftConfig::load()` + `assistant::load_config()` call. Check `cmdkey /list:rift` for `rift/bridge.<server_key>` + `rift/assistant.api_key` entries. JSON files post-migration should NOT contain `bridgeToken` / `apiKey` fields.
 
 ---
 

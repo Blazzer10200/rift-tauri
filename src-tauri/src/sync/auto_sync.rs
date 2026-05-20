@@ -77,6 +77,11 @@ pub struct AutoSyncStatus {
     pub ignored_total: u64,
     pub conflicts: usize,
     pub watches: usize,
+    /// #45: cumulative FS-event drops since engine start. Bumped each time the
+    /// 2048-event channel try_send fails. Surfaces sustained watcher pressure
+    /// (webpack rebuild + stalled flush) the per-drop log can't make visible.
+    #[serde(default)]
+    pub dropped_events: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -962,6 +967,7 @@ impl AutoSyncEngine {
             ignored_total: self.ignored_total.load(Ordering::Relaxed),
             conflicts: self.conflicts.len(),
             watches: self.folders.len(),
+            dropped_events: self.dropped_events.load(Ordering::Relaxed),
         }
     }
 
@@ -1758,6 +1764,12 @@ impl AutoSyncEngine {
             let mut delete_buckets: std::collections::HashMap<String, Vec<crate::sync::DriftEntry>> =
                 std::collections::HashMap::new();
             let mut to_delete_remote = 0u32;
+            // #103: count blocks separately so the diag emit reflects what
+            // was actually dispatched vs gated by the mass-delete breaker.
+            let mut to_delete_blocked = 0u32;
+            // #102: ToDeleteRemote entries the UI still needs to read after
+            // the post-dispatch cache wipe — re-cached at the end on success.
+            let mut retained_remote_deletes: Vec<crate::sync::DriftEntry> = Vec::new();
             for e in entries {
                 match e.bucket {
                     crate::sync::DriftBucket::ToPush => to_push += 1,
@@ -1773,7 +1785,13 @@ impl AutoSyncEngine {
                     // explicit user selection from the Sync page (the typed-
                     // confirm gate). force_pull_now is the Pull-all path and
                     // never fires remote deletes — count for visibility only.
-                    crate::sync::DriftBucket::ToDeleteRemote => to_delete_remote += 1,
+                    // #102: keep the entries in `retained_remote_deletes` so
+                    // the post-dispatch cache wipe preserves them for the
+                    // Sync page modal to read.
+                    crate::sync::DriftBucket::ToDeleteRemote => {
+                        to_delete_remote += 1;
+                        retained_remote_deletes.push(e);
+                    }
                     crate::sync::DriftBucket::Conflict => {
                         conflicts += 1;
                         crate::sync::drift_watcher::register_conflict(&engine, e);
@@ -1823,6 +1841,8 @@ impl AutoSyncEngine {
                     };
                     use tauri::Emitter;
                     let _ = engine.app().emit("autosync://activity", &row);
+                    // #103: blocked deletes shouldn't inflate the dispatched total.
+                    to_delete_blocked += count as u32;
                 } else {
                     for d in deletes {
                         pending.push((crate::sync::DriftBucket::ToDelete, d));
@@ -1890,9 +1910,15 @@ impl AutoSyncEngine {
             // stale cache (sha-collapse hides it, but the count lies).
             // Next Pull triggers a fresh inline scan.
             if !cancelled && pull_dispatched > 0 {
-                engine.cache_scan_entries(Vec::new());
-                eprintln!("[rift] force_pull_now: cleared scan cache (was stale post-pull)");
+                // #102: ToDeleteRemote entries were never dispatched here (Pull
+                // path), so preserve them across the cache wipe so the Sync
+                // modal can still show pending remote-deletes after Pull Now.
+                engine.cache_scan_entries(retained_remote_deletes);
+                eprintln!("[rift] force_pull_now: cleared scan cache (kept {to_delete_remote} ToDeleteRemote entries)");
             }
+            // #103: subtract blocked deletes from the to_delete total before
+            // emitting so the UI sees dispatched vs blocked separately.
+            let to_delete_dispatched = to_delete.saturating_sub(to_delete_blocked);
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
                 DiagLevel::Info,
@@ -1909,7 +1935,8 @@ impl AutoSyncEngine {
                     "entries": 0,
                     "to_push": to_push,
                     "to_pull": to_pull,
-                    "to_delete": to_delete,
+                    "to_delete": to_delete_dispatched,
+                    "to_delete_blocked": to_delete_blocked,
                     "to_delete_remote": to_delete_remote,
                     "conflicts": conflicts,
                     "enqueued_for_push": 0,

@@ -10,17 +10,43 @@ pub fn current_user() -> String {
         .unwrap_or_else(|_| "unknown".into())
 }
 
-/// Best-effort hostname. Tries `COMPUTERNAME` (Windows) then shells out to
-/// `hostname` (POSIX). Returns `Some(name)` on success, `None` on miss so
-/// callers can apply their own fallback string.
+/// Best-effort hostname. Tries `COMPUTERNAME` (Windows) then `HOSTNAME`
+/// env (POSIX shells), then reads `/proc/sys/kernel/hostname` on Linux,
+/// then absolute-path `/bin/hostname` as a last resort. Returns
+/// `Some(name)` on success, `None` on miss so callers can apply their own
+/// fallback string. #32: switched off ambient-PATH `hostname` to remove
+/// the `$PATH`-hijack vector on multi-user POSIX hosts.
 pub fn hostname() -> Option<String> {
-    std::env::var("COMPUTERNAME").ok().or_else(|| {
-        std::process::Command::new("hostname")
-            .output()
-            .ok()
-            .and_then(|o| String::from_utf8(o.stdout).ok())
-            .map(|s| s.trim().to_string())
-    })
+    if let Ok(v) = std::env::var("COMPUTERNAME") {
+        return Some(v);
+    }
+    if let Ok(v) = std::env::var("HOSTNAME") {
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::fs::read_to_string("/proc/sys/kernel/hostname") {
+            let t = s.trim();
+            if !t.is_empty() {
+                return Some(t.to_string());
+            }
+        }
+    }
+    // Absolute-path fallback. `/bin/hostname` on Linux/macOS; we accept the
+    // file-not-found case as a miss rather than searching PATH.
+    for candidate in ["/bin/hostname", "/usr/bin/hostname"] {
+        if let Ok(o) = std::process::Command::new(candidate).output() {
+            if let Ok(s) = String::from_utf8(o.stdout) {
+                let t = s.trim();
+                if !t.is_empty() {
+                    return Some(t.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 /// 16-hex-char OS-randomness id. Used by edit/in-place + lock-presence +

@@ -43,26 +43,26 @@ impl RemoteStateCache {
     }
 
     pub fn set(&self, remote_path: &str, size: i64, mtime_utc: DateTime<Utc>) {
-        {
-            let mut g = lock(&self.data);
-            g.insert(remote_path.to_string(), Entry { size, mtime_utc });
-        }
-        let _ = self.save();
+        // #125: save while the guard is held so another `set`/`forget` can't
+        // race in between the insert and the snapshot read and write a stale
+        // snapshot to disk. Cost is a brief disk-write hold of the data
+        // mutex — acceptable b/c the file is small (state-<key>.json).
+        let mut g = lock(&self.data);
+        g.insert(remote_path.to_string(), Entry { size, mtime_utc });
+        let _ = self.save_locked(&g);
     }
 
     pub fn forget(&self, remote_path: &str) {
-        let removed = {
-            let mut g = lock(&self.data);
-            g.remove(remote_path).is_some()
-        };
-        if removed {
-            let _ = self.save();
+        let mut g = lock(&self.data);
+        if g.remove(remote_path).is_some() {
+            let _ = self.save_locked(&g);
         }
     }
 
-    fn save(&self) -> std::io::Result<()> {
-        let snapshot = lock(&self.data).clone();
-        let json = serde_json::to_string(&snapshot)
+    /// #125: persist a borrowed snapshot. Callers hold the data lock — this
+    /// avoids the re-lock + clone the original `save()` did.
+    fn save_locked(&self, snapshot: &HashMap<String, Entry>) -> std::io::Result<()> {
+        let json = serde_json::to_string(snapshot)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         atomic_write_json(&self.path, &json)
     }

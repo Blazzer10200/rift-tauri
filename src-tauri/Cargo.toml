@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.4.17-alpha"
+version = "0.4.18-alpha"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -82,6 +82,11 @@ rand = "0.10"
 # `claude` themselves to launch Claude Code, no SDK / API-key plumbing on our
 # side). WezTerm-backed, ConPTY on Win10+. v0.9.0 released 2026-02.
 portable-pty = "0.9"
+
+# Phase 6 (#9.3 / #37 / #38): OS-keychain bridge. Windows Credential Manager,
+# macOS Keychain, Linux Secret Service. Migrates bridge_token + api_key out of
+# the plaintext ~/.rift/*.json files.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 # Speech-to-text runs in the WebView via the Web Speech API (Edge's built-in
 # Azure-backed recogniser). No backend crate needed — Rust side only persists

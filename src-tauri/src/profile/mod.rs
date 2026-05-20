@@ -27,12 +27,11 @@ pub struct ServerProfile {
     pub tx_admin_url: Option<String>,
     #[serde(default)]
     pub added_at: Option<String>,
-    // Bridge token + bridge port. NOTE: WPF DPAPI-encrypts the token at rest;
-    // the Tauri side currently stores it as plaintext in `~/.rift/rift.json`.
-    // Tauri 2 secure-storage integration is on the Phase 6 list — keep this
-    // gap visible until then. File perms (~/.rift owner-only) are the only
-    // protection until then.
-    #[serde(default)]
+    // Bridge token. Phase 6 (#9.3) migrated this to the OS keychain — the JSON
+    // field is now legacy: parsed for one-time migration into the keychain on
+    // `RiftConfig::load()`, never written back. Skip-serialize keeps it absent
+    // from disk after migration. Runtime callers use `secrets::get(bridge_token_key(&server.key))`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge_token: Option<String>,
     #[serde(default)]
     pub bridge_port: Option<u16>,
@@ -63,6 +62,15 @@ pub struct ServerProfilePublic {
 
 impl From<&ServerProfile> for ServerProfilePublic {
     fn from(p: &ServerProfile) -> Self {
+        // Phase 6 (#9.3): post-migration, `bridge_token` is always None on the
+        // struct — the live value sits in the OS keychain. The "configured"
+        // indicator the UI reads must come from there.
+        let has_bridge_token = p
+            .bridge_token
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+            || server_bridge_token(&p.key).is_some();
         Self {
             key: p.key.clone(),
             name: p.name.clone(),
@@ -76,7 +84,7 @@ impl From<&ServerProfile> for ServerProfilePublic {
             tx_admin_url: p.tx_admin_url.clone(),
             added_at: p.added_at.clone(),
             bridge_port: p.bridge_port,
-            has_bridge_token: p.bridge_token.as_deref().map(|s| !s.is_empty()).unwrap_or(false),
+            has_bridge_token,
         }
     }
 }
@@ -114,7 +122,36 @@ impl RiftConfig {
         }
         let text = std::fs::read_to_string(&path)
             .map_err(|e| format!("read {}: {e}", path.display()))?;
-        serde_json::from_str(&text).map_err(|e| format!("parse rift.json: {e}"))
+        let mut cfg: RiftConfig = serde_json::from_str(&text)
+            .map_err(|e| format!("parse rift.json: {e}"))?;
+        // Phase 6 (#9.3) one-shot migration: lift any plaintext bridge_token
+        // into the OS keychain, then strip it from the in-memory struct so the
+        // next save() drops it from disk. Failure to write the keychain is
+        // non-fatal — log + leave the JSON field intact for next attempt.
+        let mut migrated = false;
+        for s in cfg.servers.iter_mut() {
+            if let Some(tok) = s.bridge_token.as_deref() {
+                if !tok.is_empty() {
+                    let key = crate::secrets::bridge_token_key(&s.key);
+                    match crate::secrets::set(&key, tok) {
+                        Ok(()) => {
+                            s.bridge_token = None;
+                            migrated = true;
+                            log::info!("profile: migrated bridge_token for '{}' to keychain", s.key);
+                        }
+                        Err(e) => log::warn!("profile: keychain migration for '{}' failed: {e}", s.key),
+                    }
+                } else {
+                    s.bridge_token = None;
+                }
+            }
+        }
+        if migrated {
+            if let Err(e) = cfg.save() {
+                log::warn!("profile: post-migration save failed: {e}");
+            }
+        }
+        Ok(cfg)
     }
 
     pub fn find(&self, key: &str) -> Option<&ServerProfile> {
@@ -134,6 +171,22 @@ impl RiftConfig {
         let text = serde_json::to_string_pretty(self)
             .map_err(|e| format!("serialize rift.json: {e}"))?;
         atomic_write_json(&path, &text).map_err(|e| format!("write {}: {e}", path.display()))
+    }
+}
+
+/// Read the per-server bridge token from the OS keychain. Returns None if
+/// unset, the backend is unavailable, or the entry is empty. Phase 6 (#9.3).
+pub fn server_bridge_token(server_key: &str) -> Option<String> {
+    crate::secrets::get(&crate::secrets::bridge_token_key(server_key))
+}
+
+/// Persist or clear the per-server bridge token in the OS keychain. Some →
+/// set, None → delete. Phase 6 (#9.3).
+pub fn set_server_bridge_token(server_key: &str, value: Option<&str>) -> Result<(), String> {
+    let key = crate::secrets::bridge_token_key(server_key);
+    match value {
+        Some(v) if !v.is_empty() => crate::secrets::set(&key, v),
+        _ => crate::secrets::delete(&key),
     }
 }
 

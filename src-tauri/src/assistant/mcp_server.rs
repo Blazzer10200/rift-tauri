@@ -207,6 +207,13 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
         .build()
         .map_err(|e| format!("invalid regex `{pattern}`: {e}"))?;
 
+    // #120: when the glob has no path separator (`*.rs`, `*.svelte`), it's a
+    // filename-only pattern in user intent. The raw regex compiled from
+    // `*.rs` only matches at the path root (`foo.rs`, not `src/foo.rs`)
+    // because `*` stops at `/`. Match on just the filename component in
+    // that case instead. Globs containing `/` (e.g. `src/**/*.svelte`)
+    // keep the relpath-match semantics.
+    let glob_filename_only = glob_arg.is_some_and(|g| !g.contains('/'));
     let glob_matcher = match glob_arg {
         Some(g) => Some(glob_to_regex(g)?),
         None => None,
@@ -243,9 +250,17 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
         }
         let p = entry.path();
         if let Some(ref gm) = glob_matcher {
-            let rel = p.strip_prefix(&search_root).unwrap_or(p);
-            let rel_s = rel.to_string_lossy().replace('\\', "/");
-            if !gm.is_match(&rel_s) {
+            // #120: filename-only globs (no `/`) match the basename; otherwise
+            // match the full relpath like before.
+            let target_s = if glob_filename_only {
+                p.file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            } else {
+                let rel = p.strip_prefix(&search_root).unwrap_or(p);
+                rel.to_string_lossy().replace('\\', "/")
+            };
+            if !gm.is_match(&target_s) {
                 continue;
             }
         }
@@ -412,6 +427,14 @@ fn tool_remote_bash(args: &Value) -> Result<String, String> {
         .and_then(|v| v.as_u64())
         .unwrap_or(60)
         .clamp(1, 600);
+    // #119: NOTE — the MCP server child runs `run_stdio` on a single thread
+    // (one JSON-RPC request at a time). A long-running `remote_bash` blocks
+    // every other MCP tool call for `timeout_secs + 15`. `set_read_timeout`
+    // below caps the worst-case block, and the CLI client serializes tool
+    // calls per-turn anyway, so concurrent MCP tools from one CLI session
+    // is not the live failure mode — but back-to-back turns w/ a stalled
+    // bridge will queue. If multi-tool parallelism becomes needed, move
+    // `remote_bash` to a worker thread + channel w/ a hard deadline.
 
     let req = json!({
         "op": "remote_bash",

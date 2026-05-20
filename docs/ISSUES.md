@@ -74,10 +74,10 @@
 
 ## 9. Bridge token stored plaintext in two places + leaked via IPC (HIGH)
 
-> **9.1 + 9.2 SHIPPED v0.4.12-alpha.**
+> **9.1 + 9.2 SHIPPED v0.4.12-alpha. 9.3 SHIPPED v0.4.18-alpha.**
 > - **9.1** New `ServerProfilePublic` DTO (profile/mod.rs) omits `bridge_token`, replaces it w/ `hasBridgeToken: bool`. `list_servers` + `save_server` return it. `save_server` preserves the on-disk token when an edit submits an empty value (mirrors existing fingerprint preserve pattern). Frontend `ServerProfile` type updated; `AddServer.svelte` summary shows "existing token" on edit. Verified via CDP — `bridgeToken` field is gone from `list_servers` JSON.
 > - **9.2** `write_mcp_config` now chmods 0600 on Unix (Windows relies on NTFS inheritance from `%USERPROFILE%\.rift\`). New `pub fn cleanup_mcp_config_on_exit` removes `~/.rift/assistant/mcp-config.json` on `RunEvent::Exit` (lib.rs `.build().run(...)` hook). Best-effort, swallows errors. Verified — new binary boots cleanly and autosync runs.
-> - **9.3** OS keyring / Tauri 2 secure-storage still deferred (Phase 6).
+> - **9.3 SHIPPED v0.4.18-alpha (S121).** Per-server `bridge_token` migrated to OS keychain via new `keyring = "3"` dep + `src-tauri/src/secrets.rs` helper. `ServerProfile.bridge_token` field kept for legacy parse + form roundtrip but marked `skip_serializing_if = Option::is_none`; `RiftConfig::load()` one-shot-migrates any non-empty plaintext value to `rift/bridge.<server_key>` keychain entry then clears the field + atomic-saves back. New `profile::server_bridge_token(&key)` reads keychain; `set_server_bridge_token(&key, Some/None)` writes/deletes. `save_server` writes incoming token straight to keychain; `delete_server` cleans up. `ServerProfilePublic.has_bridge_token` now derives `|| server_bridge_token(&p.key).is_some()`. Tunnel-start site in `lib.rs:529` reads via the new helper.
 
 - **Where:**
   - [src-tauri/src/profile/mod.rs:30-36](../src-tauri/src/profile/mod.rs#L30-L36) — `bridge_token: Option<String>` written plaintext into `~/.rift/rift.json`. Source comment explicitly acknowledges this: "Tauri 2 secure-storage integration is on the Phase 6 list — keep this gap visible until then. File perms (~/.rift owner-only) are the only protection until then."
@@ -219,6 +219,8 @@
 
 ## 26. `.gitignore` audit for `Releases/staging-*`
 
+> **VERIFIED non-bug v0.4.18-alpha (S121).** `.gitignore:8` has `Releases/` covering the whole folder. No code change needed.
+
 - **Where:** [scripts/release.ps1:90-92, 138](../scripts/release.ps1#L90) — creates `Releases/staging-$version/`, deletes on success.
 - **Symptom:** Mid-run build failure leaves the staging dir on disk. Next `git add .` could accidentally commit build artifacts if `.gitignore` doesn't cover it.
 - **Fix sketch:** Verify `.gitignore` has `Releases/staging-*` (or `Releases/` entirely if no other content lives there). One-line check.
@@ -230,6 +232,8 @@
 Open audit items folded in when AUDIT.md was archived to `docs/archive/AUDIT-fix-log.md`. All low-severity backend hardening; full fix-pass history (S81-S86 + Codex passes) lives in the archive.
 
 ## 27. `atomic_write_json` blocks a Tokio worker (LOW)
+
+> **SHIPPED (docs-only) v0.4.18-alpha (S121).** `atomic_write_json` doc-commented as **BLOCKING**; callers known to hit the AV-scanner retry window should wrap in `spawn_blocking`. Same pattern as #127. Behavior unchanged — the retry loop already caps at ~500ms worst-case across 4 attempts.
 
 - **Where:** [src-tauri/src/state/paths.rs:68](../src-tauri/src/state/paths.rs#L68).
 - **Symptom:** `std::thread::sleep` retry loop runs on the async cmd thread, blocking a Tokio worker for up to the retry window.
@@ -260,6 +264,8 @@ Open audit items folded in when AUDIT.md was archived to `docs/archive/AUDIT-fix
 - **Fix sketch:** Scope to known prefixes — update URL, docs URL, `https://github.com/Blazzer10200/*`.
 
 ## 32. `transport/env.rs::hostname` shells out on non-Windows (INFO)
+
+> **SHIPPED v0.4.18-alpha (S121).** `hostname()` now tries `COMPUTERNAME` → `HOSTNAME` env → `/proc/sys/kernel/hostname` (Linux) → absolute-path `/bin/hostname` / `/usr/bin/hostname`. Ambient-PATH `Command::new("hostname")` path removed entirely.
 
 - **Where:** [src-tauri/src/transport/env.rs:16-24](../src-tauri/src/transport/env.rs#L16-L24).
 - **Symptom:** Spawns external `hostname` binary on macOS/Linux — ambient PATH risk if an attacker controls `$PATH` for the user's shell.
@@ -391,11 +397,17 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** Propagate the load error with `?`; never fall back to default on save_server.
 
 ## 37. API key plaintext in `~/.rift/assistant/config.json`
+
+> **SHIPPED v0.4.18-alpha (S121).** `AssistantConfig.api_key` marked `skip_serializing_if = Option::is_none`. `load_config()` one-shot-migrates any non-empty plaintext value to `rift/assistant.api_key` in the OS keychain (via new `secrets.rs`), clears the field, and atomic-saves. New `current_api_key()` reads keychain first, falls back to (un-migrated) legacy field. `assistant_get/set_api_key` go through keychain (`set` writes; `None` deletes). `assistant_send` + `assistant_auth_probe` use `current_api_key()` for the `ANTHROPIC_API_KEY` env. Pair w/ #9.3.
+
 - **Where:** [assistant/mod.rs:209](../src-tauri/src/assistant/mod.rs#L209), [:490](../src-tauri/src/assistant/mod.rs#L490)
 - **Symptom:** `AssistantConfig.api_key: Option<String>` serialized cleartext. No keychain, no encryption. Mirrors #9 pattern but separate file. Source comment acknowledges "keychain migration planned".
 - **Fix:** Stronghold / OS keychain. Pair w/ #9.3 (Phase 6).
 
 ## 38. `mcp-config.json` Windows DACL not tightened
+
+> **SHIPPED v0.4.18-alpha (S121).** `write_mcp_config` post-write now invokes `icacls /inheritance:r /grant:r <user>:(F)` on Windows so the per-session `mcp-config-<uuid>.json` carries an explicit user-only DACL even when `%USERPROFILE%\.rift\` inheritance would have granted SYSTEM/Administrators read on domain-joined or shared-profile setups. Best-effort — failure non-fatal (file is still delete-on-exit + the embedded RIFT_BRIDGE_TOKEN rotates each app launch).
+
 - **Where:** [assistant/mod.rs:547-557](../src-tauri/src/assistant/mod.rs#L547-L557)
 - **Symptom:** Unix sets 0600; Windows defers to NTFS inheritance. Assumption that `%USERPROFILE%\.rift\` is user-only is wrong on domain-joined / shared-profile setups where inheritance can grant SYSTEM/Administrators/other users read. Bridge token leaks to those readers.
 - **Fix:** After write on Windows, call `icacls` or `SetNamedSecurityInfo` (`windows-permissions` crate) to set explicit user-only DACL. Continues #9.2 work.
@@ -448,7 +460,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [auto_sync.rs:354-361](../src-tauri/src/sync/auto_sync.rs#L354-L361)
 - **Symptom:** When 2048-event channel fills, each drop logs a uniform-severity `warn` + `DiagLevel::Warn` w/ no aggregation, no rate-limit, no `AutoSyncStatus` field. Sustained bursts (webpack rebuild + stalled flush) are invisible.
 - **Fix:** Add `dropped_events: AtomicU64`; expose in `AutoSyncStatus`; debounced `DiagLevel::Error` after threshold.
-> PARTIAL v0.4.14-alpha S114 (uncommitted) — `dropped_events: AtomicU64` added on `AutoSyncEngine`; every 100th drop now emits `DiagLevel::Error` + log::error w/ cumulative count. AutoSyncStatus exposure deferred (not consumed by FE yet; diag bus carries the signal).
+> PARTIAL v0.4.14-alpha S114 — `dropped_events: AtomicU64` added on `AutoSyncEngine`; every 100th drop now emits `DiagLevel::Error` + log::error w/ cumulative count. **CLOSED v0.4.18-alpha (S121):** `dropped_events: u64` field added to `AutoSyncStatus`; new `fs_events_dropped: u64` field on `DiagStateDto` is wired by the shared `collect_diag_dto()` helper so the 500ms diag pump carries the counter to the FE.
 
 ## 46. `pending_dir_reconcile` coalesce flag cleared before dispatch
 - **Where:** [auto_sync/watch.rs:189-193](../src-tauri/src/sync/auto_sync/watch.rs#L189-L193)
@@ -556,7 +568,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mod.rs:43-55](../src-tauri/src/assistant/mod.rs#L43-L55)
 - **Symptom:** `with_session_pids`/`with_session_stopped` use `.lock().ok()` → `None` on poison. All callers (`set_session_pid`, `clear_session_pid`, `get_session_pid`) silently no-op → `assistant_stop` fails to kill, child orphans.
 - **Fix:** Recover via `e.into_inner()` or surface explicit error; add child-orphan kill in spawn-task drop.
-> PARTIAL v0.4.14-alpha S114 (uncommitted) — both helpers now `into_inner()` on poison + log::error. PID/stop tracking continues working after a poisoning panic instead of silently no-op'ing. Child-orphan kill on spawn-task drop deferred (needs RAII guard on Child handles).
+> PARTIAL v0.4.14-alpha S114 — both helpers now `into_inner()` on poison + log::error. PID/stop tracking continues working after a poisoning panic instead of silently no-op'ing. **CLOSED v0.4.18-alpha (S121):** `claude_command()` now sets `cmd.kill_on_drop(true)`. If the spawning tokio task is dropped before `wait()` returns (panic mid-turn, IPC handle teardown, app shutdown), tokio's Drop impl kills the child instead of orphaning — no RAII wrapper struct needed.
 
 ## 64. `CLAUDE_EXE` cached forever via OnceLock — stale after CLI install/update
 - **Where:** [assistant/mod.rs:84-165](../src-tauri/src/assistant/mod.rs#L84-L165)
@@ -766,16 +778,23 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 > SHIPPED v0.4.16-alpha S119 (uncommitted) — early-release `tokio::spawn` block in `process_entry_body` success branch dropped. Sole release path is now `process_entry`'s post-result inline await — also covers Fail branch.
 
 ## 101. `recently_written` map grows unbounded on never-re-queried entries
+
+> **SHIPPED — already in code, untracked. Confirmed v0.4.18-alpha (S121):** [auto_sync.rs:452-454](../src-tauri/src/sync/auto_sync.rs#L452-L454) — the 5s root-vanish poll already runs a `recently_written.retain(...)` sweep evicting entries >10s old. Original audit ref missed this.
+
 - **Where:** [auto_sync/watch.rs:210-220](../src-tauri/src/sync/auto_sync/watch.rs#L210-L220)
 - **Fix:** Add periodic sweep on existing 5s root-vanish poll, or use bounded LRU (~1024).
 
 ## 102. `force_pull_now` clears scan cache before UI reads `ToDeleteRemote` entries
+
+> **SHIPPED v0.4.18-alpha (S121).** Added `retained_remote_deletes: Vec<DriftEntry>`; entries land there during the bucket loop. Post-dispatch the cache-clear now passes that Vec instead of `Vec::new()`, preserving the ToDeleteRemote rows for the Sync modal to read.
+
 - **Where:** [auto_sync.rs:1617](../src-tauri/src/sync/auto_sync.rs#L1617), [:1734](../src-tauri/src/sync/auto_sync.rs#L1734)
-- **Fix:** Don't clear cache for ToDeleteRemote; only clear dispatched (ToPull + ToDelete).
 
 ## 103. Mass-delete breaker block-path keeps blocked count in `to_delete` total
+
+> **SHIPPED v0.4.18-alpha (S121).** New `to_delete_blocked: u32` tally incremented by `count as u32` per blocked resource. The final `DriftScanResult` emit subtracts (saturating) before reporting `to_delete` and adds a new `to_delete_blocked` field so the UI sees dispatched vs gated separately.
+
 - **Where:** [auto_sync.rs:1631-1671](../src-tauri/src/sync/auto_sync.rs#L1631-L1671), [:1754](../src-tauri/src/sync/auto_sync.rs#L1754)
-- **Fix:** Track `to_delete_blocked` separately; subtract before diag emit, or add `blocked_local_deletes` field.
 
 ## 104. `eprintln!` debug noise in sync command handlers (production)
 - **Where:** [lib.rs:132,134,136,165,167,169,183,185,187,190,192](../src-tauri/src/lib.rs#L132)
@@ -787,16 +806,20 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** `set_mirror_mode` returns new value, eliminate the read-back call.
 
 ## 106. `diag_state_pump` infinite loop has no cancellation path
+
+> **SHIPPED v0.4.18-alpha (S121).** `diag_state_pump` now takes `cancel: CancellationToken`; the loop is a `tokio::select!` between cancel + tick. New `DiagPumpCancel(CancellationToken)` managed state; setup spawns the pump with a fresh token, `RunEvent::Exit` fires it before `cleanup_mcp_config_on_exit`.
+
 - **Where:** [lib.rs:343](../src-tauri/src/lib.rs#L343)
-- **Fix:** Pass CancellationToken; `tokio::select!` between tick and cancel.
 
 ## 107. `start_autosync` status sampled before prev engine fully stopped
 - **Where:** [lib.rs:572-576](../src-tauri/src/lib.rs#L572-L576)
 - **Fix:** Drop state lock first, then sample new engine status.
 
 ## 108. `diag_state_pump` duplicates `diag_get_state` DTO assembly
+
+> **SHIPPED v0.4.18-alpha (S121).** Extracted `async fn collect_diag_dto(engine: Option<Arc<AutoSyncEngine>>) -> DiagStateDto`. Both `diag_get_state` (Tauri command) + the 500ms pump call it. Adding a new diag counter now requires one edit, not two — `fs_events_dropped` (#45 close-out) landed via this single change.
+
 - **Where:** [lib.rs:355-385](../src-tauri/src/lib.rs#L355-L385) ≈ [lib.rs:83-113](../src-tauri/src/lib.rs#L83-L113)
-- **Fix:** Extract shared `collect_diag_dto(engine: Option<Arc<AutoSyncEngine>>) -> DiagStateDto`.
 
 ## 109. `bootstrap_list_files` accepts dead `_local_root` IPC param
 - **Where:** [lib.rs:1443](../src-tauri/src/lib.rs#L1443)
@@ -811,12 +834,16 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** Set `missing_count: remote_count as u32` OR document state-conditional semantics.
 
 ## 112. `remote_list_dir` double-loads `RiftConfig`
+
+> **SHIPPED v0.4.18-alpha (S121).** New `open_sftp_for_server(&ServerProfile)` variant. `open_sftp_for(server_key)` keeps its load + delegates. `remote_list_dir` (which already loaded the config for path-guard validation) now calls `open_sftp_for_server(&server)` and skips the second `~/.rift/rift.json` parse. Other 7 callers unchanged.
+
 - **Where:** [lib.rs:957](../src-tauri/src/lib.rs#L957) + [:929](../src-tauri/src/lib.rs#L929) (inside `open_sftp_for`)
-- **Fix:** Optional `&ServerConfig` param to `open_sftp_for` so callers can pass through.
 
 ## 113. `editor_for` race-loss drops SFTP client without explicit close
+
+> **SHIPPED v0.4.18-alpha (S121).** Race-loss branch spawns a detached `tokio::spawn` that does `Arc::try_unwrap(losing_sftp).ok().map(|c| c.close().await)`. `drop(mgr)` runs first so the just-constructed `EditInPlaceManager` releases its strong ref. Best-effort — if Arc count is still >1, falls back to Drop semantics.
+
 - **Where:** [lib.rs:1673-1680](../src-tauri/src/lib.rs#L1673-L1680)
-- **Fix:** In race-loss branch, spawn `c.close().await` on the losing handle before returning.
 
 ## 114. `assistant_delete_conversation` orphans `cli_session_id` cwd sidecar
 - **Where:** [assistant/mod.rs:466-473](../src-tauri/src/assistant/mod.rs#L466-L473)
@@ -842,12 +869,16 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ### LOW continued + INFO (folded)
 
 ## 119. `tool_remote_bash` read timeout has no total deadline; single-thread MCP blocks
+
+> **SHIPPED (docs-only) v0.4.18-alpha (S121).** Single-thread MCP contract documented at the call site. `set_read_timeout` already caps worst-case block at `timeout_secs + 15`; the CLI serializes tool calls per-turn so concurrent MCP calls from one CLI session isn't a live failure mode. Worker-thread refactor deferred until multi-tool parallelism becomes a requirement.
+
 - **Where:** [assistant/mcp_server.rs:410-411](../src-tauri/src/assistant/mcp_server.rs#L410-L411)
-- **Fix:** Background-thread + channel w/ hard deadline, or `tokio::time::timeout`; OR document single-thread limit.
 
 ## 120. `glob_to_regex` `*.rs` matches per path segment only — confuses users
+
+> **SHIPPED v0.4.18-alpha (S121).** New `glob_filename_only = glob.is_some_and(|g| !g.contains('/'))` flag computed alongside the regex. Match target swaps to `p.file_name()` when set, full relpath otherwise. `*.rs` now finds `src/foo.rs`; `src/**/*.rs` keeps existing semantics.
+
 - **Where:** [assistant/mcp_server.rs:485-507](../src-tauri/src/assistant/mcp_server.rs#L485-L507)
-- **Fix:** When glob has no `/`, strip relpath to filename component before matching; OR document `**/*.rs` requirement.
 
 ## 121. `poll_once` stale-lock delete ignores `stale_delete_fails` cap
 - **Where:** [lock_presence.rs:323](../src-tauri/src/sync/lock_presence.rs#L323) (vs [:217](../src-tauri/src/sync/lock_presence.rs#L217) which has cap)
@@ -866,32 +897,40 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Fix:** Re-stat local before building `ConflictRecord`, matching `pull_one` at L129.
 
 ## 125. `RemoteStateCache::save` re-locks for clone outside guard
+
+> **SHIPPED v0.4.18-alpha (S121).** New `save_locked(&HashMap)` mirrors `SyncSnapshot`'s pattern. `set`/`forget` hold the guard across the mutate + save_locked call so a racing writer can't snapshot stale state between them. Original `save()` removed.
+
 - **Where:** [state/remote_state.rs:63](../src-tauri/src/state/remote_state.rs#L63)
-- **Fix:** Accept `&HashMap<...>` like `save_locked` does; call inside `set`/`forget` while guard held.
 
 ## 126. `safe_profile_key` silently strips dots — collision on `foo` vs `foo.v2`
 - **Where:** [state/paths.rs:30](../src-tauri/src/state/paths.rs#L30)
 - **Fix:** Add `.` to allowed set OR `log::warn!` on cleaned-key mismatch.
 
 ## 127. `compute_sha1` blocking I/O on async executor
+
+> **SHIPPED (docs-only + helper) v0.4.18-alpha (S121).** `compute_sha1` doc-marked **BLOCKING**. New `compute_sha1_async(PathBuf)` wraps it in `tokio::task::spawn_blocking`. Existing callers all gate on `SHA1_MAX_BYTES = 32 MiB` so practical stall is well within tokio's worker budget; future call sites should use the async wrapper.
+
 - **Where:** [state/sync_snapshot.rs:141](../src-tauri/src/state/sync_snapshot.rs#L141), called inline from async at [drift_watcher.rs:141](../src-tauri/src/sync/drift_watcher.rs#L141) + [auto_sync.rs:1803](../src-tauri/src/sync/auto_sync.rs#L1803)
-- **Fix:** Wrap callers in `tokio::task::spawn_blocking`, or mark fn `blocking` w/ doc.
 
 ## 128. `atomic_write_json` orphans `.tmp` on write/sync failure
 - **Where:** [state/paths.rs:59](../src-tauri/src/state/paths.rs#L59), cleanup only at [:83](../src-tauri/src/state/paths.rs#L83) rename-retry path.
 - **Fix:** Closure-wrap inner write block w/ cleanup-on-fail, or `tempfile::NamedTempFile`.
 
 ## 129. `upload_bytes` missing SETSTAT 0664 (permission gap for non-atomic callers)
+
+> **SHIPPED (docs-only) v0.4.18-alpha (S121).** `upload_bytes` doc-marked **Internal-only — probe writes**. Used only by `probe_write_access` ephemeral writes that get removed immediately; SETSTAT would be wasted. Documented to prevent accidental use for shared-group durable writes.
+
 - **Where:** [sftp/transfer.rs:214-216](../src-tauri/src/sftp/transfer.rs#L214-L216) (vs `upload_atomic_via` at [:322-327](../src-tauri/src/sftp/transfer.rs#L322-L327))
-- **Fix:** Append `set_metadata` call after `f.shutdown()`, OR doc that `upload_bytes` is internal-only (probe ephemeral).
 
 ## 130. Exec fast-path errors silently dropped — no degradation visibility
 - **Where:** [sftp/list.rs:80-88](../src-tauri/src/sftp/list.rs#L80-L88)
 - **Fix:** Match Err arm w/ `log::debug!("list exec fast-path failed for {root}, falling back to sftp: {e}")`.
 
 ## 131. `SftpClient` has no `Drop` impl — workers leak on panic unwind
+
+> **SHIPPED v0.4.18-alpha (S121).** `impl Drop for SftpClient` added: tries `workers.try_lock()` and drains the Vec via `std::mem::take`, decrementing Arc<Worker> refs synchronously. Logs a `warn!` w/ the leaked count when `close().await` wasn't called (panic unwind, early return). The existing `close(self)` path's explicit `drop(self.handle)` removed — Drop now handles it implicitly.
+
 - **Where:** [sftp/mod.rs:114-121](../src-tauri/src/sftp/mod.rs#L114-L121) (vs `SshTunnel` Drop at [tunnel/mod.rs:195-205](../src-tauri/src/tunnel/mod.rs#L195-L205))
-- **Fix:** Add `Drop` that clears `self.workers` synchronously; log if `close()` was not called.
 
 ## 132. `convo_path`/`session_cwd_path` no length cap on `id`
 - **Where:** [assistant/mod.rs:314-318](../src-tauri/src/assistant/mod.rs#L314-L318), [:331-337](../src-tauri/src/assistant/mod.rs#L331-L337)
