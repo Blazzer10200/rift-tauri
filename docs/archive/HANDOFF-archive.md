@@ -3,6 +3,15 @@
 > Retired session entries from `docs/HANDOFF.md`. Newest first. Pre-archive history also available via `git log -- docs/HANDOFF.md`.
 
 
+## Session 111 — 2026-05-19 — v0.4.13-alpha shipped — Assistant UI overhaul + update-flow restyle
+
+**Update-flow restyle (S110):** `UpdateInfoDto` + `UpdateService` upgraded to managed Tauri state w/ `Arc`; `apply_updates` split into `download_update` (streams `update-progress`) + `apply_pending_update`. Frontend store = 8-state machine + progress + `dismissedVersion` snooze + derived labels. `UpdateDialog` restyled (gradient header, version-diff chips, markdown-lite notes, shimmer progress, ready-card). New `UpdateToast.svelte` slides bottom-right (12s auto-dismiss, hover-paused). StatusBar pill gated on available/ready + toast dismissed + dialog closed. `release.ps1` got conditional `--splashImage` flag.
+
+**Assistant UI overhaul (S111):** Killed empty-tabs gate — first tab auto-opens (−85 LOC). User msgs right-aligned neutral `--bg-elev-2` + 12px radius; user avatar dropped. Turn-badge inline beside "Claude" (was floating right). Messages widened to `min(960px, 88ch)` w/ 20px gap + faint top-border between bubbles. Header `+` labeled "New"; tasks-toggle gated on `taskCount > 0`; ws-chip neutral. EmptyState anchored 12vh top, cards 520px, suggestion clamp 1→2 lines, stagger entrance + hero-glyph breathe + card press states. Composer baseline-centered (mic 26 borderless, hint 22, effort 22, model 24 w/ ▾ caret, send 28×28); `:has(textarea:not(:placeholder-shown))` flips to flex-end on multi-line. Scrollbar nuked on `.scroll` + `.strip` (kills WebView2 arrow-buttons leaking top-right). Jump-to-latest pill on scroll-up. ChatTabsBar new-tab slide-in 220ms.
+
+CDP-verified; svelte-check 0/0/4051; 3-file bump 0.4.12-alpha → 0.4.13-alpha.
+
+
 ## Session 109 — 2026-05-19 — v0.4.12-alpha shipped — UI shell redesign + security batch
 
 S105 through S109 collapsed into one ship batch. Per-tab streaming pipeline + telemetry overhaul + cache discovery (S105/S106) → IPC token strip + TOFU guard + mcp-config cleanup (#9.1/9.2/#10) → context-pill envelope fix (#1) → UI shell Phase 1 (StatusBar extend + PageHeader sweep across all 8 workspaces, S108) → Phase 2 (Sync dashboard rebuild: `WatchedFoldersTable` + `RecentActivityCard` + `DriftSummaryCard` w/ Activity deeplink, new `list_watched_folders` Tauri cmd) → Phase 3 (Composer `(?)` popover + pills on textarea row + `scrollbar-gutter: stable` (#6), Settings-as-workspace via `SettingsPage.svelte` + `dialogs.svelte.ts` callbacks store, gear dropped from ActivityBar, `Ctrl+,` flips to settings workspace, `+` button moved to right end of tab strip) → console noise sweep (#22) + dead-file cleanup.
