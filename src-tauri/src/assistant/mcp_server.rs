@@ -249,14 +249,26 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
                 continue;
             }
         }
-        // Cheap binary skip: read first 8 KB, bail on NUL.
+        // #71: Cheap binary skip — actually read only the first 8 KiB for the
+        // NUL probe. Prior impl called `std::fs::read(p)` (loads entire file)
+        // then `.iter().take(8192)`; under a 5000-file scan that loaded ~5000
+        // full files into stdio-process memory. Now: open + take(8192) for the
+        // probe, full read only after the file passes.
+        {
+            use std::io::Read;
+            let mut probe = Vec::with_capacity(8192);
+            let Ok(f) = std::fs::File::open(p) else { continue };
+            if f.take(8192).read_to_end(&mut probe).is_err() {
+                continue;
+            }
+            if probe.iter().any(|&b| b == 0) {
+                continue;
+            }
+        }
         let bytes = match std::fs::read(p) {
             Ok(b) => b,
             Err(_) => continue,
         };
-        if bytes.iter().take(8192).any(|&b| b == 0) {
-            continue;
-        }
         files_scanned += 1;
         if files_scanned > MAX_GREP_FILES {
             matches.push(format!("(scan stopped at {} files)", MAX_GREP_FILES));
@@ -296,11 +308,14 @@ fn remote_shell_enabled() -> bool {
 }
 
 /// Whether the loopback bridge is reachable from this MCP-child spawn.
-/// True whenever `RIFT_BRIDGE_PORT` + `RIFT_BRIDGE_TOKEN` are set, regardless
-/// of the remote-shell toggle. `sync_status` uses the bridge without needing
-/// the user to opt into remote-bash.
+/// True whenever `RIFT_BRIDGE_PORT` + a read-only-or-write token are set.
+/// `sync_status` uses the bridge without needing the user to opt into
+/// remote-bash. #62: read-only token gates read ops; write token (only injected
+/// when `remote_shell_enabled`) gates `remote_bash`.
 fn bridge_enabled() -> bool {
-    std::env::var("RIFT_BRIDGE_PORT").is_ok() && std::env::var("RIFT_BRIDGE_TOKEN").is_ok()
+    std::env::var("RIFT_BRIDGE_PORT").is_ok()
+        && (std::env::var("RIFT_BRIDGE_READONLY_TOKEN").is_ok()
+            || std::env::var("RIFT_BRIDGE_TOKEN").is_ok())
 }
 
 /// Dial the parent Tauri's loopback bridge for a single read-only op (`sync_status`).
@@ -311,7 +326,12 @@ fn tool_sync_status() -> Result<String, String> {
         return Err("sync_status requires an active Rift server connection (no bridge env vars set)".into());
     }
     let port_s = std::env::var("RIFT_BRIDGE_PORT").map_err(|_| "RIFT_BRIDGE_PORT not set".to_string())?;
-    let token = std::env::var("RIFT_BRIDGE_TOKEN").map_err(|_| "RIFT_BRIDGE_TOKEN not set".to_string())?;
+    // #62: read-only token first; fall back to the write-scoped token when
+    // the readonly env var is missing (older MCP child spawns, or paranoid
+    // ops where only the write token is around). Either authorizes `sync_status`.
+    let token = std::env::var("RIFT_BRIDGE_READONLY_TOKEN")
+        .or_else(|_| std::env::var("RIFT_BRIDGE_TOKEN"))
+        .map_err(|_| "no RIFT_BRIDGE_*_TOKEN set".to_string())?;
     let port: u16 = port_s.parse().map_err(|e| format!("invalid RIFT_BRIDGE_PORT `{port_s}`: {e}"))?;
 
     let req = json!({ "op": "sync_status", "token": token });

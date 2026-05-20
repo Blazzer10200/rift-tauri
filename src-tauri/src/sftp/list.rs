@@ -178,17 +178,23 @@ impl SftpClient {
             // do NOT retry — that's a serial round-trip per empty folder.
             for r in &missing {
                 if !out.contains_key(r) {
-                    if let Ok(retry) = list_recursive_via(
+                    // #85: wrap the main-session retry in the same LIST_T
+                    // timeout the worker paths use. A wedged main session
+                    // (russh keepalive hasn't fired yet) would otherwise hang
+                    // the retry indefinitely, blocking the entire batch return.
+                    let retry_fut = list_recursive_via(
                         &self.sftp,
                         r,
                         max_depth,
                         owned_filter.as_deref(),
-                    )
-                    .await
-                    {
-                        out.insert(r.clone(), retry);
-                    } else {
-                        out.entry(r.clone()).or_default();
+                    );
+                    match tokio::time::timeout(Duration::from_secs(LIST_T), retry_fut).await {
+                        Ok(Ok(retry)) => {
+                            out.insert(r.clone(), retry);
+                        }
+                        Ok(Err(_)) | Err(_) => {
+                            out.entry(r.clone()).or_default();
+                        }
                     }
                 }
             }

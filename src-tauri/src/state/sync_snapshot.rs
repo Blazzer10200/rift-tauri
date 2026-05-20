@@ -71,13 +71,24 @@ impl SyncSnapshot {
                 sha1,
             },
         );
-        let _ = self.save_locked(&g);
+        // #81: surface save failures via log::error. In-memory state still
+        // commits — keeping the signature `-> ()` to avoid touching every
+        // caller — but disk divergence is now diagnosable instead of silently
+        // producing phantom drift on the next restart.
+        if let Err(e) = self.save_locked(&g) {
+            log::error!("sync_snapshot::set save failed for {remote_path}: {e}");
+        }
     }
 
     pub fn forget(&self, remote_path: &str) {
         let mut g = lock(&self.data);
         if g.remove(remote_path).is_some() {
-            let _ = self.save_locked(&g);
+            // #81: same as `set` — surface disk-write failures so a forget
+            // that didn't reach disk doesn't silently leak baseline entries
+            // across restarts.
+            if let Err(e) = self.save_locked(&g) {
+                log::error!("sync_snapshot::forget save failed for {remote_path}: {e}");
+            }
         }
     }
 

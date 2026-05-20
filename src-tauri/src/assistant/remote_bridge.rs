@@ -28,7 +28,14 @@ use crate::AutoSyncState;
 #[derive(Debug, Clone)]
 pub struct BridgeInfo {
     pub port: u16,
+    /// Write-scoped token. Required for ops that mutate remote state (`remote_bash`).
+    /// Only injected into the MCP child env when `remote_shell_enabled` is true.
     pub token: String,
+    /// Read-only token. Authorizes `sync_status` + `shell_lock_status` only.
+    /// Always injected so the MCP child can report sync state regardless of the
+    /// remote-shell toggle. #62: split so a compromised MCP tool that only has
+    /// `sync_status` access can't escalate to `remote_bash`.
+    pub readonly_token: String,
 }
 
 static BRIDGE: OnceLock<BridgeInfo> = OnceLock::new();
@@ -94,23 +101,32 @@ pub async fn start(app: AppHandle) -> Result<BridgeInfo, String> {
     let mut token_bytes = [0u8; 24];
     rand::fill(&mut token_bytes);
     let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(token_bytes);
+    let mut ro_bytes = [0u8; 24];
+    rand::fill(&mut ro_bytes);
+    let readonly_token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(ro_bytes);
 
-    let info = BridgeInfo { port, token: token.clone() };
+    let info = BridgeInfo {
+        port,
+        token: token.clone(),
+        readonly_token: readonly_token.clone(),
+    };
     if BRIDGE.set(info.clone()).is_err() {
         return Ok(BRIDGE.get().unwrap().clone());
     }
     log::info!("assistant remote_bridge: listening on 127.0.0.1:{port}");
 
     let app_for_accept = app.clone();
-    let token_for_accept = token;
+    let write_for_accept = token;
+    let ro_for_accept = readonly_token;
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _peer)) => {
                     let app = app_for_accept.clone();
-                    let token = token_for_accept.clone();
+                    let write_tok = write_for_accept.clone();
+                    let ro_tok = ro_for_accept.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_conn(app, token, stream).await {
+                        if let Err(e) = handle_conn(app, write_tok, ro_tok, stream).await {
                             log::debug!("assistant remote_bridge conn closed: {e}");
                         }
                     });
@@ -126,9 +142,19 @@ pub async fn start(app: AppHandle) -> Result<BridgeInfo, String> {
     Ok(info)
 }
 
+/// Authorization scope inferred from which token the client presented.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scope {
+    /// `sync_status`, `shell_lock_status` only.
+    ReadOnly,
+    /// All ops including `remote_bash`.
+    Write,
+}
+
 async fn handle_conn(
     app: AppHandle,
-    expected_token: String,
+    write_token: String,
+    readonly_token: String,
     stream: tokio::net::TcpStream,
 ) -> Result<(), String> {
     let (read_half, mut write_half) = stream.into_split();
@@ -141,11 +167,20 @@ async fn handle_conn(
                 continue;
             }
         };
-        if req.token != expected_token {
-            let _ = write_line(&mut write_half, &err("unauthorized")).await;
+        let scope = if req.token == write_token {
+            Scope::Write
+        } else if req.token == readonly_token {
+            Scope::ReadOnly
+        } else {
+            // #69: write+flush the error line, then orderly-shutdown the write
+            // half so the MCP child sees the "unauthorized" response instead of
+            // a connection-reset (Windows TCP drop after `let _ = ...` can race
+            // ahead of the kernel sendq flush).
+            write_line(&mut write_half, &err("unauthorized")).await?;
+            let _ = write_half.shutdown().await;
             return Err("unauthorized".into());
-        }
-        let resp = dispatch(&app, req).await;
+        };
+        let resp = dispatch(&app, scope, req).await;
         write_line(&mut write_half, &resp).await?;
     }
     Ok(())
@@ -162,9 +197,14 @@ async fn write_line(
     Ok(())
 }
 
-async fn dispatch(app: &AppHandle, req: Request) -> Response {
+async fn dispatch(app: &AppHandle, scope: Scope, req: Request) -> Response {
     match req.op.as_str() {
         "remote_bash" => {
+            // #62: write-scoped only. Readonly token must NOT escalate to
+            // remote shell exec even if it has a valid loopback connection.
+            if scope != Scope::Write {
+                return err("unauthorized: remote_bash requires write-scoped token");
+            }
             let command = match req.command {
                 Some(c) if !c.trim().is_empty() => c,
                 _ => return err("missing or empty `command`"),

@@ -193,9 +193,15 @@ pub fn classify(path: &str) -> Option<&'static str> {
 
     // FiveM resource UI bundle: `<...>/web/build/` or `<...>/web/dist/` —
     // bypass the generic /build/ + /dist/ rules only.
+    // #78: also match the trailing-no-slash form so a bare dir entry like
+    // `res/qbx_core/web/build` (no trailing /) hits the bypass. Without it,
+    // the dir-itself listing was reported as ignored while its children were
+    // correctly synced — confusing UI signal even if no data was lost.
     let lower = normalized.to_ascii_lowercase();
-    let is_fivem_ui_output =
-        lower.contains("/web/build/") || lower.contains("/web/dist/");
+    let is_fivem_ui_output = lower.contains("/web/build/")
+        || lower.contains("/web/dist/")
+        || lower.ends_with("/web/build")
+        || lower.ends_with("/web/dist");
 
     for seg in IGNORE_SEGMENTS {
         // IGNORE_SEGMENTS entries are kept lowercase by convention so we can

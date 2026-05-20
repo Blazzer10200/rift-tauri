@@ -40,7 +40,6 @@ impl AutoSyncEngine {
     ) -> u32 {
         // ── Mass-delete circuit breaker ───────────────────────────────────
         let delete_count = entries.iter().filter(|e| e.kind == ChangeKind::Deleted).count();
-        let created_count = entries.iter().filter(|e| e.kind == ChangeKind::Created).count();
         let local_root_gone = !fw.local_root.exists();
         let local_file_count = self.cached_local_file_count(fw).await;
         let scaled_threshold =
@@ -246,13 +245,12 @@ impl AutoSyncEngine {
             self.track_background(h);
         }
 
-        // Apply best-effort delta to the cached file count. Optimistic — uses
-        // input entry kinds (not per-entry success) since the TTL refresh
-        // (5 min) corrects accumulated drift. Threshold clamp 5..25 forgives
-        // small inaccuracy.
-        if created_count > 0 || delete_count > 0 {
-            self.apply_count_delta(&fw.remote_root, created_count as i64, delete_count as i64);
-        }
+        // #49: per-entry deltas now applied inside `process_entry` on
+        // `EntryResult::Ok` (with the entry's real kind), so the cached file
+        // count reflects outcomes, not intents. The prior `apply_count_delta`
+        // call here was pre-circuit-breaker — used the input list, so a
+        // dropped batch / per-entry cancel / per-entry failure all leaked
+        // into the count cache. TTL refresh (5 min) corrects any residual drift.
 
         dispatched
     }
@@ -295,17 +293,27 @@ impl AutoSyncEngine {
         let file_for_log = file_name(&entry_for_requeue.path).to_string();
         let entry_path_for_release = entry.path.clone();
         let fw_for_release = fw.clone();
+        // #49: capture entry kind before move so success-path count delta
+        // reflects actual outcomes (not pre-circuit-breaker input counts).
+        let entry_kind = entry.kind;
         let work = self.process_entry_body(fw, entry, cancel.clone());
         let result = if let Some(ct) = cancel {
             tokio::select! {
+                // #50: poll work FIRST. When both branches are ready in the
+                // same epoch (e.g. cancel fired during a long upload that
+                // just completed), biased ordering previously picked cancel
+                // → silently dropped a completed Ok + re-inserted into dirty
+                // → redundant re-upload next cycle. Reordering keeps cancel
+                // responsive (cancel is checked every poll cycle once work
+                // is pending) while honoring completed outcomes.
                 biased;
+                r = work => r,
                 _ = ct.cancelled() => {
                     self.dirty.insert(entry_for_requeue.path.clone(), entry_for_requeue);
                     self.log_activity(&fw_name, &file_for_log,
                         "cancelled mid-flight — requeued");
                     EntryResult::Requeued
                 }
-                r = work => r,
             }
         } else {
             work.await
@@ -322,6 +330,21 @@ impl AutoSyncEngine {
                         locks.release(&remote),
                     ).await;
                 }
+            }
+        }
+        // #49: apply file-count delta from actual outcomes. Only successful
+        // Create/Delete shift the cached file count; Modified is a no-op,
+        // Fail/Requeued contribute nothing. Replaces the pre-circuit-breaker
+        // bulk apply at flush_batch end that used INPUT counts.
+        if matches!(result, EntryResult::Ok(..)) {
+            match entry_kind {
+                ChangeKind::Created => {
+                    self.apply_count_delta(&fw_for_release.remote_root, 1, 0);
+                }
+                ChangeKind::Deleted => {
+                    self.apply_count_delta(&fw_for_release.remote_root, 0, 1);
+                }
+                ChangeKind::Modified => {}
             }
         }
         result
@@ -594,11 +617,11 @@ impl AutoSyncEngine {
                         self.snapshot.set(&remote, lsize, lmtime, info.size, info.last_modified, sha);
                     }
                 }
-                if let Some(locks) = self.locks.clone() {
-                    let r = remote.clone();
-                    let h = tokio::spawn(async move { locks.release(&r).await });
-                    self.track_background(h);
-                }
+                // #100: lock release was previously fired here AND in process_entry's
+                // post-result cleanup (L317-325) — release is idempotent so safe
+                // but wasted a task spawn per successful upload. Sole release
+                // path is now the outer `process_entry` wrapper, which also
+                // covers the Fail branch.
                 let rel = rel_of(fw, &entry.path);
                 self.log_activity_rich(
                     &fw.resource_name,
