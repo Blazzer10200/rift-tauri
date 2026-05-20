@@ -201,6 +201,22 @@
   );
 
   const isUser = $derived(message.role === "user");
+  const isSystem = $derived(message.role === "system");
+  // Compaction boundary: the system-role message owns a single
+  // BoundaryBlock. Extract it here so the boundary render path stays
+  // out of the normal block-snippet rendering loop below.
+  const boundaryBlock = $derived(
+    isSystem
+      ? (message.blocks.find((b) => b.type === "boundary") as
+          | Extract<Block, { type: "boundary" }>
+          | undefined)
+      : undefined,
+  );
+  let boundaryExpanded = $state(false);
+
+  function formatBoundaryAt(ms: number): string {
+    return new Date(ms).toLocaleTimeString([], { hour12: true });
+  }
 
   function formatDuration(ms: number): string {
     if (ms < 1000) return `${ms} ms`;
@@ -323,6 +339,39 @@
   });
 </script>
 
+{#if isSystem && boundaryBlock}
+  {@const isCompacting = boundaryBlock.streaming === true}
+  {@const showBody = isCompacting || boundaryExpanded}
+  <div class="boundary" data-role="system" class:streaming={isCompacting}>
+    <button
+      type="button"
+      class="boundary-head"
+      onclick={() => (boundaryExpanded = !boundaryExpanded)}
+      aria-expanded={boundaryExpanded}
+      disabled={isCompacting}
+      title={isCompacting ? "Summarizing…" : `Click to ${boundaryExpanded ? "hide" : "show"} the compaction summary`}
+    >
+      <span class="boundary-line" aria-hidden="true"></span>
+      <span class="boundary-pill">
+        <Sparkles size={11} />
+        {#if isCompacting}
+          <span class="live-dot" aria-label="Compacting" title="Summarizing in progress"></span>
+          <span>Compacting · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} · {boundaryBlock.summary.length.toLocaleString()} chars</span>
+        {:else}
+          <span>Conversation compacted · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} archived</span>
+          <span class="boundary-meta mono">
+            ${boundaryBlock.costUsd.toFixed(4)} · {boundaryBlock.summaryModel} · {formatBoundaryAt(boundaryBlock.at)}
+          </span>
+          <ChevronDown size={11} class="chev" />
+        {/if}
+      </span>
+      <span class="boundary-line" aria-hidden="true"></span>
+    </button>
+    {#if showBody && boundaryBlock.summary.length > 0}
+      <div class="boundary-body"><Markdown text={boundaryBlock.summary} /></div>
+    {/if}
+  </div>
+{:else}
 <div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
   {#if !isUser}
     <div class="avatar" aria-hidden="true">
@@ -446,8 +495,65 @@
     {/if}
   </div>
 </div>
+{/if}
 
 <style>
+  .boundary {
+    width: 100%;
+    padding: 8px 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .boundary-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: inherit;
+    cursor: pointer;
+    width: 100%;
+  }
+  .boundary-line {
+    flex: 1;
+    height: 1px;
+    background: var(--border, rgba(255, 255, 255, 0.08));
+  }
+  .boundary-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--bg-elev, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    font-size: 11px;
+    color: var(--text-dim, rgba(255, 255, 255, 0.7));
+    white-space: nowrap;
+  }
+  .boundary-pill :global(.chev) {
+    transition: transform 120ms ease;
+    opacity: 0.6;
+  }
+  .boundary-head[aria-expanded="true"] :global(.chev) {
+    transform: rotate(180deg);
+  }
+  .boundary-meta {
+    opacity: 0.55;
+    font-size: 10px;
+  }
+  .boundary-body {
+    margin: 4px 24px 0;
+    padding: 10px 14px;
+    background: var(--bg-elev, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    border-radius: 8px;
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text, rgba(255, 255, 255, 0.86));
+  }
   .bubble {
     display: grid;
     grid-template-columns: 28px 1fr;
@@ -476,6 +582,19 @@
     margin-top: 0;
     background: var(--accent-soft);
     color: var(--accent);
+    transition: box-shadow 240ms ease-out;
+  }
+  /* Subtle pulsing halo on the avatar while a turn streams — gives the
+     "still working" signal even when text is paused (e.g. mid-thinking). */
+  .bubble[data-streaming="true"] .avatar {
+    animation: avatar-halo 1.8s ease-in-out infinite;
+  }
+  @keyframes avatar-halo {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
+    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bubble[data-streaming="true"] .avatar { animation: none; }
   }
 
   .body { min-width: 0; }

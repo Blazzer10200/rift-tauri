@@ -90,6 +90,52 @@
     return n;
   });
 
+  // Category drives the icon-color + border tint. Lets the eye distinguish
+  // read-only (cheap, blue), mutation (accent), side-effect (warm),
+  // agentic/meta (purple-ish) at a glance without parsing the tool name.
+  type Category = "read" | "write" | "shell" | "agent" | "meta";
+  const category = $derived.by<Category>(() => {
+    const n = shortName(tool.name);
+    if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
+    if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
+    if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand") return "agent";
+    if (n === "TodoWrite" || n === "AskUserQuestion" || n === "ExitPlanMode") return "meta";
+    return "read";
+  });
+
+  // Format the result's first non-empty line as an inline preview when the
+  // result is short and structurally a single line of useful text. Skips
+  // when result is empty, multi-line w/ substance, or expansion would
+  // confuse. Caps at 60 chars.
+  const inlinePreview = $derived.by<string | null>(() => {
+    if (!tool.result || tool.isError) return null;
+    if (tool.status !== "done") return null;
+    const raw = tool.result.trim();
+    if (raw.length === 0) return null;
+    const lines = raw.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+    if (lines.length === 0) return null;
+    // Single-line short result → inline. Multi-line w/ 1-3 short lines → first line + "…".
+    const first = lines[0];
+    if (first.length > 60) return first.slice(0, 58) + "…";
+    if (lines.length === 1) return first;
+    if (lines.length <= 3 && raw.length <= 200) return first + " …";
+    return null;
+  });
+
+  // Inline duration label for the chip head — only shown when the tool
+  // actually took noticeable wall-clock time (>1s). For Bash/Agent calls
+  // this surfaces slowness at a glance.
+  function shortDuration(ms: number): string {
+    if (ms < 1000) return "";
+    const s = ms / 1000;
+    return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+  }
+  const durationLabel = $derived.by<string | null>(() => {
+    if (tool.status !== "done") return null;
+    if (typeof tool.durationMs !== "number" || tool.durationMs < 1000) return null;
+    return shortDuration(tool.durationMs);
+  });
+
   const Icon = $derived.by(() => {
     const sn = shortName(tool.name);
     // File ops.
@@ -224,13 +270,20 @@
   });
 </script>
 
-<div class="chip" data-status={tool.status}>
+<div class="chip" data-status={tool.status} data-category={category}>
   <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
     <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
     <span class="chip-icon"><Icon size={12} /></span>
     <span class="chip-tool">{toolLabel}</span>
     <span class="chip-sep">·</span>
     <span class="chip-sum mono">{summary}</span>
+    {#if !expanded && inlinePreview}
+      <span class="chip-arrow" aria-hidden="true">→</span>
+      <span class="chip-preview mono" title={tool.result ?? ""}>{inlinePreview}</span>
+    {/if}
+    {#if durationLabel}
+      <span class="chip-duration mono" title="Wall-clock duration">{durationLabel}</span>
+    {/if}
     <span class="chip-status">
       {#if tool.status === "pending"}
         <Loader2 size={11} class="chip-spin" />
@@ -346,7 +399,31 @@
     flex-shrink: 0;
     opacity: 0.85;
   }
+  /* Category coloring — distinguishes read-only/mutation/side-effect/agentic
+   * at a glance. Tones picked from the existing palette + slight hue shifts
+   * so the chips read as a family rather than 5 unrelated colors. */
+  .chip[data-category="read"]  .chip-icon { color: oklch(0.74 0.10 230); }
+  .chip[data-category="write"] .chip-icon { color: var(--accent); }
+  .chip[data-category="shell"] .chip-icon { color: oklch(0.78 0.12 60); }
+  .chip[data-category="agent"] .chip-icon { color: oklch(0.74 0.13 310); }
+  .chip[data-category="meta"]  .chip-icon { color: oklch(0.76 0.10 145); }
+  /* Subtle left-edge accent so a wall of chips has visual scannability. */
+  .chip { border-left-width: 2px; }
+  .chip[data-category="read"]  { border-left-color: color-mix(in oklch, oklch(0.74 0.10 230) 45%, var(--border)); }
+  .chip[data-category="write"] { border-left-color: color-mix(in oklch, var(--accent) 50%, var(--border)); }
+  .chip[data-category="shell"] { border-left-color: color-mix(in oklch, oklch(0.78 0.12 60) 50%, var(--border)); }
+  .chip[data-category="agent"] { border-left-color: color-mix(in oklch, oklch(0.74 0.13 310) 50%, var(--border)); }
+  .chip[data-category="meta"]  { border-left-color: color-mix(in oklch, oklch(0.76 0.10 145) 45%, var(--border)); }
   .chip[data-status="error"] .chip-icon { color: var(--danger); opacity: 1; }
+  .chip[data-status="error"] { border-left-color: var(--danger) !important; }
+  .chip[data-status="pending"] {
+    border-left-color: var(--accent) !important;
+    animation: chip-pulse 1.8s ease-in-out infinite;
+  }
+  @keyframes chip-pulse {
+    0%, 100% { background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev-1)); }
+    50%      { background: color-mix(in oklch, var(--accent-soft) 25%, var(--bg-elev-1)); }
+  }
   .chip-tool {
     font-weight: 600;
     color: var(--fg-2);
@@ -360,6 +437,34 @@
     color: var(--fg-muted);
     font-size: 10.5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chip-arrow {
+    color: var(--fg-faint);
+    font-size: 10px;
+    flex-shrink: 0;
+    margin: 0 1px;
+  }
+  .chip-preview {
+    color: var(--fg-2);
+    font-size: 10.5px;
+    flex-shrink: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 36ch;
+    opacity: 0.85;
+  }
+  .chip-duration {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--warn-soft) 55%, var(--bg-elev-1));
+    color: var(--warn);
+    border: 1px solid color-mix(in oklch, var(--warn) 25%, var(--border));
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+    font-weight: 600;
   }
   .chip-status {
     display: inline-flex;

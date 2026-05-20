@@ -944,6 +944,320 @@ pub fn assistant_set_compact_model(value: String) -> Result<(), String> {
     save_config(&cfg)
 }
 
+/// Output of a one-shot summarize call. Mirrors the design doc Phase B
+/// shape — caller uses `summary` as the seed for the next CLI session
+/// after a compaction remint, and surfaces the cost/token figures in the
+/// boundary message pill.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummarizeResult {
+    pub summary: String,
+    pub model: String,
+    pub cost_usd: f64,
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub cache_read_tokens: u32,
+    pub cache_create_tokens: u32,
+}
+
+const SUMMARIZE_PROMPT_HEAD: &str = "The user is approaching their context window cap. Produce a structured summary of this conversation that another instance of you could read in under 2K tokens and pick up where we left off without losing critical state. Preserve verbatim: (1) the active TodoWrite list below, (2) file paths actively being worked on + the last revision direction for each, (3) decisions explicitly made by the user, (4) open questions or blockers. Drop: tool-call mechanics, exploratory dead-ends, verbose tool outputs. Output format: 4 sections — \"Active task\", \"Files in play\", \"Decisions\", \"Open questions\". No preamble or sign-off.";
+
+/// Phase B: one-shot summarize against an existing CLI session. Spawns
+/// `claude -p --resume <sid> --model <m>` headless, pipes a structured
+/// summarize prompt, parses the NDJSON stream for assistant text deltas +
+/// the terminal `result` envelope. No state mutation, no UI events — the
+/// caller decides what to do with the returned summary (Phase C wires it
+/// into the compaction remint flow).
+///
+/// `tasks_json` is the frontend's current TodoWrite snapshot serialized as
+/// a JSON string (e.g. `[{"content":"...","status":"in_progress"}, ...]`);
+/// pass `"[]"` or `"(none)"` when empty. Interpolated server-side so the
+/// frontend doesn't have to know the prompt template.
+#[tauri::command]
+pub async fn assistant_summarize_session(
+    app: AppHandle,
+    session_id: String,
+    focus: Option<String>,
+    tasks_json: Option<String>,
+) -> Result<SummarizeResult, String> {
+    let cfg = load_config();
+    let model = cfg
+        .compact_model
+        .filter(|v| matches!(v.as_str(), "haiku" | "sonnet" | "opus"))
+        .unwrap_or_else(|| "haiku".to_string());
+
+    let focus_line = focus
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("Focus: {s}."))
+        .unwrap_or_else(|| "Focus: general continuation.".into());
+    let tasks_body = tasks_json
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty() && *s != "[]")
+        .unwrap_or("(none)")
+        .to_string();
+    let prompt = format!(
+        "{SUMMARIZE_PROMPT_HEAD}\n\n{focus_line}\n\nActive TodoWrite tasks (preserve verbatim under \"Active task\"):\n{tasks_body}\n"
+    );
+
+    let mut cmd = claude_command()
+        .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
+    // S124 fix: `--resume <sid>` resolves against the CLI's project-hash dir
+    // derived from cwd. Without setting current_dir to match the cwd the
+    // original conversation ran under (persisted via the .cwd sidecar at
+    // session-id mint time), the CLI looks in the wrong hash dir and errors
+    // "No conversation found with session ID".
+    if let Some(cwd) = load_session_cwd(&session_id).filter(|p| p.is_dir()) {
+        cmd.current_dir(cwd);
+    }
+    cmd.arg("-p").arg(&prompt)
+        .arg("--resume").arg(&session_id)
+        .arg("--output-format").arg("stream-json")
+        .arg("--input-format").arg("text")
+        .arg("--verbose")
+        .arg("--model").arg(&model)
+        // Hard cost cap — Haiku at full 900K context is ~$0.91; 1.50 leaves
+        // ~60% headroom for tokenizer drift. Sonnet runs above this should
+        // be flagged before they fire.
+        .arg("--max-budget-usd").arg("1.50")
+        // Headless mode has no interactive surface for ANY tool — and a
+        // summarize call shouldn't be running tools regardless. The CLI's
+        // `--tools ""` disables the built-in tool set wholesale.
+        .arg("--tools").arg("")
+        .arg("--permission-mode").arg("bypassPermissions")
+        // SessionStart hooks load ~46K tokens of memory/git context into
+        // cache_creation per fresh CLI process — irrelevant for a one-shot
+        // summarize and burns ~5% of the budget per call. Verified S103
+        // probe 2026-05-19 ($0.0586 empty-resume baseline cost).
+        .env("CLAUDE_DISABLE_HOOKS", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().map_err(|e| format!("spawn `claude` (summarize): {e}"))?;
+
+    let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
+
+    let progress_sid = session_id.clone();
+    let progress_app = app.clone();
+    let stdout_task = tokio::spawn(async move {
+        let mut summary = String::new();
+        // Rate-limit progress emits: at most every 150ms or every 64 new chars,
+        // whichever comes first. Avoids flooding the frontend on dense streams.
+        let mut last_emit_at = std::time::Instant::now();
+        let mut last_emit_len: usize = 0;
+        let mut cost_usd: f64 = 0.0;
+        let mut input_tokens: u32 = 0;
+        let mut output_tokens: u32 = 0;
+        let mut cache_read: u32 = 0;
+        let mut cache_create: u32 = 0;
+        let mut result_model: Option<String> = None;
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let env: Value = match serde_json::from_str(trimmed) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let env_type = env.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            match env_type {
+                // S124: in current CLI (2.1.139) `-p` mode emits buffered
+                // `assistant` envelopes w/ the full message.content array
+                // instead of per-token stream_event deltas. Extract text
+                // from each content block here. Multiple `assistant` events
+                // can land per turn (one per content block); the `result`
+                // envelope below is the final aggregated source-of-truth.
+                "assistant" => {
+                    let msg = env.get("message").unwrap_or(&Value::Null);
+                    if let Some(blocks) = msg.get("content").and_then(|v| v.as_array()) {
+                        for b in blocks {
+                            if b.get("type").and_then(|v| v.as_str()) == Some("text") {
+                                if let Some(t) = b.get("text").and_then(|v| v.as_str()) {
+                                    summary.push_str(t);
+                                }
+                            }
+                        }
+                    }
+                    // Stream the in-flight summary to the frontend.
+                    let elapsed_ms = last_emit_at.elapsed().as_millis();
+                    let new_chars = summary.len().saturating_sub(last_emit_len);
+                    if new_chars > 0 && (new_chars >= 64 || elapsed_ms >= 150) {
+                        last_emit_at = std::time::Instant::now();
+                        last_emit_len = summary.len();
+                        let _ = progress_app.emit(
+                            "assistant://summarize-progress",
+                            serde_json::json!({
+                                "session_id": progress_sid,
+                                "summary_so_far": summary,
+                                "status": "streaming",
+                            }),
+                        );
+                    }
+                }
+                // Per-token deltas (alternative CLI output shape).
+                "stream_event" => {
+                    let inner = env.get("event").unwrap_or(&Value::Null);
+                    if inner.get("type").and_then(|v| v.as_str()) == Some("content_block_delta") {
+                        let delta = inner.get("delta").unwrap_or(&Value::Null);
+                        if delta.get("type").and_then(|v| v.as_str()) == Some("text_delta") {
+                            if let Some(t) = delta.get("text").and_then(|v| v.as_str()) {
+                                summary.push_str(t);
+                                let elapsed_ms = last_emit_at.elapsed().as_millis();
+                                let new_chars = summary.len().saturating_sub(last_emit_len);
+                                if new_chars > 0 && (new_chars >= 64 || elapsed_ms >= 150) {
+                                    last_emit_at = std::time::Instant::now();
+                                    last_emit_len = summary.len();
+                                    let _ = progress_app.emit(
+                                        "assistant://summarize-progress",
+                                        serde_json::json!({
+                                            "session_id": progress_sid,
+                                            "summary_so_far": summary,
+                                            "status": "streaming",
+                                        }),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                // Terminal envelope w/ aggregated usage + cost.
+                "result" => {
+                    // S124: also drains `result.result` as the canonical
+                    // aggregated text — overrides accumulated assistant
+                    // events if non-empty so the parser is robust to
+                    // either CLI output shape.
+                    if let Some(t) = env.get("result").and_then(|v| v.as_str()) {
+                        let trimmed = t.trim();
+                        if !trimmed.is_empty() {
+                            summary = trimmed.to_string();
+                        }
+                    }
+                    if let Some(c) = env.get("total_cost_usd").and_then(|v| v.as_f64()) {
+                        cost_usd = c;
+                    }
+                    let u = env.get("usage").unwrap_or(&Value::Null);
+                    let g = |k: &str| -> u32 {
+                        u.get(k)
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n as u32)
+                            .unwrap_or(0)
+                    };
+                    input_tokens = g("input_tokens");
+                    output_tokens = g("output_tokens");
+                    cache_read = g("cache_read_input_tokens");
+                    cache_create = g("cache_creation_input_tokens");
+                    if let Some(m) = env.get("model").and_then(|v| v.as_str()) {
+                        result_model = Some(m.to_string());
+                    }
+                    // Emit final aggregated summary so the frontend lands on
+                    // the canonical text (covers cases where assistant-event
+                    // streaming was empty and `result.result` is the source).
+                    let _ = progress_app.emit(
+                        "assistant://summarize-progress",
+                        serde_json::json!({
+                            "session_id": progress_sid,
+                            "summary_so_far": summary,
+                            "status": "done",
+                        }),
+                    );
+                }
+                _ => {}
+            }
+        }
+        (
+            summary,
+            cost_usd,
+            input_tokens,
+            output_tokens,
+            cache_read,
+            cache_create,
+            result_model,
+        )
+    });
+
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(l)) = lines.next_line().await {
+            buf.push_str(&l);
+            buf.push('\n');
+            if buf.len() > 32 * 1024 {
+                break;
+            }
+        }
+        buf
+    });
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("await claude (summarize): {e}"))?;
+    let (summary, cost_usd, input_tokens, output_tokens, cache_read, cache_create, result_model) =
+        stdout_task.await.unwrap_or_default();
+    let stderr_buf = stderr_task.await.unwrap_or_default();
+
+    if !status.success() {
+        return Err(format!(
+            "claude (summarize) exited {} — {}",
+            status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
+            stderr_buf.trim()
+        ));
+    }
+    let summary = summary.trim().to_string();
+    if summary.is_empty() {
+        return Err("summarize call returned empty text".into());
+    }
+
+    Ok(SummarizeResult {
+        summary,
+        model: result_model.unwrap_or(model),
+        cost_usd,
+        input_tokens,
+        output_tokens,
+        cache_read_tokens: cache_read,
+        cache_create_tokens: cache_create,
+    })
+}
+
+/// Compaction Phase C: copy the cwd sidecar from an old CLI session id to a
+/// freshly-minted one. The old sidecar is left in place during a transition
+/// window so a failed/aborted compaction can still --resume the prior
+/// session. Cleanup of stranded old sidecars happens lazily via the next
+/// `save_session_cwd` overwrite or never (best-effort housekeeping is fine —
+/// each sidecar is ~80 bytes).
+///
+/// Both ids are validated as canonical UUIDs (#220 shape) before touching
+/// disk. Errors propagate so the frontend can surface them in `lastError`.
+#[tauri::command]
+pub fn assistant_remint_session(
+    old_session_id: String,
+    new_session_id: String,
+) -> Result<(), String> {
+    if !is_valid_session_id(&old_session_id) {
+        return Err(format!("invalid old session id: {old_session_id}"));
+    }
+    if !is_valid_session_id(&new_session_id) {
+        return Err(format!("invalid new session id: {new_session_id}"));
+    }
+    if old_session_id == new_session_id {
+        return Err("remint requires distinct old + new session ids".into());
+    }
+    let Some(cwd) = load_session_cwd(&old_session_id) else {
+        // Legacy convos lacked sidecars; nothing to copy is not an error.
+        // The new session will get a sidecar on its first turn via the
+        // existing save_session_cwd path in assistant_send.
+        return Ok(());
+    };
+    save_session_cwd(&new_session_id, &cwd);
+    Ok(())
+}
+
 #[tauri::command]
 pub fn assistant_get_allow_remote_shell() -> Result<bool, String> {
     Ok(load_config().allow_remote_shell.unwrap_or(false))
@@ -1251,6 +1565,7 @@ pub async fn assistant_send(
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
+    prior_context_summary: Option<String>,
 ) -> Result<(), String> {
     // #220: validate session_id is a canonical UUID (8-4-4-4-12 lowercase hex)
     // BEFORE any use. Renderer-supplied — must not flow into CLI args or
@@ -1461,10 +1776,19 @@ pub async fn assistant_send(
         // denials on `Agent` (subagent spawn — used by /plan, /quick-review,
         // /check), `BashOutput`/`KillBash`/`KillShell` (background-bash
         // bookkeeping the CLI auto-invokes after `run_in_background: true`),
-        // `MultiEdit`, `NotebookEdit`, `SlashCommand`, `AskUserQuestion`,
-        // `ExitPlanMode`. Wider built-in coverage = fewer denial pop-ups.
+        // `MultiEdit`, `NotebookEdit`, `SlashCommand`, `ExitPlanMode`.
+        // Wider built-in coverage = fewer denial pop-ups.
         // MCP scope still restricts to rift's tools in the scoped branches.
-        const BUILTINS: &str = "Agent,AskUserQuestion,Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
+        //
+        // `AskUserQuestion` is INTENTIONALLY omitted: the CLI runs in `-p`
+        // (headless) mode with no interactive surface to present the
+        // question / capture an answer / inject the tool_result back into
+        // the model's stream. When admitted, the model called it and stalled
+        // waiting for a tool_result that never arrived, then retried — the
+        // user saw two collapsed error bubbles on every question turn.
+        // Excluding it makes the model fall back to asking in plain text,
+        // which works correctly in `-p` mode.
+        const BUILTINS: &str = "Agent,Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
         let allowed: String = if use_full_config {
             // `mcp__*` admits any tool from user MCP servers that the CLI
             // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
@@ -1542,6 +1866,17 @@ pub async fn assistant_send(
     // clarifying questions.
     if dyslexia_mode.unwrap_or(false) {
         reminder_parts.push("Dyslexia-friendly mode + voice-to-text are enabled for this user. Phonetic typos (e.g. \"wair\"/\"where\", \"nite\"/\"night\"), letter-swap typos (b/d, p/q), and slurred-speech transcription artifacts are expected. Interpret the most likely intended meaning charitably and proceed; only ask for clarification when meaning is genuinely ambiguous. Don't comment on spelling/grammar unless the user asks.".into());
+    }
+    // Phase C: seed the next CLI session with the prior conversation's
+    // summary after a compaction remint. Frontend tracks
+    // `pendingCompactionSummary` and passes it on the FIRST send into the
+    // newly-minted session; the summary lives inside <system-reminder> so
+    // the cached system-prompt prefix stays stable. Cleared after the send
+    // returns — never persists across turns.
+    if let Some(s) = prior_context_summary.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        reminder_parts.push(format!(
+            "Prior conversation summary (compacted; the CLI session this turn runs against is fresh — this summary IS your context for what came before):\n{s}"
+        ));
     }
     let effective_prompt = if reminder_parts.is_empty() {
         prompt.clone()

@@ -9,6 +9,24 @@
       if (assistant.openTabs.length === 0) void assistant.newTab();
     });
   });
+
+  // Phase D: auto-compact trigger. Guards in priority order:
+  //   - threshold is non-null (feature opt-in)
+  //   - active tab exists + not streaming + not already compacting
+  //   - ≥5min since last successful compaction (cooldown vs runaway on failure)
+  //   - ctxPct has crossed threshold
+  // Page-scoped so the effect lives only while the chat workspace is mounted;
+  // navigating to Sync/Settings pauses auto-trigger naturally.
+  $effect(() => {
+    const threshold = assistant.autoCompactThreshold;
+    if (!threshold) return;
+    const tab = assistant.activeTab;
+    if (!tab) return;
+    if (tab.streaming || tab.compactingNow) return;
+    if (Date.now() - tab.lastCompactionAt < 5 * 60_000) return;
+    if (assistant.ctxPct < threshold * 100) return;
+    void assistant.compactConversation();
+  });
 </script>
 
 <div class="assistant">

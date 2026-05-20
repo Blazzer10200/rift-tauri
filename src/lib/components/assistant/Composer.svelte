@@ -25,17 +25,20 @@
   // `/clear` is intentionally NOT listed — it's an alias of /new and surfacing
   // both clutters the picker. runSlash() still accepts it.
   const SLASH_COMMANDS: SlashCmd[] = [
-    { name: "new",     desc: "Start a new conversation (saves current)" },
-    { name: "history", desc: "Open conversation history" },
-    { name: "model",   desc: "Switch model — opens picker" },
-    { name: "retry",   desc: "Re-fire the last prompt" },
-    { name: "copy",    desc: "Copy last response to clipboard" },
-    { name: "stop",    desc: "Halt the current turn" },
-    { name: "tools",   desc: "List available workspace tools" },
-    { name: "cost",    desc: "Show session cost" },
-    { name: "stats",   desc: "Session telemetry summary (inline)" },
-    { name: "diag",    desc: "Copy full telemetry JSON to clipboard" },
-    { name: "help",    desc: "List slash commands" },
+    { name: "new",       desc: "Start a new conversation (saves current)" },
+    { name: "compact",   desc: "Summarize + remint the CLI session (optional focus)" },
+    { name: "history",   desc: "Open conversation history" },
+    { name: "model",     desc: "Switch model — opens picker" },
+    { name: "retry",     desc: "Re-fire the last prompt" },
+    { name: "copy",      desc: "Copy last response to clipboard" },
+    { name: "stop",      desc: "Halt the current turn" },
+    { name: "tools",     desc: "List available workspace tools" },
+    { name: "cost",      desc: "Show session cost" },
+    { name: "stats",     desc: "Session telemetry summary (inline)" },
+    { name: "summarize", desc: "Dry-run a compaction summary (no state change)" },
+    { name: "openincli", desc: "Print the claude --resume command for this session" },
+    { name: "diag",      desc: "Copy full telemetry JSON to clipboard" },
+    { name: "help",      desc: "List slash commands" },
   ];
 
   // Model picker rows — version + tagline + context window. The CLI takes

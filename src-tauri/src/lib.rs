@@ -2073,6 +2073,8 @@ pub fn run() {
             assistant::assistant_set_auto_compact_threshold,
             assistant::assistant_get_compact_model,
             assistant::assistant_set_compact_model,
+            assistant::assistant_summarize_session,
+            assistant::assistant_remint_session,
             assistant::assistant_send,
             assistant::assistant_stop,
             assistant::assistant_list_conversations,

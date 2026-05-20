@@ -707,6 +707,65 @@
           {#if asstApiKeyMsg}<p class="muted">{asstApiKeyMsg}</p>{/if}
           <p class="muted asst-warn">Stored in <code>~/.rift/assistant/config.json</code> as plaintext. Keychain migration planned.</p>
         </div>
+
+        <div class="card asst-card">
+          <h4 class="asst-h4">Conversation compaction</h4>
+          <p class="muted">
+            When ctx fills past a threshold, Rift summarizes the chat via a one-shot
+            <code>claude -p</code> call, retires the CLI session id, mints a fresh one,
+            and seeds the next turn with the summary. Manual compact via the header
+            button (or <code>/compact [focus]</code>) is always available.
+          </p>
+
+          <div class="asst-row">
+            <label class="muted" for="auto-compact-threshold">Auto-compact threshold</label>
+            <select
+              id="auto-compact-threshold"
+              class="input mono asst-input"
+              value={assistantStore.autoCompactThreshold ?? 0}
+              onchange={(e) => {
+                const raw = Number((e.currentTarget as HTMLSelectElement).value);
+                void assistantStore.setAutoCompactThreshold(raw > 0 ? raw : null);
+              }}
+            >
+              <option value={0}>Off (manual only)</option>
+              <option value={0.70}>70% (recommended)</option>
+              <option value={0.80}>80%</option>
+              <option value={0.85}>85%</option>
+              <option value={0.90}>90%</option>
+            </select>
+          </div>
+          <p class="muted">
+            Off by default — your global <code>DISABLE_AUTO_COMPACT=1</code> stays in effect for the CLI;
+            this is Rift's replacement, opt-in. 5min cooldown between fires.
+          </p>
+
+          <div class="asst-row">
+            <span class="muted">Compact model</span>
+            <button
+              type="button"
+              class="btn ghost sm"
+              data-on={assistantStore.compactModel === "haiku"}
+              onclick={() => void assistantStore.setCompactModel("haiku")}
+            >Haiku · $0.91/call</button>
+            <button
+              type="button"
+              class="btn ghost sm"
+              data-on={assistantStore.compactModel === "sonnet"}
+              onclick={() => void assistantStore.setCompactModel("sonnet")}
+            >Sonnet · $2.73/call</button>
+          </div>
+          <p class="muted">Haiku is sufficient for prose summarization. Sonnet only if Haiku misses details on your workflow.</p>
+
+          <div class="asst-row">
+            <button
+              type="button"
+              class="btn primary sm"
+              onclick={() => void assistantStore.compactConversation()}
+            >Compact now</button>
+            <span class="muted">Fires <code>compactConversation()</code> on the active chat regardless of threshold. Requires ≥4 messages and no in-flight stream.</span>
+          </div>
+        </div>
       </div>
 
     {:else if section === "accessibility"}
