@@ -4,16 +4,28 @@
   // (`compact`). When `input` lacks old_string / new_string, renders nothing
   // and the parent can fall back to raw JSON.
 
+  import { untrack } from "svelte";
   import { diffArrays } from "diff";
-  import { FilePen } from "lucide-svelte";
+  import { FilePen, ChevronDown } from "lucide-svelte";
 
   let {
     input,
     compact = false,
+    defaultExpanded = false,
   }: {
     input: Record<string, unknown>;
     compact?: boolean;
+    defaultExpanded?: boolean;
   } = $props();
+
+  // Collapsed by default in the chat lane — large diffs would otherwise eat
+  // most of the message column for a turn that's already summarized in the
+  // header (+N -M). The compact (dock) variant stays expanded since the dock
+  // is purpose-built for ops review.
+  // Initial-seed only: prop reads are intentionally non-reactive — once the
+  // user clicks the chevron their choice is sticky and shouldn't snap back
+  // when a parent re-renders the same block w/ identical props.
+  let expanded = $state<boolean>(untrack(() => compact || defaultExpanded));
 
   type DiffPair =
     | { kind: "ctx";  left: string; right: string }
@@ -106,12 +118,30 @@
     }
     return { adds, dels };
   });
+
+  // Unified layout when one side is empty — a +21/-0 edit (new file content)
+  // or -N/+0 edit (deletion) doesn't need two columns. Drops the empty side
+  // entirely, halving the horizontal footprint.
+  const unified = $derived(counts.adds === 0 || counts.dels === 0);
+  const unifiedSide = $derived<"left" | "right">(counts.adds === 0 ? "left" : "right");
+
+  function toggleExpanded(e: MouseEvent) {
+    if (compact) return;
+    e.stopPropagation();
+    expanded = !expanded;
+  }
 </script>
 
 {#if pairs}
-  <div class="edit-diff" class:compact>
+  <div class="edit-diff" class:compact class:collapsed={!expanded} class:unified>
     {#if !compact && filePath}
-      <div class="edit-head">
+      <button
+        type="button"
+        class="edit-head"
+        class:clickable={!compact}
+        onclick={toggleExpanded}
+        title={expanded ? "Collapse diff" : "Show diff"}
+      >
         <span class="edit-icon"><FilePen size={12} /></span>
         <span class="edit-tool">Edit</span>
         <span class="edit-path mono" title={filePath}>{shortPath(filePath)}</span>
@@ -119,34 +149,52 @@
           <span class="ct-add">+{counts.adds}</span>
           <span class="ct-del">−{counts.dels}</span>
         </span>
-      </div>
+        <span class="edit-chev" class:open={expanded} aria-hidden="true">
+          <ChevronDown size={12} />
+        </span>
+      </button>
     {/if}
-    <div class="diff-body">
-      <div class="diff-head">
-        <span>before</span>
-        <span>after</span>
-      </div>
-      {#each compactPairs as p, pi (pi)}
-        {#if p.kind === "meta"}
-          <div class="diff-meta">{p.text}</div>
-        {:else if p.kind === "gap"}
-          <div class="diff-gap" data-multi={p.lines > 1} title={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
-            {#if p.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{p.lines} blank lines</span>{/if}
-          </div>
-        {:else}
-          <div class="diff-pair" data-kind={p.kind}>
-            <span class="diff-cell side-l">
-              <span class="diff-sigil">{p.left === null ? " " : p.kind === "ctx" ? " " : "-"}</span>
-              <span class="diff-text">{p.left ?? ""}</span>
-            </span>
-            <span class="diff-cell side-r">
-              <span class="diff-sigil">{p.right === null ? " " : p.kind === "ctx" ? " " : "+"}</span>
-              <span class="diff-text">{p.right ?? ""}</span>
-            </span>
+    {#if expanded}
+      <div class="diff-body">
+        {#if !unified}
+          <div class="diff-head">
+            <span>before</span>
+            <span>after</span>
           </div>
         {/if}
-      {/each}
-    </div>
+        {#each compactPairs as p, pi (pi)}
+          {#if p.kind === "meta"}
+            <div class="diff-meta">{p.text}</div>
+          {:else if p.kind === "gap"}
+            <div class="diff-gap" data-multi={p.lines > 1} title={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
+              {#if p.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{p.lines} blank lines</span>{/if}
+            </div>
+          {:else if unified}
+            {@const cellKind = unifiedSide === "left" ? (p.kind === "ctx" ? "ctx" : "del") : (p.kind === "ctx" ? "ctx" : "add")}
+            {@const cellText = unifiedSide === "left" ? p.left : p.right}
+            {#if cellText !== null}
+              <div class="diff-pair single" data-kind={cellKind}>
+                <span class="diff-cell side-{unifiedSide === 'left' ? 'l' : 'r'}">
+                  <span class="diff-sigil">{cellKind === "ctx" ? " " : cellKind === "del" ? "-" : "+"}</span>
+                  <span class="diff-text">{cellText}</span>
+                </span>
+              </div>
+            {/if}
+          {:else}
+            <div class="diff-pair" data-kind={p.kind}>
+              <span class="diff-cell side-l">
+                <span class="diff-sigil">{p.left === null ? " " : p.kind === "ctx" ? " " : "-"}</span>
+                <span class="diff-text">{p.left ?? ""}</span>
+              </span>
+              <span class="diff-cell side-r">
+                <span class="diff-sigil">{p.right === null ? " " : p.kind === "ctx" ? " " : "+"}</span>
+                <span class="diff-text">{p.right ?? ""}</span>
+              </span>
+            </div>
+          {/if}
+        {/each}
+      </div>
+    {/if}
   </div>
 {/if}
 
@@ -167,11 +215,37 @@
   }
   .edit-head {
     display: flex; align-items: center; gap: 8px;
+    width: 100%;
     padding: 6px 10px;
     background: var(--bg-elev-2);
+    border: 0;
     border-bottom: 1px solid var(--border);
+    font: inherit;
     font-size: var(--fs-xs);
     color: var(--fg-2);
+    text-align: left;
+  }
+  .edit-head.clickable {
+    cursor: pointer;
+    transition: background 140ms ease-out, border-color 140ms ease-out;
+  }
+  .edit-head.clickable:hover {
+    background: color-mix(in oklch, var(--bg-elev-2) 80%, var(--accent));
+    border-bottom-color: color-mix(in oklch, var(--accent) 30%, var(--border));
+  }
+  .edit-head.clickable:focus-visible {
+    outline: 2px solid color-mix(in oklch, var(--accent) 60%, transparent);
+    outline-offset: -2px;
+  }
+  .edit-diff.collapsed .edit-head { border-bottom-color: transparent; }
+  .edit-chev {
+    display: inline-flex;
+    color: var(--fg-muted);
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .edit-chev.open { transform: rotate(180deg); }
+  @media (prefers-reduced-motion: reduce) {
+    .edit-chev { transition: none; }
   }
   .edit-icon { display: inline-flex; color: var(--accent); }
   .edit-tool {
@@ -227,6 +301,22 @@
     column-gap: 1px;
     background: var(--border);
   }
+  .diff-pair.single {
+    grid-template-columns: 1fr;
+    background: transparent;
+  }
+  .diff-pair.single[data-kind="del"] .side-l {
+    background: oklch(0.68 0.20 22 / 0.13);
+    box-shadow: inset 2px 0 oklch(0.68 0.20 22 / 0.55);
+  }
+  .diff-pair.single[data-kind="del"] .side-l .diff-sigil { color: oklch(0.78 0.16 22); }
+  .diff-pair.single[data-kind="del"] .side-l .diff-text { color: oklch(0.88 0.10 22); }
+  .diff-pair.single[data-kind="add"] .side-r {
+    background: oklch(0.76 0.18 152 / 0.13);
+    box-shadow: inset 2px 0 oklch(0.76 0.18 152 / 0.55);
+  }
+  .diff-pair.single[data-kind="add"] .side-r .diff-sigil { color: oklch(0.80 0.14 152); }
+  .diff-pair.single[data-kind="add"] .side-r .diff-text { color: oklch(0.90 0.09 152); }
   .diff-cell {
     display: grid;
     grid-template-columns: 16px 1fr;

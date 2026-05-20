@@ -3,13 +3,20 @@
   import { assistant } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
   import { tick, onMount } from "svelte";
+  import StatusHub from "./StatusHub.svelte";
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
   // mic until they opened Settings → Speech once.
   onMount(() => { void stt.init(); });
 
-  let { onsubmit }: { onsubmit: (text: string) => void } = $props();
+  let {
+    onsubmit,
+    tabId = null,
+  }: {
+    onsubmit: (text: string) => void;
+    tabId?: string | null;
+  } = $props();
 
   let ta = $state<HTMLTextAreaElement | undefined>();
 
@@ -598,6 +605,7 @@
       </div>
     {/if}
 
+    <StatusHub {tabId} />
     <div class="composer" class:streaming={assistant.streaming}>
       {#if stt.config.enabled && stt.supported}
       <button
@@ -703,7 +711,7 @@
 <style>
   .composer-wrap {
     padding: 10px 18px 14px;
-    max-width: min(960px, 88ch);
+    max-width: var(--chat-col-max);
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
@@ -727,6 +735,12 @@
   }
   .composer.streaming {
     border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+  }
+  /* When the status hub is rendered above us during streaming, drop the
+     top corners so the hub + composer read as one continuous element. */
+  .composer-shell:has(:global(.hub)) .composer {
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
   }
   textarea {
     flex: 1;

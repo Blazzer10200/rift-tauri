@@ -33,6 +33,21 @@ use crate::sync::ignore;
 const MAX_DEPTH: usize = 12;
 const REMOTE_HASH_BUDGET_PER_FOLDER: i32 = 25;
 
+/// Lifetime cap for the `.rift-rebuild` tooling sentinel. Stale leftovers (older
+/// than this) are ignored so a crashed build script can't lock sync forever.
+const REBUILD_SENTINEL_MAX_AGE_SECS: u64 = 300;
+
+/// True when the path exists AND mtime is within the sentinel's max-age window.
+/// Used by both the drift scanner (skip folder) and the watch queue (skip event).
+pub fn is_rebuild_sentinel_fresh(path: &Path) -> bool {
+    let Ok(meta) = std::fs::metadata(path) else { return false };
+    let Ok(modified) = meta.modified() else { return true };
+    match modified.elapsed() {
+        Ok(age) => age.as_secs() <= REBUILD_SENTINEL_MAX_AGE_SECS,
+        Err(_) => true,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DriftBucket {
@@ -228,6 +243,22 @@ impl<'a> DriftScanner<'a> {
         // Walk runs on a blocking thread so a multi-thousand-file resource
         // folder doesn't stall the tokio runtime mid-scan.
         let local_root = Path::new(&f.local_root);
+
+        // Rebuild sentinel: tooling drops `.rift-rebuild` at the watched-folder
+        // root while a build is in flight (Vite/Webpack/esbuild content-hashed
+        // filenames produce unlink-old + write-new event pairs that otherwise
+        // misclassify as remote-delete + local-new for two events). Skip the
+        // whole folder for this scan when the sentinel is fresh.
+        if is_rebuild_sentinel_fresh(&local_root.join(".rift-rebuild")) {
+            crate::diagnostics::emit_for(
+                crate::diagnostics::DiagStage::DriftScanProgress,
+                crate::diagnostics::DiagLevel::Debug,
+                Some(&f.resource_name),
+                None,
+                ".rift-rebuild present — folder skipped for this scan",
+            );
+            return FolderScan::Drift(Vec::new());
+        }
         // #74: a panic inside walk_local previously fell back to .unwrap_or_default(),
         // producing an empty local_map that silently bypassed the data-safety guard
         // below (`!local_map.is_empty()`) and let the diff downstream mark every

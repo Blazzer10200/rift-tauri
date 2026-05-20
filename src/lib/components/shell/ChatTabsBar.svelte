@@ -412,6 +412,10 @@
     color: var(--fg);
     font-weight: 600;
     border-color: var(--border);
+    /* Top-edge accent — picks the active tab out of the row at a glance.
+       Inset box-shadow vs ::before because ::before is reserved for the
+       in-pane indicator. */
+    box-shadow: inset 0 2px 0 0 var(--accent);
     z-index: 1;
   }
   .tab.active::after {
