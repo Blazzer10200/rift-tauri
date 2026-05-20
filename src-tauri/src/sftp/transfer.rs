@@ -203,6 +203,12 @@ impl SftpClient {
     }
 
 
+    /// **Internal-only — probe writes** (`probe_write_access` ephemeral file).
+    /// Does NOT apply SETSTAT 0664 like `upload_atomic_via` because the file
+    /// is removed immediately after the write. Don't use this for files the
+    /// shared-group workflow depends on — they'd ship at the default umask
+    /// 0644 and break the EACCES tmp-rename recovery the v0.2.25 work added.
+    /// #129: contract documented; no behavior change.
     pub async fn upload_bytes(&self, bytes: &[u8], remote_path: &str) -> Result<(), String> {
         // russh-sftp's `write()` is WRITE-only (no CREATE/TRUNCATE) — fails on
         // first creation and leaves trailing garbage if the new payload is

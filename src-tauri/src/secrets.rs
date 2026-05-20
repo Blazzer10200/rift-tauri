@@ -1,0 +1,59 @@
+//! Phase 6: OS-keychain wrapper for at-rest secrets.
+//!
+//! Replaces plaintext storage of `bridge_token` (per server) and `api_key`
+//! (Anthropic) in `~/.rift/*.json`. Backends per the `keyring` crate:
+//! Windows Credential Manager, macOS Keychain, Linux Secret Service.
+//!
+//! Issues addressed: #9.3, #37, #38.
+
+use keyring::Entry;
+
+const SERVICE: &str = "rift";
+
+/// Read a secret. Returns None if the entry doesn't exist, is empty, or the
+/// backend is unavailable (e.g. headless Linux with no Secret Service). Errors
+/// are logged at debug — callers treat absence as "not configured".
+pub fn get(key: &str) -> Option<String> {
+    match Entry::new(SERVICE, key) {
+        Ok(entry) => match entry.get_password() {
+            Ok(v) if !v.is_empty() => Some(v),
+            Ok(_) => None,
+            Err(keyring::Error::NoEntry) => None,
+            Err(e) => {
+                log::debug!("secrets::get({key}) backend error: {e}");
+                None
+            }
+        },
+        Err(e) => {
+            log::debug!("secrets::get({key}) entry-new error: {e}");
+            None
+        }
+    }
+}
+
+pub fn set(key: &str, value: &str) -> Result<(), String> {
+    let entry = Entry::new(SERVICE, key).map_err(|e| format!("keyring entry {key}: {e}"))?;
+    entry
+        .set_password(value)
+        .map_err(|e| format!("keyring set {key}: {e}"))
+}
+
+pub fn delete(key: &str) -> Result<(), String> {
+    let entry = match Entry::new(SERVICE, key) {
+        Ok(e) => e,
+        Err(e) => return Err(format!("keyring entry {key}: {e}")),
+    };
+    match entry.delete_credential() {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("keyring delete {key}: {e}")),
+    }
+}
+
+/// Namespaced key for a per-server bridge token.
+pub fn bridge_token_key(server_key: &str) -> String {
+    format!("bridge.{server_key}")
+}
+
+/// Single-tenant key for the Anthropic API key.
+pub const ASSISTANT_API_KEY: &str = "assistant.api_key";

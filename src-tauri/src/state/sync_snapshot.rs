@@ -149,6 +149,13 @@ impl SyncSnapshot {
                 <= MTIME_TOLERANCE_SECS * 1000
     }
 
+    /// **BLOCKING** — uses `std::fs::File` + `Read` synchronously. Callers
+    /// on the tokio runtime should wrap via `compute_sha1_async` or
+    /// `tokio::task::spawn_blocking` to avoid stalling the executor on a
+    /// large file. #127 left this as the documented contract since most
+    /// callers (drift_scanner, flush, watcher) already gate on a 32MiB
+    /// `SHA1_MAX_BYTES` ceiling and the read is buffer-sized — practical
+    /// stall is well under the tokio worker budget for files under the cap.
     pub fn compute_sha1(local_path: &Path) -> Option<String> {
         use std::io::{BufReader, Read};
 
@@ -165,6 +172,15 @@ impl SyncSnapshot {
             }
         }
         Some(hex_upper(&hasher.finalize()))
+    }
+
+    /// #127: async wrapper around `compute_sha1`. Use this from async call
+    /// sites when the path may exceed the gate (or when adding new callers).
+    pub async fn compute_sha1_async(local_path: std::path::PathBuf) -> Option<String> {
+        tokio::task::spawn_blocking(move || Self::compute_sha1(&local_path))
+            .await
+            .ok()
+            .flatten()
     }
 
     fn save_locked(&self, snapshot: &HashMap<String, Entry>) -> std::io::Result<()> {

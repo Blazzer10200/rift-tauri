@@ -218,6 +218,12 @@ fn claude_command() -> Option<Command> {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+    // #63 follow-up: kill the CLI child if the spawning tokio task is
+    // dropped before `wait()` returns (panic mid-turn, IPC handle teardown,
+    // app shutdown). Without this the child outlives the spawn task and the
+    // PID-tracker-based `assistant_stop` is the only kill path — which itself
+    // depends on `set_session_pid` having completed.
+    cmd.kill_on_drop(true);
     Some(cmd)
 }
 
@@ -250,7 +256,11 @@ pub struct AuthStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct AssistantConfig {
-    /// Plaintext API key. Keychain migration planned (see design brief).
+    /// Legacy plaintext slot — Phase 6 (#37) moved the API key to the OS
+    /// keychain. Still parsed (so old on-disk configs can be migrated) but
+    /// never written: `skip_serializing_if` drops it once cleared, and
+    /// `load_config()` runs a one-shot migration on read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     api_key: Option<String>,
     /// Currently-open project folder for the Assistant. None = no folder open;
     /// Assistant falls back to AutoSync's server folders if any, else no-tools.
@@ -578,10 +588,36 @@ fn dirs_home() -> Result<PathBuf, String> {
 }
 
 fn load_config() -> AssistantConfig {
-    config_path()
+    let mut cfg: AssistantConfig = config_path()
         .and_then(|p| std::fs::read_to_string(&p).map_err(|e| e.to_string()))
         .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // Phase 6 (#37): one-shot migration of any plaintext api_key into the
+    // OS keychain. Failure is non-fatal — the field stays in JSON for a
+    // future attempt, and runtime reads still see it via legacy fallback in
+    // current_api_key().
+    if let Some(k) = cfg.api_key.as_deref().filter(|s| !s.is_empty()) {
+        match crate::secrets::set(crate::secrets::ASSISTANT_API_KEY, k) {
+            Ok(()) => {
+                cfg.api_key = None;
+                if let Err(e) = save_config(&cfg) {
+                    log::warn!("assistant: post-migration save_config failed: {e}");
+                } else {
+                    log::info!("assistant: migrated api_key to keychain");
+                }
+            }
+            Err(e) => log::warn!("assistant: keychain migration for api_key failed: {e}"),
+        }
+    }
+    cfg
+}
+
+/// Phase 6 (#37): the live API key. Reads the keychain first; falls back to
+/// any (un-migrated) plaintext value still in `config.json`. Returns None
+/// when both are empty/absent.
+fn current_api_key() -> Option<String> {
+    crate::secrets::get(crate::secrets::ASSISTANT_API_KEY)
+        .or_else(|| load_config().api_key.filter(|s| !s.is_empty()))
 }
 
 fn save_config(cfg: &AssistantConfig) -> Result<(), String> {
@@ -680,15 +716,35 @@ fn write_mcp_config(
     let s = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
     std::fs::write(&path, s).map_err(|e| format!("write mcp-config: {e}"))?;
 
-    // #9.2: tighten permissions so the on-disk bridge token isn't world-
-    // readable in the interval between write + delete-on-exit. On Unix:
-    // explicit 0600. On Windows: rely on NTFS inheritance from
-    // `%USERPROFILE%\.rift\` (already user-only by default); explicit DACL
-    // tightening is deferred until Tauri 2 secure-storage lands (#9.3).
+    // #9.2 + #38: tighten permissions so the on-disk bridge token isn't world-
+    // readable in the interval between write + delete-on-exit.
+    // Unix: explicit 0600 on the file.
+    // Windows: explicit DACL via `icacls` — strip inheritance and grant the
+    // current user Full Control only. NTFS inheritance from `%USERPROFILE%\.rift\`
+    // is user-only on a standalone profile but NOT on domain-joined / shared
+    // setups where inheritance can grant SYSTEM/Administrators read.
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        if !user.is_empty() {
+            // /inheritance:r — strip inherited ACEs; /grant:r — replace user grant.
+            // Output discarded; failure is non-fatal (file is still delete-on-exit
+            // and the embedded token rotates each app launch).
+            let _ = std::process::Command::new("icacls")
+                .arg(&path)
+                .args(["/inheritance:r", "/grant:r", &format!("{user}:(F)")])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
     }
 
     Ok(path)
@@ -742,8 +798,8 @@ struct CliAuthStatus {
 #[tauri::command]
 pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     let mut out = AuthStatus::default();
-    let cfg = load_config();
-    out.api_key_configured = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+    let _cfg = load_config(); // run keychain migration / surface any stale legacy field
+    out.api_key_configured = current_api_key().is_some();
 
     // `claude --version`. Resolve absolute path first — Windows can't find
     // `claude` from PATH alone (PATHEXT isn't applied by Command::new).
@@ -811,7 +867,7 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
 
 #[tauri::command]
 pub fn assistant_get_api_key() -> Result<Option<String>, String> {
-    Ok(load_config().api_key.filter(|s| !s.is_empty()))
+    Ok(current_api_key())
 }
 
 #[tauri::command]
@@ -902,9 +958,20 @@ pub fn assistant_set_allow_remote_shell(value: bool) -> Result<(), String> {
 
 #[tauri::command]
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
+    // Phase 6 (#37): write the API key to the OS keychain, not config.json.
+    // Empty/None → delete the keychain entry. Also clears any lingering
+    // legacy plaintext field (load_config's migration handles the read side,
+    // but a fresh set after a failed migration leaves the legacy slot stale).
+    match api_key.as_deref().filter(|s| !s.is_empty()) {
+        Some(k) => crate::secrets::set(crate::secrets::ASSISTANT_API_KEY, k)?,
+        None => crate::secrets::delete(crate::secrets::ASSISTANT_API_KEY)?,
+    }
     let mut cfg = load_config();
-    cfg.api_key = api_key.filter(|s| !s.is_empty());
-    save_config(&cfg)
+    if cfg.api_key.is_some() {
+        cfg.api_key = None;
+        save_config(&cfg)?;
+    }
+    Ok(())
 }
 
 /// Workspace state surfaced to the frontend. `current` is the open folder or
@@ -1194,7 +1261,8 @@ pub async fn assistant_send(
         return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
     }
     let cfg = load_config();
-    let use_api_key = cfg.api_key.as_deref().map(|s| !s.is_empty()).unwrap_or(false);
+    let api_key = current_api_key();
+    let use_api_key = api_key.is_some();
     let model = model.unwrap_or_else(|| "sonnet".to_string());
     // Effort tier: per-turn override wins, else stored default, else "quick".
     let effort = thinking_effort
@@ -1423,7 +1491,7 @@ pub async fn assistant_send(
     if use_api_key {
         // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly.
         cmd.arg("--bare");
-        if let Some(k) = cfg.api_key.as_deref() {
+        if let Some(k) = api_key.as_deref() {
             cmd.env("ANTHROPIC_API_KEY", k);
         }
     }

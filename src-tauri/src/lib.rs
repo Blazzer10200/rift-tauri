@@ -13,6 +13,7 @@ pub mod edit;
 pub mod local_fs;
 pub mod path_guard;
 pub mod profile;
+pub mod secrets;
 pub mod sftp;
 pub mod state;
 pub mod sync;
@@ -53,6 +54,11 @@ pub struct EditInPlaceState(
 /// cancellation.
 pub struct DownloadState(pub AsyncMutex<Option<CancellationToken>>);
 
+/// #106: cancellation handle for the `diag_state_pump` background task. Set
+/// during app setup; fired on `RunEvent::Exit` so the pump exits cleanly
+/// before Tauri tears the runtime down.
+pub struct DiagPumpCancel(pub CancellationToken);
+
 // ─── Diagnostics (Sync Inspector) ────────────────────────────────────────────
 
 /// Frontend-facing snapshot of pipeline state. Aggregated from the autosync
@@ -67,6 +73,9 @@ struct DiagStateDto {
     queue_pending: usize,
     queue_failed: usize,
     queue_dropped_total: u64,
+    /// #45: FS-event drops on the watcher → tokio channel (per-engine), distinct
+    /// from `queue_dropped_total` which counts diag-bus broadcaster overflow.
+    fs_events_dropped: u64,
     ignored_total: u64,
     conflicts: usize,
     last_drift_scan_at: Option<String>,
@@ -75,12 +84,12 @@ struct DiagStateDto {
     events_emitted_total: u64,
 }
 
-#[tauri::command]
-async fn diag_get_state(
-    state: tauri::State<'_, AutoSyncState>,
-) -> Result<DiagStateDto, String> {
-    let engine = { state.0.lock().await.clone() };
-    let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts) =
+/// #108: shared DTO builder used by both `diag_get_state` (Tauri command) and
+/// `diag_state_pump` (500ms emitter). Pre-#108 the two assembled the same
+/// fields independently, so adding a counter required two edits — and they
+/// drifted (e.g. `dropped_events` would have to be wired twice).
+async fn collect_diag_dto(engine: Option<Arc<sync::AutoSyncEngine>>) -> DiagStateDto {
+    let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts, fs_dropped) =
         if let Some(engine) = engine.as_ref() {
             let s = engine.status().await;
             (
@@ -91,12 +100,13 @@ async fn diag_get_state(
                 s.failed,
                 s.ignored_total,
                 s.conflicts,
+                s.dropped_events,
             )
         } else {
-            (None, String::new(), 0, 0, 0, 0, 0)
+            (None, String::new(), 0, 0, 0, 0, 0, 0)
         };
     let bus = diagnostics::bus();
-    Ok(DiagStateDto {
+    DiagStateDto {
         at: chrono::Utc::now().to_rfc3339(),
         autosync_state,
         autosync_detail,
@@ -104,13 +114,22 @@ async fn diag_get_state(
         queue_pending: pending,
         queue_failed: failed,
         queue_dropped_total: bus.queue_dropped_total(),
+        fs_events_dropped: fs_dropped,
         ignored_total,
         conflicts,
         last_drift_scan_at: bus.last_drift_scan_at().map(|d| d.to_rfc3339()),
         last_rescan_signal_at: bus.last_rescan_signal_at().map(|d| d.to_rfc3339()),
         bus_lag_total: bus.bus_lag_total(),
         events_emitted_total: bus.events_emitted_total(),
-    })
+    }
+}
+
+#[tauri::command]
+async fn diag_get_state(
+    state: tauri::State<'_, AutoSyncState>,
+) -> Result<DiagStateDto, String> {
+    let engine = { state.0.lock().await.clone() };
+    Ok(collect_diag_dto(engine).await)
 }
 
 /// Returns the on-disk path of the snapshot file for the active server.
@@ -337,51 +356,26 @@ async fn diag_ignored_breakdown(
 
 /// Periodic pipeline-state snapshot emitter. 500ms cadence — fast enough for
 /// the Diagnostics tab to feel live, slow enough to stay invisible to the
-/// rest of the app. Runs forever; first emit waits one tick so the autosync
-/// engine has a chance to register if the user just connected.
-async fn diag_state_pump(app: tauri::AppHandle) {
+/// rest of the app. Exits when `cancel` fires (#106: pre-fix this looped
+/// forever even after app shutdown signaled). DTO assembly delegates to
+/// `collect_diag_dto` (#108).
+async fn diag_state_pump(app: tauri::AppHandle, cancel: CancellationToken) {
     use tauri::Emitter;
     use tauri::Manager;
 
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(500));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
-        tick.tick().await;
-        // Pull current autosync status off the managed engine (None if not
-        // connected). Mirrors `diag_get_state` w/o the command-handler boilerplate.
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                log::debug!("diag_state_pump: cancellation received, exiting");
+                return;
+            }
+            _ = tick.tick() => {}
+        }
         let st = app.state::<AutoSyncState>();
         let engine = { st.0.lock().await.clone() };
-        let (autosync_state, autosync_detail, watches, pending, failed, ignored_total, conflicts) =
-            if let Some(engine) = engine.as_ref() {
-                let s = engine.status().await;
-                (
-                    Some(s.state),
-                    s.detail,
-                    s.watches,
-                    s.pending,
-                    s.failed,
-                    s.ignored_total,
-                    s.conflicts,
-                )
-            } else {
-                (None, String::new(), 0, 0, 0, 0, 0)
-            };
-        let bus = diagnostics::bus();
-        let dto = DiagStateDto {
-            at: chrono::Utc::now().to_rfc3339(),
-            autosync_state,
-            autosync_detail,
-            watcher_count: watches,
-            queue_pending: pending,
-            queue_failed: failed,
-            queue_dropped_total: bus.queue_dropped_total(),
-            ignored_total,
-            conflicts,
-            last_drift_scan_at: bus.last_drift_scan_at().map(|d| d.to_rfc3339()),
-            last_rescan_signal_at: bus.last_rescan_signal_at().map(|d| d.to_rfc3339()),
-            bus_lag_total: bus.bus_lag_total(),
-            events_emitted_total: bus.events_emitted_total(),
-        };
+        let dto = collect_diag_dto(engine).await;
         let _ = app.emit("diag://state", &dto);
     }
 }
@@ -524,7 +518,9 @@ async fn start_autosync(
     // BridgeClient then targets the tunnel's kernel-assigned local_port instead
     // of trying to dial bridge_port directly (which only works if the user has
     // an external `ssh -L` up — the WPF migration pain point).
-    let active_tunnel = match (server.bridge_port, server.bridge_token.as_deref()) {
+    // Phase 6: bridge_token now lives in the OS keychain, not the profile struct.
+    let bridge_token_kc = profile::server_bridge_token(&server.key);
+    let active_tunnel = match (server.bridge_port, bridge_token_kc.as_deref()) {
         (Some(rport), Some(token)) if !token.is_empty() => {
             match tunnel::SshTunnel::start(tunnel::TunnelArgs {
                 host: &server.host,
@@ -878,21 +874,26 @@ fn save_server(
         next.added_at = Some(chrono::Utc::now().to_rfc3339());
     }
 
+    // Phase 6 (#9.3): pluck any incoming token off the struct BEFORE persisting.
+    // Empty/None means "no change" on edit (preserve keychain entry) or "no
+    // token" on add. Some(v) means "set this token in the keychain".
+    let incoming_token = next.bridge_token.take().filter(|s| !s.is_empty());
+
     match edit_key {
         Some(key) => {
             let pos = cfg.servers.iter().position(|s| s.key == key)
                 .ok_or_else(|| format!("no server with key '{key}'"))?;
             // preserve the original key (don't allow renames here — slug stays stable)
-            next.key = key;
+            next.key = key.clone();
             // preserve fingerprint if the form didn't supply one (TOFU stays valid)
             if next.fingerprint.as_deref().unwrap_or("").is_empty() {
                 next.fingerprint = cfg.servers[pos].fingerprint.clone();
             }
-            // #9.1: preserve bridge_token if the form didn't supply one. The
-            // renderer no longer receives the token from list_servers, so an
-            // empty value on edit means "unchanged", not "clear it".
-            if next.bridge_token.as_deref().unwrap_or("").is_empty() {
-                next.bridge_token = cfg.servers[pos].bridge_token.clone();
+            // #9.1 + Phase 6: only touch the keychain when the form supplied a
+            // non-empty token. Empty form input = "unchanged"; keychain entry
+            // from the prior save or load-time migration stays valid.
+            if let Some(tok) = incoming_token.as_deref() {
+                profile::set_server_bridge_token(&key, Some(tok))?;
             }
             cfg.servers[pos] = next.clone();
         }
@@ -904,6 +905,9 @@ fn save_server(
             };
             let existing: Vec<String> = cfg.servers.iter().map(|s| s.key.clone()).collect();
             next.key = profile::unique_key(&base, &existing);
+            if let Some(tok) = incoming_token.as_deref() {
+                profile::set_server_bridge_token(&next.key, Some(tok))?;
+            }
             cfg.servers.push(next.clone());
             if cfg.last_selected.is_none() {
                 cfg.last_selected = Some(next.key.clone());
@@ -955,7 +959,13 @@ async fn delete_server(
     if cfg.last_selected.as_deref() == Some(key.as_str()) {
         cfg.last_selected = cfg.servers.first().map(|s| s.key.clone());
     }
-    cfg.save()
+    cfg.save()?;
+    // Phase 6 (#9.3): drop the keychain entry. Best-effort — keychain failure
+    // doesn't block deletion (the profile is already gone from disk).
+    if let Err(e) = profile::set_server_bridge_token(&key, None) {
+        log::warn!("delete_server: keychain cleanup for '{key}' failed: {e}");
+    }
+    Ok(())
 }
 
 /// #10: defense-in-depth guard against silent TOFU. Sync entry paths
@@ -1020,13 +1030,21 @@ async fn open_sftp_for(server_key: &str) -> Result<sftp::SftpClient, String> {
         .find(server_key)
         .ok_or_else(|| format!("no server with key '{server_key}'"))?
         .clone();
+    open_sftp_for_server(&server).await
+}
+
+/// #112: variant taking a pre-loaded server so callers like `remote_list_dir`
+/// that already had to load `RiftConfig` (for path-guard validation) don't
+/// pay a second file read. `open_sftp_for(key)` delegates here after its
+/// own load.
+async fn open_sftp_for_server(server: &profile::ServerProfile) -> Result<sftp::SftpClient, String> {
     // #10: refuse without a pinned fingerprint. Every SFTP-touching IPC
     // command funnels through here -- remote_list_dir, upload/download,
     // edit_in_place, sync_* -- so this is the single chokepoint that
     // closes the silent-TOFU window for all of them.
-    require_pinned_fingerprint(server_key, server.fingerprint.as_deref())?;
+    require_pinned_fingerprint(&server.key, server.fingerprint.as_deref())?;
     let key_path = std::path::PathBuf::from(&server.key_path);
-    let client = sftp::SftpClient::connect(sftp::ConnectArgs {
+    sftp::SftpClient::connect(sftp::ConnectArgs {
         host: &server.host,
         port: server.port,
         user: &server.user,
@@ -1034,8 +1052,7 @@ async fn open_sftp_for(server_key: &str) -> Result<sftp::SftpClient, String> {
         trusted_fingerprint: server.fingerprint.as_deref(),
         write_probe_root: Some(&server.remote_root),
     })
-    .await?;
-    Ok(client)
+    .await
 }
 
 #[tauri::command]
@@ -1050,7 +1067,9 @@ async fn remote_list_dir(
         .clone();
     let path = path_guard::validate_remote_listable(&server, &path)
         .map_err(|e| format!("remote list guard: {e}"))?;
-    let client = open_sftp_for(&server_key).await?;
+    // #112: pass through the already-loaded server to skip a second
+    // RiftConfig::load() inside open_sftp_for.
+    let client = open_sftp_for_server(&server).await?;
     let entries = client.list_directory(&path).await;
     client.close().await;
     entries
@@ -1818,16 +1837,32 @@ async fn editor_for(
     }
     let client = open_sftp_for(server_key).await?;
     let sftp_arc = Arc::new(client);
-    let mgr = Arc::new(edit::in_place::EditInPlaceManager::new(server_key.to_string(), sftp_arc, app.clone())?);
+    let mgr = Arc::new(edit::in_place::EditInPlaceManager::new(server_key.to_string(), sftp_arc.clone(), app.clone())?);
     // Two concurrent first-time inits for the same server may both reach
     // here. The first to grab the lock wins; the loser drops its just-opened
-    // SFTP handle. Worst case: one wasted handshake. Race-loss now logs a
-    // `warn!` so the drop is visible in diag/logs instead of silent.
+    // SFTP handle.
     let mut g = state.0.lock().await;
     if let Some(existing) = g.get(server_key) {
         log::warn!(
             "editor_for: race lost on '{server_key}' — discarding just-opened SFTP handle (another task initialized first)"
         );
+        // #113: explicitly close the losing handle's SFTP session in the
+        // background. Drop alone tears down the TCP/SSH session but leaves
+        // any russh worker tasks alive until next GC tick; an explicit close
+        // sends a proper SSH_MSG_DISCONNECT so the server-side cleanup is
+        // immediate. Spawned + detached because editor_for is hot — we
+        // don't want to wait for the close handshake before returning the
+        // existing manager. The losing `mgr` was already unique to this task
+        // (just constructed), so try_unwrap will succeed and avoid orphaning.
+        let losing_sftp = sftp_arc.clone();
+        drop(mgr);
+        tokio::spawn(async move {
+            // Best-effort — Arc may still be alive if the lost manager is
+            // referenced elsewhere, in which case Drop handles it later.
+            if let Some(owned) = Arc::try_unwrap(losing_sftp).ok() {
+                owned.close().await;
+            }
+        });
         return Ok(existing.clone());
     }
     g.insert(server_key.to_string(), mgr.clone());
@@ -1954,7 +1989,12 @@ pub fn run() {
             // every 500ms. Both run for the life of the process.
             let app_handle = app.handle().clone();
             diagnostics::spawn_frontend_pump(app_handle.clone());
-            tauri::async_runtime::spawn(diag_state_pump(app_handle));
+            // #106: stash the pump's cancel token in managed state so
+            // RunEvent::Exit can cancel it cleanly. Pre-fix the pump looped
+            // forever even after Tauri signaled shutdown.
+            let pump_cancel = CancellationToken::new();
+            app.manage(DiagPumpCancel(pump_cancel.clone()));
+            tauri::async_runtime::spawn(diag_state_pump(app_handle, pump_cancel));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2049,13 +2089,18 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
             // #9.2: scrub the on-disk bridge token from `~/.rift/assistant/
             // mcp-config.json` on app exit. The token in that file becomes
             // stale the instant the process exits (new one generated next
             // run), but a leaked stale token is still strictly more info
             // than a missing file. Best-effort -- swallow errors.
             if let tauri::RunEvent::Exit = event {
+                // #106: cancel the diag pump before cleanup so it stops
+                // emitting events into a tearing-down Tauri runtime.
+                if let Some(c) = app_handle.try_state::<DiagPumpCancel>() {
+                    c.0.cancel();
+                }
                 assistant::cleanup_mcp_config_on_exit();
             }
         });

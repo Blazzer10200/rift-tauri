@@ -54,6 +54,12 @@ pub fn cache_path(prefix: &str, profile_key: &str) -> std::io::Result<PathBuf> {
     Ok(dir.join(format!("{prefix}-{safe}.json")))
 }
 
+/// **BLOCKING** — uses `std::fs` + `std::thread::sleep` for the Windows
+/// rename-retry backoff (worst case ~500ms across 4 attempts). Callers on
+/// the tokio runtime should wrap in `tokio::task::spawn_blocking` for paths
+/// known to hit the retry window (concurrent indexer / AV); call sites in
+/// the flush loop are already on `spawn_blocking` or non-runtime contexts.
+/// #27: contract documented; behavior unchanged.
 pub fn atomic_write_json(path: &std::path::Path, json: &str) -> std::io::Result<()> {
     use std::fs::OpenOptions;
     use std::io::Write;

@@ -287,7 +287,32 @@ impl SftpClient {
         for w in workers {
             let _ = w.sftp.close().await;
         }
-        drop(self.handle);
+        // #131: handle drops implicitly when `self` exits this scope, which
+        // also triggers the new Drop impl below (no-op b/c workers Vec is
+        // already drained).
+    }
+}
+
+/// #131: panic-unwind safety net. If a panic skips the `close().await` path
+/// (panic-in-async on the main session, lock-poisoning callers, etc.), the
+/// worker Vec stays populated and its `Arc<Worker>` strong refs keep russh
+/// background tasks alive until the runtime tears down. Drop synchronously
+/// drains the Vec so the Arc counts can decrement — actual SSH close packets
+/// won't get sent on this path (no async runtime), but russh handles
+/// terminate when their tasks observe the dropped channel.
+impl Drop for SftpClient {
+    fn drop(&mut self) {
+        let leaked = self.workers
+            .try_lock()
+            .map(|mut g| std::mem::take(&mut *g))
+            .unwrap_or_default();
+        if !leaked.is_empty() {
+            log::warn!(
+                "SftpClient::drop: {} worker session(s) closed via Drop — `close().await` was not called (likely panic unwind or early return)",
+                leaked.len()
+            );
+        }
+        // leaked: dropped here, Arcs decremented synchronously.
     }
 }
 
