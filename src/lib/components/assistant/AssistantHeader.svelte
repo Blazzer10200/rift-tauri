@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ListChecks, FolderOpen, Folder, X, TerminalSquare } from "lucide-svelte";
+  import { ListChecks, FolderOpen, Folder, X, TerminalSquare, Layers } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
   function leafName(p: string): string {
@@ -46,15 +46,6 @@
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
 
-  function contextWindowFor(model: string | null): number {
-    if (!model) return 200_000;
-    if (/\[1m\]/i.test(model)) return 1_000_000;
-    const id = model.toLowerCase();
-    if (id.includes("haiku")) return 200_000;
-    if (/sonnet-4-[56]/.test(id) || /opus-4-[67]/.test(id)) return 1_000_000;
-    return 200_000;
-  }
-
   function shortK(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
     if (n >= 10_000) return `${Math.round(n / 1000)}K`;
@@ -67,14 +58,20 @@
       ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheCreate
       : 0,
   );
-  const ctxTokens = $derived(
-    assistant.lastTurnUsage
-      ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheRead + assistant.lastTurnUsage.cacheCreate
-      : 0,
-  );
-  const ctxWindow = $derived(contextWindowFor(assistant.lastModelId));
-  const ctxPct = $derived(ctxWindow > 0 ? Math.min(100, (ctxTokens / ctxWindow) * 100) : 0);
+  const ctxTokens = $derived(assistant.ctxTokens);
+  const ctxWindow = $derived(assistant.ctxWindow);
+  const ctxPct = $derived(assistant.ctxPct);
   const ctxTone = $derived(ctxPct >= 90 ? "red" : ctxPct >= 70 ? "yellow" : "ok");
+  const compactWarning = $derived(assistant.compactWarning);
+  const activeAgents = $derived(
+    (assistant.activeTab?.agentSpawns ?? []).filter((a) => a.completedAt === null),
+  );
+  const activeAgentTitle = $derived.by(() => {
+    if (activeAgents.length === 0) return "";
+    return activeAgents
+      .map((a) => `${a.subagentType}: ${a.description}`)
+      .join("\n");
+  });
   const ctxTitle = $derived.by(() => {
     const u = assistant.lastTurnUsage;
     if (!u) return "Context — send a message to populate";
@@ -150,12 +147,41 @@
       </span>
     {/if}
 
+    {#if activeAgents.length > 0}
+      <span class="agents-pill" title={activeAgentTitle}>
+        <span class="agents-dot"></span>
+        <span>{activeAgents.length} agent{activeAgents.length === 1 ? "" : "s"}</span>
+      </span>
+    {/if}
+
+    {#if compactWarning}
+      <span class="compact-warn" title="Compact early w/ /compact <focus> if you want fine control over the summary."
+        >{compactWarning}</span>
+    {/if}
+
     {#if ctxTokens > 0}
       <span class="ctx-pill" data-tone={ctxTone} title={ctxTitle}>
         <span class="ctx-bar"><span class="ctx-fill" style="width: {ctxPct}%"></span></span>
         <span class="ctx-text">{shortK(ctxTokens)}<span class="ctx-sep">/</span>{shortK(ctxWindow)}</span>
         <span class="ctx-pct">{Math.round(ctxPct)}%</span>
       </span>
+    {/if}
+
+    {#if ctxPct >= 50}
+      <button
+        class="compact-btn"
+        data-tone={ctxTone}
+        type="button"
+        onclick={() => {
+          const cost = ctxPct >= 70 ? "≈ $0.91" : "≈ $0.30";
+          if (!confirm(`Compact conversation? ${cost} on Haiku · drops context to ~5-10% · next turn carries the summary forward.`)) return;
+          void assistant.compactConversation();
+        }}
+        title="Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."
+      >
+        <Layers size={11} />
+        <span>Compact</span>
+      </button>
     {/if}
 
     {#if taskCount > 0}
@@ -230,6 +256,40 @@
     border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
   }
 
+  .agents-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    cursor: help;
+    font-variant-numeric: tabular-nums;
+  }
+  .agents-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    animation: agents-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes agents-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .compact-warn {
+    display: inline-flex; align-items: center;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    background: var(--warn-soft);
+    color: var(--warn);
+    border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
+    cursor: help;
+  }
+
   .ctx-pill {
     display: inline-flex; align-items: center; gap: 7px;
     padding: 3px 9px;
@@ -273,6 +333,33 @@
     color: var(--danger);
   }
   .ctx-pill[data-tone="red"] .ctx-text { color: var(--danger); }
+
+  .compact-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--fg-muted);
+    font-size: 11px;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+  .compact-btn:hover {
+    background: var(--surface-hover);
+    color: var(--fg);
+  }
+  .compact-btn[data-tone="yellow"] {
+    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    color: var(--warn);
+  }
+  .compact-btn[data-tone="red"] {
+    border-color: color-mix(in oklch, var(--danger) 45%, var(--border));
+    background: color-mix(in oklch, var(--danger) 8%, transparent);
+    color: var(--danger);
+  }
   .ctx-pill[data-tone="red"] .ctx-fill { background: var(--danger); }
 
   .hdr-btn {

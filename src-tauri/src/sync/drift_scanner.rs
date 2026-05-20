@@ -603,26 +603,29 @@ fn walk_local(root: &Path, dir: &Path, out: &mut HashMap<String, LocalStat>) {
     };
     for entry in rd.flatten() {
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        let Ok(meta) = entry.metadata() else { continue };
+        // Dirs: rel-path WITH trailing slash so segment rules in
+        // ignore.rs:206-217 (which match `/{seg}/` or `{seg}/`) prune
+        // `node_modules`, `.git`, `[disabled]`, etc. BEFORE we descend.
+        // Bare-name `should_ignore("node_modules")` fails — input has no
+        // trailing slash, so neither the contains nor starts_with branch
+        // fires. Without this, the dir tree is walked even though the
+        // per-file rel-path check at the bottom would later filter every
+        // entry — wasted disk I/O on large `node_modules` etc. Mirrors
+        // the #51 fix in `auto_sync::walk_local_rebaseline`.
+        let Ok(rel) = path.strip_prefix(root) else {
             continue;
         };
-        let Ok(meta) = entry.metadata() else { continue };
-        // #137: split-by-kind. Dirs get the bare-name probe so a `node_modules/`
-        // is pruned BEFORE we descend. Files get the rel-path probe (which is
-        // a strict superset of bare-name for files — `should_ignore("foo.log")`
-        // is also reachable via the rel-path string). One ignore call per
-        // entry instead of two.
+        let rel_s = rel.to_string_lossy().replace('\\', "/");
         if meta.is_dir() {
-            if ignore::should_ignore(name) {
+            let mut probe = rel_s.clone();
+            probe.push('/');
+            if ignore::should_ignore(&probe) {
                 continue;
             }
             walk_local(root, &path, out);
             continue;
         }
-        let Ok(rel) = path.strip_prefix(root) else {
-            continue;
-        };
-        let rel_s = rel.to_string_lossy().replace('\\', "/");
         if ignore::should_ignore(&rel_s) {
             continue;
         }

@@ -329,13 +329,13 @@
   .scroll::-webkit-scrollbar-button { display: none; }
   .messages {
     display: flex; flex-direction: column;
-    gap: 20px;
+    gap: 16px;
     max-width: var(--chat-col-max);
     width: 100%;
     margin: 0 auto;
   }
   .messages :global(.bubble + .bubble) {
-    padding-top: 14px;
+    padding-top: 12px;
     border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
   }
 

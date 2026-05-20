@@ -13,6 +13,7 @@
     const active = assistant.tasks.filter((t) => t.status === "in_progress").length;
     return { total, done, active };
   });
+  const pct = $derived(counts.total > 0 ? (counts.done / counts.total) * 100 : 0);
 </script>
 
 <aside class="dock">
@@ -21,10 +22,18 @@
     <span class="title">Tasks</span>
     {#if counts.total > 0}
       <span class="counter mono" title="{counts.done} done · {counts.active} in progress · {counts.total} total">
-        {counts.done}/{counts.total}
+        {counts.done}<span class="counter-sep">/</span>{counts.total}
       </span>
     {/if}
   </div>
+  {#if counts.total > 0}
+    <div class="progress" role="progressbar" aria-valuenow={counts.done} aria-valuemax={counts.total}>
+      <div class="progress-fill" style="width: {pct}%"></div>
+      {#if counts.active > 0}
+        <div class="progress-active" style="left: {pct}%; width: {Math.max(4, 100 / counts.total)}%"></div>
+      {/if}
+    </div>
+  {/if}
 
   <div class="body">
     {#if assistant.tasks.length === 0}
@@ -92,6 +101,30 @@
     border-radius: 999px;
     font-variant-numeric: tabular-nums;
     font-weight: 600;
+  }
+  .counter-sep { opacity: 0.55; margin: 0 1px; }
+
+  .progress {
+    position: relative;
+    height: 2px;
+    background: var(--bg-elev-2);
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .progress-active {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: color-mix(in oklch, var(--accent) 60%, transparent);
+    animation: progress-active-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes progress-active-pulse {
+    0%, 100% { opacity: 0.45; }
+    50%      { opacity: 0.95; }
   }
 
   .body { padding: 8px 12px 14px; }

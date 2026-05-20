@@ -36,6 +36,11 @@ export type ToolBlock = {
   result: string | null;
   isError: boolean;
   status: "pending" | "done" | "error";
+  // S124: wall-clock start (ms epoch) on tool_use, end (ms epoch) on
+  // tool_result. Lets the chip render an inline duration badge when the
+  // call was slow (>1s). Optional — legacy records omit both fields.
+  startedAt?: number;
+  durationMs?: number;
 };
 
 export type TextBlock = {
@@ -61,11 +66,28 @@ export type ThinkingBlock = {
   status: "active" | "done";
 };
 
-export type Block = TextBlock | ToolBlock | ThinkingBlock;
+/** Compaction Phase C: synthetic block that marks the boundary where a
+ *  CLI session was retired in favor of a summary. Renders as a collapsed
+ *  pill ("Conversation compacted · N turns archived") with the summary
+ *  text on expand. Owned by a `role: "system"` message — third role
+ *  alongside user/assistant. */
+export type BoundaryBlock = {
+  type: "boundary";
+  summary: string;
+  at: number;
+  archivedCount: number;
+  costUsd: number;
+  summaryModel: string;
+  // S124: true while the summarize call is in-flight; flipped to false on
+  // the final 'done' event. Drives the streaming spinner in MessageBubble.
+  streaming?: boolean;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock;
 
 export type ChatMessage = {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   blocks: Block[];
   /** Per-turn cost in USD captured from the CLI `result` envelope. Only set
    *  on assistant messages after the turn completes. */
@@ -83,6 +105,29 @@ export type ConversationMeta = {
   updatedAt: number;
 };
 
+/** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in
+ *  `assistant/mod.rs` (camelCase serde). Phase C consumes the summary
+ *  text + cost figures when minting a boundary message. */
+export type SummarizeResult = {
+  summary: string;
+  model: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+};
+
+type CompactionHistoryEntry = {
+  at: number;
+  priorSessionId: string;
+  newSessionId: string;
+  summary: string;
+  costUsd: number;
+  summaryModel: string;
+  archivedCount: number;
+};
+
 type ConversationRecord = {
   id: string;
   title: string;
@@ -95,6 +140,10 @@ type ConversationRecord = {
   // persistence. Optional for backward compat — legacy convos fall back to
   // `id` on load.
   cliSessionId?: string;
+  // Phase E prerequisite: ordered list of compactions that happened on this
+  // convo. The BoundaryBlock in `messages` is the user-visible artifact; this
+  // is the structured record for search / cleanup sweep. Absent for legacy.
+  compactionHistory?: CompactionHistoryEntry[];
 };
 
 // Minimal stream-json envelope shape we care about.
@@ -522,6 +571,44 @@ class TabState {
    *  already streaming; onDone() pops the next one. Per-tab so a queued msg
    *  in Tab A can't drain into Tab B if the user switches mid-turn. */
   queue = $state<{ id: string; text: string }[]>([]);
+  /** Compaction Phase C: summary seeded by compactConversation() that the
+   *  next send() drains into the `prior_context_summary` invoke arg. Null
+   *  outside of the one-turn post-compaction window. Per-tab so concurrent
+   *  compactions on different tabs don't cross-contaminate. */
+  pendingCompactionSummary = $state<string | null>(null);
+  /** S124 fix: scheduleSave's doSave() unconditionally writes
+   *  `tab.convoCreatedAt = record.createdAt` and buildSaveRecord falls
+   *  back to Date.now() when null, so compaction's `convoCreatedAt = null`
+   *  gets clobbered before the next send reads it — causing isFirstTurn
+   *  to be false → --resume on a non-existent new JSONL → session-lost
+   *  recovery → priorSummary lost. This flag is the authoritative signal
+   *  to send() that the next dispatch MUST be first-turn regardless of
+   *  convoCreatedAt's persistence-driven value. Cleared on first read. */
+  forceNextFirstTurn = $state(false);
+  /** Compaction Phase D guard: prevents auto-trigger from re-firing on a
+   *  failed compaction (ctx pill stays high → effect re-runs). Set when
+   *  compactConversation() starts; cleared on success OR failure. */
+  compactingNow = $state(false);
+  /** Compaction Phase D cooldown: wall-clock ms of the last successful
+   *  compaction. The auto-trigger effect checks this against a 5min floor
+   *  before re-firing — a failed compaction at $0.91 × runaway = real
+   *  money, so erring long. */
+  lastCompactionAt = $state(0);
+  /** Phase E prerequisite: structured log of compactions on this tab. Pushed
+   *  by compactConversation() on success; hydrated from ConversationRecord on
+   *  load. Persists alongside messages. */
+  compactionHistory = $state<CompactionHistoryEntry[]>([]);
+  /** S124: in-flight sub-agent spawns. Pushed on Task tool_use, marked done
+   *  on the matching tool_result. CLI does NOT stream intermediate sub-agent
+   *  activity — we only know spawn + final result. */
+  agentSpawns = $state<{
+    id: string;
+    subagentType: string;
+    description: string;
+    startedAt: number;
+    completedAt: number | null;
+    isError: boolean;
+  }[]>([]);
 
   // Non-reactive per-stream internals.
   streamingMsgId: string | null = null;
@@ -798,6 +885,14 @@ class TabState {
       this.onTodoApplied?.(this, opensDock);
       return;
     }
+    if (block.name === "Task" || block.name === "Agent") {
+      const subagentType = String((block.input?.subagent_type as string) ?? "fork");
+      const description = String((block.input?.description as string) ?? "(no description)");
+      this.agentSpawns = [
+        ...this.agentSpawns,
+        { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false },
+      ];
+    }
     const DENY = new Set(["ToolSearch"]);
     if (DENY.has(block.name)) return;
     this.activity = {
@@ -816,6 +911,7 @@ class TabState {
           result: null,
           isError: false,
           status: "pending",
+          startedAt: Date.now(),
         },
       ],
     }));
@@ -864,13 +960,21 @@ class TabState {
         rec.isError = isError;
       }
     }
+    // S124: mark matching agent spawn done.
+    const agentIdx = this.agentSpawns.findIndex((a) => a.id === toolUseId);
+    if (agentIdx !== -1) {
+      const next = this.agentSpawns.slice();
+      next[agentIdx] = { ...next[agentIdx], completedAt: Date.now(), isError };
+      this.agentSpawns = next;
+    }
+    const now = Date.now();
     this.mutateStreaming((m) => ({
       ...m,
-      blocks: m.blocks.map((b) =>
-        b.type === "tool" && b.id === toolUseId
-          ? { ...b, result: content, isError, status: isError ? "error" : "done" }
-          : b,
-      ),
+      blocks: m.blocks.map((b) => {
+        if (b.type !== "tool" || b.id !== toolUseId) return b;
+        const durationMs = typeof b.startedAt === "number" ? now - b.startedAt : undefined;
+        return { ...b, result: content, isError, status: isError ? "error" : "done", durationMs };
+      }),
     }));
   }
 
@@ -1116,6 +1220,40 @@ class AssistantStore {
   get messages(): ChatMessage[] { return this.activeTab?.messages ?? []; }
   get streaming(): boolean { return this.activeTab?.streaming ?? false; }
   get tasks() { return this.activeTab?.tasks ?? []; }
+
+  // Phase D: ctx-pill derivations lifted off AssistantHeader so the
+  // auto-trigger $effect can read them. Header consumes assistant.ctxPct etc.
+  get ctxWindow(): number {
+    const model = this.lastModelId;
+    if (!model) return 200_000;
+    if (/\[1m\]/i.test(model)) return 1_000_000;
+    const id = model.toLowerCase();
+    if (id.includes("haiku")) return 200_000;
+    if (/sonnet-4-[56]/.test(id) || /opus-4-[67]/.test(id)) return 1_000_000;
+    return 200_000;
+  }
+  get ctxTokens(): number {
+    const u = this.lastTurnUsage;
+    return u ? u.input + u.cacheRead + u.cacheCreate : 0;
+  }
+  get ctxPct(): number {
+    const w = this.ctxWindow;
+    return w > 0 ? Math.min(100, (this.ctxTokens / w) * 100) : 0;
+  }
+  /** Pre-emption banner text — non-null when ctx is within 10pp of the
+   *  user's auto-compact threshold but hasn't crossed yet. Lets the user
+   *  compact early w/ a focus string if they want fine control. */
+  get compactWarning(): string | null {
+    const t = this.autoCompactThreshold;
+    if (!t) return null;
+    const tab = this.activeTab;
+    if (!tab || tab.compactingNow) return null;
+    const pct = this.ctxPct;
+    const threshPct = t * 100;
+    if (pct >= threshPct) return null; // crossed — the effect handles it
+    if (pct < threshPct - 10) return null;
+    return `Approaching auto-compact at ${Math.round(threshPct)}%`;
+  }
   get activity() {
     return this.activeTab?.activity ?? { currentLabel: null, turnStartedAt: null };
   }
@@ -1396,6 +1534,12 @@ class AssistantStore {
   useFullConfig = $state<boolean>(true);
   maxBudgetUsd = $state<number | null>(null);
   allowRemoteShell = $state<boolean>(false);
+  // Phase D: fraction (0-1] of ctx window that auto-fires compactConversation.
+  // Null = manual only (matches the user's DISABLE_AUTO_COMPACT=1 stance).
+  autoCompactThreshold = $state<number | null>(null);
+  // Phase D: model alias used by summarize call. "haiku" default ($0.91 vs
+  // $2.73 on sonnet for a 900K-token summarize).
+  compactModel = $state<"haiku" | "sonnet">("haiku");
   remoteShellLockedByOther = $state<{ user: string; host: string; sinceMs: number } | null>(null);
   remoteShellBannerSeen = $state<boolean>(false);
   remoteShellLastEvent = $state<{ command: string; remoteRoot: string; at: string } | null>(null);
@@ -1643,6 +1787,17 @@ class AssistantStore {
       console.warn("assistant_get_allow_remote_shell failed", e);
     }
     try {
+      this.autoCompactThreshold = await invoke<number | null>("assistant_get_auto_compact_threshold");
+    } catch (e) {
+      console.warn("assistant_get_auto_compact_threshold failed", e);
+    }
+    try {
+      const m = await invoke<string>("assistant_get_compact_model");
+      this.compactModel = m === "sonnet" ? "sonnet" : "haiku";
+    } catch (e) {
+      console.warn("assistant_get_compact_model failed", e);
+    }
+    try {
       this.remoteShellBannerSeen = localStorage.getItem("rift.assistant.remoteShellBannerSeen") === "1";
     } catch { /* localStorage unavailable in some test contexts */ }
 
@@ -1834,6 +1989,7 @@ class AssistantStore {
       updatedAt: Date.now(),
       messages: tab.messages,
       cliSessionId: tab.cliSessionId || convoId,
+      compactionHistory: tab.compactionHistory.length > 0 ? tab.compactionHistory : undefined,
     };
   }
 
@@ -1920,6 +2076,7 @@ class AssistantStore {
       // previously open with stale data.
       tab.messages = convo.messages ?? [];
       tab.cliSessionId = cliSid;
+      tab.compactionHistory = convo.compactionHistory ?? [];
       tab.tasks = [];
       tab.lastError = null;
       tab.totalCostUsd = null;
@@ -2277,6 +2434,17 @@ class AssistantStore {
     this.allowRemoteShell = value;
   }
 
+  async setAutoCompactThreshold(value: number | null) {
+    const v = value !== null && Number.isFinite(value) && value > 0 && value <= 1 ? value : null;
+    await invoke("assistant_set_auto_compact_threshold", { value: v });
+    this.autoCompactThreshold = v;
+  }
+
+  async setCompactModel(value: "haiku" | "sonnet") {
+    await invoke("assistant_set_compact_model", { value });
+    this.compactModel = value;
+  }
+
   async send(prompt: string) {
     const trimmed = prompt.trim();
     // Empty prompts are allowed when attachments are staged (paste-and-go).
@@ -2302,7 +2470,8 @@ class AssistantStore {
     // path. ensureTab seeds cliSessionId to convoId for fresh tabs; compaction
     // remints it later without recreating the tab.
     const tab = this.ensureTab(this.currentConvoId, this.currentConvoId);
-    const isFirstTurn = !tab.convoCreatedAt;
+    const isFirstTurn = !tab.convoCreatedAt || tab.forceNextFirstTurn;
+    tab.forceNextFirstTurn = false;
     if (!tab.cliSessionId) {
       tab.cliSessionId = this.currentConvoId;
     }
@@ -2380,6 +2549,15 @@ class AssistantStore {
       dataBase64: a.dataBase64,
     }));
     this.composerAttachments = [];
+    // Phase C: drain pendingCompactionSummary onto THIS turn only.
+    // The new CLI session was minted at compactConversation() but is
+    // empty — this summary is the model's only context for what came
+    // before. Cleared immediately after dispatch; never persists across
+    // turns. If the invoke itself fails the summary is lost (next send
+    // starts cold) — acceptable since the boundary message stays in the
+    // UI for the user to copy out if they need to manually re-seed.
+    const priorSummary = tab.pendingCompactionSummary ?? null;
+    tab.pendingCompactionSummary = null;
     try {
       await invoke("assistant_send", {
         prompt: trimmed,
@@ -2389,6 +2567,7 @@ class AssistantStore {
         attachments: turnAttachments.length > 0 ? turnAttachments : null,
         dyslexiaMode: accessibility.dyslexiaMode,
         thinkingEffort: this.thinkingEffort,
+        priorContextSummary: priorSummary,
       });
     } catch (e) {
       tab.onError(String(e));
@@ -2525,6 +2704,186 @@ class AssistantStore {
     this.queue = this.queue.filter((q) => q.id !== id);
   }
 
+  /** Compaction Phase B: one-shot summarize of the current CLI session.
+   *  Pure read — does NOT mutate `messages`, doesn't archive, doesn't
+   *  remint. Phase C wires this into the actual compaction flow; until
+   *  then it's reachable only via the `/summarize` debug slash.
+   *
+   *  Returns the SummarizeResult on success, or null if no active session
+   *  or the call fails (error surfaces via `lastError`). The cost/usage
+   *  fields let Phase C populate the boundary message pill. */
+  async summarizeCurrentSession(focus?: string): Promise<SummarizeResult | null> {
+    const sid = this.currentCliSessionId;
+    if (!sid) {
+      this.lastError = "No active session yet — send a message first.";
+      return null;
+    }
+    const tasksJson = JSON.stringify(
+      this.tasks.map((t) => ({ content: t.content, status: t.status })),
+    );
+    try {
+      const res = await invoke<SummarizeResult>("assistant_summarize_session", {
+        sessionId: sid,
+        focus: focus ?? null,
+        tasksJson,
+      });
+      return res;
+    } catch (e) {
+      this.lastError = `Summarize failed: ${String(e)}`;
+      return null;
+    }
+  }
+
+  /** Compaction Phase C: full compact action. Summarizes the current
+   *  session via Phase B, remints the CLI session id via the backend,
+   *  pushes a BoundaryBlock into messages, and stages the summary onto
+   *  the next send so the fresh CLI session has context.
+   *
+   *  Guards (any failed → abort with notice/error, no state change):
+   *   - not currently streaming
+   *   - not already compacting
+   *   - at least 4 messages worth compacting
+   *   - have an active tab + cliSessionId
+   *
+   *  Cost is fully internal — no UI confirmation here; the Compact button
+   *  in the header should confirm before calling (Phase E1 polish). */
+  async compactConversation(focus?: string): Promise<boolean> {
+    const tab = this.activeTab;
+    if (!tab) {
+      this.lastError = "No active tab.";
+      return false;
+    }
+    if (tab.streaming) {
+      this.lastError = "Wait for the current turn to finish before compacting.";
+      return false;
+    }
+    if (tab.compactingNow) {
+      this.lastError = "Compaction already in progress.";
+      return false;
+    }
+    if (tab.messages.length < 4) {
+      this.lastError = "Conversation too short to compact (need ≥4 messages).";
+      return false;
+    }
+    const oldSid = tab.cliSessionId;
+    if (!oldSid) {
+      this.lastError = "No CLI session to compact.";
+      return false;
+    }
+
+    tab.compactingNow = true;
+    this.lastNotice = "Compacting conversation…";
+
+    // S124: pre-stage the boundary message w/ streaming:true BEFORE the
+    // summarize call. As progress events land, we patch the same block in
+    // place so the user sees the summary fill live.
+    const archivedCount = tab.messages.length;
+    const boundaryId = crypto.randomUUID();
+    const placeholderModel = this.compactModel ?? "haiku";
+    const stagedBoundary: ChatMessage = {
+      id: boundaryId,
+      role: "system",
+      blocks: [
+        {
+          type: "boundary",
+          summary: "",
+          at: Date.now(),
+          archivedCount,
+          costUsd: 0,
+          summaryModel: placeholderModel,
+          streaming: true,
+        },
+      ],
+    };
+    tab.messages = [...tab.messages, stagedBoundary];
+
+    // Live updater — replace the boundary block's summary field as the
+    // backend emits progress chunks. Tab-aware so background tabs don't
+    // get clobbered if a user switches mid-compact.
+    const patchBoundary = (patch: Partial<BoundaryBlock>) => {
+      const idx = tab.messages.findIndex((m) => m.id === boundaryId);
+      if (idx === -1) return;
+      const msg = tab.messages[idx];
+      const block = msg.blocks[0];
+      if (block?.type !== "boundary") return;
+      const nextBlock: BoundaryBlock = { ...block, ...patch };
+      const nextMsg: ChatMessage = { ...msg, blocks: [nextBlock] };
+      const next = tab.messages.slice();
+      next[idx] = nextMsg;
+      tab.messages = next;
+    };
+    let progressUnlisten: UnlistenFn | null = null;
+    try {
+      progressUnlisten = await listen<{
+        session_id: string;
+        summary_so_far: string;
+        status: "streaming" | "done";
+      }>("assistant://summarize-progress", (e) => {
+        if (e.payload.session_id !== oldSid) return;
+        patchBoundary({ summary: e.payload.summary_so_far });
+      });
+      const res = await this.summarizeCurrentSession(focus);
+      if (!res) {
+        // summarizeCurrentSession already set lastError. Drop the staged
+        // boundary so the chat doesn't keep a half-rendered pill.
+        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
+        return false;
+      }
+      const newSid = crypto.randomUUID();
+      try {
+        await invoke("assistant_remint_session", {
+          oldSessionId: oldSid,
+          newSessionId: newSid,
+        });
+      } catch (e) {
+        this.lastError = `Remint failed: ${String(e)}`;
+        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
+        return false;
+      }
+
+      // Finalize the staged boundary with the real summary + cost + model
+      // and clear streaming. archivedCount stays the snapshot from pre-compact.
+      patchBoundary({
+        summary: res.summary,
+        costUsd: res.costUsd,
+        summaryModel: res.model,
+        streaming: false,
+      });
+
+      // Flip the tab's CLI handle to the new session and force the next
+      // send into first-turn mode (mints --session-id <new> instead of
+      // --resume <new>, which would fail since there's no JSONL yet).
+      tab.cliSessionId = newSid;
+      tab.convoCreatedAt = null;
+      tab.forceNextFirstTurn = true;
+      tab.pendingCompactionSummary = res.summary;
+      tab.resetUsage();
+      const now = Date.now();
+      tab.lastCompactionAt = now;
+      tab.compactionHistory = [
+        ...tab.compactionHistory,
+        {
+          at: now,
+          priorSessionId: oldSid,
+          newSessionId: newSid,
+          summary: res.summary,
+          costUsd: res.costUsd,
+          summaryModel: res.model,
+          archivedCount,
+        },
+      ];
+
+      this.scheduleSave(true);
+      const inTk = res.inputTokens + res.cacheReadTokens + res.cacheCreateTokens;
+      this.lastNotice =
+        `Compacted ${archivedCount} message(s) · $${res.costUsd.toFixed(4)} · ${inTk.toLocaleString()} in / ${res.outputTokens.toLocaleString()} out · ${res.model}. Next turn seeds the new session with the summary.`;
+      return true;
+    } finally {
+      tab.compactingNow = false;
+      if (progressUnlisten) progressUnlisten();
+    }
+  }
+
   /** Client-side slash commands. Returns true if input was consumed. */
   private runSlash(input: string): boolean {
     const [cmd, ...rest] = input.slice(1).split(/\s+/);
@@ -2609,6 +2968,24 @@ class AssistantStore {
           slowT + costT + slowTool + stale;
         return true;
       }
+      case "compact": {
+        // Phase C: full compact action. arg becomes the focus hint.
+        void this.compactConversation(arg || undefined);
+        return true;
+      }
+      case "summarize": {
+        // Compaction Phase B debug — dry-runs the summarize primitive
+        // and renders the result as a notice. No state mutation; the
+        // actual compaction flow lands in Phase C.
+        this.lastNotice = "Summarizing… (cheap model, no state change)";
+        void this.summarizeCurrentSession(arg || undefined).then((res) => {
+          if (!res) return; // error already on lastError
+          const tk = res.inputTokens + res.cacheReadTokens + res.cacheCreateTokens;
+          this.lastNotice =
+            `Summary ($${res.costUsd.toFixed(4)} · ${tk.toLocaleString()} in / ${res.outputTokens.toLocaleString()} out · ${res.model}):\n\n${res.summary}`;
+        });
+        return true;
+      }
       case "openincli": {
         const sid = this.currentCliSessionId;
         const ws = this.workspace.current;
@@ -2625,8 +3002,10 @@ class AssistantStore {
       }
       case "help":
         this.lastNotice =
-          "Slash commands: /new · /history · /model · /retry · /copy · /stop · /tools · /cost · /openincli · /diag · /diag-clear · /help. " +
+          "Slash commands: /new · /history · /model · /retry · /copy · /stop · /tools · /cost · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
           "Aliases: /clear → /new. /openincli copies a `claude --resume` command for the standalone CLI. " +
+          "/compact summarizes the current session + remints the CLI session id; the next turn carries the summary forward. " +
+          "/summarize dry-runs Phase-B compaction summarize (no state change). " +
           "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
         return true;
       default:
