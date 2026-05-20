@@ -73,6 +73,12 @@ impl SftpClient {
         match tokio::time::timeout(timeout, drain).await {
             Ok(()) => {}
             Err(_) => {
+                // #88: send EOF before dropping the channel so the remote
+                // shell receives an orderly close signal. Without this, a
+                // timed-out `find` / long-running script keeps consuming
+                // server CPU until the session itself goes away (could be
+                // tens of minutes for long-lived auto-sync sessions).
+                let _ = chan.eof().await;
                 return Err(format!(
                     "remote command timed out after {}s",
                     timeout.as_secs()
@@ -103,11 +109,12 @@ impl SftpClient {
             return;
         }
         let mut chan = channel;
-        while let Some(msg) = chan.wait().await {
-            if let russh::ChannelMsg::ExitStatus { .. } = msg {
-                break;
-            }
-        }
+        // #82: drain to channel close, NOT to ExitStatus. SSH doesn't order
+        // ExitStatus after final Data; breaking on ExitStatus can miss trailing
+        // frames. Same fix pattern as `list_via_exec` / `get_remote_sha1` /
+        // `exec_bash` — heal_owned_dirs was missed in the v0.2.44 sweep. No
+        // body is needed: we don't consume stdout, just wait for close.
+        while chan.wait().await.is_some() {}
     }
 
 
@@ -148,7 +155,11 @@ impl SftpClient {
 
 
 pub(super) fn shell_quote(s: &str) -> Result<String, String> {
-    if s.contains(['\0', '\n', '\r']) {
+    // #90: also reject TAB. `find -printf '%p\t%s\t%T@\n'` uses tab as the
+    // field separator; a remote filename containing a literal tab would
+    // smuggle extra columns and break the downstream `splitn(3, '\t')`
+    // parser → file silently dropped as `skipped_bad_size`.
+    if s.contains(['\0', '\n', '\r', '\t']) {
         return Err("path contains command-breaking control character".into());
     }
     let mut out = String::from("'");

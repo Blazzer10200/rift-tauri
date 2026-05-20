@@ -289,9 +289,27 @@ pub(crate) async fn delete_local_one(engine: &Arc<AutoSyncEngine>, entry: crate:
 
     // Best-effort empty-dir cleanup walks up until a non-empty dir or fs error
     // halts it. remove_dir only succeeds on empties → safe.
+    // #76: floor at the resource's local_root so a single-file resource doesn't
+    // start removing parents up through the profile local_root and beyond.
+    // Without the floor, `remove_dir` only fails on non-empty dirs / IO error
+    // — but the resource root could legitimately be empty after the last file
+    // is removed, and we don't want to nuke it.
+    let floor: Option<PathBuf> = engine
+        .folders_clone()
+        .into_iter()
+        .find(|fw| fw.resource_name == resource)
+        .map(|fw| fw.local_root.clone());
     if let Some(parent) = local_path.parent() {
         let mut cur = parent.to_path_buf();
-        while std::fs::remove_dir(&cur).is_ok() {
+        loop {
+            if let Some(ref f) = floor {
+                if &cur == f || !cur.starts_with(f) {
+                    break;
+                }
+            }
+            if std::fs::remove_dir(&cur).is_err() {
+                break;
+            }
             match cur.parent() {
                 Some(p) => cur = p.to_path_buf(),
                 None => break,

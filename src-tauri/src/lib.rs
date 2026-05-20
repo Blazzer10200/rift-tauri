@@ -129,11 +129,11 @@ fn diag_snapshot_path(server_key: String) -> Result<String, String> {
 async fn sync_reconcile(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
-    eprintln!("[rift] sync_reconcile cmd: entry");
+    log::debug!("sync_reconcile cmd: entry");
     let g = state.0.lock().await;
-    eprintln!("[rift] sync_reconcile cmd: lock acquired");
+    log::debug!("sync_reconcile cmd: lock acquired");
     let Some(engine) = g.as_ref() else {
-        eprintln!("[rift] sync_reconcile cmd: no engine bound");
+        log::debug!("sync_reconcile cmd: no engine bound");
         return Ok(false);
     };
     engine.kick_drift_reconcile();
@@ -162,11 +162,11 @@ async fn sync_cancel(
 async fn sync_pull_pending(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
-    eprintln!("[rift] sync_pull_pending cmd: entry");
+    log::debug!("sync_pull_pending cmd: entry");
     let g = state.0.lock().await;
-    eprintln!("[rift] sync_pull_pending cmd: lock acquired");
+    log::debug!("sync_pull_pending cmd: lock acquired");
     let Some(engine) = g.as_ref() else {
-        eprintln!("[rift] sync_pull_pending cmd: no engine bound");
+        log::debug!("sync_pull_pending cmd: no engine bound");
         return Ok(false);
     };
     engine.force_pull_now();
@@ -180,16 +180,16 @@ async fn sync_pull_pending(
 async fn sync_push_pending(
     state: tauri::State<'_, AutoSyncState>,
 ) -> Result<bool, String> {
-    eprintln!("[rift] sync_push_pending cmd: entry");
+    log::debug!("sync_push_pending cmd: entry");
     let g = state.0.lock().await;
-    eprintln!("[rift] sync_push_pending cmd: lock acquired");
+    log::debug!("sync_push_pending cmd: lock acquired");
     let Some(engine) = g.as_ref() else {
-        eprintln!("[rift] sync_push_pending cmd: no engine bound — returning false");
+        log::debug!("sync_push_pending cmd: no engine bound — returning false");
         return Ok(false);
     };
-    eprintln!("[rift] sync_push_pending cmd: calling force_push_now");
+    log::debug!("sync_push_pending cmd: calling force_push_now");
     engine.force_push_now();
-    eprintln!("[rift] sync_push_pending cmd: returning Ok(true)");
+    log::debug!("sync_push_pending cmd: returning Ok(true)");
     Ok(true)
 }
 
@@ -428,8 +428,17 @@ async fn scan_drift(
     })
     .await?;
 
-    let snap = state::SyncSnapshot::new(&server.key)
-        .map_err(|e| format!("snapshot init: {e}"))?;
+    // #53: close the russh session if snapshot init fails. Without this,
+    // any I/O error from `SyncSnapshot::new` (disk full on first write,
+    // permission denied on `~/.rift/state/`) propagated via `?` and orphaned
+    // the live SSH session until OS reclaim.
+    let snap = match state::SyncSnapshot::new(&server.key) {
+        Ok(s) => s,
+        Err(e) => {
+            client.close().await;
+            return Err(format!("snapshot init: {e}"));
+        }
+    };
     let scanner = sync::DriftScanner::new(&client, Some(&snap));
 
     let targets: Vec<sync::FolderTarget> = folders
@@ -1025,6 +1034,21 @@ async fn upload_paths(
     }
     let client = open_sftp_for(&server_key).await?;
     let mapped = expand_upload_jobs(jobs);
+    // #60: re-validate each expanded (local, remote) pair. The pre-expansion guard
+    // only sees caller-supplied roots; walkdir under a watched dir can yield local
+    // paths that traverse a symlink out of `local_root`, and the synthesized remote
+    // targets must each pass `validate_remote_child` (not just the input root).
+    for (local, remote) in &mapped {
+        let local_str = local.to_string_lossy().to_string();
+        if let Err(e) = path_guard::validate_local_child(&server, &local_str) {
+            client.close().await;
+            return Err(format!("upload local guard (expanded): {e}"));
+        }
+        if let Err(e) = path_guard::validate_remote_child(&server, remote) {
+            client.close().await;
+            return Err(format!("upload remote guard (expanded): {e}"));
+        }
+    }
     if mapped.is_empty() {
         client.close().await;
         return Ok(vec![]);
@@ -1057,7 +1081,7 @@ async fn upload_paths(
 async fn expand_download_jobs(
     client: &sftp::SftpClient,
     jobs: Vec<(String, String)>,
-) -> Vec<(String, PathBuf)> {
+) -> Result<Vec<(String, PathBuf)>, String> {
     let mut expanded: Vec<(String, PathBuf)> = Vec::new();
     for (remote, local) in jobs {
         let info = client.remote_stat(&remote).await;
@@ -1067,10 +1091,14 @@ async fn expand_download_jobs(
         let local_path = PathBuf::from(&local);
         if info.is_directory {
             let _ = std::fs::create_dir_all(&local_path);
+            // #58: surface list_recursive failures instead of silently producing
+            // an empty file list. Pre-fix: `.unwrap_or_default()` made the
+            // frontend see "download empty" on a network blip; the user had no
+            // signal that the listing failed.
             let files = client
                 .list_recursive(&remote, 32, None)
                 .await
-                .unwrap_or_default();
+                .map_err(|e| format!("list_recursive `{remote}`: {e}"))?;
             let prefix = format!("{}/", remote.trim_end_matches('/'));
             for f in files {
                 if f.is_dir {
@@ -1095,7 +1123,7 @@ async fn expand_download_jobs(
             expanded.push((remote, local_path));
         }
     }
-    expanded
+    Ok(expanded)
 }
 
 #[tauri::command]
@@ -1135,7 +1163,41 @@ async fn download_paths(
         kind: ActivityKind::Pull,
         ..Default::default()
     });
-    let mapped = expand_download_jobs(&client, jobs).await;
+    let mapped = match expand_download_jobs(&client, jobs).await {
+        Ok(m) => m,
+        Err(e) => {
+            client.close().await;
+            let mut g = dl_state.0.lock().await;
+            *g = None;
+            let _ = app.emit("autosync://activity", &ActivityRow {
+                at: chrono::Utc::now(),
+                resource: "manual".to_string(),
+                file: "expand failed".to_string(),
+                action: format!("download aborted: {e}"),
+                kind: ActivityKind::Error,
+                ..Default::default()
+            });
+            return Err(e);
+        }
+    };
+    // #59: re-validate each expanded (remote, local) pair after expand_download_jobs.
+    // The pre-expansion guard runs only on caller-supplied jobs; SFTP symlink targets
+    // or `..` components inside `full_path` returned by list_recursive can produce
+    // pairs that escape `remote_root`/`local_root` unless re-checked here.
+    for (remote, local) in &mapped {
+        let remote_ok = path_guard::validate_remote_child(&server, remote);
+        let local_str = local.to_string_lossy().to_string();
+        let local_ok = remote_ok
+            .as_ref()
+            .map_err(|e| e.clone())
+            .and_then(|_| path_guard::validate_local_child(&server, &local_str).map(|_| ()));
+        if let Err(e) = local_ok {
+            client.close().await;
+            let mut g = dl_state.0.lock().await;
+            *g = None;
+            return Err(format!("download guard (expanded): {e}"));
+        }
+    }
     if mapped.is_empty() {
         client.close().await;
         let _ = app.emit("autosync://activity", &ActivityRow {

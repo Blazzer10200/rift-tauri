@@ -122,7 +122,7 @@ pub struct ActivityRow {
 impl Default for ActivityRow {
     fn default() -> Self {
         Self {
-            at: DateTime::<Utc>::from_timestamp(0, 0).unwrap_or_else(Utc::now),
+            at: DateTime::UNIX_EPOCH,
             resource: String::new(),
             file: String::new(),
             action: String::new(),
@@ -1396,6 +1396,19 @@ impl AutoSyncEngine {
     /// enqueue dirty). Circuit breaker runs per-resource on the selected
     /// deletes — same formula as force_pull_now. Returns (dispatched, blocked).
     pub fn apply_selected(self: &Arc<Self>, local_paths: Vec<String>) {
+        // #47: register a cancellation token in the shared `current_scan_cancel`
+        // slot so the modal's Cancel button can stop the selected-entry push
+        // mid-flight. Pre-fix: this dispatch ignored the cancel token entirely;
+        // user-clicked Cancel fired against an unrelated slot and apply_selected
+        // continued. Now flush_all_now honors the CT between resources/entries,
+        // and the spawned pulls/deletes/remote-deletes finish naturally
+        // (russh streams can't be aborted mid-transfer without partial files).
+        let ct = CancellationToken::new();
+        let ct_for_task = ct.clone();
+        let my_nonce = self.cancel_nonce.fetch_add(1, Ordering::Relaxed);
+        if let Ok(mut g) = self.current_scan_cancel.lock() {
+            *g = Some((my_nonce, ct));
+        }
         let engine = self.clone();
         let h = tokio::spawn(async move {
             let cache: Vec<crate::sync::DriftEntry> = engine.drift_snapshot();
@@ -1513,6 +1526,15 @@ impl AutoSyncEngine {
                             "mirror delete ok",
                         );
                     } else {
+                        // #52: forget the snapshot row on failure too. If the
+                        // remote file is still present, the next drift scan
+                        // repopulates the snapshot via fresh remote stat. If
+                        // the remote was already gone (idempotent-failure case),
+                        // forgetting prevents the next scan from seeing
+                        // remote-absent + snapshot-present and re-classifying
+                        // as ToDelete (local) — i.e. a spurious local-delete
+                        // would land in the next bucket otherwise.
+                        e.snapshot.forget(&entry.remote_path);
                         e.log_activity(
                             &entry.resource_name,
                             file_name(std::path::Path::new(&entry.local_path)),
@@ -1540,7 +1562,7 @@ impl AutoSyncEngine {
                 let _ = h.await;
             }
             if enqueued_push {
-                engine.flush_all_now(None).await;
+                engine.flush_all_now(Some(ct_for_task.clone())).await;
             }
         });
         self.track_background(h);
@@ -2013,17 +2035,26 @@ fn walk_local_rebaseline(
     let Ok(rd) = std::fs::read_dir(dir) else { return };
     for entry in rd.flatten() {
         let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else { continue };
-        if crate::sync::ignore::should_ignore(name) {
-            continue;
-        }
-        let Ok(meta) = entry.metadata() else { continue };
-        if meta.is_dir() {
-            walk_local_rebaseline(root, &path, out);
+        if path.file_name().and_then(|n| n.to_str()).is_none() {
             continue;
         }
         let Ok(rel) = path.strip_prefix(root) else { continue };
         let rel_s = rel.to_string_lossy().replace('\\', "/");
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            // #51: probe with trailing slash so segment rules ("/.git/",
+            // "/node_modules/", "/[disabled]/") fire on the dir before we
+            // recurse. Prior bare-`name` check missed all segment rules and
+            // walked into ignored dirs (work skipped per-file at L below,
+            // but recursion was wasted — diverged from drift_scanner::walk_local
+            // which has the same bug; tracked separately if it ever matters).
+            let probe = format!("{rel_s}/");
+            if crate::sync::ignore::should_ignore(&probe) {
+                continue;
+            }
+            walk_local_rebaseline(root, &path, out);
+            continue;
+        }
         if crate::sync::ignore::should_ignore(&rel_s) {
             continue;
         }

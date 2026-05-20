@@ -425,6 +425,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [drift_watcher.rs:64](../src-tauri/src/sync/drift_watcher.rs#L64) + [ignore.rs:157](../src-tauri/src/sync/ignore.rs#L157)
 - **Symptom:** `derive_conflict_path` writes `.rift-conflict.` filename; `mark_recently_written` is set on target only, not original. If `watch.rs` event filter applies `should_ignore` to the absolute path (not rel-path), the conflict-marker substring guard may miss → conflict copy queued + pushed to remote.
 - **Fix:** Verify watch.rs event handler uses relative-path `should_ignore`; if not, strip prefix before the check.
+> CLOSED v0.4.16-alpha S119 (uncommitted) — non-bug confirmed. `ignore::classify` (ignore.rs:87) normalizes `\→/` then extracts filename via `rsplit('/').next()` — substring `.rift-conflict.` matches against the filename regardless of whether an absolute or rel path is passed. `watch.rs:243` `is_recently_written` fires BEFORE classify and targets `target_local` (which IS the conflict path the watcher sees). Both guards correctly trigger. No code change required.
 
 ### MED (45)
 
@@ -456,6 +457,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [auto_sync.rs:1493-1506](../src-tauri/src/sync/auto_sync.rs#L1493-L1506)
 - **Symptom:** Selected-entry push calls `flush_all_now(None)`. User-clicked Cancel fires on the slot token but `flush_all_now` continues. Semaphore-based pull/delete tasks (L1428-1492) same gap.
 - **Fix:** Create + register CT via `current_scan_cancel`; pass to `flush_all_now`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — CT installed via `current_scan_cancel` mirror of `force_push_now`; `flush_all_now(Some(ct))` honors the slot. Spawned pulls/deletes/remote-deletes finish naturally (russh streams can't be aborted mid-transfer without partial files); the push side is the one that closes the issue's explicit gap.
 
 ## 48. `force_pull_now` mutex poison → silent early return, UI hangs
 - **Where:** [auto_sync.rs:1543-1546](../src-tauri/src/sync/auto_sync.rs#L1543-L1546)
@@ -467,26 +469,31 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [auto_sync/flush.rs:42-43](../src-tauri/src/sync/auto_sync/flush.rs#L42-L43), [:253-254](../src-tauri/src/sync/auto_sync/flush.rs#L253-L254)
 - **Symptom:** `created_count`/`delete_count` computed once at L42 from input list. After breaker drops batch or per-entry cancels/fails occur, `apply_count_delta` uses the original counts → file-count cache reflects intents not outcomes.
 - **Fix:** Accumulate `delta_created`/`delta_deleted` inside dispatch loop, only on `EntryResult::Ok`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `process_entry` now captures `entry_kind` before move and calls `apply_count_delta(±1, 0)` / `(0, ±1)` on `EntryResult::Ok` per real outcome. Bulk apply at flush_batch end removed; unused `created_count` local dropped. `delete_count` still feeds the mass-delete circuit breaker (correct — that's an intent guard).
 
 ## 50. `process_entry` outer `biased; select!` cancels completed work
 - **Where:** [auto_sync/flush.rs:299-312](../src-tauri/src/sync/auto_sync/flush.rs#L299-L312)
 - **Symptom:** If `ct.cancelled()` and `work` both ready in the same poll, `biased;` always picks cancel → completed upload silently dropped + entry re-inserted into dirty + redundant re-upload next cycle.
 - **Fix:** Move cancel check before `select!` (already done inside `process_entry_body`), or remove biased select.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — biased arms reordered: `r = work => r` first, `_ = ct.cancelled() => Requeued` second. When both ready in the same epoch, completed Ok wins; cancel still fires immediately on every poll cycle once work is pending.
 
 ## 51. `walk_local_rebaseline` ignore-check diverges from drift_scanner
 - **Where:** [auto_sync.rs:1961-1971](../src-tauri/src/sync/auto_sync.rs#L1961-L1971)
 - **Symptom:** `should_ignore` called with bare filename for dirs (not full rel-path). Path-segment rules (`.git/`, `[disabled]/`) don't fire on nested entries. Rebaseline includes files drift_scanner excludes → phantom baseline mismatch. (Cross-agent: A9+C8.)
 - **Fix:** Pass forward-slash rel-path to `should_ignore`, matching `drift_scanner::walk_local`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — bare-name check at L2030 replaced with rel-path probe (trailing slash for dirs so `/{seg}/` segment rules fire). Skips recursion into ignored dirs entirely; per-file check at L2040 unchanged. Note: drift_scanner::walk_local has the same divergence — out-of-scope for this issue, left as-is.
 
 ## 52. `apply_selected` ToDeleteRemote failure leaves snapshot stale
 - **Where:** [auto_sync.rs:1457-1491](../src-tauri/src/sync/auto_sync.rs#L1457-L1491)
 - **Symptom:** Success path calls `e.snapshot.forget(&entry.remote_path)`; failure path logs but doesn't forget. Next scan sees remote-absent + snapshot-present → bucket becomes `ToDelete` (local delete) instead of `Synced` → spurious "delete local" entry next cycle.
 - **Fix:** Also call `snapshot.forget` in failure branch, or mark for re-scan.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — failure branch now also calls `e.snapshot.forget(&entry.remote_path)`. Idempotent-failure case (remote already gone) no longer produces a spurious `ToDelete-local` row next scan; genuine failure case (file still present) repopulates the snapshot via the next fresh remote stat.
 
 ## 53. SFTP connection leak in `scan_drift` when SyncSnapshot::new fails
 - **Where:** [lib.rs:431](../src-tauri/src/lib.rs#L431)
 - **Symptom:** `SyncSnapshot::new` errors propagated via `?`; `client.close()` only called at L456 happy path. Russh session leaked until OS reclaim.
 - **Fix:** RAII / defer-style close, or store client and close before each early return.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `SyncSnapshot::new` result destructured via match; error arm calls `client.close().await` before returning the formatted error. Russh session closes cleanly on snapshot-init failure (disk full, perm denied on `~/.rift/state/`, etc.).
 
 ## 54. `scan_drift` opens new SFTP session despite active engine session
 - **Where:** [lib.rs:421](../src-tauri/src/lib.rs#L421)
@@ -513,16 +520,19 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [lib.rs:1067-1070](../src-tauri/src/lib.rs#L1067-L1070)
 - **Symptom:** `.unwrap_or_default()` makes failed remote listings return empty vec → frontend sees "download empty" instead of error.
 - **Fix:** Return `Result<Vec<_>, String>`; or emit error `ActivityRow` per failed dir before skipping.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — signature now `Result<Vec<(String, PathBuf)>, String>`; `list_recursive` error propagates; `download_paths` caller surfaces an error `ActivityRow` + cleans up `dl_state` CT before bailing.
 
 ## 59. `download_paths` guard runs pre-expansion only
 - **Where:** [lib.rs:1111-1115](../src-tauri/src/lib.rs#L1111-L1115) (guards), [:1131](../src-tauri/src/lib.rs#L1131) (expansion)
 - **Symptom:** `validate_remote_child`/`validate_local_child` run on caller-supplied jobs; `expand_download_jobs` then produces additional `(remote, local)` pairs that bypass all guards. SFTP symlink targets / `..` components in `full_path` can escape `remote_root`.
 - **Fix:** Validate each expanded pair inside expansion, or re-validate post-expansion before `download_files_batch`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — post-expansion re-validation loop runs `validate_remote_child` + `validate_local_child` on every expanded pair before `download_files_batch`; cleans up the `dl_state` CT slot on early-return.
 
 ## 60. `upload_paths` guard runs pre-expansion only (mirrors #59)
 - **Where:** [lib.rs:1017-1022](../src-tauri/src/lib.rs#L1017-L1022) (guards), [:1024](../src-tauri/src/lib.rs#L1024) (expansion)
 - **Symptom:** Same gap as #59 on the upload side. Local symlink inside watched dir yields paths outside watched root.
 - **Fix:** Validate each `(local, remote_target)` pair inside walkdir loop or post-expansion.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — post-expansion re-validation loop on every `(local, remote_target)` pair from walkdir; closes SFTP/local symlink escape on the upload path.
 
 ## 61. `probe_server_fingerprint` issues write probe to unverified host
 - **Where:** [lib.rs:1535-1542](../src-tauri/src/lib.rs#L1535-L1542)
@@ -534,6 +544,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mod.rs:527-533](../src-tauri/src/assistant/mod.rs#L527-L533)
 - **Symptom:** `RIFT_BRIDGE_PORT`+`RIFT_BRIDGE_TOKEN` always injected (for `sync_status`). A compromised MCP tool can use the token to call any bridge endpoint, not just sync_status. Authorization scope conflated.
 - **Fix:** Issue two scoped tokens — read-only `RIFT_BRIDGE_READONLY_TOKEN` always; write-capable `RIFT_BRIDGE_TOKEN` only when `remote_shell_enabled`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `BridgeInfo` now carries `token` (write) + `readonly_token`; `handle_conn` infers `Scope::Write`/`Scope::ReadOnly` from which presented; `dispatch` rejects `remote_bash` on read-only scope. `write_mcp_config` injects `RIFT_BRIDGE_READONLY_TOKEN` always, `RIFT_BRIDGE_TOKEN` only when `remote_shell_enabled`. `mcp_server::tool_sync_status` prefers readonly w/ fall-back to write; `bridge_enabled()` accepts either.
 
 ## 63. `SESSION_PIDS`/`SESSION_STOPPED` mutex poison silently swallowed → orphaned children
 - **Where:** [assistant/mod.rs:43-55](../src-tauri/src/assistant/mod.rs#L43-L55)
@@ -557,11 +568,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mod.rs:1392-1400](../src-tauri/src/assistant/mod.rs#L1392-L1400)
 - **Symptom:** `stderr_task` appends every line to a `String buf` with no cap. Long-running erroring session grows heap until OOM.
 - **Fix:** Cap at 64 KiB; drop or truncate older lines, preserve tail for error surfacing.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — buf capped at 64 KiB; on overflow drains the first 32 KiB on a line boundary so the tail (where fatal/panic lines land) is preserved. Truncation prepends a `[... earlier stderr dropped (>64 KiB) ...]\n` marker so the surfaced error is honest.
 
 ## 67. `child.id()` None branch silently skips PID registration
 - **Where:** [assistant/mod.rs:1315-1317](../src-tauri/src/assistant/mod.rs#L1315-L1317)
 - **Symptom:** If process already exited by time `id()` is called (immediate-exit on bad args), `set_session_pid` never called → `assistant_stop` returns Ok but child kept running until natural exit.
 - **Fix:** Log warning when `child.id()` is None; consider treating missing PID in `assistant_stop` as no-op vs false-Ok.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `log::warn!` on the None branch with session_id context. The orphan-or-instant-exit case is now diagnosable from the log stream instead of being silently invisible.
 
 ## 68. MCP parse_error has no JSON-RPC error response back
 - **Where:** [assistant/mcp_server.rs:650-653](../src-tauri/src/assistant/mcp_server.rs#L650-L653)
@@ -572,6 +585,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/remote_bridge.rs:144-147](../src-tauri/src/assistant/remote_bridge.rs#L144-L147)
 - **Symptom:** `let _ = write_line(...)` then `Err("unauthorized")` returns; `TcpStream` drop on Windows may not flush before close → MCP child sees connection-reset, never reads "unauthorized".
 - **Fix:** Replace `let _ =` w/ `await?` then `write_half.shutdown().await.ok()` before returning error.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `write_line(...)?` propagates write errors; `write_half.shutdown().await` orderly-closes before the function returns. Folded into #62's scope-based gate.
 
 ## 70. MCP `run_stdio` silently discards response serialization errors
 - **Where:** [assistant/mcp_server.rs:656-659](../src-tauri/src/assistant/mcp_server.rs#L656-L659)
@@ -582,6 +596,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant/mcp_server.rs:253-258](../src-tauri/src/assistant/mcp_server.rs#L253-L258)
 - **Symptom:** Comment says "read first 8 KB" but implementation reads the whole file then `take(8192)`. Up to 5000 full-file reads per scan → memory pressure on stdio process.
 - **Fix:** `File::open` + `Read::take(8192)` for the NUL probe; re-open for the full UTF-8 regex pass.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — separate streaming probe (`File::open` + `take(8192).read_to_end`) runs before the full read. Binary files bail at 8 KiB without loading the whole file. Full `std::fs::read` only runs on files that pass the NUL probe.
 
 ## 72. MCP `sync_status` listed unconditionally (env-strip case)
 - **Where:** [assistant/mcp_server.rs:551-561](../src-tauri/src/assistant/mcp_server.rs#L551-L561), [:600](../src-tauri/src/assistant/mcp_server.rs#L600)
@@ -609,6 +624,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [drift_watcher.rs:293](../src-tauri/src/sync/drift_watcher.rs#L293)
 - **Symptom:** `while remove_dir(&cur).is_ok()` walks parents upward with no floor check. On a single-file resource, will attempt remove on profile local_root and beyond.
 - **Fix:** Pass resource's `local_root` as floor; break when `cur == floor`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — looks up the matching `FolderWatch` via `engine.folders_clone()` by `resource_name`, captures `local_root` as floor. Loop breaks if `cur == floor` or escapes via `!starts_with(floor)` before calling `remove_dir`. Single-file resources can no longer trigger an upward sweep past the resource root.
 
 ## 77. `acquire` TOCTOU — `my_locks` inserted before SFTP upload confirmed
 - **Where:** [lock_presence.rs:167](../src-tauri/src/sync/lock_presence.rs#L167)
@@ -619,6 +635,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sync/ignore.rs:197](../src-tauri/src/sync/ignore.rs#L197)
 - **Symptom:** `is_fivem_ui_output` substring match requires `/web/build/`. A listing entry for the bare dir `res/qbx_core/web/build` (no trailing slash) fails the predicate → directory itself reported as ignored, even though its children are correctly bypassed.
 - **Fix:** Add `|| lower.ends_with("/web/build")`; or normalize trailing slash on dirs before check.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `is_fivem_ui_output` now also matches `ends_with("/web/build")` + `ends_with("/web/dist")`. Bare-dir listings no longer get misreported as ignored.
 
 ## 79. Nested-negation in `classify` segment match — fragile, Clippy-flagged
 - **Where:** [sync/ignore.rs:205](../src-tauri/src/sync/ignore.rs#L205)
@@ -634,11 +651,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [state/sync_snapshot.rs:74](../src-tauri/src/state/sync_snapshot.rs#L74), [:80](../src-tauri/src/state/sync_snapshot.rs#L80)
 - **Symptom:** Both methods `let _ = self.save_locked(&g)` — disk-write fail silently leaves in-memory state diverged from on-disk. Next restart loads stale data → phantom drift / false ToDelete/ToPull. `replace_under` at L125 correctly propagates.
 - **Fix:** Change signatures to `-> std::io::Result<()>`; propagate via `?`; callers surface via DiagBus.
+> PARTIAL v0.4.16-alpha S119 (uncommitted) — `set` + `forget` now match the save_locked Result; failures emit `log::error!` with remote_path context. Signatures kept `-> ()` to avoid touching every caller (hot path: flush). Full `Result<(), io::Error>` propagation + DiagBus surface deferred — log is enough to diagnose; the silent-divergence case is closed.
 
 ## 82. `heal_owned_dirs` breaks on ExitStatus — v0.2.44 truncation bug not fixed here
 - **Where:** [sftp/remote_exec.rs:107](../src-tauri/src/sftp/remote_exec.rs#L107)
 - **Symptom:** Channel-drain loop breaks on `ChannelMsg::ExitStatus`, missing trailing Data frames. Same bug pattern fixed elsewhere (`list_via_exec`, `get_remote_sha1`, `exec_bash`) but missed in `heal_owned_dirs`.
 - **Fix:** Replace `ExitStatus { .. } => break` with `_ => {}`; loop exits only when `wait()` returns `None`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — drain loop replaced with `while chan.wait().await.is_some() {}` (we don't consume stdout here). Aligns with the v0.2.44 channel-close convention.
 
 ## 83. Worker SSH handles not explicitly closed on `SftpClient::close()`
 - **Where:** [sftp/mod.rs:281-288](../src-tauri/src/sftp/mod.rs#L281-L288)
@@ -654,6 +673,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sftp/list.rs:179-193](../src-tauri/src/sftp/list.rs#L179-L193)
 - **Symptom:** Worker paths wrap calls in `tokio::time::timeout(LIST_T, ...)`; the main-session retry at L181 calls `list_recursive_via` unwrapped. Wedged main session hangs indefinitely.
 - **Fix:** Wrap the retry call in `tokio::time::timeout(LIST_T, ...)` matching worker paths.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — retry future now wrapped in `tokio::time::timeout(LIST_T, ...)`; timeout + inner Err both fall through to the empty-entry insert. Wedged main-session retries surface as empty-listing instead of hanging the batch.
 
 ## 86. `delete_recursive_via` has no per-op timeouts
 - **Where:** [sftp/ops.rs:98-154](../src-tauri/src/sftp/ops.rs#L98-L154)
@@ -664,11 +684,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sftp/transfer.rs:215-216](../src-tauri/src/sftp/transfer.rs#L215-L216)
 - **Symptom:** `with_t(T_BODY, "write")` timeout returns `Err`; `f` dropped without explicit `shutdown()`. Server-side handle may not flush, write uncommitted. `upload_atomic_via` uses explicit scoped block (correct).
 - **Fix:** Wrap create+write+shutdown in explicit scope, OR `let _ = f.shutdown().await` in error branch.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — write-Err branch now calls `with_t(T_QUICK, "close-on-err", ...)` on `f.shutdown()` before returning the error. Server-side handle closes promptly even on the timeout/IO-error path.
 
 ## 88. `exec_bash` channel not closed on timeout — server process leak
 - **Where:** [sftp/remote_exec.rs:73-80](../src-tauri/src/sftp/remote_exec.rs#L73-L80)
 - **Symptom:** Timeout drops the drain future, dropping `chan` without orderly close. Server-side process keeps running until session teardown — long `find` / scripts continue consuming server CPU.
 - **Fix:** On timeout, `chan.eof().await` or send `ChannelMsg::Eof` before returning error.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — timeout branch now sends `chan.eof().await` (best-effort) before returning the timeout error. Remote process gets an orderly close signal instead of running until session reclaim.
 
 ## 89. `download_file` buffers entire remote file into memory
 - **Where:** [sftp/transfer.rs:231](../src-tauri/src/sftp/transfer.rs#L231), [:337](../src-tauri/src/sftp/transfer.rs#L337)
@@ -679,6 +701,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [sftp/remote_exec.rs:151-153](../src-tauri/src/sftp/remote_exec.rs#L151-L153)
 - **Symptom:** Tab in remote filename passes validation, embeds in `find -printf '%p\t%s\t%T@\n'` output, breaks `splitn(3, '\t')` parser → `skipped_bad_size` + silently dropped file.
 - **Fix:** Add `'\t'` to rejected charset: `if s.contains(['\0', '\n', '\r', '\t'])`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `\t` added to the reject set in `shell_quote`. Paths with embedded tabs now fail validation up-front instead of silently breaking the printf parser downstream.
 
 ### LOW (28)
 
@@ -689,6 +712,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 92. `ActivityRow::default()` uses deprecated chrono associated-fn form
 - **Where:** [auto_sync.rs:124](../src-tauri/src/sync/auto_sync.rs#L124) — `DateTime::<Utc>::from_timestamp(0,0).unwrap_or_else(Utc::now)`.
 - **Fix:** Use `DateTime::UNIX_EPOCH` or free-fn `chrono::DateTime::from_timestamp(0,0).unwrap()`.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — `at: DateTime::UNIX_EPOCH` constant.
 
 ## 93. `suppress_local_delete_uploads` window is 2s — too short for slow SFTP
 - **Where:** [auto_sync.rs:888](../src-tauri/src/sync/auto_sync.rs#L888) — hardcoded `chrono::Duration::seconds(2)`; debounce ceiling is `CEILING_MS=3000`. (Cross-agent: A10+C9.)
@@ -721,6 +745,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 100. Double lock release on successful upload (idempotent but wasteful)
 - **Where:** [auto_sync/flush.rs:588-591](../src-tauri/src/sync/auto_sync/flush.rs#L588-L591) + [:317-325](../src-tauri/src/sync/auto_sync/flush.rs#L317-L325)
 - **Fix:** Remove early-release inside `process_entry_body`; rely on `process_entry` cleanup.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — early-release `tokio::spawn` block in `process_entry_body` success branch dropped. Sole release path is now `process_entry`'s post-result inline await — also covers Fail branch.
 
 ## 101. `recently_written` map grows unbounded on never-re-queried entries
 - **Where:** [auto_sync/watch.rs:210-220](../src-tauri/src/sync/auto_sync/watch.rs#L210-L220)
@@ -737,6 +762,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 104. `eprintln!` debug noise in sync command handlers (production)
 - **Where:** [lib.rs:132,134,136,165,167,169,183,185,187,190,192](../src-tauri/src/lib.rs#L132)
 - **Fix:** Convert to `log::debug!` or remove.
+> SHIPPED v0.4.16-alpha S119 (uncommitted) — 11 sites in `sync_reconcile` / `sync_pull_pending` / `sync_push_pending` converted to `log::debug!`. Stderr no longer carries `[rift] sync_*` chatter in production.
 
 ## 105. `sync_set_mirror_mode` set/read-back TOCTOU
 - **Where:** [lib.rs:299-300](../src-tauri/src/lib.rs#L299)

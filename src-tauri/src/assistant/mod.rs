@@ -623,12 +623,19 @@ fn write_mcp_config(
     let mut env_map = serde_json::Map::new();
     env_map.insert("RIFT_MCP_SERVER".into(), Value::from("1"));
     env_map.insert("RIFT_MCP_ROOTS".into(), Value::from(roots_joined));
-    // Always pass bridge port+token so sync_status is available regardless of the
-    // remote-shell toggle. RIFT_REMOTE_SHELL_ENABLED gates only remote_bash.
+    // #62: always pass the read-only token so sync_status / shell_lock_status
+    // are available; only inject the write-scoped RIFT_BRIDGE_TOKEN when the
+    // user has explicitly opted into remote-shell. A compromised MCP tool with
+    // only the readonly token can't call `remote_bash` even if it tries —
+    // the bridge server-side dispatch (remote_bridge::dispatch) rejects it.
     if let Some(b) = bridge {
         env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(b.port.to_string()));
-        env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(b.token.clone()));
+        env_map.insert(
+            "RIFT_BRIDGE_READONLY_TOKEN".into(),
+            Value::from(b.readonly_token.clone()),
+        );
         if remote_shell_enabled {
+            env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(b.token.clone()));
             env_map.insert("RIFT_REMOTE_SHELL_ENABLED".into(), Value::from("1"));
         }
     }
@@ -1441,6 +1448,13 @@ pub async fn assistant_send(
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     if let Some(pid) = child.id() {
         set_session_pid(&session_id, pid);
+    } else {
+        // #67: `child.id()` returns None when the process already exited by
+        // the time we ask (immediate-exit on bad args is the usual cause).
+        // Without surfacing this, `assistant_stop` later returns Ok with no
+        // PID found and looks like a successful stop while the child kept
+        // running. Logging makes the orphan-or-instant-exit case diagnosable.
+        log::warn!("assistant_send: child PID unavailable for session {session_id} (process already exited?)");
     }
 
     // #39: race window between the pre-spawn clear and set_session_pid means a
@@ -1530,12 +1544,33 @@ pub async fn assistant_send(
     });
 
     // Drain stderr to a buffer for error-event surfacing on non-zero exit.
+    // #66: cap at 64 KiB so a wedged CLI streaming error spew doesn't grow
+    // the heap unboundedly. When the buffer crosses the cap, drop the first
+    // 32 KiB and keep the tail — error context lives at the END of a stderr
+    // stream (the panic / fatal-error line), not at the start.
+    const STDERR_CAP: usize = 64 * 1024;
+    const STDERR_TRIM: usize = 32 * 1024;
     let stderr_task = tokio::spawn(async move {
         let mut buf = String::new();
+        let mut truncated = false;
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
             buf.push_str(&l);
             buf.push('\n');
+            if buf.len() > STDERR_CAP {
+                truncated = true;
+                // Find the first newline >= STDERR_TRIM bytes in so we drop on
+                // a line boundary, not mid-line. Safe `String::drain` requires
+                // a char boundary; newline is always one.
+                let cut = buf[STDERR_TRIM..]
+                    .find('\n')
+                    .map(|n| STDERR_TRIM + n + 1)
+                    .unwrap_or(STDERR_TRIM);
+                buf.drain(..cut);
+            }
+        }
+        if truncated {
+            buf.insert_str(0, "[... earlier stderr dropped (>64 KiB) ...]\n");
         }
         buf
     });

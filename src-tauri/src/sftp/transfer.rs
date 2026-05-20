@@ -211,8 +211,15 @@ impl SftpClient {
         // server-side. Without it the close races with subsequent ops —
         // probe_write_access hit "remove_file: No such file" because the file
         // hadn't materialized server-side before cleanup ran.
+        // #87: also shutdown on write-timeout. The prior `?` chain dropped `f`
+        // implicitly on write failure, which let the server-side handle linger
+        // until the session reclaim; explicit best-effort shutdown closes it
+        // promptly even on error paths.
         let mut f = with_t(T_NORMAL, "create", remote_path, self.sftp.create(remote_path)).await?;
-        with_t(T_BODY, "write", remote_path, f.write_all(bytes)).await?;
+        if let Err(e) = with_t(T_BODY, "write", remote_path, f.write_all(bytes)).await {
+            let _ = with_t(T_QUICK, "close-on-err", remote_path, f.shutdown()).await;
+            return Err(e);
+        }
         with_t(T_QUICK, "close", remote_path, f.shutdown()).await
     }
 
