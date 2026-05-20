@@ -2,31 +2,39 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older sessions in `docs/archive/HANDOFF-archive.md` and `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 111 — 2026-05-19 — v0.4.13-alpha shipped — Assistant UI overhaul + update-flow restyle
+## Session 112 — 2026-05-20 — Multi-wave codebase audit complete (no source edits)
 
-**Update-flow restyle (S110):** `UpdateInfoDto` + `UpdateService` upgraded to managed Tauri state w/ `Arc`; `apply_updates` split into `download_update` (streams `update-progress`) + `apply_pending_update`. Frontend store = 8-state machine + progress + `dismissedVersion` snooze + derived labels. `UpdateDialog` restyled (gradient header, version-diff chips, markdown-lite notes, shimmer progress, ready-card). New `UpdateToast.svelte` slides bottom-right (12s auto-dismiss, hover-paused). StatusBar pill gated on available/ready + toast dismissed + dialog closed. `release.ps1` got conditional `--splashImage` flag.
+**27-agent audit, 3 waves, read-only.** Wave 1 backend (11 agents, 105 findings), Wave 2 frontend (8 agents, 80 findings), Wave 3 cross-cutting (8 agents, 47 findings). **232 total findings folded into `docs/ISSUES.md` #34-#265.** Severity: **16 HIGH** / 96 MED / 103 LOW / 14 INFO + 8 dupes collapsed. Three audit commits on `main` (`d36c501` wave 1, `cb3ec5e` wave 2, `3006cd3` wave 3) — **unpushed, origin/main 3 behind**. Per-agent reports + 3 SYNTHESIS files at `state/audit-2026-05-20/` (gitignored). Plan that ran the show: `state/audit-2026-05-20/AUDIT-PLAN.md`.
 
-**Assistant UI overhaul (S111):** Killed empty-tabs gate — first tab auto-opens (−85 LOC). User msgs right-aligned neutral `--bg-elev-2` + 12px radius; user avatar dropped. Turn-badge inline beside "Claude" (was floating right). Messages widened to `min(960px, 88ch)` w/ 20px gap + faint top-border between bubbles. Header `+` labeled "New"; tasks-toggle gated on `taskCount > 0`; ws-chip neutral. EmptyState anchored 12vh top, cards 520px, suggestion clamp 1→2 lines, stagger entrance + hero-glyph breathe + card press states. Composer baseline-centered (mic 26 borderless, hint 22, effort 22, model 24 w/ ▾ caret, send 28×28); `:has(textarea:not(:placeholder-shown))` flips to flex-end on multi-line. Scrollbar nuked on `.scroll` + `.strip` (kills WebView2 arrow-buttons leaking top-right). Jump-to-latest pill on scroll-up. ChatTabsBar new-tab slide-in 220ms.
-
-CDP-verified; svelte-check 0/0/4051; 3-file bump 0.4.12-alpha → 0.4.13-alpha. S109 → archive.
+Spot-checked Top 5 ship-blockers vs source — all confirmed real.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.13-alpha** (shipped 2026-05-19). Tauri 2 + Svelte 5 + Rust + russh. Clean tree.
+**Project:** rift-tauri at `C:/AI Workflow/projects/rift-tauri/`. Source at **v0.4.13-alpha**. Tauri 2 + Svelte 5 + Rust + russh. **3 unpushed audit commits + working-tree README.md tweak** (added ISSUES quick link) — bundled into one housekeeping commit this session.
 
-**Workspace shell** = single shell. Activity bar right; 9 workspaces (chat/sync/files/conflicts/diagnostics/terminal/activity/history/settings) + 2 disabled stubs (agents/attachments). Order persisted to `rift.ui.workspace-order.v1`; active to `rift.ui.workspace.v1`. Phase 1/2/3 of `ui-shell-redesign` all shipped — Settings overlay machinery is gone; everything renders inside a uniform 46px PageHeader + extended 22px StatusBar.
+**Next session's job: fix the 16 HIGH severity findings.** Recommended sequence below.
 
-**Assistant page (v0.4.13)** — auto-opens first tab on mount; user msgs right-aligned neutral; turn-badge inline; jump-to-latest pill; scrollbar hidden on `.scroll` + `.strip`; composer baseline-centered w/ `:has()` flex-end multi-line escalation; ▾ caret on model pill.
+### Top 5 ship-blockers — fix as v0.4.14-alpha hotfix (one commit batch, ~30 LOC across 5 files)
 
-**Update flow (v0.4.13)** — `UpdateToast` slides up bottom-right on availability; restyled `UpdateDialog` w/ markdown-lite notes; 8-state store machine; conditional `--splashImage` flag in release.ps1 (drop `src-tauri/installer-splash.png` to activate).
+| # | Where | What | Fix sketch |
+|---|---|---|---|
+| **#36** | `src-tauri/src/lib.rs:805` | `save_server` `.or_else(\|_\| Ok(default()))` swallows config-load errors → entire server list overwritten on next save (data-loss) | Drop `.or_else`; propagate error w/ `.map_err(\|e\| format!(...))?` |
+| **#74** | `src-tauri/src/sync/drift_scanner.rs:228` | `walk_local` panic in `spawn_blocking` → `.unwrap_or_default()` returns empty `local_map` → bypasses guard at L241 → mass ToPull overwrites real local files | Match on `JoinError`; abort scan w/ `FolderScan::ScanFailed` variant |
+| **#41** | `src-tauri/src/.../remote_bridge.rs:250-258` | Bridge lock leak on exec error → permanently blocks ALL users on that remote root | RAII guard struct (`BridgeLockGuard`) w/ `Drop` impl releasing lock |
+| **#219** | `src-tauri/src/lib.rs:1743` | No `panic::set_hook` installed → every async-task panic dies silently | Install hook after `LogForwarder` setup; route to `tracing::error!` + DiagBus |
+| **#163** | `src/lib/components/assistant/UpdateDialog.svelte:409` | `scrollbar-gutter: stable` reintroduced — direct **CRITICAL DON'T-TOUCH violation** (HANDOFF said it leaks WebView2 arrow-buttons) | Delete the line |
 
-**CDP** — `scripts/run-dev.bat` + `npm run cdp:serve`; `scripts/cdp/c.sh state|eval|type|click|wait|shot|key`. devtools:// filter merged S106.
+Verify each: `cargo check --manifest-path src-tauri/Cargo.toml` for #36/#74/#41/#219, `npm run check` for #163.
 
-**Next priorities (pick one):** (a) Drop `src-tauri/installer-splash.png` (560×140-ish dark PNG) to activate themed installer; (b) Compaction Phase B — wire around sonnet effort-flag cache bust (`docs/design/assistant-compaction.md`); (c) bg-tab session-lost retry on cwd-hash mismatch; (d) expose `xhigh`/`max` effort tiers; (e) `lib.rs` split into `commands/*.rs` (ISSUES.md #20).
+### Remaining HIGH severity (11) — triage into v0.4.15+ batches after hotfix
 
-**Open ISSUES** (full list `docs/ISSUES.md`): Tier 1 #21 (zero tests) + #15 (signing) + #9.3 (keyring) deferred to Phase 6. Tier 3 #2 (tool-block rhythm), #5 (status hub), #11 remainder (Appearance "More soon" + SSH Keys empty + font-picker class). Tier 4 #4/#7/#16/#17/#18/#20/#23/#24/#25/#26.
+4 frontend + 4 backend + 3 cross-cutting. Pull list from `docs/ISSUES.md` `## Priority tiers` section once the Top 5 are shipped.
+
+### Existing pre-audit priorities (still valid, lower urgency than HIGH findings)
+
+(a) Drop `src-tauri/installer-splash.png` for themed installer. (b) Compaction Phase B (`docs/design/assistant-compaction.md`). (c) bg-tab session-lost retry on cwd-hash mismatch. (d) expose `xhigh`/`max` effort tiers. (e) `lib.rs` split into `commands/*.rs` (ISSUES #20).
 
 ---
 
@@ -47,6 +55,6 @@ CDP-verified; svelte-check 0/0/4051; 3-file bump 0.4.12-alpha → 0.4.13-alpha. 
 - Image paste: `assistant_send` flips `--input-format text→stream-json` when attachments present. 20MiB cap + `image/*` gate.
 - Settings is now a workspace (kbd 9), `Ctrl+,` flips workspace; do NOT reintroduce the slideover scrim/aside. Dialog callbacks ride `src/lib/state/dialogs.svelte.ts`, populated by AppShell at mount.
 - `list_watched_folders` Tauri cmd returns name + remote_root + cached file_count from `FolderCountCache`; lock count + last-event derived client-side from `connection.locks` + `connection.activityFeed`.
-- Assistant scrollbar: `.scroll` + `.strip` BOTH set `scrollbar-width: none` + `::-webkit-scrollbar { display: none }` — don't reintroduce `scrollbar-gutter: stable`, it leaks the WebView2 arrow-buttons on top-right.
+- Assistant scrollbar: `.scroll` + `.strip` BOTH set `scrollbar-width: none` + `::-webkit-scrollbar { display: none }` — don't reintroduce `scrollbar-gutter: stable`, it leaks the WebView2 arrow-buttons on top-right. **#163 violator in UpdateDialog.svelte:409 is on the Top 5 fix list.**
 - AssistantPage `onMount` auto-fires `newTab()` if `openTabs.length === 0` after init resolves. Don't reintroduce the empty-tabs CTA.
 - `UpdateService` is managed Tauri state — register w/ `.manage(Arc::new(UpdateService::new(...)))` in `lib.rs::run()`. `apply_updates` is split: `download_update` then `apply_pending_update`.
