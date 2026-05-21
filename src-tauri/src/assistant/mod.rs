@@ -340,6 +340,11 @@ pub struct ConversationMeta {
     pub message_count: u32,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Phase E5: flattened compaction summaries so HistoryDrawer search can
+    /// match against the contents of long-running compacted convos without
+    /// loading every transcript. Empty for convos that never compacted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compaction_summaries: Vec<String>,
 }
 
 /// Full conversation record persisted to disk. `messages` is the frontend's
@@ -510,8 +515,14 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             Ok(b) => b,
             Err(_) => continue,
         };
-        // Parse just enough to extract metadata; skip invalid files.
-        let convo: Conversation = match serde_json::from_slice(&bytes) {
+        // Parse to a Value first so we can extract optional fields not modeled
+        // on the typed Conversation struct (compactionHistory[*].summary —
+        // shipped E5, ridden through serde_json::Value catch-all on save).
+        let raw: serde_json::Value = match serde_json::from_slice(&bytes) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let convo: Conversation = match serde_json::from_value(raw.clone()) {
             Ok(c) => c,
             Err(_) => continue,
         };
@@ -520,6 +531,15 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             .as_array()
             .map(|a| a.len() as u32)
             .unwrap_or(0);
+        let compaction_summaries = raw
+            .get("compactionHistory")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.get("summary").and_then(|s| s.as_str()).map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         out.push(ConversationMeta {
             id: convo.id,
             title: convo.title,
@@ -527,6 +547,7 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             message_count,
             created_at: convo.created_at,
             updated_at: convo.updated_at,
+            compaction_summaries,
         });
     }
     out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -782,6 +803,94 @@ pub fn cleanup_mcp_config_on_exit() {
             }
         }
     }
+}
+
+/// Phase E4: housekeeping sweep for CLI JSONLs that belong to sessions
+/// retired by compaction. After a compact, the old `<uuid>.jsonl` under
+/// `~/.claude/projects/<cwd-hash>/` is dead weight — Rift's own convo JSON
+/// keeps the user-facing history; the CLI JSONL is never read again.
+///
+/// Approach: scan every Rift convo, collect `compactionHistory[*].priorSessionId`,
+/// then walk `~/.claude/projects/*/<uuid>.jsonl`. Delete a file iff:
+///   1. Its filename stem matches a known retired session id, AND
+///   2. Its mtime is older than 30 days (conservative — gives the user a
+///      long window to manually `claude --resume <old>` if compaction
+///      surprised them; e.g. rollback debugging).
+///
+/// Errors are logged + swallowed. Best-effort — startup must not block on
+/// disk hiccups. Returns the number of files deleted (for the log line).
+pub fn cleanup_retired_jsonls() -> usize {
+    use std::collections::HashSet;
+    let Ok(home) = dirs_home() else { return 0 };
+
+    // Step 1: enumerate retired session ids across all convo JSONs.
+    let convo_dir = home.join(".rift").join("assistant").join("conversations");
+    let Ok(entries) = std::fs::read_dir(&convo_dir) else { return 0 };
+    let mut retired: HashSet<String> = HashSet::new();
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(bytes) = std::fs::read(&p) else { continue };
+        let Ok(raw) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue };
+        let Some(arr) = raw.get("compactionHistory").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for entry in arr {
+            if let Some(sid) = entry.get("priorSessionId").and_then(|s| s.as_str()) {
+                if is_valid_session_id(sid) {
+                    retired.insert(sid.to_string());
+                }
+            }
+        }
+    }
+    if retired.is_empty() {
+        return 0;
+    }
+
+    // Step 2: walk ~/.claude/projects/<cwd-hash>/*.jsonl and delete matches.
+    let projects = home.join(".claude").join("projects");
+    let Ok(project_dirs) = std::fs::read_dir(&projects) else { return 0 };
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(30 * 24 * 60 * 60));
+    let mut deleted = 0usize;
+    for cwd_dir in project_dirs.flatten() {
+        let path = cwd_dir.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(&path) else { continue };
+        for f in files.flatten() {
+            let fp = f.path();
+            if fp.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let Some(stem) = fp.file_stem().and_then(|s| s.to_str()) else { continue };
+            if !retired.contains(stem) {
+                continue;
+            }
+            // mtime guard — only delete files older than 30 days.
+            let aged = f
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .zip(cutoff)
+                .map(|(mt, c)| mt < c)
+                .unwrap_or(false);
+            if !aged {
+                continue;
+            }
+            match std::fs::remove_file(&fp) {
+                Ok(()) => {
+                    deleted += 1;
+                    log::info!("assistant: cleaned retired JSONL {}", fp.display());
+                }
+                Err(e) => log::warn!("assistant: failed to remove {}: {e}", fp.display()),
+            }
+        }
+    }
+    deleted
 }
 
 /// CLI auth-status JSON shape from `claude auth status`.

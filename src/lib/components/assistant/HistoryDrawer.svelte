@@ -11,7 +11,14 @@
   const filteredConversations = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return assistant.conversations;
-    return assistant.conversations.filter((c) => c.title.toLowerCase().includes(q));
+    return assistant.conversations.filter((c) => {
+      if (c.title.toLowerCase().includes(q)) return true;
+      // E5: fall through to compaction summaries so long-running compacted
+      // convos remain searchable by topic, not just rename.
+      const summaries = c.compactionSummaries;
+      if (!summaries || summaries.length === 0) return false;
+      return summaries.some((s) => s.toLowerCase().includes(q));
+    });
   });
 
   function startRename(c: ConversationMeta) {
@@ -75,7 +82,7 @@
         <Search size={12} />
         <input
           type="search"
-          placeholder="Filter by title…"
+          placeholder="Filter by title or summary…"
           bind:value={searchQuery}
           aria-label="Filter conversations"
         />

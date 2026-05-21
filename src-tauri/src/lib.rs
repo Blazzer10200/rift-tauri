@@ -1995,6 +1995,15 @@ pub fn run() {
             let pump_cancel = CancellationToken::new();
             app.manage(DiagPumpCancel(pump_cancel.clone()));
             tauri::async_runtime::spawn(diag_state_pump(app_handle, pump_cancel));
+            // Phase E4: best-effort sweep of CLI JSONLs whose sessions were
+            // retired by compaction >30 days ago. Off the hot path — spawned
+            // off the runtime so a slow disk doesn't block window-show.
+            tauri::async_runtime::spawn_blocking(|| {
+                let deleted = assistant::cleanup_retired_jsonls();
+                if deleted > 0 {
+                    log::info!("assistant: startup sweep deleted {} retired JSONL(s)", deleted);
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
