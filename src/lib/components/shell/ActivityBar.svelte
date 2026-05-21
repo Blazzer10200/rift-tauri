@@ -215,11 +215,11 @@
     /* Blend into the shell — no harsh divider. A faint inset on the inner
        edge gives just enough separation against the main pane. */
     background: linear-gradient(
-      to left,
+      to right,
       color-mix(in oklch, var(--surface) 96%, transparent),
       color-mix(in oklch, var(--surface) 70%, transparent)
     );
-    box-shadow: inset 1px 0 0 color-mix(in oklch, var(--border) 55%, transparent);
+    box-shadow: inset -1px 0 0 color-mix(in oklch, var(--border) 55%, transparent);
     overflow: hidden;
     user-select: none;
     padding: 6px 0;
@@ -282,7 +282,7 @@
     background: color-mix(in oklch, var(--accent) 14%, transparent);
     color: var(--accent);
   }
-  /* Soft capsule indicator on the inner edge — replaces the hard 2px stripe.
+  /* Soft capsule indicator on the outer edge — replaces the hard 2px stripe.
      Centered vertically at 55% of the button height. */
   .ab-btn[data-active="true"]::before {
     content: "";

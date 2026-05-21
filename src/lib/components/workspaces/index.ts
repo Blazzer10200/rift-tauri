@@ -2,7 +2,7 @@ import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
   MessageSquare, RefreshCcw, FolderOpen, AlertTriangle, Stethoscope,
-  Terminal, Activity, History, Bot, Paperclip, Settings as SettingsIcon,
+  Terminal, Activity, Settings as SettingsIcon,
 } from "lucide-svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SyncPage from "../sync/SyncPage.svelte";
@@ -11,11 +11,8 @@ import ConflictsPage from "../conflicts/ConflictsPage.svelte";
 import Diagnostics from "../diagnostics/Diagnostics.svelte";
 import TerminalPanel from "../terminal/TerminalPanel.svelte";
 import ActivityFeed from "../activity/ActivityFeed.svelte";
-import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
-import DisabledWorkspace from "./DisabledWorkspace.svelte";
 import { connection } from "$lib/state/connection.svelte";
-import { assistant } from "$lib/state/assistant.svelte";
 
 // lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
 // matches what each icon export looks like and stays compatible w/ Svelte 5
@@ -49,9 +46,5 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   diagnostics: { component: Diagnostics,       title: "Diagnostics", icon: Stethoscope,   kbd: "5" },
   terminal:    { component: TerminalPanel,     title: "Terminal",    icon: Terminal,      kbd: "6" },
   activity:    { component: ActivityFeed,      title: "Activity",    icon: Activity,      kbd: "7" },
-  history:     { component: HistoryDrawer,     title: "History",     icon: History,       kbd: "8",
-                 getCount: () => assistant.conversations.length, getTone: "info" },
-  agents:      { component: DisabledWorkspace, title: "Agents",      icon: Bot,           kbd: "",  disabled: true },
-  attachments: { component: DisabledWorkspace, title: "Attachments", icon: Paperclip,     kbd: "",  disabled: true },
-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "9" },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "8" },
 };

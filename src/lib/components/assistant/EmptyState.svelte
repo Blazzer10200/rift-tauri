@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Sparkles, FolderOpen, FolderTree, Search, FileText,
-    ExternalLink, Server, X, Folder, ChevronRight,
+    ExternalLink, X, Folder, ChevronRight,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { connection } from "../../state/connection.svelte";
@@ -103,6 +103,25 @@
   // entirely on the Open-folder CTA so users aren't confused about what's wired.
   const hasWorkspace = $derived(hasRoot || hasSynced);
   const recents = $derived(assistant.workspace.recent);
+
+  // Resume-tiles — top 4 recent conversations excluding the current empty
+  // tab. The titlebar already exposes the synced-server label, so this slot
+  // earns its keep by being actionable: one click resumes a real conversation.
+  const recentChats = $derived(
+    assistant.conversations
+      .filter((c) => c.id !== assistant.currentConvoId)
+      .slice(0, 4),
+  );
+
+  function fmtAgo(ms: number): string {
+    const diff = Date.now() - ms;
+    const min = 60_000, hr = 60 * min, day = 24 * hr;
+    if (diff < min) return "just now";
+    if (diff < hr) return `${Math.floor(diff / min)}m ago`;
+    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
+    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+    return new Date(ms).toLocaleDateString();
+  }
 </script>
 
 <div class="empty" class:no-ws={!hasWorkspace}>
@@ -120,20 +139,24 @@
       <p class="muted">Or open <strong>Settings → Assistant</strong> and paste an <code>sk-ant-api03-…</code> key.</p>
     </div>
   {:else}
-    <!-- Hero — headline adapts to workspace state. Subtitle suppressed when a
-         workspace is already wired (the workspace card below repeats the same
-         info — keep one source). -->
+    <!-- Hero — headline adapts to workspace state + whether there's history
+         to resume. Subtitle suppressed when a workspace is already wired. -->
     <div class="hero">
-      <div class="glyph"><Sparkles size={22} /></div>
+      <div class="glyph">
+        <span class="glyph-halo" aria-hidden="true"></span>
+        <Sparkles size={22} />
+      </div>
       {#if hasRoot || hasSynced}
-        <h2>What's on your mind?</h2>
+        <h2>{recentChats.length > 0 ? "Pick up where you left off" : "What's on your mind?"}</h2>
       {:else}
         <h2>Open a folder to begin</h2>
         <p class="sub">Point Claude at any project on your disk — it'll read, list, and grep on demand.</p>
       {/if}
     </div>
 
-    <!-- Workspace card — one focal element. Variant by state. -->
+    <!-- Workspace card — only when a folder is genuinely open. Synced-only
+         state is already covered by the titlebar connection chip, so this slot
+         goes to recent-chat tiles instead (see below). -->
     {#if hasRoot}
       <div class="ws-card active">
         <div class="ws-icon"><Folder size={16}/></div>
@@ -148,21 +171,7 @@
           onclick={() => void assistant.clearRoot()}
         ><X size={13}/></button>
       </div>
-    {:else if hasSynced}
-      <div class="ws-card synced">
-        <div class="ws-icon"><Server size={16}/></div>
-        <div class="ws-body">
-          <div class="ws-title">{server!.name}</div>
-          <div class="ws-sub">Synced workspace · {server!.host}</div>
-        </div>
-        <button
-          class="ws-secondary"
-          type="button"
-          title="Open a different folder instead"
-          onclick={() => void assistant.pickFolder()}
-        >Switch</button>
-      </div>
-    {:else}
+    {:else if !hasSynced}
       <button
         class="ws-card primary"
         type="button"
@@ -205,6 +214,34 @@
       {/if}
     {/if}
 
+    <!-- Resume tiles — surfaced when there's chat history AND a workspace is
+         wired. Click resumes that tab; the current empty chat stays open in
+         the background until the user types or closes it. -->
+    {#if hasWorkspace && recentChats.length > 0}
+      <div class="resume-block">
+        <div class="block-label">Recent</div>
+        <div class="chat-tiles">
+          {#each recentChats as c (c.id)}
+            <button
+              class="chat-tile"
+              type="button"
+              onclick={() => void assistant.openTab(c.id)}
+              title={c.title}
+            >
+              <span class="tile-title">{c.title}</span>
+              <span class="tile-meta">
+                <span class="tile-model">{c.model}</span>
+                <span class="tile-dot">·</span>
+                <span>{c.messageCount} msg</span>
+                <span class="tile-dot">·</span>
+                <span class="tile-time">{fmtAgo(c.updatedAt)}</span>
+              </span>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     <!-- Suggestions only when a workspace is wired — keeps the empty/no-folder
          state focused on a single CTA. -->
     {#if hasWorkspace}
@@ -244,6 +281,7 @@
   .empty > :nth-child(2) { animation-delay: 60ms; }
   .empty > :nth-child(3) { animation-delay: 100ms; }
   .empty > :nth-child(4) { animation-delay: 140ms; }
+  .empty > :nth-child(5) { animation-delay: 180ms; }
   @keyframes empty-child-in {
     from { opacity: 0; transform: translateY(6px); }
     to   { opacity: 1; transform: translateY(0); }
@@ -259,22 +297,47 @@
     gap: 4px;
   }
   .glyph {
-    width: 44px; height: 44px;
-    margin-bottom: 6px;
+    position: relative;
+    width: 52px; height: 52px;
+    margin-bottom: 8px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
     background: var(--accent-soft);
     color: var(--accent);
     box-shadow:
       0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent),
-      0 12px 32px color-mix(in oklch, var(--accent) 18%, transparent);
+      0 18px 40px color-mix(in oklch, var(--accent) 18%, transparent);
+    isolation: isolate;
+  }
+  /* Conic-gradient halo behind the glyph — rotates slowly + softly blurred.
+     Lifts the empty state out of "stock" feel without screaming for attention. */
+  .glyph-halo {
+    position: absolute;
+    inset: -10px;
+    border-radius: 50%;
+    background: conic-gradient(
+      from 0deg,
+      color-mix(in oklch, var(--accent) 75%, transparent),
+      transparent 25%,
+      color-mix(in oklch, var(--accent) 55%, transparent) 50%,
+      transparent 75%,
+      color-mix(in oklch, var(--accent) 75%, transparent)
+    );
+    filter: blur(10px);
+    opacity: 0.55;
+    z-index: -1;
+    pointer-events: none;
   }
   @media (prefers-reduced-motion: no-preference) {
     .glyph { animation: glyph-breathe 4.2s ease-in-out infinite; }
+    .glyph-halo { animation: halo-spin 9s linear infinite; }
   }
   @keyframes glyph-breathe {
     0%, 100% { transform: scale(1); }
     50%      { transform: scale(1.04); }
+  }
+  @keyframes halo-spin {
+    to { transform: rotate(360deg); }
   }
   .hero h2 {
     margin: 0;
@@ -326,20 +389,12 @@
     border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
     background: color-mix(in oklch, var(--accent) 6%, var(--surface));
   }
-  .ws-card.synced {
-    border-color: color-mix(in oklch, var(--ok) 35%, var(--border));
-    background: color-mix(in oklch, var(--ok) 5%, var(--surface));
-  }
   .ws-icon {
     width: 36px; height: 36px;
     border-radius: 10px;
     display: flex; align-items: center; justify-content: center;
     background: color-mix(in oklch, var(--accent) 18%, transparent);
     color: var(--accent);
-  }
-  .ws-card.synced .ws-icon {
-    background: color-mix(in oklch, var(--ok) 18%, transparent);
-    color: var(--ok);
   }
   .ws-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .ws-title {
@@ -375,23 +430,6 @@
     color: var(--danger);
     background: var(--surface-hover);
   }
-  .ws-secondary {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 5px 10px;
-    color: var(--fg-2);
-    cursor: pointer;
-    font: inherit;
-    font-size: var(--fs-xs);
-    transition: background 120ms, color 120ms, border-color 120ms;
-  }
-  .ws-secondary:hover {
-    color: var(--fg);
-    border-color: var(--border-strong);
-    background: var(--surface-hover);
-  }
-
   /* ── Recents — quiet, compact list under the primary CTA ───────────────── */
   .recents-block {
     width: 100%;
@@ -459,6 +497,60 @@
   }
   .recent-row:hover .recent-x { opacity: 1; }
   .recent-x:hover { color: var(--danger); }
+
+  /* ── Resume tiles — recent conversations ───────────────────────────────── */
+  .resume-block {
+    width: 100%;
+    max-width: 520px;
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  .chat-tiles {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .chat-tile {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    padding: 9px 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--fg);
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    min-width: 0;
+    transition: background 140ms, border-color 140ms, transform 140ms, box-shadow 140ms;
+  }
+  .chat-tile:hover {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px color-mix(in oklch, var(--accent) 14%, transparent);
+  }
+  .chat-tile:active { transform: translateY(0) scale(0.99); }
+  .chat-tile:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+  .tile-title {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--fg);
+    line-height: 1.3;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tile-meta {
+    display: flex; align-items: center; gap: 5px;
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    overflow: hidden;
+  }
+  .tile-model { text-transform: capitalize; font-weight: 500; color: var(--fg-muted); }
+  .tile-dot { opacity: 0.6; }
+  .tile-time { margin-left: auto; }
 
   /* ── Suggestions ───────────────────────────────────────────────────────── */
   .suggestions-block {

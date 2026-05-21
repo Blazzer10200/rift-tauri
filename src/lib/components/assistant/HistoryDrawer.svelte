@@ -2,16 +2,55 @@
   import { History, Plus, Trash2, Pencil, Check, MessagesSquare, Search, X } from "lucide-svelte";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
+  import OpenInPaneMenu from "./OpenInPaneMenu.svelte";
+
+  // `compact` collapses the page-style PageHeader into a slim popover header
+  // so this same component can serve both the workspace surface (removed
+  // 2026-05-21) and the in-chat history popover. `onSelected` lets a popover
+  // host close itself after the user picks/creates a conversation.
+  let { compact = false, onSelected = () => {} }: {
+    compact?: boolean;
+    onSelected?: () => void;
+  } = $props();
 
   let renameId = $state<string | null>(null);
   let renameDraft = $state("");
   let confirmDeleteId = $state<string | null>(null);
   let searchQuery = $state("");
+  let hideTests = $state(localStorage.getItem("rift.history.hideTests") === "1");
+  let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
+
+  // Heuristic test-title detector — catches the canary/ping pairs (Token-A,
+  // ACK-ONE, Memorize) plus generic "hello"/"please respond" probe titles
+  // that clutter History during dev sessions.
+  const TEST_TITLE_RE = /^(token-?[a-z]?\.?|ack-?one|memorize this token|hello!?$|hello\s|please (do exactly|respond)|i want to audit)/i;
+  function isTestTitle(t: string): boolean {
+    return TEST_TITLE_RE.test(t.trim());
+  }
+
+  $effect(() => {
+    localStorage.setItem("rift.history.hideTests", hideTests ? "1" : "0");
+  });
+
+  function onRowContext(e: MouseEvent, id: string) {
+    e.preventDefault();
+    // History entries that aren't yet in openTabs need to be opened first so
+    // `dropTabIntoPane` (which gates on openTabs.includes) can target them.
+    if (!assistant.openTabs.includes(id)) {
+      void assistant.openTab(id).then(() => {
+        ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
+      });
+    } else {
+      ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
+    }
+  }
 
   const filteredConversations = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return assistant.conversations;
-    return assistant.conversations.filter((c) => {
+    let base = assistant.conversations;
+    if (hideTests) base = base.filter((c) => !isTestTitle(c.title));
+    if (!q) return base;
+    return base.filter((c) => {
       if (c.title.toLowerCase().includes(q)) return true;
       // E5: fall through to compaction summaries so long-running compacted
       // convos remain searchable by topic, not just rename.
@@ -20,6 +59,42 @@
       return summaries.some((s) => s.toLowerCase().includes(q));
     });
   });
+
+  // Bucket by recency for scannability — Today / Yesterday / This week / Older.
+  // Day boundaries use local midnight, not 24h windows, so "yesterday at 11pm"
+  // doesn't bleed into "today" the next morning.
+  type BucketKey = "today" | "yesterday" | "week" | "older";
+  const BUCKET_LABELS: Record<BucketKey, string> = {
+    today: "Today",
+    yesterday: "Yesterday",
+    week: "This week",
+    older: "Older",
+  };
+  function bucketOf(ms: number): BucketKey {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - 86_400_000;
+    const weekStart = todayStart - 6 * 86_400_000;
+    if (ms >= todayStart) return "today";
+    if (ms >= yesterdayStart) return "yesterday";
+    if (ms >= weekStart) return "week";
+    return "older";
+  }
+  const groupedConversations = $derived.by(() => {
+    const groups: Record<BucketKey, ConversationMeta[]> = {
+      today: [], yesterday: [], week: [], older: [],
+    };
+    for (const c of filteredConversations) {
+      groups[bucketOf(c.updatedAt)].push(c);
+    }
+    return (["today", "yesterday", "week", "older"] as BucketKey[])
+      .filter((k) => groups[k].length > 0)
+      .map((k) => ({ key: k, label: BUCKET_LABELS[k], items: groups[k] }));
+  });
+
+  const hiddenTestCount = $derived(
+    hideTests ? assistant.conversations.filter((c) => isTestTitle(c.title)).length : 0,
+  );
 
   function startRename(c: ConversationMeta) {
     renameId = c.id;
@@ -58,39 +133,64 @@
   }
 </script>
 
-<aside class="drawer" aria-label="Conversation history">
-    <PageHeader
-      icon={History}
-      title="History"
-      subtitle="{assistant.conversations.length} conversation{assistant.conversations.length === 1 ? '' : 's'}"
-      tone="info"
-    >
-      {#snippet actions()}
+<aside class="drawer" class:compact aria-label="Conversation history">
+    {#if compact}
+      <div class="cmp-head">
+        <span class="cmp-icon"><History size={13}/></span>
+        <span class="cmp-title">History</span>
+        <span class="cmp-count">{assistant.conversations.length}</span>
         <button
-          class="iconbtn primary"
+          class="cmp-new"
           type="button"
-          title="New conversation"
-          onclick={() => void assistant.newTab()}
+          title="New conversation (Ctrl+T)"
+          onclick={() => { void assistant.newTab(); onSelected(); }}
         >
-          <Plus size={13} /> New
+          <Plus size={12} /> New
         </button>
-      {/snippet}
-    </PageHeader>
+      </div>
+    {:else}
+      <PageHeader
+        icon={History}
+        title="History"
+        subtitle="{assistant.conversations.length} conversation{assistant.conversations.length === 1 ? '' : 's'}"
+        tone="info"
+      >
+        {#snippet actions()}
+          <button
+            class="iconbtn primary"
+            type="button"
+            title="New conversation"
+            onclick={() => void assistant.newTab()}
+          >
+            <Plus size={13} /> New
+          </button>
+        {/snippet}
+      </PageHeader>
+    {/if}
 
     {#if assistant.conversations.length > 0}
-      <div class="search">
-        <Search size={12} />
-        <input
-          type="search"
-          placeholder="Filter by title or summary…"
-          bind:value={searchQuery}
-          aria-label="Filter conversations"
-        />
-        {#if searchQuery}
-          <button class="search-clear" type="button" title="Clear" onclick={() => (searchQuery = "")}>
-            <X size={11} />
-          </button>
-        {/if}
+      <div class="filters">
+        <div class="search">
+          <Search size={12} />
+          <input
+            type="search"
+            placeholder="Filter by title or summary…"
+            bind:value={searchQuery}
+            aria-label="Filter conversations"
+          />
+          {#if searchQuery}
+            <button class="search-clear" type="button" title="Clear" onclick={() => (searchQuery = "")}>
+              <X size={11} />
+            </button>
+          {/if}
+        </div>
+        <label class="hide-tests" title="Hide canary/ping test conversations (Token-A, ACK-ONE, hello, …)">
+          <input type="checkbox" bind:checked={hideTests} />
+          <span>Hide tests</span>
+          {#if hiddenTestCount > 0}
+            <span class="hide-tests-count">{hiddenTestCount}</span>
+          {/if}
+        </label>
       </div>
     {/if}
 
@@ -108,11 +208,15 @@
           <span class="hint">Try a shorter query.</span>
         </div>
       {:else}
-        {#each filteredConversations as c (c.id)}
+        {#each groupedConversations as group (group.key)}
+          <div class="group-label">{group.label}</div>
+          {#each group.items as c (c.id)}
           <div
             class="row"
             class:active={c.id === assistant.currentConvoId}
             class:editing={c.id === renameId}
+            oncontextmenu={(e) => onRowContext(e, c.id)}
+            role="presentation"
           >
             {#if c.id === renameId}
               <input
@@ -130,7 +234,7 @@
               <button
                 class="row-main"
                 type="button"
-                onclick={() => void assistant.openTab(c.id)}
+                onclick={() => { void assistant.openTab(c.id); onSelected(); }}
                 title="Open"
               >
                 <span class="row-title">{c.title}</span>
@@ -163,10 +267,20 @@
               </div>
             {/if}
           </div>
+          {/each}
         {/each}
       {/if}
     </div>
   </aside>
+
+{#if ctxMenu}
+  <OpenInPaneMenu
+    tabId={ctxMenu.tabId}
+    x={ctxMenu.x}
+    y={ctxMenu.y}
+    onClose={() => (ctxMenu = null)}
+  />
+{/if}
 
 <style>
   .drawer {
@@ -177,6 +291,49 @@
     display: flex; flex-direction: column;
     background: transparent;
   }
+  /* Popover variant — slim header replaces the full PageHeader. Hosted by
+     ChatTabsBar's history popover, which owns the outer surface + shadow. */
+  .cmp-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .cmp-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .cmp-title {
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    color: var(--fg);
+  }
+  .cmp-count {
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-faint);
+    padding: 1px 6px;
+    background: var(--bg-elev-2);
+    border-radius: 999px;
+  }
+  .cmp-new {
+    margin-left: auto;
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--fs-xs);
+    font-weight: 600;
+    transition: filter 120ms;
+  }
+  .cmp-new:hover { filter: brightness(1.08); }
 
   .iconbtn {
     display: inline-flex; align-items: center; gap: 4px;
@@ -199,9 +356,45 @@
   }
   .iconbtn.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-fg); }
 
-  .search {
-    display: flex; align-items: center; gap: 6px;
+  .filters {
+    display: flex; align-items: center; gap: 8px;
     margin: 8px 10px 4px;
+  }
+  .hide-tests {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 9px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: border-color 120ms, color 120ms, background 120ms;
+  }
+  .hide-tests:hover { color: var(--fg); border-color: var(--border-strong); }
+  .hide-tests input { margin: 0; cursor: pointer; accent-color: var(--accent); }
+  .hide-tests-count {
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+    font-size: 10px;
+    padding: 1px 5px;
+    background: var(--surface);
+    border-radius: 999px;
+  }
+  .group-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-subtle);
+    padding: 10px 12px 4px;
+  }
+  .group-label:first-child { padding-top: 4px; }
+  .search {
+    flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 6px;
     padding: 5px 9px;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);

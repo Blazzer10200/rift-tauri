@@ -368,14 +368,14 @@
       </div>
     {/if}
 
-    {#if workspace.activeId === "chat"}
+    <div class="tabs-rail" data-show={workspace.activeId === "chat"} aria-hidden={workspace.activeId !== "chat"}>
       <ChatTabsBar />
-    {/if}
+    </div>
     <div class="body">
+      <ActivityBar />
       <main class="pane">
         <WorkspaceShell />
       </main>
-      <ActivityBar />
     </div>
   </div>
 
@@ -443,7 +443,7 @@
 <style>
   .shell {
     display: grid;
-    grid-template-rows: 44px 1fr 22px;
+    grid-template-rows: 44px 1fr 26px;
     height: 100%;
     width: 100%;
     min-width: 0;
@@ -480,13 +480,34 @@
     font: inherit;
   }
   .wire-error button:hover { background: rgba(255,255,255,0.08); }
-  /* Workspace shell: [main pane | 40px activity bar]. WorkspaceShell mounts
+  /* Chat tabs rail collapses to 0 height when non-chat workspace is active.
+     Always mounted so tab state survives workspace hops without remount jitter. */
+  .tabs-rail {
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-4px);
+    transition:
+      max-height 180ms cubic-bezier(.2,.7,.2,1),
+      opacity 140ms ease,
+      transform 180ms cubic-bezier(.2,.7,.2,1);
+    will-change: max-height, opacity, transform;
+  }
+  .tabs-rail[data-show="true"] {
+    max-height: 48px;
+    opacity: 1;
+    transform: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tabs-rail { transition: none; transform: none; }
+  }
+  /* Workspace shell: [44px activity bar | main pane]. WorkspaceShell mounts
      each workspace once-and-keeps-it via the everOpened latch — no width to
      animate, so no grid-template-columns transition. */
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-columns: 44px minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
     overflow: visible;

@@ -5,6 +5,7 @@
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
   import Composer from "./Composer.svelte";
+  import TasksDock from "./TasksDock.svelte";
 
   let {
     tabId,
@@ -27,6 +28,28 @@
   // Per-tab error renders in whichever pane owns the erroring tab, focused or
   // not — otherwise a background-pane send-failure is silent until refocus.
   const showError = $derived(!!lastError);
+  const dockOpen = $derived(
+    assistant.ui.dockOpen && !!tab && tab.tasks.length > 0,
+  );
+
+  // Per-pane status chip — own tab's ctx%, model, cost — independent of focus.
+  const paneCtxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
+  const paneCtxTone = $derived(
+    paneCtxPct >= 90 ? "red" : paneCtxPct >= 70 ? "yellow" : "ok",
+  );
+  const paneModel = $derived(tab?.lastModelId ?? null);
+  const paneCost = $derived(tab?.totalCostUsd ?? null);
+  const paneChipTitle = $derived.by(() => {
+    if (!tab) return "";
+    const w = assistant.ctxWindowFor(tab);
+    const used = Math.round((paneCtxPct / 100) * w);
+    const lines = [
+      `Ctx: ${used.toLocaleString()} / ${w.toLocaleString()} (${paneCtxPct.toFixed(1)}%)`,
+    ];
+    if (paneModel) lines.push(`Model: ${paneModel}`);
+    if (paneCost != null) lines.push(`Cost: $${paneCost.toFixed(4)}`);
+    return lines.join("\n");
+  });
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
@@ -150,6 +173,7 @@
   }
 </script>
 
+<div class="pane-shell" class:split={assistant.splitActive}>
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div
@@ -170,6 +194,15 @@
   {#if assistant.splitActive}
     <div class="pane-chrome" aria-hidden="true">
       <span class="pane-label" title="Pane {paneIdx + 1} of {assistant.panes.length}">{paneIdx + 1}</span>
+      {#if tabId && tab}
+        <span class="pane-ctx-chip" data-tone={paneCtxTone} title={paneChipTitle}>
+          <span class="pane-ctx-bar"><span class="pane-ctx-fill" style="width: {Math.min(100, paneCtxPct)}%"></span></span>
+          <span class="pane-ctx-pct">{Math.round(paneCtxPct)}%</span>
+          {#if paneCost != null}
+            <span class="pane-cost">${paneCost.toFixed(2)}</span>
+          {/if}
+        </span>
+      {/if}
       <button
         class="pane-close"
         type="button"
@@ -266,10 +299,33 @@
   {/if}
 </div>
 
+  <aside class="pane-dock-slot" class:open={dockOpen} aria-hidden={!dockOpen}>
+    <TasksDock {tabId} />
+  </aside>
+</div>
+
 <style>
-  .pane {
+  .pane-shell {
     flex: 1 1 0;
     min-width: 320px;
+    display: flex; flex-direction: row;
+    min-height: 0;
+  }
+  .pane-dock-slot {
+    width: 0;
+    overflow: hidden;
+    transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out;
+    display: flex;
+    opacity: 0;
+    flex-shrink: 0;
+    border-left: 1px solid var(--border);
+  }
+  .pane-dock-slot.open { width: 260px; opacity: 1; }
+  .pane-dock-slot :global(.dock) { flex: 1; min-width: 260px; }
+
+  .pane {
+    flex: 1 1 0;
+    min-width: 0;
     display: flex; flex-direction: column;
     min-height: 0;
     position: relative;
@@ -303,6 +359,45 @@
     font-variant-numeric: tabular-nums;
     line-height: 1;
   }
+  .pane-ctx-chip {
+    pointer-events: auto;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 16px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
+    line-height: 1;
+  }
+  .pane-ctx-bar {
+    width: 28px; height: 3px;
+    background: var(--bg-elev-3, var(--border));
+    border-radius: 2px;
+    overflow: hidden;
+    display: inline-block;
+  }
+  .pane-ctx-fill {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    transition: width 200ms ease-out;
+  }
+  .pane-ctx-pct { color: var(--fg); font-weight: 600; }
+  .pane-cost { color: var(--fg-muted); }
+  .pane-ctx-chip[data-tone="yellow"] {
+    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+  }
+  .pane-ctx-chip[data-tone="yellow"] .pane-ctx-fill { background: var(--warn); }
+  .pane-ctx-chip[data-tone="yellow"] .pane-ctx-pct { color: var(--warn); }
+  .pane-ctx-chip[data-tone="red"] {
+    border-color: color-mix(in oklch, var(--danger) 40%, var(--border));
+  }
+  .pane-ctx-chip[data-tone="red"] .pane-ctx-fill { background: var(--danger); }
+  .pane-ctx-chip[data-tone="red"] .pane-ctx-pct { color: var(--danger); }
+
   .pane.focused .pane-label {
     color: var(--accent);
     border-color: color-mix(in oklch, var(--accent) 35%, var(--border));

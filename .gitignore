@@ -28,3 +28,4 @@ scratch/
 
 # Session state — overnight plans, audit logs, transient agent notes. Local only.
 state/
+scripts/cdp/.audit/
