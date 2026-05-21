@@ -6,7 +6,11 @@
   import { assistant } from "../../state/assistant.svelte";
   import { connection } from "../../state/connection.svelte";
 
-  let { needsAuth = false }: { needsAuth?: boolean } = $props();
+  // Optional tabId — when set (split-pane), suggestion clicks write into THIS
+  // tab's draft instead of the focused-pane shim. Falls back to focused tab
+  // when omitted (single-pane / pre-pane callers).
+  let { needsAuth = false, tabId = null }: { needsAuth?: boolean; tabId?: string | null } = $props();
+  const targetTab = $derived(tabId ? assistant.tabFor(tabId) : assistant.activeTab);
 
   type Suggestion = {
     icon: typeof FolderTree;
@@ -74,7 +78,8 @@
   const suggestions = $derived(stack === "fivem" ? fivemSuggestions : genericSuggestions);
 
   function pick(prompt: string) {
-    assistant.composerDraft = prompt;
+    if (targetTab) targetTab.draft = prompt;
+    else assistant.composerDraft = prompt;
   }
 
   function leafName(p: string): string {
