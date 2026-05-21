@@ -580,6 +580,14 @@ class TabState {
    *  already streaming; onDone() pops the next one. Per-tab so a queued msg
    *  in Tab A can't drain into Tab B if the user switches mid-turn. */
   queue = $state<{ id: string; text: string }[]>([]);
+  /** Per-tab composer draft. Was store-level before split-pane v2 — moved
+   *  here so each pane can compose into its own tab concurrently w/o the
+   *  focus-change stash/restore dance dropping characters under fast typing.
+   *  Composer binds via `bind:value={tab.draft}`. */
+  draft = $state<string>("");
+  /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
+   *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
+  attachments = $state<{ id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]>([]);
   /** Compaction Phase C: summary seeded by compactConversation() that the
    *  next send() drains into the `prior_context_summary` invoke arg. Null
    *  outside of the one-turn post-compaction window. Per-tab so concurrent
@@ -1232,8 +1240,14 @@ class AssistantStore {
 
   // Phase D: ctx-pill derivations lifted off AssistantHeader so the
   // auto-trigger $effect can read them. Header consumes assistant.ctxPct etc.
-  get ctxWindow(): number {
-    const model = this.lastModelId;
+  get ctxWindow(): number { return this.ctxWindowFor(this.activeTab); }
+  get ctxTokens(): number { return this.ctxTokensFor(this.activeTab); }
+  get ctxPct(): number { return this.ctxPctFor(this.activeTab); }
+
+  /** Per-tab ctx helpers — let the auto-compact effect iterate `panes[]` so
+   *  a background-pane tab can't sail past the threshold silently. */
+  ctxWindowFor(tab: TabState | null): number {
+    const model = tab?.lastModelId ?? null;
     if (!model) return 200_000;
     if (/\[1m\]/i.test(model)) return 1_000_000;
     const id = model.toLowerCase();
@@ -1241,13 +1255,13 @@ class AssistantStore {
     if (/sonnet-4-[56]/.test(id) || /opus-4-[67]/.test(id)) return 1_000_000;
     return 200_000;
   }
-  get ctxTokens(): number {
-    const u = this.lastTurnUsage;
+  ctxTokensFor(tab: TabState | null): number {
+    const u = tab?.lastTurnUsage ?? null;
     return u ? u.input + u.cacheRead + u.cacheCreate : 0;
   }
-  get ctxPct(): number {
-    const w = this.ctxWindow;
-    return w > 0 ? Math.min(100, (this.ctxTokens / w) * 100) : 0;
+  ctxPctFor(tab: TabState | null): number {
+    const w = this.ctxWindowFor(tab);
+    return w > 0 ? Math.min(100, (this.ctxTokensFor(tab) / w) * 100) : 0;
   }
   /** Pre-emption banner text — non-null when ctx is within 10pp of the
    *  user's auto-compact threshold but hasn't crossed yet. Lets the user
@@ -1567,12 +1581,19 @@ class AssistantStore {
   workspaceFiles = $state<string[]>([]);
   workspaceFilesLoadingFor = $state<string | null>(null);
 
-  composerDraft = $state("");
-  // Pasted/dropped binary attachments staged for the next send. Each carries
-  // base64 + mime so the backend can emit a stream-json `image` content
-  // block. `previewUrl` is a data URL for the in-composer thumbnail; it's
-  // cheap to keep here since the same bytes are already in dataBase64.
-  composerAttachments = $state<{ id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]>([]);
+  // composerDraft + composerAttachments live on TabState in v2.1 split-pane.
+  // These getter/setter shims delegate to the focused-pane's tab so non-pane
+  // call-sites (slash commands, EmptyState fallback, telemetry, send()) keep
+  // working unchanged. Pane-aware components (Composer) bind to `tab.draft`
+  // directly so each pane composes into its own tab concurrently.
+  get composerDraft(): string { return this.activeTab?.draft ?? ""; }
+  set composerDraft(v: string) { if (this.activeTab) this.activeTab.draft = v; }
+  get composerAttachments(): { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[] {
+    return this.activeTab?.attachments ?? [];
+  }
+  set composerAttachments(v: { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]) {
+    if (this.activeTab) this.activeTab.attachments = v;
+  }
   // queue moved to TabState (S105 follow-up) — per-tab so a queued msg in
   // Tab A can't drain into Tab B if the user switches mid-turn. UI binds via
   // the `queue` getter below which delegates to activeTab.
@@ -1634,17 +1655,9 @@ class AssistantStore {
 
   // tasks + activity now live on TabState (see top-of-class getters).
 
-  // Per-tab UI state cache. Survives tab switches so the composer draft,
-  // staged attachments, and scroll position aren't wiped when the user clicks
-  // away to check another convo. Saved in openTab/closeTab/newTab before the
-  // active id flips; restored after the flip. Entries pruned when a tab is
-  // closed (the convo itself stays on disk; only the in-memory UI scratch is
-  // dropped).
-  private tabDrafts = new Map<string, string>();
-  private tabAttachments = new Map<
-    string,
-    { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]
-  >();
+  // Per-tab UI state. Draft + attachments live on TabState directly (split-
+  // pane v2.1: each pane composes into its own tab concurrently). Only scroll
+  // is still kept here — it's a transient DOM measurement, not user input.
   private tabScroll = new Map<string, number>();
 
   private unlistens: UnlistenFn[] = [];
@@ -1687,29 +1700,12 @@ class AssistantStore {
         : "Heads up — switching models mid-conversation rebuilds the prefix cache from scratch. Next turn will pay full cache_create.";
   }
 
-  /** Snapshot the OUTGOING tab's composer + attachments into the cache.
-   *  Call BEFORE flipping currentConvoId. Pass the convoId being left.
-   *  Scroll position is captured separately by AssistantPage. */
-  private stashTabUi(id: string | null) {
-    if (!id) return;
-    if (this.composerDraft.length > 0) {
-      this.tabDrafts.set(id, this.composerDraft);
-    } else {
-      this.tabDrafts.delete(id);
-    }
-    if (this.composerAttachments.length > 0) {
-      this.tabAttachments.set(id, this.composerAttachments);
-    } else {
-      this.tabAttachments.delete(id);
-    }
-  }
-
-  /** Pull cached composer + attachments for the INCOMING tab. Call AFTER
-   *  flipping currentConvoId. Missing entry → blank state. */
-  private restoreTabUi(id: string | null) {
-    this.composerDraft = (id && this.tabDrafts.get(id)) || "";
-    this.composerAttachments = (id && this.tabAttachments.get(id)) || [];
-  }
+  // Draft + attachments live on TabState directly in v2.1 — focus changes no
+  // longer need to stash/restore. stashTabUi/restoreTabUi are kept as no-ops
+  // so the call-sites in addPane/closePane/setFocusedPane/dropTabIntoPane
+  // don't need surgery; the per-tab fields already carry the right value.
+  private stashTabUi(_id: string | null) { /* no-op since v2.1 */ }
+  private restoreTabUi(_id: string | null) { /* no-op since v2.1 */ }
 
   /** AssistantPage writes the active tab's scrollTop here on scroll, then
    *  reads it back on tab activation. Kept in the store so it survives
@@ -1721,10 +1717,10 @@ class AssistantStore {
     return this.tabScroll.get(id);
   }
 
-  /** Drop all per-tab UI scratch for a closed tab. */
+  /** Drop all per-tab UI scratch for a closed tab. Draft + attachments live
+   *  on TabState now, so dropTab() teardown handles those; only scroll cache
+   *  needs explicit pruning here. */
   private pruneTabUi(id: string) {
-    this.tabDrafts.delete(id);
-    this.tabAttachments.delete(id);
     this.tabScroll.delete(id);
   }
 
@@ -2585,25 +2581,31 @@ class AssistantStore {
 
   /** Stage a binary attachment for the next send. Returns false if the size
    *  cap would be exceeded; the composer surfaces a notice on rejection. */
-  addAttachment(att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }): boolean {
-    // 20 MiB cumulative cap — mirrors the backend guard so we reject before
-    // round-tripping a hopeless payload.
+  /** Stage a binary attachment on `tabId`'s tab — defaults to the active
+   *  (focused-pane) tab when omitted. 20 MiB cumulative cap mirrors the
+   *  backend guard. Returns false on overflow. */
+  addAttachment(
+    att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number },
+    tabId?: string | null,
+  ): boolean {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (!tab) return false;
     const CAP = 20 * 1024 * 1024;
-    const current = this.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
+    const current = tab.attachments.reduce((s, a) => s + a.sizeBytes, 0);
     if (current + att.sizeBytes > CAP) return false;
-    this.composerAttachments = [
-      ...this.composerAttachments,
-      { id: crypto.randomUUID(), ...att },
-    ];
+    tab.attachments = [...tab.attachments, { id: crypto.randomUUID(), ...att }];
     return true;
   }
 
-  removeAttachment(id: string) {
-    this.composerAttachments = this.composerAttachments.filter((a) => a.id !== id);
+  removeAttachment(id: string, tabId?: string | null) {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (!tab) return;
+    tab.attachments = tab.attachments.filter((a) => a.id !== id);
   }
 
-  clearAttachments() {
-    this.composerAttachments = [];
+  clearAttachments(tabId?: string | null) {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (tab) tab.attachments = [];
   }
 
   /** User-driven pin from a chat checklist into the Tasks dock.
@@ -2683,12 +2685,12 @@ class AssistantStore {
     }
   }
 
-  /** Stop the active tab's in-flight stream. Pre-clears the tab's streaming
-   *  flag synchronously so any late `done` event for this session is
-   *  idempotent (the kill propagates the late event AFTER the user may have
-   *  already switched tabs). Background tabs keep streaming. */
-  async stop() {
-    const tab = this.activeTab;
+  /** Stop a tab's in-flight stream. Defaults to the focused-pane tab when
+   *  `tabId` is omitted. Pre-clears the tab's streaming flag synchronously
+   *  so any late `done` event for this session is idempotent. Other tabs
+   *  keep streaming. */
+  async stop(tabId?: string | null) {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
     if (!tab || !tab.streaming) return;
     const sid = tab.cliSessionId;
     tab.streaming = false;
@@ -2756,8 +2758,8 @@ class AssistantStore {
    *
    *  Cost is fully internal — no UI confirmation here; the Compact button
    *  in the header should confirm before calling (Phase E1 polish). */
-  async compactConversation(focus?: string): Promise<boolean> {
-    const tab = this.activeTab;
+  async compactConversation(focus?: string, tabId?: string | null): Promise<boolean> {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
     if (!tab) {
       this.lastError = "No active tab.";
       return false;

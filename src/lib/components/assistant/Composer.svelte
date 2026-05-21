@@ -18,6 +18,23 @@
     tabId?: string | null;
   } = $props();
 
+  // Per-pane composer: bind to THIS tab's draft/attachments/queue/streaming
+  // rather than the focused-pane shims, so two panes can compose & stream
+  // concurrently. Tab can be null transiently (empty pane during drag/drop);
+  // the parent (AssistantPane) gates Composer rendering on tab presence.
+  const tab = $derived(assistant.tabFor(tabId));
+  const draft = $derived(tab?.draft ?? "");
+  const attachments = $derived(tab?.attachments ?? []);
+  const queue = $derived(tab?.queue ?? []);
+  const streaming = $derived(tab?.streaming ?? false);
+
+  function setDraft(v: string) { if (tab) tab.draft = v; }
+  function setAttachments(
+    v: { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[],
+  ) {
+    if (tab) tab.attachments = v;
+  }
+
   let ta = $state<HTMLTextAreaElement | undefined>();
 
   type SlashCmd = { name: string; desc: string };
@@ -64,11 +81,11 @@
   }
 
   $effect(() => {
-    const _v = assistant.composerDraft;
+    const _v = draft;
     void _v;
     void tick().then(() => {
       autosize();
-      if (assistant.composerDraft && ta) ta.focus();
+      if (draft && ta) ta.focus();
     });
   });
 
@@ -79,16 +96,16 @@
   type MentionState = { start: number; query: string };
   function detectMention(): MentionState | null {
     if (!ta) return null;
-    const draft = assistant.composerDraft;
-    const caret = ta.selectionStart ?? draft.length;
+    const d = draft;
+    const caret = ta.selectionStart ?? d.length;
     if (ta.selectionStart !== ta.selectionEnd) return null;
     let i = caret - 1;
     while (i >= 0) {
-      const ch = draft[i];
+      const ch = d[i];
       if (ch === "@") {
-        const prev = i === 0 ? " " : draft[i - 1];
+        const prev = i === 0 ? " " : d[i - 1];
         if (!/\s/.test(prev) && i !== 0) return null;
-        return { start: i, query: draft.slice(i + 1, caret) };
+        return { start: i, query: d.slice(i + 1, caret) };
       }
       if (/\s/.test(ch)) return null;
       i--;
@@ -154,12 +171,12 @@
   });
   function pickMention(path: string) {
     if (!mentionState || !ta) return;
-    const draft = assistant.composerDraft;
-    const caret = ta.selectionStart ?? draft.length;
-    const before = draft.slice(0, mentionState.start);
-    const after = draft.slice(caret);
+    const d = draft;
+    const caret = ta.selectionStart ?? d.length;
+    const before = d.slice(0, mentionState.start);
+    const after = d.slice(caret);
     const insertion = `@${path} `;
-    assistant.composerDraft = before + insertion + after;
+    setDraft(before + insertion + after);
     const newCaret = before.length + insertion.length;
     mentionState = null;
     void tick().then(() => {
@@ -176,12 +193,12 @@
   let modelPickerOpen = $state(false);
   const slashOpen = $derived(
     !modelPickerOpen &&
-      assistant.composerDraft.startsWith("/") &&
-      !assistant.composerDraft.includes(" ") &&
-      assistant.composerDraft.length >= 1,
+      draft.startsWith("/") &&
+      !draft.includes(" ") &&
+      draft.length >= 1,
   );
   const slashFiltered = $derived.by(() => {
-    const q = assistant.composerDraft.slice(1).toLowerCase();
+    const q = draft.slice(1).toLowerCase();
     return SLASH_COMMANDS.filter((c) => c.name.startsWith(q));
   });
   let slashIdx = $state(0);
@@ -220,14 +237,14 @@
   function pickSlash(c: SlashCmd) {
     if (c.name === "model") {
       // Open the model picker instead of inserting `/model ` text.
-      assistant.composerDraft = "";
+      setDraft("");
       stt.consume();
       modelPickerOpen = true;
       void tick().then(() => ta?.focus());
       return;
     }
     // Direct-fire commands skip the textarea round-trip entirely.
-    assistant.composerDraft = "";
+    setDraft("");
     stt.consume();
     onsubmit(`/${c.name}`);
     void tick().then(autosize);
@@ -240,19 +257,20 @@
   }
 
   function fire() {
-    const text = assistant.composerDraft.trim();
+    const text = draft.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
-    if (!text && assistant.composerAttachments.length === 0) return;
-    assistant.composerDraft = "";
+    if (!text && attachments.length === 0) return;
+    setDraft("");
     stt.consume();
     onsubmit(text);
     void tick().then(autosize);
   }
 
-  // S88: mic toggle. The stt store writes recognized text directly into
-  // `assistant.composerDraft` as it arrives (interim + final), so we just
-  // start/stop and let the autosizer catch up. Composer focus is restored
-  // on stop so the user can hit Enter without an extra click.
+  // S88: mic toggle. The stt store writes recognized text directly into the
+  // focused tab's draft (via `assistant.composerDraft` setter shim → activeTab.draft)
+  // as it arrives (interim + final), so we just start/stop and let the
+  // autosizer catch up. Composer focus is restored on stop so the user can
+  // hit Enter without an extra click.
   let micBusy = $state(false);
   async function toggleMic() {
     if (micBusy) return;
@@ -273,7 +291,7 @@
   // Live autosize while transcription is streaming in.
   $effect(() => {
     if (stt.recording || stt.transcribing) {
-      const _v = assistant.composerDraft;
+      const _v = draft;
       void _v;
       void tick().then(autosize);
     }
@@ -335,7 +353,7 @@
           dataBase64,
           previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
           sizeBytes: file.size,
-        });
+        }, tabId);
         if (!ok) {
           attachError = "Attachment limit reached (20 MB total per turn).";
         }
@@ -384,15 +402,19 @@
     // History recall — only when no menu is open and the textarea is
     // either empty, or cursor is at position 0 (so plain Up in a multiline
     // draft still moves the caret normally).
-    const empty = assistant.composerDraft.length === 0;
+    const empty = draft.length === 0;
     const atStart = ta?.selectionStart === 0 && ta?.selectionEnd === 0;
     if (!modelPickerOpen && !slashOpen && !mentionState && (empty || atStart)) {
       if (e.key === "ArrowUp") {
-        const next = assistant.recallPrompt(recallOffset + 1);
+        // Recall from THIS tab's promptHistory, not the focused tab's, so
+        // each pane has its own prompt-history scroll.
+        const hist = tab?.promptHistory ?? [];
+        const idx = hist.length - 1 - (recallOffset + 1);
+        const next = idx >= 0 ? hist[idx] : null;
         if (next !== null) {
           e.preventDefault();
           recallOffset += 1;
-          assistant.composerDraft = next;
+          setDraft(next);
           void tick().then(() => {
             autosize();
             if (ta) ta.setSelectionRange(next.length, next.length);
@@ -402,8 +424,10 @@
       } else if (e.key === "ArrowDown" && recallOffset >= 0) {
         e.preventDefault();
         recallOffset -= 1;
-        const prev = recallOffset < 0 ? "" : assistant.recallPrompt(recallOffset);
-        assistant.composerDraft = prev ?? "";
+        const hist = tab?.promptHistory ?? [];
+        const idx = recallOffset < 0 ? -1 : hist.length - 1 - recallOffset;
+        const prev = idx >= 0 ? hist[idx] : "";
+        setDraft(prev ?? "");
         void tick().then(() => {
           autosize();
           if (ta) ta.setSelectionRange((prev ?? "").length, (prev ?? "").length);
@@ -453,7 +477,7 @@
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        assistant.composerDraft = "";
+        setDraft("");
         return;
       }
     }
@@ -468,8 +492,8 @@
   }
 
   function onBtnClick() {
-    if (assistant.streaming && assistant.composerDraft.trim().length === 0) {
-      void assistant.stop();
+    if (streaming && draft.trim().length === 0) {
+      void assistant.stop(tabId);
       return;
     }
     fire();
@@ -480,41 +504,50 @@
   //   streaming + empty      → Stop (kill the running turn)
   //   streaming + draft      → Queue (append to message queue)
   const mode = $derived.by<"send" | "stop" | "queue">(() => {
-    const hasDraft = assistant.composerDraft.trim().length > 0;
-    if (assistant.streaming && !hasDraft) return "stop";
-    if (assistant.streaming && hasDraft) return "queue";
+    const hasDraft = draft.trim().length > 0;
+    if (streaming && !hasDraft) return "stop";
+    if (streaming && hasDraft) return "queue";
     return "send";
   });
   const canFire = $derived(
     mode === "stop" ||
-      ((assistant.composerDraft.trim().length > 0 || assistant.composerAttachments.length > 0) &&
+      ((draft.trim().length > 0 || attachments.length > 0) &&
         (assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")),
   );
 </script>
 
 <div class="composer-wrap">
-  {#if assistant.queue.length > 0}
+  {#if queue.length > 0}
     <div class="queue">
-      <span class="queue-label">Queued ({assistant.queue.length}):</span>
-      {#each assistant.queue as q (q.id)}
+      <span class="queue-label">Queued ({queue.length}):</span>
+      {#each queue as q (q.id)}
         <span class="qpill" title={q.text}>
           <span class="qtext">{q.text}</span>
-          <button class="qx" type="button" onclick={() => assistant.removeQueued(q.id)} aria-label="Remove">
+          <button
+            class="qx"
+            type="button"
+            onclick={() => { if (tab) tab.queue = tab.queue.filter((it) => it.id !== q.id); }}
+            aria-label="Remove"
+          >
             <X size={11} />
           </button>
         </span>
       {/each}
-      {#if assistant.queue.length >= 2}
-        <button class="qclear" type="button" onclick={() => assistant.clearQueue()}>
+      {#if queue.length >= 2}
+        <button
+          class="qclear"
+          type="button"
+          onclick={() => { if (tab) tab.queue = []; }}
+        >
           Clear all
         </button>
       {/if}
     </div>
   {/if}
 
-  {#if assistant.composerAttachments.length > 0 || attachError}
+  {#if attachments.length > 0 || attachError}
     <div class="attachments">
-      {#each assistant.composerAttachments as a (a.id)}
+      {#each attachments as a (a.id)}
         <div class="attach-chip" title={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
           <img class="attach-thumb" src={a.previewUrl} alt="pasted attachment" />
           <span class="attach-meta">
@@ -524,7 +557,7 @@
           <button
             class="attach-x"
             type="button"
-            onclick={() => assistant.removeAttachment(a.id)}
+            onclick={() => assistant.removeAttachment(a.id, tabId)}
             aria-label="Remove attachment"
           >
             <X size={11} />
@@ -609,7 +642,7 @@
     {/if}
 
     <StatusHub {tabId} />
-    <div class="composer" class:streaming={assistant.streaming}>
+    <div class="composer" class:streaming={streaming}>
       {#if stt.config.enabled && stt.supported}
       <button
         class="micbtn"
@@ -652,16 +685,19 @@
       </div>
       <textarea
         bind:this={ta}
-        bind:value={assistant.composerDraft}
-        oninput={() => { resetRecall(); autosize(); refreshMention(); }}
+        value={draft}
+        oninput={(e) => {
+          setDraft((e.currentTarget as HTMLTextAreaElement).value);
+          resetRecall(); autosize(); refreshMention();
+        }}
         onkeyup={refreshMention}
         onclick={refreshMention}
         onblur={() => { mentionState = null; }}
         onkeydown={onKey}
         onpaste={onPaste}
-        placeholder={assistant.streaming
+        placeholder={streaming
           ? "Type to queue another message — Enter sends, /stop halts"
-          : assistant.composerAttachments.length > 0
+          : attachments.length > 0
           ? "Add a question or hit Send to ask about the image"
           : "Ask Claude — paste images, or type / for commands"}
         rows="1"

@@ -24,6 +24,9 @@
   // Notices are session-global; only show on the focused pane to avoid dup banners.
   const showNotice = $derived(focused && !!assistant.lastNotice);
   const showShellBanner = $derived(focused && showRemoteShellBanner);
+  // Per-tab error renders in whichever pane owns the erroring tab, focused or
+  // not — otherwise a background-pane send-failure is silent until refocus.
+  const showError = $derived(!!lastError);
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
@@ -40,6 +43,9 @@
   $effect(() => {
     if (!messagesEl) return;
     const ro = new ResizeObserver(() => {
+      // Background-pane streams: only force-stick when the user was already
+      // at the bottom — don't yank the scroll on a pane they're reading
+      // mid-history just because a sibling pane is streaming.
       if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
     });
     ro.observe(messagesEl);
@@ -182,7 +188,7 @@
         <div class="pane-empty-inner">No tab in this pane</div>
       </div>
     {:else if showEmpty}
-      <EmptyState {needsAuth} />
+      <EmptyState {needsAuth} {tabId} />
     {:else}
       <div class="messages" bind:this={messagesEl}>
         {#each messages as m, mi (m.id)}
@@ -204,7 +210,7 @@
     </button>
   {/if}
 
-  {#if focused && (lastError || showNotice || showShellBanner)}
+  {#if showError || showNotice || showShellBanner}
     <div class="alerts">
       {#if showShellBanner}
         <button class="alert notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} title="Got it — don't show again">
@@ -221,7 +227,7 @@
           <span class="notice-text">{assistant.lastNotice}</span>
         </button>
       {/if}
-      {#if lastError}
+      {#if showError}
         <div class="alert error">
           <span class="notice-icon">⚠</span>
           <span class="notice-text">{lastError}</span>
@@ -230,10 +236,18 @@
     </div>
   {/if}
 
-  {#if focused}
-    <Composer {tabId} onsubmit={(text) => assistant.send(text)} />
-  {:else}
-    <div class="pane-focus-hint">Click to focus this pane</div>
+  <!-- Composer renders for every non-empty pane so two panes can compose
+       concurrently. Empty pane (no tab) still shows the EmptyState scroll
+       region above and no composer. Send focuses this pane first so the
+       store's activeTab-driven send() targets the right tab. -->
+  {#if tabId}
+    <Composer
+      {tabId}
+      onsubmit={(text) => {
+        if (!focused) assistant.setFocusedPane(paneIdx);
+        assistant.send(text);
+      }}
+    />
   {/if}
 
   {#if dragging}
@@ -268,10 +282,13 @@
     z-index: 4;
     display: inline-flex; align-items: center; gap: 4px;
     pointer-events: none;
-    opacity: 0;
+    /* Always-visible at low opacity so the pane index is readable at a glance;
+       hover/focus brightens it. Hidden-until-hover hid the affordance the
+       multi-session UI depends on. */
+    opacity: 0.5;
     transition: opacity 120ms ease-out;
   }
-  .pane:hover .pane-chrome, .pane.focused .pane-chrome { opacity: 0.85; }
+  .pane:hover .pane-chrome, .pane.focused .pane-chrome { opacity: 0.95; }
   .pane-label {
     pointer-events: auto;
     display: inline-flex; align-items: center; justify-content: center;
@@ -308,15 +325,20 @@
     border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
     background: color-mix(in oklch, var(--danger) 10%, transparent);
   }
+  /* Focused pane — visible accent rail along the top edge plus a stronger
+     border. Subtle in single-pane mode (no split visible); pronounced in
+     split mode where multiple panes compete for attention. */
   .pane.split.focused {
-    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+    box-shadow: inset 0 2px 0 0 var(--accent);
   }
   .pane.split:not(.focused) {
     cursor: pointer;
-    background: color-mix(in oklch, var(--bg) 92%, transparent);
+    background: color-mix(in oklch, var(--bg) 94%, transparent);
   }
   .pane.split:not(.focused):hover {
     background: var(--bg);
+    border-color: color-mix(in oklch, var(--accent) 22%, transparent);
   }
   .scroll {
     flex: 1; min-height: 0;
@@ -349,21 +371,6 @@
     padding: 14px 20px;
     border: 1px dashed var(--border-strong);
     border-radius: 10px;
-  }
-
-  .pane-focus-hint {
-    flex-shrink: 0;
-    margin: 10px auto 14px;
-    padding: 8px 14px;
-    max-width: var(--chat-col-max);
-    width: calc(100% - 36px);
-    text-align: center;
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-    background: var(--bg-elev-1);
-    border: 1px dashed var(--border-strong);
-    border-radius: 10px;
-    pointer-events: none;
   }
 
   .jump-latest {

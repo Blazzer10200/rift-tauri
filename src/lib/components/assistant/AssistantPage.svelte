@@ -10,22 +10,28 @@
     });
   });
 
-  // Phase D: auto-compact trigger. Guards in priority order:
-  //   - threshold is non-null (feature opt-in)
-  //   - active tab exists + not streaming + not already compacting
+  // Phase D + split-pane v2.1: auto-compact iterates EVERY pane so a
+  // background-pane tab can't sail past threshold silently. Guards per tab:
+  //   - threshold non-null (feature opt-in, global)
+  //   - tab exists + not streaming + not already compacting
   //   - ≥5min since last successful compaction (cooldown vs runaway on failure)
-  //   - ctxPct has crossed threshold
+  //   - that tab's ctxPct has crossed threshold
   // Page-scoped so the effect lives only while the chat workspace is mounted;
   // navigating to Sync/Settings pauses auto-trigger naturally.
   $effect(() => {
     const threshold = assistant.autoCompactThreshold;
     if (!threshold) return;
-    const tab = assistant.activeTab;
-    if (!tab) return;
-    if (tab.streaming || tab.compactingNow) return;
-    if (Date.now() - tab.lastCompactionAt < 5 * 60_000) return;
-    if (assistant.ctxPct < threshold * 100) return;
-    void assistant.compactConversation();
+    const threshPct = threshold * 100;
+    const now = Date.now();
+    for (const p of assistant.panes) {
+      if (!p.tabId) continue;
+      const tab = assistant.tabFor(p.tabId);
+      if (!tab) continue;
+      if (tab.streaming || tab.compactingNow) continue;
+      if (now - tab.lastCompactionAt < 5 * 60_000) continue;
+      if (assistant.ctxPctFor(tab) < threshPct) continue;
+      void assistant.compactConversation(undefined, p.tabId);
+    }
   });
 </script>
 
