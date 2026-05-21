@@ -81,6 +81,12 @@ export type BoundaryBlock = {
   // S124: true while the summarize call is in-flight; flipped to false on
   // the final 'done' event. Drives the streaming spinner in MessageBubble.
   streaming?: boolean;
+  // Phase E1: ctx% snapshot at the moment the compact fired (pre) and the
+  // estimated ctx% the new session starts at (post = summary tokens / window).
+  // Rendered as "Ctx X% → est Y%" in the boundary pill so the user sees
+  // headroom won. Optional for legacy boundaries pre-E1.
+  ctxPctBefore?: number;
+  ctxPctEstAfter?: number;
 };
 
 export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock;
@@ -103,6 +109,9 @@ export type ConversationMeta = {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Phase E5: flattened compactionHistory summaries for HistoryDrawer
+   *  search. Absent or empty for convos that never compacted. */
+  compactionSummaries?: string[];
 };
 
 /** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in
@@ -2780,6 +2789,8 @@ class AssistantStore {
     const archivedCount = tab.messages.length;
     const boundaryId = crypto.randomUUID();
     const placeholderModel = this.compactModel ?? "haiku";
+    const ctxPctBefore = this.ctxPct;
+    const ctxWindowAtCompact = this.ctxWindow;
     const stagedBoundary: ChatMessage = {
       id: boundaryId,
       role: "system",
@@ -2792,6 +2803,7 @@ class AssistantStore {
           costUsd: 0,
           summaryModel: placeholderModel,
           streaming: true,
+          ctxPctBefore,
         },
       ],
     };
@@ -2843,11 +2855,18 @@ class AssistantStore {
 
       // Finalize the staged boundary with the real summary + cost + model
       // and clear streaming. archivedCount stays the snapshot from pre-compact.
+      // E1: post-compact ctx estimate — the new session starts with only the
+      // summary in context (seeded as <system-reminder> on the next user turn).
+      const ctxPctEstAfter =
+        ctxWindowAtCompact > 0
+          ? Math.min(100, (res.outputTokens / ctxWindowAtCompact) * 100)
+          : 0;
       patchBoundary({
         summary: res.summary,
         costUsd: res.costUsd,
         summaryModel: res.model,
         streaming: false,
+        ctxPctEstAfter,
       });
 
       // Flip the tab's CLI handle to the new session and force the next

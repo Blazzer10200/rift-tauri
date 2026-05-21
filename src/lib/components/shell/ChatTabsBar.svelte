@@ -205,6 +205,8 @@
         class="tab"
         class:in-pane={paneIndexFor(id) !== null}
         class:active={id === activeId}
+        class:streaming={isStreamingTab(id)}
+        class:bg-streaming={isStreamingTab(id) && id !== activeId}
         class:drop-target={dragOverIdx === idx && dragFromIdx !== null && dragFromIdx !== idx}
         role="tab"
         aria-selected={id === activeId}
@@ -217,7 +219,9 @@
         ondragend={onDragEnd}
         onclick={() => onTabClick(id)}
         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTabClick(id); } }}
-        title={titleFor(id)}
+        title={isStreamingTab(id) && id !== activeId
+          ? `${titleFor(id)} — streaming in background. Click to switch.`
+          : titleFor(id)}
       >
         <span class="icon" aria-hidden="true">
           {#if isStreamingTab(id)}
@@ -296,10 +300,16 @@
     {/if}
 
     {#if activeAgents.length > 0}
-      <span class="agents-pill" title={activeAgentTitle}>
+      <button
+        type="button"
+        class="agents-pill"
+        title={`${activeAgentTitle}\n\nClick to open a fresh tab — this one keeps streaming in the background, you can chat in the new one.`}
+        onclick={() => void assistant.newTab()}
+      >
         <span class="agents-dot"></span>
         <span>{activeAgents.length} agent{activeAgents.length === 1 ? "" : "s"}</span>
-      </span>
+        <Plus size={10} aria-hidden="true" />
+      </button>
     {/if}
 
     {#if compactWarning}
@@ -451,6 +461,37 @@
   .tab.drop-target {
     box-shadow: -2px 0 0 var(--accent);
   }
+  /* Background-streaming tab (streaming + NOT active): subtle accent tint
+     + animated underline pulse. Visible-but-quiet — the user should be able
+     to scan the strip and see "Tab 2 is busy in background" without it
+     stealing attention from whatever they're typing in the active tab. */
+  .tab.bg-streaming {
+    background: color-mix(in oklch, var(--accent) 8%, var(--bg));
+    color: var(--fg);
+  }
+  .tab.bg-streaming::after {
+    content: "";
+    position: absolute;
+    left: 6px; right: 6px;
+    bottom: 2px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--accent);
+    opacity: 0.65;
+    animation: bg-stream-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes bg-stream-pulse {
+    0%, 100% { opacity: 0.3; }
+    50%      { opacity: 0.85; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tab.bg-streaming::after { animation: none; opacity: 0.5; }
+  }
+  /* in-pane + bg-streaming share the ::before/::after slot — the in-pane
+     ::before still renders (different pseudo); but its ::after would
+     collide. Suppress the active-tab ::after override (which fills bg) by
+     scoping that rule already to .active — bg-streaming is mutually
+     exclusive with .active by render-time guard. */
   /* Split-pane indicator — when a non-focused pane owns this tab, mark it
      with a dim accent underline. The numbered .pane-badge tells the user
      WHICH pane (1-4). Focused-pane tabs use the normal .active style. */
@@ -633,14 +674,23 @@
     display: inline-flex; align-items: center; gap: 6px;
     padding: 2px 8px;
     border-radius: 999px;
+    font: inherit;
     font-size: var(--fs-xs);
     font-weight: 600;
     line-height: 1;
     background: var(--accent-soft);
     color: var(--accent);
     border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
-    cursor: help;
+    cursor: pointer;
     font-variant-numeric: tabular-nums;
+    transition: background 120ms, border-color 120ms;
+  }
+  .agents-pill:hover {
+    background: color-mix(in oklch, var(--accent) 22%, var(--surface));
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+  }
+  .agents-pill :global(svg) {
+    opacity: 0.7;
   }
   .agents-dot {
     width: 6px; height: 6px; border-radius: 50%;
