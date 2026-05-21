@@ -176,9 +176,9 @@
 <style>
   .statusbar {
     display: flex; align-items: center; gap: 10px;
-    height: 22px; padding: 0 10px;
-    background: var(--bg);
-    border-top: 1px solid var(--border);
+    height: 26px; padding: 0 12px;
+    background: var(--bg-elev-1, var(--bg));
+    border-top: 1px solid var(--border-strong);
     font-size: var(--fs-xs);
     color: var(--fg-muted);
     user-select: none;
@@ -192,10 +192,20 @@
   .sep { width: 1px; height: 12px; background: var(--border); }
   .flex-spacer { flex: 1; }
   .led {
-    width: 6px; height: 6px; border-radius: 50%;
+    width: 8px; height: 8px; border-radius: 50%;
     background: var(--fg-faint);
-    box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 12%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 16%, transparent);
     transition: background 120ms ease;
+  }
+  .led[data-state="ok"] {
+    animation: led-breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes led-breathe {
+    0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--ok) 22%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--ok) 14%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .led[data-state="ok"] { animation: none; }
   }
   .led[data-state="ok"]     { background: var(--ok); }
   .led[data-state="info"]   { background: var(--info); }

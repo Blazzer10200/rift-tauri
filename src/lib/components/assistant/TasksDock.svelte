@@ -7,10 +7,15 @@
   import { Circle, CircleDot, CheckCircle2, ListChecks } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
+  let { tabId = null }: { tabId?: string | null } = $props();
+
+  const tasks = $derived(
+    tabId == null ? assistant.tasks : (assistant.tabFor(tabId)?.tasks ?? []),
+  );
   const counts = $derived.by(() => {
-    const total = assistant.tasks.length;
-    const done = assistant.tasks.filter((t) => t.status === "completed").length;
-    const active = assistant.tasks.filter((t) => t.status === "in_progress").length;
+    const total = tasks.length;
+    const done = tasks.filter((t) => t.status === "completed").length;
+    const active = tasks.filter((t) => t.status === "in_progress").length;
     return { total, done, active };
   });
   const pct = $derived(counts.total > 0 ? (counts.done / counts.total) * 100 : 0);
@@ -36,14 +41,14 @@
   {/if}
 
   <div class="body">
-    {#if assistant.tasks.length === 0}
+    {#if tasks.length === 0}
       <div class="empty-note">
         No plan yet — Claude will list multi-step plans here as it builds them.
         Individual tool calls (Read, Bash, Grep, Edit…) show inline in the chat.
       </div>
     {:else}
       <ul class="tasklist">
-        {#each assistant.tasks as t (t.id)}
+        {#each tasks as t (t.id)}
           <li class="task" data-status={t.status}>
             <span class="status-icon">
               {#if t.status === "completed"}

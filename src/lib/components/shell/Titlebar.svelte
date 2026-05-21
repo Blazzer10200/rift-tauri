@@ -136,8 +136,9 @@
     height: 44px;
     width: 100%;
     min-width: 0;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev-1, var(--bg));
+    border-bottom: 1px solid var(--border-strong);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--bg) 60%, transparent);
     font-size: var(--fs-xs);
     user-select: none;
     padding-left: 12px;

@@ -4,8 +4,59 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers } from "lucide-svelte";
+  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
+  import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
+
+  let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
+  let historyOpen = $state(false);
+  let historyAnchor = $state<HTMLButtonElement | undefined>();
+  let historyPopover = $state<HTMLDivElement | undefined>();
+  let historyPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
+
+  // Portal action — moves the node to <body> so the popover escapes the
+  // `.tabs-rail` overflow:hidden clip (that clip exists to drive the
+  // workspace-hop collapse animation, can't remove it).
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy() { node.remove(); } };
+  }
+
+  function openHistory() {
+    if (!historyAnchor) return;
+    const r = historyAnchor.getBoundingClientRect();
+    historyPos = {
+      top: r.bottom + 6,
+      right: Math.max(8, window.innerWidth - r.right),
+    };
+    historyOpen = true;
+  }
+
+  // Close history popover on outside-click or Escape.
+  $effect(() => {
+    if (!historyOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (historyAnchor?.contains(t)) return;
+      if (historyPopover?.contains(t)) return;
+      historyOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { historyOpen = false; historyAnchor?.focus(); }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  });
+
+  function onTabContext(e: MouseEvent, id: string) {
+    e.preventDefault();
+    ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
+  }
 
   let dragFromIdx = $state<number | null>(null);
   let dragOverIdx = $state<number | null>(null);
@@ -218,6 +269,7 @@
         ondrop={(e) => onDrop(e, idx)}
         ondragend={onDragEnd}
         onclick={() => onTabClick(id)}
+        oncontextmenu={(e) => onTabContext(e, id)}
         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTabClick(id); } }}
         title={isStreamingTab(id) && id !== activeId
           ? `${titleFor(id)} — streaming in background. Click to switch.`
@@ -245,6 +297,15 @@
         </button>
       </div>
     {/each}
+    <button
+      class="new-tab"
+      type="button"
+      title="New chat (Ctrl+T)"
+      aria-label="New chat"
+      onclick={onNewTab}
+    >
+      <Plus size={14}/>
+    </button>
     <div
       class="tail-zone"
       class:drop-target={dragOverIdx === tabs.length && dragFromIdx !== null}
@@ -255,6 +316,24 @@
   </div>
 
   <div class="actions">
+    <button
+      class="hdr-btn history-btn"
+      class:open={historyOpen}
+      type="button"
+      title="Conversation history"
+      onclick={() => { historyOpen ? (historyOpen = false) : openHistory(); }}
+      aria-haspopup="dialog"
+      aria-expanded={historyOpen}
+      bind:this={historyAnchor}
+    >
+      <History size={12}/>
+      <span class="hdr-btn-label">History</span>
+      {#if assistant.conversations.length > 0}
+        <span class="history-count">{assistant.conversations.length}</span>
+      {/if}
+      <ChevronDown size={10} class={historyOpen ? "chev-open" : ""}/>
+    </button>
+
     {#if assistant.workspace.current}
       <span class="ws-chip" title={assistant.workspace.current}>
         <Folder size={11}/>
@@ -373,17 +452,29 @@
       {/if}
     </button>
   </div>
-
-  <button
-    class="new-tab"
-    type="button"
-    title="New chat (Ctrl+T)"
-    aria-label="New chat"
-    onclick={onNewTab}
-  >
-    <Plus size={13}/>
-  </button>
 </div>
+
+{#if ctxMenu}
+  <OpenInPaneMenu
+    tabId={ctxMenu.tabId}
+    x={ctxMenu.x}
+    y={ctxMenu.y}
+    onClose={() => (ctxMenu = null)}
+  />
+{/if}
+
+{#if historyOpen}
+  <div
+    class="history-popover"
+    role="dialog"
+    aria-label="Conversation history"
+    bind:this={historyPopover}
+    use:portal
+    style="top: {historyPos.top}px; right: {historyPos.right}px;"
+  >
+    <HistoryDrawer compact onSelected={() => (historyOpen = false)} />
+  </div>
+{/if}
 
 <style>
   .tabsbar {
@@ -602,6 +693,56 @@
   }
   .hdr-btn:hover { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
   .hdr-btn-label { font-size: var(--fs-xs); }
+
+  .history-btn {
+    position: relative;
+  }
+  .history-btn.open {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+  }
+  .history-btn :global(svg) { transition: transform 140ms ease; }
+  .history-btn :global(.chev-open) { transform: rotate(180deg); }
+  .history-count {
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 5px;
+    background: var(--bg-elev-2);
+    color: var(--fg-faint);
+    border-radius: 999px;
+    line-height: 1;
+  }
+  .history-btn.open .history-count {
+    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    color: var(--accent);
+  }
+
+  .history-popover {
+    position: fixed;
+    width: 420px;
+    max-width: calc(100vw - 24px);
+    height: 540px;
+    max-height: calc(100vh - 120px);
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.45),
+      0 4px 12px rgba(0, 0, 0, 0.25);
+    z-index: 50;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    animation: history-pop-in 160ms cubic-bezier(.2,.7,.2,1);
+    transform-origin: top right;
+  }
+  @keyframes history-pop-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .history-popover { animation: none; }
+  }
 
   .ws-chip {
     display: inline-flex; align-items: center; gap: 5px;
@@ -850,26 +991,35 @@
     color: var(--accent);
   }
 
+  /* New-chat affordance sits flush after the last tab — browser convention
+     puts the + there, not buried after the right-side action chips. Idle
+     state is a subtle elevated pill so the eye picks it out of the strip
+     without competing with the active tab. Hover lifts the accent tint. */
   .new-tab {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 26px;
-    margin: 4px 5px 0 4px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 5px;
+    width: 26px;
+    height: 24px;
+    margin: 4px 4px 0 6px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
     color: var(--fg-muted);
     cursor: pointer;
     padding: 0;
     flex-shrink: 0;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
     align-self: center;
+    transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
   }
   .new-tab:hover {
-    background: var(--surface-hover);
-    color: var(--fg);
-    border-color: var(--border);
+    background: color-mix(in oklch, var(--accent) 18%, var(--bg-elev-2));
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+  }
+  .new-tab:active { transform: scale(0.94); }
+  .new-tab:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
   }
 </style>

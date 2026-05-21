@@ -32,6 +32,22 @@
   let shellDdRef = $state<HTMLDivElement | undefined>();
   let fontDdOpen = $state(false);
   let fontDdRef = $state<HTMLDivElement | undefined>();
+  // Two-step confirm for the Terminal Reset button — top-right placement is
+  // muscle-memory "Save" territory, so a single click was a footgun. First
+  // click arms, second click commits; auto-disarms after 3s of inactivity.
+  let confirmResetTerm = $state(false);
+  let confirmResetTimer: ReturnType<typeof setTimeout> | null = null;
+  function clickResetTerm() {
+    if (!confirmResetTerm) {
+      confirmResetTerm = true;
+      if (confirmResetTimer) clearTimeout(confirmResetTimer);
+      confirmResetTimer = setTimeout(() => { confirmResetTerm = false; }, 3000);
+      return;
+    }
+    if (confirmResetTimer) { clearTimeout(confirmResetTimer); confirmResetTimer = null; }
+    confirmResetTerm = false;
+    terminal.resetAppearance();
+  }
 
   function onDdDocMouseDown(e: MouseEvent) {
     const t = e.target as Node;
@@ -263,8 +279,16 @@
             <h3>Terminal</h3>
             <p class="help">Font, cursor, palette, and shell defaults for the embedded terminal.</p>
           </div>
-          <button class="btn ghost sm" onclick={() => terminal.resetAppearance()} type="button" title="Restore defaults">
-            <RotateCcw size={11}/> Reset
+          <button
+            class="btn sm"
+            class:ghost={!confirmResetTerm}
+            class:danger={confirmResetTerm}
+            onclick={clickResetTerm}
+            type="button"
+            title={confirmResetTerm ? "Click again to confirm — wipes terminal appearance back to defaults" : "Restore terminal defaults"}
+          >
+            <RotateCcw size={11}/>
+            {confirmResetTerm ? "Click again to reset" : "Reset"}
           </button>
         </div>
 

@@ -696,10 +696,10 @@
         onkeydown={onKey}
         onpaste={onPaste}
         placeholder={streaming
-          ? "Type to queue another message — Enter sends, /stop halts"
+          ? "Type to queue — Enter sends, /stop halts"
           : attachments.length > 0
-          ? "Add a question or hit Send to ask about the image"
-          : "Ask Claude — paste images, or type / for commands"}
+          ? "Ask about the image…"
+          : "Ask Claude"}
         rows="1"
       ></textarea>
       {#if assistant.model !== "haiku"}

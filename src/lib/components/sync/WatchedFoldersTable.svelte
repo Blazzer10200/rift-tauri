@@ -78,6 +78,14 @@
     connection.activityFilter = name;
     workspace.setActive("activity");
   }
+
+  // Column visibility — empty columns proudly displaying `0 / — / —` made
+  // the panel read as broken. Drop a column when every row's cell is empty;
+  // when all three are empty we collapse to a single "Idle" chip per row.
+  const showFiles = $derived(folders.some((f) => f.file_count > 0));
+  const showLast = $derived(folders.some((f) => lastEventFor(f.name) !== null));
+  const showLocks = $derived(connection.locks.length > 0);
+  const allEmpty = $derived(!showFiles && !showLast && !showLocks);
 </script>
 
 <section class="card" aria-labelledby="watched-folders-title">
@@ -99,13 +107,15 @@
       hint="Connect a server to start watching its top-level resources."
     />
   {:else}
-    <div class="table" role="table">
-      <div class="th" role="row">
-        <div role="columnheader">Name</div>
-        <div role="columnheader" class="right">Files</div>
-        <div role="columnheader" class="right">Last</div>
-        <div role="columnheader" class="right">Locks</div>
-      </div>
+    <div class="table" role="table" class:compact={allEmpty}>
+      {#if !allEmpty}
+        <div class="th" role="row">
+          <div role="columnheader">Name</div>
+          {#if showFiles}<div role="columnheader" class="right">Files</div>{/if}
+          {#if showLast}<div role="columnheader" class="right">Last</div>{/if}
+          {#if showLocks}<div role="columnheader" class="right">Locks</div>{/if}
+        </div>
+      {/if}
       {#each folders as f, i (f.remote_root)}
         {@const last = lastEventFor(f.name)}
         {@const locks = lockCountFor(f.remote_root)}
@@ -123,17 +133,25 @@
           }}
         >
           <span class="name mono">{f.name}</span>
-          <span class="right mono">{f.file_count.toLocaleString()}</span>
-          <span class="right mono" title={last ?? "no events"}>{fmtRel(last)}</span>
-          <span class="right">
-            {#if locks > 0}
-              <span class="lock-pip" in:fade={{ duration: 140 }}>
-                <LockIcon size={10}/> {locks}
+          {#if allEmpty}
+            <span class="right">
+              <span class="idle-pip" title="Watcher registered — no recent activity, locks, or counted files">idle</span>
+            </span>
+          {:else}
+            {#if showFiles}<span class="right mono">{f.file_count.toLocaleString()}</span>{/if}
+            {#if showLast}<span class="right mono" title={last ?? "no events"}>{fmtRel(last)}</span>{/if}
+            {#if showLocks}
+              <span class="right">
+                {#if locks > 0}
+                  <span class="lock-pip" in:fade={{ duration: 140 }}>
+                    <LockIcon size={10}/> {locks}
+                  </span>
+                {:else}
+                  <span class="muted">—</span>
+                {/if}
               </span>
-            {:else}
-              <span class="muted">—</span>
             {/if}
-          </span>
+          {/if}
         </button>
       {/each}
     </div>
@@ -179,13 +197,15 @@
     display: flex; flex-direction: column;
   }
   .th, .row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 80px 60px 80px;
+    display: flex;
     align-items: center;
-    column-gap: 12px;
+    gap: 12px;
     padding: 6px 14px;
     font-size: var(--fs-sm);
   }
+  .th > *, .row > * { flex: 0 0 auto; }
+  .th > :first-child, .row > :first-child { flex: 1; min-width: 0; }
+  .right { min-width: 60px; }
   .th {
     color: var(--fg-faint);
     text-transform: uppercase;
@@ -232,6 +252,17 @@
     font-size: var(--fs-xs);
     border: 1px solid color-mix(in oklch, var(--warn) 28%, transparent);
     font-variant-numeric: tabular-nums;
+  }
+  .idle-pip {
+    display: inline-flex; align-items: center;
+    padding: 1px 8px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--fg-faint);
+    border: 1px solid var(--border);
+    font-size: 10px;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
   }
 
   @media (prefers-reduced-motion: reduce) {

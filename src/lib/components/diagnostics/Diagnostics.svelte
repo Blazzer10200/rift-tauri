@@ -129,23 +129,39 @@
   const pulledTotal = $derived((diagnostics.countsByStage["remote_pull_done"] ?? 0));
   const pullFailedTotal = $derived((diagnostics.countsByStage["remote_pull_fail"] ?? 0));
 
-  const tiles = $derived.by(() => {
+  type Tile = { label: string; value: string; hint: string; tone: Variant };
+  const tileGroups = $derived.by<{ label: string; items: Tile[] }[]>(() => {
     const s = diagnostics.state;
     return [
-      { label: "Auto-sync",      value: s?.autosync_state ?? "—",                hint: s?.autosync_detail ?? "",     tone: (s?.autosync_state === "error" ? "danger" : s?.autosync_state ? "info" : "muted") as Variant },
-      { label: "Watching",       value: String(s?.watcher_count ?? 0),           hint: "folders",                     tone: "muted" as Variant },
-      { label: "Queue pending",  value: String(s?.queue_pending ?? 0),           hint: "files debouncing/in-flight",  tone: ((s?.queue_pending ?? 0) > 50 ? "warn" : "muted") as Variant },
-      { label: "Failed",         value: String(s?.queue_failed ?? 0),            hint: "retry pending",               tone: ((s?.queue_failed ?? 0) > 0 ? "danger" : "muted") as Variant },
-      { label: "Dropped",        value: String(s?.queue_dropped_total ?? 0),     hint: "channel-full events lost",    tone: ((s?.queue_dropped_total ?? 0) > 0 ? "danger" : "muted") as Variant },
-      { label: "Ignored",        value: String(s?.ignored_total ?? 0),           hint: "rule-filtered total",         tone: "muted" as Variant },
-      { label: "Conflicts",      value: String(s?.conflicts ?? 0),               hint: "needs resolve",               tone: ((s?.conflicts ?? 0) > 0 ? "warn" : "muted") as Variant },
-      { label: "Locks",          value: String(connection.lockCount),            hint: "presence locks",              tone: "muted" as Variant },
-      { label: "Last remote scan", value: fmtAge(lastRemoteScan),                hint: "drift watcher tick",          tone: "muted" as Variant },
-      { label: "Pulled",         value: String(pulledTotal),                     hint: pullFailedTotal > 0 ? `${pullFailedTotal} failed` : (lastPullAt ? `last ${fmtAge(lastPullAt)} ago` : "from remote"), tone: (pullFailedTotal > 0 ? "warn" : "muted") as Variant },
-      { label: "Last rescan",    value: fmtAge(s?.last_rescan_signal_at),        hint: "kernel event-drop signal",    tone: (s?.last_rescan_signal_at ? "warn" : "muted") as Variant },
-      { label: "Last drift",     value: fmtAge(s?.last_drift_scan_at),           hint: "reconcile fired",             tone: "muted" as Variant },
-      { label: "Bus lag",        value: String(s?.bus_lag_total ?? 0),           hint: "diag events the UI missed",   tone: ((s?.bus_lag_total ?? 0) > 0 ? "warn" : "muted") as Variant },
-      { label: "Total emitted",  value: String(s?.events_emitted_total ?? 0),    hint: "lifetime diag events",        tone: "muted" as Variant },
+      {
+        label: "Sync engine",
+        items: [
+          { label: "Auto-sync",     value: s?.autosync_state ?? "—",            hint: s?.autosync_detail ?? "",     tone: (s?.autosync_state === "error" ? "danger" : s?.autosync_state ? "info" : "muted") },
+          { label: "Watching",      value: String(s?.watcher_count ?? 0),       hint: "folders",                    tone: "muted" },
+          { label: "Queue pending", value: String(s?.queue_pending ?? 0),       hint: "files debouncing/in-flight", tone: ((s?.queue_pending ?? 0) > 50 ? "warn" : "muted") },
+          { label: "Failed",        value: String(s?.queue_failed ?? 0),        hint: "retry pending",              tone: ((s?.queue_failed ?? 0) > 0 ? "danger" : "muted") },
+          { label: "Dropped",       value: String(s?.queue_dropped_total ?? 0), hint: "channel-full events lost",   tone: ((s?.queue_dropped_total ?? 0) > 0 ? "danger" : "muted") },
+          { label: "Ignored",       value: String(s?.ignored_total ?? 0),       hint: "rule-filtered total",        tone: "muted" },
+        ],
+      },
+      {
+        label: "Conflicts & locks",
+        items: [
+          { label: "Conflicts", value: String(s?.conflicts ?? 0),    hint: "needs resolve",  tone: ((s?.conflicts ?? 0) > 0 ? "warn" : "muted") },
+          { label: "Locks",     value: String(connection.lockCount), hint: "presence locks", tone: "muted" },
+        ],
+      },
+      {
+        label: "Drift activity",
+        items: [
+          { label: "Last remote scan", value: fmtAge(lastRemoteScan),                hint: "drift watcher tick",        tone: "muted" },
+          { label: "Pulled",           value: String(pulledTotal),                   hint: pullFailedTotal > 0 ? `${pullFailedTotal} failed` : (lastPullAt ? `last ${fmtAge(lastPullAt)} ago` : "from remote"), tone: (pullFailedTotal > 0 ? "warn" : "muted") },
+          { label: "Last rescan",      value: fmtAge(s?.last_rescan_signal_at),      hint: "kernel event-drop signal",  tone: (s?.last_rescan_signal_at ? "warn" : "muted") },
+          { label: "Last drift",       value: fmtAge(s?.last_drift_scan_at),         hint: "reconcile fired",           tone: "muted" },
+          { label: "Bus lag",          value: String(s?.bus_lag_total ?? 0),         hint: "diag events the UI missed", tone: ((s?.bus_lag_total ?? 0) > 0 ? "warn" : "muted") },
+          { label: "Total emitted",    value: String(s?.events_emitted_total ?? 0),  hint: "lifetime diag events",      tone: "muted" },
+        ],
+      },
     ];
   });
 </script>
@@ -167,15 +183,20 @@
     {/snippet}
   </PageHeader>
 
-  <div class="tiles">
-    {#each tiles as t (t.label)}
-      <div class="tile" data-tone={t.tone}>
-        <div class="tile-label">{t.label}</div>
-        <div class="tile-value mono">{t.value}</div>
-        <div class="tile-hint">{t.hint}</div>
+  {#each tileGroups as g (g.label)}
+    <div class="tile-group">
+      <div class="group-label">{g.label}</div>
+      <div class="tiles">
+        {#each g.items as t (t.label)}
+          <div class="tile" data-tone={t.tone}>
+            <div class="tile-label">{t.label}</div>
+            <div class="tile-value mono">{t.value}</div>
+            <div class="tile-hint">{t.hint}</div>
+          </div>
+        {/each}
       </div>
-    {/each}
-  </div>
+    </div>
+  {/each}
 
   <div class="hero-row">
     <button class="hero-btn" type="button" onclick={copyReport} disabled={copyState === "copying"} data-state={copyState}>
@@ -252,11 +273,19 @@
     position: relative;
   }
 
+  .tile-group { margin-bottom: 10px; }
+  .group-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--fg-subtle);
+    padding: 2px 2px 6px;
+  }
   .tiles {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
     gap: 6px;
-    margin-bottom: 10px;
   }
   .tile {
     background: var(--bg-elev-1);

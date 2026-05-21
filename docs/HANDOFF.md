@@ -2,48 +2,33 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 126 — 2026-05-21 — Split-pane v2.1: per-tab composer + concurrent send
+## Session 128 — 2026-05-21 — UI/UX overhaul (S127 + S128 shipped as v0.4.22-alpha)
 
-### Completed
-- **Per-tab composer state** — `TabState.draft` + `TabState.attachments` ($state). Deleted `tabDrafts`/`tabAttachments` Maps + stash/restore dance. `composerDraft`/`composerAttachments` are now getter/setter shims on store (back-compat for slash cmds + send()).
-- **Composer.svelte rewired** — reads `tab.draft / tab.attachments / tab.queue / tab.streaming / tab.promptHistory` via `tabId` prop. Per-pane prompt-history recall. Textarea moved from `bind:value` → controlled `value + oninput`.
-- **AssistantPane always renders Composer** — dropped `{#if focused}` gate; gated only on `tabId` presence. Submit auto-focuses pane before dispatch so `send()` targets correct tab.
-- **EmptyState** accepts `tabId` prop — suggestion clicks write into correct pane's draft.
-- **Auto-compact iterates panes** — AssistantPage effect walks `panes[]` + uses new `ctxPctFor(tab)` / `ctxWindowFor(tab)` helpers. Background tabs can no longer sail past threshold.
-- **`stop(tabId?)` / `addAttachment(att, tabId?)` / `removeAttachment(id, tabId?)` / `compactConversation(focus?, tabId?)`** — all accept optional tabId.
-- **Per-tab error banners** — `lastError` renders in owning pane regardless of focus.
-- **Focus rail** — `inset 0 2px 0 var(--accent)` + accent-60% border on focused split-pane. Non-focused pane bg dimmed 94%.
-- **Pane chrome always-on** — opacity 0.5 at rest (was 0), 0.95 on hover/focus.
-- **`npm run check`** — 0 errors, 3 pre-existing CSS warnings. CDP-verified: 2 independent composers, drafts persist across focus swaps.
+Shell polish (left-rail flip, titlebar divider, statusbar bump w/ breathing pulse), workspace cross-fade transitions + slide-fade tabs rail, History date grouping + Hide-tests filter, Diagnostics tile-grouping (3 sections), Settings Reset 2-click confirm, WatchedFolders compact display, Composer placeholder trim, dropped `agents`+`attachments` stubs, New-chat button moved flush-after-tabs + restyled, EmptyState refresh (rotating halo + 2×2 resume tiles + dropped synced-card), History moved to ChatTabsBar popover (portal to body, position:fixed anchored). Full notes: `docs/CHANGELOG.md`.
 
-### Next Steps
-1. **Smoke gate** (S124, still open) — live verify on real chat: auto-trigger @70%, pre-emption pill, header Compact button, agents-pill on Task spawn, E1 ctx-stats render.
-2. **TasksDock per-pane** — dock still global/focused-tab; needs per-pane scope in split.
-3. **Per-pane status chip** — Ctx%/model/cost in pane chrome (composer StatusHub is per-pane; header pill is not).
-4. **Resizable divider** — drag-handle pattern exists in `browser/TwoPane.svelte`.
-5. **Open-in-pane N right-click** — tabsbar + history drawer entry point.
-6. *(Deferred)* Vertical split / 2×2 grid; keybinds skipped (user decision).
+## Session 127 — 2026-05-21 — Split-pane polish + UI audit (shipped v0.4.22-alpha alongside S128)
 
-### Files Modified
-- `src/lib/state/assistant.svelte.ts` — TabState draft/attachments, store shims, ctxPctFor, stop/addAttachment/removeAttachment/compactConversation tabId params
-- `src/lib/components/assistant/Composer.svelte` — full per-tab rewrite
-- `src/lib/components/assistant/AssistantPane.svelte` — always-on Composer, error visibility, focus rail CSS
-- `src/lib/components/assistant/AssistantPage.svelte` — auto-compact pane-iteration effect
-- `src/lib/components/assistant/EmptyState.svelte` — tabId prop
+TasksDock per-pane, per-pane status chip, resizable divider w/ kbd+dblclick reset + persisted fracs, OpenInPaneMenu right-click on tabs+history rows. UI audit doc `docs/design/ui-audit-2026-05-21.md` (5 P0 / 7 P1 / 4 P2 from 9 workspace shots).
+
+## Session 126 — Split-pane v2.1: per-tab composer + concurrent send
+
+`TabState.draft`/`attachments` per-tab ($state); `composerDraft`/`composerAttachments` are back-compat getter/setter shims on store. Composer + EmptyState rewired around `tabId` prop, AssistantPane always renders Composer (gated on tabId, not focus). Auto-compact walks `panes[]` w/ `ctxPctFor`/`ctxWindowFor`. `stop/addAttachment/removeAttachment/compactConversation` accept optional tabId. Per-tab error banners. Focus rail + always-on pane chrome.
 
 ---
 
-## Session 125 — 2026-05-21 — Phase E1/E4/E5 + agents-pill (shipped v0.4.21-alpha)
+## Session 126 — Split-pane v2.1: per-tab composer + concurrent send
 
-E1 ctx-stats pill, E4 retired-JSONL sweep, E5 history search across summaries. Agents-pill clickable → newTab() while old tab streams. Cleanup batch. Deferred: E2 collapse, E3 tab-close prompt, agents popover.
+`TabState.draft`/`attachments` per-tab ($state); `composerDraft`/`composerAttachments` are back-compat getter/setter shims on store. Composer + EmptyState rewired around `tabId` prop, AssistantPane always renders Composer (gated on tabId, not focus). Auto-compact walks `panes[]` w/ `ctxPctFor`/`ctxWindowFor`. `stop/addAttachment/removeAttachment/compactConversation` accept optional tabId. Per-tab error banners. Focus rail + always-on pane chrome.
+
+## Session 125 — Phase E1/E4/E5 + agents-pill (shipped v0.4.21-alpha)
+
+E1 ctx-stats pill, E4 retired-JSONL sweep, E5 history search across summaries.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.21-alpha** (S125 shipped). S126 uncommitted (split-pane v2.1). Tauri 2 + Svelte 5 + Rust + russh.
-
-**Commit pending:** S126 split-pane v2.1 (per-tab composer, auto-compact per pane, focus rail, pane chrome). Run `/git-ship` when ready.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.22-alpha** (S126+S127+S128 shipped). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Smoke gate still open** from S124 — live verify on real chat:
 - Auto-trigger @70% + 5min cooldown
@@ -53,10 +38,11 @@ E1 ctx-stats pill, E4 retired-JSONL sweep, E5 history search across summaries. A
 - E1 ctx-stats: `Ctx X% → est Y%`
 
 **Next code lanes:**
-1. `/git-ship` to land S126 → v0.4.22-alpha
-2. Smoke gate (above)
-3. Split-pane polish queue: TasksDock per-pane → per-pane status chip → resizable divider → open-in-pane menu
-4. Refactor queue (each its own `/plan`): split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
+1. Smoke gate (above)
+2. Files diff-dot per row (needs new backend `drift_scanner` per-row verdict command) — deferred from S128
+3. Files breadcrumb `\` → `›` chevrons — deferred from S128
+4. UI audit gaps: settings sub-tabs, chat-with-content, split-pane visual, backend organization (lib.rs/assistant.svelte.ts/assistant/mod.rs)
+5. Refactor queue (each its own `/plan`): split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
 
 **Phase 6 keychain runtime:** old plaintext `bridgeToken`/`apiKey` get auto-lifted to Windows Credential Manager on first config load. `cmdkey /list:rift` for `rift/bridge.<server_key>` + `rift/assistant.api_key`.
 
@@ -76,11 +62,12 @@ E1 ctx-stats pill, E4 retired-JSONL sweep, E5 history search across summaries. A
 - `assistant_send`: `--permission-mode bypassPermissions` + full `BUILTINS` in `--allowed-tools`.
 - TabState: per-tab field → add to TabState + getter on AssistantStore. Never back on the store.
 - Image paste: `assistant_send` flips `--input-format text→stream-json` when attachments present. 20MiB cap.
-- Settings is workspace (kbd 9), `Ctrl+,` flips; do NOT reintroduce slideover scrim.
+- Settings is workspace (kbd **8** post-S128), `Ctrl+,` flips; do NOT reintroduce slideover scrim.
+- **History popover** — lives in ChatTabsBar via `<HistoryDrawer compact onSelected>`. Popover uses `use:portal` to `<body>` + `position: fixed` anchored from button rect — putting it inside the normal tree hits `.tabs-rail` overflow:hidden clip.
+- **WorkspaceShell cross-fade** — all once-opened panes mounted absolute-layered; only active is opacity:1 + `inert={false}`. Don't switch back to `[hidden]`/`display:none`.
 - Assistant scrollbar: `.scroll` + `.strip` BOTH `scrollbar-width: none` — don't reintroduce `scrollbar-gutter: stable`.
 - AssistantPage `onMount` auto-fires `newTab()` if `openTabs.length === 0`. Don't reintroduce empty-tabs CTA.
 - `UpdateService` managed Tauri state — `download_update` then `apply_pending_update`.
 - **`tauri.conf.json` `dragDropEnabled: false`** — removing breaks cross-region HTML5 DnD. Rift has no file-drop Tauri events, cost = zero.
 - **AssistantPane drop handlers on `.pane` outer div only** — never move to inner `.drop-zone` overlays; loses the continuous-preventDefault chain.
-- **`composerDraft` stays store-level** — moving to per-pane requires Composer rewire across ~30 refs; not worth it.
 - **`compactionHistory[]` field name is camelCase** in persisted JSON (`compactionHistory`, not `compaction_history`) — Rust extracts via `Value::get("compactionHistory")` in `assistant_list_conversations`. Don't rename.

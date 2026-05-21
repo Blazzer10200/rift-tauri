@@ -1,17 +1,15 @@
 // v0.4.10 workspace shell — replaces right-pane.svelte.ts. ActivityBar swaps
 // the main pane via workspace.setActive(); no sidecar widths to track.
-// Chat is the default workspace. Agents + Attachments are DISABLED stubs —
-// setActive() guards against them. Stub entries stay in the registry so the
-// activity bar can render them as "Coming soon" tiles.
+// Chat is the default workspace.
 
 export type WorkspaceId =
   | "chat" | "sync" | "files" | "conflicts" | "diagnostics"
-  | "terminal" | "activity" | "history" | "agents" | "attachments"
+  | "terminal" | "activity"
   | "settings";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
   "chat", "sync", "files", "conflicts", "diagnostics",
-  "terminal", "activity", "history", "agents", "attachments",
+  "terminal", "activity",
   "settings",
 ] as const;
 
@@ -36,7 +34,7 @@ const LEGACY_KEYS_TO_SWEEP = [
   "rift.ui.dock-accordion.v1",
 ] as const;
 
-const DISABLED: ReadonlySet<WorkspaceId> = new Set(["agents", "attachments"]);
+const DISABLED: ReadonlySet<WorkspaceId> = new Set();
 const DEFAULT_ORDER: readonly WorkspaceId[] = WORKSPACE_IDS;
 
 function isWorkspaceId(v: unknown): v is WorkspaceId {
