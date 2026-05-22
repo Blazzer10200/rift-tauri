@@ -2,59 +2,47 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 134 — 2026-05-22 — Settings page rebuild (uncommitted — v0.4.23-alpha)
+## Session 135 — 2026-05-22 — Empty-pane UX (uncommitted, post-v0.4.23-alpha)
 
-**Settings.svelte rewrite (1846L → ~1500L).** 8 nav rows → 7 (SSH keys folded into new **Network** section as header action next to *Add server*). Unified pattern across all sections: `.set-group` (uppercase title bar + hairline rows) + `.set-row` (left label/hint, right control). Lifted from polished Terminal section. New section subtitles. Outer PageHeader dropped from [SettingsPage.svelte](src/lib/components/settings/SettingsPage.svelte) (section title now carries the page).
+**Reported:** post-update Rift looked "fucked up" — screenshot showed wide-but-short window (Win-snap), 2 panes with one empty showing useless "No tab in this pane" + History popover open over a 0-msg fresh tab.
 
-**Bugs fixed.** Appearance kbd grid was unreadable — each `Ctrl+T` row flowed 4 kids into a 2-col grid so each `<kbd>` block-stacked. Wrapped combos in `.kbd-combo`. Killed "More coming soon" placeholder. Speech 12-lang picker stacked vertically in a narrow right column; switched language + engine rows to `set-row-stack`.
+**Diagnosis.** Window-shortness was Windows Snap bypassing `minHeight: 800` — not a code bug. The visual confusion was the multi-pane orphan-empty state: 2 panes persisted but only 1 (or 0) tabs assigned → other pane stuck on the dead-end "No tab in this pane" string with no recovery action.
 
-**Verify.** `npm run check` 0/0 (after dropping 2 dead CSS selectors). CDP-verified all 7 sections (Appearance / Terminal / Accessibility / Assistant / Speech / Network / About), active-state nav ramp, kbd grid renders correctly, engine flip mounts/unmounts whisper cards, dyslexia-disabled state propagates dim across child rows.
+**Fix.** [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte) — replaced the orphan empty state w/ an actionable card: `+ New chat` (primary) + `× Close pane` (ghost, only when panes.length > 1) + a `RECENT` quick-pick listing the last 3 conversations not already mounted in another pane. Each handler focuses this pane first so `newTab`/`openTab` route through `assignFocusedPane` → land in the empty slot. Filters out convos already in sibling panes to avoid cross-pane tab-yank.
 
-**Files.** [Settings.svelte](src/lib/components/settings/Settings.svelte), [SettingsPage.svelte](src/lib/components/settings/SettingsPage.svelte), package.json + Cargo.toml + tauri.conf.json bumped 0.4.22 → 0.4.23-alpha (lockstep), docs/CHANGELOG + HANDOFF consolidated v0.4.23-alpha entry.
+**Verify.** `npm run check` 0/0. CDP-verified: empty-pane card renders w/ correct copy, `New chat` mints a tab into this pane (panes 2→2, tabs 1→2), `Close pane` collapses (panes 2→1), Recent-row click opens the convo here (panes 2→2, tabs 1→2). Visual snapshot via `shot-sel .pane-empty-card` confirmed.
 
----
-
-## Session 133 — 2026-05-22 — Whisper STT backend (feature-gated) + dual-engine UI (uncommitted — v0.4.23-alpha)
-
-Full detail in CHANGELOG v0.4.23-alpha entry. Compact summary:
-- Backend under [src-tauri/src/stt/](src-tauri/src/stt/) — 5 modules (audio/vad/whisper/model_manager/cleanup), `!Send` cpal::Stream on dedicated thread, 14 commands + 5 events in [lib.rs](src-tauri/src/lib.rs). Feature-gated default = stub.
-- Frontend dual-engine in [stt.svelte.ts](src/lib/state/stt.svelte.ts) + Speech section UI.
-- **Whisper FFI UNVERIFIED live** — needs `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`. CDP verified all UI surfaces (cpal returned 3 real mics).
+**Not bumped.** v0.4.23-alpha just shipped 0ec2cc5. User can `/git-ship` as 0.4.24-alpha when ready.
 
 ---
 
-## Sessions 129–132 — 2026-05-21 / 2026-05-22 — collapsed (uncommitted — v0.4.23-alpha)
+## v0.4.23-alpha — 2026-05-22 — SHIPPED at 0ec2cc5 (S129–S134)
 
-Full session detail folded into CHANGELOG v0.4.23-alpha entry. One-liners:
-- **S132** SplashOverlay Glass Reveal cold-boot — `SplashOverlay.svelte`, app.html bg fix, AppShell `onMount` slimmed. Visual UNVERIFIED live.
-- **S131** Assistant chat UI overhaul — turn rail, atmosphere, Shiki, agent + TodoWrite card branches, image attachments, DPI fixes. Shiki UNVERIFIED w/ live fenced block.
-- **S130** UI audit fixes (6 files) + ISSUES.md prune (979 → 882L). CDP-verified.
-- **S129** 5 assistant MCP sync tools + `is_dead_session_error()` wedge fix + `SyncActivityBanner.svelte`. Wedge fix + banner live-UNVERIFIED.
+Full detail in CHANGELOG. One-liners:
+- **S134** Settings rebuild — 8→7 nav, `.set-group`/`.set-row` pattern, kbd grid + Speech bugs fixed
+- **S133** Whisper STT backend (feature-gated) + dual-engine Speech UI — FFI UNVERIFIED live
+- **S132** SplashOverlay Glass Reveal cold-boot — visual UNVERIFIED live
+- **S131** Assistant chat UI overhaul — turn rail, Shiki, atmosphere, agent + TodoWrite cards, image paste, DPI
+- **S130** UI audit fixes + ISSUES.md prune
+- **S129** 5 MCP sync tools + dead-session wedge fix + `SyncActivityBanner` — wedge/banner UNVERIFIED live
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.22-alpha** shipped; **v0.4.23-alpha staged** (versions bumped, CHANGELOG/HANDOFF consolidated, ready to `/git-ship`). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.23-alpha** shipped (0ec2cc5). S135 empty-pane UX fix uncommitted on top. Tauri 2 + Svelte 5 + Rust + russh.
 
-**Uncommitted batch (S129–S134, all rolling into v0.4.23-alpha):**
-- S129: 5 MCP sync tools + wedge fix + SyncActivityBanner
-- S130: UI audit fixes + ISSUES.md prune
-- S131: Full assistant chat UI overhaul (rail-spans-turn, Shiki, atmosphere, agent card, image attachments, DPI fixes)
-- S132: SplashOverlay Glass Reveal cold-boot intro + app.html bg fix + AppShell onMount slimmed
-- S133: Whisper STT backend (feature-gated) + dual-engine Speech settings UI + Composer mic engine-aware
-- S134: Settings page rebuild (this session)
-
-**Smoke gate (open — do before shipping):**
-- S129 banner: active + error-with-wedge **UNVERIFIED live** — drop network 90s, edit file, push → banner should go red + Reconnect
-- S131 Shiki: **UNVERIFIED with live message** — send a msg with fenced code block (```rust / ```bash) → confirm header bar + syntax highlight render
-- S132 splash: **visual UNVERIFIED** — needs cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
-- S133 Whisper FFI: **UNVERIFIED live** — needs LLVM install + `cargo build --features whisper-rs`. Settings UI + cpal mic enumeration CDP-verified; download/transcribe round-trip pending. CPU build first (LLVM only), CUDA second pass (CUDA Toolkit + `whisper-cuda` feature) for 10× speedup.
+**Smoke gate (open — clear before next ship):**
+- S129 banner: drop network 90s, edit file, push → banner should go red + Reconnect
+- S131 Shiki: send ` ```rust ` fenced block → confirm header bar + syntax highlight
+- S132 splash: cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
+- S133 Whisper FFI: `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`. CPU first, CUDA pass second (`whisper-cuda` feature).
+- S135 empty-pane: cold-launch w/ 2-pane persisted state → verify new card renders, buttons work
 - S124 items (auto-compact, ctx stats) still in gate
 
 **Next code lanes:**
-1. Smoke gate (above) → `/git-ship` v0.4.23-alpha
-2. Wave-2 audit bugs: #146 `mutateStreaming` O(n) rebuild (HIGH — fixes stagger animation safety too), #147 thinking dedup, #148 tab-switch race, #149 delete/openTab race
+1. Smoke gate → `/git-ship` v0.4.24-alpha (includes S135)
+2. Wave-2 audit bugs: #146 `mutateStreaming` O(n) rebuild (HIGH), #147 thinking dedup, #148 tab-switch race, #149 delete/openTab race
 3. Files diff-dot per row (backend `drift_scanner` per-row verdict cmd needed)
 4. Refactor queue: split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
 5. Design brief: `git-rcon-tools.md` v2.2 (git + RCON MCP tools)
