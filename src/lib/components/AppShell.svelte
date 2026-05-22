@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
   import { connection, type ServerProfile } from "../state/connection.svelte";
   import { dialogs } from "../state/dialogs.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
@@ -81,8 +81,30 @@
   // S131: SplashOverlay (layout-level) owns wireEvents + loadServers +
   // refreshStatus + first-run settings redirect. AppShell mounts behind the
   // blur and reacts off connection state as the overlay populates it.
+  // S136: Windows 11 remembers per-app snap state — once a borderless window
+  // gets Win+↑/snap-resized below `minHeight: 800`, every subsequent launch
+  // restores at that wonky size and `decorations: false` hides the resize
+  // cue. Tauri's config `minHeight` only clamps user drag, not initial show.
+  // On mount, if the logical inner size is shorter than the minHeight floor
+  // OR the window is offscreen, force-reset to defaults + center.
   onMount(() => {
     updates.checkOnLaunch();
+    void (async () => {
+      try {
+        const win = getCurrentWindow();
+        if (await win.isMaximized()) return;
+        const phys = await win.innerSize();
+        const scale = await win.scaleFactor();
+        const logicalH = phys.height / scale;
+        const logicalW = phys.width / scale;
+        if (logicalH < 800 || logicalW < 1280) {
+          await win.setSize(new LogicalSize(1600, 1000));
+          await win.center();
+        }
+      } catch (e) {
+        console.warn("window-size restore failed", e);
+      }
+    })();
   });
 
   // Phase 3b: SettingsPage workspace pulls callbacks from this store. AppShell
