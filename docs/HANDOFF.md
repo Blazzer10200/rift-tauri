@@ -15,7 +15,9 @@ S135 empty split-pane UX + S136 `.shell` layout-collapse fix (`position: fixed; 
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.26-alpha** shipped. Working tree clean. Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.26-alpha** shipped + Velopack-published to [rift-releases](https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.26-alpha) (Setup.exe + Portable.zip + full nupkg, no delta). Working tree clean. Tauri 2 + Svelte 5 + Rust + russh.
+
+**Velopack quirk to revisit:** `vpk pack` crashed on `Line 17, position 208` XmlException when reading either the prior .25 nupkg's manifest (delta build) OR a freshly-built .26 manifest (setup wrap). Workaround used this ship: `--delta None` + skip `--releaseNotes` flag. Smoking-gun is the markdown→HTML conversion vpk runs on CHANGELOG entries — special chars in `var(--fg-faint 38%)`/em-dashes/markdown link `()` syntax → bad entity reference. Reproduce + fix at top of next ship; release.ps1 is back to default state.
 
 **Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
