@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.24-alpha — 2026-05-22 — S135 hotfix: empty-pane UX
+
+**Empty-pane card replaces dead-end string.** [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte) — when a split pane has no tab assigned, the slot used to render only the unhelpful "No tab in this pane" string w/ no recovery action. Now renders an actionable card: `+ New chat` (primary) + `× Close pane` (ghost, only when `panes.length > 1`) + a `RECENT` quick-pick listing the top 3 conversations not already mounted in a sibling pane. Each handler focuses this pane first so `newTab`/`openTab` route through `assignFocusedPane` → land in the empty slot. Recent picks filter out convos held by sibling panes to avoid cross-pane tab-yank.
+
+**Verify.** `npm run check` 0/0. CDP-verified: card renders w/ correct copy + 3 recents; `New chat` mints a tab into the empty pane (panes 2→2, tabs 1→2); `Close pane` collapses (panes 2→1); recent-row click opens convo here (panes 2→2, tabs 1→2). Visual snapshot via `shot-sel .pane-empty-card` confirmed.
+
 ## v0.4.23-alpha — 2026-05-22 — S129–S134 batch: MCP sync tools, splash, chat-UI overhaul, Whisper, Settings rebuild
 
 **S134 — Settings page rebuild.** [Settings.svelte](src/lib/components/settings/Settings.svelte) rewritten end-to-end. 8 nav rows → 7 (SSH keys folded into Network section as a header action). Every section now uses one unified `set-group` + `set-row` pattern (uppercase title bar + hairline-separated rows w/ left label/hint + right control) lifted from the polished Terminal section. Killed the "More coming soon" placeholder card in Appearance. **Fixed kbd grid bug**: each `Ctrl+T` combo was flowing 4 kids (kbd / + / kbd / span) into a 2-col grid → every key block-stacked on its own row. Now wraps the combo in `.kbd-combo` so the grid sees exactly 2 children. Page-header wrapper dropped — section title carries weight w/ a one-line subtitle each. Per-section head-actions: Terminal *Reset* (2-click confirm preserved), Network *SSH key setup + Add server*, About *Check for updates*. CDP-verified all 7 sections live (Appearance / Terminal / Accessibility / Assistant / Speech / Network / About). [SettingsPage.svelte](src/lib/components/settings/SettingsPage.svelte) slimmed to drop the redundant PageHeader since the new section title fills that role.
