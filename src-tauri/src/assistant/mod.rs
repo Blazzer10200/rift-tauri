@@ -426,6 +426,16 @@ fn is_valid_session_id(s: &str) -> bool {
     true
 }
 
+/// #221: reject any model value that would be parsed as a flag by the CLI.
+/// Allowlist `[A-Za-z0-9._-]+` w/ NO leading dash. Covers short aliases
+/// (`sonnet`/`opus`/`haiku`) and full ids (`claude-opus-4-7`).
+fn is_valid_model_name(s: &str) -> bool {
+    if s.is_empty() || s.starts_with('-') {
+        return false;
+    }
+    s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
 fn save_session_cwd(id: &str, cwd: &Path) {
     if let Ok(p) = session_cwd_path(id) {
         let s = cwd.to_string_lossy();
@@ -1689,6 +1699,9 @@ pub async fn assistant_send(
     let api_key = current_api_key();
     let use_api_key = api_key.is_some();
     let model = model.unwrap_or_else(|| "sonnet".to_string());
+    if !is_valid_model_name(&model) {
+        return Err(format!("invalid model: {model}"));
+    }
     // Effort tier: per-turn override wins, else stored default, else "quick".
     let effort = thinking_effort
         .or_else(|| cfg.thinking_effort.clone())
@@ -1940,18 +1953,21 @@ pub async fn assistant_send(
     // reasoning is encrypted by the API in -p mode; what reaches us is
     // `content_block_start` of type `thinking` + `signature_delta` w/
     // `thinking_delta` text in some scenarios.
+    // #237: normalize effort BEFORE logging so newlines/ANSI in the raw
+    // renderer-supplied string can't reach the log stream. The CLI flag itself
+    // was safe (string-arg passthrough) but the log line was unredacted.
+    let effort_level = match effort.as_str() {
+        "none" => "low",
+        "deep" => "high",
+        _ /* "quick" or unknown */ => "medium",
+    };
     if model != "haiku" {
-        let level = match effort.as_str() {
-            "none" => "low",
-            "deep" => "high",
-            _ /* "quick" or unknown */ => "medium",
-        };
-        cmd.arg("--effort").arg(level);
+        cmd.arg("--effort").arg(effort_level);
     }
 
     log::info!(
         "assistant_send: spawn session_id={} first_turn={} model={} effort={} use_full_config={} mcp={} api_key={} remote_shell={}",
-        session_id, is_first_turn, model, effort, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
+        session_id, is_first_turn, model, effort_level, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child

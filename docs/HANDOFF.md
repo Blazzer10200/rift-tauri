@@ -2,22 +2,40 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## v0.4.26-alpha — 2026-05-22 — assistant timeline UI + center-on-work-area
+## WIP — 2026-05-22 — Lane 3: compaction UX + live tool dots
 
-- **Timeline UI.** Vertical timeline on the existing turn-rail. Each block = a node w/ status-colored bullet (hollow gray=thinking, green=done, pulsing accent=pending, red=error) + drop-shadow + inner highlight for depth. "Thought for Ns" flat single-line — `.reasoning` bordered surface gone. Tool chips drop card frame in collapsed state via new `variant="timeline"` prop; right-edge status pip removed (rail bullet shows it). Agent + TodoWrite cards unchanged. Step-N headers → uppercased dividers w/ trailing hairline; `StepGroup` numbered bubble dropped from main flow (component intact, unused). Rail recolored neutral gray (1.5px, `--fg-faint 38%`); streaming still glows accent + last bullet pulses. Hover lifts bullet 1.15×. Files: [MessageBubble.svelte](src/lib/components/assistant/MessageBubble.svelte), [ToolChip.svelte](src/lib/components/assistant/ToolChip.svelte).
-- **Window centers on work area.** [tauri.conf.json](src-tauri/tauri.conf.json) `visible:false` + `center:true`; [lib.rs::run](src-tauri/src/lib.rs) `setup()` calls `center_in_work_area` then `show + set_focus`. Windows: `SystemParametersInfoW(SPI_GETWORKAREA)` via raw FFI (no new deps), centers in taskbar-excluded rect. Non-Windows: Tauri `center:true` fallback. **Not runtime-verified** at fresh launch — exercise via `scripts/run-dev.bat` if behavior looks off.
+Frontend-only polish. No version bump — `/git-ship` rolls Lane 2 + Lane 3 together.
 
-## v0.4.25-alpha — 2026-05-22 — SHIPPED at 2502cd8
+- **Tool dots fire live.** [MessageBubble.svelte:460](src/lib/components/assistant/MessageBubble.svelte#L460) — `nodeStatus` override (last-node-while-streaming → pending) now gated on `unit.status === "neutral"`. Prior behavior held the trailing tool of every turn at pulsing-yellow until end-of-turn since it stayed `lastBlockKey`. Tool + thinking blocks now honor their own per-block status; flip green/red as `fillToolResult` lands. Prose streaming still pulses.
+- **Ctx-pill tooltip + nudge.** [ChatTabsBar.svelte](src/lib/components/shell/ChatTabsBar.svelte) — tooltip rewritten to lead with the cap and state plainly that cache-read tokens stay in-window (was: "replayed from prior turns", read as free). New `autoCompactDisabledNudge` chip mirrors `.compact-warn` style, surfaces when threshold=null && ctxPct≥70, goes red at 85%. CSS `[data-tone="red"]` added.
+- **Settings.** [Settings.svelte](src/lib/components/settings/Settings.svelte) — threshold hint spells out cache-read counts; 80% marked `(recommended)`.
 
-S135 empty split-pane UX + S136 `.shell` layout-collapse fix (`position: fixed; inset: 0`). Details in CHANGELOG + git log.
+**Verify.** `npm run check` 0/0/0.
+
+## WIP — 2026-05-22 — Lane 2: backend security HIGHs + Velopack preflight
+
+Five Wave-3 HIGHs closed + Velopack ship-blocker fixed. Backend-only (parallel session on assistant.svelte.ts). Still v0.4.26-alpha; `/git-ship` next.
+
+- **#221** [assistant/mod.rs](src-tauri/src/assistant/mod.rs) — `is_valid_model_name()` (`[A-Za-z0-9._-]+`, no leading dash) rejects model in `assistant_send`. Closes `--model -<flag>` injection.
+- **#237** [assistant/mod.rs](src-tauri/src/assistant/mod.rs) — spawn-log uses normalized `effort_level`, not raw `effort`. Closes log-injection vector.
+- **#227** [diagnostics/mod.rs](src-tauri/src/diagnostics/mod.rs) — `scrub_log_message` adds Ed25519 + DSA + generic + encrypted `BEGIN PRIVATE KEY`.
+- **#238** [diagnostics/mod.rs](src-tauri/src/diagnostics/mod.rs) — `DiagBus::publish` scrubs `event.message` at the choke point. Covers 58 direct `emit*` sites bypassing LogForwarder. Idempotent. Completes #8 Rust-side.
+- **#228** dialog plugin removed across [lib.rs](src-tauri/src/lib.rs) + [capabilities/default.json](src-tauri/capabilities/default.json) + [Cargo.toml](src-tauri/Cargo.toml) + [package.json](package.json). Zero refs confirmed.
+- **Velopack quirk RESOLVED** — `×` (U+00D7, `1.15×`) passed to nuspec unescaped. Fix: [release.ps1](scripts/release.ps1) `Convert-ToAsciiSafe` + `[xml]` probe BEFORE `vpk pack`. Source ASCII-only w/ `\uXXXX` escapes (BOM-less PS5.1 safe). Smoke-tested: 5 non-ASCII → 0, XML probe PASSED.
+
+**Verify.** `cargo check` 0 errors (1 pre-existing `private_interfaces` warning unrelated).
+
+## v0.4.26-alpha — 2026-05-22 — timeline UI + center-on-work-area
+
+Timeline UI on turn-rail; window centers in work area. Detail in CHANGELOG.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.26-alpha** shipped + Velopack-published to [rift-releases](https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.26-alpha) (Setup.exe + Portable.zip + full nupkg, no delta). Working tree clean. Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.26-alpha** shipped + published to [rift-releases](https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.26-alpha). Lane 2 + Lane 3 WIP above — uncommitted, awaiting `/git-ship` rollup. Tauri 2 + Svelte 5 + Rust + russh.
 
-**Velopack quirk to revisit:** `vpk pack` crashed on `Line 17, position 208` XmlException when reading either the prior .25 nupkg's manifest (delta build) OR a freshly-built .26 manifest (setup wrap). Workaround used this ship: `--delta None` + skip `--releaseNotes` flag. Smoking-gun is the markdown→HTML conversion vpk runs on CHANGELOG entries — special chars in `var(--fg-faint 38%)`/em-dashes/markdown link `()` syntax → bad entity reference. Reproduce + fix at top of next ship; release.ps1 is back to default state.
+**Velopack U+00D7 fix** in `release.ps1::Convert-ToAsciiSafe` — don't remove. See Lane 2 WIP above.
 
 **Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
@@ -25,21 +43,21 @@ S135 empty split-pane UX + S136 `.shell` layout-collapse fix (`position: fixed; 
 
 ## CRITICAL DON'T-TOUCH
 
-- russh `ring` + reqwest `rustls` only. russh `Config{keepalive 20s/3, window 2MiB, packet 32KiB}`.
+- russh `ring` + reqwest `rustls`. russh `Config{keepalive 20s/3, window 2MiB, packet 32KiB}`.
 - `~/.rift/*.json`: keep `serde(flatten) extra`. `VelopackApp::build().run()` FIRST in `lib.rs::run()`. `bundle.targets:["nsis"]`.
 - DriftWatcher: never overwrite dirty local. `.rift-trail.jsonl` ignore mandatory.
-- `GITHUB_OWNER`/`GITHUB_REPO` → public `rift-releases`, NOT source repo.
+- `GITHUB_OWNER`/`REPO` → public `rift-releases`, NOT source repo.
 - `path_guard.rs` frozen; `rename_overwriting_via` ONLY for atomic upload tmp-swap.
-- `FileAttributes::default()` for SETSTAT = data-loss — use `empty()`. `DriftBucket::ToDelete`=LOCAL; `ToDeleteRemote`=REMOTE.
+- `FileAttributes::default()` SETSTAT = data-loss — use `empty()`. `DriftBucket::ToDelete`=LOCAL; `ToDeleteRemote`=REMOTE.
 - Time displays MUST pass `[], { hour12: true }`. `spawn_frontend_pump` 200/s rate-limit.
 - MCP self-exec: `RIFT_MCP_SERVER=1` branch in `lib.rs::run()` BEFORE Tauri loop.
-- Chat tabs: `openTabs` filters vs `assistant_list_conversations` on init. `send()` keys `isFirstTurn` off `convoCreatedAt`. Keybinds gated on `workspace.activeId === "chat"`.
+- Chat tabs: `openTabs` filters vs `assistant_list_conversations`. `send()` keys `isFirstTurn` off `convoCreatedAt`. Keybinds gated on `workspace.activeId === "chat"`.
 - `assistant_send`: `--permission-mode bypassPermissions` + full `BUILTINS` in `--allowed-tools`.
 - TabState: per-tab field → add to TabState + getter on AssistantStore. Never back on the store.
-- Image paste: `assistant_send` flips `--input-format text→stream-json` when attachments present. 20MiB cap.
-- Settings is workspace (kbd **8** post-S128), `Ctrl+,` flips; do NOT reintroduce slideover scrim.
+- Image paste: `assistant_send` flips `--input-format text→stream-json` w/ attachments. 20MiB cap.
+- Settings is workspace (kbd **8**), `Ctrl+,` flips; no slideover scrim.
 - `UpdateService` managed Tauri state — `download_update` then `apply_pending_update`.
-- **`tauri.conf.json` `dragDropEnabled: false`** — removing breaks cross-region HTML5 DnD. Rift has no file-drop Tauri events, cost = zero.
-- **AssistantPane drop handlers on `.pane` outer div only** — never move to inner `.drop-zone` overlays; loses the continuous-preventDefault chain.
-- **`compactionHistory[]` field name is camelCase** in persisted JSON (`compactionHistory`, not `compaction_history`) — Rust extracts via `Value::get("compactionHistory")` in `assistant_list_conversations`. Don't rename.
-- **`.shell` MUST be `position: fixed; inset: 0`** (AppShell.svelte) — `height: 100%` chain via app.html's `display: contents` wrapper collapses in prod. `body.win-maximized .shell { inset: 8px }` compensates for the borderless-maximized invisible-frame.
+- `tauri.conf.json` `dragDropEnabled: false` — required for HTML5 DnD.
+- AssistantPane drop handlers on `.pane` outer only — inner overlays break preventDefault chain.
+- `compactionHistory[]` is camelCase in persisted JSON. Don't rename.
+- `.shell` MUST be `position: fixed; inset: 0` (AppShell). `body.win-maximized .shell { inset: 8px }` for borderless-maximized.

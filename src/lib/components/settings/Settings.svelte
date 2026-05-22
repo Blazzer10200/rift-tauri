@@ -851,7 +851,7 @@
             <div class="set-row">
               <div class="set-row-l">
                 <span class="set-label">Auto-compact threshold</span>
-                <span class="set-hint">When ctx fills past the threshold, Rift summarizes via <code>claude -p</code> and seeds the next turn with the summary. 5min cooldown between fires.</span>
+                <span class="set-hint">When ctx (including cache-read) fills past the threshold, Rift summarizes via <code>claude -p</code> and seeds the next turn with the summary. Cache-read tokens count — they sit in the model's window every turn. 5min cooldown between fires.</span>
               </div>
               <div class="set-row-r">
                 <select
@@ -865,7 +865,7 @@
                 >
                   <option value={0}>Off</option>
                   <option value={0.70}>70%</option>
-                  <option value={0.80}>80%</option>
+                  <option value={0.80}>80% (recommended)</option>
                   <option value={0.85}>85%</option>
                   <option value={0.90}>90%</option>
                 </select>

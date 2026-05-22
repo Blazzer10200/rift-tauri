@@ -158,6 +158,12 @@ impl DiagBus {
         // to the webview. The basename keeps the signal — which file moved —
         // without the noise.
         event.file = event.file.as_deref().map(basename_only);
+        // #238 / completes #8: scrub home-dir prefixes + private-key bodies
+        // on every bus-bound message. LogForwarder already scrubs; the direct
+        // `emit*` helpers (58 sites in sync/sftp/assistant) bypassed scrub
+        // entirely. Idempotent — homedir replacement is a no-op on already-
+        // scrubbed strings, key-body redaction is a no-op on `[REDACTED ...]`.
+        event.message = scrub_log_message(&event.message);
         event.seq = self.seq.fetch_add(1, Ordering::Relaxed);
         self.events_emitted_total.fetch_add(1, Ordering::Relaxed);
         match event.stage {
@@ -344,9 +350,17 @@ fn scrub_log_message(msg: &str) -> String {
             }
         }
     }
+    // #227: Ed25519 (PKCS#8) is the most common SSH key type now; DSA still
+    // appears on legacy systems. Original guard missed both — they passed
+    // through to the renderer unredacted. Generic `BEGIN ... PRIVATE KEY`
+    // catch-all covers any future format too.
     if out.contains("BEGIN OPENSSH PRIVATE KEY")
         || out.contains("BEGIN RSA PRIVATE KEY")
         || out.contains("BEGIN EC PRIVATE KEY")
+        || out.contains("BEGIN ED25519 PRIVATE KEY")
+        || out.contains("BEGIN DSA PRIVATE KEY")
+        || out.contains("BEGIN PRIVATE KEY")
+        || out.contains("BEGIN ENCRYPTED PRIVATE KEY")
     {
         return "[REDACTED — log line contained private-key body]".to_string();
     }

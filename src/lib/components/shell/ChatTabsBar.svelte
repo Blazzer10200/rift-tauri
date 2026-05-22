@@ -222,6 +222,12 @@
   const activeAgentTitle = $derived.by(() =>
     activeAgents.map((a) => `${a.subagentType}: ${a.description}`).join("\n"),
   );
+  const autoCompactDisabledNudge = $derived(
+    assistant.autoCompactThreshold === null && ctxPct >= 70
+      ? `Auto-compact off (${ctxPct >= 85 ? "compact soon" : "approaching window cap"})`
+      : null,
+  );
+
   const ctxTitle = $derived.by(() => {
     const u = assistant.lastTurnUsage;
     if (!u) return "Context — send a message to populate";
@@ -230,21 +236,25 @@
       assistant.totalCostUsd !== null && assistant.totalCostUsd !== undefined
         ? ` · $${assistant.totalCostUsd.toFixed(4)}`
         : "";
-    const hint =
+    const action =
       ctxPct >= 85
-        ? "\n\nWindow nearly full — start a new chat (Ctrl+T) to drop the accumulated tool-result history."
+        ? "\n\nWindow nearly full. Type /compact to summarize and reset this chat, or Ctrl+T for a fresh one."
         : ctxPct >= 70
-          ? "\n\nCache is growing — Ctrl+T for a fresh chat if responses start lagging."
+          ? "\n\nApproaching the window cap. /compact will summarize-and-reset; Ctrl+T starts fresh."
           : "";
+    const autoNote =
+      assistant.autoCompactThreshold === null && ctxPct >= 70
+        ? "\nAuto-compact is off — enable it in Settings → Conversation compaction to fire automatically."
+        : "";
     return (
-      `Context this turn: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} (${ctxPct.toFixed(1)}%)\n` +
-      `  • new this turn: ${newTokens.toLocaleString()} (input ${u.input.toLocaleString()} + cache-create ${u.cacheCreate.toLocaleString()})\n` +
-      `  • cache read: ${u.cacheRead.toLocaleString()} (replayed from prior turns)\n` +
-      `  • output: ${u.output.toLocaleString()}\n` +
-      `Session totals (${s.turns} turn${s.turns === 1 ? "" : "s"}):\n` +
-      `  • input: ${s.totalInput.toLocaleString()} · output: ${s.totalOutput.toLocaleString()}\n` +
-      `  • cache read: ${s.totalCacheRead.toLocaleString()} · cache create: ${s.totalCacheCreate.toLocaleString()}${cost}\n` +
-      `Model: ${assistant.lastModelId ?? "?"}${hint}`
+      `Context: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} (${ctxPct.toFixed(1)}%) — the model's hard input cap.\n\n` +
+      `This turn:\n` +
+      `  • new (input + cache-create): ${newTokens.toLocaleString()}\n` +
+      `  • cache-read: ${u.cacheRead.toLocaleString()} — replay of prior turns, still occupies the window every turn\n` +
+      `  • output: ${u.output.toLocaleString()}\n\n` +
+      `The cache only saves billing — those tokens are in the window every send, same as fresh input.\n\n` +
+      `Session (${s.turns} turn${s.turns === 1 ? "" : "s"}): in ${s.totalInput.toLocaleString()} · out ${s.totalOutput.toLocaleString()} · cache ${s.totalCacheRead.toLocaleString()} r / ${s.totalCacheCreate.toLocaleString()} w${cost}\n` +
+      `Model: ${assistant.lastModelId ?? "?"}${action}${autoNote}`
     );
   });
 </script>
@@ -394,6 +404,12 @@
     {#if compactWarning}
       <span class="compact-warn" title="Compact early w/ /compact <focus> if you want fine control over the summary."
         >{compactWarning}</span>
+    {:else if autoCompactDisabledNudge}
+      <span
+        class="compact-warn"
+        data-tone={ctxPct >= 85 ? "red" : "yellow"}
+        title="Auto-compact is off in Settings → Conversation compaction. Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Enable a threshold to fire compaction automatically, or click the Compact button now."
+        >{autoCompactDisabledNudge}</span>
     {/if}
 
     {#if ctxTokens > 0}
@@ -854,6 +870,11 @@
     color: var(--warn);
     border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
     cursor: help;
+  }
+  .compact-warn[data-tone="red"] {
+    background: var(--danger-soft, color-mix(in oklch, var(--danger) 12%, transparent));
+    color: var(--danger);
+    border-color: color-mix(in oklch, var(--danger) 40%, var(--border));
   }
 
   .compact-btn {
