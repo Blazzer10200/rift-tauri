@@ -47,6 +47,45 @@ Write-Host "Version: $version (tag $tag)" -ForegroundColor Green
 # Pull the top `## v<version>` entry body. Only used if the top entry's
 # version matches the bumped version -- otherwise we'd ship stale notes from
 # a prior release. Silently skipped (warn only) if missing; release still ships.
+#
+# v0.4.26-alpha XML quirk: vpk pack embeds the raw markdown into the nuspec's
+# `<releaseNotes>` element. Velopack strips some non-ASCII chars (em-dash,
+# arrows) but passes Latin-1 supplement chars (e.g. multiplication sign U+00D7)
+# through unescaped, which trips the XmlReader on the read-back path (delta
+# build / setup wrap). v0.4.26 ship hit "Line 17, position 208 XmlException"
+# because of `1.15x` (the unicode multiplication sign) in the entry; workaround
+# used was `--delta None` + skip notes. Convert-ToAsciiSafe pre-strips to pure
+# ASCII so vpk has nothing tricky.
+#
+# Source is kept ASCII-only on purpose -- BOM-less .ps1 read as Win-1252 by
+# PS5.1 would mojibake literal multi-byte chars. \uXXXX regex escapes resolve
+# at .NET regex compile time, not at PS string-parse time, so the source bytes
+# stay ASCII.
+function Convert-ToAsciiSafe([string]$s) {
+    $s = $s -replace '\u2014', '--'   # em-dash
+    $s = $s -replace '\u2013', '-'    # en-dash
+    $s = $s -replace '\u2212', '-'    # minus sign
+    $s = $s -replace '\u2192', '->'   # right arrow
+    $s = $s -replace '\u2190', '<-'   # left arrow
+    $s = $s -replace '\u2194', '<->'  # left-right arrow
+    $s = $s -replace '\u00D7', 'x'    # multiplication sign (v0.4.26 culprit)
+    $s = $s -replace '\u00F7', '/'    # division sign
+    $s = $s -replace '\u2026', '...'  # horizontal ellipsis
+    $s = $s -replace '\u2018', "'"    # left single quote
+    $s = $s -replace '\u2019', "'"    # right single quote
+    $s = $s -replace '\u201C', '"'    # left double quote
+    $s = $s -replace '\u201D', '"'    # right double quote
+    $s = $s -replace '\u00A0', ' '    # non-breaking space
+    $s = $s -replace '\u00B7', '*'    # middle dot
+    $s = $s -replace '\u2022', '*'    # bullet
+    # Belt-and-suspenders: drop any remaining non-ASCII.
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($ch in $s.ToCharArray()) {
+        if ([int]$ch -lt 128) { [void]$sb.Append($ch) }
+    }
+    return $sb.ToString()
+}
+
 $releaseNotesFile = $null
 $changelogPath = 'docs/CHANGELOG.md'
 if (Test-Path $changelogPath) {
@@ -59,9 +98,20 @@ if (Test-Path $changelogPath) {
         if ($topVer -eq $version) {
             $body = $m.Groups['body'].Value.Trim()
             if ($body) {
+                $bodyAscii = Convert-ToAsciiSafe $body
+                # Sanity: synthesize the nuspec releaseNotes element + parse as
+                # XML before handing to vpk. Catches future char hazards fast,
+                # not after a 5-min build burns.
+                $probeXml = "<?xml version='1.0' encoding='utf-8'?><r>$([System.Security.SecurityElement]::Escape($bodyAscii))</r>"
+                try {
+                    [xml]$null = $probeXml
+                } catch {
+                    throw "Release notes failed XML sanity probe: $($_.Exception.Message)"
+                }
                 $releaseNotesFile = Join-Path ([System.IO.Path]::GetTempPath()) "rift-release-notes-$version.md"
-                [System.IO.File]::WriteAllText($releaseNotesFile, $body)
-                Write-Host "Release notes: top CHANGELOG entry ($($body.Length) chars)" -ForegroundColor Green
+                [System.IO.File]::WriteAllText($releaseNotesFile, $bodyAscii)
+                $delta = $body.Length - $bodyAscii.Length
+                Write-Host "Release notes: top CHANGELOG entry ($($bodyAscii.Length) chars, $delta non-ASCII stripped)" -ForegroundColor Green
             } else {
                 Write-Host "Warning: CHANGELOG entry for v$version has empty body -- skipping notes" -ForegroundColor Yellow
             }
@@ -146,7 +196,7 @@ if ($releaseNotesFile) {
     $packArgs += @('--releaseNotes', $releaseNotesFile)
 }
 # Optional: themed splash for the native Velopack installer dialog. Active
-# when `src-tauri/installer-splash.png` exists — drop a 560x140-ish PNG/GIF
+# when `src-tauri/installer-splash.png` exists -- drop a 560x140-ish PNG/GIF
 # matching the in-app theme there to swap the bland default.
 $splashPath = 'src-tauri/installer-splash.png'
 if (Test-Path $splashPath) {

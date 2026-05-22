@@ -457,7 +457,10 @@
           </div>
         {:else}
           {@const isLastNode = !isUser && unit.key === lastBlockKey}
-          {@const nodeStatus = streaming && isLastNode ? "pending" : unit.status}
+          {@const nodeStatus =
+            streaming && isLastNode && unit.status === "neutral"
+              ? "pending"
+              : unit.status}
           <div
             class="tl-node"
             data-kind={nodeKind(unit.block)}
