@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, X } from "lucide-svelte";
+  import { ChevronDown, Plus, X } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
@@ -141,6 +141,33 @@
     assistant.closePane(paneIdx);
   }
 
+  // Empty-pane actions — surface New chat / Close pane / Recent picks so
+  // an unassigned slot is actionable instead of just saying "No tab in this
+  // pane". Each handler focuses this pane first so newTab / openTab assigns
+  // here (both rely on focusedPaneIdx via assignFocusedPane).
+  function onEmptyNew() {
+    if (!focused) assistant.setFocusedPane(paneIdx);
+    void assistant.newTab();
+  }
+  function onEmptyClosePane() {
+    assistant.closePane(paneIdx);
+  }
+  function onEmptyOpenRecent(id: string) {
+    if (!focused) assistant.setFocusedPane(paneIdx);
+    void assistant.openTab(id);
+  }
+  // Skip convos already visible in another pane — moving a tab cross-pane
+  // from this picker would yank it from a pane the user can see.
+  const emptyRecents = $derived.by(() => {
+    if (tabId) return [];
+    const inPanes = new Set(
+      assistant.panes.map((p) => p.tabId).filter((x): x is string => !!x),
+    );
+    return assistant.conversations
+      .filter((c) => !inPanes.has(c.id))
+      .slice(0, 3);
+  });
+
   function onPaneDragOver(e: DragEvent) {
     // Always preventDefault when a tab is being dragged — without this on
     // BOTH dragenter and dragover, Chromium shows the "no-drop" cursor.
@@ -230,7 +257,38 @@
   <div class="scroll" bind:this={scrollEl} onscroll={onScroll}>
     {#if !tabId}
       <div class="pane-empty">
-        <div class="pane-empty-inner">No tab in this pane</div>
+        <div class="pane-empty-card">
+          <div class="pane-empty-title">Empty pane</div>
+          <div class="pane-empty-hint">
+            Start a chat, drag a tab from the bar, or close the pane.
+          </div>
+          <div class="pane-empty-actions">
+            <button class="btn primary sm" type="button" onclick={onEmptyNew}>
+              <Plus size={12}/> New chat
+            </button>
+            {#if assistant.panes.length > 1}
+              <button class="btn ghost sm" type="button" onclick={onEmptyClosePane}>
+                <X size={12}/> Close pane
+              </button>
+            {/if}
+          </div>
+          {#if emptyRecents.length > 0}
+            <div class="pane-empty-recent">
+              <div class="pane-empty-recent-label">RECENT</div>
+              {#each emptyRecents as c (c.id)}
+                <button
+                  class="pane-empty-recent-row"
+                  type="button"
+                  onclick={() => onEmptyOpenRecent(c.id)}
+                  title={c.title}
+                >
+                  <span class="pane-empty-recent-title">{c.title}</span>
+                  <span class="pane-empty-recent-meta">{c.messageCount} msg</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
     {:else if showEmpty}
       <EmptyState {needsAuth} {tabId} />
@@ -520,13 +578,78 @@
   .pane-empty {
     flex: 1;
     display: flex; align-items: center; justify-content: center;
-    color: var(--fg-faint);
-    font-size: var(--fs-sm);
+    padding: 24px;
   }
-  .pane-empty-inner {
-    padding: 14px 20px;
+  .pane-empty-card {
+    display: flex; flex-direction: column;
+    gap: 10px;
+    padding: 18px 20px;
     border: 1px dashed var(--border-strong);
-    border-radius: 10px;
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    max-width: 360px; width: 100%;
+  }
+  .pane-empty-title {
+    font-size: var(--fs-md);
+    color: var(--fg);
+    font-weight: 600;
+    text-align: center;
+  }
+  .pane-empty-hint {
+    font-size: var(--fs-sm);
+    color: var(--fg-muted);
+    text-align: center;
+    line-height: 1.45;
+  }
+  .pane-empty-actions {
+    display: flex; gap: 8px;
+    justify-content: center;
+    margin-top: 4px;
+  }
+  .pane-empty-recent {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    margin-top: 6px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .pane-empty-recent-label {
+    font-size: var(--fs-xs);
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    font-weight: 600;
+    margin-bottom: 2px;
+  }
+  .pane-empty-recent-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    text-align: left;
+    transition: background 100ms ease, border-color 100ms ease;
+  }
+  .pane-empty-recent-row:hover {
+    background: var(--surface-hover);
+    border-color: var(--border);
+  }
+  .pane-empty-recent-title {
+    flex: 1; min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pane-empty-recent-meta {
+    flex-shrink: 0;
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
   }
 
   .jump-latest {
