@@ -2,17 +2,15 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 135 — 2026-05-22 — Empty-pane UX (uncommitted, post-v0.4.23-alpha)
+## v0.4.25-alpha — 2026-05-22 — SHIPPED at 2502cd8 (S135 + S136 hotfix arc)
 
-**Reported:** post-update Rift looked "fucked up" — screenshot showed wide-but-short window (Win-snap), 2 panes with one empty showing useless "No tab in this pane" + History popover open over a 0-msg fresh tab.
+User installed v0.4.23-alpha → reported "fucked up" layout. Two real bugs surfaced + one misdiagnosis on the path.
 
-**Diagnosis.** Window-shortness was Windows Snap bypassing `minHeight: 800` — not a code bug. The visual confusion was the multi-pane orphan-empty state: 2 panes persisted but only 1 (or 0) tabs assigned → other pane stuck on the dead-end "No tab in this pane" string with no recovery action.
+- **S135** (v0.4.24-alpha @ ee2cfd7) — empty-pane UX. Orphan split-pane (no tab assigned) used to render the dead-end "No tab in this pane" string. Now an actionable card: `+ New chat` + `× Close pane` (when `panes.length > 1`) + `RECENT` quick-pick of top 3 convos not already mounted in a sibling pane. Handlers focus this pane first so `newTab`/`openTab` route through `assignFocusedPane`. CDP-verified all three actions. [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte).
+- **S136 misdiagnosis** (a600d54) — assumed user's wide-but-short window was Windows Snap state and added `setSize+center` clamp on mount. Wrong: the window was full-size; the *layout* was collapsing inside it. Reverted.
+- **S136 actual** (v0.4.25-alpha @ cfb1087) — `.shell` layout-collapse. Prod builds intermittently resolved the percentage chain `body 100% → app.html wrapper display:contents → .shell 100%` to auto-height, leaving the bottom of the window blank below StatusBar. Fix: `.shell` switched from `height: 100%` to `position: fixed; inset: 0`. `body.win-maximized` 8px padding moved onto `.shell` as `inset: 8px` since body padding doesn't push fixed children. [AppShell.svelte](src/lib/components/AppShell.svelte) + [app.css](src/app.css).
 
-**Fix.** [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte) — replaced the orphan empty state w/ an actionable card: `+ New chat` (primary) + `× Close pane` (ghost, only when panes.length > 1) + a `RECENT` quick-pick listing the last 3 conversations not already mounted in another pane. Each handler focuses this pane first so `newTab`/`openTab` route through `assignFocusedPane` → land in the empty slot. Filters out convos already in sibling panes to avoid cross-pane tab-yank.
-
-**Verify.** `npm run check` 0/0. CDP-verified: empty-pane card renders w/ correct copy, `New chat` mints a tab into this pane (panes 2→2, tabs 1→2), `Close pane` collapses (panes 2→1), Recent-row click opens the convo here (panes 2→2, tabs 1→2). Visual snapshot via `shot-sel .pane-empty-card` confirmed.
-
-**Not bumped.** v0.4.23-alpha just shipped 0ec2cc5. User can `/git-ship` as 0.4.24-alpha when ready.
+User confirmed fix landed live after Velopack pulled v0.4.25-alpha delta.
 
 ---
 
@@ -30,18 +28,17 @@ Full detail in CHANGELOG. One-liners:
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.23-alpha** shipped (0ec2cc5). S135 empty-pane UX fix uncommitted on top. Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.25-alpha** shipped (2502cd8). Working tree clean. Tauri 2 + Svelte 5 + Rust + russh.
 
 **Smoke gate (open — clear before next ship):**
 - S129 banner: drop network 90s, edit file, push → banner should go red + Reconnect
 - S131 Shiki: send ` ```rust ` fenced block → confirm header bar + syntax highlight
 - S132 splash: cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
 - S133 Whisper FFI: `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`. CPU first, CUDA pass second (`whisper-cuda` feature).
-- S135 empty-pane: cold-launch w/ 2-pane persisted state → verify new card renders, buttons work
 - S124 items (auto-compact, ctx stats) still in gate
 
 **Next code lanes:**
-1. Smoke gate → `/git-ship` v0.4.24-alpha (includes S135)
+1. Smoke gate → ship next batch
 2. Wave-2 audit bugs: #146 `mutateStreaming` O(n) rebuild (HIGH), #147 thinking dedup, #148 tab-switch race, #149 delete/openTab race
 3. Files diff-dot per row (backend `drift_scanner` per-row verdict cmd needed)
 4. Refactor queue: split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
@@ -68,3 +65,4 @@ Full detail in CHANGELOG. One-liners:
 - **`tauri.conf.json` `dragDropEnabled: false`** — removing breaks cross-region HTML5 DnD. Rift has no file-drop Tauri events, cost = zero.
 - **AssistantPane drop handlers on `.pane` outer div only** — never move to inner `.drop-zone` overlays; loses the continuous-preventDefault chain.
 - **`compactionHistory[]` field name is camelCase** in persisted JSON (`compactionHistory`, not `compaction_history`) — Rust extracts via `Value::get("compactionHistory")` in `assistant_list_conversations`. Don't rename.
+- **`.shell` MUST be `position: fixed; inset: 0`** (AppShell.svelte) — `height: 100%` chain via app.html's `display: contents` wrapper collapses in prod. `body.win-maximized .shell { inset: 8px }` compensates for the borderless-maximized invisible-frame.
