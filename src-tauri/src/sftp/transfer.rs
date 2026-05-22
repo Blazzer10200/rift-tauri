@@ -248,6 +248,34 @@ impl SftpClient {
 
 
 
+/// russh / russh-sftp error fragments that mean "the SSH transport itself is
+/// broken — no further ops on this session can succeed." Distinct from
+/// per-file errors (perms / missing path) which are retryable, and from
+/// `with_t` timeouts which already emit `ConnectionWedged` directly.
+///
+/// Observed in the wild (2026-05-21 incident): after ~13h of dev uptime, the
+/// russh session went stale (likely server `ClientAliveInterval` timeout or
+/// network blip killing TCP keepalive). Every subsequent op failed with
+/// "Channel send error" — the underlying mpsc to the russh worker task is
+/// closed. Without this detection, `format_sftp_err` returned the raw string
+/// and the engine treated each file as an independent failure, piling up
+/// 35 silent retries instead of surfacing a single "Reconnect" affordance.
+pub(crate) fn is_dead_session_error(s: &str) -> bool {
+    const MARKERS: &[&str] = &[
+        "Channel send error",       // russh mpsc to connection task closed
+        "channel was closed",       // russh channel handle dropped
+        "Connection reset",         // OS-level TCP reset
+        "connection reset",
+        "Broken pipe",              // OS-level pipe broken on write
+        "broken pipe",
+        "Transport error",          // russh transport-layer failure
+        "EOF reached",              // russh saw clean close mid-op
+        "session is closed",        // russh-sftp session handle dropped
+        "Operation timed out",      // Some platforms surface keepalive-fail this way
+    ];
+    MARKERS.iter().any(|m| s.contains(m))
+}
+
 fn format_sftp_err(op: &str, target: &str, err: impl std::fmt::Display) -> String {
     let raw = err.to_string();
     // Collapse "X: X" duplicates russh-sftp emits.
@@ -255,7 +283,22 @@ fn format_sftp_err(op: &str, target: &str, err: impl std::fmt::Display) -> Strin
         Some((a, b)) if a == b => a.to_string(),
         _ => raw.clone(),
     };
-    if cleaned.contains("Permission denied") || cleaned.contains("permission denied") {
+    if is_dead_session_error(&cleaned) {
+        // Mirror the `with_t` timeout path — emit ConnectionWedged so the UI
+        // surfaces a Reconnect affordance instead of just another upload-fail
+        // toast. The engine layer (flush.rs) also sniffs `is_dead_session_error`
+        // on this returned string to bail the rest of the batch + park the
+        // engine in Error state with a "Reconnect to recover" detail.
+        let msg = format!("{op} {target}: SSH session dead ({cleaned}) — reconnect required");
+        crate::diagnostics::emit_for(
+            crate::diagnostics::DiagStage::ConnectionWedged,
+            crate::diagnostics::DiagLevel::Error,
+            None,
+            Some(target),
+            &msg,
+        );
+        msg
+    } else if cleaned.contains("Permission denied") || cleaned.contains("permission denied") {
         format!(
             "{op} {target}: permission denied — your SSH user can't write here. \
 Server admin: sudo chgrp -R <shared-group> <parent dir> && sudo chmod -R g+w <parent dir> \

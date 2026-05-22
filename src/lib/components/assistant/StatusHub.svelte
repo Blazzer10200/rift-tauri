@@ -103,7 +103,7 @@
     margin: 0 1px -1px;
     font-size: var(--fs-xs);
     color: var(--fg-2);
-    animation: hub-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: enter 180ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .hub :global(.spin) {
     color: var(--accent);
@@ -131,10 +131,6 @@
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
-  }
-  @keyframes hub-in {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
   }
   @media (prefers-reduced-motion: reduce) {
     .hub, .hub-label, .hub :global(.spin) { animation: none; }

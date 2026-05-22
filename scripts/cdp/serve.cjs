@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// serve.js - Long-running CDP wrapper for Rift's WebView2.
+// serve.cjs - Long-running CDP wrapper for Rift's WebView2.
 //
 // Holds one persistent WebSocket to WebView2 on localhost:9222, exposes a
 // small HTTP API on localhost:9223 so Claude (from a bash session) can fire
@@ -7,15 +7,19 @@
 // cold start per call.
 //
 // Endpoints:
-//   GET  /health                          -> { ok, target }
-//   POST /eval     { js, timeoutMs? }     -> { value | error }
-//   POST /type     { selector, text, key? } -> { ok, len }
-//   POST /click    { selector }           -> { ok }
+//   GET  /health                              -> { ok, target, pingMs }
+//   POST /eval     { js, timeoutMs? }         -> { value | error }
+//   POST /type     { selector, text, key? }   -> { ok, len }
+//   POST /click    { selector }               -> { ok }
 //   POST /wait     { js, timeoutMs?, intervalMs? } -> { value, polls, elapsedMs }
-//   POST /screenshot { format?, quality?, clip? } -> { path, bytes }
-//   GET  /state                           -> assistant-state snapshot
+//   POST /screenshot { format?, quality?, clip?, selector? } -> { path, bytes }
+//   POST /key      { key, modifiers? }        -> { ok, key }
+//   GET  /state                               -> assistant-state snapshot (incl. workspaceActiveId)
+//   GET  /page                                -> generic page snapshot
+//   POST /batch    { ops, parallel? }         -> { results, elapsedMs }
+//   POST /shutdown                            -> { ok }
 //
-// Usage: node scripts/cdp/serve.js  (or via npm run cdp:serve)
+// Usage: node scripts/cdp/serve.cjs  (or via npm run cdp:serve)
 // Stop:  Ctrl+C in its window, or POST /shutdown.
 
 const http = require('node:http');
@@ -26,6 +30,7 @@ const CDP_HOST = process.env.RIFT_CDP_HOST || 'localhost';
 const CDP_PORT = process.env.RIFT_CDP_PORT || '9222';
 const API_PORT = Number(process.env.RIFT_CDP_API_PORT || 9223);
 const TMP_DIR = path.join(__dirname, '.tmp');
+const TMP_KEEP = Number(process.env.RIFT_CDP_TMP_KEEP || 20);
 
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -33,44 +38,81 @@ let ws = null;
 let wsConnecting = null;
 let targetInfo = null;
 let nextId = 1;
-const pending = new Map(); // id -> { resolve, reject, deadline }
+let snapSeq = 0;
+const pending = new Map(); // id -> { resolve, reject }
+
+// Prune snap-*.{jpeg,png,webp} in .tmp/ to the N newest by mtime. Whitelist-
+// scoped on filename so stress.sh / stress_agentic.sh and any other ext stay.
+function pruneTmp(keep = TMP_KEEP) {
+    let snaps;
+    try {
+        snaps = fs.readdirSync(TMP_DIR)
+            .filter(f => /^snap-.*\.(jpeg|jpg|png|webp)$/i.test(f))
+            // sort newest first — slice(keep) drops the oldest tail.
+            .map(f => ({ f, m: fs.statSync(path.join(TMP_DIR, f)).mtimeMs }))
+            .sort((a, b) => b.m - a.m);
+    } catch (e) { return; }
+    let removed = 0;
+    for (const { f } of snaps.slice(keep)) {
+        try { fs.unlinkSync(path.join(TMP_DIR, f)); removed++; } catch {}
+    }
+    if (removed) console.log(`[cdp/serve] pruned ${removed} old snap-* (kept ${Math.min(keep, snaps.length)})`);
+}
 
 async function getTarget() {
-    const res = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json`);
-    if (!res.ok) throw new Error(`CDP /json HTTP ${res.status}`);
-    const list = await res.json();
-    // Pick the Rift page, not DevTools window (also type=page when user has F12 open).
-    const isRift = (t) =>
-        t.type === 'page' &&
-        !/^devtools:\/\//.test(t.url || '') &&
-        !/^DevTools\b/.test(t.title || '');
-    const page = list.find(isRift) || list.find(t => t.type === 'page');
-    if (!page) throw new Error('no page target in CDP list');
-    return page;
+    let lastErr;
+    for (let i = 0; i < 3; i++) {
+        try {
+            const res = await fetch(`http://${CDP_HOST}:${CDP_PORT}/json`);
+            if (!res.ok) throw new Error(`CDP /json HTTP ${res.status}`);
+            const list = await res.json();
+            // Pick the Rift page, not DevTools window (also type=page when user has F12 open).
+            const isRift = (t) =>
+                t.type === 'page' &&
+                !/^devtools:\/\//.test(t.url || '') &&
+                !/^DevTools\b/.test(t.title || '');
+            const page = list.find(isRift) || list.find(t => t.type === 'page');
+            if (!page) throw new Error('no page target in CDP list');
+            return page;
+        } catch (e) {
+            lastErr = e;
+            if (i < 2) await new Promise(r => setTimeout(r, 500));
+        }
+    }
+    throw lastErr;
+}
+
+function onMessage(ev) {
+    let frame;
+    try { frame = JSON.parse(ev.data); } catch { return; }
+    if (frame.id && pending.has(frame.id)) {
+        const p = pending.get(frame.id);
+        pending.delete(frame.id);
+        p.resolve(frame);
+    }
+}
+
+function onClose() {
+    for (const [, p] of pending) p.reject(new Error('ws closed before response'));
+    pending.clear();
+    ws = null;
 }
 
 async function connect() {
     if (ws && ws.readyState === WebSocket.OPEN) return;
     if (wsConnecting) return wsConnecting;
-    wsConnecting = (async () => {
+    const attempt = (async () => {
         targetInfo = await getTarget();
-        ws = new WebSocket(targetInfo.webSocketDebuggerUrl);
+        const sock = new WebSocket(targetInfo.webSocketDebuggerUrl);
         await new Promise((resolve, reject) => {
-            ws.addEventListener('open', resolve, { once: true });
-            ws.addEventListener('error', reject, { once: true });
+            sock.addEventListener('open', resolve, { once: true });
+            sock.addEventListener('error', reject, { once: true });
         });
-        ws.addEventListener('message', (ev) => {
-            let frame;
-            try { frame = JSON.parse(ev.data); } catch { return; }
-            if (frame.id && pending.has(frame.id)) {
-                const p = pending.get(frame.id);
-                pending.delete(frame.id);
-                p.resolve(frame);
-            }
-        });
-        ws.addEventListener('close', () => { ws = null; });
-        wsConnecting = null;
+        sock.addEventListener('message', onMessage);
+        sock.addEventListener('close', onClose);
+        ws = sock;
     })();
+    wsConnecting = attempt.finally(() => { wsConnecting = null; });
     return wsConnecting;
 }
 
@@ -82,7 +124,10 @@ function cdp(method, params = {}, timeoutMs = 30000) {
             pending.delete(id);
             reject(new Error(`CDP ${method} timeout after ${timeoutMs}ms`));
         }, timeoutMs);
-        pending.set(id, { resolve: (r) => { clearTimeout(timer); resolve(r); }, reject });
+        pending.set(id, {
+            resolve: (r) => { clearTimeout(timer); resolve(r); },
+            reject: (e) => { clearTimeout(timer); reject(e); },
+        });
         ws.send(JSON.stringify({ id, method, params }));
     });
 }
@@ -149,14 +194,30 @@ async function waitFor({ js, timeoutMs = 60000, intervalMs = 200 }) {
     return { error: 'timeout', polls, elapsedMs: Date.now() - start };
 }
 
-async function screenshot({ format = 'jpeg', quality = 65, clip } = {}) {
+async function screenshot({ format = 'jpeg', quality = 65, clip, selector } = {}) {
+    // Selector → CSS-pixel rect via getBoundingClientRect, then clip. CDP spec:
+    // Page.Viewport requires {x,y,width,height,scale}; coords are CSS pixels
+    // (Page.getLayoutMetrics — cssLayoutViewport is "in CSS pixels", clip uses
+    // same convention). https://chromedevtools.github.io/devtools-protocol/tot/Page/#type-Viewport
+    if (selector && !clip) {
+        const r = await evalJs(`(() => {
+            const el = document.querySelector(${JSON.stringify(selector)});
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) return null;
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+        })()`);
+        if (!r.value) throw new Error(`selector not found or zero-size: ${selector}`);
+        clip = r.value;
+    }
     const params = { format };
     if (format !== 'png') params.quality = quality;
-    if (clip) params.clip = { ...clip, scale: clip.scale || 1 };
+    if (clip) params.clip = { x: clip.x, y: clip.y, width: clip.width, height: clip.height, scale: clip.scale || 1 };
     const resp = await cdp('Page.captureScreenshot', params, 15000);
     if (!resp.result?.data) throw new Error('CDP returned no data');
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filePath = path.join(TMP_DIR, `snap-${ts}.${format}`);
+    // ms precision + monotonic counter — parallel /batch screenshots must not collide.
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);
+    const filePath = path.join(TMP_DIR, `snap-${ts}-${++snapSeq}.${format}`);
     const buf = Buffer.from(resp.result.data, 'base64');
     fs.writeFileSync(filePath, buf);
     return { path: filePath, bytes: buf.length };
@@ -183,8 +244,11 @@ async function assistantState() {
             });
             const modelPill = document.querySelector('.assistant .model-pill, [class*=model-pill]');
             const streaming = !!document.querySelector('[data-streaming], .assistant [class*=streaming]');
+            // workspace.svelte.ts stores ACTIVE_KEY as a bare string, not JSON.
+            const workspaceActiveId = localStorage.getItem('rift.ui.workspace.v1');
             return {
                 onAssistant: tab?.className?.includes('active') || !!document.querySelector('.assistant'),
+                workspaceActiveId,
                 model: modelPill?.textContent?.trim() || null,
                 textareaValue: ta?.value || '',
                 bubbleCount: bubbles.length,
@@ -196,6 +260,17 @@ async function assistantState() {
         })()
     `;
     return evalJs(js);
+}
+
+// Generic "where am I" snapshot — works on every workspace, not just chat.
+async function pageState() {
+    return evalJs(`
+        (() => {
+            // workspace.svelte.ts stores ACTIVE_KEY as a bare string, not JSON.
+            const workspaceActiveId = localStorage.getItem('rift.ui.workspace.v1');
+            return { workspaceActiveId, pathname: location.pathname, title: document.title, ts: Date.now() };
+        })()
+    `);
 }
 
 // Trusted key dispatch via CDP Input domain. Synthetic JS KeyboardEvent
@@ -237,6 +312,23 @@ async function pressKey({ key, modifiers = 0 }) {
     return { ok: true, key };
 }
 
+// /batch dispatcher — CDP is fully multiplexed by id (commands are demuxed in
+// onMessage), so parallel:true is safe for read/action commands. Default
+// sequential to preserve type→wait dependency semantics.
+async function runOp({ op, params = {} }) {
+    switch (op) {
+        case 'eval': return evalJs(params.js, params.timeoutMs);
+        case 'type': return typeText(params);
+        case 'click': return click(params.selector);
+        case 'wait': return waitFor(params);
+        case 'key': return pressKey(params);
+        case 'screenshot': return screenshot(params);
+        case 'state': return assistantState();
+        case 'page': return pageState();
+        default: return { error: `unknown op: ${op}` };
+    }
+}
+
 // --- HTTP server ---
 function readJson(req) {
     return new Promise((resolve, reject) => {
@@ -249,8 +341,13 @@ function readJson(req) {
 
 const routes = {
     'GET /health': async () => {
-        try { const t = await getTarget(); return { ok: true, target: t.url, title: t.title, wsOpen: ws?.readyState === WebSocket.OPEN }; }
-        catch (e) { return { ok: false, error: e.message }; }
+        try {
+            const t = await getTarget();
+            const t0 = Date.now();
+            const r = await cdp('Runtime.evaluate', { expression: '1', returnByValue: true }, 3000);
+            const ok = r.result?.result?.value === 1;
+            return { ok, target: t.url, title: t.title, pingMs: Date.now() - t0, wsOpen: ws?.readyState === WebSocket.OPEN };
+        } catch (e) { return { ok: false, error: e.message }; }
     },
     'POST /eval': async (body) => evalJs(body.js, body.timeoutMs),
     'POST /type': async (body) => typeText(body),
@@ -259,6 +356,20 @@ const routes = {
     'POST /screenshot': async (body) => screenshot(body),
     'POST /key': async (body) => pressKey(body),
     'GET /state': async () => assistantState(),
+    'GET /page': async () => pageState(),
+    'POST /batch': async ({ ops = [], parallel = false }) => {
+        const t0 = Date.now();
+        let results;
+        if (parallel) {
+            results = await Promise.all(ops.map(o => runOp(o).catch(e => ({ error: e.message }))));
+        } else {
+            results = [];
+            for (const o of ops) {
+                try { results.push(await runOp(o)); } catch (e) { results.push({ error: e.message }); }
+            }
+        }
+        return { results, elapsedMs: Date.now() - t0 };
+    },
     'POST /shutdown': async () => { setTimeout(() => process.exit(0), 100); return { ok: true }; },
 };
 
@@ -284,6 +395,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(API_PORT, '127.0.0.1', () => {
     console.log(`[cdp/serve] listening on http://127.0.0.1:${API_PORT}`);
     console.log(`[cdp/serve] target: WebView2 CDP on ${CDP_HOST}:${CDP_PORT}`);
+    pruneTmp();
     connect().then(() => console.log(`[cdp/serve] ws connected -> ${targetInfo.url}`))
         .catch(e => console.log(`[cdp/serve] ws connect failed: ${e.message} (will retry on first request)`));
 });

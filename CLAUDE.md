@@ -17,8 +17,7 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Audit fix-log (historical) | `docs/archive/AUDIT-fix-log.md` (S81-S86 + Codex passes) |
-| Design briefs | `docs/design/` (1 active: `assistant-compaction.md`; shipped briefs in `docs/archive/design/`) |
+| Design briefs | `docs/design/` (3 active: `assistant-compaction.md`, `git-rcon-tools.md`, `ui-audit-2026-05-21.md`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
@@ -57,7 +56,7 @@ Only `operator` + `recon` are defined as local subagents. `architect` / `scout` 
 |---|---|---|
 | `sync/`, `sftp/` multi-file changes | **operator** | Coupled state across watcher + queue + transport |
 | `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `update_service.rs` | inline | All <400 lines, single-file edits typical |
-| Svelte/TS / Rust symbol lookup | inline + cclsp | LSP covers TS/JS/Rust |
+| Svelte/TS / Rust symbol lookup | inline + LSP tool | TS/JS native; Rust via `rust-analyzer-lsp` plugin (installed 2026-05-21). Svelte: no LSP — grep + `/check` (skipped Piebald `svelte-lsp` — needs tweakcc patch) |
 | "Where does X live" (LSP miss) | **recon** | Terse `path:line :: snippet` output |
 | IPC contract change, tradeoff calls | inline (or `Plan` skill for multi-track) | Built-in `architect` agent is available but heavyweight; usually inline reasoning is enough |
 | Tauri 2 / russh / Velopack docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
@@ -76,8 +75,8 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 
 1. `scripts/run-dev.bat` already sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Always start dev via this batch (not raw `npm run tauri dev`) so CDP is exposed.
 2. Start the wrapper once per dev session: `npm run cdp:serve` (background). It holds one persistent ws to WebView2 and exposes `127.0.0.1:9223`. ~40-60ms per call.
-3. Drive via `bash scripts/cdp/c.sh {health|state|eval|type|click|wait|shot|shutdown}`. Full docs: `scripts/cdp/README.md`.
-4. **`shot` workflow** — `bash scripts/cdp/c.sh shot jpeg 65` writes to `scripts/cdp/.tmp/snap-*.jpeg` and returns the path. `Read` the path; image renders inline (multimodal). ~$0.07/shot at Opus 4.7 rates.
+3. Drive via `bash scripts/cdp/c.sh {health|state|page|eval|type|click|wait|shot|shot-sel|batch|key|shutdown}`. Full docs: `scripts/cdp/README.md`.
+4. **`shot` workflow** — `bash scripts/cdp/c.sh shot` prints just the path on stdout (use `--json` for `{path,bytes}`). `f=$(bash scripts/cdp/c.sh shot)` → `Read` $f; image renders inline (multimodal). `shot-sel "<selector>"` clips to a bounding rect. Server auto-prunes `.tmp/snap-*` to last 20 on boot. ~$0.07/shot at Opus 4.7 rates.
 5. **DOM vs shot decision table — DON'T skip the shot when these triggers fire:**
 
    | Trigger | Tool | Why |

@@ -643,7 +643,10 @@
 
     <StatusHub {tabId} />
     <div class="composer" class:streaming={streaming}>
-      {#if stt.config.enabled && stt.supported}
+      {#if stt.config.enabled && (
+        (stt.config.engine === "web_speech" && stt.supported) ||
+        (stt.config.engine === "whisper" && stt.backendAvailable)
+      )}
       <button
         class="micbtn"
         class:recording={stt.recording}
@@ -651,7 +654,11 @@
         type="button"
         onclick={toggleMic}
         disabled={micBusy || stt.transcribing}
-        title={stt.recording ? "Stop recording" : stt.transcribing ? "Transcribing…" : "Dictate (speech-to-text)"}
+        title={
+          stt.recording ? "Stop recording" :
+          stt.transcribing ? "Transcribing…" :
+          stt.config.engine === "whisper" ? "Dictate (Whisper, local)" : "Dictate (Web Speech)"
+        }
         aria-label={stt.recording ? "Stop recording" : "Start recording"}
       >
         {#if stt.transcribing}

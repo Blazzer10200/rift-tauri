@@ -1,13 +1,28 @@
 // Speech-to-text state.
 //
-// Uses the browser's Web Speech API (WebView2 ships Edge's Azure-backed
-// recogniser). Live interim text streams into the composer as the user
-// speaks; the final committed transcript replaces interim segments segment-
-// by-segment. No Rust-side audio capture or model — only settings are
-// persisted backend-side via `stt_get_config` / `stt_set_config`.
+// Two engines, same public surface (composer wires `recording` /
+// `transcribing` / `lastError` / `start` / `stop` / `cancel` / `consume`
+// without caring which engine is active):
+//
+//   • engine="web_speech" (default, legacy) — WebView2's built-in
+//     SpeechRecognition (Azure-backed when online). 100% in-browser, no
+//     backend round-trips. Settings persisted via `stt_get/set_config`.
+//
+//   • engine="whisper" — Rust-side cpal mic capture, webrtc-vad gating,
+//     whisper.cpp inference, optional Claude Haiku polish. Driven over
+//     Tauri IPC (`stt_start_recording` / `stt_stop_recording`); partial +
+//     final text arrives via `stt://partial` / `stt://final` events. The
+//     same `composeDraft` path feeds them into the composer so the live-
+//     typing UX matches Web Speech's interim/final segment behaviour.
+//
+// Switching engines mid-session is allowed — `setConfig({engine})` aborts
+// any in-flight recording before the new engine takes over.
 
 import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { assistant } from "./assistant.svelte";
+
+export type SttEngine = "web_speech" | "whisper";
 
 export type SttConfig = {
   enabled: boolean;
@@ -15,7 +30,38 @@ export type SttConfig = {
   append_to_draft: boolean;
   continuous: boolean;
   show_interim: boolean;
+  engine: SttEngine;
+  whisper_model: string;
+  input_device: string | null;
+  initial_prompt: string;
+  vocab_text: string;
+  cleanup_enabled: boolean;
 };
+
+export type ModelInfo = {
+  id: string;
+  display_name: string;
+  filename: string;
+  approx_size_bytes: number;
+  on_disk_bytes: number | null;
+  downloaded: boolean;
+  path: string | null;
+  sha256: string | null;
+};
+
+export type DownloadProgress = {
+  model: string;
+  downloaded: number;
+  total: number;
+  phase: "start" | "progress" | "done" | "error";
+  message: string | null;
+};
+
+export type SttState =
+  | "idle"
+  | "loading_model"
+  | "recording"
+  | "transcribing";
 
 type SpeechRecognitionAlternative = { transcript: string; confidence: number };
 type SpeechRecognitionResult = {
@@ -62,41 +108,48 @@ class SttStore {
     append_to_draft: true,
     continuous: true,
     show_interim: true,
+    engine: "web_speech",
+    whisper_model: "large-v3-turbo-q5_0",
+    input_device: null,
+    initial_prompt: "",
+    vocab_text: "",
+    cleanup_enabled: true,
   });
   configLoaded = $state(false);
 
-  /** Whether the WebView exposes a SpeechRecognition implementation. */
+  /** Web Speech API availability in the current WebView. */
   supported = $state(false);
+  /** True if the Whisper Rust backend was compiled in (default: false until
+   *  the user installs LLVM + rebuilds with `--features whisper-rs`). */
+  backendAvailable = $state(false);
   recording = $state(false);
   /** True while we've stopped but final results may still arrive. */
   transcribing = $state(false);
   lastError = $state<string | null>(null);
   lastTranscript = $state<string>("");
+  /** Backend lifecycle state, mirrored from `stt://state` events. */
+  currentState = $state<SttState>("idle");
 
+  // Whisper-specific reactive state.
+  models = $state<ModelInfo[]>([]);
+  modelDownloads = $state<Record<string, DownloadProgress>>({});
+  inputDevices = $state<string[]>([]);
+
+  // --- Private fields ---
   private recognition: SpeechRecognitionInstance | null = null;
   private initStarted = false;
-  // Composer draft snapshot at the moment recording started — interim +
-  // final transcripts are concatenated onto this so a partway result doesn't
-  // wipe what the user typed before talking.
   private baseDraft = "";
-  // Accumulated final-only transcript across the current recording session.
   private finalText = "";
-  // Set true when the composer has consumed the current draft (send / slash
-  // fire). Late-arriving onResult / onEnd writes are dropped until the next
-  // start() — otherwise queued finals re-paste what the user just sent.
   private consumed = false;
-  // Watchdog timer for the post-stop "transcribing" window. Some WebView2
-  // builds never fire onend after stop() if no finals are pending; without
-  // this the mic button stays disabled forever.
   private transcribeTimer: ReturnType<typeof setTimeout> | null = null;
-  // Debounce token for setConfig-driven restart — prevents double-start
-  // when the user toggles multiple options in quick succession.
   private restartToken = 0;
+  private unlisten: UnlistenFn[] = [];
 
   async init() {
     if (this.initStarted) return;
     this.initStarted = true;
     this.supported = getSRCtor() !== null;
+
     try {
       this.config = await invoke<SttConfig>("stt_get_config");
       this.configLoaded = true;
@@ -104,9 +157,64 @@ class SttStore {
       console.debug("[stt] load config failed:", e);
       this.configLoaded = true;
     }
+
+    try {
+      this.backendAvailable = await invoke<boolean>("stt_backend_available");
+    } catch (e) {
+      console.debug("[stt] backend availability probe failed:", e);
+      this.backendAvailable = false;
+    }
+
+    // Subscribe to backend events. Always subscribe — engine can be flipped
+    // at runtime so we want listeners ready before the first start().
+    try {
+      this.unlisten.push(
+        await listen<{ text: string }>("stt://partial", (ev) => this.onBackendPartial(ev.payload.text)),
+      );
+      this.unlisten.push(
+        await listen<{ text: string; raw: string; cleaned: boolean }>("stt://final", (ev) =>
+          this.onBackendFinal(ev.payload.text),
+        ),
+      );
+      this.unlisten.push(
+        await listen<{ state: SttState; message: string | null }>("stt://state", (ev) => {
+          this.currentState = ev.payload.state;
+          if (ev.payload.state === "transcribing") this.transcribing = true;
+          if (ev.payload.state === "recording") {
+            this.recording = true;
+            this.transcribing = false;
+          }
+          if (ev.payload.state === "idle") {
+            this.recording = false;
+            this.transcribing = false;
+          }
+        }),
+      );
+      this.unlisten.push(
+        await listen<{ code: string; message: string }>("stt://error", (ev) => {
+          this.lastError = ev.payload.message;
+          console.debug("[stt] backend error:", ev.payload);
+        }),
+      );
+      this.unlisten.push(
+        await listen<DownloadProgress>("stt://download_progress", (ev) => {
+          this.modelDownloads = { ...this.modelDownloads, [ev.payload.model]: ev.payload };
+          if (ev.payload.phase === "done") {
+            void this.refreshModels();
+          }
+        }),
+      );
+    } catch (e) {
+      console.debug("[stt] event subscribe failed:", e);
+    }
+
+    // Best-effort initial loads for the Settings panel — failures are non-fatal.
+    void this.refreshModels();
+    void this.refreshInputDevices();
   }
 
   async setConfig(patch: Partial<SttConfig>) {
+    const prevEngine = this.config.engine;
     const next: SttConfig = { ...this.config, ...patch };
     this.config = next;
     try {
@@ -114,9 +222,17 @@ class SttStore {
     } catch (e) {
       this.lastError = `Save settings failed: ${e}`;
     }
-    if (this.recording && this.recognition) {
-      // Restart recognition so language/continuous/interim changes take
-      // effect. Debounced via token so rapid toggles don't double-start.
+
+    // Engine switch mid-recording — hard-cancel the in-flight session under
+    // the OLD engine before letting the new one take over.
+    if (patch.engine && patch.engine !== prevEngine && this.recording) {
+      await this.cancel();
+      return;
+    }
+
+    // Web Speech only: restart recogniser so language/continuous/interim
+    // changes take effect mid-session. Whisper picks up config on next start().
+    if (next.engine === "web_speech" && this.recording && this.recognition) {
       const token = ++this.restartToken;
       this.recognition.abort();
       this.recording = false;
@@ -126,13 +242,13 @@ class SttStore {
     }
   }
 
-  /** Composer-side hook: the current draft was just sent / cleared. Hard-
-   *  stops the recogniser so the mic doesn't keep recording after send, and
-   *  drops the transcript baseline so any in-flight late finals can't re-
-   *  paste the just-sent text. `consumed=true` is a belt-and-suspenders
-   *  guard for onResult/onEnd, but abort() is what actually releases the mic. */
+  /** Composer-side hook: the current draft was just sent / cleared. */
   consume() {
-    if (this.recognition) {
+    if (this.config.engine === "whisper") {
+      // Fire-and-forget — the backend's drop-on-stop preserves any in-flight
+      // partials but stops emitting new ones.
+      void invoke("stt_stop_recording").catch(() => {});
+    } else if (this.recognition) {
       try {
         this.recognition.abort();
       } catch {
@@ -151,30 +267,45 @@ class SttStore {
 
   /** Begin live recognition. Returns false if unavailable / disabled. */
   async start(): Promise<boolean> {
-    if (!this.supported) {
-      this.lastError = "Speech recognition is not available in this WebView.";
-      return false;
-    }
     if (!this.config.enabled) {
       this.lastError = "Speech-to-text is disabled. Enable it in Settings → Speech.";
       return false;
     }
     if (this.recording) return true;
-    const Ctor = getSRCtor();
-    if (!Ctor) return false;
     this.lastError = null;
     this.baseDraft = this.config.append_to_draft ? assistant.composerDraft : "";
     this.finalText = "";
     this.consumed = false;
     this.clearTranscribeTimer();
 
+    if (this.config.engine === "whisper") {
+      if (!this.backendAvailable) {
+        this.lastError =
+          "Whisper backend not built. Install LLVM + rebuild with --features whisper-rs (see Settings → Speech for details).";
+        return false;
+      }
+      try {
+        await invoke("stt_start_recording", { model: this.config.whisper_model });
+        // `recording` flips to true once the `stt://state: recording` event arrives.
+        return true;
+      } catch (e) {
+        this.lastError = `Could not start whisper recording: ${e}`;
+        return false;
+      }
+    }
+
+    // --- Web Speech path (unchanged) ---
+    if (!this.supported) {
+      this.lastError = "Speech recognition is not available in this WebView.";
+      return false;
+    }
+    const Ctor = getSRCtor();
+    if (!Ctor) return false;
+
     const r = new Ctor();
     r.lang = this.config.language || "en-US";
     r.continuous = this.config.continuous;
     r.interimResults = this.config.show_interim;
-    // S91: request 3 alternates so onResult can pick the highest-confidence
-    // variant. WebView2's Azure backend sometimes ranks a cleaner alternate
-    // above the slurred primary; defaulting to alt[0] missed those wins.
     r.maxAlternatives = 3;
     r.onstart = () => {
       this.recording = true;
@@ -195,16 +326,28 @@ class SttStore {
     }
   }
 
-  /** End live recognition. Final results that are already queued still fire
-   *  before `onend`; we return the committed transcript via `lastTranscript`. */
+  /** End live recognition. */
   async stop(): Promise<string> {
+    if (this.config.engine === "whisper") {
+      if (!this.recording && !this.transcribing) return this.lastTranscript;
+      try {
+        this.transcribing = true;
+        const final = await invoke<string>("stt_stop_recording");
+        // The `stt://final` event also fires; we treat the invoke return as
+        // the authoritative result and ignore the event if it lands first.
+        return final;
+      } catch (e) {
+        this.lastError = `Stop whisper recording failed: ${e}`;
+        this.recording = false;
+        this.transcribing = false;
+        return this.lastTranscript;
+      }
+    }
+
     if (!this.recognition) return this.lastTranscript;
     try {
       this.recognition.stop();
       this.transcribing = true;
-      // Watchdog: if onend doesn't fire within 4s (seen on some WebView2
-      // builds when no finals are pending), force-clear the transcribing
-      // flag so the mic button isn't stuck disabled.
       this.clearTranscribeTimer();
       this.transcribeTimer = setTimeout(() => {
         if (this.transcribing) {
@@ -220,14 +363,30 @@ class SttStore {
 
   /** Hard-cancel — drop interim text, restore the original draft. */
   async cancel() {
+    if (this.config.engine === "whisper") {
+      if (this.recording || this.transcribing) {
+        try {
+          await invoke("stt_stop_recording");
+        } catch {
+          /* may already be stopped */
+        }
+      }
+      if (!this.consumed) {
+        assistant.composerDraft = this.baseDraft;
+      }
+      this.finalText = "";
+      this.recording = false;
+      this.transcribing = false;
+      this.clearTranscribeTimer();
+      return;
+    }
+
     if (!this.recognition) return;
     try {
       this.recognition.abort();
     } catch {
       /* recogniser may already be stopped */
     }
-    // Only restore the pre-recording draft if the user hasn't already sent.
-    // Restoring after a send re-pastes the original text the user just shipped.
     if (!this.consumed) {
       assistant.composerDraft = this.baseDraft;
     }
@@ -238,6 +397,71 @@ class SttStore {
     this.clearTranscribeTimer();
   }
 
+  // ---- Whisper-only management ops ----------------------------------------
+
+  async refreshModels() {
+    try {
+      this.models = await invoke<ModelInfo[]>("stt_list_models");
+    } catch (e) {
+      console.debug("[stt] refreshModels failed:", e);
+    }
+  }
+
+  async refreshInputDevices() {
+    try {
+      this.inputDevices = await invoke<string[]>("stt_get_input_devices");
+    } catch (e) {
+      console.debug("[stt] refreshInputDevices failed:", e);
+      this.inputDevices = [];
+    }
+  }
+
+  async downloadModel(modelId: string) {
+    this.lastError = null;
+    try {
+      await invoke("stt_download_model", { modelId });
+    } catch (e) {
+      this.lastError = `Download failed: ${e}`;
+    }
+  }
+
+  async cancelDownload() {
+    try {
+      await invoke("stt_cancel_download");
+    } catch (e) {
+      console.debug("[stt] cancelDownload failed:", e);
+    }
+  }
+
+  async deleteModel(modelId: string) {
+    try {
+      await invoke("stt_delete_model", { modelId });
+      await this.refreshModels();
+    } catch (e) {
+      this.lastError = `Delete failed: ${e}`;
+    }
+  }
+
+  // ---- Event handlers (backend) -------------------------------------------
+
+  private onBackendPartial(text: string) {
+    if (this.consumed) return;
+    if (!this.config.show_interim) return;
+    this.lastTranscript = text;
+    assistant.composerDraft = this.composeDraft(text, "");
+  }
+
+  private onBackendFinal(text: string) {
+    if (this.consumed) return;
+    this.finalText = text;
+    this.lastTranscript = text;
+    assistant.composerDraft = this.composeDraft(text, "");
+    this.recording = false;
+    this.transcribing = false;
+  }
+
+  // ---- Event handlers (Web Speech) ----------------------------------------
+
   private clearTranscribeTimer() {
     if (this.transcribeTimer) {
       clearTimeout(this.transcribeTimer);
@@ -246,9 +470,6 @@ class SttStore {
   }
 
   private onResult(e: SpeechRecognitionEvent) {
-    // After a send/clear, drop late-arriving results so they don't re-paste
-    // the committed text. Caller (Composer) restarts via toggleMic if the
-    // user wants to keep dictating.
     if (this.consumed) return;
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -275,15 +496,12 @@ class SttStore {
   private onError(e: SpeechRecognitionErrorEvent) {
     const friendly = errorMessage(e.error, e.message);
     this.lastError = friendly;
-    // `no-speech` / `aborted` are routine; don't toast loudly.
     if (e.error !== "no-speech" && e.error !== "aborted") {
       console.debug("[stt] recognition error:", e.error, e.message);
     }
   }
 
   private onEnd() {
-    // Commit any interim text by re-composing with empty interim — but only
-    // if the draft hasn't been consumed (send), to avoid re-pasting.
     if (this.recognition && !this.consumed) {
       assistant.composerDraft = this.composeDraft(this.finalText, "");
     }
@@ -294,11 +512,6 @@ class SttStore {
   }
 }
 
-// Pick the alternate with the highest confidence. Falls back to alt[0]
-// when confidence is uniformly 0 (some WebView2 builds return 0 for every
-// alternate — the spec allows it). Tolerates slurred input by letting a
-// lower-ranked-but-more-confident variant win when the engine bothers to
-// score them. Empty / missing alternates -> empty string.
 function pickBestAlternate(res: SpeechRecognitionResult): string {
   if (res.length === 0) return "";
   let best = res[0];

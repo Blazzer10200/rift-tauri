@@ -273,19 +273,15 @@
     gap: 14px;
   }
   /* Stagger child entrance so the empty state feels composed top-down,
-     not slammed in as one block. */
+     not slammed in as one block. Uses shared `enter` keyframe (app.css). */
   .empty > * {
-    animation: empty-child-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .empty > :nth-child(1) { animation-delay: 0ms; }
   .empty > :nth-child(2) { animation-delay: 60ms; }
   .empty > :nth-child(3) { animation-delay: 100ms; }
   .empty > :nth-child(4) { animation-delay: 140ms; }
   .empty > :nth-child(5) { animation-delay: 180ms; }
-  @keyframes empty-child-in {
-    from { opacity: 0; transform: translateY(6px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
   @media (prefers-reduced-motion: reduce) {
     .empty > * { animation: none; }
   }
@@ -353,8 +349,6 @@
     font-size: var(--fs-sm);
     max-width: 440px;
   }
-  .hero .sub strong { color: var(--fg); font-weight: 600; }
-
   /* ── Workspace card — single focal element ─────────────────────────────── */
   .ws-card {
     display: grid;

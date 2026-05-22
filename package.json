@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.4.22-alpha",
+  "version": "0.4.23-alpha",
   "description": "",
   "type": "module",
   "scripts": {
@@ -18,6 +18,8 @@
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/lexend": "^5.2.11",
+    "@shikijs/engine-javascript": "^3.23.0",
+    "@shikijs/transformers": "^3.23.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@tauri-apps/plugin-opener": "^2",
@@ -30,7 +32,8 @@
     "dompurify": "^3.4.3",
     "lucide-svelte": "^1.0.1",
     "marked": "^18.0.3",
-    "marked-alert": "^2.1.2"
+    "marked-alert": "^2.1.2",
+    "shiki": "^3.23.0"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",

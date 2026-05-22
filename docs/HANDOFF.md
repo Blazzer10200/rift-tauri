@@ -2,49 +2,62 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 128 — 2026-05-21 — UI/UX overhaul (S127 + S128 shipped as v0.4.22-alpha)
+## Session 134 — 2026-05-22 — Settings page rebuild (uncommitted — v0.4.23-alpha)
 
-Shell polish (left-rail flip, titlebar divider, statusbar bump w/ breathing pulse), workspace cross-fade transitions + slide-fade tabs rail, History date grouping + Hide-tests filter, Diagnostics tile-grouping (3 sections), Settings Reset 2-click confirm, WatchedFolders compact display, Composer placeholder trim, dropped `agents`+`attachments` stubs, New-chat button moved flush-after-tabs + restyled, EmptyState refresh (rotating halo + 2×2 resume tiles + dropped synced-card), History moved to ChatTabsBar popover (portal to body, position:fixed anchored). Full notes: `docs/CHANGELOG.md`.
+**Settings.svelte rewrite (1846L → ~1500L).** 8 nav rows → 7 (SSH keys folded into new **Network** section as header action next to *Add server*). Unified pattern across all sections: `.set-group` (uppercase title bar + hairline rows) + `.set-row` (left label/hint, right control). Lifted from polished Terminal section. New section subtitles. Outer PageHeader dropped from [SettingsPage.svelte](src/lib/components/settings/SettingsPage.svelte) (section title now carries the page).
 
-## Session 127 — 2026-05-21 — Split-pane polish + UI audit (shipped v0.4.22-alpha alongside S128)
+**Bugs fixed.** Appearance kbd grid was unreadable — each `Ctrl+T` row flowed 4 kids into a 2-col grid so each `<kbd>` block-stacked. Wrapped combos in `.kbd-combo`. Killed "More coming soon" placeholder. Speech 12-lang picker stacked vertically in a narrow right column; switched language + engine rows to `set-row-stack`.
 
-TasksDock per-pane, per-pane status chip, resizable divider w/ kbd+dblclick reset + persisted fracs, OpenInPaneMenu right-click on tabs+history rows. UI audit doc `docs/design/ui-audit-2026-05-21.md` (5 P0 / 7 P1 / 4 P2 from 9 workspace shots).
+**Verify.** `npm run check` 0/0 (after dropping 2 dead CSS selectors). CDP-verified all 7 sections (Appearance / Terminal / Accessibility / Assistant / Speech / Network / About), active-state nav ramp, kbd grid renders correctly, engine flip mounts/unmounts whisper cards, dyslexia-disabled state propagates dim across child rows.
 
-## Session 126 — Split-pane v2.1: per-tab composer + concurrent send
-
-`TabState.draft`/`attachments` per-tab ($state); `composerDraft`/`composerAttachments` are back-compat getter/setter shims on store. Composer + EmptyState rewired around `tabId` prop, AssistantPane always renders Composer (gated on tabId, not focus). Auto-compact walks `panes[]` w/ `ctxPctFor`/`ctxWindowFor`. `stop/addAttachment/removeAttachment/compactConversation` accept optional tabId. Per-tab error banners. Focus rail + always-on pane chrome.
+**Files.** [Settings.svelte](src/lib/components/settings/Settings.svelte), [SettingsPage.svelte](src/lib/components/settings/SettingsPage.svelte), package.json + Cargo.toml + tauri.conf.json bumped 0.4.22 → 0.4.23-alpha (lockstep), docs/CHANGELOG + HANDOFF consolidated v0.4.23-alpha entry.
 
 ---
 
-## Session 126 — Split-pane v2.1: per-tab composer + concurrent send
+## Session 133 — 2026-05-22 — Whisper STT backend (feature-gated) + dual-engine UI (uncommitted — v0.4.23-alpha)
 
-`TabState.draft`/`attachments` per-tab ($state); `composerDraft`/`composerAttachments` are back-compat getter/setter shims on store. Composer + EmptyState rewired around `tabId` prop, AssistantPane always renders Composer (gated on tabId, not focus). Auto-compact walks `panes[]` w/ `ctxPctFor`/`ctxWindowFor`. `stop/addAttachment/removeAttachment/compactConversation` accept optional tabId. Per-tab error banners. Focus rail + always-on pane chrome.
+Full detail in CHANGELOG v0.4.23-alpha entry. Compact summary:
+- Backend under [src-tauri/src/stt/](src-tauri/src/stt/) — 5 modules (audio/vad/whisper/model_manager/cleanup), `!Send` cpal::Stream on dedicated thread, 14 commands + 5 events in [lib.rs](src-tauri/src/lib.rs). Feature-gated default = stub.
+- Frontend dual-engine in [stt.svelte.ts](src/lib/state/stt.svelte.ts) + Speech section UI.
+- **Whisper FFI UNVERIFIED live** — needs `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`. CDP verified all UI surfaces (cpal returned 3 real mics).
 
-## Session 125 — Phase E1/E4/E5 + agents-pill (shipped v0.4.21-alpha)
+---
 
-E1 ctx-stats pill, E4 retired-JSONL sweep, E5 history search across summaries.
+## Sessions 129–132 — 2026-05-21 / 2026-05-22 — collapsed (uncommitted — v0.4.23-alpha)
+
+Full session detail folded into CHANGELOG v0.4.23-alpha entry. One-liners:
+- **S132** SplashOverlay Glass Reveal cold-boot — `SplashOverlay.svelte`, app.html bg fix, AppShell `onMount` slimmed. Visual UNVERIFIED live.
+- **S131** Assistant chat UI overhaul — turn rail, atmosphere, Shiki, agent + TodoWrite card branches, image attachments, DPI fixes. Shiki UNVERIFIED w/ live fenced block.
+- **S130** UI audit fixes (6 files) + ISSUES.md prune (979 → 882L). CDP-verified.
+- **S129** 5 assistant MCP sync tools + `is_dead_session_error()` wedge fix + `SyncActivityBanner.svelte`. Wedge fix + banner live-UNVERIFIED.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.22-alpha** (S126+S127+S128 shipped). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.22-alpha** shipped; **v0.4.23-alpha staged** (versions bumped, CHANGELOG/HANDOFF consolidated, ready to `/git-ship`). Tauri 2 + Svelte 5 + Rust + russh.
 
-**Smoke gate still open** from S124 — live verify on real chat:
-- Auto-trigger @70% + 5min cooldown
-- Pre-emption "Approaching auto-compact at 70%" pill
-- Header Compact button (≥50% ctx)
-- Agents-pill on real `Task` spawn
-- E1 ctx-stats: `Ctx X% → est Y%`
+**Uncommitted batch (S129–S134, all rolling into v0.4.23-alpha):**
+- S129: 5 MCP sync tools + wedge fix + SyncActivityBanner
+- S130: UI audit fixes + ISSUES.md prune
+- S131: Full assistant chat UI overhaul (rail-spans-turn, Shiki, atmosphere, agent card, image attachments, DPI fixes)
+- S132: SplashOverlay Glass Reveal cold-boot intro + app.html bg fix + AppShell onMount slimmed
+- S133: Whisper STT backend (feature-gated) + dual-engine Speech settings UI + Composer mic engine-aware
+- S134: Settings page rebuild (this session)
+
+**Smoke gate (open — do before shipping):**
+- S129 banner: active + error-with-wedge **UNVERIFIED live** — drop network 90s, edit file, push → banner should go red + Reconnect
+- S131 Shiki: **UNVERIFIED with live message** — send a msg with fenced code block (```rust / ```bash) → confirm header bar + syntax highlight render
+- S132 splash: **visual UNVERIFIED** — needs cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
+- S133 Whisper FFI: **UNVERIFIED live** — needs LLVM install + `cargo build --features whisper-rs`. Settings UI + cpal mic enumeration CDP-verified; download/transcribe round-trip pending. CPU build first (LLVM only), CUDA second pass (CUDA Toolkit + `whisper-cuda` feature) for 10× speedup.
+- S124 items (auto-compact, ctx stats) still in gate
 
 **Next code lanes:**
-1. Smoke gate (above)
-2. Files diff-dot per row (needs new backend `drift_scanner` per-row verdict command) — deferred from S128
-3. Files breadcrumb `\` → `›` chevrons — deferred from S128
-4. UI audit gaps: settings sub-tabs, chat-with-content, split-pane visual, backend organization (lib.rs/assistant.svelte.ts/assistant/mod.rs)
-5. Refactor queue (each its own `/plan`): split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
-
-**Phase 6 keychain runtime:** old plaintext `bridgeToken`/`apiKey` get auto-lifted to Windows Credential Manager on first config load. `cmdkey /list:rift` for `rift/bridge.<server_key>` + `rift/assistant.api_key`.
+1. Smoke gate (above) → `/git-ship` v0.4.23-alpha
+2. Wave-2 audit bugs: #146 `mutateStreaming` O(n) rebuild (HIGH — fixes stagger animation safety too), #147 thinking dedup, #148 tab-switch race, #149 delete/openTab race
+3. Files diff-dot per row (backend `drift_scanner` per-row verdict cmd needed)
+4. Refactor queue: split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
+5. Design brief: `git-rcon-tools.md` v2.2 (git + RCON MCP tools)
 
 ---
 
@@ -63,10 +76,6 @@ E1 ctx-stats pill, E4 retired-JSONL sweep, E5 history search across summaries.
 - TabState: per-tab field → add to TabState + getter on AssistantStore. Never back on the store.
 - Image paste: `assistant_send` flips `--input-format text→stream-json` when attachments present. 20MiB cap.
 - Settings is workspace (kbd **8** post-S128), `Ctrl+,` flips; do NOT reintroduce slideover scrim.
-- **History popover** — lives in ChatTabsBar via `<HistoryDrawer compact onSelected>`. Popover uses `use:portal` to `<body>` + `position: fixed` anchored from button rect — putting it inside the normal tree hits `.tabs-rail` overflow:hidden clip.
-- **WorkspaceShell cross-fade** — all once-opened panes mounted absolute-layered; only active is opacity:1 + `inert={false}`. Don't switch back to `[hidden]`/`display:none`.
-- Assistant scrollbar: `.scroll` + `.strip` BOTH `scrollbar-width: none` — don't reintroduce `scrollbar-gutter: stable`.
-- AssistantPage `onMount` auto-fires `newTab()` if `openTabs.length === 0`. Don't reintroduce empty-tabs CTA.
 - `UpdateService` managed Tauri state — `download_update` then `apply_pending_update`.
 - **`tauri.conf.json` `dragDropEnabled: false`** — removing breaks cross-region HTML5 DnD. Rift has no file-drop Tauri events, cost = zero.
 - **AssistantPane drop handlers on `.pane` outer div only** — never move to inner `.drop-zone` overlays; loses the continuous-preventDefault chain.

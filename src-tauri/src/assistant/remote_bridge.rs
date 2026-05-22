@@ -52,6 +52,12 @@ struct Request {
     command: Option<String>,
     #[serde(default)]
     timeout_secs: Option<u64>,
+    /// Acknowledgement latch for destructive sync ops (`reconcile_apply`).
+    /// The MCP tool layer instructs the model to call read-only ops first
+    /// (`reconcile_preview` + `drift_snapshot`), show the user, then re-call
+    /// with `confirm: true` to actually mutate.
+    #[serde(default)]
+    confirm: Option<bool>,
 }
 
 /// Flat response shape — every field optional so a single struct handles bash
@@ -222,6 +228,31 @@ async fn dispatch(app: &AppHandle, scope: Scope, req: Request) -> Response {
         }
         "shell_lock_status" => shell_lock_status(app).await,
         "sync_status" => sync_status_op(app).await,
+        "drift_snapshot" => drift_snapshot_op(app).await,
+        "reconcile_preview" => reconcile_preview_op(app).await,
+        "push_pending" => {
+            if scope != Scope::Write {
+                return err("unauthorized: push_pending requires write-scoped token");
+            }
+            push_pending_op(app).await
+        }
+        "pull_pending" => {
+            if scope != Scope::Write {
+                return err("unauthorized: pull_pending requires write-scoped token");
+            }
+            pull_pending_op(app).await
+        }
+        "reconcile_apply" => {
+            if scope != Scope::Write {
+                return err("unauthorized: reconcile_apply requires write-scoped token");
+            }
+            if req.confirm != Some(true) {
+                return err(
+                    "reconcile_apply requires confirm: true — call reconcile_preview + drift_snapshot first, show the user the diff, then re-call with confirm: true",
+                );
+            }
+            reconcile_apply_op(app).await
+        }
         other => err(format!("unknown op `{other}`")),
     }
 }
@@ -273,6 +304,101 @@ async fn sync_status_op(app: &AppHandle) -> Response {
         Err(e) => return err(format!("serialize status: {e}")),
     };
     Response { ok: true, data: Some(data), ..Default::default() }
+}
+
+/// Return the last drift-scan result as a structured list. Read-only.
+/// No-engine case is reported in-band (`connected: false`) rather than as an
+/// error so the model can render a clean "not connected" message.
+async fn drift_snapshot_op(app: &AppHandle) -> Response {
+    let Some(eng) = engine(app).await else {
+        return Response {
+            ok: true,
+            data: Some(serde_json::json!({ "connected": false, "entries": [] })),
+            ..Default::default()
+        };
+    };
+    let entries = eng.drift_snapshot();
+    let entries_v = match serde_json::to_value(&entries) {
+        Ok(v) => v,
+        Err(e) => return err(format!("serialize drift snapshot: {e}")),
+    };
+    Response {
+        ok: true,
+        data: Some(serde_json::json!({ "connected": true, "entries": entries_v })),
+        ..Default::default()
+    }
+}
+
+/// Kick a fresh drift scan without applying anything. The result lands in the
+/// engine's `last_scan_entries` cache; the model reads it via `drift_snapshot`.
+async fn reconcile_preview_op(app: &AppHandle) -> Response {
+    let Some(eng) = engine(app).await else {
+        return err("not connected — start a server in Rift first");
+    };
+    eng.kick_drift_reconcile();
+    Response {
+        ok: true,
+        data: Some(serde_json::json!({ "scan_kicked": true })),
+        ..Default::default()
+    }
+}
+
+/// Trigger an immediate push of all pending local-side changes. Fire-and-forget.
+/// The model should follow up with `sync_status` / `drift_snapshot` to confirm completion.
+async fn push_pending_op(app: &AppHandle) -> Response {
+    let Some(eng) = engine(app).await else {
+        return err("not connected — start a server in Rift first");
+    };
+    eng.force_push_now();
+    crate::diagnostics::emit(
+        crate::diagnostics::DiagStage::System,
+        crate::diagnostics::DiagLevel::Info,
+        "assistant tool: push_pending triggered",
+    );
+    Response {
+        ok: true,
+        data: Some(serde_json::json!({ "triggered": "push" })),
+        ..Default::default()
+    }
+}
+
+/// Trigger an immediate pull of all pending remote-side changes. Fire-and-forget.
+async fn pull_pending_op(app: &AppHandle) -> Response {
+    let Some(eng) = engine(app).await else {
+        return err("not connected — start a server in Rift first");
+    };
+    eng.force_pull_now();
+    crate::diagnostics::emit(
+        crate::diagnostics::DiagStage::System,
+        crate::diagnostics::DiagLevel::Info,
+        "assistant tool: pull_pending triggered",
+    );
+    Response {
+        ok: true,
+        data: Some(serde_json::json!({ "triggered": "pull" })),
+        ..Default::default()
+    }
+}
+
+/// Apply both push and pull in sequence. Requires explicit `confirm: true` —
+/// the dispatch arm gates on this before calling here. Fire-and-forget at the
+/// engine level (both `force_*_now` fns are non-blocking).
+async fn reconcile_apply_op(app: &AppHandle) -> Response {
+    let Some(eng) = engine(app).await else {
+        return err("not connected — start a server in Rift first");
+    };
+    eng.force_push_now();
+    eng.force_pull_now();
+    crate::diagnostics::emit(
+        crate::diagnostics::DiagStage::System,
+        crate::diagnostics::DiagLevel::Info,
+        "assistant tool: reconcile_apply (push + pull) triggered",
+    );
+    Response {
+        ok: true,
+        data: Some(serde_json::json!({ "applied": true, "ops": ["push", "pull"] })),
+        ..Default::default()
+    }
 }
 
 async fn run_remote_bash(app: &AppHandle, command: String, timeout: Duration) -> Response {

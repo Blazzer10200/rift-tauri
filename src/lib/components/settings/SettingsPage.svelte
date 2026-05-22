@@ -1,16 +1,9 @@
 <script lang="ts">
-  import { Settings as SettingsIcon } from "lucide-svelte";
-  import PageHeader from "../shell/PageHeader.svelte";
   import Settings from "./Settings.svelte";
   import { dialogs } from "../../state/dialogs.svelte";
 </script>
 
 <section class="page">
-  <PageHeader
-    icon={SettingsIcon}
-    title="Settings"
-    tone="neutral"
-  />
   <div class="page-body">
     <Settings
       onAddServer={() => dialogs.onAddServer()}

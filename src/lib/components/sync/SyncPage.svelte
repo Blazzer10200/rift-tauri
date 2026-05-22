@@ -257,6 +257,18 @@
               role="menuitem"
               class="kebab-item"
               disabled={!canSync}
+              onclick={() => { syncPage.rescan(); overflowOpen = false; }}
+              title="Re-scan both sides for drift right now (independent of Auto-rescan)"
+            >
+              <span class="kebab-check"></span>
+              <RefreshCw size={13} class={syncPage.busy ? "spin" : ""}/>
+              <span>Rescan now</span>
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              class="kebab-item"
+              disabled={!canSync}
               onclick={() => { syncPage.sweepStaleLocks(); overflowOpen = false; }}
               title="Reclaim our own stale .rift-lock files across every watched root"
             >
@@ -308,16 +320,6 @@
           </div>
         {/if}
       </div>
-      <button
-        class="btn ghost icon"
-        type="button"
-        onclick={() => syncPage.rescan()}
-        disabled={!canSync}
-        title="Re-scan both sides for drift"
-        aria-label="Rescan"
-      >
-        <RefreshCw size={13} class={syncPage.busy ? "spin" : ""} />
-      </button>
       {#if syncPage.mirrorEnabled && totals.delRemote > 0}
         <button
           class="btn danger"

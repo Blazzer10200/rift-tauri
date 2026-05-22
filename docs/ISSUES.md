@@ -175,7 +175,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 
 ## Priority tiers
 
-**S120 (uncommitted) — Wave-2 backend MED + LOW sweep, ~40 issues SHIPPED.** Full lane breakdown in `docs/HANDOFF.md`. New SHIPPED: #54 #55 #56 #68 #70 #72 #73 #75 #77 #79 #80 #83 #84 #86 #91 #93 #94 #95 #97 #98 #101 #105 #110 #111 #114 #116 #117 #118 #121 #122 #123 #124 #126 #128 #130 #132 #133 #136 #137 #138. Pending `/git-ship` → v0.4.17-alpha.
+**S120 — Wave-2 backend MED + LOW sweep, ~40 issues SHIPPED v0.4.17-alpha (commit 0e91393).** SHIPPED set: #54 #55 #56 #68 #70 #72 #73 #75 #77 #79 #80 #83 #84 #86 #91 #93 #94 #95 #97 #98 #101 #105 #110 #111 #114 #116 #117 #118 #121 #122 #123 #124 #126 #128 #130 #132 #133 #136 #137 #138. Body blocks for those numbers pruned from Wave-1 detail 2026-05-21 (see `git log -- docs/ISSUES.md` for the deleted blocks). Wave-1 detail below = open items only.
 
 
 **Tier 0 — verify before anything else**
@@ -262,7 +262,7 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 
 > 11 parallel `operator` agents over `src-tauri/src/`. Reports persisted at `state/audit-2026-05-20/{A..K}-*.md`; synthesis at `SYNTHESIS-wave1.md`. Format below is compressed (Where / Symptom / Fix); see reports for root-cause detail. Dupes collapsed where multiple agents found same site.
 
-### HIGH (9)
+### HIGH (7 — 1 PARTIAL, 6 open)
 
 ## 81. `SyncSnapshot::set`/`forget` silently discard save errors
 - **Where:** [state/sync_snapshot.rs:74](../src-tauri/src/state/sync_snapshot.rs#L74), [:80](../src-tauri/src/state/sync_snapshot.rs#L80)
@@ -275,37 +275,13 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Symptom:** `sftp.read(remote_path)` loads full bytes into `Vec<u8>` before writing local. Hundreds-of-MB asset files (FiveM map packs, .ytd) OOM on low-RAM servers / mobile WiFi.
 - **Fix:** For files >16 MB, `sftp.open` + stream chunks to local tmp via `AsyncRead`. Deferred-complexity.
 
-## 93. `suppress_local_delete_uploads` window is 2s — too short for slow SFTP
-- **Where:** [auto_sync.rs:888](../src-tauri/src/sync/auto_sync.rs#L888) — hardcoded `chrono::Duration::seconds(2)`; debounce ceiling is `CEILING_MS=3000`. (Cross-agent: A10+C9.)
-- **Fix:** Raise to ≥5s (match `recently_written` window at [watch.rs:211](../src-tauri/src/sync/auto_sync/watch.rs#L211)), or extract `SUPPRESS_WINDOW_SECS=5` const.
-
-## 94. `resolve_conflict AcceptRemote` drops conflict row on download failure
-- **Where:** [auto_sync.rs:1006-1017](../src-tauri/src/sync/auto_sync.rs#L1006-L1017)
-- **Fix:** Re-insert conflict via `self.conflicts.insert(...)` on download fail before returning, matching `SaveLocalCopy` bail.
-
-## 95. `resolve_conflict ForceLocal` enqueues but never triggers flush
-- **Where:** [auto_sync.rs:1055-1060](../src-tauri/src/sync/auto_sync.rs#L1055-L1060)
-- **Fix:** After `enqueue_for_flush_batch`, call `kick_drift_reconcile` or trigger flush.
-
 ## 96. `apply_selected` guard-override emits ActivityRow direct (bypasses buffered feed)
 - **Where:** [auto_sync.rs:1413-1424](../src-tauri/src/sync/auto_sync.rs#L1413-L1424), [:1656-1666](../src-tauri/src/sync/auto_sync.rs#L1656-L1666)
 - **Fix:** Use `engine.log_activity(...)` (buffered) not direct `engine.app().emit(...)`.
 
-## 97. `rebaseline_folder` blocking walk ignores cancel + disposal
-- **Where:** [auto_sync.rs:1276-1285](../src-tauri/src/sync/auto_sync.rs#L1276-L1285)
-- **Fix:** Check `engine.disposed.load(SeqCst)` before `spawn_blocking`; pass AtomicBool cancel into walk.
-
-## 98. `process_entry_body` fabricates `(0, Utc::now())` ConflictRecord on vanished file
-- **Where:** [auto_sync/flush.rs:514-515](../src-tauri/src/sync/auto_sync/flush.rs#L514-L515)
-- **Fix:** Check `stat_local` return; log "file vanished mid-preflight" + return `EntryResult::Fail`, don't insert synthetic conflict.
-
 ## 99. `flush_batch dispatched` count includes Requeued — `force_push_now` clears scan cache wrongly
 - **Where:** [auto_sync/flush.rs:140-154](../src-tauri/src/sync/auto_sync/flush.rs#L140-L154), [auto_sync.rs:824](../src-tauri/src/sync/auto_sync.rs#L824)
 - **Fix:** Return `(dispatched, ok, fail)` tuple; gate cache-clear on `ok > 0`.
-
-## 105. `sync_set_mirror_mode` set/read-back TOCTOU
-- **Where:** [lib.rs:299-300](../src-tauri/src/lib.rs#L299)
-- **Fix:** `set_mirror_mode` returns new value, eliminate the read-back call.
 
 ## 107. `start_autosync` status sampled before prev engine fully stopped
 - **Where:** [lib.rs:572-576](../src-tauri/src/lib.rs#L572-L576)
@@ -315,94 +291,21 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [lib.rs:1443](../src-tauri/src/lib.rs#L1443)
 - **Fix:** Remove param from signature + update FE caller, OR restore use w/ validation guard.
 
-## 110. `bootstrap::classify` skips `BadRemoteRoot` check for `remote_count < 3`
-- **Where:** [bootstrap/mod.rs:46-60](../src-tauri/src/bootstrap/mod.rs#L46-L60)
-- **Fix:** Lower `BAD_REMOTE_ROOT_MIN_DIRS` to 1, OR add fallback: `if remote_count < 3 && bracketed_count == 0 → BadRemoteRoot`.
-
-## 111. `BadRemoteRoot` branch reports `missing_count: 0` (misleads FE)
-- **Where:** [bootstrap/mod.rs:53-59](../src-tauri/src/bootstrap/mod.rs#L53-L59)
-- **Fix:** Set `missing_count: remote_count as u32` OR document state-conditional semantics.
-
-## 114. `assistant_delete_conversation` orphans `cli_session_id` cwd sidecar
-- **Where:** [assistant/mod.rs:466-473](../src-tauri/src/assistant/mod.rs#L466-L473)
-- **Symptom:** Calls `delete_session_cwd(&id)` w/ Rift convo id only; since S103, `Conversation.cli_session_id` is a separate UUID — sidecar under that UUID never cleaned. (Cross-agent: F7+G7.)
-- **Fix:** Load convo first; call `delete_session_cwd` for both `convo.id` AND `convo.cli_session_id`. Also move call to after `remove_file` success.
-
 ## 115. `session-lost` event re-broadcasts full prompt over Tauri bus
 - **Where:** [assistant/mod.rs:1439-1446](../src-tauri/src/assistant/mod.rs#L1439-L1446)
 - **Fix:** Emit only `{ session_id }` recovery signal; FE re-sends from its own buffered last message.
 
-## 116. Attachment 20MiB cap uses approximate base64 estimate `len*3/4`
-- **Where:** [assistant/mod.rs:1151](../src-tauri/src/assistant/mod.rs#L1151)
-- **Fix:** Use `base64::decoded_len_estimate` or strip whitespace before `(len/4)*3`.
-
-## 117. `stdin.take() == None` branch hangs child forever
-- **Where:** [assistant/mod.rs:1323](../src-tauri/src/assistant/mod.rs#L1323), wait at [:1402](../src-tauri/src/assistant/mod.rs#L1402)
-- **Fix:** Return `Err("claude stdin unavailable")` + kill child; OR `tokio::time::timeout` around `child.wait()`.
-
-## 118. MCP `OnceLock::unwrap()` after race-loss in Result-returning fn
-- **Where:** [assistant/remote_bridge.rs:100](../src-tauri/src/assistant/remote_bridge.rs#L100)
-- **Fix:** `BRIDGE.get().cloned().ok_or_else(|| "...".into())?`.
-
-### LOW continued + INFO (folded)
-
-## 121. `poll_once` stale-lock delete ignores `stale_delete_fails` cap
-- **Where:** [lock_presence.rs:323](../src-tauri/src/sync/lock_presence.rs#L323) (vs [:217](../src-tauri/src/sync/lock_presence.rs#L217) which has cap)
-- **Fix:** Apply same `STALE_DELETE_MAX_FAILS` counter in `poll_once`, or extract shared helper.
-
-## 122. `try_read_lock` leaks temp scratch dir on parse failure
-- **Where:** [lock_presence.rs:352](../src-tauri/src/sync/lock_presence.rs#L352)
-- **Fix:** `remove_dir_all(&scratch)` at end, OR `tempfile::TempDir` RAII guard.
-
-## 123. `lock_presence::stop` cleanup task not aborted on timeout
-- **Where:** [lock_presence.rs:135](../src-tauri/src/sync/lock_presence.rs#L135)
-- **Fix:** Call `cleanup.abort()` on `Err(Elapsed)`.
-
-## 124. `register_conflict` uses stale scan-time mtimes vs disk
-- **Where:** [drift_watcher.rs:340](../src-tauri/src/sync/drift_watcher.rs#L340)
-- **Fix:** Re-stat local before building `ConflictRecord`, matching `pull_one` at L129.
-
-## 126. `safe_profile_key` silently strips dots — collision on `foo` vs `foo.v2`
-- **Where:** [state/paths.rs:30](../src-tauri/src/state/paths.rs#L30)
-- **Fix:** Add `.` to allowed set OR `log::warn!` on cleaned-key mismatch.
-
-## 128. `atomic_write_json` orphans `.tmp` on write/sync failure
-- **Where:** [state/paths.rs:59](../src-tauri/src/state/paths.rs#L59), cleanup only at [:83](../src-tauri/src/state/paths.rs#L83) rename-retry path.
-- **Fix:** Closure-wrap inner write block w/ cleanup-on-fail, or `tempfile::NamedTempFile`.
-
-## 130. Exec fast-path errors silently dropped — no degradation visibility
-- **Where:** [sftp/list.rs:80-88](../src-tauri/src/sftp/list.rs#L80-L88)
-- **Fix:** Match Err arm w/ `log::debug!("list exec fast-path failed for {root}, falling back to sftp: {e}")`.
-
-## 132. `convo_path`/`session_cwd_path` no length cap on `id`
-- **Where:** [assistant/mod.rs:314-318](../src-tauri/src/assistant/mod.rs#L314-L318), [:331-337](../src-tauri/src/assistant/mod.rs#L331-L337)
-- **Fix:** Add `|| id.len() > 64` to rejection condition.
-
-## 133. `common_ancestor` falls back silently to roots[0] on non-existent path
-- **Where:** [assistant/mod.rs:397-403](../src-tauri/src/assistant/mod.rs#L397-L403)
-- **Fix:** `log::warn!` when `is_dir()` false so fallback visible in DiagBus.
+### LOW (1)
 
 ## 134. `assistant_auth_probe` two-spawn TOCTOU window for CLI replacement
 - **Where:** [assistant/mod.rs:592-658](../src-tauri/src/assistant/mod.rs#L592-L658)
 - **Fix:** Single `claude auth status --version` call if CLI supports it; OR parallel via `tokio::join!`.
 
-### INFO (4 — actionable docs/comments only)
+### INFO (1)
 
 ## 135. `force_push_now` promotion log emitted after flush (out-of-order)
 - **Where:** [auto_sync.rs:802-806](../src-tauri/src/sync/auto_sync.rs#L802-L806)
 - **Fix:** Move log call before `flush_all_now(...)` at L814.
-
-## 136. `apply_selected` emits no final `DriftScanResult` — spinner never closes
-- **Where:** [auto_sync.rs:1493-1508](../src-tauri/src/sync/auto_sync.rs#L1493-L1508) (vs `force_pull_now` at [:1737-1763](../src-tauri/src/sync/auto_sync.rs#L1737-L1763))
-- **Fix:** Emit final `DriftScanResult` w/ dispatched counts after `h.await`.
-
-## 137. `walk_local` runs `should_ignore` twice per file (name then rel-path)
-- **Where:** [drift_scanner.rs:521](../src-tauri/src/sync/drift_scanner.rs#L521) + [:533](../src-tauri/src/sync/drift_scanner.rs#L533)
-- **Fix:** Apply name-only check only on dirs (before recursion); rely on rel-path check for files.
-
-## 138. Sync-snapshot count-under invariant undocumented (`listing_files` vs snapshot keys)
-- **Where:** [drift_scanner.rs:267](../src-tauri/src/sync/drift_scanner.rs#L267)
-- **Fix:** Comment documenting snapshot-keys-are-files invariant on `count_under`.
 
 ---
 

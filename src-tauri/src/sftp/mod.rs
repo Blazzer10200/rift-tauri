@@ -41,6 +41,7 @@ mod list;
 pub(crate) mod ops;
 pub(crate) mod remote_exec;
 mod transfer;
+pub(crate) use transfer::is_dead_session_error;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RemoteEntry {

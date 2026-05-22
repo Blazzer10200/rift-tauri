@@ -1974,6 +1974,9 @@ pub fn run() {
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
         .manage(terminal::TerminalState::default())
+        .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
+        .manage(stt::WhisperCache(tokio::sync::Mutex::new(None)))
+        .manage(stt::WhisperSession(tokio::sync::Mutex::new(None)))
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 if let Some(state) = window.app_handle().try_state::<terminal::TerminalState>() {
@@ -2097,6 +2100,16 @@ pub fn run() {
             assistant::assistant_list_workspace_files,
             stt::stt_get_config,
             stt::stt_set_config,
+            stt::stt_set_engine,
+            stt::stt_start_recording,
+            stt::stt_stop_recording,
+            stt::stt_get_input_devices,
+            stt::stt_backend_available,
+            stt::stt_list_models,
+            stt::stt_download_model,
+            stt::stt_cancel_download,
+            stt::stt_delete_model,
+            stt::stt_clean_transcript,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
