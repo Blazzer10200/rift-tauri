@@ -16,7 +16,7 @@
   import type { ToolBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
 
-  let { tool }: { tool: ToolBlock } = $props();
+  let { tool, variant = "card" }: { tool: ToolBlock; variant?: "card" | "timeline" } = $props();
   // Agent + TodoWrite are first-class card variants — default-expanded since
   // their body IS the message, not a debug detail. All other tools collapse.
   const isAgent = $derived(/^(mcp__rift__)?Agent$/.test(tool.name));
@@ -319,7 +319,7 @@
   });
 </script>
 
-<div class="chip" data-status={tool.status} data-category={category} class:as-card={isCard}>
+<div class="chip" data-status={tool.status} data-category={category} data-variant={variant} class:as-card={isCard}>
   {#if isAgent}
     <!-- Agent card head — bigger, badge-led, no chevron toggle (always open). -->
     <div class="agent-head">
@@ -477,6 +477,51 @@
   }
   .chip[data-status="done"] { opacity: 0.85; }
   .chip[data-status="done"]:hover { opacity: 1; }
+
+  /* Timeline variant — naked head; the bullet on the rail (drawn by the
+     parent .tl-node) carries the category + status signal. Card variants
+     (Agent + TodoWrite) keep their chrome regardless. */
+  .chip[data-variant="timeline"]:not(.as-card) {
+    background: transparent;
+    border: 0;
+    border-left: 0;
+    border-radius: 4px;
+    margin: 0;
+    animation: none;
+  }
+  .chip[data-variant="timeline"]:not(.as-card) .chip-head {
+    padding: 2px 6px 2px 3px;
+    min-height: 20px;
+    border-radius: 4px;
+    transition: background 140ms ease-out, transform 140ms ease-out;
+  }
+  .chip[data-variant="timeline"]:not(.as-card) .chip-head:hover {
+    background: color-mix(in oklch, var(--surface-hover) 70%, transparent);
+    transform: translateX(1px);
+  }
+  /* Rail-bullet already shows status — kill the redundant right-edge pill
+     in timeline variant. Duration badge stays (slowness signal). */
+  .chip[data-variant="timeline"]:not(.as-card) .chip-status { display: none; }
+  /* Chip-tool name gets a bit more weight; summary stays muted for hierarchy. */
+  .chip[data-variant="timeline"]:not(.as-card) .chip-tool {
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .chip[data-variant="timeline"]:not(.as-card) .chip-sum { color: var(--fg-muted); }
+  .chip[data-variant="timeline"]:not(.as-card)[data-status="error"] .chip-tool { color: oklch(0.85 0.13 22); }
+  .chip[data-variant="timeline"]:not(.as-card) .chip-body {
+    margin-top: 4px;
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    border-radius: 5px;
+    background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
+  }
+  .chip[data-variant="timeline"]:not(.as-card)[data-status="pending"] {
+    background: transparent;
+    animation: none;
+  }
+  .chip[data-variant="timeline"]:not(.as-card)[data-status="error"] {
+    background: transparent;
+  }
   .chip[data-status="pending"] {
     background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev-1));
     border-color: color-mix(in oklch, var(--accent) 28%, var(--border));

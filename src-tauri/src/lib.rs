@@ -1956,6 +1956,47 @@ pub fn run() {
 
     velopack::VelopackApp::build().run();
 
+    // Center the main window inside the primary monitor's WORK AREA (screen
+    // minus the taskbar / dock). Tauri's built-in `center: true` uses full
+    // monitor size, which on Windows shifts the window visually low because
+    // the taskbar eats the bottom band. SystemParametersInfoW(SPI_GETWORKAREA)
+    // returns the taskbar-excluded rect, so the result is *visually* centered
+    // at every resolution + taskbar position. Best-effort: any failure leaves
+    // Tauri's screen-centered position in place.
+    #[cfg(target_os = "windows")]
+    fn center_in_work_area(window: &tauri::WebviewWindow) {
+        #[repr(C)]
+        #[derive(Default)]
+        struct Rect { left: i32, top: i32, right: i32, bottom: i32 }
+        extern "system" {
+            fn SystemParametersInfoW(
+                ui_action: u32,
+                ui_param: u32,
+                pv_param: *mut std::ffi::c_void,
+                f_win_ini: u32,
+            ) -> i32;
+        }
+        const SPI_GETWORKAREA: u32 = 0x0030;
+        let mut wa = Rect::default();
+        let ok = unsafe {
+            SystemParametersInfoW(
+                SPI_GETWORKAREA,
+                0,
+                &mut wa as *mut _ as *mut std::ffi::c_void,
+                0,
+            )
+        };
+        if ok == 0 { return; }
+        let Ok(size) = window.outer_size() else { return; };
+        let work_w = wa.right - wa.left;
+        let work_h = wa.bottom - wa.top;
+        let x = wa.left + (work_w - size.width as i32) / 2;
+        let y = wa.top + (work_h - size.height as i32) / 2;
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+    }
+    #[cfg(not(target_os = "windows"))]
+    fn center_in_work_area(_window: &tauri::WebviewWindow) {}
+
     // Assistant α2: when launched by the Claude CLI as an MCP server (env
     // RIFT_MCP_SERVER=1), serve JSON-RPC on stdio and skip Tauri entirely.
     // assistant_send writes a temp MCP config that points the CLI at our own
@@ -1985,6 +2026,15 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Window starts hidden (`visible: false` in tauri.conf.json) so we
+            // can position it before the user sees it. `center: true` is the
+            // safety net; `center_in_work_area` refines to taskbar-excluded
+            // center on Windows. Show after positioning to avoid a jump.
+            if let Some(main) = app.get_webview_window("main") {
+                center_in_work_area(&main);
+                let _ = main.show();
+                let _ = main.set_focus();
+            }
             // STT recognition runs in the WebView (Web Speech API). Rust side
             // only persists the user's STT preferences via stt::stt_*_config.
             // Diagnostics: stream bus events to the frontend (`diag://event`)

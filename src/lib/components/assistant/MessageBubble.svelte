@@ -5,7 +5,6 @@
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
-  import StepGroup from "./StepGroup.svelte";
 
   // Tool blocks that render inline as a full side-by-side diff (vs the
   // compact ToolChip). Edit-family only — everything else gets a chip.
@@ -103,33 +102,29 @@
     return out;
   }
 
-  type StepStatus = "neutral" | "pending" | "done" | "error";
-  type StepUnit =
-    | { kind: "loose"; block: Block; key: string }
-    | {
-        kind: "step";
-        stepNum: number;
-        headerText: string;
-        children: Block[];
-        status: StepStatus;
-        key: string;
-      };
+  // Timeline-flat units. Step-N headers from prose become dividers (small
+  // inline labels on the rail) instead of numbered groups. Every other
+  // block becomes its own node on the chain.
+  type NodeStatus = "neutral" | "pending" | "done" | "error";
+  type TimelineUnit =
+    | { kind: "block"; block: Block; key: string; status: NodeStatus }
+    | { kind: "divider"; stepNum: number; title: string; key: string };
 
-  // Roll up a step's tool children into a single status. Mirrors the chip
-  // status semantics (pending = at least one running, error = at least one
-  // errored, done = every tool resolved cleanly, neutral = no tools).
-  function rollupStatus(children: Block[]): StepStatus {
-    let saw = false, anyPending = false, anyError = false;
-    for (const c of children) {
-      if (c.type !== "tool") continue;
-      saw = true;
-      if (c.status === "error" || c.isError) anyError = true;
-      else if (c.status === "pending") anyPending = true;
+  function statusOf(b: Block): NodeStatus {
+    if (b.type === "tool") {
+      if (b.status === "error" || b.isError) return "error";
+      if (b.status === "pending") return "pending";
+      return "done";
     }
-    if (!saw) return "neutral";
-    if (anyError) return "error";
-    if (anyPending) return "pending";
-    return "done";
+    if (b.type === "thinking") return b.status === "active" ? "pending" : "done";
+    return "neutral";
+  }
+  function nodeKind(b: Block): "thinking" | "prose" | "tool" | "edit" | "image" {
+    if (b.type === "thinking") return "thinking";
+    if (b.type === "text") return "prose";
+    if (b.type === "image") return "image";
+    if (b.type === "tool") return isInlineDiffTool(b.name) ? "edit" : "tool";
+    return "prose";
   }
 
   let { message, streaming = false }: { message: ChatMessage; streaming?: boolean } = $props();
@@ -219,9 +214,8 @@
   }
 
   function formatDuration(ms: number): string {
-    if (ms < 1000) return `${ms} ms`;
-    const s = ms / 1000;
-    return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+    const s = Math.floor(ms / 1000);
+    return `${s}s`;
   }
 
   function elapsedFor(b: ThinkingBlock, nowMs: number): string {
@@ -276,64 +270,47 @@
     typeof message.costUsd === "number" ? `$${message.costUsd.toFixed(4)}` : null,
   );
 
-  // Walk the message's blocks and group them into "steps" — visual units
-  // headed by a `Step N — title` text line. Loose blocks (pre-step prose,
-  // reasoning, leading tool calls) render flat above the first group.
-  const grouped = $derived.by<StepUnit[]>(() => {
-    const units: StepUnit[] = [];
-    let current: { stepNum: number; headerText: string; children: Block[] } | null = null;
-    const flush = () => {
-      if (current) {
-        units.push({
-          kind: "step",
-          ...current,
-          status: rollupStatus(current.children),
-          key: `s_${current.stepNum}_${units.length}`,
-        });
-        current = null;
-      }
-    };
+  // Walk the message's blocks → flat TimelineUnit list. Step headers in
+  // prose become dividers; everything else becomes a node on the chain.
+  const grouped = $derived.by<TimelineUnit[]>(() => {
+    const units: TimelineUnit[] = [];
     const blocks = reconcileSplitHeaders(message.blocks);
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
-      // Reasoning blocks always render flat (they live at the top of a turn).
-      if (b.type === "thinking") {
-        flush();
-        units.push({ kind: "loose", block: b, key: `l_t${i}` });
-        continue;
-      }
       if (b.type === "text") {
         const segments = parseTextBlock(b.text);
         for (let si = 0; si < segments.length; si++) {
           const seg = segments[si];
           if (seg.kind === "header") {
-            flush();
-            current = { stepNum: seg.stepNum, headerText: seg.title, children: [] };
+            units.push({
+              kind: "divider",
+              stepNum: seg.stepNum,
+              title: seg.title,
+              key: `d_${i}_${si}`,
+            });
           } else {
             const proseBlock: Block = { type: "text", text: seg.text };
-            if (current) current.children.push(proseBlock);
-            else units.push({ kind: "loose", block: proseBlock, key: `l_${i}_${si}` });
+            units.push({
+              kind: "block",
+              block: proseBlock,
+              status: "neutral",
+              key: `t_${i}_${si}`,
+            });
           }
         }
         continue;
       }
-      // Tool blocks: attach to current step, or render loose if no step yet.
-      if (current) current.children.push(b);
-      else units.push({ kind: "loose", block: b, key: `l_${i}` });
+      units.push({ kind: "block", block: b, status: statusOf(b), key: `b_${i}` });
     }
-    flush();
     return units;
   });
 
-  // Auto-collapse helpers for the each-loop — total step count + key of
-  // the last step. Both drive the rule "collapse done mid-turn steps when
-  // the turn has ≥4 steps, but never collapse the last one (most recent
-  // context) or pending/error steps (need visibility)".
-  const stepCount = $derived(grouped.reduce((n, u) => n + (u.kind === "step" ? 1 : 0), 0));
-  const lastStepKey = $derived.by<string | null>(() => {
+  // Key of the last in-flight or final node — drives the bullet pulse for
+  // the streaming bubble (last node = "current activity").
+  const lastBlockKey = $derived.by<string | null>(() => {
     for (let i = grouped.length - 1; i >= 0; i--) {
       const u = grouped[i];
-      if (u.kind === "step") return u.key;
+      if (u.kind === "block") return u.key;
     }
     return null;
   });
@@ -435,33 +412,29 @@
           {@const hasText = b.text.length > 0}
           {@const isOpen = expandedThinking.has(bi)}
           {@const elapsed = elapsedFor(b, tickNow)}
-          <div class="reasoning" class:active={isActive} class:expandable={hasText}>
+          <div class="tn-think" class:active={isActive} class:expandable={hasText}>
             <button
               type="button"
-              class="reasoning-head"
+              class="tn-think-head"
               onclick={() => hasText && toggleThinking(bi)}
               disabled={!hasText}
               aria-expanded={isOpen}
             >
-              <Brain size={12} />
-              <span class="reasoning-label">
-                {#if isActive}Thinking{:else}Reasoned{/if}
+              <Brain size={11} />
+              <span class="tn-think-label">
+                {#if isActive}Thinking{:else}Thought{/if} for <span class="tn-think-meta mono">{elapsed}</span>
               </span>
-              <span class="reasoning-meta">{elapsed}</span>
               {#if isActive}
                 <span class="dots" aria-hidden="true">
                   <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                 </span>
               {/if}
               {#if hasText}
-                <span class="chev" class:open={isOpen}><ChevronDown size={12} /></span>
+                <span class="chev" class:open={isOpen}><ChevronDown size={11} /></span>
               {/if}
             </button>
-            {#if hasText && !isOpen && !isActive}
-              <div class="reasoning-preview">{previewOf(b.text)}</div>
-            {/if}
             {#if hasText && isOpen}
-              <div class="reasoning-body"><Markdown text={b.text} /></div>
+              <div class="tn-think-body"><Markdown text={b.text} /></div>
             {/if}
           </div>
         {:else if b.type === "tool" && isInlineDiffTool(b.name)}
@@ -473,34 +446,27 @@
             <EditDiff input={b.input} />
           {/if}
         {:else if b.type === "tool"}
-          <ToolChip tool={b} />
+          <ToolChip tool={b} variant={isUser ? "card" : "timeline"} />
         {/if}
       {/snippet}
 
       {#each grouped as unit, ui (unit.key)}
-        <div class="stagger" style="--idx: {Math.min(ui, 6)}">
-        {#if unit.kind === "loose"}
-          {@render renderBlock(unit.block, ui)}
+        {#if unit.kind === "divider"}
+          <div class="tl-divider">
+            <span class="tl-divider-label">Step {unit.stepNum} — {unit.title}</span>
+          </div>
         {:else}
-          {@const isLast = unit.key === lastStepKey}
-          {@const collapsible = stepCount >= 4 && unit.status === "done" && !isLast}
-          {@const toolCount = unit.children.reduce((n, b) => n + (b.type === "tool" ? 1 : 0), 0)}
-          {@const childSummary = toolCount > 0 ? `${toolCount} tool${toolCount === 1 ? "" : "s"}` : null}
-          <StepGroup
-            stepNum={unit.stepNum}
-            headerText={unit.headerText}
-            status={unit.status}
-            {collapsible}
-            {childSummary}
+          {@const isLastNode = !isUser && unit.key === lastBlockKey}
+          {@const nodeStatus = streaming && isLastNode ? "pending" : unit.status}
+          <div
+            class="tl-node"
+            data-kind={nodeKind(unit.block)}
+            data-status={nodeStatus}
+            style="--idx: {Math.min(ui, 6)}"
           >
-            {#snippet children()}
-              {#each unit.children as child, ci (ci)}
-                {@render renderBlock(child, ci)}
-              {/each}
-            {/snippet}
-          </StepGroup>
+            {@render renderBlock(unit.block, ui)}
+          </div>
         {/if}
-        </div>
       {/each}
 
     </div>
@@ -596,13 +562,13 @@
     grid-column: 1;
     grid-row: 1;
     align-self: stretch;
-    width: 2px;
+    width: 1.5px;
     border-radius: 2px;
-    background: color-mix(in oklch, var(--accent) 22%, transparent);
+    background: color-mix(in oklch, var(--fg-faint) 38%, transparent);
     transition: background 200ms ease-out;
   }
   .bubble[data-streaming="true"] .turn-rail {
-    background: color-mix(in oklch, var(--accent) 60%, transparent);
+    background: color-mix(in oklch, var(--accent) 55%, transparent);
     animation: rail-stream 2.4s ease-in-out infinite;
   }
   @keyframes rail-stream {
@@ -678,14 +644,115 @@
     animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .body { display: flex; flex-direction: column; }
-  /* Stagger wrapper — per-block fade-up rhythm inside a turn. --idx is set
-     inline; cap at 6 in the template so we don't keep delaying past 210ms. */
-  .stagger {
+
+  /* Timeline node — every block sits on the 2px turn-rail via an absolutely
+     positioned bullet. Bullet color = status; thinking = hollow. The chain
+     visual is the rail (already drawn by .turn-rail in grid-column 1); we
+     just hang dots off it. */
+  .tl-node {
+    position: relative;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--idx, 0) * 35ms);
   }
+  .tl-node::before {
+    content: "";
+    position: absolute;
+    /* The .body sits at grid-column 2 with a 14px column-gap from the 2px rail.
+       The rail center is at x = -(14 + 2/2) = -15px from .body's left edge.
+       A 9px bullet centered on the rail wants left = -15 - 4.5 = -19.5px. */
+    left: -19px;
+    top: 8px;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--bg-elev-2);
+    border: 1.5px solid color-mix(in oklch, var(--fg-faint) 60%, transparent);
+    z-index: 1;
+    transition: background 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+  }
+  .tl-node[data-kind="thinking"]::before {
+    width: 8px; height: 8px;
+    background: transparent;
+    border-color: color-mix(in oklch, var(--fg-faint) 85%, transparent);
+  }
+  .tl-node[data-kind="thinking"][data-status="pending"]::before {
+    background: transparent;
+    border-color: color-mix(in oklch, var(--accent) 70%, transparent);
+    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+  }
+  .tl-node[data-kind="prose"]::before {
+    width: 5px; height: 5px;
+    top: 10px;
+    left: -17px;
+    background: var(--fg-faint);
+    border: 0;
+    opacity: 0.55;
+  }
+  .tl-node[data-kind="tool"][data-status="done"]::before,
+  .tl-node[data-kind="edit"][data-status="done"]::before {
+    background: var(--ok, oklch(0.74 0.15 145));
+    border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 75%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+                0 1px 2px color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 25%, transparent);
+  }
+  .tl-node[data-status="error"]::before {
+    background: var(--danger);
+    border-color: color-mix(in oklch, var(--danger) 80%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+                0 1px 2px color-mix(in oklch, var(--danger) 30%, transparent);
+  }
+  .tl-node[data-status="pending"]:not([data-kind="thinking"])::before {
+    background: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 75%, transparent);
+    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes tl-bullet-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent),
+                          inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
+    50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 20%, transparent),
+                          inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
+  }
+  /* Hover lifts the bullet — small but signals interactivity on tool/edit rows. */
+  .tl-node[data-kind="tool"]:hover::before,
+  .tl-node[data-kind="edit"]:hover::before {
+    transform: scale(1.15);
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+  }
+  /* Image nodes don't need a bullet — the user thumbnail carries its own
+     framing + sits on the right side anyway. */
+  .tl-node[data-kind="image"]::before { display: none; }
+  /* User-side bubbles drop the rail (single-column grid), so the bullets
+     would float in space — kill them. */
+  .bubble[data-role="user"] .tl-node::before { display: none; }
+
+  /* Step divider — uppercased label flanked by a faint line, sitting on
+     the rail. Quiet visual punctuation between turn sections. */
+  .tl-divider {
+    display: flex; align-items: center; gap: 8px;
+    margin: 10px 0 4px;
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .tl-divider::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: color-mix(in oklch, var(--border) 70%, transparent);
+    opacity: 0.55;
+  }
+  .tl-divider-label {
+    opacity: 0.9;
+    padding-right: 2px;
+  }
+
   @media (prefers-reduced-motion: reduce) {
-    .stagger, .cost-pill { animation: none; }
+    .tl-node, .tl-divider, .cost-pill { animation: none; }
+    .tl-node[data-status="pending"]::before,
+    .tl-node[data-kind="thinking"][data-status="pending"]::before { animation: none; }
   }
   .copybtn {
     opacity: 0;
@@ -703,7 +770,7 @@
 
   .content {
     display: flex; flex-direction: column;
-    gap: 6px;
+    gap: 5px;
   }
   /* Per-block reveal handled by .stagger wrapper now (see grouped each loop).
      Don't double-animate here — would re-fire on inner text deltas. */
@@ -764,49 +831,45 @@
   }
   .bubble[data-role="assistant"] .user-image-thumb { align-self: flex-start; }
 
-  /* Reasoning / thinking surface */
-  .reasoning {
+  /* Flat thinking node — no bordered surface; bullet on the rail carries
+     the "this is a reasoning beat" signal. Label is single-line, prose
+     opens inline below on click. */
+  .tn-think {
     align-self: flex-start;
     max-width: min(100%, 78ch);
-    border: 1px solid var(--border);
-    background: color-mix(in oklch, var(--accent-soft) 35%, var(--bg-elev-1));
-    border-radius: 8px;
-    overflow: hidden;
-    transition: border-color 180ms ease-out, background 180ms ease-out;
   }
-  .reasoning.active {
-    border-color: color-mix(in oklch, var(--accent) 45%, transparent);
-    background: color-mix(in oklch, var(--accent-soft) 60%, var(--bg-elev-1));
-    animation: reasoning-glow 2.4s ease-in-out infinite;
-  }
-  @keyframes reasoning-glow {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
-    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 14%, transparent); }
-  }
-  .reasoning-head {
+  .tn-think-head {
     display: flex; align-items: center; gap: 6px;
-    width: 100%;
-    padding: 5px 9px;
+    padding: 1px 4px 1px 0;
     background: transparent;
     border: 0;
-    color: var(--fg-2);
+    color: var(--fg-muted);
     font-size: var(--fs-xs);
     font-weight: 500;
     cursor: default;
     text-align: left;
+    border-radius: 3px;
+    transition: color 140ms ease-out, background 140ms ease-out;
   }
-  .reasoning.expandable .reasoning-head { cursor: pointer; }
-  .reasoning.expandable .reasoning-head:hover { background: var(--surface-hover); }
-  .reasoning-head[disabled] { opacity: 1; } /* keep visible state */
-  .reasoning-label { color: var(--fg); }
-  .reasoning.active .reasoning-label { color: var(--accent); }
-  .reasoning-meta {
-    color: var(--fg-muted);
+  .tn-think.expandable .tn-think-head { cursor: pointer; }
+  .tn-think.expandable .tn-think-head:hover {
+    background: color-mix(in oklch, var(--surface-hover) 60%, transparent);
+    color: var(--fg-2);
+  }
+  .tn-think-head :global(svg) { opacity: 0.7; flex-shrink: 0; }
+  .tn-think.active .tn-think-head { color: var(--accent); }
+  .tn-think.active .tn-think-head :global(svg) { opacity: 0.9; color: var(--accent); }
+  .tn-think-label {
     font-variant-numeric: tabular-nums;
     font-size: 11px;
   }
+  .tn-think-meta {
+    color: var(--fg-muted);
+    font-size: 10.5px;
+    opacity: 0.85;
+  }
+  .tn-think.active .tn-think-meta { color: color-mix(in oklch, var(--accent) 80%, var(--fg-muted)); }
   .chev {
-    margin-left: auto;
     display: inline-flex;
     color: var(--fg-faint);
     transition: transform 160ms ease-out;
@@ -820,24 +883,16 @@
   }
   .dots .dot:nth-child(2) { animation-delay: 0.15s; }
   .dots .dot:nth-child(3) { animation-delay: 0.3s; }
-  .reasoning-preview {
-    padding: 0 10px 7px 10px;
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--fg-muted);
-    font-style: italic;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .reasoning-body {
-    padding: 4px 10px 9px 10px;
-    border-top: 1px solid var(--border);
+  .tn-think-body {
+    margin-top: 4px;
+    padding: 6px 10px;
+    border-left: 2px solid color-mix(in oklch, var(--accent) 28%, var(--border));
+    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
+    border-radius: 0 5px 5px 0;
     font-size: var(--fs-sm);
     line-height: 1.5;
     color: var(--fg-2);
     font-style: italic;
-    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
   }
 
   /* Liveness — live dot + heartbeat timer in role-row while streaming. */

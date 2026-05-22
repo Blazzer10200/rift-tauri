@@ -2,47 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## v0.4.25-alpha — 2026-05-22 — SHIPPED at 2502cd8 (S135 + S136 hotfix arc)
+## v0.4.26-alpha — 2026-05-22 — assistant timeline UI + center-on-work-area
 
-User installed v0.4.23-alpha → reported "fucked up" layout. Two real bugs surfaced + one misdiagnosis on the path.
+- **Timeline UI.** Vertical timeline on the existing turn-rail. Each block = a node w/ status-colored bullet (hollow gray=thinking, green=done, pulsing accent=pending, red=error) + drop-shadow + inner highlight for depth. "Thought for Ns" flat single-line — `.reasoning` bordered surface gone. Tool chips drop card frame in collapsed state via new `variant="timeline"` prop; right-edge status pip removed (rail bullet shows it). Agent + TodoWrite cards unchanged. Step-N headers → uppercased dividers w/ trailing hairline; `StepGroup` numbered bubble dropped from main flow (component intact, unused). Rail recolored neutral gray (1.5px, `--fg-faint 38%`); streaming still glows accent + last bullet pulses. Hover lifts bullet 1.15×. Files: [MessageBubble.svelte](src/lib/components/assistant/MessageBubble.svelte), [ToolChip.svelte](src/lib/components/assistant/ToolChip.svelte).
+- **Window centers on work area.** [tauri.conf.json](src-tauri/tauri.conf.json) `visible:false` + `center:true`; [lib.rs::run](src-tauri/src/lib.rs) `setup()` calls `center_in_work_area` then `show + set_focus`. Windows: `SystemParametersInfoW(SPI_GETWORKAREA)` via raw FFI (no new deps), centers in taskbar-excluded rect. Non-Windows: Tauri `center:true` fallback. **Not runtime-verified** at fresh launch — exercise via `scripts/run-dev.bat` if behavior looks off.
 
-- **S135** (v0.4.24-alpha @ ee2cfd7) — empty-pane UX. Orphan split-pane (no tab assigned) used to render the dead-end "No tab in this pane" string. Now an actionable card: `+ New chat` + `× Close pane` (when `panes.length > 1`) + `RECENT` quick-pick of top 3 convos not already mounted in a sibling pane. Handlers focus this pane first so `newTab`/`openTab` route through `assignFocusedPane`. CDP-verified all three actions. [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte).
-- **S136 misdiagnosis** (a600d54) — assumed user's wide-but-short window was Windows Snap state and added `setSize+center` clamp on mount. Wrong: the window was full-size; the *layout* was collapsing inside it. Reverted.
-- **S136 actual** (v0.4.25-alpha @ cfb1087) — `.shell` layout-collapse. Prod builds intermittently resolved the percentage chain `body 100% → app.html wrapper display:contents → .shell 100%` to auto-height, leaving the bottom of the window blank below StatusBar. Fix: `.shell` switched from `height: 100%` to `position: fixed; inset: 0`. `body.win-maximized` 8px padding moved onto `.shell` as `inset: 8px` since body padding doesn't push fixed children. [AppShell.svelte](src/lib/components/AppShell.svelte) + [app.css](src/app.css).
+## v0.4.25-alpha — 2026-05-22 — SHIPPED at 2502cd8
 
-User confirmed fix landed live after Velopack pulled v0.4.25-alpha delta.
-
----
-
-## v0.4.23-alpha — 2026-05-22 — SHIPPED at 0ec2cc5 (S129–S134)
-
-Full detail in CHANGELOG. One-liners:
-- **S134** Settings rebuild — 8→7 nav, `.set-group`/`.set-row` pattern, kbd grid + Speech bugs fixed
-- **S133** Whisper STT backend (feature-gated) + dual-engine Speech UI — FFI UNVERIFIED live
-- **S132** SplashOverlay Glass Reveal cold-boot — visual UNVERIFIED live
-- **S131** Assistant chat UI overhaul — turn rail, Shiki, atmosphere, agent + TodoWrite cards, image paste, DPI
-- **S130** UI audit fixes + ISSUES.md prune
-- **S129** 5 MCP sync tools + dead-session wedge fix + `SyncActivityBanner` — wedge/banner UNVERIFIED live
+S135 empty split-pane UX + S136 `.shell` layout-collapse fix (`position: fixed; inset: 0`). Details in CHANGELOG + git log.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.25-alpha** shipped (2502cd8). Working tree clean. Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.26-alpha** shipped. Working tree clean. Tauri 2 + Svelte 5 + Rust + russh.
 
-**Smoke gate (open — clear before next ship):**
-- S129 banner: drop network 90s, edit file, push → banner should go red + Reconnect
-- S131 Shiki: send ` ```rust ` fenced block → confirm header bar + syntax highlight
-- S132 splash: cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
-- S133 Whisper FFI: `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`. CPU first, CUDA pass second (`whisper-cuda` feature).
-- S124 items (auto-compact, ctx stats) still in gate
-
-**Next code lanes:**
-1. Smoke gate → ship next batch
-2. Wave-2 audit bugs: #146 `mutateStreaming` O(n) rebuild (HIGH), #147 thinking dedup, #148 tab-switch race, #149 delete/openTab race
-3. Files diff-dot per row (backend `drift_scanner` per-row verdict cmd needed)
-4. Refactor queue: split `lib.rs` (2118L), `assistant.svelte.ts` (3109L), `assistant/mod.rs` (2244L)
-5. Design brief: `git-rcon-tools.md` v2.2 (git + RCON MCP tools)
+**Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
 ---
 

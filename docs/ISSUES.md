@@ -1,10 +1,38 @@
 # Rift — Issue Tracker
 
-> Open issues only. When something ships, **delete the block** — `git log -- docs/ISSUES.md` preserves the SHIPPED detail. Don't accumulate ✅ markers; the live file is "what's actually open."
+> Single source of truth for open work. **Active work dashboard** sits at the top (current sprint). **Priority tiers** are the navigation index. Detailed blocks follow.
 >
-> Each block carries: `Where` (file:line, may have drifted — re-grep before acting), `Symptom`, optionally `Fix sketch`. Issue IDs are durable references — never re-number, only append new findings.
+> Open issues only — when something ships, **delete the block** (`git log -- docs/ISSUES.md` preserves history). Each block carries `Where` (file:line, may have drifted — re-grep before acting), `Symptom`, optional `Fix sketch`. Issue IDs are durable — never re-number, only append.
 >
-> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170). Priority tiers at the bottom — read those first if you only have 30 seconds.
+> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170).
+
+---
+
+## Active work — current sprint
+
+> Live dashboard. HANDOFF.md = session state only; this section = what's actually queued. Touched 2026-05-22 (post v0.4.25-alpha).
+
+### Smoke gate (verify-then-ship, no code)
+Clear before next ship cuts. Each is a UI/live-build verification, not a code change.
+- **S129 banner** — drop network 90s, edit file, push → banner should go red + Reconnect
+- **S131 Shiki** — send ` ```rust ` fenced block → confirm header bar + syntax highlight
+- **S132 splash** — cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
+- **S133 Whisper FFI** — `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`; CPU first, then CUDA (`whisper-cuda` feature)
+- **S124** — auto-compact + ctx stats still in gate
+
+### Code lanes (pick one)
+Ordered by recommended attack sequence. All cross-reference detailed blocks below.
+
+1. **Wave-2 frontend HIGH cluster** — single file (`assistant.svelte.ts`), batchable. Issues **#146** (mutateStreaming O(n) — also re-cited as #234 HIGH), **#147** (thinking dedup), **#148** (tab-switch race), **#149** (delete/openTab race).
+2. **Wave-3 backend security HIGHs** — issues **#221** (model flag injection), **#227** (Ed25519/DSA scrub gap), **#228** (dead dialog plugin XSS surface), **#237** (thinking_effort log-injection), **#238** (scrubUser Rust-side gap → completes #8).
+3. **Files diff-dot per row** — needs new `drift_scanner` per-row verdict backend cmd. (Not in numbered tracker; lane-only.)
+4. **Hot-file splits** — issue **#20**: `lib.rs` 2118L → per-domain `commands/*.rs`; `assistant.svelte.ts` 3109L → per-concern classes; `assistant/mod.rs` 2244L → continued extraction.
+5. **Design brief `git-rcon-tools.md` v2.2** — git + RCON MCP tools. See `docs/design/git-rcon-tools.md`.
+
+### Active design briefs
+- `docs/design/assistant-compaction.md`
+- `docs/design/git-rcon-tools.md` (lane 5)
+- `docs/design/ui-audit-2026-05-21.md`
 
 ---
 
