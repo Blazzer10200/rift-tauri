@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.25-alpha — 2026-05-22 — S136 hotfix: window-size self-restore
+
+**Snapped-window persistence killed.** Windows 11 remembers per-app snap state — once Rift's `decorations: false` borderless window got Win+↑'d below the configured `minHeight: 800` floor, every subsequent launch (including post-Velopack-update relaunches) restored at that wonky size with no visible resize cue. Tauri config `minHeight` only clamps user-drag resize, not initial show. [AppShell.svelte](src/lib/components/AppShell.svelte) onMount now reads `innerSize` + `scaleFactor`, converts to logical pixels, and if either dimension is below the configured floor (1280×800) AND the window isn't maximized, calls `setSize(1600×1000) + center()`. One-shot per mount; survives the bad-state bootstrap on first launch, then yields to user drag/snap forever after.
+
 ## v0.4.24-alpha — 2026-05-22 — S135 hotfix: empty-pane UX
 
 **Empty-pane card replaces dead-end string.** [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte) — when a split pane has no tab assigned, the slot used to render only the unhelpful "No tab in this pane" string w/ no recovery action. Now renders an actionable card: `+ New chat` (primary) + `× Close pane` (ghost, only when `panes.length > 1`) + a `RECENT` quick-pick listing the top 3 conversations not already mounted in a sibling pane. Each handler focuses this pane first so `newTab`/`openTab` route through `assignFocusedPane` → land in the empty slot. Recent picks filter out convos held by sibling panes to avoid cross-pane tab-yank.
