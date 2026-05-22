@@ -97,8 +97,10 @@ html, body, #app, #svelte { height: 100%; margin: 0; }
 html, body { overflow: hidden; overscroll-behavior: none; }
 /* Win32 maximized borderless window extends ~8px past each screen edge
    (invisible resize frame). AppShell toggles .win-maximized so we inset
-   the shell, keeping titlebar controls + StatusBar inside the viewport. */
-body.win-maximized { padding: 8px; }
+   the shell, keeping titlebar controls + StatusBar inside the viewport.
+   .shell is position:fixed (see AppShell.svelte) so body padding doesn't
+   push it — apply the inset directly to .shell instead. */
+body.win-maximized .shell { inset: 8px; }
 body {
   font-family: var(--font-ui);
   font-size: var(--fs-md);

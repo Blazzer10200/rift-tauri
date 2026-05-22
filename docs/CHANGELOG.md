@@ -2,9 +2,11 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.4.25-alpha — 2026-05-22 — S136 hotfix: window-size self-restore
+## v0.4.25-alpha — 2026-05-22 — S136 hotfix: shell layout-collapse
 
-**Snapped-window persistence killed.** Windows 11 remembers per-app snap state — once Rift's `decorations: false` borderless window got Win+↑'d below the configured `minHeight: 800` floor, every subsequent launch (including post-Velopack-update relaunches) restored at that wonky size with no visible resize cue. Tauri config `minHeight` only clamps user-drag resize, not initial show. [AppShell.svelte](src/lib/components/AppShell.svelte) onMount now reads `innerSize` + `scaleFactor`, converts to logical pixels, and if either dimension is below the configured floor (1280×800) AND the window isn't maximized, calls `setSize(1600×1000) + center()`. One-shot per mount; survives the bad-state bootstrap on first launch, then yields to user drag/snap forever after.
+**Bottom-of-window blank-zone killed.** Prod builds intermittently collapsed `.shell` to its content height, leaving the bottom of the window blank below the StatusBar despite the window being full-size. Root cause: percentage-height chain `body 100% → app.html wrapper display:contents → .shell 100%` works in dev but breaks under prod build conditions (display:contents height-resolution edge case in the bundled chunks). [AppShell.svelte](src/lib/components/AppShell.svelte) — `.shell` switched from `height: 100%` to `position: fixed; inset: 0`, sidestepping every parent-height-resolution path. SplashOverlay is also `position: fixed` so flow ordering is unaffected. [app.css](src/app.css) — `body.win-maximized` 8px padding moved onto `.shell` directly (`.win-maximized .shell { inset: 8px }`) since body padding doesn't push fixed children.
+
+**Verify.** `npm run check` 0/0.
 
 ## v0.4.24-alpha — 2026-05-22 — S135 hotfix: empty-pane UX
 
