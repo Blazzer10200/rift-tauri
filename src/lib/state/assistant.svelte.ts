@@ -89,7 +89,19 @@ export type BoundaryBlock = {
   ctxPctEstAfter?: number;
 };
 
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock;
+/** User-attached image — pasted/dropped into the composer, persisted on the
+ *  outgoing user message so the chat shows what the user actually sent (not
+ *  just the text). Mirrors the composer attachment shape minus `id` (id is
+ *  composer-local). dataBase64 is the source-of-truth; previewUrl is an
+ *  ephemeral blob URL re-mintable from data if missing. */
+export type ImageBlock = {
+  type: "image";
+  mime: string;
+  dataBase64: string;
+  sizeBytes: number;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
 
 export type ChatMessage = {
   id: string;
@@ -2540,9 +2552,22 @@ class AssistantStore {
         : attachCount === 1
         ? "📎 1 image"
         : `📎 ${attachCount} images`;
+    // Build the user message blocks — image blocks (one per attachment) first,
+    // then the text block. Order matches the visual stack (thumbs above text)
+    // in MessageBubble's user-side render path.
+    const userBlocks: Block[] = [];
+    for (const a of this.composerAttachments) {
+      userBlocks.push({
+        type: "image",
+        mime: a.mime,
+        dataBase64: a.dataBase64,
+        sizeBytes: a.sizeBytes,
+      });
+    }
+    userBlocks.push({ type: "text", text: bubbleText });
     tab.messages = [
       ...tab.messages,
-      { id: crypto.randomUUID(), role: "user", blocks: [{ type: "text", text: bubbleText }] },
+      { id: crypto.randomUUID(), role: "user", blocks: userBlocks },
     ];
     const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [] };
     tab.messages = [...tab.messages, asst];

@@ -209,8 +209,9 @@ fn resolve_claude_exe() -> Option<PathBuf> {
 }
 
 /// Build a `tokio::process::Command` for `claude`, hiding the console window
-/// on Windows. Returns `None` if the CLI isn't on PATH.
-fn claude_command() -> Option<Command> {
+/// on Windows. Returns `None` if the CLI isn't on PATH. `pub(crate)` so the
+/// `stt::cleanup` hop can reuse the same resolution + windowing path.
+pub(crate) fn claude_command() -> Option<Command> {
     let exe = resolve_claude_exe()?;
     let mut cmd = Command::new(exe);
     #[cfg(windows)]
@@ -1904,9 +1905,9 @@ pub async fn assistant_send(
             // via the explicit-name entries.
             format!("{BUILTINS},mcp__*")
         } else if remote_shell_enabled {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__remote_bash")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__remote_bash,mcp__rift__push_pending,mcp__rift__pull_pending,mcp__rift__reconcile_apply")
         } else {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);

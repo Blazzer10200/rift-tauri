@@ -405,6 +405,21 @@ body.win-maximized .slideover { top: 52px; bottom: 30px; }
   .fade-in{ animation: fade-in 120ms ease-out both; }
 }
 
+/* Shared 'enter' keyframe — replaces msg-in / chip-in / block-in / alert-in /
+   hub-in / empty-child-in. One source of truth. Per-component stagger via
+   `style="--idx: N"` + `animation-delay: calc(var(--idx, 0) * 35ms)`. */
+@keyframes enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.enter {
+  animation: enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--idx, 0) * 35ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .enter { animation: none; }
+}
+
 /* ─── Accessibility — dyslexia-friendly overrides ─── */
 /* Driven by `data-a11y-*` attributes on <html>, set by accessibility.svelte.ts.
    Scoped narrowly: font swap is global (since it's UI-wide), but line-height

@@ -45,7 +45,7 @@
   <div class="path-scroll" title={path}>
     <nav class="path mono" aria-label="Path breadcrumbs">
       {#each crumbs as c, i (c.full)}
-        {#if i > 0}<span class="sep">{sep}</span>{/if}
+        {#if i > 0}<span class="sep" aria-hidden="true">›</span>{/if}
         <button class="crumb" type="button" onclick={() => onNavigate(c.full)}>{c.label}</button>
       {/each}
     </nav>
@@ -114,7 +114,13 @@
     flex-shrink: 0;
   }
   .crumb:hover { background: var(--surface-hover); color: var(--accent); }
-  .sep { color: var(--fg-faint); padding: 0 1px; }
+  .sep {
+    color: var(--fg-faint);
+    padding: 0 4px;
+    font-size: var(--fs-md);
+    line-height: 1;
+    user-select: none;
+  }
   .actions { display: flex; gap: 2px; }
   .actions :global(button[data-active="true"]) {
     background: color-mix(in oklch, var(--accent) 14%, var(--surface));

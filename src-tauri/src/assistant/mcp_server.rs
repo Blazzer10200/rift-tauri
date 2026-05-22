@@ -333,6 +333,172 @@ fn bridge_enabled() -> bool {
             || std::env::var("RIFT_BRIDGE_TOKEN").is_ok())
 }
 
+/// Whether the write-scoped bridge token is reachable from this MCP child.
+/// Gates the destructive sync tools (`push_pending`, `pull_pending`,
+/// `reconcile_apply`). The write token is only injected when the user has the
+/// remote-shell toggle on — same gate as `remote_bash` (see `mod.rs`
+/// `--allowed-tools` strings), so sync-mutation capability piggy-backs on the
+/// existing trust boundary rather than introducing a separate toggle.
+fn write_bridge_available() -> bool {
+    std::env::var("RIFT_BRIDGE_PORT").is_ok()
+        && std::env::var("RIFT_BRIDGE_TOKEN").is_ok()
+}
+
+/// Single round-trip helper for all bridge-backed ops. Replaces the bespoke
+/// dialing logic that was duplicated across `tool_sync_status` and
+/// `tool_remote_bash`. `extra` is merged into the request body so callers can
+/// pass op-specific fields (`command`, `confirm`, etc.).
+fn bridge_call(op: &str, write_scope: bool, extra: Value) -> Result<Value, String> {
+    let port_s = std::env::var("RIFT_BRIDGE_PORT")
+        .map_err(|_| "RIFT_BRIDGE_PORT not set on this MCP child".to_string())?;
+    let token = if write_scope {
+        std::env::var("RIFT_BRIDGE_TOKEN")
+            .map_err(|_| "RIFT_BRIDGE_TOKEN not set (remote-shell toggle off)".to_string())?
+    } else {
+        std::env::var("RIFT_BRIDGE_READONLY_TOKEN")
+            .or_else(|_| std::env::var("RIFT_BRIDGE_TOKEN"))
+            .map_err(|_| "no RIFT_BRIDGE_*_TOKEN set".to_string())?
+    };
+    let port: u16 = port_s
+        .parse()
+        .map_err(|e| format!("invalid RIFT_BRIDGE_PORT `{port_s}`: {e}"))?;
+
+    let mut req = json!({ "op": op, "token": token });
+    if let (Some(req_obj), Value::Object(extra_obj)) = (req.as_object_mut(), extra) {
+        for (k, v) in extra_obj {
+            req_obj.insert(k, v);
+        }
+    }
+
+    let addr: SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| format!("bridge addr parse: {e}"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .map_err(|e| format!("bridge connect: {e}"))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+
+    let payload = format!("{}\n", req);
+    stream
+        .write_all(payload.as_bytes())
+        .map_err(|e| format!("bridge write: {e}"))?;
+    stream.flush().ok();
+
+    let mut reader = io::BufReader::new(&stream);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("bridge read: {e}"))?;
+    if line.trim().is_empty() {
+        return Err("bridge closed connection without a response".into());
+    }
+    let resp: Value = serde_json::from_str(line.trim())
+        .map_err(|e| format!("bridge parse: {e} (raw: {})", line.trim()))?;
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let msg = resp.get("error").and_then(|v| v.as_str()).unwrap_or("unknown bridge error");
+        return Err(msg.to_string());
+    }
+    Ok(resp.get("data").cloned().unwrap_or(Value::Null))
+}
+
+fn tool_drift_snapshot() -> Result<String, String> {
+    if !bridge_enabled() {
+        return Err("drift_snapshot requires an active Rift server connection".into());
+    }
+    let data = bridge_call("drift_snapshot", false, Value::Null)?;
+    if data.get("connected").and_then(|v| v.as_bool()) == Some(false) {
+        return Ok("Not connected (no active server in Rift).".into());
+    }
+    let empty: Vec<Value> = Vec::new();
+    let entries = data
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&empty);
+    if entries.is_empty() {
+        return Ok("No drift — workspace in sync.".into());
+    }
+    // Group by bucket for readability. DriftBucket is Serialize-as-string.
+    use std::collections::BTreeMap;
+    let mut by_bucket: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for e in entries {
+        let bucket = e
+            .get("bucket")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        let rel = e
+            .get("rel_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?")
+            .to_string();
+        let resource = e
+            .get("resource_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let label = if resource.is_empty() {
+            rel
+        } else {
+            format!("{resource}/{rel}")
+        };
+        by_bucket.entry(bucket).or_default().push(label);
+    }
+    let mut out = String::new();
+    out.push_str(&format!("Drift snapshot ({} entries):\n", entries.len()));
+    for (bucket, paths) in &by_bucket {
+        out.push_str(&format!("  {} ({}):\n", bucket, paths.len()));
+        for p in paths.iter().take(20) {
+            out.push_str(&format!("    - {p}\n"));
+        }
+        if paths.len() > 20 {
+            out.push_str(&format!("    … +{} more\n", paths.len() - 20));
+        }
+    }
+    Ok(out)
+}
+
+fn tool_reconcile_preview() -> Result<String, String> {
+    if !bridge_enabled() {
+        return Err("reconcile_preview requires an active Rift server connection".into());
+    }
+    bridge_call("reconcile_preview", false, Value::Null)?;
+    Ok("Drift scan kicked. Call drift_snapshot in a moment to see the result, then decide whether to call reconcile_apply.".into())
+}
+
+fn tool_push_pending() -> Result<String, String> {
+    if !write_bridge_available() {
+        return Err("push_pending is disabled — toggle 'Allow remote shell' on the Rift Assistant Settings page and restart the conversation".into());
+    }
+    bridge_call("push_pending", true, Value::Null)?;
+    Ok("Push triggered — pending uploads queued for immediate flush. Call sync_status to confirm completion.".into())
+}
+
+fn tool_pull_pending() -> Result<String, String> {
+    if !write_bridge_available() {
+        return Err("pull_pending is disabled — toggle 'Allow remote shell' on the Rift Assistant Settings page and restart the conversation".into());
+    }
+    bridge_call("pull_pending", true, Value::Null)?;
+    Ok("Pull triggered — pending downloads queued for immediate fetch. Call sync_status to confirm completion.".into())
+}
+
+fn tool_reconcile_apply(args: &Value) -> Result<String, String> {
+    if !write_bridge_available() {
+        return Err("reconcile_apply is disabled — toggle 'Allow remote shell' on the Rift Assistant Settings page and restart the conversation".into());
+    }
+    let confirm = args
+        .get("confirm")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !confirm {
+        return Err("reconcile_apply requires confirm: true. Workflow: (1) call reconcile_preview, (2) call drift_snapshot to see the diff, (3) show the user, (4) re-call reconcile_apply with confirm: true.".into());
+    }
+    bridge_call(
+        "reconcile_apply",
+        true,
+        json!({ "confirm": true }),
+    )?;
+    Ok("Reconcile applied — push + pull both triggered. Call sync_status to confirm completion.".into())
+}
+
 /// Dial the parent Tauri's loopback bridge for a single read-only op (`sync_status`).
 /// Reuses the same TCP+NDJSON pattern as `tool_remote_bash` but is always
 /// available when the bridge is running — no remote-shell gate.
@@ -601,6 +767,58 @@ fn tools_list_payload() -> Value {
                 "required": []
             }
         }));
+        tools.push(json!({
+            "name": "drift_snapshot",
+            "description": "Return the last drift-scan result as a grouped list (ToPush / ToPull / Conflict / ToDelete / ToDeleteRemote). Read-only. Use this to show the user exactly which files differ between local and the remote server BEFORE calling any destructive sync op. If the snapshot looks stale, call reconcile_preview first to refresh it.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }));
+        tools.push(json!({
+            "name": "reconcile_preview",
+            "description": "Kick a fresh drift scan WITHOUT applying any changes. Read-only — only refreshes the snapshot the engine holds. Follow up with drift_snapshot to see the result. Use this any time the user asks 'what's different' or before reconcile_apply.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }));
+    }
+    if write_bridge_available() {
+        tools.push(json!({
+            "name": "push_pending",
+            "description": "Trigger an immediate push of all pending local-side changes to the remote server (force-flush the upload queue). Non-destructive but not free — files start uploading immediately. Use when the user says 'push now', 'sync up', or wants to flush queued uploads. Follow up with sync_status to confirm completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }));
+        tools.push(json!({
+            "name": "pull_pending",
+            "description": "Trigger an immediate pull of all pending remote-side changes from the remote server. Non-destructive for local-only changes (drift watcher refuses to overwrite dirty local files). Use when the user says 'pull now', 'sync down', or wants to fetch remote updates. Follow up with sync_status to confirm completion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }));
+        tools.push(json!({
+            "name": "reconcile_apply",
+            "description": "Apply a full reconciliation: push + pull in sequence. REQUIRES `confirm: true` in the arguments. Mandatory workflow: (1) call reconcile_preview, (2) call drift_snapshot, (3) show the user the diff and ask for confirmation in plain language, (4) only then call reconcile_apply with confirm: true. Calling without confirm: true returns an error explaining the workflow.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "confirm": {
+                        "type": "boolean",
+                        "description": "Must be true. Acknowledges the user has seen the drift diff and authorized the push+pull."
+                    }
+                },
+                "required": ["confirm"]
+            }
+        }));
     }
     if remote_shell_enabled() {
         tools.push(json!({
@@ -644,6 +862,11 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 // tool declaration. Env-stripped MCP launchers see "unknown
                 // tool" instead of a silent ignore + no response.
                 "sync_status" if bridge_enabled() => tool_sync_status(),
+                "drift_snapshot" if bridge_enabled() => tool_drift_snapshot(),
+                "reconcile_preview" if bridge_enabled() => tool_reconcile_preview(),
+                "push_pending" if write_bridge_available() => tool_push_pending(),
+                "pull_pending" if write_bridge_available() => tool_pull_pending(),
+                "reconcile_apply" if write_bridge_available() => tool_reconcile_apply(&args),
                 "remote_bash" if remote_shell_enabled() => tool_remote_bash(&args),
                 other => Err(format!("unknown tool: {other}")),
             };

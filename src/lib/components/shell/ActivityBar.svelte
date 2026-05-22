@@ -256,7 +256,9 @@
     /* Smooth slide when neighbors shift to open a drop gap. Source row
        overrides w/ `transition: none` to track the cursor 1:1. */
     transition: transform 180ms cubic-bezier(.2,.7,.2,1);
-    will-change: transform;
+    /* will-change removed (perma-compositor caused icon-blur at 1.25x DPR).
+       Drag/drop reorders are rare; the transition's transform alone GPU-
+       composites for the brief animation. */
   }
   /* Inset pill — the actual hover/active target. Gives a modern rounded
      affordance instead of a full-width slab. */

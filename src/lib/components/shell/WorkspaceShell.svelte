@@ -47,7 +47,9 @@
     pointer-events: none;
     transform: translateY(3px);
     transition: opacity 160ms ease, transform 200ms cubic-bezier(.2,.7,.2,1);
-    will-change: opacity, transform;
+    /* will-change removed: perma-compositor on workspace pages caused text-
+       blur at 1.25x DPR. Page switches are rare; the brief transition GPU-
+       composites itself. */
   }
   .ws-page[data-active="true"] {
     opacity: 1;

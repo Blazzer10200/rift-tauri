@@ -379,22 +379,24 @@
 {:else}
 <div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
   {#if !isUser}
-    <div class="avatar" aria-hidden="true">
-      <Sparkles size={13} />
-    </div>
+    <div class="turn-rail" aria-hidden="true"></div>
   {/if}
 
   <div class="body">
-    <div class="role-row">
+    <div class="turn-head">
+      {#if !isUser}
+        <div class="avatar" aria-hidden="true">
+          <Sparkles size={13} />
+        </div>
+      {/if}
       <span class="role-name">{isUser ? "You" : "Claude"}</span>
+      {#if !isUser && modelLabel}
+        <span class="head-sep" aria-hidden="true">·</span>
+        <span class="head-model" title="Model for this turn">{modelLabel}</span>
+      {/if}
       {#if !isUser && streaming}
         <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
         {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
-      {/if}
-      {#if !isUser && streaming && modelLabel}
-        <span class="turn-badge" title="Model for this turn">
-          <span class="turn-model">{modelLabel}</span>
-        </span>
       {/if}
       {#if plainText.length > 0}
         <button class="copybtn" type="button" onclick={copy} title="Copy">
@@ -409,7 +411,20 @@
 
     <div class="content">
       {#snippet renderBlock(b: Block, bi: number)}
-        {#if b.type === "text" && b.text.length > 0}
+        {#if b.type === "image"}
+          <button
+            type="button"
+            class="user-image-thumb"
+            title="Click to view full size"
+            onclick={() => window.open(`data:${b.mime};base64,${b.dataBase64}`, "_blank")}
+          >
+            <img
+              src={`data:${b.mime};base64,${b.dataBase64}`}
+              alt=""
+              loading="lazy"
+            />
+          </button>
+        {:else if b.type === "text" && b.text.length > 0}
           {#if isUser}
             <div class="text">{b.text}</div>
           {:else}
@@ -463,6 +478,7 @@
       {/snippet}
 
       {#each grouped as unit, ui (unit.key)}
+        <div class="stagger" style="--idx: {Math.min(ui, 6)}">
         {#if unit.kind === "loose"}
           {@render renderBlock(unit.block, ui)}
         {:else}
@@ -484,19 +500,13 @@
             {/snippet}
           </StepGroup>
         {/if}
+        </div>
       {/each}
 
     </div>
 
-    {#if !isUser && !streaming && (modelLabel || costLabel)}
-      <div class="turn-footer" title="Turn complete">
-        <span class="footer-line" aria-hidden="true"></span>
-        <span class="footer-meta">
-          {#if modelLabel}<span class="foot-model">{modelLabel}</span>{/if}
-          {#if modelLabel && costLabel}<span class="foot-sep">·</span>{/if}
-          {#if costLabel}<span class="foot-cost">{costLabel}</span>{/if}
-        </span>
-      </div>
+    {#if !isUser && !streaming && costLabel}
+      <div class="cost-pill mono" title="Turn cost">{costLabel}</div>
     {/if}
   </div>
 </div>
@@ -561,36 +571,59 @@
   }
   .bubble {
     display: grid;
-    grid-template-columns: 28px 1fr;
-    gap: 12px;
-    padding: 4px 0;
-    animation: msg-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    grid-template-columns: 2px 1fr;
+    column-gap: 14px;
+    padding: 2px 0;
+    position: relative;
+    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* User bubbles drop the avatar entirely + right-align — the bubble shape
+  /* User bubbles drop the rail entirely + right-align — the bubble shape
      already signals "you", and the position differentiates from Claude
-     without forcing a twin avatar column. */
+     without forcing a rail on user messages. */
   .bubble[data-role="user"] {
     grid-template-columns: 1fr;
+    column-gap: 0;
   }
   .bubble[data-role="user"] .body {
     align-items: flex-end;
     display: flex; flex-direction: column;
   }
-  @keyframes msg-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
+
+  /* Continuous accent rail down the LEFT of every assistant turn — visually
+     groups the avatar header + content + cost as one unit without boxing
+     them in (per the 2026 left-rail-spans-turn convention). */
+  .turn-rail {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: stretch;
+    width: 2px;
+    border-radius: 2px;
+    background: color-mix(in oklch, var(--accent) 22%, transparent);
+    transition: background 200ms ease-out;
   }
+  .bubble[data-streaming="true"] .turn-rail {
+    background: color-mix(in oklch, var(--accent) 60%, transparent);
+    animation: rail-stream 2.4s ease-in-out infinite;
+  }
+  @keyframes rail-stream {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
+    50%      { box-shadow: 0 0 6px 0 color-mix(in oklch, var(--accent) 28%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bubble[data-streaming="true"] .turn-rail { animation: none; }
+  }
+
+  /* Avatar lives INSIDE the turn-head row now (not a separate grid column).
+     Reads as the "head node" sitting on the rail. */
   .avatar {
-    width: 26px; height: 26px;
+    width: 22px; height: 22px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    margin-top: 0;
     background: var(--accent-soft);
     color: var(--accent);
+    flex-shrink: 0;
     transition: box-shadow 240ms ease-out;
   }
-  /* Subtle pulsing halo on the avatar while a turn streams — gives the
-     "still working" signal even when text is paused (e.g. mid-thinking). */
   .bubble[data-streaming="true"] .avatar {
     animation: avatar-halo 1.8s ease-in-out infinite;
   }
@@ -602,37 +635,58 @@
     .bubble[data-streaming="true"] .avatar { animation: none; }
   }
 
-  .body { min-width: 0; }
-  .role-row {
+  .body { min-width: 0; grid-column: 2; }
+  .bubble[data-role="user"] .body { grid-column: 1; }
+
+  /* Unified turn header — [avatar] Claude · Opus 4.7 [streaming dot heartbeat] [copy]
+     One row carries name + model + liveness instead of role-row + turn-badge
+     fighting for space. */
+  .turn-head {
     display: flex; align-items: center; gap: 8px;
-    margin-bottom: 2px;
-    height: 16px;
+    margin-bottom: 6px;
+    min-height: 22px;
   }
-  .bubble[data-role="user"] .role-row { justify-content: flex-end; }
+  .bubble[data-role="user"] .turn-head { justify-content: flex-end; }
   .role-name {
     font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--fg-2);
   }
-  .turn-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 10px;
-    line-height: 1;
-    padding: 2px 7px;
-    border-radius: 999px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+  .head-sep { color: var(--fg-faint); font-size: 11px; opacity: 0.6; }
+  .head-model {
+    font-size: 10.5px;
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
     white-space: nowrap;
-    flex-shrink: 0;
   }
-  .turn-model { color: var(--fg-2); font-weight: 500; }
-  .turn-sep { color: var(--fg-faint); }
-  .turn-cost { color: var(--fg-muted); font-family: var(--font-mono, monospace); }
+
+  /* Cost pill — sits flush-right under the turn's content as the "closing
+     beat" for a finished turn. Migrated out of the orphan footer-line. */
+  .cost-pill {
+    align-self: flex-end;
+    margin-top: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    color: var(--fg-muted);
+    font-size: 10px;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .body { display: flex; flex-direction: column; }
+  /* Stagger wrapper — per-block fade-up rhythm inside a turn. --idx is set
+     inline; cap at 6 in the template so we don't keep delaying past 210ms. */
+  .stagger {
+    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--idx, 0) * 35ms);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stagger, .cost-pill { animation: none; }
+  }
   .copybtn {
     opacity: 0;
     margin-left: auto;
@@ -651,21 +705,8 @@
     display: flex; flex-direction: column;
     gap: 6px;
   }
-  /* Per-block reveal — each direct child gently materializes on mount.
-     Streaming chunks inside an already-mounted block don't re-trigger;
-     the existing caret + bottom-mask handle in-place text growth. */
-  .content > .text,
-  .content > .reasoning {
-    animation: block-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  @keyframes block-in {
-    from { opacity: 0; transform: translateY(3px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .content > .text,
-    .content > .reasoning { animation: none; }
-  }
+  /* Per-block reveal handled by .stagger wrapper now (see grouped each loop).
+     Don't double-animate here — would re-fire on inner text deltas. */
   .text {
     word-wrap: break-word;
     font-size: var(--fs-md);
@@ -689,6 +730,39 @@
     white-space: pre-wrap;
   }
   .bubble[data-role="assistant"] .text { max-width: 78ch; }
+
+  /* User image thumbnails — pasted/dropped into the composer get persisted
+     on the user message and render here above the text bubble. Click opens
+     the data URL in a new window for full-size view. */
+  .user-image-thumb {
+    align-self: flex-end;
+    display: inline-flex;
+    padding: 0;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    cursor: pointer;
+    overflow: hidden;
+    max-width: min(100%, 320px);
+    max-height: 240px;
+    transition: border-color 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
+  }
+  .user-image-thumb:hover {
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px color-mix(in oklch, var(--accent) 14%, transparent);
+  }
+  .user-image-thumb img {
+    display: block;
+    max-width: 100%;
+    max-height: 240px;
+    width: auto;
+    height: auto;
+    object-fit: cover;
+    /* image-rendering for high-DPI sharpness on raster sources */
+    image-rendering: auto;
+  }
+  .bubble[data-role="assistant"] .user-image-thumb { align-self: flex-start; }
 
   /* Reasoning / thinking surface */
   .reasoning {
@@ -786,37 +860,6 @@
     letter-spacing: 0.01em;
   }
   .mono { font-family: var(--font-mono, monospace); }
-
-  /* End-of-turn footer — the stream-status row used to live below role-row
-     for in-flight signaling; it was easy to miss when scrolled to the input,
-     so the live label moved to <StatusHub /> above the composer. The footer
-     here closes a finished assistant turn with a subtle divider + model · cost,
-     giving the user a clear "done" beat instead of just trailing prose. */
-  .turn-footer {
-    display: flex; align-items: center; gap: 10px;
-    margin-top: 14px;
-    padding-top: 8px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
-    animation: footer-in 240ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .footer-line { display: none; }
-  .footer-meta {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-size: 10px;
-    color: var(--fg-faint);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.02em;
-  }
-  .foot-model { color: var(--fg-muted); font-weight: 500; }
-  .foot-sep { color: var(--fg-faint); opacity: 0.6; }
-  .foot-cost { color: var(--fg-muted); font-family: var(--font-mono, monospace); }
-  @keyframes footer-in {
-    from { opacity: 0; transform: translateY(-2px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .turn-footer { animation: none; }
-  }
 
   @keyframes pulse {
     0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }

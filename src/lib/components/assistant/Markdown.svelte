@@ -4,9 +4,16 @@
   import DOMPurify from "dompurify";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
+  import { highlightSync, normalizeLang, whenReady } from "../../state/highlighter.svelte";
 
   marked.setOptions({ gfm: true, breaks: true });
   marked.use(markedAlert());
+
+  // Reactive flag — flips to true once Shiki's singleton has warmed up.
+  // Markdown's `processed` $derived depends on this so all code blocks
+  // re-render w/ syntax highlighting on first warmup.
+  let shikiReady = $state(false);
+  whenReady().then(() => { shikiReady = true; });
 
   // Diff code blocks: when fenced as ```diff, color +/- lines inline.
   function esc(s: string) {
@@ -64,7 +71,16 @@
           });
           return `<pre class="diff-block"><code>${rows.join("")}</code></pre>`;
         }
-        return false as unknown as string;
+        // Shiki path — supported language → render highlighted body wrapped
+        // in a header bar w/ [lang · N lines · Copy]. Unsupported language
+        // OR highlighter not ready yet → return false to fall through to
+        // marked's default (annotateCodeBlocks adds the copy button there).
+        const norm = normalizeLang(lang);
+        if (!norm) return false as unknown as string;
+        const html = highlightSync(text, lang);
+        if (!html) return false as unknown as string;
+        const lineCount = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+        return `<div class="shiki-block" data-lang="${esc(norm)}"><div class="shiki-head"><span class="shiki-lang">${esc(norm)}</span><span class="shiki-sep">·</span><span class="shiki-lines">${lineCount} line${lineCount === 1 ? "" : "s"}</span><span class="code-copy" role="button" tabindex="0" aria-label="Copy code">Copy</span></div>${html}</div>`;
       },
     },
   });
@@ -76,7 +92,11 @@
     const copyBtn = target?.closest(".code-copy") as HTMLElement | null;
     if (copyBtn) {
       e.preventDefault();
-      const pre = copyBtn.closest("pre");
+      // Shiki blocks: copy lives in .shiki-head (sibling of <pre>, both
+      // children of .shiki-block). Legacy blocks: copy lives INSIDE <pre>.
+      // Try shiki path first, fall back to pre.
+      const shikiBlock = copyBtn.closest(".shiki-block");
+      const pre = shikiBlock?.querySelector("pre") ?? copyBtn.closest("pre");
       const code = pre?.querySelector("code");
       const text = code?.textContent ?? "";
       if (!text) return;
@@ -130,8 +150,8 @@
 
   // Inject a tiny copy affordance into every fenced code block. The button
   // lives inside the <pre> so we can position it absolutely top-right.
-  // Diff blocks are skipped — copying their gutter-laden HTML would yield
-  // mangled output, and the inline +/- coloring already conveys the change.
+  // Diff blocks AND shiki-rendered blocks are skipped — diffs would yield
+  // mangled output, and shiki blocks already have a header w/ Copy.
   function annotateCodeBlocks(html: string): string {
     if (typeof document === "undefined") return html;
     if (!html.includes("<pre")) return html;
@@ -139,6 +159,8 @@
     tpl.innerHTML = html;
     tpl.content.querySelectorAll("pre").forEach((pre) => {
       if (pre.classList.contains("diff-block")) return;
+      // Skip shiki blocks — they're wrapped in .shiki-block w/ own header.
+      if (pre.closest(".shiki-block")) return;
       const code = pre.querySelector("code");
       if (!code || (code.textContent ?? "").length === 0) return;
       pre.classList.add("has-copy");
@@ -175,6 +197,10 @@
   }
 
   const processed = $derived.by(() => {
+    // Re-run when shikiReady flips — `code()` renderer reads from the same
+    // highlighter singleton, so on the first paint after warmup all code
+    // blocks upgrade from plain → syntax-highlighted in place.
+    void shikiReady;
     const raw = marked.parse(text, { async: false }) as string;
     const clean = DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: [
@@ -189,7 +215,10 @@
         "details", "summary",
         "input",
       ],
-      ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open"],
+      // `style` allowed for Shiki's inline span colors. Safe because the
+      // upstream `text` already went through marked + we only render
+      // highlighter output we generated ourselves.
+      ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open", "style", "tabindex", "role", "aria-label", "data-lang"],
     });
     const extracted = extractAndStripChecklists(clean);
     return { html: annotateCodeBlocks(tagFlatShortLists(extracted.html)), items: extracted.items };
@@ -535,6 +564,89 @@
     background: color-mix(in oklch, var(--danger) 8%, transparent);
   }
   .md :global(.markdown-alert-caution .markdown-alert-title) { color: oklch(0.78 0.18 22); }
+
+  /* ── Shiki syntax-highlighted code blocks ─────────────────────────── */
+  /* Wraps the shiki-rendered <pre> in a slim header bar w/ lang + line count
+     + Copy. Overrides the default .md pre styling so shiki's own bg + colors
+     take over from the elev-1/accent-border treatment. */
+  .md :global(.shiki-block) {
+    margin: 8px 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #22272e; /* github-dark-dimmed bg, matches Shiki output */
+    position: relative;
+  }
+  .md :global(.shiki-head) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--fg-muted);
+    letter-spacing: 0.04em;
+    text-transform: lowercase;
+  }
+  .md :global(.shiki-lang) {
+    color: var(--fg-2);
+    font-weight: 600;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    letter-spacing: 0.02em;
+  }
+  .md :global(.shiki-sep) { color: var(--fg-faint); opacity: 0.6; }
+  .md :global(.shiki-lines) {
+    color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 9.5px;
+  }
+  .md :global(.shiki-head .code-copy) {
+    margin-left: auto;
+    padding: 2px 8px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: color 120ms ease-out, background 120ms ease-out, border-color 120ms ease-out;
+  }
+  .md :global(.shiki-head .code-copy:hover) {
+    color: var(--fg);
+    background: var(--bg-elev-2);
+    border-color: var(--border);
+  }
+  .md :global(.shiki-head .code-copy.copied) {
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+  }
+  /* Shiki's own <pre.shiki> — strip our default border/radius/elev so the
+     wrapper's chrome takes over. */
+  .md :global(.shiki-block pre.shiki) {
+    margin: 0;
+    padding: 10px 14px;
+    background: transparent !important;
+    border: 0;
+    border-radius: 0;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .md :global(.shiki-block pre.shiki code) {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+    color: inherit;
+    font-family: var(--font-mono, ui-monospace, monospace);
+  }
 
   /* ── Diff code blocks (```diff fenced) ─────────────────────────────── */
   .md :global(pre.diff-block) {

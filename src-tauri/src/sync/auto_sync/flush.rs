@@ -29,6 +29,11 @@ pub(super) enum EntryResult {
     Ok(Option<String>, String), // (rel_path, action)
     Fail,
     Requeued,
+    /// SFTP op returned a dead-session error (Channel send error, broken pipe,
+    /// etc.). The russh session is unusable until reconnect. `flush_batch` bails
+    /// the rest of the batch on first Wedged — no point dispatching 34 more
+    /// uploads that will all fail identically. 2026-05-21 incident fix.
+    Wedged,
 }
 
 impl AutoSyncEngine {
@@ -122,10 +127,11 @@ impl AutoSyncEngine {
         let mut dispatched = 0u32;
         let mut ok = 0u32;
         let mut fail = 0u32;
+        let mut wedged = false;
         let mut trail_items: Vec<(String, String)> = Vec::new();
 
         loop {
-            while active < UPLOAD_CONCURRENCY {
+            while active < UPLOAD_CONCURRENCY && !wedged {
                 if let Some(ct) = &cancel {
                     if ct.is_cancelled() {
                         break;
@@ -150,10 +156,40 @@ impl AutoSyncEngine {
                 }
                 EntryResult::Fail => fail += 1,
                 EntryResult::Requeued => {}
+                EntryResult::Wedged => {
+                    // First wedge triggers batch abort. Stop dispatching new
+                    // entries — let any in-flight futures drain (they'll all
+                    // return Wedged too on a dead session, and that's fine —
+                    // they self-requeue). Remaining `iter` entries get
+                    // requeued explicitly after the loop.
+                    wedged = true;
+                }
             }
         }
 
-        if ok > 0 || fail > 0 {
+        // Requeue any entries we never dispatched once wedge was detected.
+        // process_entry_body re-inserts wedged-mid-flight entries itself; this
+        // covers the not-yet-dispatched tail that `iter` still holds.
+        if wedged {
+            for entry in iter {
+                self.dirty.insert(entry.path.clone(), entry);
+            }
+        }
+
+        if wedged {
+            // Park engine in Error with a clear, actionable detail string.
+            // The UI's existing ConnectionWedged listener already surfaces a
+            // Reconnect affordance from the diag event format_sftp_err emitted;
+            // this just makes sure the global engine-state pill matches.
+            self.set_state(
+                AutoSyncState::Error,
+                format!(
+                    "{}: SSH session dead — Disconnect / Reconnect to recover",
+                    fw.resource_name
+                ),
+            )
+            .await;
+        } else if ok > 0 || fail > 0 {
             // v0.2.52: smarter escalation. Don't flip to Error on a single
             // fail (editor-tmp race, vanished-rename source path, etc.).
             // Track consecutive-fail batches; only escalate after 3+ in a
@@ -322,7 +358,10 @@ impl AutoSyncEngine {
         // inline-await w/ 5 s timeout (previous spawn could be aborted by
         // engine `stop()` before delete fired, leaving orphan locks). Release
         // is idempotent so inline + success-path release is harmless.
-        if !matches!(result, EntryResult::Requeued) {
+        // Wedged sessions can't release anything — every SFTP op fails
+        // identically. Skip to avoid 5s × N entries of pointless timeout
+        // waits, which would block the batch-abort drain.
+        if !matches!(result, EntryResult::Requeued | EntryResult::Wedged) {
             if let Some(locks) = self.locks.clone() {
                 if let Some(remote) = map_local_to_remote(&entry_path_for_release, &fw_for_release) {
                     let _ = tokio::time::timeout(
@@ -408,6 +447,15 @@ impl AutoSyncEngine {
                 );
                 EntryResult::Ok(Some(rel), "deleted".into())
             } else {
+                // Dead-session detection: don't bump retry counter on a wedged
+                // session — every retry attempt would fail identically until
+                // reconnect. Requeue verbatim so the entry comes back clean.
+                if crate::sftp::is_dead_session_error(&r.error) {
+                    self.dirty.insert(entry.path.clone(), entry.clone());
+                    self.log_activity(&fw.resource_name, file_name(&entry.path),
+                        &format!("delete blocked — SSH session dead, requeued"));
+                    return EntryResult::Wedged;
+                }
                 self.mark_failed(&entry);
                 self.log_activity(&fw.resource_name, file_name(&entry.path),
                     &format!("delete failed: {}", r.error));
@@ -663,6 +711,16 @@ impl AutoSyncEngine {
                 );
                 EntryResult::Ok(Some(rel), "synced".into())
             } else {
+                // Dead-session detection: same rationale as delete path —
+                // don't bump retry counter or emit UploadFail noise for a
+                // wedged session. ConnectionWedged was already emitted by
+                // `format_sftp_err` (one event for the batch, not 35).
+                if crate::sftp::is_dead_session_error(&r.error) {
+                    self.dirty.insert(entry.path.clone(), entry.clone());
+                    self.log_activity(&fw.resource_name, file_name(&entry.path),
+                        "upload blocked — SSH session dead, requeued");
+                    return EntryResult::Wedged;
+                }
                 self.mark_failed(&entry);
                 self.log_activity(&fw.resource_name, file_name(&entry.path),
                     &format!("sync failed: {}", r.error));

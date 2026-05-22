@@ -21,16 +21,22 @@ Already wired:
 `scripts/cdp/c.sh` — thin curl wrapper. Examples:
 
 ```bash
-bash scripts/cdp/c.sh health                                   # smoke test
-bash scripts/cdp/c.sh state                                    # assistant-page state snapshot in 1 call
+bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs)
+bash scripts/cdp/c.sh state                                    # assistant snapshot (incl. workspaceActiveId)
+bash scripts/cdp/c.sh page                                     # generic "where am I" (every workspace)
 bash scripts/cdp/c.sh eval "document.title"                    # arbitrary JS
 bash scripts/cdp/c.sh type ".assistant textarea" "hello" Enter # type + Enter
 bash scripts/cdp/c.sh click "button.sendbtn"                   # click
 bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
-bash scripts/cdp/c.sh shot                                     # jpeg q65 -> .tmp/snap-...jpeg
-bash scripts/cdp/c.sh shot png                                 # png lossless
+bash scripts/cdp/c.sh shot                                     # jpeg q65 -> prints bare path
+bash scripts/cdp/c.sh shot png 0                               # png lossless
+bash scripts/cdp/c.sh shot jpeg 65 --json                      # {path,bytes} JSON instead of bare path
+bash scripts/cdp/c.sh shot-sel ".tabs-rail"                    # clip screenshot to a selector's rect
+bash scripts/cdp/c.sh batch '{"ops":[{"op":"state"},{"op":"screenshot"}],"parallel":true}'
 bash scripts/cdp/c.sh shutdown                                 # stop the server
 ```
+
+`shot` prints just the path on stdout — `f=$(bash scripts/cdp/c.sh shot)` then `Read` $f.
 
 ## /state — the swiss army snapshot
 
@@ -60,9 +66,13 @@ Per-screenshot ~$0.07 + image input tokens. Image cost tripled vs Opus 4.6.
 2. **Screenshot only when pixels matter** — layout bugs, animations, contrast, drag region.
 3. **JPEG q50-70** when you DO screenshot. Half the tokens of PNG.
 
-## Legacy PowerShell scripts
+## Server-side behavior
 
-`_cdp.ps1`, `targets.ps1`, `eval.ps1`, `type.ps1`, `wait.ps1`, `screenshot.ps1` — still work as a fallback if the Node wrapper isn't running. Slower (~700ms cold start each) but no dependencies beyond PowerShell 5.1.
+- **Auto-prune `.tmp/`** — on startup, prunes `snap-*.{jpeg,png,webp}` to the 20 newest by mtime. Override w/ `RIFT_CDP_TMP_KEEP=N`. Whitelist-scoped: stress scripts and any other ext stay.
+- **Auto-reconnect** — `connect()` retries the CDP `/json` lookup 3× w/ 500ms gap before throwing, so a cold Tauri boot races cleanly.
+- **In-flight cleanup** — when the WebView2 socket closes, all pending requests reject immediately w/ `ws closed before response` (no 30s timeout hangs).
+- **`/health`** — fires a real `Runtime.evaluate('1')` ping; reports `pingMs`. Half-broken socket (port open, no response) surfaces as `ok:false`.
+- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `key`, `screenshot`, `state`, `page`.
 
 ## Limits
 

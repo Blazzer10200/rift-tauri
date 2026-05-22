@@ -7,8 +7,17 @@
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { accessibility } from "$lib/state/accessibility.svelte";
+  import SplashOverlay from "$lib/components/SplashOverlay.svelte";
 
   let { children } = $props();
+  // sessionStorage is per-window-instance (cleared on close), so prod cold-
+  // launches always replay the splash. Dev HMR / page-refresh within the
+  // same window skips — set inline so we never flash-mount the overlay.
+  // To force-replay during iteration: `sessionStorage.removeItem("rift.splash.seen")`
+  let splashDone = $state(
+    typeof sessionStorage !== "undefined" &&
+      !!sessionStorage.getItem("rift.splash.seen"),
+  );
 
   onMount(() => {
     uiPrefs.init();
@@ -18,3 +27,7 @@
 </script>
 
 {@render children()}
+
+{#if !splashDone}
+  <SplashOverlay onComplete={() => (splashDone = true)} />
+{/if}

@@ -23,12 +23,6 @@
   );
 
   const stateText = $derived(connection.status?.state ?? "offline");
-  const ledClass = $derived(
-    stateText === "watching" || stateText === "idle" ? "ok" :
-    stateText === "syncing" ? "info" :
-    stateText === "error" ? "danger" : "muted"
-  );
-
   const watcherOn = $derived(stateText === "watching" || stateText === "idle" || stateText === "syncing");
   const queue = $derived(connection.status?.pending ?? 0);
   const failed = $derived(connection.status?.failed ?? 0);
@@ -56,6 +50,22 @@
     return `${Math.floor(sec / 3600)}h ago`;
   });
 
+  const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+  const isStale = $derived.by(() => {
+    if (!watcherOn) return false;
+    const t = connection.lastScanAt;
+    if (!t) return false;
+    return now - t > STALE_THRESHOLD_MS;
+  });
+
+  const ledClass = $derived(
+    stateText === "error" ? "danger" :
+    isStale ? "stale" :
+    stateText === "syncing" ? "info" :
+    stateText === "watching" || stateText === "idle" ? "ok" :
+    "muted"
+  );
+
   // Phase 1: app version pulled once at module init via the existing
   // `app_version` Tauri cmd (lib.rs:362). Renders on the right edge.
   let version = $state<string | null>(null);
@@ -80,10 +90,10 @@
     type="button"
     onclick={toggleWatcher}
     disabled={!connection.selected || connection.connecting}
-    title={connection.isHandshaking ? "Connecting…" : watcherOn ? "Click to stop watching" : "Click to start watching"}
+    title={connection.isHandshaking ? "Connecting…" : isStale ? `Watching but last scan ${lastScanLabel ?? "long ago"} — click to stop` : watcherOn ? "Click to stop watching" : "Click to start watching"}
   >
     <span class="led" data-state={ledClass}></span>
-    <span class="lbl">{connection.isHandshaking ? "connecting" : stateText}</span>
+    <span class="lbl">{connection.isHandshaking ? "connecting" : isStale ? "stale" : stateText}</span>
   </button>
 
   {#if bgSync}
@@ -211,6 +221,17 @@
   .led[data-state="info"]   { background: var(--info); }
   .led[data-state="danger"] { background: var(--danger); }
   .led[data-state="muted"]  { background: var(--fg-faint); }
+  .led[data-state="stale"] {
+    background: var(--warn);
+    animation: led-stale 1.8s ease-in-out infinite;
+  }
+  @keyframes led-stale {
+    0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--warn) 26%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--warn) 16%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .led[data-state="stale"] { animation: none; }
+  }
   .sync-pill {
     background: transparent;
     border: 0;

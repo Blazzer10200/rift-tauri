@@ -11,11 +11,20 @@
     FileText, FolderTree, Search, FilePen, FilePlus, Terminal, Globe,
     Wrench, Loader2, CheckCircle2, AlertCircle, ChevronRight, ListChecks,
     Bot, HelpCircle, FlagOff, BookOpen, Sparkles, Slash, Square, SkipForward,
+    Circle,
   } from "lucide-svelte";
   import type { ToolBlock } from "../../state/assistant.svelte";
+  import Markdown from "./Markdown.svelte";
 
   let { tool }: { tool: ToolBlock } = $props();
+  // Agent + TodoWrite are first-class card variants — default-expanded since
+  // their body IS the message, not a debug detail. All other tools collapse.
+  const isAgent = $derived(/^(mcp__rift__)?Agent$/.test(tool.name));
+  const isTodoWrite = $derived(/^(mcp__rift__)?TodoWrite$/.test(tool.name));
+  const isCard = $derived(isAgent || isTodoWrite);
   let expanded = $state(false);
+  // Cards open by default; chips closed.
+  $effect(() => { if (isCard) expanded = true; });
 
   function shortName(name: string): string { return name.replace(/^mcp__rift__/, ""); }
   function trim(s: string, n = 60): string {
@@ -268,34 +277,144 @@
     if (lines.length <= 60) return { shown: lines, more: 0 };
     return { shown: lines.slice(0, 60), more: lines.length - 60 };
   });
+
+  // ── Agent card data ──────────────────────────────────────────────────
+  const agentSubtype = $derived(
+    typeof tool.input?.subagent_type === "string"
+      ? (tool.input.subagent_type as string)
+      : "general",
+  );
+  const agentDescription = $derived(
+    typeof tool.input?.description === "string"
+      ? (tool.input.description as string)
+      : null,
+  );
+  const agentPrompt = $derived(
+    typeof tool.input?.prompt === "string" ? (tool.input.prompt as string) : null,
+  );
+
+  // ── TodoWrite checklist data ─────────────────────────────────────────
+  type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" };
+  const todoItems = $derived.by<TodoItem[]>(() => {
+    const raw = tool.input?.todos;
+    if (!Array.isArray(raw)) return [];
+    return (raw as Array<Record<string, unknown>>)
+      .map((t) => ({
+        content: typeof t.content === "string" ? t.content : "",
+        status:
+          t.status === "completed" || t.status === "in_progress" || t.status === "pending"
+            ? (t.status as TodoItem["status"])
+            : "pending",
+      }))
+      .filter((t) => t.content.length > 0);
+  });
+  const todoCounts = $derived.by(() => {
+    let done = 0, active = 0, pend = 0;
+    for (const t of todoItems) {
+      if (t.status === "completed") done++;
+      else if (t.status === "in_progress") active++;
+      else pend++;
+    }
+    return { done, active, pend, total: todoItems.length };
+  });
 </script>
 
-<div class="chip" data-status={tool.status} data-category={category}>
-  <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
-    <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
-    <span class="chip-icon"><Icon size={12} /></span>
-    <span class="chip-tool">{toolLabel}</span>
-    <span class="chip-sep">·</span>
-    <span class="chip-sum mono">{summary}</span>
-    {#if !expanded && inlinePreview}
-      <span class="chip-arrow" aria-hidden="true">→</span>
-      <span class="chip-preview mono" title={tool.result ?? ""}>{inlinePreview}</span>
-    {/if}
-    {#if durationLabel}
-      <span class="chip-duration mono" title="Wall-clock duration">{durationLabel}</span>
-    {/if}
-    <span class="chip-status">
-      {#if tool.status === "pending"}
-        <Loader2 size={11} class="chip-spin" />
-      {:else if tool.status === "error"}
-        <AlertCircle size={11} />
-      {:else}
-        <CheckCircle2 size={11} />
+<div class="chip" data-status={tool.status} data-category={category} class:as-card={isCard}>
+  {#if isAgent}
+    <!-- Agent card head — bigger, badge-led, no chevron toggle (always open). -->
+    <div class="agent-head">
+      <span class="agent-icon"><Bot size={14} /></span>
+      <span class="agent-pill">{agentSubtype}</span>
+      {#if agentDescription}
+        <span class="agent-desc">{agentDescription}</span>
       {/if}
-    </span>
-  </button>
+      {#if durationLabel}
+        <span class="chip-duration mono" title="Wall-clock duration">{durationLabel}</span>
+      {/if}
+      <span class="chip-status">
+        {#if tool.status === "pending"}<Loader2 size={12} class="chip-spin" />
+        {:else if tool.status === "error"}<AlertCircle size={12} />
+        {:else}<CheckCircle2 size={12} />{/if}
+      </span>
+    </div>
+  {:else if isTodoWrite}
+    <!-- TodoWrite card head — counts summary + status. -->
+    <div class="todo-head">
+      <span class="agent-icon"><ListChecks size={13} /></span>
+      <span class="todo-title">Tasks</span>
+      <span class="todo-counts mono">
+        <span class="todo-count done" title="completed">{todoCounts.done}</span>
+        <span class="todo-sep">/</span>
+        <span class="todo-count total" title="total">{todoCounts.total}</span>
+      </span>
+      <span class="chip-status">
+        {#if tool.status === "pending"}<Loader2 size={11} class="chip-spin" />
+        {:else if tool.status === "error"}<AlertCircle size={11} />
+        {:else}<CheckCircle2 size={11} />{/if}
+      </span>
+    </div>
+  {:else}
+    <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
+      <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
+      <span class="chip-icon"><Icon size={12} /></span>
+      <span class="chip-tool">{toolLabel}</span>
+      <span class="chip-sep">·</span>
+      <span class="chip-sum mono">{summary}</span>
+      {#if !expanded && inlinePreview}
+        <span class="chip-arrow" aria-hidden="true">→</span>
+        <span class="chip-preview mono" title={tool.result ?? ""}>{inlinePreview}</span>
+      {/if}
+      {#if durationLabel}
+        <span class="chip-duration mono" title="Wall-clock duration">{durationLabel}</span>
+      {/if}
+      <span class="chip-status">
+        {#if tool.status === "pending"}
+          <Loader2 size={11} class="chip-spin" />
+        {:else if tool.status === "error"}
+          <AlertCircle size={11} />
+        {:else}
+          <CheckCircle2 size={11} />
+        {/if}
+      </span>
+    </button>
+  {/if}
 
-  {#if expanded}
+  {#if isAgent && expanded}
+    <div class="agent-body">
+      {#if agentPrompt}
+        <div class="agent-prompt-wrap">
+          <span class="agent-field-label">prompt</span>
+          <blockquote class="agent-prompt">{agentPrompt}</blockquote>
+        </div>
+      {/if}
+      <div class="agent-field-label">{tool.isError ? "error" : tool.status === "pending" ? "working…" : "result"}</div>
+      {#if tool.status === "pending" && !tool.result}
+        <div class="agent-pending">
+          <span class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
+          <span>Agent running…</span>
+        </div>
+      {:else if tool.isError}
+        <pre class="result error">{tool.result ?? ""}</pre>
+      {:else if tool.result}
+        <div class="agent-result"><Markdown text={tool.result} /></div>
+      {/if}
+    </div>
+  {:else if isTodoWrite && expanded}
+    <div class="todo-body">
+      <ul class="todo-list">
+        {#each todoItems as item, i (i + item.content)}
+          <li class="todo-item" data-status={item.status}>
+            <span class="todo-box" aria-hidden="true">
+              {#if item.status === "completed"}<CheckCircle2 size={12} />
+              {:else if item.status === "in_progress"}<Loader2 size={12} class="todo-spin" />
+              {:else}<Circle size={12} />{/if}
+            </span>
+            <span class="todo-content">{item.content}</span>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {:else if expanded}
     <div class="chip-body">
       {#if inputRows}
         {#if inputRows.length > 0}
@@ -354,11 +473,7 @@
     border-radius: 5px;
     overflow: hidden;
     transition: border-color 140ms ease-out, background 140ms ease-out, opacity 140ms ease-out;
-    animation: chip-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  @keyframes chip-in {
-    from { opacity: 0; transform: translateY(3px); }
-    to   { opacity: 1; transform: translateY(0); }
+    animation: enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .chip[data-status="done"] { opacity: 0.85; }
   .chip[data-status="done"]:hover { opacity: 1; }
@@ -641,4 +756,172 @@
   }
 
   .mono { font-family: var(--font-mono, monospace); }
+
+  /* ── Card variants (Agent + TodoWrite) ─────────────────────────────── */
+  .chip.as-card {
+    max-width: min(100%, 78ch);
+    width: 100%;
+    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
+    border-radius: 8px;
+    border-width: 1px;
+    border-left-width: 3px;
+  }
+  .chip.as-card[data-category="agent"] {
+    border-left-color: color-mix(in oklch, oklch(0.74 0.13 310) 65%, var(--border));
+  }
+  .chip.as-card[data-category="meta"] {
+    border-left-color: color-mix(in oklch, oklch(0.76 0.10 145) 55%, var(--border));
+  }
+
+  /* Agent head */
+  .agent-head {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 12px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    background: color-mix(in oklch, oklch(0.74 0.13 310) 8%, transparent);
+  }
+  .agent-icon {
+    display: inline-flex;
+    color: oklch(0.78 0.14 310);
+    flex-shrink: 0;
+  }
+  .agent-pill {
+    display: inline-flex; align-items: center;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: color-mix(in oklch, oklch(0.74 0.13 310) 22%, transparent);
+    border: 1px solid color-mix(in oklch, oklch(0.74 0.13 310) 40%, var(--border));
+    color: oklch(0.84 0.10 310);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    font-family: var(--font-mono, monospace);
+    flex-shrink: 0;
+  }
+  .agent-desc {
+    flex: 1; min-width: 0;
+    color: var(--fg-2);
+    font-size: 12px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .agent-body {
+    padding: 10px 14px 12px;
+    display: flex; flex-direction: column;
+    gap: 8px;
+  }
+  .agent-field-label {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-muted);
+    font-weight: 600;
+  }
+  .agent-prompt-wrap { display: flex; flex-direction: column; gap: 4px; }
+  .agent-prompt {
+    margin: 0;
+    padding: 8px 12px;
+    border-left: 2px solid color-mix(in oklch, oklch(0.74 0.13 310) 50%, transparent);
+    background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
+    color: var(--fg-2);
+    font-size: 11.5px;
+    line-height: 1.5;
+    font-style: italic;
+    border-radius: 0 4px 4px 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .agent-result {
+    padding: 4px 0;
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .agent-pending {
+    display: inline-flex; align-items: center; gap: 8px;
+    color: var(--fg-muted);
+    font-size: 11.5px;
+    font-style: italic;
+  }
+  .agent-pending .dots { display: inline-flex; gap: 3px; }
+  .agent-pending .dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: oklch(0.74 0.13 310);
+    animation: agent-dot 1.1s ease-in-out infinite;
+  }
+  .agent-pending .dot:nth-child(2) { animation-delay: 0.15s; }
+  .agent-pending .dot:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes agent-dot {
+    0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
+    30% { opacity: 1; transform: scale(1); }
+  }
+
+  /* Todo head + checklist */
+  .todo-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 11px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    background: color-mix(in oklch, oklch(0.76 0.10 145) 6%, transparent);
+  }
+  .todo-head .agent-icon { color: oklch(0.76 0.13 145); }
+  .todo-title {
+    color: var(--fg-2);
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.01em;
+  }
+  .todo-counts {
+    display: inline-flex; align-items: center; gap: 3px;
+    margin-left: auto;
+    margin-right: 4px;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
+  .todo-count.done { color: oklch(0.78 0.14 145); font-weight: 600; }
+  .todo-count.total { color: var(--fg-muted); }
+  .todo-sep { color: var(--fg-faint); }
+  .todo-body { padding: 8px 12px 10px; }
+  .todo-list {
+    list-style: none;
+    margin: 0; padding: 0;
+    display: flex; flex-direction: column;
+    gap: 3px;
+  }
+  .todo-item {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    align-items: start;
+    gap: 8px;
+    padding: 3px 4px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.45;
+    color: var(--fg-2);
+    /* Transition (not animation) — safe with mutateStreaming rebuild. */
+    transition: color 200ms ease-out, opacity 200ms ease-out;
+  }
+  .todo-box {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-faint);
+    padding-top: 1px;
+    transition: color 200ms ease-out;
+  }
+  .todo-content {
+    word-wrap: break-word;
+    transition: color 200ms ease-out, text-decoration-color 200ms ease-out;
+  }
+  .todo-item[data-status="completed"] .todo-box { color: oklch(0.78 0.14 145); }
+  .todo-item[data-status="completed"] .todo-content {
+    color: var(--fg-muted);
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in oklch, var(--fg-muted) 60%, transparent);
+  }
+  .todo-item[data-status="in_progress"] .todo-box { color: var(--accent); }
+  .todo-item[data-status="in_progress"] .todo-content { color: var(--fg); font-weight: 500; }
+  .todo-item[data-status="pending"] .todo-content { color: var(--fg-2); }
+  .todo-box :global(.todo-spin) {
+    animation: chip-spin 1.1s linear infinite;
+    color: var(--accent);
+  }
 </style>

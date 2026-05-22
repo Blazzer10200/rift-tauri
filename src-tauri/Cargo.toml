@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.4.22-alpha"
+version = "0.4.23-alpha"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -8,6 +8,26 @@ edition = "2021"
 [lib]
 name = "rift_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[features]
+# Default build = no native Whisper. Every other STT subsystem (mic capture,
+# VAD, model download, Haiku cleanup, Settings + IPC) is unconditional. To
+# enable on-device Whisper inference, install dependencies + opt in:
+#
+#   1. Install LLVM/Clang (libclang.dll is needed by `whisper-rs-sys`'s
+#      bindgen step): https://github.com/llvm/llvm-project/releases or
+#      `winget install LLVM.LLVM` (needs admin).
+#   2. (Optional, for 10× speedup) install the NVIDIA CUDA Toolkit and set
+#      `CUDA_PATH`: https://developer.nvidia.com/cuda-downloads
+#   3. Rebuild:
+#      * CPU:  `cargo build --release --features whisper-rs`
+#      * CUDA: `cargo build --release --features whisper-rs,whisper-cuda`
+#
+# Until then, `engine: "whisper"` returns a clean error telling the user
+# what to install; `engine: "web_speech"` keeps working as before.
+default = []
+whisper-rs = ["dep:whisper-rs"]
+whisper-cuda = ["whisper-rs", "whisper-rs/cuda"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -64,7 +84,7 @@ walkdir = "2.5.0"
 # directly lets us import w/o relying on transitive paths.
 regex = "1"
 futures = "0.3.32"
-reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream"] }
 
 # Phase 1h: server pubkey fingerprint pinning (OpenSSH-style SHA256:base64).
 # `sha2` for the digest, `base64` w/ NO_PAD engine to match OpenSSH's
@@ -88,6 +108,29 @@ portable-pty = "0.9"
 # the plaintext ~/.rift/*.json files.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
-# Speech-to-text runs in the WebView via the Web Speech API (Edge's built-in
-# Azure-backed recogniser). No backend crate needed — Rust side only persists
-# the user's STT preferences via the `stt` module.
+# Speech-to-text — Phase 3: mic capture.
+#   - `cpal` for cross-platform audio input (WASAPI on Windows).
+#   - `rubato` for sample-rate conversion to Whisper's 16 kHz mono f32.
+cpal = "0.15"
+rubato = "0.16"
+
+# Speech-to-text — Phase 4: VAD. Pure-Rust port of Google's WebRTC VAD —
+# 10/20/30ms frame energy gating, no ONNX runtime needed. Cheaper than Silero;
+# good enough for desktop dictation (Silero edge is noisy-environment robustness
+# we don't need). Pairs w/ a post-Whisper blocklist for the residual silence-
+# hallucination class.
+webrtc-vad = "0.4"
+
+# Speech-to-text — Phase 5: Whisper inference via whisper.cpp FFI.
+# OPTIONAL — gated behind `whisper-rs` Cargo feature; see [features] header
+# for the install + opt-in instructions. Marked `optional = true` so the
+# default `cargo build` works on machines without LLVM/Clang installed.
+whisper-rs = { version = "0.14", default-features = false, optional = true }
+
+# Speech-to-text — Phase 2: local Whisper pipeline.
+#   - `webkitSpeechRecognition` (Web Speech / Azure) kept as legacy engine.
+#   - New engine: whisper-rs (whisper.cpp w/ CUDA) + cpal mic capture + Silero
+#     VAD + optional Haiku polish. Model files live in `~/.rift/models/`,
+#     downloaded from huggingface.co/ggerganov/whisper.cpp via `reqwest`
+#     streaming + `sha2` integrity. Heavy crates (whisper-rs/cpal/ort) added
+#     as their respective sub-modules land — Cargo deps stay minimal until then.

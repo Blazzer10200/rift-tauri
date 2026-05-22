@@ -78,17 +78,10 @@
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────
-  onMount(async () => {
-    try {
-      await connection.wireEvents();
-    } catch (e) {
-      console.error("wireEvents failed; banner will offer retry", e);
-    }
-    await connection.loadServers();
-    await connection.refreshStatus();
-    if (!connection.selectedKey && connection.servers.length === 0) {
-      gotoSettings();
-    }
+  // S131: SplashOverlay (layout-level) owns wireEvents + loadServers +
+  // refreshStatus + first-run settings redirect. AppShell mounts behind the
+  // blur and reacts off connection state as the overlay populates it.
+  onMount(() => {
     updates.checkOnLaunch();
   });
 
@@ -491,7 +484,9 @@
       max-height 180ms cubic-bezier(.2,.7,.2,1),
       opacity 140ms ease,
       transform 180ms cubic-bezier(.2,.7,.2,1);
-    will-change: max-height, opacity, transform;
+    /* will-change removed: perma-compositor layer caused text-blur on tab
+       labels at fractional DPR (1.25/1.5x Win scaling). max-height can't be
+       composited anyway, so it was a no-op for perf + a cost for clarity. */
   }
   .tabs-rail[data-show="true"] {
     max-height: 48px;

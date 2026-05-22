@@ -6,6 +6,7 @@
   import EmptyState from "./EmptyState.svelte";
   import Composer from "./Composer.svelte";
   import TasksDock from "./TasksDock.svelte";
+  import SyncActivityBanner from "./SyncActivityBanner.svelte";
 
   let {
     tabId,
@@ -191,6 +192,17 @@
   ondrop={onPaneDrop}
   tabindex={focused ? -1 : 0}
 >
+  <!-- Atmosphere layer — single accent-only top-spotlight + faint film grain.
+       Pure CSS, no colors outside the existing accent vocabulary, no garish
+       drift. Replaces the v1 3-blob aurora which clashed by introducing
+       info/ok semantic colors not used anywhere else in the UI. -->
+  <div class="atmos" aria-hidden="true">
+    <span class="atmos-glow"></span>
+    <span class="atmos-grain"></span>
+  </div>
+  {#if focused}
+    <SyncActivityBanner />
+  {/if}
   {#if assistant.splitActive}
     <div class="pane-chrome" aria-hidden="true">
       <span class="pane-label" title="Pane {paneIdx + 1} of {assistant.panes.length}">{paneIdx + 1}</span>
@@ -274,13 +286,15 @@
        region above and no composer. Send focuses this pane first so the
        store's activeTab-driven send() targets the right tab. -->
   {#if tabId}
-    <Composer
-      {tabId}
-      onsubmit={(text) => {
-        if (!focused) assistant.setFocusedPane(paneIdx);
-        assistant.send(text);
-      }}
-    />
+    <div class="composer-slot">
+      <Composer
+        {tabId}
+        onsubmit={(text) => {
+          if (!focused) assistant.setFocusedPane(paneIdx);
+          assistant.send(text);
+        }}
+      />
+    </div>
   {/if}
 
   {#if dragging}
@@ -435,7 +449,56 @@
     background: var(--bg);
     border-color: color-mix(in oklch, var(--accent) 22%, transparent);
   }
+  /* ── Atmosphere ─────────────────────────────────────────────────────
+     Pure accent + grain. Matches the existing UpdateDialog head-glow +
+     EmptyState glyph-halo vocabulary — same color family, same restraint.
+     No info/ok colors, no garish drift. Sits behind chat content. */
+  .atmos {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  /* Single soft accent glow at the top edge — same shape as the
+     UpdateDialog .head-glow (60% 100% at 50% 0%). Gives the chat surface
+     a subtle "lit-from-above" feel without competing w/ content. */
+  .atmos-glow {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 55%;
+    background:
+      radial-gradient(70% 100% at 50% 0%,
+        color-mix(in oklch, var(--accent) 12%, transparent) 0%,
+        color-mix(in oklch, var(--accent) 4%, transparent) 35%,
+        transparent 75%);
+    opacity: 0.8;
+    animation: atmos-breathe 9s ease-in-out infinite;
+  }
+  /* Tiny film grain via inline SVG turbulence — adds organic texture so
+     the dark surface doesn't read as a flat void. ~3% opacity, no anim. */
+  .atmos-grain {
+    position: absolute;
+    inset: 0;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    background-size: 200px 200px;
+    mix-blend-mode: overlay;
+  }
+  @keyframes atmos-breathe {
+    0%, 100% { opacity: 0.70; }
+    50%      { opacity: 0.95; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .atmos-glow { animation: none; opacity: 0.80; }
+  }
+  .composer-slot {
+    position: relative;
+    z-index: 1;
+  }
   .scroll {
+    position: relative;
+    z-index: 1;
     flex: 1; min-height: 0;
     overflow-y: auto;
     padding: 16px 18px 4px;
@@ -446,15 +509,13 @@
   .scroll::-webkit-scrollbar-button { display: none; }
   .messages {
     display: flex; flex-direction: column;
-    gap: 16px;
+    gap: 28px;
     max-width: var(--chat-col-max);
     width: 100%;
     margin: 0 auto;
   }
-  .messages :global(.bubble + .bubble) {
-    padding-top: 12px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-  }
+  /* Inter-turn separation: rail + 28px gap does the work. No divider line
+     — the rail-spans-turn pattern reads cleaner without a horizontal cut. */
 
   .pane-empty {
     flex: 1;
@@ -502,6 +563,8 @@
   }
 
   .alerts {
+    position: relative;
+    z-index: 1;
     flex-shrink: 0;
     display: flex; flex-direction: column;
     gap: 6px;
@@ -519,7 +582,7 @@
     font-size: var(--fs-sm);
     text-align: left;
     line-height: 1.4;
-    animation: alert-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .alert.error {
     background: var(--danger-soft);
@@ -546,10 +609,6 @@
   }
   .notice-text { flex: 1; line-height: 1.45; }
   .alert-x { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; opacity: 0.7; }
-  @keyframes alert-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
   @media (prefers-reduced-motion: reduce) {
     .alert { animation: none; }
   }
