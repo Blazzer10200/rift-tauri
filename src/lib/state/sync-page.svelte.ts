@@ -117,6 +117,16 @@ class SyncPageStore {
       .sort((a, b) => b.total_pending - a.total_pending);
   }
 
+  // #257: memoized path → entry map. Plain getters re-run per access; this
+  // $derived only recomputes when `entries` changes, so consumers that mix
+  // `entries` + `selected` (e.g. SyncPage.selBreakdown) won't reallocate the
+  // map every time a row is checked/unchecked.
+  byPath = $derived.by(() => {
+    const map = new Map<string, DriftEntry>();
+    for (const e of this.entries) map.set(e.local_path, e);
+    return map;
+  });
+
   get totals() {
     let push = 0, pull = 0, del = 0, delRemote = 0, conf = 0;
     for (const e of this.entries) {
@@ -454,8 +464,17 @@ class SyncPageStore {
           return;
         }
       }
-      // Final rescan re-surfaces any leftover drift + new mid-sync changes.
-      setTimeout(() => { void this.rescan(); }, 1200);
+      // #153: chain rescan inline so busy stays true through the settle.
+      // Was fire-and-forget setTimeout → busy=false before rescan grabbed it
+      // → 1.2s window where a double-click could fire a second syncNow().
+      await new Promise((r) => setTimeout(r, 1200));
+      const fired = await invoke<boolean>("sync_reconcile");
+      if (!fired) {
+        this.errorMsg = "Not connected — start watcher first.";
+      } else {
+        await new Promise((r) => setTimeout(r, 800));
+        await this.refresh();
+      }
     } catch (e) {
       this.errorMsg = String(e);
     } finally {

@@ -183,6 +183,26 @@ class UpdateStore {
       });
     }
   }
+
+  /** #173: tear down Tauri event listeners. Wired via `import.meta.hot.dispose`
+   *  so HMR doesn't stack duplicates; AppShell may also call this on unmount
+   *  (separate milestone). Safe to call when listeners were never installed. */
+  dispose() {
+    if (this.progressUnlisten) {
+      try { this.progressUnlisten(); } catch (e) { console.warn("update-progress unlisten threw", e); }
+      this.progressUnlisten = null;
+    }
+    if (this.downloadedUnlisten) {
+      try { this.downloadedUnlisten(); } catch (e) { console.warn("update-downloaded unlisten threw", e); }
+      this.downloadedUnlisten = null;
+    }
+  }
 }
 
 export const updates = new UpdateStore();
+
+// #173: HMR teardown so a hot-reload doesn't leave the old listeners firing
+// into a stale store instance.
+if (typeof import.meta !== "undefined" && (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot) {
+  (import.meta as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => updates.dispose());
+}
