@@ -26,6 +26,12 @@ use tokio::sync::broadcast;
 
 const BUS_CAPACITY: usize = 4096;
 const FRONTEND_RATE_PER_SEC: u32 = 200;
+/// #246: secondary ceiling on critical-bypass events. Pathological loops
+/// (e.g. a RemoteScanResult emitted in a hot retry) could otherwise flood
+/// Svelte reactivity without limit. 50/s leaves head-room for normal bursty
+/// activity (drift result + reconnect + bridge ack arriving in the same
+/// second) while bounding pathological cases.
+const FRONTEND_CRITICAL_RATE_PER_SEC: u32 = 50;
 /// Cap of the recent-events ring buffer. Sized to cover ~30s of activity at
 /// typical churn while staying small enough that snapshot reads don't matter.
 const RECENT_RING_CAP: usize = 128;
@@ -418,10 +424,12 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut window_start = std::time::Instant::now();
         let mut window_emitted: u32 = 0;
+        let mut crit_window_start = std::time::Instant::now();
+        let mut crit_window_emitted: u32 = 0;
         loop {
             match rx.recv().await {
                 Ok(ev) => {
-                    // Critical lifecycle events ALWAYS pass through — the
+                    // Critical lifecycle events bypass the 200/s cap — the
                     // SyncModal blocks on DriftScanResult and TabRail's busy
                     // flag clears on it. Rate-limiting these caused the
                     // "Pushing pending local edits…" hang after a 192-file
@@ -437,7 +445,22 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
                             | DiagStage::BridgeAck
                             | DiagStage::System
                     );
-                    if !is_critical {
+                    if is_critical {
+                        // #246: secondary ceiling on the critical bypass —
+                        // pathological loops (e.g. a RemoteScanResult fired
+                        // in tight retry) could otherwise flood Svelte
+                        // reactivity. 50/s is well above any legitimate
+                        // burst we've seen in production.
+                        let now = std::time::Instant::now();
+                        if now.duration_since(crit_window_start).as_millis() >= 1000 {
+                            crit_window_start = now;
+                            crit_window_emitted = 0;
+                        }
+                        if crit_window_emitted >= FRONTEND_CRITICAL_RATE_PER_SEC {
+                            continue;
+                        }
+                        crit_window_emitted += 1;
+                    } else {
                         let now = std::time::Instant::now();
                         if now.duration_since(window_start).as_millis() >= 1000 {
                             window_start = now;
@@ -452,6 +475,10 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
                 }
                 Err(RecvError::Lagged(n)) => {
                     bus().record_bus_lag(n);
+                    // #226: prior silent counter only surfaced via 500ms
+                    // diag://state if the Diagnostics tab was open. Warn-log
+                    // makes the drop visible to LogForwarder + activity feed.
+                    log::warn!("diag bus lagged: {n} events dropped");
                 }
                 Err(RecvError::Closed) => break,
             }

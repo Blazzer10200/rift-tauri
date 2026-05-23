@@ -139,6 +139,12 @@ impl<'a> DriftScanner<'a> {
         folders: &[FolderTarget],
         cancel: Option<&CancellationToken>,
     ) -> ScanResult {
+        // #247: entry/exit timing without pulling in `tracing`. Single
+        // log::debug pair per scan — cost is negligible and a debug-level
+        // build (RUST_LOG=debug) gets hierarchical visibility into the
+        // listing → scan → result pipeline.
+        let __t_scan_start = std::time::Instant::now();
+        log::debug!("drift_scanner.scan_with_cancel enter folders={}", folders.len());
         let mut entries = Vec::new();
         let mut last_batch_error: Option<String> = None;
         let mut remote_folders_missing = Vec::new();
@@ -223,6 +229,16 @@ impl<'a> DriftScanner<'a> {
             }
         }
 
+        let __elapsed_ms = __t_scan_start.elapsed().as_millis() as u64;
+        log::debug!(
+            "drift_scanner.scan_with_cancel exit folders={} entries={} missing={} aborted_shrunk={} cancelled={} elapsed_ms={}",
+            folders.len(),
+            entries.len(),
+            remote_folders_missing.len(),
+            aborted_shrunk.len(),
+            cancelled,
+            __elapsed_ms
+        );
         ScanResult {
             entries,
             last_batch_listing_error: last_batch_error,
@@ -396,6 +412,84 @@ impl<'a> DriftScanner<'a> {
             all_keys.insert(k);
         }
 
+        // #259: pre-pass batches remote sha1 lookups instead of serializing
+        // them one-per-entry in the main loop below. Pre-fix, each candidate
+        // hit was an SSH-exec round-trip on the critical path → up to
+        // REMOTE_HASH_BUDGET_PER_FOLDER (25) × RTT wall time per scan on a
+        // high-latency link. With concurrency=4 that drops to ~6×RTT.
+        //
+        // Candidate selection mirrors the three sha-needing branches in the
+        // main loop (remote jitter detect, false-conflict collapse, first-
+        // scan equality). Pre-fetch may over-fetch a few entries when a
+        // later case-1 jitter would have reset `remote_changed` — that's
+        // strictly conservative; budget is enforced at candidate-collection
+        // time. Cache misses (e.g. main loop's `remote_path` not in the
+        // pre-pass set) simply fall through to None → behavior unchanged.
+        let mut sha_candidates: Vec<String> = Vec::new();
+        for rel in &all_keys {
+            if sha_candidates.len() >= REMOTE_HASH_BUDGET_PER_FOLDER as usize {
+                break;
+            }
+            let l = match local_map.get(*rel) {
+                Some(v) => v,
+                None => continue,
+            };
+            let r = match remote_map.get(*rel) {
+                Some(v) => v,
+                None => continue,
+            };
+            let remote_path = r.full_path.clone();
+            let snap = self.snapshot.and_then(|s| s.try_get(&remote_path));
+            let needs = match snap.as_ref() {
+                Some(snap_e) => {
+                    if snap_e.sha1.is_none() {
+                        false
+                    } else {
+                        let local_changed =
+                            !SyncSnapshot::local_matches(snap_e, l.size, l.mtime);
+                        let remote_changed =
+                            !SyncSnapshot::remote_matches(snap_e, r.size, r.mtime);
+                        let case_jitter_remote =
+                            remote_changed && r.size == snap_e.remote_size;
+                        let case_false_conflict = local_changed
+                            && remote_changed
+                            && l.size == r.size
+                            && l.size <= SHA1_MAX_BYTES;
+                        case_jitter_remote || case_false_conflict
+                    }
+                }
+                None => l.size == r.size && l.size <= SHA1_MAX_BYTES,
+            };
+            if needs {
+                sha_candidates.push(remote_path);
+            }
+        }
+        let mut sha_cache: HashMap<String, Option<String>> = HashMap::new();
+        if !sha_candidates.is_empty() {
+            let __t_sha = std::time::Instant::now();
+            let n_candidates = sha_candidates.len();
+            const SHA_CONCURRENCY: usize = 4;
+            use futures::stream::StreamExt as _;
+            let pairs: Vec<(String, Option<String>)> = futures::stream::iter(sha_candidates)
+                .map(|path| async move {
+                    let sha = self.sftp.get_remote_sha1(&path).await;
+                    (path, sha)
+                })
+                .buffer_unordered(SHA_CONCURRENCY)
+                .collect()
+                .await;
+            for (path, sha) in pairs {
+                sha_cache.insert(path, sha);
+            }
+            log::debug!(
+                "drift_scanner.sha_prefetch resource={} candidates={} cached={} elapsed_ms={}",
+                f.resource_name,
+                n_candidates,
+                sha_cache.len(),
+                __t_sha.elapsed().as_millis()
+            );
+        }
+
         let mut entries = Vec::new();
         for rel in all_keys {
             // #73: per-entry cancel check. Each iteration may issue 0-2
@@ -473,7 +567,13 @@ impl<'a> DriftScanner<'a> {
                     // Remote jitter: stat-changed but size still matches snapshot column.
                     if remote_changed && rs.size == snap_e.remote_size && hash_budget > 0 {
                         hash_budget -= 1;
-                        if let Some(rh) = self.sftp.get_remote_sha1(&remote_path).await {
+                        // #259: cache hit (pre-pass batched this lookup).
+                        // Falls back to live fetch if pre-pass missed.
+                        let rh_opt = match sha_cache.get(&remote_path).cloned() {
+                            Some(cached) => cached,
+                            None => self.sftp.get_remote_sha1(&remote_path).await,
+                        };
+                        if let Some(rh) = rh_opt {
                             if rh.eq_ignore_ascii_case(snap_sha) {
                                 remote_changed = false;
                                 if let Some(s) = self.snapshot {
@@ -497,7 +597,12 @@ impl<'a> DriftScanner<'a> {
                 {
                     if let Some(lh) = SyncSnapshot::compute_sha1(&ls.full_path) {
                         hash_budget -= 1;
-                        if let Some(rh) = self.sftp.get_remote_sha1(&remote_path).await {
+                        // #259: cache hit (pre-pass batched). Fallback fetch on miss.
+                        let rh_opt = match sha_cache.get(&remote_path).cloned() {
+                            Some(cached) => cached,
+                            None => self.sftp.get_remote_sha1(&remote_path).await,
+                        };
+                        if let Some(rh) = rh_opt {
                             if lh.eq_ignore_ascii_case(&rh) {
                                 if let Some(s) = self.snapshot {
                                     s.set(&remote_path, ls.size, ls.mtime, rs.size, rs.mtime, Some(lh));
@@ -520,7 +625,12 @@ impl<'a> DriftScanner<'a> {
                 if ls.size == rs.size && ls.size <= SHA1_MAX_BYTES && hash_budget > 0 {
                     if let Some(lh) = SyncSnapshot::compute_sha1(&ls.full_path) {
                         hash_budget -= 1;
-                        if let Some(rh) = self.sftp.get_remote_sha1(&remote_path).await {
+                        // #259: cache hit (pre-pass batched). Fallback fetch on miss.
+                        let rh_opt = match sha_cache.get(&remote_path).cloned() {
+                            Some(cached) => cached,
+                            None => self.sftp.get_remote_sha1(&remote_path).await,
+                        };
+                        if let Some(rh) = rh_opt {
                             if lh.eq_ignore_ascii_case(&rh) {
                                 if let Some(s) = self.snapshot {
                                     s.set(&remote_path, ls.size, ls.mtime, rs.size, rs.mtime, Some(lh));
