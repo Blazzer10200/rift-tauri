@@ -27,5 +27,6 @@ backups/
 scratch/
 
 # Session state — overnight plans, audit logs, transient agent notes. Local only.
-state/
+# Anchored to root so it doesn't swallow src/lib/state/ (Svelte 5 store dir).
+/state/
 scripts/cdp/.audit/
