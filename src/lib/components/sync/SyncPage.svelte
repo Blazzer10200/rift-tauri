@@ -18,6 +18,15 @@
   // v0.2.53 Mirror typed-confirm gate. User must type "MIRROR" to enable
   // the Confirm button. Prevents accidental destructive remote deletes.
   let mirrorConfirmText = $state("");
+  let mirrorConfirmInput = $state<HTMLInputElement | undefined>(undefined);
+
+  // Autofocus the confirm input when the modal opens — keeps Tab inside the
+  // dialog instead of leaking back into the sync table.
+  $effect(() => {
+    if (syncPage.mirrorConfirm && mirrorConfirmInput) {
+      queueMicrotask(() => mirrorConfirmInput?.focus());
+    }
+  });
   const MIRROR_CONFIRM_PHRASE = "MIRROR";
   // Track which shrink-banners are expanded. Default collapsed —
   // banner is dense and steals vertical space when several brackets fire.
@@ -132,7 +141,17 @@
   });
 
   function relPathLabel(e: DriftEntry): string {
-    return e.rel_path || e.local_path;
+    if (e.rel_path) return e.rel_path;
+    // Don't surface the user's absolute FS path when rel_path is empty —
+    // it leaks their layout. Fall back to basename only.
+    const lp = e.local_path || "";
+    const idx = Math.max(lp.lastIndexOf("/"), lp.lastIndexOf("\\"));
+    return idx >= 0 ? lp.slice(idx + 1) : (lp || "—");
+  }
+
+  function isConflictCopy(e: DriftEntry): boolean {
+    return /[\\\/]\.rift-conflict\./.test(e.local_path || "") ||
+           /^\.rift-conflict\./.test(e.rel_path || "");
   }
 
   function bucketLabel(b: string): string {
@@ -163,7 +182,7 @@
   }
 
   function groupSelectionState(g: ResourceGroup): "none" | "some" | "all" {
-    const items = [...g.to_push, ...g.to_pull, ...g.to_delete];
+    const items = [...g.to_push, ...g.to_pull, ...g.to_delete, ...g.to_delete_remote];
     if (items.length === 0) return "none";
     let on = 0;
     for (const it of items) if (syncPage.selected.has(it.local_path)) on++;
@@ -180,7 +199,7 @@
 
   function selectedCountIn(g: ResourceGroup): number {
     let n = 0;
-    for (const e of [...g.to_push, ...g.to_pull, ...g.to_delete]) {
+    for (const e of [...g.to_push, ...g.to_pull, ...g.to_delete, ...g.to_delete_remote]) {
       if (syncPage.selected.has(e.local_path)) n++;
     }
     return n;
@@ -198,13 +217,6 @@
     return Math.min(25, Math.max(5, Math.floor(total * 0.3)));
   }
 
-  function scanAgeLabel(): string {
-    if (!syncPage.scannedAt) return "never";
-    const ageSec = Math.floor((Date.now() - syncPage.scannedAt) / 1000);
-    if (ageSec < 60) return `${ageSec}s ago`;
-    if (ageSec < 3600) return `${Math.floor(ageSec / 60)}m ago`;
-    return `${Math.floor(ageSec / 3600)}h ago`;
-  }
 </script>
 
 {#snippet toolbarActions()}
@@ -571,6 +583,9 @@
                         <div class="entry-main">
                           <div class="entry-line-1">
                             <span class="entry-path mono" title={e.local_path}>{relPathLabel(e)}</span>
+                            {#if isConflictCopy(e)}
+                              <span class="conflict-copy-chip" title="Local .rift-conflict.* copy — review before push">conflict-copy</span>
+                            {/if}
                             {#if sizeBytes > 0}<span class="entry-meta-right">{formatSize(sizeBytes)}</span>{/if}
                           </div>
                           <div class="entry-line-2">
@@ -660,6 +675,7 @@
             Type <code>{MIRROR_CONFIRM_PHRASE}</code> to confirm:
             <input
               type="text"
+              bind:this={mirrorConfirmInput}
               bind:value={mirrorConfirmText}
               placeholder={MIRROR_CONFIRM_PHRASE}
               autocomplete="off"
@@ -1101,6 +1117,19 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--fg);
+  }
+  .conflict-copy-chip {
+    display: inline-flex; align-items: center;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--warn-soft);
+    color: var(--warn);
+    border: 1px solid color-mix(in oklch, var(--warn) 32%, transparent);
+    font-size: 10px;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+    flex: 0 0 auto;
   }
 
   /* ── Footer ─────────────────────────────────────────── */
