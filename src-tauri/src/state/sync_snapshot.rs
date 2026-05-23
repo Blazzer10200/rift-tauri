@@ -399,4 +399,132 @@ mod tests {
         assert_eq!(e.sha1.as_deref(), Some("DEADBEEF"));
         let _ = std::fs::remove_file(&path);
     }
+
+    // ── M8 serialization round-trip tests (Wave A, #265) ────────────────
+
+    #[test]
+    fn entry_json_uses_pascal_case_field_names() {
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        let e = Entry {
+            local_size: 11,
+            local_mtime_utc: mtime,
+            remote_size: 22,
+            remote_mtime_utc: mtime,
+            sha1: Some("ABC".into()),
+        };
+        let j = serde_json::to_string(&e).unwrap();
+        // WPF Rift compat: top-level field names MUST be PascalCase so existing
+        // ~/.rift/snapshot-*.json files round-trip across both apps.
+        assert!(j.contains("\"LocalSize\":11"), "json = {j}");
+        assert!(j.contains("\"RemoteSize\":22"), "json = {j}");
+        assert!(j.contains("\"LocalMtimeUtc\":"), "json = {j}");
+        assert!(j.contains("\"RemoteMtimeUtc\":"), "json = {j}");
+        assert!(j.contains("\"Sha1\":\"ABC\""), "json = {j}");
+    }
+
+    #[test]
+    fn entry_json_omits_absent_sha1() {
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        let e = Entry {
+            local_size: 1,
+            local_mtime_utc: mtime,
+            remote_size: 1,
+            remote_mtime_utc: mtime,
+            sha1: None,
+        };
+        let j = serde_json::to_string(&e).unwrap();
+        // sha1 carries skip_serializing_if = Option::is_none — absence must
+        // omit the key, not emit `"Sha1":null`. Keeps disk parity w/ WPF.
+        assert!(!j.contains("Sha1"), "json = {j}");
+    }
+
+    #[test]
+    fn entry_loads_when_sha1_field_missing() {
+        // Older WPF snapshots predate the sha1 jitter-collapse path and have
+        // no Sha1 key. Loading them must succeed with sha1 = None.
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        let mtime_str = mtime.to_rfc3339();
+        let json = format!(
+            r#"{{"LocalSize":7,"LocalMtimeUtc":"{m}","RemoteSize":7,"RemoteMtimeUtc":"{m}"}}"#,
+            m = mtime_str
+        );
+        let e: Entry = serde_json::from_str(&json).expect("parse legacy entry");
+        assert_eq!(e.local_size, 7);
+        assert_eq!(e.remote_size, 7);
+        assert!(e.sha1.is_none());
+    }
+
+    #[test]
+    fn multi_entry_round_trip_via_disk() {
+        let key = unique_key();
+        let m1 = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        let m2 = Utc.with_ymd_and_hms(2026, 5, 8, 9, 30, 0).unwrap();
+        let path = {
+            let snap = SyncSnapshot::new(&key).unwrap();
+            snap.set("/r/a.lua", 1, m1, 1, m1, Some("AAA".into()));
+            snap.set("/r/b.lua", 2, m2, 3, m2, None);
+            snap.set("/r/sub/c.lua", 100, m1, 200, m2, Some("CCC".into()));
+            assert_eq!(snap.count(), 3);
+            snap.path.clone()
+        };
+
+        let snap2 = SyncSnapshot::new(&key).unwrap();
+        assert_eq!(snap2.count(), 3);
+
+        let a = snap2.try_get("/r/a.lua").unwrap();
+        assert_eq!(a.local_size, 1);
+        assert_eq!(a.sha1.as_deref(), Some("AAA"));
+
+        let b = snap2.try_get("/r/b.lua").unwrap();
+        assert_eq!(b.local_size, 2);
+        assert_eq!(b.remote_size, 3);
+        assert!(b.sha1.is_none());
+
+        let c = snap2.try_get("/r/sub/c.lua").unwrap();
+        assert_eq!(c.local_size, 100);
+        assert_eq!(c.remote_size, 200);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn missing_snapshot_file_yields_empty_map() {
+        // First open on a never-existed key → no entries (no panic).
+        let key = unique_key();
+        let snap = SyncSnapshot::new(&key).unwrap();
+        assert_eq!(snap.count(), 0);
+        assert!(snap.try_get("/anything").is_none());
+        let _ = std::fs::remove_file(&snap.path);
+    }
+
+    #[test]
+    fn corrupt_snapshot_file_yields_empty_map() {
+        // Garbage on disk must not panic — load_or_default falls back to empty
+        // (better than crashing the whole engine on a malformed cache).
+        let key = unique_key();
+        let path = super::super::paths::cache_path("snapshot", &key).unwrap();
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "not valid json {{{").unwrap();
+
+        let snap = SyncSnapshot::new(&key).unwrap();
+        assert_eq!(snap.count(), 0);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn forget_persists_to_disk() {
+        let key = unique_key();
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        let path = {
+            let snap = SyncSnapshot::new(&key).unwrap();
+            snap.set("/r/keep.lua", 1, mtime, 1, mtime, None);
+            snap.set("/r/drop.lua", 1, mtime, 1, mtime, None);
+            snap.forget("/r/drop.lua");
+            snap.path.clone()
+        };
+        let snap2 = SyncSnapshot::new(&key).unwrap();
+        assert!(snap2.try_get("/r/keep.lua").is_some());
+        assert!(snap2.try_get("/r/drop.lua").is_none());
+        let _ = std::fs::remove_file(&path);
+    }
 }
