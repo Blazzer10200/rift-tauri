@@ -130,6 +130,7 @@
   let { message, streaming = false }: { message: ChatMessage; streaming?: boolean } = $props();
 
   let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
   let expandedThinking = $state(new Set<number>());
   // Live tick so `active` thinking blocks + the role-row heartbeat show
   // real-time elapsed seconds. Runs while either an active thinking block
@@ -140,15 +141,16 @@
   );
   let tickHandle: ReturnType<typeof setInterval> | null = null;
   $effect(() => {
-    if ((hasActiveThinking || streaming) && !tickHandle) {
+    // Unconditional clear-at-entry — reactive batch can run this effect twice
+    // before the !tickHandle guard catches up, registering two intervals. (#161)
+    if (tickHandle) { clearInterval(tickHandle); tickHandle = null; }
+    if (hasActiveThinking || streaming) {
       tickHandle = setInterval(() => (tickNow = Date.now()), 500);
-    } else if (!hasActiveThinking && !streaming && tickHandle) {
-      clearInterval(tickHandle);
-      tickHandle = null;
     }
   });
   onDestroy(() => {
     if (tickHandle) clearInterval(tickHandle);
+    if (copyTimer) clearTimeout(copyTimer);
   });
 
   // Role-row heartbeat — elapsed since turn start. Re-reads tickNow so it
@@ -249,7 +251,8 @@
     try {
       await navigator.clipboard.writeText(plainText);
       copied = true;
-      setTimeout(() => (copied = false), 1200);
+      if (copyTimer) clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => { copied = false; copyTimer = null; }, 1200);
     } catch (e) {
       console.warn("copy failed", e);
     }

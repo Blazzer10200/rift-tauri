@@ -70,7 +70,8 @@
   .page-head[data-tone="warn"]    { --tone-color: var(--warn); }
   .page-head[data-tone="danger"]  { --tone-color: var(--danger); }
   .page-head[data-tone="ok"]      { --tone-color: var(--ok); }
-  .page-head[data-tone="neutral"] { --tone-color: var(--fg-muted); opacity: 0.35; }
+  .page-head[data-tone="neutral"] { --tone-color: var(--fg-muted); }
+  .page-head[data-tone="neutral"]::after { opacity: 0.2; }
   .left, .right {
     display: flex; align-items: center; gap: 8px;
     min-width: 0;

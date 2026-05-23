@@ -677,12 +677,13 @@
           onclick={() => (hintOpen = !hintOpen)}
           aria-expanded={hintOpen}
           aria-label="Composer hints"
+          aria-describedby={hintOpen ? "composer-hint-pop" : undefined}
           title="Keyboard shortcuts"
         >
           <HelpCircle size={14} />
         </button>
         {#if hintOpen}
-          <div class="hint-pop" role="dialog">
+          <div id="composer-hint-pop" class="hint-pop" role="tooltip">
             <div class="hint-row"><kbd>Enter</kbd><span>send</span></div>
             <div class="hint-row"><kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span></div>
             <div class="hint-row"><kbd>/</kbd><span>commands</span></div>
@@ -699,7 +700,10 @@
         }}
         onkeyup={refreshMention}
         onclick={refreshMention}
-        onblur={() => { mentionState = null; }}
+        onblur={() => {
+          if (!mentionState) return;
+          requestAnimationFrame(() => { mentionState = null; });
+        }}
         onkeydown={onKey}
         onpaste={onPaste}
         placeholder={streaming
