@@ -55,8 +55,8 @@ Bump-First -Path 'package.json' `
     -Label 'package.json top-level version'
 
 Bump-First -Path 'src-tauri/Cargo.toml' `
-    -Pattern '(?m)^version\s*=\s*"[^"]+"' `
-    -Replacement "version = `"$Version`"" `
+    -Pattern '(?ms)(\[package\][^\[]*?^version\s*=\s*")[^"]+(")' `
+    -Replacement "`${1}$Version`${2}" `
     -Label 'Cargo.toml [package] version'
 
 Bump-First -Path 'src-tauri/tauri.conf.json' `
@@ -67,7 +67,7 @@ Bump-First -Path 'src-tauri/tauri.conf.json' `
 # Cross-check: re-read all three and confirm they match.
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
 $cargoText = Get-Content src-tauri/Cargo.toml -Raw
-$null = $cargoText -match '(?m)^version\s*=\s*"([^"]+)"'
+$null = $cargoText -match '(?ms)\[package\][^\[]*?^version\s*=\s*"([^"]+)"'
 $cargoVer = $matches[1]
 $tauriCfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
 if ($pkg.version -ne $Version -or $cargoVer -ne $Version -or $tauriCfg.version -ne $Version) {
