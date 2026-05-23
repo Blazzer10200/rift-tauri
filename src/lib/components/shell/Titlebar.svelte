@@ -12,14 +12,26 @@
 
   let menuOpen = $state(false);
   let menuRef = $state<HTMLDivElement | null>(null);
+  let triggerRef = $state<HTMLButtonElement | null>(null);
 
   function onDocMouseDown(e: MouseEvent) {
     if (menuRef && !menuRef.contains(e.target as Node)) menuOpen = false;
   }
+  function onMenuKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      menuOpen = false;
+      triggerRef?.focus();
+    }
+  }
   $effect(() => {
     if (menuOpen) {
       document.addEventListener("mousedown", onDocMouseDown);
-      return () => document.removeEventListener("mousedown", onDocMouseDown);
+      document.addEventListener("keydown", onMenuKey);
+      return () => {
+        document.removeEventListener("mousedown", onDocMouseDown);
+        document.removeEventListener("keydown", onMenuKey);
+      };
     }
   });
 
@@ -55,10 +67,13 @@
 
     <div class="svr-picker" bind:this={menuRef} data-open={menuOpen}>
       <button
+        bind:this={triggerRef}
         class="svr-btn"
         onclick={() => (menuOpen = !menuOpen)}
         type="button"
         title={`${connCfg[connState].label} — ${connCfg[connState].title}`}
+        aria-haspopup="listbox"
+        aria-expanded={menuOpen}
       >
         <span class="svr-dot" data-state={connCfg[connState].cls}></span>
         {#if sel}
@@ -71,11 +86,13 @@
         <ChevronDown size={12}/>
       </button>
       {#if menuOpen}
-        <div class="svr-menu">
+        <div class="svr-menu" role="listbox" aria-label="Server profiles">
           <div class="menu-label">Servers</div>
           {#each connection.servers as s (s.key)}
             <button
               class="menu-item"
+              role="option"
+              aria-selected={sel?.key === s.key}
               data-active={sel?.key === s.key}
               onclick={() => pick(s)}
               type="button"

@@ -1,6 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { invoke } from "@tauri-apps/api/core";
   import { connection } from "../../state/connection.svelte";
   import { syncModal } from "../../state/sync-modal.svelte";
   import { Lock, RefreshCw, Download, Upload, AlertTriangle, Hourglass, Network, Sparkles } from "lucide-svelte";
@@ -66,13 +64,10 @@
     "muted"
   );
 
-  // Phase 1: app version pulled once at module init via the existing
-  // `app_version` Tauri cmd (lib.rs:362). Renders on the right edge.
-  let version = $state<string | null>(null);
-  onMount(async () => {
-    try { version = await invoke<string>("app_version"); }
-    catch (e) { console.error("app_version invoke failed", e); }
-  });
+  // App version comes from updates.currentVersion once checkOnLaunch resolves
+  // (UpdateService fetches it via the same `app_version` IPC). Re-using avoids
+  // a duplicate invoke on every StatusBar mount.
+  const version = $derived(updates.currentVersion);
 
   async function toggleWatcher() {
     if (!connection.selected || connection.connecting) return;
@@ -176,7 +171,7 @@
     </button>
   {/if}
 
-  {#if version}
+  {#if version && version !== "?"}
     <div class="grp version" title="Rift version">
       <span class="mono val faint">v{version}</span>
     </div>

@@ -5,6 +5,7 @@
   // workspace is active.
 
   import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown } from "lucide-svelte";
+  import { onDestroy } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
@@ -153,6 +154,15 @@
     assistant.draggingTabId = null;
   }
 
+  // Window-level dragend safety net + unmount cleanup. Workspace-switch
+  // collapses the rail mid-drag; some browsers swallow the per-element
+  // dragend in that case. (#208)
+  $effect(() => {
+    window.addEventListener("dragend", onDragEnd);
+    return () => window.removeEventListener("dragend", onDragEnd);
+  });
+  onDestroy(onDragEnd);
+
   // -------- right-side chat status chips (absorbed from AssistantHeader) -----
 
   function leafName(p: string): string {
@@ -189,7 +199,10 @@
       lastSeenUpdate = t;
       if (!assistant.ui.dockOpen && taskCount > 0) {
         pulse = true;
-        setTimeout(() => (pulse = false), 700);
+        // Return cleanup so a workspace-switch / unmount within 700ms doesn't
+        // leave the callback writing into a detached closure. (#159)
+        const handle = setTimeout(() => (pulse = false), 700);
+        return () => clearTimeout(handle);
       }
     }
   });

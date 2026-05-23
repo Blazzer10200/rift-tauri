@@ -19,6 +19,7 @@
   }
   function disarm() {
     if (timer) { clearTimeout(timer); timer = null; }
+    hovering = false;
   }
 
   $effect(() => {

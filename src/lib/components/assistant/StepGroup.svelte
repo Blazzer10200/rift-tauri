@@ -65,6 +65,7 @@
         role="button"
         tabindex="0"
         aria-expanded={expanded}
+        aria-label={`Toggle step ${stepNum ?? ""}: ${headerText}`.trim()}
         onclick={toggle}
         onkeydown={onKey}
       >
