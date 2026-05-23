@@ -35,6 +35,12 @@ const GITHUB_REPO: &str = "rift-releases";
 /// Set true so alpha/beta tags are eligible for the "newest" pick. Match the
 /// WPF GithubSource(prerelease:true) call site.
 const ALLOW_PRERELEASE: bool = true;
+/// Velopack channel identifier — matches the `--channel win` arg in
+/// scripts/release.ps1. Currently informational (the value flows through the
+/// installed manifest, not this constant), but kept here as the single source
+/// of truth for "what channel does Rift ship on" on the client side.
+#[allow(dead_code)]
+const UPDATE_CHANNEL: &str = "win";
 
 const USER_AGENT: &str = concat!("Rift/", env!("CARGO_PKG_VERSION"));
 
@@ -159,6 +165,19 @@ fn resolve_manager(meta: ReleaseMetaCache) -> Result<Option<velopack::UpdateMana
     // Local FileSource (RIFT_UPDATE_FEED) is dev-only — gated behind
     // `debug_assertions` so a release-build binary can't be tricked into
     // pointing at an attacker-controlled local update feed via env var.
+    // Channel is bound at vpk-pack time via `--channel win` in
+    // scripts/release.ps1 (#232). The string lands in the installed
+    // VelopackLocator manifest, gets passed back to
+    // `GithubSource::get_release_feed(channel, ...)` as the `channel` arg,
+    // and drives the `releases.{channel}.json` asset lookup.
+    //
+    // We deliberately pass `None` for UpdateOptions here:
+    //   - `UpdateOptions::ExplicitChannel = Some("win")` would force-override
+    //     the manifest channel, which defeats any future channel-switch UX.
+    //   - Leaving it None lets the manifest decide. The single-channel
+    //     coupling is now documented at both ends — `--channel win` (vpk) and
+    //     `UPDATE_CHANNEL` here, kept as the source-of-truth identifier even
+    //     though the value flows through the manifest, not this call site.
     #[cfg(debug_assertions)]
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
         let p = Path::new(&local);
@@ -216,6 +235,41 @@ impl GithubSource {
             .read_to_string()
             .map_err(|e| VeloError::Generic(format!("read {url}: {e}")))
     }
+
+    /// Variant that also returns the `Link: <url>; rel="next"` follow-on URL
+    /// when GitHub paginates. Used by `get_release_feed` to walk multiple
+    /// pages when the newest eligible release doesn't carry the channel feed
+    /// asset (#252).
+    fn http_get_with_link(url: &str) -> Result<(String, Option<String>), VeloError> {
+        let mut resp = ureq::get(url)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/vnd.github+json")
+            .call()
+            .map_err(|e| VeloError::Generic(format!("GET {url}: {e}")))?;
+        let next_url = resp
+            .headers()
+            .get("link")
+            .and_then(|v| v.to_str().ok())
+            .and_then(parse_link_next);
+        let body = resp
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| VeloError::Generic(format!("read {url}: {e}")))?;
+        Ok((body, next_url))
+    }
+}
+
+/// Parse the GitHub `Link` response header and return the URL for the `next`
+/// page if present. Header format: `<url1>; rel="next", <url2>; rel="last"`.
+fn parse_link_next(header: &str) -> Option<String> {
+    for part in header.split(',') {
+        let part = part.trim();
+        if !part.contains("rel=\"next\"") { continue; }
+        let start = part.find('<')?;
+        let end = part[start + 1..].find('>')?;
+        return Some(part[start + 1..start + 1 + end].to_string());
+    }
+    None
 }
 
 impl UpdateSource for GithubSource {
@@ -225,76 +279,82 @@ impl UpdateSource for GithubSource {
         _app: &Manifest,
         _staged_user_id: &str,
     ) -> Result<VelopackAssetFeed, VeloError> {
-        let api_url = format!(
-            "https://api.github.com/repos/{}/{}/releases?per_page=10",
+        let releases_name = format!("releases.{channel}.json");
+        let initial_url = format!(
+            "https://api.github.com/repos/{}/{}/releases?per_page=50",
             self.owner, self.repo
         );
-        log::info!("GithubSource: querying {api_url}");
-        let body = Self::http_get_string(&api_url)?;
-        let releases: Vec<serde_json::Value> = serde_json::from_str(&body)
-            .map_err(|e| VeloError::Generic(format!("parse releases JSON: {e}")))?;
 
-        // Newest-first ordering is GitHub's default. Pick the first release
-        // that's not a draft and matches the prerelease policy.
-        let target = releases
-            .iter()
-            .find(|r| {
+        // Page walker (#252). Per page, examine each eligible release for the
+        // channel feed asset. First match wins; otherwise follow Link: rel="next".
+        let mut next_url: Option<String> = Some(initial_url);
+        let mut pages_walked = 0;
+        let mut eligible_examined = 0;
+
+        while let Some(api_url) = next_url {
+            pages_walked += 1;
+            log::info!("GithubSource: querying {api_url}");
+            let (body, link_next) = Self::http_get_with_link(&api_url)?;
+            let releases: Vec<serde_json::Value> = serde_json::from_str(&body)
+                .map_err(|e| VeloError::Generic(format!("parse releases JSON: {e}")))?;
+
+            for r in &releases {
                 let is_draft = r.get("draft").and_then(|v| v.as_bool()).unwrap_or(false);
                 let is_pre = r.get("prerelease").and_then(|v| v.as_bool()).unwrap_or(false);
-                !is_draft && (self.allow_prerelease || !is_pre)
-            })
-            .ok_or_else(|| {
-                VeloError::Generic(format!(
-                    "no eligible release in {}/{} (allow_prerelease={})",
-                    self.owner, self.repo, self.allow_prerelease
-                ))
-            })?;
+                if is_draft || (!self.allow_prerelease && is_pre) {
+                    continue;
+                }
+                eligible_examined += 1;
 
-        // Stash release-level metadata (notes body, html_url, published_at)
-        // for UpdateService::check to surface to the UI.
-        let html_url = target.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let published_at = target.get("published_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        if let Ok(mut g) = self.meta.lock() {
-            *g = Some(ReleaseMeta { html_url, published_at });
-        }
+                let Some(assets) = r.get("assets").and_then(|v| v.as_array()) else {
+                    continue;
+                };
 
-        let releases_name = format!("releases.{channel}.json");
-        let assets = target
-            .get("assets")
-            .and_then(|v| v.as_array())
-            .ok_or_else(|| VeloError::Generic("release has no assets array".into()))?;
+                let mut url_map: HashMap<String, String> = HashMap::new();
+                let mut feed_url: Option<String> = None;
+                for a in assets {
+                    let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = a
+                        .get("browser_download_url")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    if name.is_empty() || url.is_empty() {
+                        continue;
+                    }
+                    if name.eq_ignore_ascii_case(&releases_name) {
+                        feed_url = Some(url.to_string());
+                    }
+                    url_map.insert(name.to_string(), url.to_string());
+                }
+                let Some(feed_url) = feed_url else { continue; };
 
-        let mut url_map: HashMap<String, String> = HashMap::new();
-        let mut feed_url: Option<String> = None;
-        for a in assets {
-            let name = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let url = a
-                .get("browser_download_url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if name.is_empty() || url.is_empty() {
-                continue;
+                // Match found. Stash release metadata + asset URL cache, then
+                // fetch the feed JSON and return. This is the only success path.
+                let html_url = r.get("html_url").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let published_at = r.get("published_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if let Ok(mut g) = self.meta.lock() {
+                    *g = Some(ReleaseMeta { html_url, published_at });
+                }
+                if let Ok(mut g) = self.asset_urls.lock() {
+                    *g = url_map;
+                }
+
+                log::info!(
+                    "GithubSource: downloading feed from {feed_url} (page {pages_walked}, eligible examined {eligible_examined})"
+                );
+                let feed_json = Self::http_get_string(&feed_url)?;
+                let feed: VelopackAssetFeed = serde_json::from_str(&feed_json)
+                    .map_err(|e| VeloError::Generic(format!("parse {releases_name}: {e}")))?;
+                return Ok(feed);
             }
-            if name.eq_ignore_ascii_case(&releases_name) {
-                feed_url = Some(url.to_string());
-            }
-            url_map.insert(name.to_string(), url.to_string());
+
+            next_url = link_next;
         }
 
-        let feed_url = feed_url.ok_or_else(|| {
-            VeloError::Generic(format!("{releases_name} not found in latest release assets"))
-        })?;
-
-        // Cache asset URLs so download_release_entry can resolve nupkgs by name.
-        if let Ok(mut g) = self.asset_urls.lock() {
-            *g = url_map;
-        }
-
-        log::info!("GithubSource: downloading feed from {feed_url}");
-        let feed_json = Self::http_get_string(&feed_url)?;
-        let feed: VelopackAssetFeed = serde_json::from_str(&feed_json)
-            .map_err(|e| VeloError::Generic(format!("parse {releases_name}: {e}")))?;
-        Ok(feed)
+        Err(VeloError::Generic(format!(
+            "no eligible release w/ {releases_name} in {}/{} across {pages_walked} page(s) (eligible examined: {eligible_examined}, allow_prerelease={})",
+            self.owner, self.repo, self.allow_prerelease
+        )))
     }
 
     fn download_release_entry(
