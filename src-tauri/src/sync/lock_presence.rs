@@ -45,6 +45,14 @@ struct LockBody {
     since: String,
 }
 
+/// 3-state result for `try_read_lock` — distinguishes absent-lock (safe to
+/// write) from SFTP-error (unknown state, must skip write). #224.
+enum LockReadOutcome {
+    Present(LockBody),
+    Absent,
+    Error(String),
+}
+
 pub type ScopedFoldersFn = Arc<dyn Fn() -> Vec<String> + Send + Sync>;
 
 /// Skip stale-lock delete retries after this many consecutive failures per
@@ -240,7 +248,16 @@ impl LockPresence {
             {
                 continue;
             }
-            let Some(body) = self.try_read_lock(&e.full_path).await else { continue };
+            // #224: only sweep on Present. Absent → already gone, Error →
+            // unknown ownership; either way skip the delete attempt.
+            let body = match self.try_read_lock(&e.full_path).await {
+                LockReadOutcome::Present(b) => b,
+                LockReadOutcome::Absent => continue,
+                LockReadOutcome::Error(err) => {
+                    log::warn!("stale-sweep read failed for {} — skip: {err}", e.full_path);
+                    continue;
+                }
+            };
             if body.user != self.my_user {
                 continue;
             }
@@ -355,9 +372,28 @@ impl LockPresence {
                 })
                 .collect();
             while let Some((e, body_opt)) = read_tasks.next().await {
+                // #224: distinguish absent (lock gone) from SFTP error
+                // (unknown). On error, preserve the prior entry so a
+                // transient hiccup doesn't drop an active foreign lock from
+                // the active_by_path map → permitting a write that would
+                // collide with the still-held lock.
                 let body = match body_opt {
-                    Some(b) => b,
-                    None => continue,
+                    LockReadOutcome::Present(b) => b,
+                    LockReadOutcome::Absent => continue,
+                    LockReadOutcome::Error(err) => {
+                        log::warn!("poll read failed for {} — preserve prior: {err}", e.full_path);
+                        let file_being_edited = if e.full_path.ends_with(".rift-lock") {
+                            e.full_path[..e.full_path.len() - ".rift-lock".len()].to_string()
+                        } else {
+                            e.full_path.clone()
+                        };
+                        if let Ok(g) = self.active_by_path.read() {
+                            if let Some(prior) = g.get(&file_being_edited) {
+                                found.push(prior.clone());
+                            }
+                        }
+                        continue;
+                    }
                 };
                 let since = chrono::DateTime::parse_from_rfc3339(&body.since)
                     .map(|d| d.with_timezone(&Utc))
@@ -412,7 +448,7 @@ impl LockPresence {
         Ok(())
     }
 
-    async fn try_read_lock(&self, remote_lock_path: &str) -> Option<LockBody> {
+    async fn try_read_lock(&self, remote_lock_path: &str) -> LockReadOutcome {
         let scratch = std::env::temp_dir().join(format!(
             "rift-lock-{}-{}",
             std::process::id(),
@@ -423,13 +459,28 @@ impl LockPresence {
         // remove_dir on failure → scratch dir leaked under TEMP indefinitely
         // (one orphan per failed poll). Match arms ensure every return path
         // drains the scratch dir.
-        let result: Option<LockBody> = match self.sftp.download_file(remote_lock_path, &scratch).await {
+        // #224: distinguish absent-lock (file doesn't exist — safe to write)
+        // from SFTP-error (unknown state — must NOT treat as no-lock or we'd
+        // permit a write that collides with another user's active lock).
+        let result = match self.sftp.download_file(remote_lock_path, &scratch).await {
             Ok(local) => {
                 let text = std::fs::read_to_string(&local).ok();
                 let _ = std::fs::remove_file(&local);
-                text.and_then(|t| serde_json::from_str::<LockBody>(&t).ok())
+                match text.and_then(|t| serde_json::from_str::<LockBody>(&t).ok()) {
+                    Some(body) => LockReadOutcome::Present(body),
+                    None => LockReadOutcome::Error("lock body parse failed".into()),
+                }
             }
-            Err(_) => None,
+            Err(e) => {
+                if e.contains("remote path missing")
+                    || e.contains("No such file")
+                    || e.contains("no such file")
+                {
+                    LockReadOutcome::Absent
+                } else {
+                    LockReadOutcome::Error(e)
+                }
+            }
         };
         let _ = std::fs::remove_dir(&scratch);
         result

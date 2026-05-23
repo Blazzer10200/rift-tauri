@@ -37,12 +37,26 @@ pub(super) enum EntryResult {
 }
 
 impl AutoSyncEngine {
+    /// Returns (dispatched, ok, fail). `dispatched` counts entries we started
+    /// processing including Requeued; `ok` is successful uploads; `fail` is
+    /// hard failures. Callers gating side-effects (e.g. scan-cache clear)
+    /// must use `ok > 0`, NOT `dispatched > 0`, else a wedge or all-requeued
+    /// batch will wrongly invalidate scan state. #99 + #247.
     pub(super) async fn flush_batch(
         &self,
         fw: &FolderWatch,
         entries: Vec<DirtyEntry>,
         cancel: Option<CancellationToken>,
-    ) -> u32 {
+    ) -> (u32, u32, u32) {
+        // #247: entry/exit log::debug! with timing — cheap, hierarchical
+        // visibility into the flush hot path without pulling in `tracing`.
+        let __t_flush_start = std::time::Instant::now();
+        let __entries_in = entries.len();
+        log::debug!(
+            "flush_batch enter resource={} entries={}",
+            fw.resource_name,
+            __entries_in
+        );
         // ── Mass-delete circuit breaker ───────────────────────────────────
         let delete_count = entries.iter().filter(|e| e.kind == ChangeKind::Deleted).count();
         let local_root_gone = !fw.local_root.exists();
@@ -71,7 +85,7 @@ impl AutoSyncEngine {
                 format!("BLOCKED · {} · {reason}", fw.resource_name),
             )
             .await;
-            return 0;
+            return (0, 0, 0);
         }
 
         self.set_state(
@@ -288,7 +302,16 @@ impl AutoSyncEngine {
         // dropped batch / per-entry cancel / per-entry failure all leaked
         // into the count cache. TTL refresh (5 min) corrects any residual drift.
 
-        dispatched
+        let __elapsed_ms = __t_flush_start.elapsed().as_millis() as u64;
+        log::debug!(
+            "flush_batch exit resource={} dispatched={} ok={} fail={} elapsed_ms={}",
+            fw.resource_name,
+            dispatched,
+            ok,
+            fail,
+            __elapsed_ms
+        );
+        (dispatched, ok, fail)
     }
 
     /// Returns the cached local file count, refreshing via `safe_count_files`
