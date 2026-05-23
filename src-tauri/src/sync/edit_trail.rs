@@ -53,7 +53,18 @@ impl<'a> EditTrail<'a> {
             return Ok(());
         }
         let trail = Self::trail_path(watched_root);
-        let existing = self.read_raw(&trail).await.unwrap_or_default();
+        // #244: distinguish "first write" from "download error". Prior
+        // `.ok()?` → unwrap_or_default treated transient SFTP failures as
+        // empty file → next append wrote ONLY the new batch, silently
+        // destroying all prior trail history.
+        let existing = match self.read_raw(&trail).await {
+            ReadOutcome::Present(s) => s,
+            ReadOutcome::Absent => String::new(),
+            ReadOutcome::Error(e) => {
+                log::warn!("edit-trail: skip cycle, read failed ({e}) — preserving remote history");
+                return Ok(());
+            }
+        };
         let mut buf = existing;
         let now = Utc::now();
         for (rel, action) in items {
@@ -72,17 +83,41 @@ impl<'a> EditTrail<'a> {
         self.sftp.upload_bytes(trimmed.as_bytes(), &trail).await
     }
 
-    async fn read_raw(&self, remote_path: &str) -> Option<String> {
+    async fn read_raw(&self, remote_path: &str) -> ReadOutcome {
         let sandbox = std::env::temp_dir().join(format!(
             "rift-trail-{}-{}",
             std::process::id(),
             short_id()
         ));
-        let local = self.sftp.download_file(remote_path, &sandbox).await.ok()?;
-        let text = std::fs::read_to_string(&local).ok();
+        // download_file's `read` error stringly distinguishes missing-path
+        // ("remote path missing") via format_sftp_err. Anything else is a
+        // real SFTP error and must not be conflated with "file doesn't
+        // exist yet" (which is the legitimate first-write case).
+        let outcome = match self.sftp.download_file(remote_path, &sandbox).await {
+            Ok(local) => {
+                let text = std::fs::read_to_string(&local).unwrap_or_default();
+                ReadOutcome::Present(text)
+            }
+            Err(e) => {
+                if e.contains("remote path missing")
+                    || e.contains("No such file")
+                    || e.contains("no such file")
+                {
+                    ReadOutcome::Absent
+                } else {
+                    ReadOutcome::Error(e)
+                }
+            }
+        };
         let _ = std::fs::remove_dir_all(&sandbox);
-        text
+        outcome
     }
+}
+
+enum ReadOutcome {
+    Present(String),
+    Absent,
+    Error(String),
 }
 
 fn trim_to_tail(content: &str, max_lines: usize) -> String {
