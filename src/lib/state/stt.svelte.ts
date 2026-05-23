@@ -141,6 +141,12 @@ class SttStore {
   private baseDraft = "";
   private finalText = "";
   private consumed = false;
+  // #175: explicit intent flag separates "session ended naturally" (commit
+  // the finalText draft) from "user pressed Cancel" (drop the draft). Prior
+  // code overloaded `this.recognition === null` for both roles, which made
+  // the onEnd branch fragile to future edits that null the handle for
+  // unrelated reasons.
+  private cancelRequested = false;
   private transcribeTimer: ReturnType<typeof setTimeout> | null = null;
   private restartToken = 0;
   private unlisten: UnlistenFn[] = [];
@@ -153,15 +159,14 @@ class SttStore {
     try {
       this.config = await invoke<SttConfig>("stt_get_config");
       this.configLoaded = true;
-    } catch (e) {
-      console.debug("[stt] load config failed:", e);
+    } catch {
+      // Non-fatal — keep default config; UI shows defaults until next session.
       this.configLoaded = true;
     }
 
     try {
       this.backendAvailable = await invoke<boolean>("stt_backend_available");
-    } catch (e) {
-      console.debug("[stt] backend availability probe failed:", e);
+    } catch {
       this.backendAvailable = false;
     }
 
@@ -193,7 +198,6 @@ class SttStore {
       this.unlisten.push(
         await listen<{ code: string; message: string }>("stt://error", (ev) => {
           this.lastError = ev.payload.message;
-          console.debug("[stt] backend error:", ev.payload);
         }),
       );
       this.unlisten.push(
@@ -204,8 +208,8 @@ class SttStore {
           }
         }),
       );
-    } catch (e) {
-      console.debug("[stt] event subscribe failed:", e);
+    } catch {
+      // Non-fatal — backend events won't arrive, but Web Speech path stays functional.
     }
 
     // Best-effort initial loads for the Settings panel — failures are non-fatal.
@@ -244,6 +248,7 @@ class SttStore {
 
   /** Composer-side hook: the current draft was just sent / cleared. */
   consume() {
+    this.cancelRequested = true;
     if (this.config.engine === "whisper") {
       // Fire-and-forget — the backend's drop-on-stop preserves any in-flight
       // partials but stops emitting new ones.
@@ -276,6 +281,7 @@ class SttStore {
     this.baseDraft = this.config.append_to_draft ? assistant.composerDraft : "";
     this.finalText = "";
     this.consumed = false;
+    this.cancelRequested = false;
     this.clearTranscribeTimer();
 
     if (this.config.engine === "whisper") {
@@ -355,14 +361,15 @@ class SttStore {
           this.recognition = null;
         }
       }, 4000);
-    } catch (e) {
-      console.debug("[stt] stop failed:", e);
+    } catch {
+      /* recogniser already stopped */
     }
     return this.lastTranscript;
   }
 
   /** Hard-cancel — drop interim text, restore the original draft. */
   async cancel() {
+    this.cancelRequested = true;
     if (this.config.engine === "whisper") {
       if (this.recording || this.transcribing) {
         try {
@@ -402,16 +409,15 @@ class SttStore {
   async refreshModels() {
     try {
       this.models = await invoke<ModelInfo[]>("stt_list_models");
-    } catch (e) {
-      console.debug("[stt] refreshModels failed:", e);
+    } catch {
+      /* Whisper not built — keep prior models list (likely empty). */
     }
   }
 
   async refreshInputDevices() {
     try {
       this.inputDevices = await invoke<string[]>("stt_get_input_devices");
-    } catch (e) {
-      console.debug("[stt] refreshInputDevices failed:", e);
+    } catch {
       this.inputDevices = [];
     }
   }
@@ -428,8 +434,8 @@ class SttStore {
   async cancelDownload() {
     try {
       await invoke("stt_cancel_download");
-    } catch (e) {
-      console.debug("[stt] cancelDownload failed:", e);
+    } catch {
+      /* nothing in flight — no-op */
     }
   }
 
@@ -494,15 +500,14 @@ class SttStore {
   }
 
   private onError(e: SpeechRecognitionErrorEvent) {
-    const friendly = errorMessage(e.error, e.message);
-    this.lastError = friendly;
-    if (e.error !== "no-speech" && e.error !== "aborted") {
-      console.debug("[stt] recognition error:", e.error, e.message);
-    }
+    // Friendly message already surfaced via `lastError`; the raw code is
+    // dropped to avoid the #22 / #250 console-noise regression.
+    this.lastError = errorMessage(e.error, e.message);
   }
 
   private onEnd() {
-    if (this.recognition && !this.consumed) {
+    // #175: commit only if neither user-cancel nor composer-consume fired.
+    if (!this.cancelRequested && !this.consumed) {
       assistant.composerDraft = this.composeDraft(this.finalText, "");
     }
     this.recording = false;

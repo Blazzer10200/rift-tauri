@@ -17,10 +17,26 @@
 //! separated). The CLI's `--strict-mcp-config` plus our `--allowed-tools
 //! mcp__rift__*` together guarantee these are the only tools Claude can call.
 
+use std::fmt::Write as _;
 use std::io::{self, BufRead, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+/// #241: socket timeout setters return Err on platforms / states where the
+/// option can't be applied. Prior code dropped that with `let _ =`, which
+/// turned a misbehaving bridge socket into an indefinite blocked read on
+/// the stdio thread (one MCP request stalls every subsequent tool call).
+/// We can't recover here — connect already succeeded — but logging at least
+/// gives a breadcrumb when investigating a stuck `remote_bash`.
+fn apply_bridge_timeouts(stream: &TcpStream, read: Duration, write: Duration, label: &str) {
+    if let Err(e) = stream.set_read_timeout(Some(read)) {
+        log::warn!("{label}: set_read_timeout failed: {e}");
+    }
+    if let Err(e) = stream.set_write_timeout(Some(write)) {
+        log::warn!("{label}: set_write_timeout failed: {e}");
+    }
+}
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -182,16 +198,18 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     }
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     let mut out = String::new();
-    out.push_str(&format!("{}\n", resolved.display()));
+    // #258: `write!` directly into the String — skips the intermediate
+    // allocation `push_str(&format!(...))` would create for each line.
+    let _ = writeln!(out, "{}", resolved.display());
     for (name, is_dir, size) in &entries {
         if *is_dir {
-            out.push_str(&format!("  {}/\n", name));
+            let _ = writeln!(out, "  {}/", name);
         } else {
-            out.push_str(&format!("  {} ({} bytes)\n", name, size));
+            let _ = writeln!(out, "  {} ({} bytes)", name, size);
         }
     }
     if entries.len() >= MAX_LIST_ENTRIES {
-        out.push_str(&format!("  (truncated at {} entries)\n", MAX_LIST_ENTRIES));
+        let _ = writeln!(out, "  (truncated at {} entries)", MAX_LIST_ENTRIES);
     }
     Ok(out)
 }
@@ -375,14 +393,16 @@ fn bridge_call(op: &str, write_scope: bool, extra: Value) -> Result<Value, Strin
         .map_err(|e| format!("bridge addr parse: {e}"))?;
     let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
         .map_err(|e| format!("bridge connect: {e}"))?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    apply_bridge_timeouts(&stream, Duration::from_secs(10), Duration::from_secs(5), "bridge_call");
 
     let payload = format!("{}\n", req);
     stream
         .write_all(payload.as_bytes())
         .map_err(|e| format!("bridge write: {e}"))?;
-    stream.flush().ok();
+    // #242: propagate flush errors instead of `.ok()` so a broken pipe
+    // surfaces here rather than as a misleading "bridge closed without
+    // response" on the next blocking `read_line`.
+    stream.flush().map_err(|e| format!("bridge flush: {e}"))?;
 
     let mut reader = io::BufReader::new(&stream);
     let mut line = String::new();
@@ -443,14 +463,14 @@ fn tool_drift_snapshot() -> Result<String, String> {
         by_bucket.entry(bucket).or_default().push(label);
     }
     let mut out = String::new();
-    out.push_str(&format!("Drift snapshot ({} entries):\n", entries.len()));
+    let _ = writeln!(out, "Drift snapshot ({} entries):", entries.len());
     for (bucket, paths) in &by_bucket {
-        out.push_str(&format!("  {} ({}):\n", bucket, paths.len()));
+        let _ = writeln!(out, "  {} ({}):", bucket, paths.len());
         for p in paths.iter().take(20) {
-            out.push_str(&format!("    - {p}\n"));
+            let _ = writeln!(out, "    - {p}");
         }
         if paths.len() > 20 {
-            out.push_str(&format!("    … +{} more\n", paths.len() - 20));
+            let _ = writeln!(out, "    … +{} more", paths.len() - 20);
         }
     }
     Ok(out)
@@ -521,12 +541,11 @@ fn tool_sync_status() -> Result<String, String> {
         .map_err(|e| format!("bridge addr parse: {e}"))?;
     let mut stream = std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(5))
         .map_err(|e| format!("bridge connect: {e}"))?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    apply_bridge_timeouts(&stream, Duration::from_secs(10), Duration::from_secs(5), "sync_status");
 
     let payload = format!("{}\n", req);
     stream.write_all(payload.as_bytes()).map_err(|e| format!("bridge write: {e}"))?;
-    stream.flush().ok();
+    stream.flush().map_err(|e| format!("bridge flush: {e}"))?;
 
     let mut reader = io::BufReader::new(&stream);
     let mut line = String::new();
@@ -556,12 +575,13 @@ fn tool_sync_status() -> Result<String, String> {
 
     let mut out = format!("Sync engine: {state}");
     if !detail.is_empty() && detail != state {
-        out.push_str(&format!(" — {detail}"));
+        let _ = write!(out, " — {detail}");
     }
     out.push('\n');
-    out.push_str(&format!(
+    let _ = write!(
+        out,
         "  pending: {pending}  failed: {failed}  conflicts: {conflicts}  watches: {watches}"
-    ));
+    );
     Ok(out)
 }
 
@@ -617,14 +637,13 @@ fn tool_remote_bash(args: &Value) -> Result<String, String> {
     // The bridge holds the connection open for the whole exec — read timeout
     // covers the worst case (full exec duration + bridge overhead).
     let read_to = Duration::from_secs(timeout_secs + 15);
-    let _ = stream.set_read_timeout(Some(read_to));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    apply_bridge_timeouts(&stream, read_to, Duration::from_secs(5), "remote_bash");
 
     let payload = format!("{}\n", req);
     stream
         .write_all(payload.as_bytes())
         .map_err(|e| format!("bridge write: {e}"))?;
-    stream.flush().ok();
+    stream.flush().map_err(|e| format!("bridge flush: {e}"))?;
 
     let mut reader = io::BufReader::new(&stream);
     let mut line = String::new();
@@ -661,7 +680,7 @@ fn tool_remote_bash(args: &Value) -> Result<String, String> {
         cmd_preview
     };
     let mut out = String::new();
-    out.push_str(&format!("$ {cmd_preview}\n"));
+    let _ = writeln!(out, "$ {cmd_preview}");
     if !stdout_s.is_empty() {
         out.push_str("--- stdout ---\n");
         out.push_str(stdout_s);
@@ -676,12 +695,13 @@ fn tool_remote_bash(args: &Value) -> Result<String, String> {
             out.push('\n');
         }
     }
-    out.push_str(&format!(
-        "--- exit: {} ---\n",
+    let _ = writeln!(
+        out,
+        "--- exit: {} ---",
         exit_code
             .map(|c| c.to_string())
             .unwrap_or_else(|| "?".into())
-    ));
+    );
     if truncated {
         out.push_str("(output truncated at 256 KB)\n");
     }
