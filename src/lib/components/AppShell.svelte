@@ -77,20 +77,26 @@
     workspace.setActive("settings");
   }
 
+  // Single alive flag — shared by the win-maximize effect AND the TOFU
+  // fingerprint dialog awaiter. Past code had two parallel booleans
+  // (alive + shellAlive) that could diverge silently. (#174 / #218)
+  let alive = true;
+
   // ── lifecycle ──────────────────────────────────────────────────────
   // S131: SplashOverlay (layout-level) owns wireEvents + loadServers +
   // refreshStatus + first-run settings redirect. AppShell mounts behind the
   // blur and reacts off connection state as the overlay populates it.
+  //
+  // Dialog callback wiring lives in onMount/onDestroy (not at script-init):
+  // route-level HMR remounts otherwise stack stale closures on the singleton
+  // and dispatch into dead $state. (#169)
   onMount(() => {
     updates.checkOnLaunch();
+    dialogs.onAddServer = () => openAddServer(null);
+    dialogs.onEditServer = (s) => openAddServer(s);
+    dialogs.onDeleteServer = (s) => void deleteServer(s);
+    dialogs.onLaunchKeygen = () => (keygenOpen = true);
   });
-
-  // Phase 3b: SettingsPage workspace pulls callbacks from this store. AppShell
-  // owns the dialog state, so wire them once at the top level.
-  dialogs.onAddServer = () => openAddServer(null);
-  dialogs.onEditServer = (s) => openAddServer(s);
-  dialogs.onDeleteServer = (s) => void deleteServer(s);
-  dialogs.onLaunchKeygen = () => (keygenOpen = true);
 
   // Borderless-window maximize compensation. Win32 draws maximized
   // `decorations: false` windows ~8px past each screen edge (invisible
@@ -99,7 +105,6 @@
   $effect(() => {
     const win = getCurrentWindow();
     let unlisten: (() => void) | null = null;
-    let alive = true;
 
     async function apply() {
       try {
@@ -115,7 +120,6 @@
     });
 
     return () => {
-      alive = false;
       if (unlisten) unlisten();
       document.body.classList.remove("win-maximized");
     };
@@ -139,7 +143,14 @@
   });
 
   onDestroy(() => {
+    alive = false;
     connection.disposeEvents();
+    // Reset dialog callbacks to no-ops so a stale closure from this destroyed
+    // shell doesn't fire into dead state on the next HMR-driven remount. (#169)
+    dialogs.onAddServer = () => {};
+    dialogs.onEditServer = () => {};
+    dialogs.onDeleteServer = () => {};
+    dialogs.onLaunchKeygen = () => {};
     // Audit H9: resolve any in-flight confirm promises so awaiters unblock.
     for (const resolve of pendingConfirms) resolve(false);
     pendingConfirms.clear();
@@ -287,10 +298,9 @@
   }
 
   // Audit C2 — TOFU prompt. When connection.connect() probes a fresh
-  // fingerprint, show a confirmation dialog before we trust it.
+  // fingerprint, show a confirmation dialog before we trust it. The `alive`
+  // gate prevents the resolved promise from acting on a destroyed shell.
   let fingerprintHandled = $state<string | null>(null);
-  let shellAlive = true;
-  onDestroy(() => { shellAlive = false; });
   $effect(() => {
     const fp = connection.pendingFingerprint;
     if (!fp || fp === fingerprintHandled) return;
@@ -301,7 +311,7 @@
       body: `First connection to ${name}. Verify this matches what you expect from the server admin before accepting.\n\n${fp}`,
       isDanger: false,
     }).then((ok) => {
-      if (!shellAlive) return;
+      if (!alive) return;
       if (ok) connection.confirmFingerprint();
       else connection.cancelFingerprint();
       fingerprintHandled = null;

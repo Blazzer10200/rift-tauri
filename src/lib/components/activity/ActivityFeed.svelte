@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import {
     RefreshCw, Download, Trash2, AlertTriangle, Check,
     GitBranch, Network, Lock, XCircle, Info, Pause, Play,
@@ -143,8 +143,22 @@
     return r.kind === g;
   }
 
+  // Group-counts memo — feed × 9 groups was O(N×9) per render. Single pass
+  // builds a count map; lookups become O(1). (#203)
+  const groupCounts = $derived.by<Record<Group, number>>(() => {
+    const out: Record<Group, number> = {
+      all: 0, sync: 0, pull: 0, delete: 0, drift: 0,
+      conflict: 0, bridge: 0, block: 0, error: 0, system: 0,
+    };
+    for (const r of connection.activityFeed) {
+      out.all++;
+      if (r.kind === "conflict" || r.kind === "conflict_resolved") out.conflict++;
+      else if (r.kind in out) out[r.kind as Group]++;
+    }
+    return out;
+  });
   function countFor(g: Group): number {
-    return connection.activityFeed.filter((r) => inGroup(r, g)).length;
+    return groupCounts[g];
   }
 
   function rowKey(r: ActivityRow): string {
@@ -359,10 +373,13 @@
   }
 
   let actionFlash = $state<string | null>(null);
+  let flashTimer: ReturnType<typeof setTimeout> | null = null;
   function flash(msg: string) {
     actionFlash = msg;
-    setTimeout(() => { actionFlash = null; }, 1500);
+    if (flashTimer) clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => { actionFlash = null; flashTimer = null; }, 1500);
   }
+  onDestroy(() => { if (flashTimer) clearTimeout(flashTimer); });
 
   async function copyPath(r: ActivityRow) {
     const p = resolveLocalPath(r);
@@ -505,7 +522,7 @@
           </EmptyState>
         {/if}
       {:else}
-        {#each rendered as item (item.key + (item.type === "groupHeader" ? `_${item.expanded ? "x" : "c"}_${item.rows.length}` : ""))}
+        {#each rendered as item (item.key)}
           {#if item.type === "groupHeader"}
             {@const r0 = item.rows[0]}
             {@const Icon = kindIcon(r0.kind)}
@@ -821,6 +838,7 @@
   .tr[data-selected="true"][data-variant="info"]   { background: var(--info-soft);   box-shadow: inset 2px 0 var(--info); }
   .tr[data-selected="true"][data-variant="warn"]   { background: var(--warn-soft);   box-shadow: inset 2px 0 var(--warn); }
   .tr[data-selected="true"][data-variant="danger"] { background: var(--danger-soft); box-shadow: inset 2px 0 var(--danger); }
+  .tr[data-selected="true"][data-variant="muted"]  { background: var(--surface-hover); box-shadow: inset 2px 0 var(--fg-muted); }
   .tr[data-variant="danger"] .td.action { color: var(--danger); }
   .tr[data-variant="warn"] .td.action { color: var(--warn); }
 
