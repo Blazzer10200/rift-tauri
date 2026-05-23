@@ -592,13 +592,11 @@ async fn start_autosync(
     let engine_for_lp = engine.clone();
     lp.set_scoped_provider(std::sync::Arc::new(move || engine_for_lp.watched_remote_roots()))
         .await;
-    let status = engine.status().await;
-
     let mut g = state.0.lock().await;
     if let Some(prev) = g.take() {
         prev.stop().await;
     }
-    *g = Some(engine);
+    *g = Some(engine.clone());
     drop(g);
 
     // Stash tunnel — replaces any stale handle from a prior session.
@@ -607,6 +605,11 @@ async fn start_autosync(
         prev.stop().await;
     }
     *tg = tunnel_handle;
+    drop(tg);
+
+    // #107: sample status only after the prev engine is stopped + slots replaced,
+    // so the returned snapshot reflects the new engine's post-install state.
+    let status = engine.status().await;
     Ok(status)
 }
 
@@ -1186,7 +1189,9 @@ async fn expand_download_jobs(
         }
         let local_path = PathBuf::from(&local);
         if info.is_directory {
-            let _ = std::fs::create_dir_all(&local_path);
+            if let Err(e) = std::fs::create_dir_all(&local_path) {
+                log::warn!("download mkdir {}: {e}", local_path.display());
+            }
             // #58: surface list_recursive failures instead of silently producing
             // an empty file list. Pre-fix: `.unwrap_or_default()` made the
             // frontend see "download empty" on a network blip; the user had no
@@ -1208,13 +1213,17 @@ async fn expand_download_jobs(
                     }
                 }
                 if let Some(p) = dest.parent() {
-                    let _ = std::fs::create_dir_all(p);
+                    if let Err(e) = std::fs::create_dir_all(p) {
+                        log::warn!("download mkdir {}: {e}", p.display());
+                    }
                 }
                 expanded.push((f.full_path.clone(), dest));
             }
         } else {
             if let Some(p) = local_path.parent() {
-                let _ = std::fs::create_dir_all(p);
+                if let Err(e) = std::fs::create_dir_all(p) {
+                    log::warn!("download mkdir {}: {e}", p.display());
+                }
             }
             expanded.push((remote, local_path));
         }
@@ -1602,10 +1611,15 @@ async fn detect_bootstrap(
 /// Phase 5.2 — list every file under remote_root (recursive, skip [disabled])
 /// and pre-compute the local destination paths under `local_root`. Returns
 /// (remote_full_path, local_full_path) pairs ready to feed into `download_paths`.
+/// #109: prior signature accepted a `_local_root` IPC param that was never
+/// read — the function builds destination paths from `server.local_root`
+/// (the canonical, profile-pinned root). Removed from signature so the IPC
+/// surface no longer accepts a dead field. Tauri 2 deserialises extra JSON
+/// keys leniently, so the existing FE caller (Bootstrap.svelte) continues
+/// to work; cleaning up the FE call site is deferred to a future session.
 #[tauri::command]
 async fn bootstrap_list_files(
     server_key: String,
-    _local_root: String,
 ) -> Result<Vec<(String, String)>, String> {
     let cfg = profile::RiftConfig::load()?;
     let server = cfg
