@@ -87,28 +87,32 @@
 
   let { text }: { text: string } = $props();
 
+  function fireCodeCopy(copyBtn: HTMLElement) {
+    // Shiki blocks: copy lives in .shiki-head (sibling of <pre>, both
+    // children of .shiki-block). Legacy blocks: copy lives INSIDE <pre>.
+    // Try shiki path first, fall back to pre.
+    const shikiBlock = copyBtn.closest(".shiki-block");
+    const pre = shikiBlock?.querySelector("pre") ?? copyBtn.closest("pre");
+    const code = pre?.querySelector("code");
+    const text = code?.textContent ?? "";
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(() => {
+      const prev = copyBtn.textContent;
+      copyBtn.classList.add("copied");
+      copyBtn.textContent = "Copied";
+      setTimeout(() => {
+        copyBtn.classList.remove("copied");
+        copyBtn.textContent = prev ?? "Copy";
+      }, 1200);
+    }).catch((err) => console.warn("copy failed", err));
+  }
+
   function onClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
     const copyBtn = target?.closest(".code-copy") as HTMLElement | null;
     if (copyBtn) {
       e.preventDefault();
-      // Shiki blocks: copy lives in .shiki-head (sibling of <pre>, both
-      // children of .shiki-block). Legacy blocks: copy lives INSIDE <pre>.
-      // Try shiki path first, fall back to pre.
-      const shikiBlock = copyBtn.closest(".shiki-block");
-      const pre = shikiBlock?.querySelector("pre") ?? copyBtn.closest("pre");
-      const code = pre?.querySelector("code");
-      const text = code?.textContent ?? "";
-      if (!text) return;
-      void navigator.clipboard.writeText(text).then(() => {
-        const prev = copyBtn.textContent;
-        copyBtn.classList.add("copied");
-        copyBtn.textContent = "Copied";
-        setTimeout(() => {
-          copyBtn.classList.remove("copied");
-          copyBtn.textContent = prev ?? "Copy";
-        }, 1200);
-      }).catch((err) => console.warn("copy failed", err));
+      fireCodeCopy(copyBtn);
       return;
     }
     const a = target?.closest("a") as HTMLAnchorElement | null;
@@ -117,6 +121,17 @@
     if (!href || href.startsWith("#")) return;
     e.preventDefault();
     void openUrl(href).catch((err) => console.warn("openUrl failed", err));
+  }
+
+  function onKey(e: KeyboardEvent) {
+    // Keyboard activation for the .code-copy <span role="button"> injected
+    // into legacy + shiki code blocks. (#209)
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const target = e.target as HTMLElement | null;
+    const copyBtn = target?.closest(".code-copy") as HTMLElement | null;
+    if (!copyBtn) return;
+    e.preventDefault();
+    fireCodeCopy(copyBtn);
   }
 
   function extractAndStripChecklists(html: string): {
@@ -225,15 +240,20 @@
   });
   const html = $derived(processed.html);
 
-  // Auto-sync any rendered checklist into the Tasks dock. Re-runs on every
-  // text delta during streaming — last parse wins, so the dock converges to
-  // the final list once the message finishes.
+  // Auto-sync any rendered checklist into the Tasks dock. Equality-check
+  // against the previous payload before dispatching — DOMPurify + 2 template
+  // walks per delta means a 200-token stream otherwise re-parses 200×. (#162)
+  let lastItemsKey = "";
   $effect(() => {
-    if (processed.items.length > 0) assistant.pinTasksFromChecklist(processed.items);
+    if (processed.items.length === 0) return;
+    const key = JSON.stringify(processed.items);
+    if (key === lastItemsKey) return;
+    lastItemsKey = key;
+    assistant.pinTasksFromChecklist(processed.items);
   });
 </script>
 
-<div class="md" onclick={onClick} role="presentation">
+<div class="md" onclick={onClick} onkeydown={onKey} role="presentation">
   {@html html}
 </div>
 

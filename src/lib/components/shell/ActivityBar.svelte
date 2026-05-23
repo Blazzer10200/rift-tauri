@@ -192,7 +192,7 @@
         type="button"
         data-active={isActive}
         data-disabled="false"
-        title={`${def.title} · Ctrl+${def.kbd}`}
+        title={`${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
         aria-label="{def.title} {isActive ? '(active)' : ''}"
         aria-pressed={isActive}
         onclick={() => workspace.setActive("settings")}

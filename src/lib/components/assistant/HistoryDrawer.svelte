@@ -130,6 +130,7 @@
   function focusOnMount(node: HTMLInputElement) {
     node.focus();
     node.select();
+    return { destroy() {} };
   }
 </script>
 
