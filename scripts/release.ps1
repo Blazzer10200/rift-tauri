@@ -20,6 +20,11 @@
 # entry's version must match the bumped version or the notes are skipped.
 #
 # Usage:  pwsh ./scripts/release.ps1
+#         pwsh ./scripts/release.ps1 -Force   # bypass dirty-tree refusal (CI/local)
+
+param(
+    [switch]$Force
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -31,8 +36,10 @@ Write-Host '=== Rift release pipeline ===' -ForegroundColor Cyan
 # --- Preflight: version sync ---------------------------------------------
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
 $cargoText = Get-Content src-tauri/Cargo.toml -Raw
-if ($cargoText -notmatch '(?ms)^\s*version\s*=\s*"([^"]+)"') {
-    throw 'Cargo.toml: cannot parse version field'
+# Anchor to the [package] section so a workspace [workspace.package] block or a
+# dep-version line before [package] doesn't get picked up by accident (#231).
+if ($cargoText -notmatch '(?ms)\[package\][^\[]*?^\s*version\s*=\s*"([^"]+)"') {
+    throw 'Cargo.toml: cannot parse [package] version field'
 }
 $cargoVer = $matches[1]
 $tauriCfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
@@ -137,8 +144,13 @@ $dirty = git status --porcelain
 if ($dirty) {
     Write-Host 'Working tree dirty:' -ForegroundColor Yellow
     Write-Host $dirty
-    $ans = Read-Host 'Continue anyway? (y/N)'
-    if ($ans -ne 'y') { exit 1 }
+    # Read-Host silently exits 1 in CI / non-TTY pipes (no stdin → empty → -ne 'y').
+    # Explicit -Force flag is the only path through. (#253)
+    if (-not $Force) {
+        Write-Host 'Refusing to ship from a dirty working tree. Re-run with -Force to override.' -ForegroundColor Red
+        throw 'release.ps1: working tree dirty (pass -Force to override)'
+    }
+    Write-Host '  -Force: continuing despite dirty tree' -ForegroundColor Yellow
 }
 
 # --- Preflight: tag does not already exist ------------------------------
@@ -173,6 +185,16 @@ if (-not (Test-Path $exePath)) { throw "exe not produced: $exePath" }
 # --- Stage a clean directory for vpk pack -------------------------------
 # vpk pack ships every file in -p verbatim. target/release/ contains build
 # artifacts we don't want in the package; copy only the exe + icon.
+#
+# #251: this list is intentionally exhaustive — Rift currently ships a single
+# self-contained exe + the window icon, and nothing else. If a future Tauri
+# release bundles a WebView2 redistributable, sidecar binary, or any *.dll
+# next to the exe, IT MUST BE ADDED HERE or it will be silently absent from
+# the Velopack package and missing on installed clients.
+#
+# Local feed files (Releases/RELEASES, releases.<channel>.json, *.nupkg) are
+# pack-state only — the canonical update feed is the GitHub release assets in
+# Blazzer10200/rift-releases. Don't ship from local Releases/. (#233)
 $staging = "Releases/staging-$version"
 if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
@@ -217,6 +239,10 @@ $uploadArgs = @(
     'upload', 'github',
     '--repoUrl', "https://github.com/$releaseRepo",
     '--publish',
+    # Explicit --channel (matches Some("win") in update_service.rs::resolve_manager).
+    # Both sides default to 'win' if omitted; spelling it out keeps multi-channel
+    # rollout from silently diverging. (#232)
+    '--channel', 'win',
     '--releaseName', $tag,
     '--tag', $tag,
     '--token', $ghToken

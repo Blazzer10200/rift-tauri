@@ -5,6 +5,9 @@ build/
 src-tauri/target/
 src-tauri/gen/
 publish/
+# Releases/ is local vpk pack output only (staging dirs, .nupkg, releases.<channel>.json).
+# Canonical update feed lives as GitHub release assets in Blazzer10200/rift-releases.
+# Never commit anything from this directory — clients pull from GitHub, not the source tree.
 Releases/
 
 # Defensive: runtime artifacts shouldn't land in the source tree, but if a
