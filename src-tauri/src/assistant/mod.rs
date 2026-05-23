@@ -921,12 +921,27 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     let _cfg = load_config(); // run keychain migration / surface any stale legacy field
     out.api_key_configured = current_api_key().is_some();
 
-    // `claude --version`. Resolve absolute path first — Windows can't find
-    // `claude` from PATH alone (PATHEXT isn't applied by Command::new).
-    let ver = match claude_command() {
-        Some(mut c) => c.arg("--version").stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok(),
-        None => None,
+    // #134: spawn `claude --version` and `claude auth status` in parallel
+    // instead of back-to-back. The prior sequential layout opened a small
+    // TOCTOU window where the CLI on PATH could be swapped between the two
+    // resolutions (uninstall mid-probe, antivirus quarantine, etc.) and the
+    // returned `cli_version` would disagree with the auth result. `claude_command()`
+    // re-stats the cached path on each call, so a CLI removal still surfaces —
+    // it just happens to both child spawns at once now.
+    let ver_fut = async {
+        match claude_command() {
+            Some(mut c) => c.arg("--version").stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok(),
+            None => None,
+        }
     };
+    let auth_fut = async {
+        match claude_command() {
+            Some(mut c) => c.args(["auth", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok(),
+            None => None,
+        }
+    };
+    let (ver, auth_opt) = tokio::join!(ver_fut, auth_fut);
+
     match ver {
         Some(o) if o.status.success() => {
             out.cli_present = true;
@@ -945,23 +960,16 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     }
 
     // `claude auth status` — JSON when stdout isn't a TTY (which it isn't from spawn).
-    let auth = claude_command()
-        .ok_or_else(|| "claude CLI not on PATH".to_string())?
-        .args(["auth", "status"])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .await
-        .map_err(|e| format!("spawn `claude auth status`: {e}"))?;
-
-    if auth.status.success() {
-        let text = String::from_utf8_lossy(&auth.stdout);
-        if let Ok(parsed) = serde_json::from_str::<CliAuthStatus>(text.trim()) {
-            out.logged_in = parsed.logged_in.unwrap_or(false);
-            out.auth_method = parsed.auth_method;
-            out.api_provider = parsed.api_provider;
-            out.email = parsed.email;
-            out.subscription_type = parsed.subscription_type;
+    if let Some(auth) = auth_opt {
+        if auth.status.success() {
+            let text = String::from_utf8_lossy(&auth.stdout);
+            if let Ok(parsed) = serde_json::from_str::<CliAuthStatus>(text.trim()) {
+                out.logged_in = parsed.logged_in.unwrap_or(false);
+                out.auth_method = parsed.auth_method;
+                out.api_provider = parsed.api_provider;
+                out.email = parsed.email;
+                out.subscription_type = parsed.subscription_type;
+            }
         }
     }
 
@@ -1320,7 +1328,11 @@ pub async fn assistant_summarize_session(
         .map_err(|e| format!("await claude (summarize): {e}"))?;
     let (summary, cost_usd, input_tokens, output_tokens, cache_read, cache_create, result_model) =
         stdout_task.await.unwrap_or_default();
-    let stderr_buf = stderr_task.await.unwrap_or_default();
+    // #222: surface drain-task JoinError as a string instead of swallowing it.
+    let stderr_buf = stderr_task.await.unwrap_or_else(|e| {
+        log::error!("summarize stderr drain task panicked: {e}");
+        format!("(stderr drain task panicked: {e})")
+    });
 
     if !status.success() {
         return Err(format!(
@@ -2158,7 +2170,13 @@ pub async fn assistant_send(
     let status = child.wait().await.map_err(|e| format!("await claude: {e}"))?;
     clear_session_pid(&session_id);
     let _ = stdout_task.await;
-    let stderr_buf = stderr_task.await.unwrap_or_default();
+    // #222: surface stderr-drain JoinError so a panicked drain task doesn't
+    // turn into a blank stderr at the call site (which then shows up as
+    // "claude exited with 1 — " with no diagnosis).
+    let stderr_buf = stderr_task.await.unwrap_or_else(|e| {
+        log::error!("stderr drain task panicked: {e}");
+        format!("(stderr drain task panicked: {e})")
+    });
 
     if status.success() {
         let _ = app.emit(
@@ -2192,12 +2210,13 @@ pub async fn assistant_send(
                 "assistant_send: --resume {} failed (no conversation found) — emitting session-lost for frontend auto-recovery",
                 session_id
             );
+            // #115: emit only the recovery signal. The full prompt is buffered
+            // in the frontend's last-message slot; re-broadcasting it over the
+            // Tauri bus risks leaking via diag listeners and inflates the
+            // event payload for no benefit.
             let _ = app.emit(
                 SESSION_LOST_EVENT,
-                serde_json::json!({
-                    "session_id": session_id,
-                    "prompt": prompt,
-                }),
+                serde_json::json!({ "session_id": session_id }),
             );
             return Ok(());
         }
