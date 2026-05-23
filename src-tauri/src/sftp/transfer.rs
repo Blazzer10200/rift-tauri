@@ -235,6 +235,12 @@ impl SftpClient {
         remote_path: &str,
         local_dir: &Path,
     ) -> Result<PathBuf, String> {
+        // #247: log::debug entry/exit + size + duration. Useful for the
+        // edit-trail / lock-presence read paths where many small files
+        // funnel through this method and a "scan took 4s — where?" question
+        // becomes answerable from logs alone.
+        let __t_dl_start = std::time::Instant::now();
+        log::debug!("sftp.download_file enter remote={remote_path}");
         std::fs::create_dir_all(local_dir).map_err(|e| format!("mkdir: {e}"))?;
         let name = remote_path
             .rsplit_once('/')
@@ -243,6 +249,11 @@ impl SftpClient {
         let local_path = local_dir.join(name);
         let buf = with_t(T_BODY, "read", remote_path, self.sftp.read(remote_path)).await?;
         std::fs::write(&local_path, &buf).map_err(|e| format!("write local: {e}"))?;
+        log::debug!(
+            "sftp.download_file exit remote={remote_path} bytes={} elapsed_ms={}",
+            buf.len(),
+            __t_dl_start.elapsed().as_millis()
+        );
         Ok(local_path)
     }}
 

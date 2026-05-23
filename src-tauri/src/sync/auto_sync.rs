@@ -741,9 +741,9 @@ impl AutoSyncEngine {
     /// `cancel` propagates into flush_batch's dispatch loop — clicking Stop
     /// during a push bails between entries, leaving un-dispatched ones in
     /// the dirty queue for the next click to pick up.
-    pub async fn flush_all_now(&self, cancel: Option<CancellationToken>) -> u32 {
+    pub async fn flush_all_now(&self, cancel: Option<CancellationToken>) -> (u32, u32, u32) {
         if self.disposed.load(Ordering::SeqCst) {
-            return 0;
+            return (0, 0, 0);
         }
         // Promote failed → dirty when backoff elapsed (used to live in the
         // killed flush_cycle loop; without this, transient failures never
@@ -788,7 +788,9 @@ impl AutoSyncEngine {
         for e in ready.iter() {
             by_watch.entry(e.watch_key.clone()).or_default().push(e.clone());
         }
-        let mut count = 0u32;
+        let mut total_dispatched = 0u32;
+        let mut total_ok = 0u32;
+        let mut total_fail = 0u32;
         for (watch_key, entries) in by_watch {
             if let Some(ct) = &cancel {
                 if ct.is_cancelled() {
@@ -798,10 +800,12 @@ impl AutoSyncEngine {
             let Some(fw) = self.folders.get(&watch_key).map(|v| v.value().clone()) else {
                 continue;
             };
-            let dispatched = self.flush_batch(&fw, entries, cancel.clone()).await;
-            count += dispatched;
+            let (d, o, f) = self.flush_batch(&fw, entries, cancel.clone()).await;
+            total_dispatched += d;
+            total_ok += o;
+            total_fail += f;
         }
-        count
+        (total_dispatched, total_ok, total_fail)
     }
 
     /// Force-push NOW — drains every dirty entry regardless of debounce, AND
@@ -883,17 +887,18 @@ impl AutoSyncEngine {
             // dispatch loop. In-flight russh streams (1-4 per batch) finish
             // naturally — we can't abort mid-stream w/o leaving partial files.
             // Un-dispatched entries stay in the dirty queue.
-            let dispatched = engine.flush_all_now(Some(ct_for_task.clone())).await;
+            let (dispatched, ok, fail) = engine.flush_all_now(Some(ct_for_task.clone())).await;
             let cancelled = ct_for_task.is_cancelled();
             let elapsed_ms = started.elapsed().as_millis() as u64;
-            eprintln!("[rift] force_push_now: flush_all_now returned dispatched={dispatched} cancelled={cancelled} elapsed_ms={elapsed_ms}");
+            eprintln!("[rift] force_push_now: flush_all_now returned dispatched={dispatched} ok={ok} fail={fail} cancelled={cancelled} elapsed_ms={elapsed_ms}");
 
-            // Invalidate the scan cache after a successful (non-cancelled)
-            // push. Without this, re-clicking Push re-promotes the same
-            // entries from the stale cache and "uploads" them again (SHA-
-            // collapse hides it, but the count lies). Next Push triggers an
-            // auto-scan via the empty-cache fallback, getting fresh state.
-            if !cancelled && dispatched > 0 {
+            // #99: invalidate scan cache only when REAL work happened.
+            // Pre-fix gated on `dispatched > 0` which includes Requeued
+            // entries — a wedge or all-requeue batch wiped the cache despite
+            // zero successful uploads, forcing an unnecessary re-scan on
+            // next Push click. Gate on `ok > 0` so cache clears only when
+            // the post-push state actually diverges from the cached scan.
+            if !cancelled && ok > 0 {
                 engine.cache_scan_entries(Vec::new());
                 eprintln!("[rift] force_push_now: cleared scan cache (was stale post-push)");
             }
@@ -903,9 +908,9 @@ impl AutoSyncEngine {
                 None,
                 None,
                 if cancelled {
-                    format!("push-now cancelled after {dispatched} flushed")
-                } else if dispatched > 0 {
-                    format!("push-now: flushed {dispatched} entries")
+                    format!("push-now cancelled after {ok} flushed")
+                } else if ok > 0 {
+                    format!("push-now: flushed {ok} entries ({fail} failed)")
                 } else {
                     "push-now: nothing pending".to_string()
                 },
@@ -1317,10 +1322,16 @@ impl AutoSyncEngine {
     /// Snapshot of folders the last reconcile aborted via the suspicious-shrink
     /// guard. Surfaced to the frontend rebaseline banner. v0.2.49.
     pub fn aborted_shrunk(&self) -> Vec<crate::sync::AbortedShrunkFolder> {
-        self.last_aborted_shrunk
-            .lock()
-            .map(|g| g.clone())
-            .unwrap_or_default()
+        // #240: poison → previously silently empty → rebaseline banner never
+        // shown after the panic that caused poisoning. Recover the inner Vec
+        // so the UI still surfaces the abort state.
+        match self.last_aborted_shrunk.lock() {
+            Ok(g) => g.clone(),
+            Err(p) => {
+                log::error!("aborted_shrunk: mutex poisoned, recovering inner state");
+                p.into_inner().clone()
+            }
+        }
     }
 
     /// Rebaseline a single folder: re-list remote authoritatively + walk local,
@@ -1533,17 +1544,14 @@ impl AutoSyncEngine {
                     let reason = format!(
                         "{count} local-deletes (\u{2265} scaled threshold {threshold} of {total} files) — user-selected, dispatching anyway"
                     );
-                    let row = crate::sync::ActivityRow {
-                        at: Utc::now(),
-                        resource: resource.clone(),
-                        file: "[guard-override]".into(),
-                        action: format!("WARN — {reason}"),
-                        kind: crate::sync::ActivityKind::Drift,
-                        actor: Some(crate::transport::env::current_user()),
-                        ..Default::default()
-                    };
-                    use tauri::Emitter;
-                    let _ = engine.app().emit("autosync://activity", &row);
+                    // #96: route through log_activity so the WARN row also
+                    // hits log::info! (LogForwarder → diag bus) instead of
+                    // ad-hoc emit that only reaches the activity feed.
+                    engine.log_activity(
+                        &resource,
+                        "[guard-override]",
+                        &format!("WARN — {reason}"),
+                    );
                 }
                 to_dispatch_deletes.extend(deletes);
             }
