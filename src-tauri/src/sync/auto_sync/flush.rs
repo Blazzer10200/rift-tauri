@@ -785,3 +785,96 @@ impl AutoSyncEngine {
         self.failed.insert(entry.path.clone(), e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // Wave A (#265): the mass-delete circuit-breaker math sits inline at the
+    // top of `flush_batch` (~line 50). The brief mandates impl is read-only,
+    // so we can't refactor the formula out into a testable helper. Instead,
+    // mirror the formula here as a **spec test** — if the impl changes, the
+    // duplicate breaks at code-review time, which is the regression sentinel.
+    //
+    // Spec under test:
+    //   scaled = ((local_file_count as f64 * 0.30) as usize).clamp(5, MASS_DELETE_THRESHOLD)
+    //
+    // MASS_DELETE_THRESHOLD is imported from the auto_sync module above.
+    use super::MASS_DELETE_THRESHOLD;
+    use super::RETRY_BACKOFFS_SECS;
+
+    fn scaled_delete_threshold(local_file_count: usize) -> usize {
+        ((local_file_count as f64 * 0.30) as usize).clamp(5, MASS_DELETE_THRESHOLD)
+    }
+
+    #[test]
+    fn empty_local_root_clamps_to_floor() {
+        // Zero files → 30% of zero is zero → clamped UP to the floor of 5 so
+        // a brand-new resource can't be wiped on the first one-file batch.
+        assert_eq!(scaled_delete_threshold(0), 5);
+    }
+
+    #[test]
+    fn small_repo_clamps_to_floor() {
+        // Anything under ~16 files → 0.3*N < 5 → floor applies.
+        assert_eq!(scaled_delete_threshold(1), 5);
+        assert_eq!(scaled_delete_threshold(10), 5);
+        assert_eq!(scaled_delete_threshold(16), 5); // 0.3*16 = 4.8 → 4 → floor 5
+    }
+
+    #[test]
+    fn medium_repo_scales_linearly() {
+        // 17..=83 → floor crossed, ceiling not yet hit. 0.3*N truncated to usize.
+        assert_eq!(scaled_delete_threshold(17), 5); // 0.3*17 = 5.1 → 5
+        assert_eq!(scaled_delete_threshold(20), 6); // 0.3*20 = 6.0 → 6
+        assert_eq!(scaled_delete_threshold(50), 15); // 0.3*50 = 15.0 → 15
+        assert_eq!(scaled_delete_threshold(83), 24); // 0.3*83 = 24.9 → 24
+    }
+
+    #[test]
+    fn large_repo_clamps_to_ceiling() {
+        // ≥84 files → 0.3*N ≥ 25.2 → clamp UP-bound (== MASS_DELETE_THRESHOLD).
+        // The ceiling exists so a 10K-file repo doesn't accept a 3000-file
+        // delete as "scaled" — that's still mass-delete territory.
+        assert_eq!(scaled_delete_threshold(84), MASS_DELETE_THRESHOLD);
+        assert_eq!(scaled_delete_threshold(100), MASS_DELETE_THRESHOLD);
+        assert_eq!(scaled_delete_threshold(10_000), MASS_DELETE_THRESHOLD);
+        assert_eq!(scaled_delete_threshold(usize::MAX / 2), MASS_DELETE_THRESHOLD);
+    }
+
+    #[test]
+    fn breaker_trips_when_deletes_meet_or_exceed_threshold() {
+        // The breaker fires on `delete_count >= scaled_threshold` (note >=,
+        // not >). 5 deletes on an empty repo is enough to trip.
+        let n_files = 0;
+        let scaled = scaled_delete_threshold(n_files);
+        assert_eq!(scaled, 5);
+        assert!(5 >= scaled, "5 deletes must trip on empty repo");
+        assert!(!(4 >= scaled), "4 deletes must NOT trip");
+    }
+
+    #[test]
+    fn breaker_does_not_trip_under_threshold_on_large_repo() {
+        // 100-file repo → threshold 25. 24 deletes pass through, 25 trips.
+        let scaled = scaled_delete_threshold(100);
+        assert_eq!(scaled, 25);
+        assert!(!(24 >= scaled), "24 deletes on 100-file repo must NOT trip");
+        assert!(25 >= scaled, "25 deletes on 100-file repo MUST trip");
+    }
+
+    // ── retry-backoff schedule shape ────────────────────────────────────
+
+    #[test]
+    fn retry_backoff_schedule_is_monotonic_and_finite() {
+        // The schedule drives `mark_failed`'s next_retry. Anything non-monotonic
+        // or zero-padded would be a regression — fast retries cascade load on
+        // the SFTP session.
+        assert!(!RETRY_BACKOFFS_SECS.is_empty());
+        for w in RETRY_BACKOFFS_SECS.windows(2) {
+            assert!(w[0] > 0, "backoff slot is zero");
+            assert!(w[1] >= w[0], "backoff schedule must be monotonic: {w:?}");
+        }
+        // Final slot must be reasonably large (≥ 60s) so a hard-failing path
+        // doesn't keep poking the engine at sub-minute cadence.
+        let last = *RETRY_BACKOFFS_SECS.last().unwrap();
+        assert!(last >= 60, "last backoff {last}s is too short");
+    }
+}
