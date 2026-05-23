@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, onDestroy, untrack } from "svelte";
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
@@ -95,6 +95,7 @@
   let configDir = $state<string>("");
   let logDir = $state<string>("");
   let diagCopied = $state(false);
+  let diagCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 
   async function loadAboutPaths() {
     try { configDir = await appConfigDir(); } catch (e) { console.warn("appConfigDir failed", e); }
@@ -123,7 +124,11 @@
     try {
       await navigator.clipboard.writeText(lines);
       diagCopied = true;
-      setTimeout(() => (diagCopied = false), 1400);
+      if (diagCopiedTimer) clearTimeout(diagCopiedTimer);
+      diagCopiedTimer = setTimeout(() => {
+        diagCopied = false;
+        diagCopiedTimer = null;
+      }, 1400);
     } catch (e) { console.error("clipboard failed", e); }
   }
 
@@ -206,10 +211,36 @@
 
   onMount(async () => {
     try { appVersion = await invoke<string>("app_version"); } catch {}
-    void loadAboutPaths();
-    await connection.loadServers();
+    // Servers list is shared connection state; skip the refetch if another
+    // mount already populated it. Settings opens often enough for this to matter.
+    if (connection.servers.length === 0) {
+      await connection.loadServers();
+    }
     try { shells = await invoke<ShellInfo[]>("term_list_shells"); }
     catch (e) { console.warn("term_list_shells failed", e); }
+  });
+
+  // Lazy-load About paths only when the About section is visible.
+  let aboutPathsLoaded = false;
+  $effect(() => {
+    if (section === "about" && !aboutPathsLoaded) {
+      aboutPathsLoaded = true;
+      void loadAboutPaths();
+    }
+  });
+
+  // Reset open dropdowns when the section changes — otherwise a previously
+  // open shell/font menu lingers and intercepts the next click.
+  $effect(() => {
+    const _s = section;
+    void _s;
+    shellDdOpen = false;
+    fontDdOpen = false;
+  });
+
+  onDestroy(() => {
+    if (diagCopiedTimer) { clearTimeout(diagCopiedTimer); diagCopiedTimer = null; }
+    if (confirmResetTimer) { clearTimeout(confirmResetTimer); confirmResetTimer = null; }
   });
 
   async function pickServer(s: ServerProfile) {
@@ -232,7 +263,12 @@
   <nav class="settings-nav">
     {#each sections as s (s.id)}
       {@const Icon = s.icon}
-      <button data-active={section === s.id} onclick={() => (section = s.id)} type="button">
+      <button
+        data-active={section === s.id}
+        aria-current={section === s.id ? "page" : undefined}
+        onclick={() => (section = s.id)}
+        type="button"
+      >
         <Icon size={14} strokeWidth={1.75}/><span>{s.label}</span>
       </button>
     {/each}
@@ -243,7 +279,7 @@
       <div
         class="section-shell"
         in:fly={{ y: 6, duration: 180, delay: 80, easing: quintOut }}
-        out:fade={{ duration: 80 }}
+        out:fade={{ duration: 0 }}
       >
         <header class="section-head">
           <div class="section-head-l">
@@ -614,10 +650,12 @@
 
           <section class="set-group">
             <header class="set-group-head">Theme</header>
-            <div class="set-theme-grid">
+            <div class="set-theme-grid" role="radiogroup" aria-label="Terminal theme preset">
               {#each THEME_PRESETS as t (t.id)}
                 <button
                   type="button"
+                  role="radio"
+                  aria-checked={terminal.themePreset === t.id}
                   class="set-theme-card"
                   data-active={terminal.themePreset === t.id}
                   onclick={() => terminal.setThemePreset(t.id as ThemePresetId)}
@@ -749,7 +787,7 @@
                   class="switch"
                   role="switch"
                   aria-label="Use full Claude Code config"
-                  aria-checked={assistantStore.useFullConfig && !assistantStore.apiKey}
+                  aria-checked={assistantStore.useFullConfig}
                   data-on={assistantStore.useFullConfig && !assistantStore.apiKey}
                   disabled={!!assistantStore.apiKey}
                   onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}
@@ -796,7 +834,12 @@
                   {asstMaxBudgetSaving ? "Saving…" : "Save"}
                 </button>
                 {#if assistantStore.maxBudgetUsd != null}
-                  <button class="btn ghost sm" type="button" onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}>
+                  <button
+                    class="btn ghost sm"
+                    type="button"
+                    disabled={asstMaxBudgetSaving}
+                    onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}
+                  >
                     Clear
                   </button>
                 {/if}
@@ -969,10 +1012,12 @@
                   <span class="set-label">Language</span>
                   <span class="set-hint">BCP-47 tag passed to the recogniser. Pick another language if you speak something other than English.</span>
                 </div>
-                <div class="set-pick-grid">
+                <div class="set-pick-grid" role="radiogroup" aria-label="Speech recognition language">
                   {#each STT_LANGS as l (l.id)}
                     <button
                       type="button"
+                      role="radio"
+                      aria-checked={stt.config.language === l.id}
                       class="set-pick"
                       data-active={stt.config.language === l.id}
                       onclick={() => void stt.setConfig({ language: l.id })}
@@ -1196,29 +1241,30 @@
             {:else}
               <div class="srv-list">
                 {#each connection.servers as s (s.key)}
-                  <div
-                    class="srv-card"
-                    data-active={connection.selectedKey === s.key}
-                    role="button"
-                    tabindex="0"
-                    onclick={() => pickServer(s)}
-                    onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickServer(s); } }}
-                  >
-                    <div class="srv-l">
-                      <span class="srv-dot"></span>
-                      <div class="srv-meta-l">
-                        <div class="mono srv-name">{s.name}</div>
-                        <div class="mono dim srv-host">{s.user}@{s.host}{s.port !== 22 ? `:${s.port}` : ""}</div>
+                  <div class="srv-card" data-active={connection.selectedKey === s.key}>
+                    <button
+                      type="button"
+                      class="srv-select"
+                      onclick={() => pickServer(s)}
+                      aria-label={`Select server ${s.name}`}
+                      aria-pressed={connection.selectedKey === s.key}
+                    >
+                      <div class="srv-l">
+                        <span class="srv-dot"></span>
+                        <div class="srv-meta-l">
+                          <div class="mono srv-name">{s.name}</div>
+                          <div class="mono dim srv-host">{s.user}@{s.host}{s.port !== 22 ? `:${s.port}` : ""}</div>
+                        </div>
                       </div>
-                    </div>
-                    <div class="srv-meta mono dim" title={s.fingerprint ?? "no fingerprint pinned"}>
-                      {s.fingerprint ? `ed25519 · ${s.fingerprint.slice(0, 18)}…` : "no fingerprint pinned"}
-                    </div>
+                      <div class="srv-meta mono dim" title={s.fingerprint ?? "no fingerprint pinned"}>
+                        {s.fingerprint ? `ed25519 · ${s.fingerprint.slice(0, 18)}…` : "no fingerprint pinned"}
+                      </div>
+                    </button>
                     <div class="srv-r">
-                      <button class="btn ghost sm" onclick={(e) => { e.stopPropagation(); onEditServer(s); }} type="button" title="Edit" aria-label="Edit">
+                      <button class="btn ghost sm" onclick={() => onEditServer(s)} type="button" title={`Edit ${s.name}`} aria-label={`Edit server ${s.name}`}>
                         <Pencil size={11}/>
                       </button>
-                      <button class="btn ghost sm" onclick={(e) => { e.stopPropagation(); onDeleteServer(s); }} type="button" title="Delete" aria-label="Delete">
+                      <button class="btn ghost sm" onclick={() => onDeleteServer(s)} type="button" title={`Delete ${s.name}`} aria-label={`Delete server ${s.name}`}>
                         <Trash2 size={11}/>
                       </button>
                     </div>
@@ -1802,17 +1848,14 @@
   .srv-list { display: flex; flex-direction: column; }
   .srv-card {
     display: grid;
-    grid-template-columns: 1fr auto auto;
+    grid-template-columns: 1fr auto;
     align-items: center;
     gap: 16px;
-    padding: 12px 14px;
+    padding: 0;
     background: transparent;
     border: 0;
     border-bottom: 1px solid var(--border);
-    cursor: pointer;
     color: var(--fg);
-    font: inherit;
-    text-align: left;
     transition: background 100ms;
   }
   .srv-card:last-child { border-bottom: none; }
@@ -1820,6 +1863,25 @@
   .srv-card[data-active="true"] {
     background: color-mix(in oklch, var(--accent) 10%, transparent);
     box-shadow: inset 2px 0 var(--accent);
+  }
+  .srv-select {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 14px;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    width: 100%;
+    min-width: 0;
+  }
+  .srv-select:focus-visible {
+    outline: none;
+    box-shadow: inset 0 0 0 2px var(--ring);
   }
   .srv-card[data-active="true"]:hover {
     background: color-mix(in oklch, var(--accent) 14%, transparent);

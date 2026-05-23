@@ -161,6 +161,7 @@
     }
   }
   $effect(() => {
+    if (!isVisible) return;
     window.addEventListener("keydown", onGlobalKey);
     return () => window.removeEventListener("keydown", onGlobalKey);
   });
