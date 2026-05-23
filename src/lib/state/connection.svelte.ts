@@ -443,8 +443,13 @@ class ConnectionStore {
   // owned SftpSession (which isn't behind a RwLock).
   private wedgeTimestamps: number[] = [];
   private reconnecting = false;
+  // #214: cap retries + exponential backoff so a server that's truly down
+  // doesn't burn IPC + log noise forever. Resets on a successful reconnect.
+  private reconnectAttempts = 0;
   private static readonly AUTO_RECONNECT_THRESHOLD = 3;
   private static readonly AUTO_RECONNECT_WINDOW_MS = 60_000;
+  private static readonly AUTO_RECONNECT_MAX_ATTEMPTS = 5;
+  private static readonly AUTO_RECONNECT_BACKOFF_CAP_S = 30;
 
   private handleConnectionWedged() {
     const now = Date.now();
@@ -464,17 +469,32 @@ class ConnectionStore {
 
   private async autoReconnect() {
     if (this.reconnecting) return;
+    if (this.reconnectAttempts >= ConnectionStore.AUTO_RECONNECT_MAX_ATTEMPTS) {
+      console.warn("[rift] auto-reconnect: max attempts reached, giving up");
+      return;
+    }
     this.reconnecting = true;
-    console.warn("[rift] auto-reconnect: 3+ ConnectionWedged events in 60s — soft restart");
+    // #170: also raise the manual `connecting` flag so concurrent connect()
+    // attempts during auto-reconnect short-circuit instead of racing.
+    this.connecting = true;
+    const attempt = this.reconnectAttempts;
+    this.reconnectAttempts++;
+    const backoffMs = Math.min(2 ** attempt, ConnectionStore.AUTO_RECONNECT_BACKOFF_CAP_S) * 1000;
+    console.warn(
+      `[rift] auto-reconnect: attempt ${attempt + 1}/${ConnectionStore.AUTO_RECONNECT_MAX_ATTEMPTS}` +
+        ` after ${backoffMs}ms backoff (3+ ConnectionWedged events in 60s)`,
+    );
     try {
       await invoke("stop_autosync");
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, backoffMs));
       await this.startAutosyncForSelected();
       console.info("[rift] auto-reconnect: complete");
+      this.reconnectAttempts = 0;
     } catch (e) {
       console.error("[rift] auto-reconnect failed", e);
     } finally {
       this.reconnecting = false;
+      this.connecting = false;
     }
   }
 
