@@ -641,6 +641,10 @@ class TabState {
 
   // Non-reactive per-stream internals.
   streamingMsgId: string | null = null;
+  // #146/#234: cached index of the streaming assistant msg so mutateStreaming
+  // can index-replace instead of full-map. Set in send() right after the
+  // placeholder push; cleared wherever streamingMsgId is cleared.
+  streamingMsgIdx: number | null = null;
   seenToolUseIds = new Set<string>();
   deltaCount = 0;
   envelopeTextBuffer = "";
@@ -703,6 +707,14 @@ class TabState {
 
   private mutateStreaming(fn: (m: ChatMessage) => ChatMessage) {
     if (!this.streamingMsgId) return;
+    const idx = this.streamingMsgIdx;
+    if (idx !== null && idx >= 0 && idx < this.messages.length) {
+      const m = this.messages[idx];
+      if (m && m.id === this.streamingMsgId) {
+        this.messages[idx] = fn(m);
+        return;
+      }
+    }
     this.messages = this.messages.map((m) => (m.id === this.streamingMsgId ? fn(m) : m));
   }
 
@@ -798,10 +810,14 @@ class TabState {
     const envSig = !!block.signature && block.signature.length > 0;
     if (existing) {
       if (envText.length > existing.text.length || (envSig && !existing.hasSignature)) {
+        // #147: $state proxies aren't referentially equal across read sites,
+        // so `b === existing` was always false → every call appended a new
+        // block. Match by stable startedAt instead.
+        const key = existing.startedAt;
         this.mutateStreaming((m) => ({
           ...m,
           blocks: m.blocks.map((b) =>
-            b.type === "thinking" && b === existing
+            b.type === "thinking" && b.startedAt === key
               ? { ...b, text: envText.length > b.text.length ? envText : b.text, hasSignature: b.hasSignature || envSig }
               : b,
           ),
@@ -877,16 +893,34 @@ class TabState {
 
   private applyTodoWrite(input: Record<string, unknown> | undefined): boolean {
     const raw = (input?.todos ?? []) as Array<{ content?: string; status?: string }>;
+    // #178: content-keyed ids so a reorder/insert in the model's TodoWrite
+    // doesn't force every downstream {#each} to destroy + remount. Existing
+    // ids are reused when content matches; new content gets a fresh id.
+    const byContent = new Map(this.tasks.map((t) => [t.content, t.id]));
+    const used = new Set<string>();
     const next = raw
       .filter((t) => typeof t?.content === "string")
-      .map((t, i) => ({
-        id: `todo-${i}-${t.content!.slice(0, 24)}`,
-        content: t.content!,
-        status: (t.status === "in_progress" || t.status === "completed" ? t.status : "pending") as
-          | "pending"
-          | "in_progress"
-          | "completed",
-      }));
+      .map((t) => {
+        const content = t.content!;
+        let id = byContent.get(content);
+        if (id && !used.has(id)) {
+          used.add(id);
+        } else {
+          let candidate = `todo-${content.slice(0, 24)}`;
+          let n = 1;
+          while (used.has(candidate)) candidate = `todo-${content.slice(0, 24)}-${n++}`;
+          id = candidate;
+          used.add(id);
+        }
+        return {
+          id,
+          content,
+          status: (t.status === "in_progress" || t.status === "completed" ? t.status : "pending") as
+            | "pending"
+            | "in_progress"
+            | "completed",
+        };
+      });
     this.tasks = next;
     if (next.length > 0 && !this.dockAutoOpenedThisConvo) {
       this.dockAutoOpenedThisConvo = true;
@@ -1024,6 +1058,10 @@ class TabState {
           }
         }
         this.enqueueText(prefix + raw);
+      } else if (raw.length > 0) {
+        // #182: post-done CLI dribble was silently dropped — surface in console
+        // for observability so we know if a known CLI bug regresses.
+        console.debug("[assistant] orphaned non-JSON line (post-done)", raw.slice(0, 80));
       }
       return;
     }
@@ -1173,6 +1211,7 @@ class TabState {
     }
     this.streaming = false;
     this.streamingMsgId = null;
+    this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
     this.activity = { ...this.activity, currentLabel: null };
     // Finalize telemetry for this turn.
@@ -1202,6 +1241,7 @@ class TabState {
       this.messages = this.messages.filter((m) => !(m.id === id && m.blocks.length === 0));
       this.streamingMsgId = null;
     }
+    this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
     // Finalize telemetry.
     if (this.currentTurnRecord) {
@@ -1673,6 +1713,12 @@ class AssistantStore {
   private tabScroll = new Map<string, number>();
 
   private unlistens: UnlistenFn[] = [];
+  // #177: keep the beforeunload listener reachable for removal in destroy().
+  // Anonymous closures used to leak across HMR cycles.
+  private beforeUnloadHandler: (() => void) | null = null;
+  // #185: re-entrance latch for retryLast — fast double-click would
+  // otherwise pop two user+assistant pairs.
+  private retrying = false;
   // streamingMsgId / seenToolUseIds / dockAutoOpenedThisConvo / deltaCount /
   // envelopeTextBuffer / rawLineLog / pendingText / drainHandle / lastDrainAt /
   // thinkingByIndex / activeThinkingIndex now live on TabState.
@@ -1833,8 +1879,31 @@ class AssistantStore {
 
     // Best-effort flush on window close so we don't lose the last turn
     // sitting inside the 700ms scheduleSave debounce. See flushNow() doc.
+    // #177: store the handler so destroy() can remove it; anonymous arrow
+    // would leak across HMR cycles.
     if (typeof window !== "undefined") {
-      window.addEventListener("beforeunload", () => this.flushNow());
+      this.beforeUnloadHandler = () => this.flushNow();
+      window.addEventListener("beforeunload", this.beforeUnloadHandler);
+    }
+
+    // #180: HMR teardown — clear listeners on module dispose so a fresh
+    // init() during dev hot-reload starts from a clean slate.
+    if (typeof import.meta !== "undefined" && (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot) {
+      (import.meta as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => this.destroy());
+    }
+  }
+
+  /** Tear down all listeners + handlers. Safe to call multiple times.
+   *  Wired automatically via `import.meta.hot.dispose` so HMR doesn't stack
+   *  duplicate listeners. AppShell may also call this on unmount. */
+  destroy() {
+    for (const u of this.unlistens) {
+      try { u(); } catch (e) { console.warn("[assistant] unlisten threw", e); }
+    }
+    this.unlistens = [];
+    if (this.beforeUnloadHandler && typeof window !== "undefined") {
+      window.removeEventListener("beforeunload", this.beforeUnloadHandler);
+      this.beforeUnloadHandler = null;
     }
   }
 
@@ -1865,6 +1934,7 @@ class AssistantStore {
     }
     tab.messages = msgs;
     tab.streamingMsgId = null;
+    tab.streamingMsgIdx = null;
     tab.lastError = null;
     this.lastNotice = "Session was lost — retrying as a fresh start";
     // Auto-retry only when the lost tab is active. Bg-tab retry would require
@@ -2136,6 +2206,12 @@ class AssistantStore {
         this.dropTab(id);
       }
       await this.refreshConversations();
+      // #149: an openTab(id) that started before the delete may have racy-
+      // pushed id into openTabs while we were awaiting the IPC; close it now
+      // so the user doesn't end up with a tab pointing at a deleted convo.
+      if (this.openTabs.includes(id)) {
+        await this.closeTab(id);
+      }
     } catch (e) {
       this.lastError = `Failed to delete conversation: ${String(e)}`;
     }
@@ -2157,6 +2233,8 @@ class AssistantStore {
   }
 
   private async restoreTabs() {
+    // #181: persistTabs() in finally so a throw mid-restore doesn't leave the
+    // disk record diverged from in-memory state.
     try {
       const raw = localStorage.getItem("rift.ui.tabs.v1");
       if (!raw) return;
@@ -2198,9 +2276,10 @@ class AssistantStore {
           await this.loadConversation(focused);
         }
       }
-      this.persistTabs();
     } catch (e) {
       console.warn("restoreTabs failed", e);
+    } finally {
+      this.persistTabs();
     }
   }
 
@@ -2504,6 +2583,9 @@ class AssistantStore {
     }
     tab.beginTurn();
     this.lastNotice = null;
+    // #184: clear stale error banner so it doesn't bleed into the new turn.
+    // Setter routes to tab.lastError when activeTab is set, store-level otherwise.
+    this.lastError = null;
     // Telemetry: build the turn record + attach to tab. TabState fills it as
     // envelopes arrive; finalized in onDone/onError.
     const attachBytes = this.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
@@ -2572,6 +2654,9 @@ class AssistantStore {
     const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [] };
     tab.messages = [...tab.messages, asst];
     tab.streamingMsgId = asst.id;
+    // #146: asst placeholder is at the tail of messages; cache its index so
+    // mutateStreaming can index-replace instead of scanning the full array.
+    tab.streamingMsgIdx = tab.messages.length - 1;
     // Snapshot attachments for this turn + clear the composer so a fast retype
     // doesn't accidentally re-attach.
     const turnAttachments = this.composerAttachments.map((a) => ({
@@ -2706,7 +2791,17 @@ class AssistantStore {
     if (tab === this.activeTab && tab.queue.length > 0 && !tab.streaming) {
       const [next, ...rest] = tab.queue;
       tab.queue = rest;
-      queueMicrotask(() => void this.send(next.text));
+      // #148: capture the active convo at queue-pop time; if the user switches
+      // tabs before the microtask fires, re-queue onto the original tab
+      // instead of dispatching against whichever tab is active now.
+      const capturedConvoId = this.currentConvoId;
+      queueMicrotask(() => {
+        if (this.currentConvoId !== capturedConvoId) {
+          tab.queue = [next, ...tab.queue];
+          return;
+        }
+        void this.send(next.text);
+      });
     }
   }
 
@@ -2718,8 +2813,12 @@ class AssistantStore {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
     if (!tab || !tab.streaming) return;
     const sid = tab.cliSessionId;
+    // #179: flush pacer-buffered text into the message BEFORE clearing
+    // streamingMsgId — otherwise mutateStreaming's early-return drops it.
+    tab.flushPendingText();
     tab.streaming = false;
     tab.streamingMsgId = null;
+    tab.streamingMsgIdx = null;
     tab.seenToolUseIds.clear();
     tab.activity = { ...tab.activity, currentLabel: null };
     // Telemetry finalize as user-stop before the late done event lands.
@@ -3063,22 +3162,29 @@ class AssistantStore {
    *  pair from the visible history so the retry looks like a redo, not a
    *  duplicate. Aborts an in-flight stream first. */
   async retryLast() {
-    const tab = this.activeTab;
-    const last = tab?.promptHistory[tab.promptHistory.length - 1];
-    if (!last || !tab) {
-      this.lastError = "No previous prompt to retry.";
-      return;
+    // #185: re-entrance guard so a fast double-click only strips one pair.
+    if (this.retrying) return;
+    this.retrying = true;
+    try {
+      const tab = this.activeTab;
+      const last = tab?.promptHistory[tab.promptHistory.length - 1];
+      if (!last || !tab) {
+        this.lastError = "No previous prompt to retry.";
+        return;
+      }
+      if (tab.streaming) {
+        await this.stop();
+      }
+      // Strip the trailing assistant turn (if any) and the matching user turn
+      // so the replayed history doesn't double-include the prompt.
+      const msgs = tab.messages.slice();
+      if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
+      if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
+      tab.messages = msgs;
+      await this.send(last);
+    } finally {
+      this.retrying = false;
     }
-    if (tab.streaming) {
-      await this.stop();
-    }
-    // Strip the trailing assistant turn (if any) and the matching user turn
-    // so the replayed history doesn't double-include the prompt.
-    const msgs = tab.messages.slice();
-    if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
-    if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
-    tab.messages = msgs;
-    await this.send(last);
   }
 
   /** Copy the latest assistant message's text content to the clipboard. */
