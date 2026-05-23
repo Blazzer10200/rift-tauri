@@ -45,7 +45,7 @@
     const q = query;
     const _o = `${caseSensitive}|${wholeWord}|${useRegex}`;
     void _o;
-    if (searchTimer) clearTimeout(searchTimer);
+    if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
     if (!q || !api) {
       api?.clearDecorations();
       resultIndex = -1;
@@ -54,18 +54,29 @@
     }
     searchTimer = setTimeout(() => {
       api.findNext(q, opts());
+      searchTimer = null;
     }, 80);
+    return () => {
+      if (searchTimer) { clearTimeout(searchTimer); searchTimer = null; }
+    };
+  });
+
+  // Re-wire results subscription whenever `api` changes (tab switch swaps it).
+  $effect(() => {
+    if (detachResults) { detachResults(); detachResults = null; }
+    if (!api) return;
+    detachResults = api.onResults((info) => {
+      resultIndex = info.resultIndex;
+      resultCount = info.resultCount;
+    });
+    return () => {
+      if (detachResults) { detachResults(); detachResults = null; }
+    };
   });
 
   onMount(() => {
     inputEl?.focus();
     inputEl?.select();
-    if (api) {
-      detachResults = api.onResults((info) => {
-        resultIndex = info.resultIndex;
-        resultCount = info.resultCount;
-      });
-    }
   });
 
   onDestroy(() => {

@@ -128,6 +128,11 @@
         cols,
         rows,
       });
+      // Teardown raced the spawn — kill the orphan and bail.
+      if (!term) {
+        try { await invoke("term_kill", { id: info.id }); } catch { /* noop */ }
+        return;
+      }
       sessionId = info.id;
       status = "running";
       onSessionStart?.(info);
@@ -215,6 +220,8 @@
       try { await invoke("term_kill", { id }); } catch { /* already exited */ }
     }
     onSearchTeardown?.();
+    try { search?.dispose(); } catch { /* noop */ }
+    try { fit?.dispose(); } catch { /* noop */ }
     term?.dispose();
     term = null;
     fit = null;

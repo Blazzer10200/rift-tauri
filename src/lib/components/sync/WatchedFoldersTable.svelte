@@ -18,6 +18,9 @@
   let folders = $state<WatchedFolderInfo[]>([]);
   let loading = $state(true);
   let unlistenDiag: UnlistenFn | null = null;
+  // Guard against unmount-during-listen race: if the component tears down
+  // while `await listen(...)` is in flight, the resolved fn would orphan.
+  let aborted = false;
 
   async function refresh() {
     try {
@@ -32,16 +35,22 @@
 
   onMount(async () => {
     await refresh();
+    if (aborted) return;
     try {
-      unlistenDiag = await listen<{ stage: string }>("diag://event", (e) => {
+      const u = await listen<{ stage: string }>("diag://event", (e) => {
         if (e.payload.stage === "drift_scan_result") void refresh();
       });
+      if (aborted) { u(); return; }
+      unlistenDiag = u;
     } catch (e) {
       console.error("WatchedFoldersTable: diag listener wire failed", e);
     }
   });
 
-  onDestroy(() => { if (unlistenDiag) unlistenDiag(); });
+  onDestroy(() => {
+    aborted = true;
+    if (unlistenDiag) { unlistenDiag(); unlistenDiag = null; }
+  });
 
   // Last activity timestamp per resource — newest match wins (feed is newest-first).
   function lastEventFor(name: string): string | null {

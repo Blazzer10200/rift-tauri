@@ -44,7 +44,8 @@
     }
   }
 
-  function fmtRel(iso: string): string {
+  function fmtRel(iso: string | null | undefined): string {
+    if (!iso) return "—";
     const t = new Date(iso).getTime();
     if (Number.isNaN(t)) return "—";
     const diff = Math.floor((Date.now() - t) / 1000);
