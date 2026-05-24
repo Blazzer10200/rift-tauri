@@ -10,8 +10,11 @@
 //! default (CLI reads its own keychain). API-key fallback: when configured,
 //! spawn with `--bare` + `ANTHROPIC_API_KEY` env so the CLI ignores OAuth.
 
+pub mod ask_user;
 pub mod mcp_server;
 pub mod remote_bridge;
+
+pub use ask_user::AskUserRegistry;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -719,6 +722,10 @@ fn write_mcp_config(
     let mut env_map = serde_json::Map::new();
     env_map.insert("RIFT_MCP_SERVER".into(), Value::from("1"));
     env_map.insert("RIFT_MCP_ROOTS".into(), Value::from(roots_joined));
+    // Plumb the convo's session_id so the `ask_user` MCP tool can tag its
+    // bridge request — the frontend pairs incoming `assistant://ask-user`
+    // events against the correct chat tab by session_id.
+    env_map.insert("RIFT_SESSION_ID".into(), Value::from(session_id.to_string()));
     // #62: always pass the read-only token so sync_status / shell_lock_status
     // are available; only inject the write-scoped RIFT_BRIDGE_TOKEN when the
     // user has explicitly opted into remote-shell. A compromised MCP tool with
@@ -1480,6 +1487,27 @@ pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, Stri
     Ok(workspace_state_from(&cfg))
 }
 
+/// Resolve a pending `mcp__rift__ask_user` request. The frontend invokes this
+/// from `ToolChip.svelte` when the user picks an answer. The `answer` payload
+/// shape is decided by the chip — the bridge layer just passes it through to
+/// the MCP child, which turns it into the tool_result text Claude sees. A
+/// `cancelled: true` flag in the payload means the user dismissed without
+/// picking; the MCP tool turns that into a fall-back "user dismissed" string
+/// so Claude can ask in plain text instead.
+#[tauri::command]
+pub async fn assistant_answer_ask_user(
+    registry: tauri::State<'_, std::sync::Arc<AskUserRegistry>>,
+    request_id: String,
+    answer: serde_json::Value,
+) -> Result<(), String> {
+    if !registry.resolve(&request_id, answer) {
+        // Stale id — request already timed out or never existed. Not fatal:
+        // the chip just no-ops on its end. Surface as a debug log only.
+        log::debug!("assistant_answer_ask_user: no pending request for id {request_id}");
+    }
+    Ok(())
+}
+
 /// Enumerate file paths under the active workspace root, relative to the root,
 /// forward-slash normalized. Drives the composer's `@`-file mention picker.
 /// Skip set mirrors `mcp_server::SKIP_DIRS`. Capped at `MENTION_LIMIT` files.
@@ -1527,7 +1555,7 @@ pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
 /// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped helpers, and sync_status to get a live reading of the sync queue (pending uploads, failed, conflicts) at any point mid-conversation — call it when the user asks whether files are synced or a push completed, rather than relying on the stale per-turn snapshot in the system-reminder. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
+const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped helpers, sync_status to get a live reading of the sync queue (pending uploads, failed, conflicts) at any point mid-conversation — call it when the user asks whether files are synced or a push completed, rather than relying on the stale per-turn snapshot in the system-reminder — and ask_user for interactive multiple-choice questions. The standard Anthropic `AskUserQuestion` tool is NOT available in this environment; use `mcp__rift__ask_user` instead when you need a quick choice from the user (e.g. picking between approaches, confirming a destructive operation, narrowing scope). The answer comes back as the tool result and resumes the turn. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters or when you need user input. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
@@ -1930,9 +1958,9 @@ pub async fn assistant_send(
             // via the explicit-name entries.
             format!("{BUILTINS},mcp__*")
         } else if remote_shell_enabled {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__remote_bash,mcp__rift__push_pending,mcp__rift__pull_pending,mcp__rift__reconcile_apply")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__remote_bash,mcp__rift__push_pending,mcp__rift__pull_pending,mcp__rift__reconcile_apply,mcp__rift__ask_user")
         } else {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);

@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 
@@ -58,6 +59,21 @@ struct Request {
     /// with `confirm: true` to actually mutate.
     #[serde(default)]
     confirm: Option<bool>,
+    /// `ask_user` only: opaque id minted by the MCP child so the frontend can
+    /// route the user's answer back to the matching pending bridge waiter.
+    #[serde(default)]
+    request_id: Option<String>,
+    /// `ask_user` only: convo session-id so the frontend can scope the event
+    /// to the right chat tab (the MCP child reads it from `RIFT_SESSION_ID`).
+    #[serde(default)]
+    session_id: Option<String>,
+    /// `ask_user` only: pass-through questions payload — same shape Claude
+    /// emits for the built-in `AskUserQuestion` tool (array of `{question,
+    /// header, multiSelect, options}` objects). The frontend chip reads this
+    /// straight from the tool_use envelope; the field here just rides along
+    /// in the event payload for parity.
+    #[serde(default)]
+    questions: Option<Value>,
 }
 
 /// Flat response shape — every field optional so a single struct handles bash
@@ -253,7 +269,60 @@ async fn dispatch(app: &AppHandle, scope: Scope, req: Request) -> Response {
             }
             reconcile_apply_op(app).await
         }
+        "ask_user" => ask_user_op(app, req).await,
         other => err(format!("unknown op `{other}`")),
+    }
+}
+
+/// Park the bridge call until the user answers the question in the chat UI.
+/// Either scope authorizes — `ask_user` is presentation-only, no remote state
+/// is touched. Emits `assistant://ask-user` so the chat tab's listener can
+/// pair the request_id with the matching tool block, then `await`s the
+/// registry oneshot. 10-min timeout on the user's side; on timeout the MCP
+/// child gets an `ok: false` and surfaces "user did not answer" so the model
+/// falls back to plain-text asking.
+async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
+    let request_id = match req.request_id {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => return err("ask_user: missing `request_id`"),
+    };
+    let session_id = req.session_id.unwrap_or_default();
+    let questions = req.questions.unwrap_or(Value::Null);
+
+    let registry = match app.try_state::<std::sync::Arc<crate::assistant::AskUserRegistry>>() {
+        Some(r) => r.inner().clone(),
+        None => return err("ask_user: registry not managed (init bug)"),
+    };
+    let rx = registry.register(request_id.clone());
+
+    // Emit AFTER registering — guarantees the receiver is in the map before
+    // the frontend can possibly fire an answer back.
+    let _ = app.emit(
+        "assistant://ask-user",
+        serde_json::json!({
+            "request_id": request_id,
+            "session_id": session_id,
+            "questions": questions,
+        }),
+    );
+
+    let timeout = Duration::from_secs(600);
+    match tokio::time::timeout(timeout, rx).await {
+        Ok(Ok(answer)) => Response {
+            ok: true,
+            data: Some(answer),
+            ..Default::default()
+        },
+        Ok(Err(_)) => {
+            // Sender dropped without sending — shouldn't happen via normal
+            // resolve/cancel, but be explicit.
+            registry.cancel(&request_id);
+            err("ask_user: pending entry dropped before an answer arrived")
+        }
+        Err(_) => {
+            registry.cancel(&request_id);
+            err("ask_user: user did not answer within 10 minutes")
+        }
     }
 }
 
