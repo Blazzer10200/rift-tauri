@@ -13,18 +13,130 @@
     Bot, HelpCircle, FlagOff, BookOpen, Sparkles, Slash, Square, SkipForward,
     Circle,
   } from "lucide-svelte";
-  import type { ToolBlock } from "../../state/assistant.svelte";
+  import { assistant, type ToolBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
 
   let { tool, variant = "card" }: { tool: ToolBlock; variant?: "card" | "timeline" } = $props();
-  // Agent + TodoWrite are first-class card variants — default-expanded since
-  // their body IS the message, not a debug detail. All other tools collapse.
+  // Agent + TodoWrite + AskUser are first-class card variants — default-expanded
+  // since their body IS the message, not a debug detail. All other tools collapse.
   const isAgent = $derived(/^(mcp__rift__)?Agent$/.test(tool.name));
   const isTodoWrite = $derived(/^(mcp__rift__)?TodoWrite$/.test(tool.name));
-  const isCard = $derived(isAgent || isTodoWrite);
+  const isAskUser = $derived(/^mcp__rift__ask_user$/.test(tool.name));
+  const isCard = $derived(isAgent || isTodoWrite || isAskUser);
   let expanded = $state(false);
   // Cards open by default; chips closed.
   $effect(() => { if (isCard) expanded = true; });
+
+  // ── AskUser state — single-select index OR multi-select set per question.
+  //    `otherText` holds the freeform input when the user picks "Other".
+  type AskQuestion = {
+    question: string;
+    header: string;
+    multiSelect?: boolean;
+    options: Array<{ label: string; description?: string }>;
+  };
+  const askQuestions = $derived.by<AskQuestion[]>(() => {
+    const raw = tool.input?.questions;
+    if (!Array.isArray(raw)) return [];
+    return (raw as Array<Record<string, unknown>>).map((q) => ({
+      question: typeof q.question === "string" ? q.question : "",
+      header: typeof q.header === "string" ? q.header : "",
+      multiSelect: q.multiSelect === true,
+      options: Array.isArray(q.options)
+        ? (q.options as Array<Record<string, unknown>>).map((o) => ({
+            label: typeof o.label === "string" ? o.label : "",
+            description: typeof o.description === "string" ? o.description : undefined,
+          })).filter((o) => o.label.length > 0)
+        : [],
+    }));
+  });
+  // Per-question UI state — index by position. "Other" is a sentinel value
+  // outside the option indices; selecting it reveals the freeform input.
+  const OTHER_IDX = -1;
+  let askSingleIdx = $state<number[]>([]);
+  let askMultiSet = $state<Set<number>[]>([]);
+  let askOtherText = $state<string[]>([]);
+  $effect(() => {
+    // Reset arrays when the question list changes (new ask_user tool call).
+    askSingleIdx = askQuestions.map(() => -2);     // -2 = no selection yet
+    askMultiSet = askQuestions.map(() => new Set());
+    askOtherText = askQuestions.map(() => "");
+  });
+  // Submission state — flips on submit, reset by tool_result via parent.
+  let askSubmitting = $state(false);
+  const askRequestId = $derived(isAskUser ? assistant.askUserRequestIdFor(tool.id) : null);
+  // Answered iff the tool_result has landed (status === "done").
+  const askAnswered = $derived(isAskUser && tool.status === "done");
+
+  function toggleAskMulti(qi: number, oi: number) {
+    const cur = askMultiSet[qi] ?? new Set<number>();
+    const next = new Set(cur);
+    if (next.has(oi)) next.delete(oi); else next.add(oi);
+    askMultiSet = askMultiSet.map((s, i) => (i === qi ? next : s));
+  }
+
+  /** Compose the answers payload and dispatch to the store. */
+  async function submitAskUser() {
+    if (askSubmitting || !askRequestId) return;
+    const answers = askQuestions.map((q, qi) => {
+      if (q.multiSelect) {
+        const set = askMultiSet[qi] ?? new Set<number>();
+        const otherText = askOtherText[qi]?.trim();
+        const labels: string[] = [];
+        for (const oi of set) {
+          if (oi === OTHER_IDX) {
+            if (otherText) labels.push(otherText);
+          } else {
+            const label = q.options[oi]?.label;
+            if (label) labels.push(label);
+          }
+        }
+        return { question: q.question, answer: labels };
+      }
+      const idx = askSingleIdx[qi];
+      if (idx === OTHER_IDX) {
+        return { question: q.question, answer: askOtherText[qi]?.trim() || "(no answer)" };
+      }
+      const label = q.options[idx]?.label ?? "(no answer)";
+      return { question: q.question, answer: label };
+    });
+    askSubmitting = true;
+    try {
+      await assistant.submitAskUserAnswer(tool.id, { answers });
+    } catch (e) {
+      console.warn("submitAskUserAnswer failed", e);
+      askSubmitting = false; // let the user retry
+    }
+  }
+
+  async function cancelAskUser() {
+    if (askSubmitting || !askRequestId) return;
+    askSubmitting = true;
+    try {
+      await assistant.submitAskUserAnswer(tool.id, { cancelled: true });
+    } catch (e) {
+      console.warn("cancelAskUser failed", e);
+      askSubmitting = false;
+    }
+  }
+
+  // Per-question validity — at least one option (or Other w/ text) selected.
+  const askCanSubmit = $derived.by<boolean>(() => {
+    if (askQuestions.length === 0) return false;
+    for (let qi = 0; qi < askQuestions.length; qi++) {
+      const q = askQuestions[qi];
+      if (q.multiSelect) {
+        const set = askMultiSet[qi] ?? new Set<number>();
+        if (set.size === 0) return false;
+        if (set.has(OTHER_IDX) && !askOtherText[qi]?.trim()) return false;
+      } else {
+        const idx = askSingleIdx[qi];
+        if (idx === undefined || idx === -2) return false;
+        if (idx === OTHER_IDX && !askOtherText[qi]?.trim()) return false;
+      }
+    }
+    return true;
+  });
 
   function shortName(name: string): string { return name.replace(/^mcp__rift__/, ""); }
   function trim(s: string, n = 60): string {
@@ -353,6 +465,26 @@
         {:else}<CheckCircle2 size={11} />{/if}
       </span>
     </div>
+  {:else if isAskUser}
+    <!-- AskUser card head — purple-ish meta tone, "Question" pill + status. -->
+    <div class="ask-head">
+      <span class="ask-icon"><HelpCircle size={14} /></span>
+      <span class="ask-pill">{askQuestions.length > 1 ? `${askQuestions.length} Questions` : "Question"}</span>
+      {#if askAnswered}
+        <span class="ask-status-text answered">answered</span>
+      {:else if askSubmitting}
+        <span class="ask-status-text submitting">sending…</span>
+      {:else if !askRequestId}
+        <span class="ask-status-text waiting">connecting…</span>
+      {:else}
+        <span class="ask-status-text awaiting">awaiting reply</span>
+      {/if}
+      <span class="chip-status">
+        {#if askAnswered}<CheckCircle2 size={12} />
+        {:else if tool.status === "error"}<AlertCircle size={12} />
+        {:else}<Loader2 size={12} class="chip-spin" />{/if}
+      </span>
+    </div>
   {:else}
     <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
       <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
@@ -413,6 +545,123 @@
           </li>
         {/each}
       </ul>
+    </div>
+  {:else if isAskUser && expanded}
+    <div class="ask-body">
+      {#if askAnswered}
+        <!-- Final state — show the model's tool_result, which already
+             contains "Q:/A:" rows formatted by tool_ask_user::format_*. -->
+        {#if tool.result}
+          <pre class="ask-result">{tool.result}</pre>
+        {:else}
+          <div class="ask-empty">(no answer recorded)</div>
+        {/if}
+      {:else}
+        {#each askQuestions as q, qi (qi)}
+          <div class="ask-question">
+            {#if q.header}<span class="ask-q-header">{q.header}</span>{/if}
+            <div class="ask-q-text">{q.question}</div>
+            <div class="ask-options" role={q.multiSelect ? "group" : "radiogroup"}>
+              {#each q.options as opt, oi (oi)}
+                {@const selected =
+                  q.multiSelect
+                    ? (askMultiSet[qi] ?? new Set()).has(oi)
+                    : askSingleIdx[qi] === oi}
+                <button
+                  type="button"
+                  class="ask-option"
+                  class:selected
+                  disabled={askSubmitting || askAnswered}
+                  aria-pressed={q.multiSelect ? selected : undefined}
+                  role={q.multiSelect ? "checkbox" : "radio"}
+                  aria-checked={selected}
+                  onclick={() => {
+                    if (q.multiSelect) {
+                      toggleAskMulti(qi, oi);
+                    } else {
+                      askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? oi : v));
+                    }
+                  }}
+                >
+                  <span class="ask-opt-marker" aria-hidden="true">
+                    {#if q.multiSelect}
+                      {#if selected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+                    {:else}
+                      {#if selected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+                    {/if}
+                  </span>
+                  <span class="ask-opt-text">
+                    <span class="ask-opt-label">{opt.label}</span>
+                    {#if opt.description}
+                      <span class="ask-opt-desc">{opt.description}</span>
+                    {/if}
+                  </span>
+                </button>
+              {/each}
+              <!-- "Other" — auto-added per AskUserQuestion contract. -->
+              {#if true}
+                {@const otherSelected =
+                  q.multiSelect
+                    ? (askMultiSet[qi] ?? new Set()).has(OTHER_IDX)
+                    : askSingleIdx[qi] === OTHER_IDX}
+                <button
+                  type="button"
+                  class="ask-option ask-option-other"
+                  class:selected={otherSelected}
+                  disabled={askSubmitting || askAnswered}
+                  onclick={() => {
+                    if (q.multiSelect) {
+                      toggleAskMulti(qi, OTHER_IDX);
+                    } else {
+                      askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? OTHER_IDX : v));
+                    }
+                  }}
+                >
+                  <span class="ask-opt-marker" aria-hidden="true">
+                    {#if q.multiSelect}
+                      {#if otherSelected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+                    {:else}
+                      {#if otherSelected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+                    {/if}
+                  </span>
+                  <span class="ask-opt-text">
+                    <span class="ask-opt-label">Other (custom)</span>
+                  </span>
+                </button>
+                {#if otherSelected}
+                  <input
+                    type="text"
+                    class="ask-other-input"
+                    placeholder="Type your answer…"
+                    disabled={askSubmitting || askAnswered}
+                    bind:value={askOtherText[qi]}
+                  />
+                {/if}
+              {/if}
+            </div>
+          </div>
+        {/each}
+        <div class="ask-actions">
+          <button
+            type="button"
+            class="ask-btn cancel"
+            disabled={askSubmitting || !askRequestId}
+            onclick={cancelAskUser}
+          >Dismiss</button>
+          <button
+            type="button"
+            class="ask-btn submit"
+            disabled={!askCanSubmit || askSubmitting || !askRequestId}
+            onclick={submitAskUser}
+          >
+            {#if askSubmitting}<Loader2 size={11} class="chip-spin" /> Sending…
+            {:else}Submit{/if}
+          </button>
+        </div>
+        {#if !askRequestId}
+          <div class="ask-hint">Connecting to the chat session…</div>
+        {/if}
+      {/if}
     </div>
   {:else if expanded}
     <div class="chip-body">
@@ -968,5 +1217,206 @@
   .todo-box :global(.todo-spin) {
     animation: chip-spin 1.1s linear infinite;
     color: var(--accent);
+  }
+
+  /* ── AskUser card ────────────────────────────────────────────────────── */
+  .chip.as-card[data-category="meta"] .ask-head {
+    background: color-mix(in oklch, oklch(0.76 0.10 145) 7%, transparent);
+  }
+  .ask-head {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 12px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  }
+  .ask-icon {
+    display: inline-flex;
+    color: oklch(0.78 0.13 145);
+    flex-shrink: 0;
+  }
+  .ask-pill {
+    display: inline-flex; align-items: center;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: color-mix(in oklch, oklch(0.76 0.10 145) 22%, transparent);
+    border: 1px solid color-mix(in oklch, oklch(0.76 0.10 145) 40%, var(--border));
+    color: oklch(0.84 0.09 145);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    font-family: var(--font-mono, monospace);
+    flex-shrink: 0;
+  }
+  .ask-status-text {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--fg-muted);
+    font-variant: small-caps;
+    letter-spacing: 0.04em;
+  }
+  .ask-status-text.answered { color: oklch(0.78 0.14 145); font-weight: 600; }
+  .ask-status-text.submitting { color: var(--accent); }
+  .ask-status-text.waiting { color: var(--fg-faint); font-style: italic; }
+  .ask-status-text.awaiting { color: oklch(0.78 0.10 145); }
+
+  .ask-body {
+    padding: 12px 14px 14px;
+    display: flex; flex-direction: column;
+    gap: 14px;
+  }
+  .ask-question {
+    display: flex; flex-direction: column;
+    gap: 6px;
+  }
+  .ask-q-header {
+    align-self: flex-start;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: color-mix(in oklch, oklch(0.76 0.10 145) 14%, transparent);
+    color: oklch(0.82 0.10 145);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-family: var(--font-mono, monospace);
+  }
+  .ask-q-text {
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.4;
+  }
+  .ask-options {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .ask-option {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    align-items: start;
+    gap: 9px;
+    padding: 7px 10px;
+    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    border-radius: 6px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 120ms ease-out, border-color 120ms ease-out, transform 80ms ease-out;
+    color: var(--fg-2);
+    font: inherit;
+    width: 100%;
+  }
+  .ask-option:hover:not(:disabled) {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklch, oklch(0.76 0.10 145) 35%, var(--border));
+  }
+  .ask-option:active:not(:disabled) { transform: translateY(1px); }
+  .ask-option:disabled { opacity: 0.55; cursor: default; }
+  .ask-option.selected {
+    background: color-mix(in oklch, oklch(0.76 0.10 145) 14%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, oklch(0.76 0.10 145) 55%, var(--border));
+    color: var(--fg);
+  }
+  .ask-option.selected .ask-opt-marker { color: oklch(0.78 0.14 145); }
+  .ask-opt-marker {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-faint);
+    padding-top: 1px;
+    flex-shrink: 0;
+  }
+  .ask-opt-text {
+    display: flex; flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .ask-opt-label {
+    font-size: 12.5px;
+    line-height: 1.35;
+    font-weight: 500;
+    word-wrap: break-word;
+  }
+  .ask-opt-desc {
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--fg-muted);
+    word-wrap: break-word;
+  }
+  .ask-option-other .ask-opt-label { font-style: italic; }
+  .ask-other-input {
+    margin-top: 2px;
+    padding: 6px 10px;
+    background: var(--bg-elev-1);
+    border: 1px solid color-mix(in oklch, oklch(0.76 0.10 145) 40%, var(--border));
+    border-radius: 5px;
+    color: var(--fg);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+    transition: border-color 120ms ease-out;
+  }
+  .ask-other-input:focus {
+    border-color: color-mix(in oklch, oklch(0.76 0.13 145) 70%, transparent);
+  }
+
+  .ask-actions {
+    display: flex; gap: 8px; justify-content: flex-end;
+    margin-top: 4px;
+  }
+  .ask-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-elev-1);
+    color: var(--fg-2);
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+  }
+  .ask-btn:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--fg);
+  }
+  .ask-btn:disabled { opacity: 0.5; cursor: default; }
+  .ask-btn.submit {
+    background: color-mix(in oklch, oklch(0.76 0.10 145) 22%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, oklch(0.76 0.10 145) 55%, var(--border));
+    color: oklch(0.86 0.08 145);
+  }
+  .ask-btn.submit:hover:not(:disabled) {
+    background: color-mix(in oklch, oklch(0.76 0.13 145) 32%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, oklch(0.76 0.13 145) 70%, var(--border));
+    color: oklch(0.92 0.10 145);
+  }
+  .ask-btn.submit :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
+  .ask-hint {
+    font-size: 10.5px;
+    color: var(--fg-muted);
+    font-style: italic;
+    text-align: right;
+  }
+
+  .ask-result {
+    margin: 0;
+    padding: 8px 10px;
+    background: var(--bg-elev-1);
+    border: 1px solid color-mix(in oklch, oklch(0.76 0.10 145) 30%, var(--border));
+    border-radius: 5px;
+    font-family: var(--font-mono, monospace);
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--fg-2);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 240px;
+    overflow: auto;
+  }
+  .ask-empty {
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    font-style: italic;
+    padding: 4px 2px;
   }
 </style>
