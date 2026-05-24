@@ -285,7 +285,8 @@
     color: var(--accent);
   }
   /* Soft capsule indicator on the outer edge — replaces the hard 2px stripe.
-     Centered vertically at 55% of the button height. */
+     Centered vertically at 55% of the button height. Accent glow makes the
+     active workspace pick out of the rail at a glance. */
   .ab-btn[data-active="true"]::before {
     content: "";
     position: absolute;
@@ -296,6 +297,12 @@
     width: 3px;
     background: var(--accent);
     border-radius: 0 3px 3px 0;
+    box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 55%, transparent);
+  }
+  /* Hover halo on the hit-target — subtle accent ring on hover so non-active
+     workspaces feel reactive, not just bg-tinted. */
+  .ab-btn:not([data-active="true"]):not([data-disabled="true"]):hover .ab-hit {
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 20%, transparent);
   }
 
   /* Dragging — the picked-up row visibly lifts: stronger accent fill,

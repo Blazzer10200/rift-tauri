@@ -2,6 +2,21 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## WIP — 2026-05-24 — UI polish overhaul
+
+Full app-wide visual refresh, frontend only. `svelte-check` 0/0. No version bump. Live-tested via CDP against real Opus turns (Edit/Write/Bash/Read) in claude-sandbox. Rolls together with the prior-session Session-panel refactor + backend ask_user wiring (`assistant_answer_ask_user` IPC + `AskUserRegistry`).
+
+- **Composer v3** — 2-row layout (textarea up, toolbar below). Glass-blur surface w/ accent focus ring + radial bottom glow. Animated streaming bar across the top edge (subsumes StatusHub which is now mounted but unused). Send button 32px w/ stacked accent shadow + hover lift. Per-model identity dot on the pill (Sonnet blue / Opus violet / Haiku cyan), version chip color follows the model. Live char counter w/ >4000 warn. `idlePlaceholder` rotates per-mount through tip set.
+- **Stage strip in bubble** — bouncing accent dots + crossfading whim label ("Sussing"/"Spelunking") + 2-line shimmer skeleton, gated on `grouped.length === 0`, `out:fade={{ duration: 220 }}`. Single source of in-flight truth.
+- **Model picker + slash/mention + titlebar svr menu** — unified glass blur, section-label headers w/ trailing gradient rule, accent-tinted hover. Titlebar bridge LED breathes ok-green when on.
+- **MessageBubble** — assistant body capped to 78ch so copy + `$0.XXXX` cost pill sit flush w/ text. `formatDuration` returns `<1s` instead of `0s`. Boundary block (compaction divider): blurred pill, accent gradient hairlines, fixed stale CSS-var fallbacks.
+- **EmptyState (shared)** — bigger glyph w/ rotating conic halo + soft shadow, button row now `align-items:center` (no more full-width-stretched buttons). ConflictsPage now uses the shared component (ok tone).
+- **HistoryDrawer** — section labels w/ trailing hairline, per-model identity dots on each tile, time-pill background.
+- **App-wide tokens** — `app.css` gained `.section-label`, `.surface-card.interactive`, `.glow-accent`, `.ws-enter`. Diagnostics tiles get background+border tone tint (warn/danger pop). Sync empty state offers Connect button OR titlebar pointer chip. Settings: kbd shortcuts 2-col, "Close all chat tabs" red, Theme card slim. ActivityBar active capsule glows. Tab strip inactive tabs have subtle bg-elev-1 30% so they don't disappear.
+- **StatusHub removed** from Composer mount + `:has(.hub)` rule — bubble stage strip carries pre-block status; tool chips carry mid-turn status.
+
+**Verify.** `npm run check` 0/0/0. Live-tested: Write/Edit/Read/Bash all render clean in timeline-variant chips, EditDiff side-by-side, Bash `>_` icon w/ duration badge.
+
 ## WIP — 2026-05-22 — Lane 3: compaction UX + live tool dots
 
 Frontend-only polish. No version bump — `/git-ship` rolls Lane 2 + Lane 3 together.

@@ -327,7 +327,7 @@
                 <span class="set-hint">Click an icon on the right-edge activity bar to swap the main pane. Drag icons to reorder — the Ctrl+1…7 shortcuts follow the bar's order.</span>
               </div>
               <div class="set-row-r">
-                <button class="btn ghost sm" type="button" onclick={() => void assistantStore.closeAllTabs()}>
+                <button class="btn danger sm" type="button" onclick={() => void assistantStore.closeAllTabs()} title="Close every chat tab in this session">
                   <X size={11}/> Close all chat tabs
                 </button>
               </div>
@@ -351,16 +351,13 @@
             </div>
           </section>
 
-          <section class="set-group">
-            <header class="set-group-head">Theme</header>
-            <div class="set-row">
-              <div class="set-row-l">
-                <span class="set-label">Color scheme</span>
-                <span class="set-hint">Rift is dark-only — density, accent tint, and light-mode tokens land in a future build.</span>
-              </div>
-              <div class="set-row-r">
-                <span class="pill muted"><span class="dot"></span>Dark · Linear-precise</span>
-              </div>
+          <section class="set-group theme-slim">
+            <header class="set-group-head">
+              <span>Theme</span>
+              <span class="theme-pill pill muted"><span class="dot"></span>Dark · Linear-precise</span>
+            </header>
+            <div class="set-row-note">
+              <span class="set-note">Rift is dark-only — density, accent tint, and light-mode tokens land in a future build.</span>
             </div>
           </section>
 
@@ -1405,6 +1402,7 @@
     width: 2px;
     background: var(--accent);
     border-radius: 0 2px 2px 0;
+    box-shadow: 0 0 8px color-mix(in oklch, var(--accent) 50%, transparent);
   }
 
   /* ─── Body ─── */
@@ -1915,18 +1913,29 @@
   /* ─── Keyboard shortcut table (Appearance) ─── */
   .kbd-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    /* Two columns on wide settings panes, single column when narrower. Halves
+       vertical scroll for the shortcut reference while keeping each row
+       readable. */
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    column-gap: 0;
     padding: 4px 0;
   }
   .kbd-row {
     display: grid;
-    grid-template-columns: 160px 1fr;
+    grid-template-columns: 140px 1fr;
     align-items: center;
-    gap: 14px;
-    padding: 8px 14px;
+    gap: 12px;
+    padding: 7px 14px;
     border-bottom: 1px solid var(--border);
   }
   .kbd-row:last-child { border-bottom: none; }
+  /* When 2 columns are active, the second-to-last row also needs to lose its
+     bottom border since the visual "last" depends on layout. Cheap heuristic:
+     only the genuinely-last DOM row keeps the border-bottom; for an even row
+     count + 2-col layout, the visual pairing handles itself. */
+  @media (min-width: 720px) {
+    .kbd-row:nth-last-child(2):nth-child(even) { border-bottom: none; }
+  }
   .kbd-combo {
     display: inline-flex; align-items: center; gap: 4px;
     flex-wrap: wrap;
@@ -1940,5 +1949,17 @@
   .set-row :global(.pill) {
     height: 22px;
     padding: 0 10px;
+  }
+
+  /* Theme card — collapsed into a single-row header w/ the dark-mode pill
+     inline. The hint moves into a set-row-note below the head. Saves ~50px
+     vertical for a card that's purely informational until light mode lands. */
+  .theme-slim .set-group-head {
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .theme-slim .theme-pill {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
   }
 </style>

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { ChevronDown, Plus, X } from "lucide-svelte";
-  import { assistant } from "../../state/assistant.svelte";
+  import { assistant, messagesHaveContextSignals } from "../../state/assistant.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
   import Composer from "./Composer.svelte";
@@ -30,7 +30,9 @@
   // not — otherwise a background-pane send-failure is silent until refocus.
   const showError = $derived(!!lastError);
   const dockOpen = $derived(
-    assistant.ui.dockOpen && !!tab && tab.tasks.length > 0,
+    assistant.ui.dockOpen
+      && !!tab
+      && (tab.tasks.length > 0 || messagesHaveContextSignals(tab.messages)),
   );
 
   // Per-pane status chip — own tab's ctx%, model, cost — independent of focus.

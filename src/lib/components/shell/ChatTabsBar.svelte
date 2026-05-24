@@ -6,7 +6,7 @@
 
   import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown } from "lucide-svelte";
   import { onDestroy } from "svelte";
-  import { assistant } from "../../state/assistant.svelte";
+  import { assistant, messagesHaveContextSignals } from "../../state/assistant.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
@@ -190,6 +190,13 @@
 
   const taskCount = $derived(assistant.tasks.length);
   const taskDone = $derived(assistant.tasks.filter((t) => t.status === "completed").length);
+  // Session-dock visibility extends past tasks — Edit/Write/WebFetch streams
+  // also populate the right rail, so the toggle button appears whenever the
+  // active tab has any dock-worthy content.
+  const dockHasContext = $derived(
+    messagesHaveContextSignals(assistant.activeTab?.messages ?? []),
+  );
+  const dockTotal = $derived(taskCount > 0 || dockHasContext);
 
   let pulse = $state(false);
   let lastSeenUpdate = 0;
@@ -450,17 +457,21 @@
       </button>
     {/if}
 
-    {#if taskCount > 0}
+    {#if dockTotal}
       <button
         class="dock-toggle"
         class:open={tasksOpen}
         class:pulse
         type="button"
         onclick={toggleTasks}
-        title="Tasks panel"
+        title={taskCount > 0
+          ? `Session panel — ${taskDone}/${taskCount} tasks done`
+          : "Session panel"}
       >
         <ListChecks size={12} />
-        <span class="task-chip">{taskDone}/{taskCount}</span>
+        {#if taskCount > 0}
+          <span class="task-chip">{taskDone}/{taskCount}</span>
+        {/if}
       </button>
     {/if}
 
@@ -537,10 +548,10 @@
     gap: 6px;
     padding: 0 8px;
     margin: 4px 1px 0;
-    background: var(--bg);
+    background: color-mix(in oklch, var(--bg-elev-1) 30%, transparent);
     border: 1px solid transparent;
     border-bottom: 0;
-    border-radius: 5px 5px 0 0;
+    border-radius: 7px 7px 0 0;
     color: var(--fg-muted);
     cursor: pointer;
     font-size: var(--fs-sm);
@@ -702,9 +713,26 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 6px 0 4px;
+    padding: 0 8px 0 10px;
     flex-shrink: 0;
     align-self: center;
+    /* Visual separator from the tab strip — the actions cluster is a
+       different domain (session-tools) and benefits from a hairline cut
+       rather than blending into the last tab. Soft gradient so the cut
+       reads on dark surfaces without feeling boxy. */
+    position: relative;
+  }
+  .actions::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px; bottom: 6px;
+    width: 1px;
+    background: linear-gradient(180deg,
+      transparent,
+      color-mix(in oklch, var(--border) 90%, transparent) 30%,
+      color-mix(in oklch, var(--border) 90%, transparent) 70%,
+      transparent);
   }
 
   .hdr-btn {

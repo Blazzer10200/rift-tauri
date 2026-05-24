@@ -8,6 +8,7 @@
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
     ChevronRight, CheckCircle2, CircleAlert, History,
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
+    Plug, ServerCog,
   } from "lucide-svelte";
   import ConflictsPage from "../conflicts/ConflictsPage.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
@@ -486,7 +487,29 @@
         <div class="empty" in:fade={{ duration: 160 }}>
           <div class="empty-icon muted"><CircleAlert size={28}/></div>
           <div class="empty-title">Not connected</div>
-          <p class="empty-hint">Connect a server first, then rescan to see pending drift.</p>
+          {#if connection.selected}
+            <p class="empty-hint">
+              <span class="mono">{connection.selected.name}</span> is picked but not watching yet.
+              Hit Connect to start drift detection.
+            </p>
+            <button
+              class="btn primary sm empty-cta"
+              type="button"
+              onclick={() => void connection.connect()}
+              disabled={connection.connecting}
+            >
+              <Plug size={12}/>
+              {connection.connecting ? "Connecting…" : `Connect to ${connection.selected.name}`}
+            </button>
+          {:else}
+            <p class="empty-hint">
+              No server selected. Pick one from the server menu in the titlebar
+              (top-left), or add a new one in Settings → Network.
+            </p>
+            <div class="empty-cta-row">
+              <span class="empty-cta-hint"><ServerCog size={11}/> Use the titlebar picker ↖</span>
+            </div>
+          {/if}
         </div>
       {:else if syncPage.loading}
         <div class="empty" in:fade={{ duration: 160 }}>
@@ -934,7 +957,22 @@
   }
   .empty-icon.muted { background: var(--bg-elev-2); color: var(--fg-muted); }
   .empty-title { font-size: var(--fs-md); font-weight: 600; color: var(--fg); }
-  .empty-hint { margin: 0; color: var(--fg-muted); font-size: var(--fs-sm); max-width: 380px; }
+  .empty-hint { margin: 0; color: var(--fg-muted); font-size: var(--fs-sm); max-width: 420px; line-height: 1.5; }
+  .empty-cta { margin-top: 10px; }
+  .empty-cta-row {
+    margin-top: 10px;
+    display: inline-flex; align-items: center;
+  }
+  .empty-cta-hint {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--accent) 8%, var(--bg-elev-1));
+    border: 1px dashed color-mix(in oklch, var(--accent) 35%, var(--border));
+    color: color-mix(in oklch, var(--accent) 75%, var(--fg-muted));
+    font-size: var(--fs-xs);
+    font-weight: 500;
+  }
 
   /* ── Resource cards ─────────────────────────────────── */
   .resources { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }

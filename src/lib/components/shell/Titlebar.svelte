@@ -185,15 +185,25 @@
   .svr-btn {
     display: inline-flex; align-items: center; gap: 8px;
     height: 28px; padding: 0 10px;
-    background: var(--surface); color: var(--fg);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
+    background: color-mix(in oklch, var(--surface) 80%, transparent);
+    color: var(--fg);
+    border: 1px solid color-mix(in oklch, var(--border-strong) 90%, transparent);
+    border-radius: 8px;
     cursor: pointer;
     font: inherit; font-size: var(--fs-xs);
-    transition: background 100ms ease, border-color 100ms ease;
+    transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
     min-width: 0; max-width: 100%;
   }
-  .svr-btn:hover { background: var(--surface-hover); border-color: color-mix(in oklch, var(--accent) 30%, var(--border-strong)); }
+  .svr-btn:hover {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border-strong));
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent);
+  }
+  .svr-picker[data-open="true"] .svr-btn {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--border-strong));
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
   .svr-dot {
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--fg-faint);
@@ -217,24 +227,57 @@
   .svr-host { color: var(--fg-subtle); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 2; min-width: 0; }
 
   .svr-menu {
-    position: absolute; top: calc(100% + 6px); left: 0;
-    width: 360px; padding: 6px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
+    position: absolute; top: calc(100% + 8px); left: 0;
+    width: 380px; padding: 6px;
+    background: color-mix(in oklch, var(--bg-elev-2) 86%, transparent);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid color-mix(in oklch, var(--border-strong) 80%, transparent);
+    border-radius: 12px;
+    box-shadow:
+      0 20px 50px -10px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     z-index: 1000;
+    animation: svr-menu-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: top left;
   }
-  .menu-label { padding: 6px 8px 4px; color: var(--fg-subtle); font-size: var(--fs-xs); letter-spacing: 0.05em; text-transform: uppercase; }
+  @keyframes svr-menu-in {
+    from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .svr-menu { animation: none; } }
+  .menu-label {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px 6px;
+    color: var(--fg-faint);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .menu-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      transparent);
+  }
   .menu-item {
-    display: flex; align-items: center; gap: 8px; width: 100%;
-    padding: 6px 8px; height: 28px;
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 7px 10px; height: 30px;
     background: transparent; border: 0; color: var(--fg);
     text-align: left; font: inherit; font-size: var(--fs-sm);
-    border-radius: var(--radius-xs); cursor: pointer;
+    border-radius: 8px; cursor: pointer;
+    transition: background 140ms ease-out;
   }
-  .menu-item:hover { background: var(--surface-hover); }
-  .menu-item[data-active="true"] { background: var(--accent-soft); }
+  .menu-item:hover { background: color-mix(in oklch, var(--accent) 10%, transparent); }
+  .menu-item[data-active="true"] {
+    background: linear-gradient(90deg,
+      color-mix(in oklch, var(--accent) 14%, transparent),
+      color-mix(in oklch, var(--accent) 4%, transparent) 70%);
+  }
   .name-cell { flex: 1; }
   .host-cell { color: var(--fg-subtle); font-size: var(--fs-xs); }
   .shortcut { margin-left: auto; }
@@ -244,17 +287,36 @@
   .bridge {
     display: inline-flex; align-items: center; gap: 6px;
     height: 24px; padding: 0 10px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+    border-radius: 999px;
     font-size: var(--fs-xs); color: var(--fg-2);
+    transition: background 140ms ease, border-color 140ms ease;
+  }
+  .bridge:hover {
+    background: var(--bg-elev-2);
+    border-color: color-mix(in oklch, var(--ok) 30%, var(--border));
   }
   .bridge-led {
     width: 6px; height: 6px; border-radius: 50%;
     background: var(--fg-faint);
     box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent);
+    flex-shrink: 0;
   }
-  .bridge-led.on { background: var(--ok); }
+  .bridge-led.on {
+    background: var(--ok);
+    box-shadow:
+      0 0 0 2px color-mix(in oklch, var(--ok) 24%, transparent),
+      0 0 8px color-mix(in oklch, var(--ok) 50%, transparent);
+    animation: bridge-breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes bridge-breathe {
+    0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--ok) 22%, transparent),
+                          0 0 6px color-mix(in oklch, var(--ok) 45%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, var(--ok) 14%, transparent),
+                          0 0 10px color-mix(in oklch, var(--ok) 55%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) { .bridge-led.on { animation: none; } }
   .dim { color: var(--fg-subtle); }
 
   .winctl { display: flex; height: 100%; margin-left: 4px; }
