@@ -2,6 +2,28 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.29-alpha — 2026-05-24 — UI polish overhaul + ask_user cross-stack + docs truth-up
+
+App-wide visual refresh on top of the v0.4.28 batch. Frontend-heavy w/ the cross-stack `ask_user` interactive-tool feature landing on both sides. Lane 2 #228 dialog-plugin claim corrected (NOT removed — 5 production sites still use it; re-scoped). No backend behavior change beyond the new IPC + MCP surface.
+
+**Composer v3.** [Composer.svelte](src/lib/components/assistant/Composer.svelte) — 2-row layout (textarea up, toolbar below) on a glass-blur surface w/ accent focus ring + radial bottom glow. Animated streaming bar across the top edge subsumes the old StatusHub (component intact, just unmounted from the composer). Send button 32px w/ stacked accent shadow + hover lift. Per-model identity dot on the pill (Sonnet blue / Opus violet / Haiku cyan), version chip color follows the model. Live char counter w/ >4000 warn. `idlePlaceholder` rotates per-mount through a tip set. Reduced-motion fallbacks throughout.
+
+**In-bubble stage strip.** [MessageBubble.svelte](src/lib/components/assistant/MessageBubble.svelte) — bouncing accent dots + crossfading whim label ("Sussing"/"Spelunking") + 2-line shimmer skeleton, gated on `grouped.length === 0`, `out:fade={{ duration: 220 }}`. Single source of in-flight truth; composer-mounted StatusHub removed alongside the `:has(.hub)` rule. Assistant body capped to 78ch so copy + `$0.XXXX` cost pill sit flush w/ text. `formatDuration` returns `<1s` instead of `0s`. Boundary block: blurred pill, accent gradient hairlines, stale CSS-var fallbacks fixed.
+
+**Unified popover aesthetic.** Model picker + slash/mention picker + titlebar server menu now share glass blur + accent-ring shadow + canonical `.section-label` header w/ trailing gradient rule. Titlebar bridge LED breathes ok-green when on.
+
+**Shared EmptyState.** Bigger glyph w/ rotating conic halo + soft shadow; button row now `align-items:center` (no more stretched primaries). ConflictsPage refactored to use the shared component.
+
+**HistoryDrawer.** Section labels w/ trailing hairline, per-model identity dots on each tile, time-pill background.
+
+**App-wide tokens.** [app.css](src/app.css) gained `.section-label`, `.surface-card.interactive`, `.glow-accent`, `.ws-enter`. Diagnostics tiles get background+border tone tint (warn/danger pop). Sync empty state offers Connect button OR titlebar pointer chip. Settings: kbd shortcuts 2-col, "Close all chat tabs" red, Theme card slim. ActivityBar active capsule glows + hover halo on inactive. Tab strip inactive tabs gain subtle bg-elev-1 30% so they don't disappear.
+
+**ask_user — cross-stack.** Backend (3966e57): new `assistant/ask_user.rs` (`AskUserRegistry`, managed Tauri state) + `assistant_answer_ask_user` IPC + MCP surface via `mcp_server.rs` (+168L) and `remote_bridge.rs` (+71L) so the tool is callable over the assistant bridge. Frontend (fbaf9d7): `ToolChip.svelte` +458L renders ask_user invocations w/ interactive UI; `assistant.svelte.ts` +93L state slice + `messagesHaveContextSignals` helper for dock visibility.
+
+**Docs truth-up.** [CLAUDE.md](CLAUDE.md) hot-files table corrected: `lib.rs` 1790L → 300L (post per-domain split, M9 #20), `assistant/mod.rs` 1167L → 2308L (grew w/ ask_user wiring; >2000L = next agent-split candidate). [HANDOFF.md](docs/HANDOFF.md) Lane 2 #228 dialog-plugin claim reversed: removal did NOT land — 5 frontend production sites (`ProfileSetup`, `ServerAdd`, `SSHKeySetup`, `assistant.svelte.ts`) + 1 test mock still consume `@tauri-apps/plugin-dialog`. Re-scoped to "audit dialog usage; replace w/ native or remove sites first." [README.md](README.md) broken `docs/CONTRIBUTING.md` link → `docs/DEVELOPING.md`.
+
+**Verify.** `npm run check` 0 errors / 0 warnings. Backend ask_user surfaces compile clean (verified pre-bump). Live-tested via CDP against real Opus turns (Write/Edit/Read/Bash) in claude-sandbox — ToolChip timeline variant, EditDiff side-by-side, Bash `>_` icon w/ duration badge all render in the new visual vocabulary.
+
 ## v0.4.28-alpha — 2026-05-22 — multi-session audit sweep + onboarding scaffold + test wave A + lib.rs split
 
 Big batch ship rolling up nine parallel agent sessions (M2-M9). M10 assistant.svelte.ts split deferred to next release (heavy rebase conflict over M2's HIGH cluster fixes; reorg with zero behavior change, no rush).
