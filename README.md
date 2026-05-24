@@ -11,7 +11,7 @@ Pre-1.0 (`-alpha`). The core sync loop is verified end-to-end against a live FXS
 ## Quick links
 
 - **Install / first-run:** [`docs/ONBOARDING.md`](docs/ONBOARDING.md)
-- **Contribute / build from source:** [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)
+- **Contribute / build from source:** [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
 - **Profile config example:** [`docs/rift.json.example`](docs/rift.json.example)
 - **Release history:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
 - **Issue tracker:** [`docs/ISSUES.md`](docs/ISSUES.md)

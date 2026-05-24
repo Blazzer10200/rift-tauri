@@ -29,8 +29,8 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 | File | Lines | Notes |
 |---|---|---|
 | `src-tauri/src/sync/auto_sync.rs` | 1966 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/lib.rs` | 1790 | tauri command registry (51 cmds) |
-| `src-tauri/src/assistant/mod.rs` | 1167 | claude CLI integration + auth + workspace |
+| `src-tauri/src/assistant/mod.rs` | 2308 | claude CLI integration + auth + workspace (grown w/ ask_user wiring 2026-05-22) |
+| `src-tauri/src/lib.rs` | 300 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
 | `src-tauri/src/sync/auto_sync/flush.rs` | 653 | flush_batch pipeline (split out 2026-05-13) |
 | `src-tauri/src/assistant/mcp_server.rs` | 587 | stdio JSON-RPC MCP server |
 | `src-tauri/src/sync/drift_scanner.rs` | 555 | 3-way drift diff |
@@ -46,7 +46,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 
 Frontend hot files: `assistant.svelte.ts` 1585L, `Settings.svelte` 1505L, `SyncPage.svelte` 1307L, `ActivityFeed.svelte` 941L, `TerminalPanel.svelte` 851L.
 
-`auto_sync.rs` + `lib.rs` are approaching the 2000-line agent-split threshold — `lib.rs` split into per-domain `commands/*.rs` is queue item (e).
+`auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2308L) and is the next split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
 
 ## Agent routing
 

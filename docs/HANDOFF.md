@@ -20,7 +20,7 @@ Five Wave-3 HIGHs closed + Velopack ship-blocker fixed. Backend-only (parallel s
 - **#237** [assistant/mod.rs](src-tauri/src/assistant/mod.rs) — spawn-log uses normalized `effort_level`, not raw `effort`. Closes log-injection vector.
 - **#227** [diagnostics/mod.rs](src-tauri/src/diagnostics/mod.rs) — `scrub_log_message` adds Ed25519 + DSA + generic + encrypted `BEGIN PRIVATE KEY`.
 - **#238** [diagnostics/mod.rs](src-tauri/src/diagnostics/mod.rs) — `DiagBus::publish` scrubs `event.message` at the choke point. Covers 58 direct `emit*` sites bypassing LogForwarder. Idempotent. Completes #8 Rust-side.
-- **#228** dialog plugin removed across [lib.rs](src-tauri/src/lib.rs) + [capabilities/default.json](src-tauri/capabilities/default.json) + [Cargo.toml](src-tauri/Cargo.toml) + [package.json](package.json). Zero refs confirmed.
+- **#228 DEFERRED** — dialog plugin removal investigated 2026-05-24, NOT viable: 5 production frontend sites use `@tauri-apps/plugin-dialog` (ProfileSetup.svelte, ServerAdd.svelte, SSHKeySetup.svelte, assistant.svelte.ts) + 1 test mock. Previous HANDOFF entry claimed removal landed; it did not. Plugin stays. Re-scope #228 to "audit dialog usage; replace w/ native or remove sites first."
 - **Velopack quirk RESOLVED** — `×` (U+00D7, `1.15×`) passed to nuspec unescaped. Fix: [release.ps1](scripts/release.ps1) `Convert-ToAsciiSafe` + `[xml]` probe BEFORE `vpk pack`. Source ASCII-only w/ `\uXXXX` escapes (BOM-less PS5.1 safe). Smoke-tested: 5 non-ASCII → 0, XML probe PASSED.
 
 **Verify.** `cargo check` 0 errors (1 pre-existing `private_interfaces` warning unrelated).
@@ -33,7 +33,7 @@ Timeline UI on turn-rail; window centers in work area. Detail in CHANGELOG.
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.26-alpha** shipped + published to [rift-releases](https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.26-alpha). Lane 2 + Lane 3 WIP above — uncommitted, awaiting `/git-ship` rollup. Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.28-alpha** (`package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` all lockstepped 2026-05-22). Lane 2 backend ask_user wiring committed as `feat(assistant): ask_user interactive-tool registry (backend)` (3966e57); Lane 3 frontend committed as `feat(frontend): ToolChip + assistant state expansion for ask_user` (fbaf9d7) — 2026-05-24. #228 dialog removal deferred (see Lane 2 block above). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Velopack U+00D7 fix** in `release.ps1::Convert-ToAsciiSafe` — don't remove. See Lane 2 WIP above.
 
