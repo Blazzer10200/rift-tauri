@@ -48,7 +48,7 @@ Timeline UI on turn-rail; window centers in work area. Detail in CHANGELOG.
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.28-alpha** (`package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` all lockstepped 2026-05-22). Lane 2 backend ask_user wiring committed as `feat(assistant): ask_user interactive-tool registry (backend)` (3966e57); Lane 3 frontend committed as `feat(frontend): ToolChip + assistant state expansion for ask_user` (fbaf9d7) — 2026-05-24. #228 dialog removal deferred (see Lane 2 block above). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.29-alpha** (`package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json` all lockstepped 2026-05-24). Shipped `release: v0.4.29-alpha — UI polish overhaul + ask_user cross-stack + docs truth-up` (7fedb84) — published to `Blazzer10200/rift-releases` w/ full+delta nupkg + Setup.exe + Portable.zip; source pushed to `Blazzer10200/rift-tauri` main + tag. Autonomous ship 2026-05-24 (dev server killed for build, not restarted). #228 dialog removal deferred (see Lane 2 block above). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Velopack U+00D7 fix** in `release.ps1::Convert-ToAsciiSafe` — don't remove. See Lane 2 WIP above.
 
