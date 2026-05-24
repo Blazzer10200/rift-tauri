@@ -639,6 +639,21 @@ class TabState {
     isError: boolean;
   }[]>([]);
 
+  /** Live bindings for `mcp__rift__ask_user` tool calls: toolUseId →
+   *  bridge requestId. Populated when the tool_use envelope and the
+   *  `assistant://ask-user` event have BOTH arrived for the same call; the
+   *  two arrive in arbitrary order so the FIFO buffers below absorb whichever
+   *  lands first. Reactive so ToolChip's `$derived` lookup refreshes when a
+   *  late binding lands. Entry stays until the user answers; after the
+   *  matching tool_result arrives the chip switches to "done" and the binding
+   *  is no longer read. */
+  askUserBindings = $state<Map<string, string>>(new Map());
+  /** FIFO of request_ids whose `assistant://ask-user` event arrived before
+   *  the matching tool_use envelope (bridge faster than CLI stdout). */
+  unboundAskUserRequestIds: string[] = [];
+  /** FIFO of ask_user toolUseIds whose request_id hasn't shown up yet. */
+  unboundAskUserToolUseIds: string[] = [];
+
   // Non-reactive per-stream internals.
   streamingMsgId: string | null = null;
   // #146/#234: cached index of the streaming assistant msg so mutateStreaming
@@ -978,6 +993,27 @@ class TabState {
         },
       ],
     }));
+    // ask_user pairing — see TabState.askUserBindings doc.
+    if (block.name === "mcp__rift__ask_user") {
+      this.unboundAskUserToolUseIds.push(block.id);
+      this.tryBindAskUser();
+    }
+  }
+
+  /** Drain the two ask_user FIFOs as long as both have entries. Each pair
+   *  binds a toolUseId to a requestId in `askUserBindings`, making the chip
+   *  in MessageBubble able to invoke the answer-submit command. */
+  tryBindAskUser() {
+    while (
+      this.unboundAskUserToolUseIds.length > 0 &&
+      this.unboundAskUserRequestIds.length > 0
+    ) {
+      const toolUseId = this.unboundAskUserToolUseIds.shift()!;
+      const requestId = this.unboundAskUserRequestIds.shift()!;
+      const next = new Map(this.askUserBindings);
+      next.set(toolUseId, requestId);
+      this.askUserBindings = next;
+    }
   }
 
   private recordTurnUsage(u: Record<string, unknown>, accumulate: boolean) {
@@ -1871,6 +1907,10 @@ class AssistantStore {
         "assistant://session-lost",
         (e) => this.onSessionLost(e.payload),
       ),
+      await listen<{ request_id: string; session_id: string; questions: unknown }>(
+        "assistant://ask-user",
+        (e) => this.onAskUser(e.payload),
+      ),
     );
 
     await this.refreshConversations();
@@ -1966,6 +2006,59 @@ class AssistantStore {
       remoteRoot: evt.remote_root,
       at: evt.at,
     };
+  }
+
+  /** `assistant://ask-user` arrived from the bridge — pair the request_id
+   *  with a pending ask_user tool block in the matching tab. The bridge
+   *  emits AFTER it registered the oneshot, so by the time we read here
+   *  the parent is already awaiting an answer. */
+  private onAskUser(payload: { request_id: string; session_id: string; questions: unknown }) {
+    const tab = this.tabByCliSession(payload.session_id);
+    if (!tab) {
+      // No matching tab — the convo was closed mid-flight. Best-effort
+      // cancel by replying w/ cancelled:true so the MCP child unblocks.
+      void invoke("assistant_answer_ask_user", {
+        requestId: payload.request_id,
+        answer: { cancelled: true },
+      }).catch(() => { /* parent already timed out — ignore */ });
+      return;
+    }
+    tab.unboundAskUserRequestIds.push(payload.request_id);
+    tab.tryBindAskUser();
+  }
+
+  /** Look up the bridge request_id for an ask_user tool block in the active
+   *  tab. Returns null until the binding lands (one of two arrival orders).
+   *  Called from ToolChip.svelte via a `$derived` so the chip activates
+   *  the moment its requestId is known. */
+  askUserRequestIdFor(toolUseId: string): string | null {
+    return this.activeTab?.askUserBindings.get(toolUseId) ?? null;
+  }
+
+  /** Submit the user's choice for an `mcp__rift__ask_user` tool call.
+   *  Resolves the parent bridge oneshot — the MCP child unblocks, returns
+   *  the answer as the tool_result, and the existing stream pipeline
+   *  flips the chip to "done" via fillToolResult. No optimistic update
+   *  here beyond clearing the binding map; the chip handles its own
+   *  "sending…" affordance.
+   *
+   *  `answer` shape: `{ answers: [{question, answer}, ...] }` for normal
+   *  submissions, or `{ cancelled: true }` if the user dismissed. */
+  async submitAskUserAnswer(toolUseId: string, answer: Record<string, unknown>): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const requestId = tab.askUserBindings.get(toolUseId);
+    if (!requestId) return;
+    try {
+      await invoke("assistant_answer_ask_user", { requestId, answer });
+    } finally {
+      // Pop the binding regardless — re-submission on the same toolUseId
+      // would be a UI bug, and the tool_result envelope is the authoritative
+      // "done" signal.
+      const next = new Map(tab.askUserBindings);
+      next.delete(toolUseId);
+      tab.askUserBindings = next;
+    }
   }
 
   ackRemoteShellBanner() {
