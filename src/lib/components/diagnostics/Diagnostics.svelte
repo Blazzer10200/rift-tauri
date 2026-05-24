@@ -275,12 +275,21 @@
 
   .tile-group { margin-bottom: 10px; }
   .group-label {
+    display: flex; align-items: center; gap: 10px;
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-subtle);
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
     padding: 2px 2px 6px;
+  }
+  .group-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      transparent);
   }
   .tiles {
     display: grid;
@@ -294,6 +303,11 @@
     padding: 6px 9px;
     display: flex; flex-direction: column; gap: 1px;
     min-width: 0;
+    transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+  }
+  .tile:hover {
+    border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
+    transform: translateY(-1px);
   }
   .tile-label { font-size: var(--fs-xs); color: var(--fg-subtle); }
   .tile-value {
@@ -301,12 +315,24 @@
     color: var(--fg);
     line-height: 1.2;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-variant-numeric: tabular-nums;
   }
   .tile-hint { font-size: 10px; color: var(--fg-faint); }
-  .tile[data-tone="warn"]   { border-color: color-mix(in oklch, var(--warn) 35%, var(--border)); }
+  /* Tone tints — warn/danger get both border + background so a non-zero
+     metric pops out of the grid instead of needing the user to read every
+     cell to find the one that matters. */
+  .tile[data-tone="warn"] {
+    border-color: color-mix(in oklch, var(--warn) 38%, var(--border));
+    background: color-mix(in oklch, var(--warn) 7%, var(--bg-elev-1));
+  }
   .tile[data-tone="warn"]   .tile-value { color: var(--warn); }
-  .tile[data-tone="danger"] { border-color: color-mix(in oklch, var(--danger) 35%, var(--border)); }
+  .tile[data-tone="warn"]   .tile-label { color: color-mix(in oklch, var(--warn) 50%, var(--fg-subtle)); }
+  .tile[data-tone="danger"] {
+    border-color: color-mix(in oklch, var(--danger) 42%, var(--border));
+    background: color-mix(in oklch, var(--danger) 8%, var(--bg-elev-1));
+  }
   .tile[data-tone="danger"] .tile-value { color: var(--danger); }
+  .tile[data-tone="danger"] .tile-label { color: color-mix(in oklch, var(--danger) 55%, var(--fg-subtle)); }
   .tile[data-tone="info"]   .tile-value { color: var(--accent); }
 
   .hero-row {

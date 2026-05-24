@@ -225,15 +225,18 @@
             <button
               class="chat-tile"
               type="button"
+              data-model={c.model?.toLowerCase().includes("opus") ? "opus"
+                : c.model?.toLowerCase().includes("haiku") ? "haiku"
+                : "sonnet"}
               onclick={() => void assistant.openTab(c.id)}
               title={c.title}
             >
               <span class="tile-title">{c.title}</span>
               <span class="tile-meta">
+                <span class="tile-model-dot" aria-hidden="true"></span>
                 <span class="tile-model">{c.model}</span>
                 <span class="tile-dot">·</span>
                 <span>{c.messageCount} msg</span>
-                <span class="tile-dot">·</span>
                 <span class="tile-time">{fmtAgo(c.updatedAt)}</span>
               </span>
             </button>
@@ -267,8 +270,13 @@
   .empty {
     flex: 1;
     display: flex; flex-direction: column;
-    align-items: center; justify-content: center;
-    padding: 24px 20px;
+    align-items: center;
+    /* Anchor near the top instead of dead-center — the page felt half-loaded
+       with a huge void above the hero. clamp keeps it tight on short windows
+       and breathy on tall ones without going full top-aligned (which made the
+       hero feel like a header). */
+    justify-content: flex-start;
+    padding: clamp(28px, 7vh, 88px) 20px 24px;
     min-height: 0;
     gap: 14px;
   }
@@ -432,12 +440,23 @@
     gap: 6px;
   }
   .block-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--fg-faint);
     padding: 0 4px;
+  }
+  .block-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      transparent);
   }
   .recents { display: flex; flex-direction: column; gap: 3px; }
   .recent-row {
@@ -544,7 +563,26 @@
   }
   .tile-model { text-transform: capitalize; font-weight: 500; color: var(--fg-muted); }
   .tile-dot { opacity: 0.6; }
-  .tile-time { margin-left: auto; }
+  .tile-time {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
+    color: var(--fg-muted);
+  }
+  /* Per-model identity dot — same colors as the Composer model picker so
+     the model-name reads at a glance, not just a string. */
+  .tile-model-dot {
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--tile-model-color, var(--fg-muted));
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--tile-model-color, var(--fg-muted)) 14%, transparent),
+                0 0 6px color-mix(in oklch, var(--tile-model-color, var(--fg-muted)) 45%, transparent);
+    flex-shrink: 0;
+  }
+  .chat-tile[data-model="sonnet"] { --tile-model-color: oklch(0.74 0.13 230); }
+  .chat-tile[data-model="opus"]   { --tile-model-color: oklch(0.70 0.18 295); }
+  .chat-tile[data-model="haiku"]  { --tile-model-color: oklch(0.78 0.14 180); }
 
   /* ── Suggestions ───────────────────────────────────────────────────────── */
   .suggestions-block {

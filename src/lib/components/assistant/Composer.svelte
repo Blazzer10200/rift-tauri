@@ -3,7 +3,6 @@
   import { assistant } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
   import { tick, onMount } from "svelte";
-  import StatusHub from "./StatusHub.svelte";
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
@@ -69,9 +68,24 @@
     ctx: string;
   };
   const MODEL_OPTIONS: ModelOpt[] = [
-    { id: "sonnet", label: "Sonnet", version: "4.6", tagline: "Balanced speed + quality — the default", ctx: "200K ctx" },
-    { id: "opus",   label: "Opus",   version: "4.7", tagline: "Heavy reasoning — slower, ~5× cost",     ctx: "1M ctx"   },
-    { id: "haiku",  label: "Haiku",  version: "4.5", tagline: "Fastest, cheapest — quick edits & lookups", ctx: "200K ctx" },
+    { id: "sonnet", label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default", ctx: "1M ctx" },
+    { id: "opus",   label: "Opus",   version: "4.7", tagline: "Most capable — complex reasoning + agentic coding", ctx: "1M ctx" },
+    { id: "haiku",  label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", ctx: "200K ctx" },
+  ];
+
+  // Session-rotated idle placeholders — one tip-shaped variant per mount.
+  // Tells the user about @/, Shift+Enter etc. without a dedicated onboarding
+  // strip. Plain "Ask Claude" is the fallback every few rotations so the
+  // composer never feels noisy.
+  const IDLE_PLACEHOLDERS = [
+    "Ask Claude",
+    "Ask Claude · @ to mention a file",
+    "Ask Claude · / for commands",
+    "Ask Claude · Shift+Enter for newline",
+    "Ask Claude · paste an image to attach",
+  ];
+  const idlePlaceholder = IDLE_PLACEHOLDERS[
+    Math.floor(Math.random() * IDLE_PLACEHOLDERS.length)
   ];
 
   function autosize() {
@@ -619,78 +633,35 @@
 
     {#if modelPickerOpen}
       <div class="slash-menu model-menu" role="listbox">
-        <div class="model-header">Select model</div>
+        <div class="model-header"><span>Model</span></div>
         {#each MODEL_OPTIONS as m, i (m.id)}
           <button
             type="button"
             class="slash-item model-item"
             class:active={i === modelIdx}
             class:current={m.id === assistant.model}
+            data-id={m.id}
             onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
           >
-            <span class="model-check">{m.id === assistant.model ? "✓" : ""}</span>
+            <span class="model-dot" aria-hidden="true"></span>
             <span class="model-name">
               <span class="model-label">{m.label}</span>
               <span class="model-version">{m.version}</span>
             </span>
             <span class="slash-desc">{m.tagline}</span>
-            <span class="model-ctx">{m.ctx}</span>
+            <span class="model-ctx" class:wide={m.ctx === "1M ctx"}>{m.ctx}</span>
           </button>
         {/each}
-        <div class="slash-hint">↑↓ select · Enter pick · Esc cancel</div>
+        <div class="slash-hint model-hint">
+          <span><kbd>↑↓</kbd> navigate</span>
+          <span><kbd>↵</kbd> pick</span>
+          <span><kbd>Esc</kbd> close</span>
+        </div>
       </div>
     {/if}
 
-    <StatusHub {tabId} />
-    <div class="composer" class:streaming={streaming}>
-      {#if stt.config.enabled && (
-        (stt.config.engine === "web_speech" && stt.supported) ||
-        (stt.config.engine === "whisper" && stt.backendAvailable)
-      )}
-      <button
-        class="micbtn"
-        class:recording={stt.recording}
-        class:transcribing={stt.transcribing}
-        type="button"
-        onclick={toggleMic}
-        disabled={micBusy || stt.transcribing}
-        title={
-          stt.recording ? "Stop recording" :
-          stt.transcribing ? "Transcribing…" :
-          stt.config.engine === "whisper" ? "Dictate (Whisper, local)" : "Dictate (Web Speech)"
-        }
-        aria-label={stt.recording ? "Stop recording" : "Start recording"}
-      >
-        {#if stt.transcribing}
-          <Loader2 size={14} class="mic-spin" />
-        {:else if stt.recording}
-          <Square size={12} fill="currentColor" />
-        {:else}
-          <Mic size={14} />
-        {/if}
-      </button>
-      {/if}
-      <div class="hint-wrap" bind:this={hintWrap}>
-        <button
-          type="button"
-          class="hintbtn"
-          onclick={() => (hintOpen = !hintOpen)}
-          aria-expanded={hintOpen}
-          aria-label="Composer hints"
-          aria-describedby={hintOpen ? "composer-hint-pop" : undefined}
-          title="Keyboard shortcuts"
-        >
-          <HelpCircle size={14} />
-        </button>
-        {#if hintOpen}
-          <div id="composer-hint-pop" class="hint-pop" role="tooltip">
-            <div class="hint-row"><kbd>Enter</kbd><span>send</span></div>
-            <div class="hint-row"><kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span></div>
-            <div class="hint-row"><kbd>/</kbd><span>commands</span></div>
-            <div class="hint-row"><kbd>@</kbd><span>mention file</span></div>
-          </div>
-        {/if}
-      </div>
+    <div class="composer" class:streaming={streaming} data-mode={mode}>
+      <span class="composer-glow" aria-hidden="true"></span>
       <textarea
         bind:this={ta}
         value={draft}
@@ -710,50 +681,113 @@
           ? "Type to queue — Enter sends, /stop halts"
           : attachments.length > 0
           ? "Ask about the image…"
-          : "Ask Claude"}
+          : idlePlaceholder}
         rows="1"
       ></textarea>
-      {#if assistant.model !== "haiku"}
-        <button
-          type="button"
-          class="effort-pill"
-          class:effort-none={currentEffort.id === "none"}
-          class:effort-quick={currentEffort.id === "quick"}
-          class:effort-deep={currentEffort.id === "deep"}
-          onclick={cycleEffort}
-          title={currentEffort.hint + " — click to cycle"}
-        >
-          <span class="pill-label">{currentEffort.label}</span>
-        </button>
-      {/if}
-      <button
-        type="button"
-        class="model-pill"
-        onclick={() => { modelPickerOpen = !modelPickerOpen; void tick().then(() => ta?.focus()); }}
-        title="Switch model"
-      >
-        {#if currentModel}
-          <span class="pill-label">{currentModel.label}</span>
-          <span class="pill-version">{currentModel.version}</span>
-          <span class="pill-caret" aria-hidden="true">▾</span>
-        {:else}
-          model: {assistant.model}
-        {/if}
-      </button>
-      <button
-        class="sendbtn"
-        class:stop={mode === "stop"}
-        class:queue={mode === "queue"}
-        type="button"
-        onclick={onBtnClick}
-        disabled={!canFire}
-        title={mode === "stop" ? "Stop current turn" : mode === "queue" ? "Queue this message" : "Send (Enter)"}
-      >
-        <span class="icon-stack">
-          <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={13} /></span>
-          <span class="icon-slot" class:active={mode === "stop"}><Square size={13} fill="currentColor" /></span>
-        </span>
-      </button>
+
+      <div class="composer-toolbar">
+        <div class="toolbar-cluster">
+          {#if stt.config.enabled && (
+            (stt.config.engine === "web_speech" && stt.supported) ||
+            (stt.config.engine === "whisper" && stt.backendAvailable)
+          )}
+          <button
+            class="iconbtn micbtn"
+            class:recording={stt.recording}
+            class:transcribing={stt.transcribing}
+            type="button"
+            onclick={toggleMic}
+            disabled={micBusy || stt.transcribing}
+            title={
+              stt.recording ? "Stop recording" :
+              stt.transcribing ? "Transcribing…" :
+              stt.config.engine === "whisper" ? "Dictate (Whisper, local)" : "Dictate (Web Speech)"
+            }
+            aria-label={stt.recording ? "Stop recording" : "Start recording"}
+          >
+            {#if stt.transcribing}
+              <Loader2 size={14} class="mic-spin" />
+            {:else if stt.recording}
+              <Square size={11} fill="currentColor" />
+            {:else}
+              <Mic size={14} />
+            {/if}
+          </button>
+          {/if}
+          <div class="hint-wrap" bind:this={hintWrap}>
+            <button
+              type="button"
+              class="iconbtn hintbtn"
+              onclick={() => (hintOpen = !hintOpen)}
+              aria-expanded={hintOpen}
+              aria-label="Composer hints"
+              aria-describedby={hintOpen ? "composer-hint-pop" : undefined}
+              title="Keyboard shortcuts"
+            >
+              <HelpCircle size={14} />
+            </button>
+            {#if hintOpen}
+              <div id="composer-hint-pop" class="hint-pop" role="tooltip">
+                <div class="hint-row"><kbd>Enter</kbd><span>send</span></div>
+                <div class="hint-row"><kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span></div>
+                <div class="hint-row"><kbd>/</kbd><span>commands</span></div>
+                <div class="hint-row"><kbd>@</kbd><span>mention file</span></div>
+              </div>
+            {/if}
+          </div>
+          {#if draft.length > 0}
+            <span class="char-count" class:warn={draft.length > 4000} title="Character count">
+              {draft.length.toLocaleString()}
+            </span>
+          {/if}
+        </div>
+
+        <div class="toolbar-cluster toolbar-right">
+          {#if assistant.model !== "haiku"}
+            <button
+              type="button"
+              class="effort-pill"
+              class:effort-none={currentEffort.id === "none"}
+              class:effort-quick={currentEffort.id === "quick"}
+              class:effort-deep={currentEffort.id === "deep"}
+              onclick={cycleEffort}
+              title={currentEffort.hint + " — click to cycle"}
+            >
+              <span class="pill-label">{currentEffort.label}</span>
+            </button>
+          {/if}
+          <button
+            type="button"
+            class="model-pill"
+            data-model={assistant.model}
+            onclick={() => { modelPickerOpen = !modelPickerOpen; void tick().then(() => ta?.focus()); }}
+            title="Switch model"
+          >
+            <span class="model-dot-mini" aria-hidden="true"></span>
+            {#if currentModel}
+              <span class="pill-label">{currentModel.label}</span>
+              <span class="pill-version">{currentModel.version}</span>
+              <span class="pill-caret" aria-hidden="true">▾</span>
+            {:else}
+              model: {assistant.model}
+            {/if}
+          </button>
+          <button
+            class="sendbtn"
+            class:stop={mode === "stop"}
+            class:queue={mode === "queue"}
+            type="button"
+            onclick={onBtnClick}
+            disabled={!canFire}
+            title={mode === "stop" ? "Stop current turn" : mode === "queue" ? "Queue this message" : "Send (Enter)"}
+          >
+            <span class="icon-stack">
+              <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
+              <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
+            </span>
+          </button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -767,36 +801,91 @@
     box-sizing: border-box;
   }
   .composer-shell { position: relative; }
+
+  /* ── Composer v3 ─────────────────────────────────────────────────────
+     Two-row layout: textarea up top, toolbar below.  Glass-blur surface
+     w/ soft accent focus ring + animated streaming edge.  All controls
+     unified under .iconbtn (mic/help) + .effort-pill / .model-pill /
+     .sendbtn.  Replaces the v2 single-row design. */
   .composer {
-    display: flex; align-items: center; gap: 6px;
-    padding: 6px 6px 6px 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    transition: border-color 200ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    position: relative;
+    display: flex; flex-direction: column;
+    padding: 6px;
+    background: color-mix(in oklch, var(--surface) 88%, transparent);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid color-mix(in oklch, var(--border) 90%, transparent);
+    border-radius: 18px;
+    box-shadow:
+      0 10px 28px -10px oklch(0 0 0 / 0.45),
+      inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
+    transition: border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+                transform 140ms ease-out;
+    overflow: hidden;
   }
-  /* Textarea grows up while controls bottom-align — when the textarea is
-     multiline, controls hug the bottom row of text. Single-line stays
-     visually centered courtesy of align-items: center on .composer. */
-  .composer:has(textarea:not(:placeholder-shown)) { align-items: flex-end; }
   .composer:focus-within {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+    box-shadow:
+      0 0 0 3px var(--accent-soft),
+      0 12px 32px -8px color-mix(in oklch, var(--accent) 28%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
   }
+  /* Soft accent radial glow visible only on focus / streaming — sits behind
+     all content via overflow:hidden + negative z-index on the layer. */
+  .composer-glow {
+    position: absolute;
+    inset: -40%;
+    background: radial-gradient(
+      circle at 50% 100%,
+      color-mix(in oklch, var(--accent) 22%, transparent) 0%,
+      transparent 55%
+    );
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 280ms ease-out;
+    z-index: 0;
+  }
+  .composer:focus-within .composer-glow { opacity: 0.55; }
+  .composer.streaming .composer-glow { opacity: 0.7; }
+
   .composer.streaming {
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
   }
-  /* When the status hub is rendered above us during streaming, drop the
-     top corners so the hub + composer read as one continuous element. */
-  .composer-shell:has(:global(.hub)) .composer {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
+  /* Animated top-edge streaming bar — replaces the StatusHub indicator. */
+  .composer.streaming::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 14%; right: 14%;
+    height: 1.5px;
+    background: linear-gradient(90deg,
+      transparent,
+      var(--accent),
+      color-mix(in oklch, var(--accent) 70%, white 30%),
+      var(--accent),
+      transparent);
+    background-size: 200% 100%;
+    animation: composer-stream 2.6s ease-in-out infinite;
+    z-index: 2;
+    border-radius: 0 0 2px 2px;
   }
+  @keyframes composer-stream {
+    0%   { background-position: 200% 0; opacity: 0.4; }
+    50%  { opacity: 0.95; }
+    100% { background-position: -100% 0; opacity: 0.4; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer.streaming::before { animation: none; opacity: 0.7; }
+  }
+
   textarea {
+    position: relative;
+    z-index: 1;
     flex: 1;
     resize: none;
-    min-height: 26px; max-height: 220px;
-    padding: 5px 4px;
+    width: 100%;
+    min-height: 28px; max-height: 220px;
+    padding: 8px 10px 6px;
     background: transparent;
     border: 0; outline: none;
     color: var(--fg);
@@ -804,56 +893,66 @@
     font-size: var(--fs-md);
     line-height: 1.5;
     overflow-y: auto;
-    align-self: stretch;
   }
-  textarea::placeholder { color: var(--fg-subtle); }
+  textarea::placeholder {
+    color: var(--fg-subtle);
+    transition: color 200ms ease-out;
+  }
+  .composer:focus-within textarea::placeholder { color: var(--fg-faint); }
 
-  .sendbtn {
+  /* Toolbar row — left cluster (input affordances) + right cluster (action). */
+  .composer-toolbar {
     position: relative;
-    width: 28px; height: 28px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--accent);
-    color: var(--accent-fg);
-    border: 0; border-radius: 8px;
-    cursor: pointer;
-    transition: background 200ms ease-out, transform 140ms ease-out, opacity 140ms ease-out, color 200ms ease-out;
-    flex-shrink: 0;
-    overflow: hidden;
-    align-self: center;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 4px 2px 4px;
   }
-  .sendbtn:hover:not(:disabled) { background: var(--accent-hover); transform: scale(1.04); }
-  .sendbtn:active:not(:disabled) { transform: scale(0.96); }
-  .sendbtn:disabled { opacity: 0.4; cursor: default; }
-  .sendbtn.stop {
-    background: var(--danger);
-    color: oklch(0.98 0.01 22);
+  .toolbar-cluster {
+    display: flex; align-items: center; gap: 4px;
   }
-  .sendbtn.stop:hover { filter: brightness(1.1); }
+  .toolbar-right { gap: 6px; }
 
-  .micbtn {
-    width: 26px; height: 26px;
+  /* Unified icon button — base for mic + help + (future attach). */
+  .iconbtn {
+    width: 28px; height: 28px;
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
     color: var(--fg-faint);
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: 8px;
     cursor: pointer;
     flex-shrink: 0;
-    align-self: center;
-    opacity: 0.7;
-    transition: color 140ms, border-color 140ms, background 140ms, box-shadow 140ms, opacity 140ms;
+    opacity: 0.75;
+    padding: 0;
+    transition: color 140ms, background 140ms, border-color 140ms, opacity 140ms, transform 140ms;
   }
-  .micbtn:hover:not(:disabled) { color: var(--fg-muted); background: var(--surface-hover); opacity: 1; }
-  .micbtn:disabled { opacity: 0.55; cursor: default; }
+  .iconbtn:hover:not(:disabled) {
+    color: var(--fg-2);
+    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
+    opacity: 1;
+  }
+  .iconbtn:active:not(:disabled) { transform: scale(0.94); }
+  .iconbtn:disabled { opacity: 0.4; cursor: default; }
+  .iconbtn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+  }
+
+  /* Mic — recording / transcribing states inherit .iconbtn base + override. */
   .micbtn.recording {
     background: var(--danger);
     color: oklch(0.98 0.01 22);
     border-color: var(--danger);
+    opacity: 1;
     animation: mic-pulse 1.1s ease-in-out infinite;
   }
   .micbtn.transcribing {
     color: var(--accent);
     border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    opacity: 1;
   }
   :global(.mic-spin) { animation: mic-spin 0.9s linear infinite; }
   @keyframes mic-spin { to { transform: rotate(360deg); } }
@@ -861,6 +960,76 @@
     0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 45%, transparent); }
     50%      { box-shadow: 0 0 0 6px transparent; }
   }
+
+  /* Live character count — surfaces only when draft is non-empty. Warns
+     past 4000 chars (rough one-turn ceiling for short prompts). */
+  .char-count {
+    margin-left: 4px;
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-faint);
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    animation: enter 160ms ease-out;
+  }
+  .char-count.warn {
+    color: var(--warn);
+    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    background: color-mix(in oklch, var(--warn) 10%, transparent);
+  }
+
+  /* Send — primary CTA, accent surface w/ glow. Bigger than v2 (32px), more
+     pronounced shadow, smoother mode-swap (send → stop → queue). */
+  .sendbtn {
+    position: relative;
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent);
+    color: var(--accent-fg);
+    border: 0; border-radius: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    overflow: hidden;
+    transition: background 200ms ease-out, transform 140ms ease-out,
+                box-shadow 220ms ease-out, opacity 140ms ease-out;
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
+      0 6px 18px -4px color-mix(in oklch, var(--accent) 60%, transparent);
+  }
+  .sendbtn:hover:not(:disabled) {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--accent) 55%, transparent),
+      0 10px 28px -4px color-mix(in oklch, var(--accent) 75%, transparent);
+  }
+  .sendbtn:active:not(:disabled) { transform: translateY(0) scale(0.96); }
+  .sendbtn:disabled {
+    opacity: 0.35; cursor: default;
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 10%, transparent);
+  }
+  .sendbtn:focus-visible {
+    outline: none;
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+      0 0 0 3px var(--ring),
+      0 6px 18px -4px color-mix(in oklch, var(--accent) 60%, transparent);
+  }
+  .sendbtn.stop {
+    background: var(--danger);
+    color: oklch(0.98 0.01 22);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--danger) 50%, transparent),
+      0 6px 18px -4px color-mix(in oklch, var(--danger) 60%, transparent);
+  }
+  .sendbtn.stop:hover { filter: brightness(1.08); transform: translateY(-1px); }
   .sendbtn.queue {
     background: color-mix(in oklch, var(--accent) 70%, var(--surface));
   }
@@ -999,54 +1168,63 @@
 
   .slash-menu {
     position: absolute;
-    bottom: calc(100% + 6px);
+    bottom: calc(100% + 8px);
     left: 0;
     width: 100%;
-    max-height: 240px;
+    max-height: 280px;
     overflow-y: auto;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 10px 24px oklch(0 0 0 / 0.35);
-    padding: 4px;
+    background: color-mix(in oklch, var(--surface) 86%, transparent);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    border-radius: 14px;
+    box-shadow:
+      0 18px 44px -8px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    padding: 6px;
     z-index: 10;
-    animation: slash-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: slash-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   @keyframes slash-in {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
   }
   .slash-item {
-    display: flex; align-items: baseline; gap: 10px;
+    display: flex; align-items: baseline; gap: 12px;
     width: 100%;
-    padding: 6px 10px;
+    padding: 8px 12px;
     background: transparent;
-    border: 0; border-radius: 6px;
+    border: 0; border-radius: 8px;
     color: var(--fg);
     text-align: left;
     cursor: pointer;
     font: inherit;
+    transition: background 140ms ease-out;
   }
   .slash-item:hover, .slash-item.active {
-    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    background: color-mix(in oklch, var(--accent) 11%, transparent);
   }
   .slash-name {
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: var(--fs-sm);
     font-weight: 600;
     color: var(--accent);
-    min-width: 64px;
+    min-width: 72px;
   }
   .slash-desc {
     font-size: var(--fs-xs);
     color: var(--fg-muted);
   }
   .slash-hint {
-    padding: 6px 10px 2px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px 4px;
+    margin-top: 4px;
     font-size: 10px;
     color: var(--fg-faint);
-    border-top: 1px solid var(--border);
-    margin-top: 2px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
   }
 
   /* Phase 3a: hint popover. Replaces the dedicated hint row; lives adjacent
@@ -1057,26 +1235,13 @@
     display: inline-flex;
     align-self: center;
   }
-  .hintbtn {
-    width: 22px; height: 22px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: transparent;
-    color: var(--fg-faint);
-    border: 1px solid transparent;
-    border-radius: 6px;
-    cursor: pointer;
-    opacity: 0.65;
-    transition: color 140ms ease-out, background 140ms ease-out, border-color 140ms ease-out, opacity 140ms ease-out;
-  }
-  .hintbtn:hover { color: var(--fg-muted); background: var(--surface-hover); opacity: 1; }
+  /* .hintbtn inherits .iconbtn base (size, radius, hover). Only the
+     aria-expanded "open" treatment is specific. */
   .hintbtn[aria-expanded="true"] {
     color: var(--accent);
     border-color: color-mix(in oklch, var(--accent) 25%, transparent);
     background: var(--accent-soft);
-  }
-  .hintbtn:focus-visible {
-    outline: none;
-    box-shadow: inset 0 0 0 2px var(--ring);
+    opacity: 1;
   }
   .hint-pop {
     position: absolute;
@@ -1117,33 +1282,47 @@
 
   .model-pill {
     align-self: center;
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 6px 2px 9px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 0 8px 0 10px;
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
     border-radius: 999px;
     color: var(--fg-2);
     font-variant-numeric: tabular-nums;
     cursor: pointer;
     font: inherit;
     font-size: var(--fs-xs);
-    height: 24px;
+    height: 26px;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
+  /* Per-model dot — same color logic as the picker. Lets the user scan the
+     pill and know which model is loaded without reading the label. */
+  .model-dot-mini {
+    width: 6px; height: 6px;
+    border-radius: 999px;
+    background: var(--model-color, var(--fg-muted));
+    box-shadow:
+      0 0 0 1.5px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
+      0 0 6px color-mix(in oklch, var(--model-color, var(--fg-muted)) 45%, transparent);
+    flex-shrink: 0;
+  }
+  .model-pill[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .model-pill[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .model-pill[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
 
   .effort-pill {
     align-self: center;
     display: inline-flex; align-items: center;
-    padding: 0 9px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+    padding: 0 10px;
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
     border-radius: 999px;
     color: var(--fg-2);
     cursor: pointer;
     font: inherit;
-    font-size: 10px;
+    font-size: 10.5px;
     font-weight: 600;
-    height: 22px;
+    height: 26px;
     letter-spacing: 0.02em;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
@@ -1171,9 +1350,9 @@
   .pill-version {
     font-size: 10px;
     font-weight: 600;
-    color: var(--accent);
+    color: var(--model-color, var(--accent));
     padding: 1px 6px;
-    background: color-mix(in oklch, var(--accent) 12%, transparent);
+    background: color-mix(in oklch, var(--model-color, var(--accent)) 14%, transparent);
     border-radius: 999px;
   }
   .pill-caret {
@@ -1185,9 +1364,9 @@
   }
   .model-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
   .model-pill:hover {
-    background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));
+    background: color-mix(in oklch, var(--bg-elev-2) 95%, transparent);
     color: var(--fg);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    border-color: color-mix(in oklch, var(--model-color, var(--accent)) 35%, var(--border));
   }
 
   .mention-menu { max-height: 280px; }
@@ -1219,27 +1398,81 @@
   }
   .mention-item.active .mention-base { color: var(--accent); }
 
+  .model-menu {
+    padding: 6px;
+    background: color-mix(in oklch, var(--surface) 86%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    box-shadow:
+      0 18px 44px -8px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+  }
   .model-menu .model-header {
-    padding: 6px 10px 4px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px 6px;
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: var(--fg-faint);
   }
+  .model-menu .model-header::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      transparent);
+  }
   .model-item {
+    position: relative;
     display: grid;
-    grid-template-columns: 14px auto 1fr auto;
+    grid-template-columns: 10px minmax(96px, auto) 1fr auto;
     align-items: center;
     gap: 12px;
-    padding: 8px 12px;
+    padding: 10px 14px 10px 18px;
+    border-radius: 8px;
+    transition: background 140ms ease-out;
   }
-  .model-check {
-    color: var(--accent);
-    font-weight: 700;
-    text-align: center;
-    font-size: 11px;
+  .model-item::before {
+    content: "";
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    width: 3px;
+    height: 60%;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 55%, transparent);
+    transform: translateY(-50%) scaleY(0);
+    transform-origin: center;
+    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  .model-item.current::before { transform: translateY(-50%) scaleY(1); }
+  .model-item.current {
+    background: linear-gradient(90deg,
+      color-mix(in oklch, var(--accent) 14%, transparent),
+      color-mix(in oklch, var(--accent) 4%, transparent) 65%,
+      transparent);
+  }
+  .model-item.active:not(.current) {
+    background: color-mix(in oklch, var(--accent) 9%, transparent);
+  }
+
+  .model-dot {
+    width: 8px; height: 8px;
+    border-radius: 999px;
+    background: var(--model-color, var(--fg-muted));
+    box-shadow:
+      0 0 0 2px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
+      0 0 8px color-mix(in oklch, var(--model-color, var(--fg-muted)) 55%, transparent);
+  }
+  .model-item[data-id="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .model-item[data-id="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .model-item[data-id="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+
   .model-name {
     display: inline-flex; align-items: baseline; gap: 6px;
     min-width: 96px;
@@ -1255,28 +1488,57 @@
     color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
     padding: 1px 5px;
-    background: var(--bg-elev-2);
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
     border-radius: 4px;
   }
   .model-item.current .model-label { color: var(--accent); }
   .model-item.current .model-version {
     color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    background: color-mix(in oklch, var(--accent) 16%, transparent);
+  }
+  .model-menu .slash-desc {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .model-ctx {
     font-size: 10px;
     font-weight: 600;
-    color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
-    padding: 2px 7px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
+    padding: 3px 8px;
     border-radius: 999px;
     white-space: nowrap;
+    color: var(--fg-muted);
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
   }
-  .model-item.current .model-ctx {
+  .model-ctx.wide {
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
     background: color-mix(in oklch, var(--accent) 8%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);
+  }
+
+  .model-menu .model-hint {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 8px 12px 6px;
+    margin-top: 4px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+  }
+  .model-menu .model-hint kbd {
+    display: inline-block;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 9.5px;
+    font-weight: 600;
+    line-height: 1;
+    padding: 2px 5px;
+    margin-right: 5px;
+    border-radius: 4px;
+    background: color-mix(in oklch, var(--bg-elev-2) 75%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    color: var(--fg-muted);
+    vertical-align: 1px;
   }
 </style>

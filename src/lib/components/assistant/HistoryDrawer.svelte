@@ -235,15 +235,18 @@
               <button
                 class="row-main"
                 type="button"
+                data-model={c.model?.toLowerCase().includes("opus") ? "opus"
+                  : c.model?.toLowerCase().includes("haiku") ? "haiku"
+                  : "sonnet"}
                 onclick={() => { void assistant.openTab(c.id); onSelected(); }}
                 title="Open"
               >
                 <span class="row-title">{c.title}</span>
                 <span class="row-meta">
+                  <span class="row-model-dot" aria-hidden="true"></span>
                   <span class="meta-model">{c.model.charAt(0).toUpperCase() + c.model.slice(1)}</span>
                   <span class="meta-dot">·</span>
                   <span>{c.messageCount} msg</span>
-                  <span class="meta-dot">·</span>
                   <span class="meta-time">{fmtTime(c.updatedAt)}</span>
                 </span>
               </button>
@@ -385,12 +388,21 @@
     border-radius: 999px;
   }
   .group-label {
+    display: flex; align-items: center; gap: 10px;
     font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-subtle);
-    padding: 10px 12px 4px;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    padding: 12px 12px 6px;
+  }
+  .group-label::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      transparent);
   }
   .group-label:first-child { padding-top: 4px; }
   .search {
@@ -498,7 +510,26 @@
     color: var(--fg-muted);
   }
   .meta-dot { opacity: 0.6; }
-  .meta-time { margin-left: auto; }
+  .meta-time {
+    margin-left: auto;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
+  }
+
+  /* Per-model identity dot, same color logic as composer model picker. */
+  .row-model-dot {
+    width: 5px; height: 5px;
+    border-radius: 999px;
+    background: var(--row-model-color, var(--fg-muted));
+    box-shadow:
+      0 0 0 1.5px color-mix(in oklch, var(--row-model-color, var(--fg-muted)) 14%, transparent),
+      0 0 4px color-mix(in oklch, var(--row-model-color, var(--fg-muted)) 40%, transparent);
+    flex-shrink: 0;
+  }
+  .row-main[data-model="sonnet"] { --row-model-color: oklch(0.74 0.13 230); }
+  .row-main[data-model="opus"]   { --row-model-color: oklch(0.70 0.18 295); }
+  .row-main[data-model="haiku"]  { --row-model-color: oklch(0.78 0.14 180); }
 
   .row-tools {
     display: flex; align-items: center; gap: 2px;

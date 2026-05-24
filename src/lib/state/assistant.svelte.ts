@@ -347,6 +347,26 @@ function previewToolInput(name: string, input: Record<string, unknown> | undefin
   return null;
 }
 
+/** Tool names whose presence in a tab's stream means the Session-panel right
+ *  rail has content worth surfacing (files Claude edited, URLs it fetched).
+ *  Used by `messagesHaveContextSignals` to gate dock visibility without
+ *  duplicating the per-section iteration logic that lives in TasksDock. */
+const CONTEXT_SIGNAL_TOOLS = new Set([
+  "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch",
+]);
+
+/** Early-exit scan: does this message list contain ANY Edit/Write/WebFetch/etc
+ *  tool call? Used by AssistantPane + ChatTabsBar to decide whether to render
+ *  the Session dock when `tasks` is empty. Cheap — bails on first match. */
+export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
+  for (const m of messages) {
+    for (const b of m.blocks) {
+      if (b.type === "tool" && CONTEXT_SIGNAL_TOOLS.has(b.name)) return true;
+    }
+  }
+  return false;
+}
+
 /** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/mod.rs. */
 function effortToFlag(
   effort: "none" | "quick" | "deep",

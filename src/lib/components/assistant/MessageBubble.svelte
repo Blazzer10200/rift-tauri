@@ -1,6 +1,7 @@
 <script lang="ts">
   import { Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
   import { onDestroy } from "svelte";
+  import { fade } from "svelte/transition";
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
@@ -216,8 +217,12 @@
   }
 
   function formatDuration(ms: number): string {
+    if (ms < 1000) return "<1s";
     const s = Math.floor(ms / 1000);
-    return `${s}s`;
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
   }
 
   function elapsedFor(b: ThinkingBlock, nowMs: number): string {
@@ -363,31 +368,50 @@
   {/if}
 
   <div class="body">
-    <div class="turn-head">
-      {#if !isUser}
+    {#if !isUser}
+      <div class="turn-head">
         <div class="avatar" aria-hidden="true">
           <Sparkles size={13} />
         </div>
-      {/if}
-      <span class="role-name">{isUser ? "You" : "Claude"}</span>
-      {#if !isUser && modelLabel}
-        <span class="head-sep" aria-hidden="true">·</span>
-        <span class="head-model" title="Model for this turn">{modelLabel}</span>
-      {/if}
-      {#if !isUser && streaming}
-        <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
-        {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
-      {/if}
-      {#if plainText.length > 0}
-        <button class="copybtn" type="button" onclick={copy} title="Copy">
-          {#if copied}
-            <Check size={11} />
-          {:else}
-            <Copy size={11} />
-          {/if}
-        </button>
-      {/if}
-    </div>
+        <span class="role-name">Claude</span>
+        {#if modelLabel}
+          <span class="head-sep" aria-hidden="true">·</span>
+          <span class="head-model" title="Model for this turn">{modelLabel}</span>
+        {/if}
+        {#if streaming}
+          <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
+          {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
+        {/if}
+        {#if plainText.length > 0}
+          <button class="copybtn" type="button" onclick={copy} title="Copy">
+            {#if copied}
+              <Check size={11} />
+            {:else}
+              <Copy size={11} />
+            {/if}
+          </button>
+        {/if}
+      </div>
+    {/if}
+
+    {#if !isUser && streaming && grouped.length === 0}
+      <div class="stage-strip" aria-live="polite" out:fade={{ duration: 220 }}>
+        <div class="stage-line">
+          <span class="stage-dots" aria-hidden="true">
+            <span class="stage-dot"></span>
+            <span class="stage-dot"></span>
+            <span class="stage-dot"></span>
+          </span>
+          {#key stageLabel}
+            <span class="stage-label">{stageLabel ?? "Thinking…"}</span>
+          {/key}
+        </div>
+        <div class="skeleton-lines" aria-hidden="true">
+          <span class="skl skl-1"></span>
+          <span class="skl skl-2"></span>
+        </div>
+      </div>
+    {/if}
 
     <div class="content">
       {#snippet renderBlock(b: Block, bi: number)}
@@ -506,20 +530,35 @@
   .boundary-line {
     flex: 1;
     height: 1px;
-    background: var(--border, rgba(255, 255, 255, 0.08));
+    background: linear-gradient(to right,
+      transparent,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      color-mix(in oklch, var(--accent) 30%, transparent) 50%,
+      color-mix(in oklch, var(--border) 80%, transparent),
+      transparent);
   }
   .boundary-pill {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 10px;
+    padding: 5px 12px;
     border-radius: 999px;
-    background: var(--bg-elev, rgba(255, 255, 255, 0.04));
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    background: color-mix(in oklch, var(--bg-elev-1) 86%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid color-mix(in oklch, var(--accent) 25%, var(--border));
+    box-shadow: 0 4px 14px -4px color-mix(in oklch, var(--accent) 25%, transparent);
     font-size: 11px;
-    color: var(--text-dim, rgba(255, 255, 255, 0.7));
+    color: var(--fg-muted);
     white-space: nowrap;
+    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
   }
+  .boundary-head:not(:disabled):hover .boundary-pill {
+    background: color-mix(in oklch, var(--bg-elev-1) 95%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+    transform: translateY(-1px);
+  }
+  .boundary-pill :global(svg) { color: var(--accent); }
   .boundary-pill :global(.chev) {
     transition: transform 120ms ease;
     opacity: 0.6;
@@ -534,12 +573,12 @@
   .boundary-body {
     margin: 4px 24px 0;
     padding: 10px 14px;
-    background: var(--bg-elev, rgba(255, 255, 255, 0.03));
-    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
-    border-radius: 8px;
+    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    border-radius: 10px;
     font-size: 12.5px;
     line-height: 1.55;
-    color: var(--text, rgba(255, 255, 255, 0.86));
+    color: var(--fg-2);
   }
   .bubble {
     display: grid;
@@ -609,6 +648,14 @@
 
   .body { min-width: 0; grid-column: 2; }
   .bubble[data-role="user"] .body { grid-column: 1; }
+  /* Cap assistant body to the reading-column width. Without this, copy +
+     cost-pill (margin-left:auto / align-self:flex-end) float against the
+     full pane width — hundreds of pixels past the actual text. Matches the
+     78ch cap already on .text so closing beats sit flush w/ the prose. */
+  .bubble[data-role="assistant"] .body {
+    max-width: 78ch;
+    width: 100%;
+  }
 
   /* Unified turn header — [avatar] Claude · Opus 4.7 [streaming dot heartbeat] [copy]
      One row carries name + model + liveness instead of role-row + turn-badge
@@ -631,6 +678,90 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
     white-space: nowrap;
+  }
+
+  /* Stage strip — fills the void between turn-head and first content block
+     while Claude is "thinking" but hasn't emitted any blocks yet. Pre-block
+     window is typically 1-15s of silence (longer w/ Opus extended thinking);
+     w/o this the bubble reads as dead until the first prose token lands.
+     Replaces the composer-top StatusHub strip — single source of in-flight
+     truth in the bubble itself. */
+  .stage-strip {
+    display: flex; flex-direction: column;
+    gap: 9px;
+    padding: 2px 0 6px;
+    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .stage-line {
+    display: inline-flex; align-items: center; gap: 9px;
+    color: var(--fg-2);
+    font-size: var(--fs-sm);
+    min-height: 14px;
+  }
+  .stage-dots {
+    display: inline-flex; gap: 4px; align-items: center;
+    height: 8px;
+  }
+  .stage-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 45%, transparent);
+    animation: stage-bounce 1.1s ease-in-out infinite;
+  }
+  .stage-dot:nth-child(2) { animation-delay: 0.18s; }
+  .stage-dot:nth-child(3) { animation-delay: 0.36s; }
+  @keyframes stage-bounce {
+    0%, 80%, 100% { opacity: 0.35; transform: translateY(0) scale(0.85); }
+    40%           { opacity: 1;    transform: translateY(-2px) scale(1.1); }
+  }
+  .stage-label {
+    color: var(--fg);
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    /* Crossfade when stageLabel changes (whim rotation: Thinking → Sussing
+       → Spelunking …). Keyed via {#key stageLabel} in the template. */
+    animation: stage-label-in 320ms ease-out;
+  }
+  @keyframes stage-label-in {
+    from { opacity: 0; transform: translateY(-1px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .skeleton-lines {
+    display: flex; flex-direction: column;
+    gap: 8px;
+    max-width: 56ch;
+    /* Subtle entrance offset so the lines feel like they're materializing
+       under the stage label rather than appearing simultaneously. */
+    animation: skl-rise 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: 60ms;
+  }
+  @keyframes skl-rise {
+    from { opacity: 0; transform: translateY(2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .skl {
+    display: block;
+    height: 8px;
+    border-radius: 4px;
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--bg-elev-2) 50%, transparent) 0%,
+      color-mix(in oklch, var(--surface-hover) 85%, transparent) 50%,
+      color-mix(in oklch, var(--bg-elev-2) 50%, transparent) 100%
+    );
+    background-size: 220% 100%;
+    animation: skl-shimmer 1.8s ease-in-out infinite;
+  }
+  .skl-1 { width: 92%; animation-delay: 0ms; }
+  .skl-2 { width: 68%; animation-delay: 220ms; }
+  @keyframes skl-shimmer {
+    0%   { background-position: 100% 0; opacity: 0.75; }
+    50%  { opacity: 1; }
+    100% { background-position: -100% 0; opacity: 0.75; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skl, .stage-dot, .stage-label, .skeleton-lines { animation: none; }
   }
 
   /* Cost pill — sits flush-right under the turn's content as the "closing
