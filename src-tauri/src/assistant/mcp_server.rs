@@ -23,6 +23,8 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use base64::Engine as _;
+
 /// #241: socket timeout setters return Err on platforms / states where the
 /// option can't be applied. Prior code dropped that with `let _ =`, which
 /// turned a misbehaving bridge socket into an indefinite blocked read on
@@ -519,6 +521,132 @@ fn tool_reconcile_apply(args: &Value) -> Result<String, String> {
     Ok("Reconcile applied — push + pull both triggered. Call sync_status to confirm completion.".into())
 }
 
+/// Interactive question to the user via the chat UI. The MCP child posts the
+/// questions to the parent bridge, which emits an event to the frontend and
+/// holds the TCP connection open until the user clicks an answer (or 10-min
+/// timeout). The bridge response carries the user's selection, which we
+/// format into a plain-text tool result Claude can read.
+///
+/// `bridge_call` is bypassed because its 10s read timeout is too short — the
+/// user might take minutes to answer. We dial the loopback directly here with
+/// a 11-min read timeout (1 min headroom over the parent's 10-min await).
+fn tool_ask_user(args: &Value) -> Result<String, String> {
+    if !bridge_enabled() {
+        return Err("ask_user requires the Rift desktop runtime (no bridge env vars set)".into());
+    }
+    let questions = args
+        .get("questions")
+        .and_then(|v| v.as_array())
+        .ok_or("missing `questions` array")?;
+    if questions.is_empty() {
+        return Err("`questions` must contain at least one question".into());
+    }
+
+    // 16 random bytes → 22-char base64url. More than enough entropy for a
+    // pending-request key; collision space is the in-flight set, never more
+    // than ~1 at a time per session.
+    let mut id_bytes = [0u8; 16];
+    rand::fill(&mut id_bytes);
+    let request_id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id_bytes);
+
+    let session_id = std::env::var("RIFT_SESSION_ID").unwrap_or_default();
+
+    let port_s = std::env::var("RIFT_BRIDGE_PORT")
+        .map_err(|_| "RIFT_BRIDGE_PORT not set on this MCP child".to_string())?;
+    let token = std::env::var("RIFT_BRIDGE_READONLY_TOKEN")
+        .or_else(|_| std::env::var("RIFT_BRIDGE_TOKEN"))
+        .map_err(|_| "no RIFT_BRIDGE_*_TOKEN set".to_string())?;
+    let port: u16 = port_s
+        .parse()
+        .map_err(|e| format!("invalid RIFT_BRIDGE_PORT `{port_s}`: {e}"))?;
+
+    let req = json!({
+        "op": "ask_user",
+        "token": token,
+        "request_id": request_id,
+        "session_id": session_id,
+        "questions": questions,
+    });
+
+    let addr: SocketAddr = format!("127.0.0.1:{port}")
+        .parse()
+        .map_err(|e| format!("bridge addr parse: {e}"))?;
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .map_err(|e| format!("bridge connect: {e}"))?;
+    // 11-min read timeout — 1 min headroom over the parent's 10-min await
+    // ceiling so the parent times out first and returns a clean error, rather
+    // than the MCP child reading half-data.
+    apply_bridge_timeouts(
+        &stream,
+        Duration::from_secs(660),
+        Duration::from_secs(5),
+        "ask_user",
+    );
+
+    let payload = format!("{}\n", req);
+    stream
+        .write_all(payload.as_bytes())
+        .map_err(|e| format!("bridge write: {e}"))?;
+    stream.flush().map_err(|e| format!("bridge flush: {e}"))?;
+
+    let mut reader = io::BufReader::new(&stream);
+    let mut line = String::new();
+    reader
+        .read_line(&mut line)
+        .map_err(|e| format!("bridge read: {e}"))?;
+    if line.trim().is_empty() {
+        return Err("bridge closed connection without a response".into());
+    }
+    let resp: Value = serde_json::from_str(line.trim())
+        .map_err(|e| format!("bridge parse: {e} (raw: {})", line.trim()))?;
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let msg = resp
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown bridge error");
+        return Err(msg.to_string());
+    }
+    let data = resp.get("data").cloned().unwrap_or(Value::Null);
+    Ok(format_ask_user_result(&data))
+}
+
+/// Turn the answer envelope from the frontend into a plain-text tool_result
+/// Claude can read. Three shapes:
+///   1. `{cancelled: true}` — user dismissed.
+///   2. `{answers: [{question, answer}, ...]}` — normal path.
+///   3. Anything else — serialize verbatim as JSON.
+fn format_ask_user_result(data: &Value) -> String {
+    if data.get("cancelled").and_then(|v| v.as_bool()) == Some(true) {
+        return "User dismissed the question without answering. Fall back to asking in plain text, or proceed with the most-likely-correct default and note your assumption.".into();
+    }
+    let Some(answers) = data.get("answers").and_then(|v| v.as_array()) else {
+        return data.to_string();
+    };
+    if answers.is_empty() {
+        return "User submitted an empty answer set.".into();
+    }
+    let mut out = String::new();
+    for (i, a) in answers.iter().enumerate() {
+        let q = a.get("question").and_then(|v| v.as_str()).unwrap_or("?");
+        let ans_val = a.get("answer");
+        let label = match ans_val {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Array(arr)) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join(", "),
+            Some(other) => other.to_string(),
+            None => "(no answer)".into(),
+        };
+        if i > 0 {
+            out.push('\n');
+        }
+        let _ = write!(out, "Q: {q}\nA: {label}");
+    }
+    out
+}
+
 /// Dial the parent Tauri's loopback bridge for a single read-only op (`sync_status`).
 /// Reuses the same TCP+NDJSON pattern as `tool_remote_bash` but is always
 /// available when the bridge is running — no remote-shell gate.
@@ -779,6 +907,45 @@ fn tools_list_payload() -> Value {
     ];
     if bridge_enabled() {
         tools.push(json!({
+            "name": "ask_user",
+            "description": "Ask the user a multiple-choice question and wait for their answer. Use this when you need to make a decision the user should weigh in on — picking between approaches, confirming a destructive action, clarifying an ambiguous request, narrowing scope. The standard Anthropic `AskUserQuestion` tool is unavailable in this environment; this is the Rift-native replacement and renders as an interactive card in the chat. Each question gets a list of options the user clicks to answer; set `multiSelect: true` if more than one option can apply. Keep questions short (≤120 chars) and labels concise (≤5 words). Returns the user's selections as the tool result; if they dismiss without picking, returns a `cancelled` marker so you can fall back to asking in plain text.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "questions": {
+                        "type": "array",
+                        "description": "1-4 questions to present. Most calls have exactly one.",
+                        "minItems": 1,
+                        "maxItems": 4,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question": { "type": "string", "description": "Full question text. Ends with '?'." },
+                                "header": { "type": "string", "description": "Short chip-label shown above the question (≤12 chars). Examples: 'Library', 'Approach', 'Confirm'." },
+                                "multiSelect": { "type": "boolean", "description": "True if multiple options can be selected. Defaults to false (single-select)." },
+                                "options": {
+                                    "type": "array",
+                                    "description": "2-4 distinct, mutually-exclusive choices (unless multiSelect). An 'Other' freeform option is always added automatically — do not include it manually.",
+                                    "minItems": 2,
+                                    "maxItems": 4,
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "label": { "type": "string", "description": "Display text (1-5 words)." },
+                                            "description": { "type": "string", "description": "Optional 1-line explanation of what this option means." }
+                                        },
+                                        "required": ["label"]
+                                    }
+                                }
+                            },
+                            "required": ["question", "header", "options"]
+                        }
+                    }
+                },
+                "required": ["questions"]
+            }
+        }));
+        tools.push(json!({
             "name": "sync_status",
             "description": "Get a live snapshot of the Rift sync engine state — pending uploads, failed uploads, conflict count, watches, and engine state (idle/syncing/error/watching). Call this when the user asks whether files are synced, how many are queued, or whether a push completed. More accurate than the per-turn <system-reminder> snapshot because it queries the engine at call time.",
             "inputSchema": {
@@ -881,6 +1048,7 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 // #72: gate call-path the same way the list-path gates the
                 // tool declaration. Env-stripped MCP launchers see "unknown
                 // tool" instead of a silent ignore + no response.
+                "ask_user" if bridge_enabled() => tool_ask_user(&args),
                 "sync_status" if bridge_enabled() => tool_sync_status(),
                 "drift_snapshot" if bridge_enabled() => tool_drift_snapshot(),
                 "reconcile_preview" if bridge_enabled() => tool_reconcile_preview(),
