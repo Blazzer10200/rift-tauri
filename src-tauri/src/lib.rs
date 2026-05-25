@@ -19,7 +19,6 @@ pub mod secrets;
 pub mod sftp;
 pub mod state;
 pub mod sync;
-pub mod terminal;
 pub mod stt;
 pub mod transport;
 pub mod tunnel;
@@ -141,17 +140,9 @@ pub fn run() {
         .manage(std::sync::Arc::new(update_service::UpdateService::new()))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
-        .manage(terminal::TerminalState::default())
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
         .manage(stt::WhisperCache(tokio::sync::Mutex::new(None)))
         .manage(stt::WhisperSession(tokio::sync::Mutex::new(None)))
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                if let Some(state) = window.app_handle().try_state::<terminal::TerminalState>() {
-                    terminal::kill_all(&state);
-                }
-            }
-        })
         .setup(|app| {
             // Window starts hidden (`visible: false` in tauri.conf.json) so we
             // can position it before the user sees it.
@@ -235,12 +226,6 @@ pub fn run() {
             commands::sync_set_mirror_mode,
             commands::sync_get_mirror_mode,
             commands::diag_ignored_breakdown,
-            terminal::term_list_shells,
-            terminal::term_spawn,
-            terminal::term_write,
-            terminal::term_resize,
-            terminal::term_kill,
-            terminal::term_default_cwd,
             commands::assistant_auth_probe,
             commands::assistant_get_api_key,
             commands::assistant_set_api_key,

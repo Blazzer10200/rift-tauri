@@ -9,6 +9,8 @@
   import { connection } from "../../state/connection.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
 
+  let { embedded = false }: { embedded?: boolean } = $props();
+
   let expanded = $state<number | null>(null);
   let copyState = $state<"idle" | "copying" | "ok" | "err">("idle");
   let copySize = $state(0);
@@ -167,21 +169,23 @@
 </script>
 
 <section class="diag">
-  <PageHeader
-    icon={Stethoscope}
-    title="Diagnostics"
-    subtitle="{diagnostics.events.length} event{diagnostics.events.length === 1 ? '' : 's'} captured"
-    tone="info"
-  >
-    {#snippet actions()}
-      <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} title={diagnostics.paused ? "Resume capture" : "Pause capture"}>
-        {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
-      </button>
-      <button class="btn ghost sm" type="button" onclick={() => diagnostics.clear()} disabled={diagnostics.events.length === 0} title="Clear captured events">
-        <Trash2 size={11}/> Clear
-      </button>
-    {/snippet}
-  </PageHeader>
+  {#if !embedded}
+    <PageHeader
+      icon={Stethoscope}
+      title="Diagnostics"
+      subtitle="{diagnostics.events.length} event{diagnostics.events.length === 1 ? '' : 's'} captured"
+      tone="info"
+    >
+      {#snippet actions()}
+        <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} title={diagnostics.paused ? "Resume capture" : "Pause capture"}>
+          {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
+        </button>
+        <button class="btn ghost sm" type="button" onclick={() => diagnostics.clear()} disabled={diagnostics.events.length === 0} title="Clear captured events">
+          <Trash2 size={11}/> Clear
+        </button>
+      {/snippet}
+    </PageHeader>
+  {/if}
 
   {#each tileGroups as g (g.label)}
     <div class="tile-group">

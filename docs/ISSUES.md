@@ -23,10 +23,10 @@ Clear before next ship cuts. Each is a UI/live-build verification, not a code ch
 ### Code lanes (pick one)
 Ordered by recommended attack sequence. All cross-reference detailed blocks below.
 
-1. **Wave-2 frontend HIGH cluster** — single file (`assistant.svelte.ts`), batchable. Issues **#146** (mutateStreaming O(n) — also re-cited as #234 HIGH), **#147** (thinking dedup), **#148** (tab-switch race), **#149** (delete/openTab race).
-2. **Wave-3 backend security HIGHs** — issues **#221** (model flag injection), **#227** (Ed25519/DSA scrub gap), **#228** (dead dialog plugin XSS surface), **#237** (thinking_effort log-injection), **#238** (scrubUser Rust-side gap → completes #8).
+1. ~~**Wave-2 frontend HIGH cluster**~~ — **#146/#147/#148/#149 + #234 all SHIPPED** (verified 2026-05-25 via inline citations in `assistant.svelte.ts`).
+2. ~~**Wave-3 backend security HIGHs**~~ — **#221 / #227 / #237 / #238 SHIPPED 2026-05-22 (Lane 2, uncommitted v0.4.30-alpha train).** #228 re-scoped (dialog plugin in active use — see updated block).
 3. **Files diff-dot per row** — needs new `drift_scanner` per-row verdict backend cmd. (Not in numbered tracker; lane-only.)
-4. **Hot-file splits** — issue **#20**: `lib.rs` 2118L → per-domain `commands/*.rs`; `assistant.svelte.ts` 3109L → per-concern classes; `assistant/mod.rs` 2244L → continued extraction.
+4. **Hot-file splits** — issue **#20**: `lib.rs` DONE (285L post-split into `commands/*.rs`); `assistant.svelte.ts` **3355L** (grew) → per-concern classes next; `assistant/mod.rs` **2308L** → continued extraction; `auto_sync.rs` **2207L** (crossed threshold) → next candidate after `assistant.svelte.ts`.
 5. **Design brief `git-rcon-tools.md` v2.2** — git + RCON MCP tools. See `docs/design/git-rcon-tools.md`.
 
 ### Active design briefs
@@ -38,7 +38,7 @@ Ordered by recommended attack sequence. All cross-reference detailed blocks belo
 
 ## 2. Tool-result blocks lack visual rhythm — "done" ambiguous mid-turn
 
-- **Where:** [src/lib/components/assistant/MessageBubble.svelte](../src/lib/components/assistant/MessageBubble.svelte) (728L), inline diff renderer + StepGroup
+- **Where:** [src/lib/components/assistant/MessageBubble.svelte](../src/lib/components/assistant/MessageBubble.svelte) (1069L 2026-05-25), inline diff renderer + StepGroup
 - **Symptom:** When an assistant turn contains short narration → Edit block → more narration → another Edit block → final summary, the visual cadence reads as if the message ended after the first big block. User assumes Claude is done and looks away; new block appears "out of nowhere." Particularly bad w/ multi-Edit batches (verified in user screenshots S104 era).
 - **Fix sketch:** Stronger end-of-turn marker (footer w/ cost + model + duration is partially there via `costLabel` / `modelLabel` derivations, but isn't visually distinct from a mid-turn block). Consider dimming/collapsing intermediate tool blocks once a turn finishes, tighter visual grouping of "narration + its tool call(s)" as one unit, or a "still working…" pulse on the role row until `streaming=false`.
 
@@ -46,7 +46,7 @@ Ordered by recommended attack sequence. All cross-reference detailed blocks belo
 
 - **Scope:** Not a single bug — tracking the user's stated goal of an app-wide consistency pass. Settings page is densest control surface and the natural starting point. App-wide pass after.
 - **Goal:** Every visible control is wired, every section is necessary, terminology + styling consistent. Navigation is intuitive — current state has "hard to navigate" hotspots per user feedback.
-- **Approach when actioned:** Per-page audit checklist (control → wired? necessary? consistent?). Hotspot list grows as specific pain points are flagged (currently #6 + #11 are concrete instances). [src/lib/components/settings/Settings.svelte](../src/lib/components/settings/Settings.svelte) is 1505L — the audit alone is non-trivial.
+- **Approach when actioned:** Per-page audit checklist (control → wired? necessary? consistent?). Hotspot list grows as specific pain points are flagged (currently #11 is the open concrete instance — #6 shipped). [src/lib/components/settings/Settings.svelte](../src/lib/components/settings/Settings.svelte) was 1505L; **1436L 2026-05-25** after the terminal-section strip — audit still non-trivial.
 
 ## 5. Live status indicator placement (QoL)
 
@@ -111,12 +111,13 @@ Ordered by recommended attack sequence. All cross-reference detailed blocks belo
 
 ## 20. Hot files exceeding the 2000-line agent-split threshold
 
-- **Where:** Per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Current state:
-  - [src/lib/state/assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) — **2320L (over and growing; +233L from S106 telemetry overhaul 2026-05-19)**
-  - [src-tauri/src/sync/auto_sync.rs](../src-tauri/src/sync/auto_sync.rs) — 1966L (right at the edge)
-  - [src-tauri/src/lib.rs](../src-tauri/src/lib.rs) — 1790L (next in line, already queue item (e) in CLAUDE.md)
+- **Where:** Per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Current state (re-measured 2026-05-25):
+  - [src/lib/state/assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) — **3355L (worst; grew from 2320L)**
+  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — 2308L (crossed threshold)
+  - [src-tauri/src/sync/auto_sync.rs](../src-tauri/src/sync/auto_sync.rs) — 2207L (crossed threshold)
+  - ~~[src-tauri/src/lib.rs](../src-tauri/src/lib.rs)~~ — **DONE 2026-05-22 M9. 1790L → 285L via `commands/*.rs` per-domain split.**
 - **Symptom:** Targeted edits become brittle, LSP slows down, agents bail mid-emit on audit-shaped prompts.
-- **Fix sketch:** Split each by domain. For `lib.rs`: per-domain `commands/*.rs` (sync, sftp, profile, assistant, update). For `assistant.svelte.ts`: extract per-concern classes (tabs, streaming, usage, tasks). For `auto_sync.rs`: continued extraction along the `flush.rs` / `watch.rs` precedent.
+- **Fix sketch:** `assistant.svelte.ts` next — extract per-concern classes (tabs, streaming, usage, tasks). Then `assistant/mod.rs` continued extraction; then `auto_sync.rs` along the `flush.rs` / `watch.rs` precedent.
 
 ## 21. Zero test coverage anywhere in the repo
 
@@ -217,6 +218,10 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - ~~#36~~ `save_server` overwrites server list — SHIPPED v0.4.14-alpha S113 (`map_err` propagation)
 - **#37** API key plaintext in `assistant/config.json` (mirrors #9.3 deferred — Phase 6)
 - **#38** `mcp-config.json` Windows DACL gap (continues #9.2 — Phase 6)
+- ~~**#221**~~ model-flag injection — SHIPPED 2026-05-22 Lane 2 (uncommitted v0.4.30-alpha train)
+- ~~**#227**~~ Ed25519/DSA scrub gap — SHIPPED 2026-05-22 Lane 2
+- ~~**#237**~~ thinking_effort log-injection — SHIPPED 2026-05-22 Lane 2
+- ~~**#238**~~ scrubUser Rust-side gap — SHIPPED 2026-05-22 Lane 2 (completes #8)
 - ~~#42~~ — VERIFIED NOT A BUG by Wave 3 T (see verdict above). Closed.
 - ~~#41~~ Bridge lock leak — SHIPPED v0.4.14-alpha S113 (`BridgeLockGuard` RAII w/ Drop)
 - ~~#74~~ `walk_local` panic → mass ToPull — SHIPPED v0.4.14-alpha S113 (JoinError → SuspiciousEmptyAborted)
@@ -276,8 +281,8 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 **Tier 5 — backend hardening (LOW, opportunistic)**
 - #27 `atomic_write_json` blocks Tokio worker
 - #29 CSP `style-src 'unsafe-inline'`
-- #30 `core:default` capability superset
-- #31 `opener:default` unscoped
+- ~~#30~~ `core:default` superset — SHIPPED (see #230)
+- ~~#31~~ `opener:default` unscoped — SHIPPED (see #229)
 - #33 `local_list_dir` profile containment (needs FE contract change)
 - #32 `transport/env.rs::hostname` shell-out (INFO)
 - #28 Dual HTTP stacks (blocked on velopack async)
@@ -303,25 +308,20 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Symptom:** `sftp.read(remote_path)` loads full bytes into `Vec<u8>` before writing local. Hundreds-of-MB asset files (FiveM map packs, .ytd) OOM on low-RAM servers / mobile WiFi.
 - **Fix:** For files >16 MB, `sftp.open` + stream chunks to local tmp via `AsyncRead`. Deferred-complexity.
 
-## 96. `apply_selected` guard-override emits ActivityRow direct (bypasses buffered feed)
-- **Where:** [auto_sync.rs:1413-1424](../src-tauri/src/sync/auto_sync.rs#L1413-L1424), [:1656-1666](../src-tauri/src/sync/auto_sync.rs#L1656-L1666)
-- **Fix:** Use `engine.log_activity(...)` (buffered) not direct `engine.app().emit(...)`.
+## 96. ~~`apply_selected` bypasses buffered feed~~ — VERIFIED SHIPPED
+- [auto_sync.rs:1547-1550](../src-tauri/src/sync/auto_sync.rs#L1547-L1550) routes the WARN row through `engine.log_activity(...)` w/ `#96` cited inline.
 
-## 99. `flush_batch dispatched` count includes Requeued — `force_push_now` clears scan cache wrongly
-- **Where:** [auto_sync/flush.rs:140-154](../src-tauri/src/sync/auto_sync/flush.rs#L140-L154), [auto_sync.rs:824](../src-tauri/src/sync/auto_sync.rs#L824)
-- **Fix:** Return `(dispatched, ok, fail)` tuple; gate cache-clear on `ok > 0`.
+## 99. ~~`flush_batch dispatched` count includes Requeued~~ — VERIFIED SHIPPED
+- `flush_batch` now returns `(dispatched, ok, fail)` ([auto_sync/flush.rs:141-143](../src-tauri/src/sync/auto_sync/flush.rs#L141-L143)); `force_push_now` cache-clear gates on `ok > 0` ([auto_sync.rs:901](../src-tauri/src/sync/auto_sync.rs#L901)).
 
-## 107. `start_autosync` status sampled before prev engine fully stopped
-- **Where:** [lib.rs:572-576](../src-tauri/src/lib.rs#L572-L576)
-- **Fix:** Drop state lock first, then sample new engine status.
+## 107. ~~`start_autosync` status sampled before prev engine fully stopped~~ — VERIFIED SHIPPED
+- [commands/sync.rs:473-476](../src-tauri/src/commands/sync.rs#L473-L476) — `engine.status()` now sampled AFTER `prev.stop().await` + slot replacement, w/ `#107` cited inline.
 
-## 109. `bootstrap_list_files` accepts dead `_local_root` IPC param
-- **Where:** [lib.rs:1443](../src-tauri/src/lib.rs#L1443)
-- **Fix:** Remove param from signature + update FE caller, OR restore use w/ validation guard.
+## 109. ~~`bootstrap_list_files` accepts dead `_local_root` IPC param~~ — SHIPPED 2026-05-25
+- Backend signature already pruned (cmd now at [commands/sftp.rs:590](../src-tauri/src/commands/sftp.rs#L590) post-split, only `server_key`). FE caller in [Bootstrap.svelte:94](../src/lib/components/dialogs/Bootstrap.svelte#L94) updated to drop the `localRoot` IPC field.
 
-## 115. `session-lost` event re-broadcasts full prompt over Tauri bus
-- **Where:** [assistant/mod.rs:1439-1446](../src-tauri/src/assistant/mod.rs#L1439-L1446)
-- **Fix:** Emit only `{ session_id }` recovery signal; FE re-sends from its own buffered last message.
+## 115. ~~`session-lost` re-broadcasts full prompt~~ — VERIFIED SHIPPED
+- [assistant/mod.rs:2241-2248](../src-tauri/src/assistant/mod.rs#L2241-L2248) — emits only `{ session_id }`; `#115` cited inline.
 
 ### LOW (1)
 
@@ -331,9 +331,8 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 
 ### INFO (1)
 
-## 135. `force_push_now` promotion log emitted after flush (out-of-order)
-- **Where:** [auto_sync.rs:802-806](../src-tauri/src/sync/auto_sync.rs#L802-L806)
-- **Fix:** Move log call before `flush_all_now(...)` at L814.
+## 135. ~~`force_push_now` promotion log out-of-order~~ — VERIFIED SHIPPED
+- Post-refactor ordering: promotion `log::debug!` lands at [auto_sync.rs:842](../src-tauri/src/sync/auto_sync.rs#L842), `flush_all_now` runs at L890. Correct order.
 
 ---
 
@@ -343,25 +342,17 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 
 ### HIGH (4)
 
-## 146. `mutateStreaming` rebuilds full messages array on every delta
-- **Where:** [assistant.svelte.ts:578](../src/lib/state/assistant.svelte.ts#L578)
-- **Symptom:** `.map(...)` over entire array per text/thinking/tool-result update; high-velocity streaming causes meaningful GC pressure + frame drops in long convos.
-- **Fix:** Cache `streamingMsgId` index at `beginTurn`; direct index-replace instead of full map.
+## 146. ~~`mutateStreaming` rebuilds full messages array~~ — VERIFIED SHIPPED
+- [assistant.svelte.ts:743-753](../src/lib/state/assistant.svelte.ts#L743-L753) — caches `streamingMsgIdx`; direct index write when index matches, full `.map` only as fallback. `#146/#234` cited inline. Also closes #234.
 
-## 147. `ensureThinkingFromEnvelope` `b === existing` always false on `$state` proxies
-- **Where:** [assistant.svelte.ts:677](../src/lib/state/assistant.svelte.ts#L677)
-- **Symptom:** Svelte 5 proxies are not referentially equal across read sites. Guard always false → every call appends a NEW thinking block instead of merging into the existing one.
-- **Fix:** Use stable key — `b.type === "thinking" && b.startedAt === existing.startedAt`.
+## 147. ~~`ensureThinkingFromEnvelope` reference-equality on `$state` proxies~~ — VERIFIED SHIPPED
+- [assistant.svelte.ts:846-852](../src/lib/state/assistant.svelte.ts#L846-L852) — match by `startedAt` stable key; `#147` cited inline.
 
-## 148. `handleTurnComplete` `queueMicrotask` send-on-next-item races tab switch
-- **Where:** [assistant.svelte.ts:2200-2203](../src/lib/state/assistant.svelte.ts#L2200-L2203)
-- **Symptom:** User switches tabs between active-tab check and microtask firing; `send()` runs on new active tab's context, not original tab.
-- **Fix:** `sendOnTab(tab, text)` overload, OR capture convoId + bail in microtask if `currentConvoId` differs.
+## 148. ~~`handleTurnComplete` microtask races tab switch~~ — VERIFIED SHIPPED
+- [assistant.svelte.ts:2907-2917](../src/lib/state/assistant.svelte.ts#L2907-L2917) — captures `capturedConvoId`; re-queues onto original tab if convo changed before microtask fires. `#148` cited inline.
 
-## 149. `openTab` race against `deleteConversation` → blank TabState
-- **Where:** [assistant.svelte.ts:1772-1779](../src/lib/state/assistant.svelte.ts#L1772-L1779)
-- **Symptom:** Brief window between `deleteConversation` removing from disk and `refreshConversations` clearing the metadata list. `openTab` sees the convo as loadable → `loadConversation` throws → tab left in error state.
-- **Fix:** After `deleteConversation` calls `refreshConversations`, also explicitly close any tab pointing at the deleted id.
+## 149. ~~`openTab` race against `deleteConversation`~~ — VERIFIED SHIPPED
+- [assistant.svelte.ts:2322-2327](../src/lib/state/assistant.svelte.ts#L2322-L2327) — after `refreshConversations`, explicitly closes any tab pointing at the deleted id. `#149` cited inline.
 
 ## 151. Theme picker + STT lang picker missing `role="radiogroup"` / `role="radio"`
 - **Where:** [Settings.svelte:539-555](../src/lib/components/settings/Settings.svelte#L539-L555) (theme), [:835-847](../src/lib/components/settings/Settings.svelte#L835-L847) (STT)
@@ -422,26 +413,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [Markdown.svelte:202-204](../src/lib/components/assistant/Markdown.svelte#L202-L204)
 - **Symptom:** `pinTasksFromChecklist` called per delta. `processed` derives via DOMPurify + 2 DOM-template walks each tick. 200 streaming tokens → ~200 full DOM parses.
 - **Fix:** Debounce, OR equality-check `JSON.stringify(processed.items)` against ref before calling.
-
-## 164. `Terminal.svelte` init/teardown race — `term_spawn` resolves after teardown
-- **Where:** [Terminal.svelte:226-230](../src/lib/components/terminal/Terminal.svelte#L226-L230)
-- **Symptom:** `visible` flips false (or onDestroy fires) during in-flight `term_spawn`; teardown clears `sessionId`; spawn resolves and sets `sessionId` on disposed terminal → orphaned backend process.
-- **Fix:** `mounting` guard; after await check whether `term` is still the original instance or `sessionId` was cleared → immediately `term_kill` the orphan.
-
-## 165. `SearchAddon` not explicitly disposed before `term.dispose()`
-- **Where:** [Terminal.svelte:218-219](../src/lib/components/terminal/Terminal.svelte#L218-L219)
-- **Symptom:** `search` + `fit` nulled but `.dispose()` never called. `SearchAddon.onDidChangeResults` emitter can outlive terminal in some xterm versions.
-- **Fix:** `search?.dispose(); fit?.dispose();` before `term?.dispose()`.
-
-## 166. `TerminalFindBar` debounce $effect lacks return cleanup
-- **Where:** [TerminalFindBar.svelte:44-58](../src/lib/components/terminal/TerminalFindBar.svelte#L44-L58)
-- **Symptom:** Effect manually clears `searchTimer` at entry, but no `return () => clearTimeout(...)` cleanup. Stale timer from prior run can fire after rapid query changes that skip the setTimeout branch.
-- **Fix:** Return cleanup function from $effect that clears `searchTimer` + nulls it.
-
-## 167. `TerminalFindBar` `api.onResults` wired only on mount — tab-switch breaks counts
-- **Where:** [TerminalFindBar.svelte:60-69](../src/lib/components/terminal/TerminalFindBar.svelte#L60-L69)
-- **Symptom:** Component holds old `detachResults` after `api` prop changes (tab switch). Result-count display freezes for new tab.
-- **Fix:** Move subscription into `$effect(() => { detachResults?.(); if (api) detachResults = api.onResults(...); })`.
 
 ## 168. `flash()` setTimeout leaks on unmount
 - **Where:** [ActivityFeed.svelte:360-363](../src/lib/components/activity/ActivityFeed.svelte#L360-L363)
@@ -596,10 +567,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [SyncPage.svelte:1259-1267](../src/lib/components/sync/SyncPage.svelte#L1259-L1267) (CSS)
 - **Fix:** Add `transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1)`.
 
-## 202. `scanAgeLabel` is dead code or non-reactive (renders stale)
-- **Where:** [SyncPage.svelte:201-207](../src/lib/components/sync/SyncPage.svelte#L201-L207)
-- **Fix:** If used: wrap in `$derived` w/ 30s tick; if unused: delete.
-
 ## 203. `countFor()` O(N×9) per render — not memoized
 - **Where:** [ActivityFeed.svelte:144-146](../src/lib/components/activity/ActivityFeed.svelte#L144-L146)
 - **Fix:** `$derived` map `Record<Group, number>` once per feed update.
@@ -631,10 +598,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 210. `UpdateToast` timer no-ops on rapid visibility re-trigger w/ hover
 - **Where:** [UpdateToast.svelte:24-28](../src/lib/components/UpdateToast.svelte#L24-L28)
 - **Fix:** Reset `hovering = false` after disarm to ensure re-trigger re-arms.
-
-## 211. `TerminalPanel` global keydown listener fires for all workspaces
-- **Where:** [TerminalPanel.svelte:163-166](../src/lib/components/terminal/TerminalPanel.svelte#L163-L166)
-- **Fix:** Condition `$effect` on `isVisible`; acceptable as-is given cheap guard.
 
 ## 212. `ActivityBar` Settings tooltip shows `Ctrl+9` only, hides `Ctrl+,`
 - **Where:** [ActivityBar.svelte:51](../src/lib/components/shell/ActivityBar.svelte#L51)
@@ -679,55 +642,31 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 
 ### HIGH (2)
 
-## 221. `model` param accepted unvalidated → leading-dash flag injection into Claude CLI
-- **Where:** [assistant/mod.rs:1039,1180](../src-tauri/src/assistant/mod.rs#L1039)
-- **Symptom:** Model value starting with `-` interpreted by CLI's arg parser as a flag (`--model --some-flag`).
-- **Fix:** Allowlist `"sonnet"|"opus"|"haiku"`, or reject leading dash via `[a-zA-Z0-9._-]+` w/o leading `-`.
+## 222. ~~`stderr_task.await.unwrap_or_default()` drops JoinError~~ — VERIFIED SHIPPED
+- [assistant/mod.rs:1339-1342, 2204+](../src-tauri/src/assistant/mod.rs#L1339-L1342) — both sites now `log::error!` + surface `(stderr drain task panicked: {e})`.
 
-## 222. `stderr_task.await.unwrap_or_default()` silently drops JoinError
-- **Where:** [assistant/mod.rs:1405](../src-tauri/src/assistant/mod.rs#L1405)
-- **Symptom:** Stderr drain panic (OOM) → blank stderr → user sees "claude exited with 1 — " w/ no diagnosis.
-- **Fix:** `.unwrap_or_else(|e| format!("(stderr task panicked: {e})"))` + `log::error!`.
+## 223. ~~`create_dir_all` for download staging silently ignored~~ — VERIFIED SHIPPED
+- All 3 sites (now [commands/sftp.rs:191, 211, 219](../src-tauri/src/commands/sftp.rs#L191) post-split) wrap in `if let Err(e)` + `log::warn!("download mkdir ...")`.
 
-## 223. `create_dir_all` for download staging dirs silently ignored
-- **Where:** [lib.rs:1066,1084,1090](../src-tauri/src/lib.rs#L1066)
-- **Symptom:** Dir-create failure (perms, path length) → opaque "no such file" SFTP error w/ no upstream cause.
-- **Fix:** `.map_err(|e| format!("mkdir: {e}"))?` or log + warn.
+## 224. ~~`try_read_lock` `.ok()?` conflates absent-lock vs SFTP-error~~ — VERIFIED SHIPPED
+- [lock_presence.rs:48-54](../src-tauri/src/sync/lock_presence.rs#L48-L54) — `LockReadOutcome` enum (`Present`/`Absent`/`Error`) distinguishes the three. Doc comment cites `#224`.
 
-## 224. `try_read_lock` `.ok()?` conflates absent-lock vs SFTP-error
-- **Where:** [lock_presence.rs:359](../src-tauri/src/sync/lock_presence.rs#L359)
-- **Symptom:** SFTP failure → returns None → caller treats as "no lock held" → permits write that could collide w/ another user's active lock.
-- **Fix:** Separate error cases; on SFTP error log warn + return sentinel → caller treats as unknown / skip write.
+## 225. ~~`eprintln!` in sync handlers + drift scanner~~ — SHIPPED 2026-05-25
+- 14 `eprintln!` in `sync/auto_sync.rs` (force_push_now / force_pull_now / reconcile) → `log::debug!` (most) + `log::info!` (reconcile summary) + `log::warn!` (no-watched-folders). Drift-scanner duplicate `eprintln!` deleted (kept the `emit_with_fields` follower). Verify: `Grep eprintln! src-tauri/src/sync/` returns zero.
+- **Out-of-scope eprintlns remaining** (separate cleanup): `profile/mod.rs:248`, `sftp/list.rs:389`, `sftp/ops.rs:88`, `state/sync_snapshot.rs:370,377`.
 
-## 225. `eprintln!` in sync handlers + drift scanner bypass log + diag bus
-- **Where:** [lib.rs:132,134,136,165,167,169,183,185,187,190,192](../src-tauri/src/lib.rs#L132) + [drift_scanner.rs:272](../src-tauri/src/sync/drift_scanner.rs#L272)
-- **Symptom:** Stderr-only — never reach LogForwarder, diag bus, or UI. Shipped binaries produce no signal.
-- **Fix:** Replace all 12 `eprintln!` with `log::info!` / `log::debug!`. Drift-scanner's `eprintln!` at L272 is also redundant w/ the `emit_with_fields` at L276 — delete it.
+## 226. ~~Broadcast bus lag silently counted~~ — VERIFIED SHIPPED
+- [diagnostics/mod.rs:481](../src-tauri/src/diagnostics/mod.rs#L481) — `log::warn!("diag bus lagged: {n} events dropped")` lands after `record_bus_lag(n)`.
 
-## 226. Broadcast bus lag silently counted, no log/diag event
-- **Where:** [diagnostics/mod.rs:439-441](../src-tauri/src/diagnostics/mod.rs#L439-L441)
-- **Symptom:** `RecvError::Lagged(n)` → `bus_lag_total += n` w/o emit; only visible via 500ms `diag://state` if Diagnostics tab open.
-- **Fix:** Add `log::warn!("diag bus lagged: {n} events dropped")` after `record_bus_lag(n)`.
+## 228. `dialog:default` re-scoped — plugin is in use, not dead
+- **Where:** 5 prod frontend sites use `@tauri-apps/plugin-dialog` (ProfileSetup.svelte, ServerAdd.svelte, SSHKeySetup.svelte, assistant.svelte.ts).
+- **Status:** Original "remove plugin" fix is NOT viable (investigated 2026-05-24). Re-scoped to: audit dialog call-sites, replace w/ native Svelte dialogs or remove the call-sites first, then drop plugin.
 
-## 227. `scrub_log_message` misses `BEGIN ED25519 PRIVATE KEY` (and DSA)
-- **Where:** [diagnostics/mod.rs:347-350](../src-tauri/src/diagnostics/mod.rs#L347-L350)
-- **Symptom:** Three PEM headers guarded; Ed25519 (PKCS#8) + DSA pass through to renderer unredacted. Real risk b/c Ed25519 is most common SSH key type now.
-- **Fix:** Add `|| out.contains("BEGIN ED25519 PRIVATE KEY") || out.contains("BEGIN DSA PRIVATE KEY")`, OR single regex `BEGIN .* PRIVATE KEY`.
+## 229. ~~`opener:default` too broad~~ — VERIFIED SHIPPED 2026-05-25
+- [capabilities/default.json](../src-tauri/capabilities/default.json) already lists the 3 explicit `opener:allow-*` perms; no `opener:default`. Closes #31 + #229.
 
-## 228. `dialog:default` capability + plugin registered, never called from frontend
-- **Where:** [capabilities/default.json:13](../src-tauri/capabilities/default.json#L13) + [lib.rs:1758](../src-tauri/src/lib.rs#L1758) + [Cargo.toml:20](../src-tauri/Cargo.toml#L20)
-- **Symptom:** Native OS dialog plugin exposed to renderer with zero usage — XSS payload could call into OS dialogs. All dialogs are custom Svelte components.
-- **Fix:** Remove `tauri_plugin_dialog::init()`, `"dialog:default"` cap entry, and `tauri-plugin-dialog` Cargo dep. Run `cargo check`.
-
-## 229. `opener:default` too broad — only `openUrl`/`openPath`/`revealItemInDir` used
-- **Where:** [capabilities/default.json:12](../src-tauri/capabilities/default.json#L12)
-- **Symptom:** Full opener plugin surface granted; only 3 functions in actual use across 6 components.
-- **Fix:** Replace `"opener:default"` with explicit `"opener:allow-open-url"`, `"opener:allow-open-path"`, `"opener:allow-reveal-item-in-dir"`. Complements #31.
-
-## 230. `core:default` bundles unused `core:path`, `core:app`, `core:menu`, `core:resources`
-- **Where:** [capabilities/default.json:7](../src-tauri/capabilities/default.json#L7)
-- **Symptom:** Zero frontend imports of `@tauri-apps/api/path` or `@tauri-apps/api/app`; no menu/tray API usage.
-- **Fix:** Enumerate `core:default` expansion; pin to explicit `core:event:default` + `core:window:default` only. Drops 4 unused sub-caps. Extends #30.
+## 230. ~~`core:default` bundles unused~~ — VERIFIED SHIPPED 2026-05-25
+- [capabilities/default.json](../src-tauri/capabilities/default.json) pinned to `core:event:default` + `core:path:default` + `core:webview:default` + `core:window:default` + 4 explicit `core:window:allow-*`. `core:app`/`core:menu`/`core:resources` excluded. `core:path:default` retained — `Settings.svelte` uses `appConfigDir`/`appLogDir`. Closes #30 + #230.
 
 ## 231. Cargo.toml version regex not anchored to `[package]` section
 - **Where:** [scripts/release.ps1:34](../scripts/release.ps1#L34), [scripts/bump.ps1:57-63](../scripts/bump.ps1#L57-L63)
@@ -744,54 +683,26 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Symptom:** Local pack regenerates feed files; if accidentally shipped from local rather than GitHub-uploaded, clients hit stale packages.
 - **Fix:** Verify `git ls-files Releases/` empty; add comment in release.ps1 that local files are pack-state only, canonical feed is GitHub asset.
 
-## 234. `mutateStreaming` O(n) message scan + array realloc per streaming token
-- **Where:** [assistant.svelte.ts:580](../src/lib/state/assistant.svelte.ts#L580)
-- **Symptom:** Hundreds of tokens/sec during streaming → hundreds of full message-array `.map(...)` + replace per turn. Frame drops in long convos. (Re-cite of Wave 2 #146 with HIGH-severity bump.)
-- **Fix:** Cache `streamingMsgIdx` on `send()`, direct `messages[idx] = fn(messages[idx])`; reset in `onDone`.
-
-## 237. `thinking_effort` raw value log-injection vector
-- **Where:** [assistant/mod.rs:1041-1043,1273-1276](../src-tauri/src/assistant/mod.rs#L1041-L1043)
-- **Symptom:** Newlines/ANSI in renderer-supplied string land in log stream unescaped (CLI arg itself safe — normalized).
-- **Fix:** Log `level` post-normalize, not raw `effort`.
-
-## 238. `scrubUser` concrete Rust-side gaps in DiagBus emit
-- **Where:** [auto_sync/watch.rs:71](../src-tauri/src/sync/auto_sync/watch.rs#L71); [diagnostics/mod.rs](../src-tauri/src/diagnostics/mod.rs)
-- **Symptom:** Concrete site for #8 — `watch refused (ignored path): C:\Users\<username>\...` flows through DiagBus unredacted.
-- **Fix:** Apply Rust-side `scrub_user()` in `LogForwarder` or at DiagBus emit. Completes #8.
+## 234. ~~Re-cite of #146~~ — VERIFIED SHIPPED (see #146).
 
 ## 239. `SESSION_PIDS`/`SESSION_STOPPED` `.lock().ok()` — re-confirmed
 - **Where:** [assistant/mod.rs:44,51](../src-tauri/src/assistant/mod.rs#L44)
 - **Note:** Dup of #63; T+U confirmed STILL present in v0.4.13. Promote priority.
 
-## 240. `aborted_shrunk()` mutex-poison silently returns empty vec
-- **Where:** [auto_sync.rs:1227](../src-tauri/src/sync/auto_sync.rs#L1227)
-- **Symptom:** Poison → empty vec → rebaseline banner never shown.
-- **Fix:** `.unwrap_or_else(|p| { log::error!(...); p.into_inner() })`.
+## 240. ~~`aborted_shrunk()` mutex-poison silently returns empty vec~~ — VERIFIED SHIPPED
+- [auto_sync.rs:1328-1334](../src-tauri/src/sync/auto_sync.rs#L1328-L1334) — explicit `Err(p)` arm logs + recovers via `p.into_inner().clone()`.
 
-## 241. MCP bridge socket `set_read_timeout`/`set_write_timeout` swallowed
-- **Where:** [mcp_server.rs:323,324,411,412](../src-tauri/src/assistant/mcp_server.rs#L323)
-- **Symptom:** `let _ = stream.set_read_timeout(...)` → hung remote_bash blocks stdio thread indefinitely.
-- **Fix:** Log warn on failure at minimum.
+## 241. ~~MCP bridge socket timeouts swallowed~~ — VERIFIED SHIPPED
+- [mcp_server.rs:35-40](../src-tauri/src/assistant/mcp_server.rs#L35-L40) — `set_read_timeout`/`set_write_timeout` failures now `log::warn!` with label.
 
-## 242. MCP bridge `stream.flush().ok()` drops flush errors
-- **Where:** [mcp_server.rs:328,418](../src-tauri/src/assistant/mcp_server.rs#L328)
-- **Symptom:** Broken pipe → followup `read_line` blocks → misleading "bridge closed without response" instead of true write failure.
-- **Fix:** Propagate via `.map_err(|e| format!("bridge flush: {e}"))?`.
+## 242. ~~MCP bridge `stream.flush().ok()` drops errors~~ — VERIFIED SHIPPED
+- 4 bridge flush sites ([mcp_server.rs:407, 590, 676, 774](../src-tauri/src/assistant/mcp_server.rs#L407)) all now `.map_err(|e| format!("bridge flush: {e}"))?`.
 
-## 243. STT `serde_json::from_slice(&bytes).unwrap_or_default()` accepts corrupt config
-- **Where:** [stt/mod.rs:77](../src-tauri/src/stt/mod.rs#L77)
-- **Symptom:** Partial-write/crash → config silently wiped to defaults; API key + model selection lost w/o warning.
-- **Fix:** `.unwrap_or_else(|e| { log::warn!("stt-config parse failed ({e}), using defaults"); default })`.
+## 243. ~~STT `from_slice().unwrap_or_default()` accepts corrupt config~~ — VERIFIED SHIPPED
+- [stt/mod.rs:138-141](../src-tauri/src/stt/mod.rs#L138-L141) — parse failure now logs `stt-config parse failed ({e}), using defaults` before defaulting.
 
-## 244. `edit_trail.rs read_raw .ok()?` destroys trail history on SFTP error
-- **Where:** [edit_trail.rs:81](../src-tauri/src/sync/edit_trail.rs#L81)
-- **Symptom:** Download error → returns None → `append` overwrites file with only the new entry, silently destroying all prior trail history.
-- **Fix:** Distinguish "not found" (normal first-write) from "download failed" (skip write cycle).
-
-## 245. Terminal PTY session ID `unwrap_or(0)` → duplicate-key on clock skew
-- **Where:** [terminal/mod.rs:186](../src-tauri/src/terminal/mod.rs#L186)
-- **Symptom:** Pre-1970 clock skew (VM, embedded) yields `"term-0"` deterministic key; second spawn overwrites first → leaked PTY + reader thread.
-- **Fix:** Use `AtomicU64` counter, or random fallback. Add existence check before insert.
+## 244. ~~`edit_trail.rs` destroys trail on SFTP error~~ — VERIFIED SHIPPED
+- [edit_trail.rs:56-67](../src-tauri/src/sync/edit_trail.rs#L56-L67) — `ReadOutcome` enum (`Present`/`Absent`/`Error`); error arm logs + early-returns to preserve remote history.
 
 ## 246. Rate-limit critical bypass has no secondary ceiling
 - **Where:** [diagnostics/mod.rs:415-425](../src-tauri/src/diagnostics/mod.rs#L415-L425)
@@ -813,10 +724,8 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Symptom:** Persistent background serialization+emit even when Diagnostics tab closed.
 - **Fix:** `diag_active: AtomicBool` toggled by subscribe/unsubscribe; OR pull model via `diag_get_state`.
 
-## 250. STT console.debug calls — #22 partial regression
-- **Where:** [stt.svelte.ts:104,216,280](../src/lib/state/stt.svelte.ts#L104)
-- **Symptom:** ISSUES #22 listed `:104,:202,:266` as shipped. Current lines `104,216,280` suggest fix missed or line numbers shifted.
-- **Fix:** Verify; remove or gate on `dev` flag.
+## 250. ~~STT console.debug calls~~ — VERIFIED SHIPPED 2026-05-25
+- Re-grep of `src/lib/state/stt.svelte.ts` returns zero `console.*` matches. Both #22 and #250 closed.
 
 ## 251. Release staging copy hardcoded to 2 files — DLL/redistributable gap
 - **Where:** [scripts/release.ps1:126-130](../scripts/release.ps1#L126-L130)
@@ -861,10 +770,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Where:** [drift_scanner.rs:384,422,445](../src-tauri/src/sync/drift_scanner.rs#L384)
 - **Symptom:** `get_remote_sha1` calls SSH exec serially within scan loop. Up to 10×RTT wall time per scan.
 - **Fix:** Collect into batch; `FuturesUnordered` bounded by `hash_budget`.
-
-## 260. Dead function `scanAgeLabel()`
-- **Where:** [SyncPage.svelte:201](../src/lib/components/sync/SyncPage.svelte#L201)
-- **Fix:** Delete L201-207.
 
 ## 261. setTimeout handles not stored in AssistantHeader pulse, ActivityFeed flash, MessageBubble copy
 - **Where:** [AssistantHeader.svelte:43](../src/lib/components/assistant/AssistantHeader.svelte#L43), [ActivityFeed.svelte:362](../src/lib/components/activity/ActivityFeed.svelte#L362), [MessageBubble.svelte:242](../src/lib/components/assistant/MessageBubble.svelte#L242)

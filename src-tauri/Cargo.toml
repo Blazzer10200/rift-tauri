@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.4.29-alpha"
+version = "0.4.30-alpha"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -97,11 +97,6 @@ base64 = "0.22"
 # russh::keys; rand 0.10 provides `rand::rng()` for `PrivateKey::random`
 # (russh 0.60 dropped the rand_core 0.6 OsRng path in favor of rand_core 0.10).
 rand = "0.10"
-
-# S37: embedded terminal (Path A — generic PTY-backed shell panel; user types
-# `claude` themselves to launch Claude Code, no SDK / API-key plumbing on our
-# side). WezTerm-backed, ConPTY on Win10+. v0.9.0 released 2026-02.
-portable-pty = "0.9"
 
 # Phase 6 (#9.3 / #37 / #38): OS-keychain bridge. Windows Credential Manager,
 # macOS Keychain, Linux Secret Service. Migrates bridge_token + api_key out of

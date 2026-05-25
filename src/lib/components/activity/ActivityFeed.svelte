@@ -4,14 +4,20 @@
     RefreshCw, Download, Trash2, AlertTriangle, Check,
     GitBranch, Network, Lock, XCircle, Info, Pause, Play,
     ChevronRight, ChevronDown, Copy, Folder, ExternalLink, Activity as ActivityIcon,
+    Stethoscope,
   } from "lucide-svelte";
   import { connection, type ActivityRow, type ActivityKind } from "../../state/connection.svelte";
+  import { diagnostics } from "../../state/diagnostics.svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { fmtRelative } from "../../utils/time";
   import PageToolbar from "../shell/PageToolbar.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
+  import Diagnostics from "../diagnostics/Diagnostics.svelte";
   import { syncPage } from "../../state/sync-page.svelte";
+
+  type Tab = "activity" | "diagnostics";
+  let tab = $state<Tab>("activity");
 
   type Group = "all" | "sync" | "pull" | "delete" | "drift" | "conflict" | "bridge" | "block" | "error" | "system";
 
@@ -404,38 +410,80 @@
 </script>
 
 <section class="feed">
-  <PageHeader
-    icon={ActivityIcon}
-    title="Activity"
-    subtitle="{connection.activityFeed.length} event{connection.activityFeed.length === 1 ? '' : 's'}"
-    tone="info"
-  >
-    {#snippet actions()}
-      <button
-        class="btn sm"
-        class:warn={paused}
-        class:ghost={!paused}
-        type="button"
-        onclick={togglePause}
-        title={paused ? "Resume feed" : "Pause feed"}
-      >
-        {#if paused}
-          <Play size={11}/> Resume
-        {:else}
-          <Pause size={11}/> Pause
-        {/if}
-      </button>
-      <button
-        class="btn ghost sm"
-        type="button"
-        onclick={() => connection.clearActivity()}
-        disabled={connection.activityFeed.length === 0}
-        title="Clear feed"
-      >
-        <Trash2 size={11}/> Clear
-      </button>
-    {/snippet}
-  </PageHeader>
+  <header class="af-head" data-tone="info">
+    <div class="af-head-l">
+      <span class="head-icon">
+        {#if tab === "activity"}<ActivityIcon size={14}/>{:else}<Stethoscope size={14}/>{/if}
+      </span>
+      <div class="af-tabs" role="tablist" aria-label="Activity views">
+        <button
+          type="button" role="tab"
+          aria-selected={tab === "activity"}
+          data-active={tab === "activity"}
+          onclick={() => (tab = "activity")}
+        >
+          Activity
+          <span class="af-tab-count" data-zero={connection.activityFeed.length === 0}>{connection.activityFeed.length}</span>
+        </button>
+        <button
+          type="button" role="tab"
+          aria-selected={tab === "diagnostics"}
+          data-active={tab === "diagnostics"}
+          onclick={() => (tab = "diagnostics")}
+        >
+          Diagnostics
+          <span class="af-tab-count" data-zero={diagnostics.events.length === 0}>{diagnostics.events.length}</span>
+        </button>
+      </div>
+    </div>
+    <div class="af-head-r">
+      {#if tab === "activity"}
+        <button
+          class="btn sm"
+          class:warn={paused}
+          class:ghost={!paused}
+          type="button"
+          onclick={togglePause}
+          title={paused ? "Resume feed" : "Pause feed"}
+        >
+          {#if paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
+        </button>
+        <button
+          class="btn ghost sm"
+          type="button"
+          onclick={() => connection.clearActivity()}
+          disabled={connection.activityFeed.length === 0}
+          title="Clear feed"
+        >
+          <Trash2 size={11}/> Clear
+        </button>
+      {:else}
+        <button
+          class="btn sm"
+          class:warn={diagnostics.paused}
+          class:ghost={!diagnostics.paused}
+          type="button"
+          onclick={() => diagnostics.togglePause()}
+          title={diagnostics.paused ? "Resume capture" : "Pause capture"}
+        >
+          {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
+        </button>
+        <button
+          class="btn ghost sm"
+          type="button"
+          onclick={() => diagnostics.clear()}
+          disabled={diagnostics.events.length === 0}
+          title="Clear captured events"
+        >
+          <Trash2 size={11}/> Clear
+        </button>
+      {/if}
+    </div>
+  </header>
+
+  {#if tab === "diagnostics"}
+    <Diagnostics embedded />
+  {:else}
 
   <PageToolbar>
     <div class="segctl">
@@ -634,6 +682,7 @@
   {#if actionFlash}
     <div class="action-flash mono">{actionFlash}</div>
   {/if}
+  {/if}
 </section>
 
 {#snippet detailStrip(r: ActivityRow, variant: Variant)}
@@ -696,6 +745,80 @@
     color: var(--fg);
     position: relative;
   }
+
+  /* Unified header — replaces PageHeader on this page so the tabs ARE the
+     title. Tone stripe + sizing mirrors PageHeader so it blends w/ sibling
+     pages (Sync/Files/Settings) at the workspace boundary. */
+  .af-head {
+    position: relative;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    padding: 8px 18px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+    min-height: 46px;
+  }
+  .af-head::after {
+    content: "";
+    position: absolute;
+    left: 0; right: 0; bottom: -1px;
+    height: 2px;
+    background: var(--info);
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  .af-head-l { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+  .af-head-r { display: flex; align-items: center; gap: 8px; }
+  .af-head .head-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--info);
+    transition: color 160ms;
+  }
+
+  .af-tabs {
+    display: inline-flex;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+    gap: 1px;
+  }
+  .af-tabs button {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: transparent; border: 0;
+    color: var(--fg-muted);
+    font: inherit; font-size: var(--fs-sm); font-weight: 500;
+    padding: 4px 11px; height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 120ms, background 120ms;
+    letter-spacing: -0.01em;
+  }
+  .af-tabs button:hover { color: var(--fg); }
+  .af-tabs button[data-active="true"] {
+    color: var(--fg);
+    background: color-mix(in oklch, var(--info) 18%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--info) 28%, transparent);
+  }
+  .af-tabs button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .af-tab-count {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    min-width: 16px;
+    text-align: center;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    color: var(--fg-muted);
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+  }
+  .af-tabs button[data-active="true"] .af-tab-count {
+    background: color-mix(in oklch, var(--info) 22%, transparent);
+    color: var(--info);
+  }
+  .af-tab-count[data-zero="true"] { opacity: 0.45; }
 
   .segctl {
     display: inline-flex; padding: 2px;

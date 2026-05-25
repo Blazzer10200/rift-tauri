@@ -85,9 +85,7 @@ impl SftpClient {
             .await
             .map_err(|e| format!("write probe create failed under {root}: {e}"))?;
         if let Err(e) = self.sftp.remove_file(&probe).await {
-            eprintln!(
-                "[rift] write probe cleanup left {probe} on server (non-fatal): {e}"
-            );
+            log::warn!("write probe cleanup left {probe} on server (non-fatal): {e}");
         }
         Ok(())
     }}

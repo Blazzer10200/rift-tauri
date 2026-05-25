@@ -3,13 +3,11 @@
 // Chat is the default workspace.
 
 export type WorkspaceId =
-  | "chat" | "sync" | "files" | "conflicts" | "diagnostics"
-  | "terminal" | "activity"
+  | "chat" | "sync" | "files" | "activity"
   | "settings";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
-  "chat", "sync", "files", "conflicts", "diagnostics",
-  "terminal", "activity",
+  "chat", "sync", "files", "activity",
   "settings",
 ] as const;
 
@@ -32,6 +30,23 @@ const LEGACY_KEYS_TO_SWEEP = [
   "rift.ui.maximized.v1",
   "rift.ui.preset-picked.v1",
   "rift.ui.dock-accordion.v1",
+  // Terminal workspace removed 2026-05-25 — sweep its orphaned keys.
+  "rift.terminal.open",
+  "rift.terminal.height",
+  "rift.terminal.defaultShell",
+  "rift.terminal.fontSize",
+  "rift.terminal.fontFamily",
+  "rift.terminal.fontFamilyCustom",
+  "rift.terminal.scrollback",
+  "rift.terminal.cursorStyle",
+  "rift.terminal.cursorBlink",
+  "rift.terminal.bellStyle",
+  "rift.terminal.copyOnSelect",
+  "rift.terminal.rightClickPaste",
+  "rift.terminal.themePreset",
+  "rift.terminal.autoLaunch",
+  "rift.terminal.savedTabs",
+  "rift.terminal.activeTabIdx",
 ] as const;
 
 const DISABLED: ReadonlySet<WorkspaceId> = new Set();
