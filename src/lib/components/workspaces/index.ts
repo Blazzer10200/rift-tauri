@@ -1,15 +1,12 @@
 import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
-  MessageSquare, RefreshCcw, FolderOpen, AlertTriangle, Stethoscope,
-  Terminal, Activity, Settings as SettingsIcon,
+  MessageSquare, RefreshCcw, FolderOpen,
+  Activity, Settings as SettingsIcon,
 } from "lucide-svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SyncPage from "../sync/SyncPage.svelte";
 import TwoPane from "../browser/TwoPane.svelte";
-import ConflictsPage from "../conflicts/ConflictsPage.svelte";
-import Diagnostics from "../diagnostics/Diagnostics.svelte";
-import TerminalPanel from "../terminal/TerminalPanel.svelte";
 import ActivityFeed from "../activity/ActivityFeed.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
 import { connection } from "$lib/state/connection.svelte";
@@ -39,12 +36,9 @@ export type WorkspaceDef = {
 
 export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "1" },
-  sync:        { component: SyncPage,          title: "Sync",        icon: RefreshCcw,    kbd: "2" },
-  files:       { component: TwoPane,           title: "Files",       icon: FolderOpen,    kbd: "3" },
-  conflicts:   { component: ConflictsPage,     title: "Conflicts",   icon: AlertTriangle, kbd: "4",
+  sync:        { component: SyncPage,          title: "Sync",        icon: RefreshCcw,    kbd: "2",
                  getCount: () => connection.conflictCount, getTone: "danger" },
-  diagnostics: { component: Diagnostics,       title: "Diagnostics", icon: Stethoscope,   kbd: "5" },
-  terminal:    { component: TerminalPanel,     title: "Terminal",    icon: Terminal,      kbd: "6" },
-  activity:    { component: ActivityFeed,      title: "Activity",    icon: Activity,      kbd: "7" },
-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "8" },
+  files:       { component: TwoPane,           title: "Files",       icon: FolderOpen,    kbd: "3" },
+  activity:    { component: ActivityFeed,      title: "Activity",    icon: Activity,      kbd: "4" },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "5" },
 };

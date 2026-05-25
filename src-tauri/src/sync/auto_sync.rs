@@ -816,7 +816,7 @@ impl AutoSyncEngine {
     /// scan as ToPush but the Push button did nothing. Pull was symmetric;
     /// Push wasn't. This restores parity.
     pub fn force_push_now(self: &Arc<Self>) {
-        eprintln!("[rift] force_push_now: entry");
+        log::debug!("force_push_now: entry");
         let ct = CancellationToken::new();
         let ct_for_task = ct.clone();
         let my_nonce = self.cancel_nonce.fetch_add(1, Ordering::Relaxed);
@@ -825,13 +825,13 @@ impl AutoSyncEngine {
         }
         let engine = self.clone();
         let h = tokio::spawn(async move {
-            eprintln!("[rift] force_push_now: task spawned");
+            log::debug!("force_push_now: task spawned");
             diagnostics::emit(
                 DiagStage::DriftScanStart,
                 DiagLevel::Info,
                 "push-now",
             );
-            eprintln!("[rift] force_push_now: drift_scan_start emitted");
+            log::debug!("force_push_now: drift_scan_start emitted");
 
             // Promote ToPush drift entries (from last scan) into the dirty
             // queue. They're idempotent — flush_all_now's lazy-pop handles
@@ -839,7 +839,7 @@ impl AutoSyncEngine {
             // since scan. Without this step a freshly-connected session can
             // see "78 to push" in the scan and dispatch zero on Push click.
             let promoted = engine.promote_scan_pushes_to_dirty();
-            eprintln!("[rift] force_push_now: promoted {promoted} from scan cache, dirty queue size = {}",
+            log::debug!("force_push_now: promoted {promoted} from scan cache, dirty queue size = {}",
                 engine.dirty.len());
 
             // Auto-scan fallback — if after the cache-promote pass both the
@@ -847,10 +847,10 @@ impl AutoSyncEngine {
             // an inline drift scan so Push can find files that exist locally
             // but never went through the watcher. Parity w/ force_pull_now.
             if engine.dirty.is_empty() && promoted == 0 {
-                eprintln!("[rift] force_push_now: dirty empty + cache empty → running inline scan");
+                log::debug!("force_push_now: dirty empty + cache empty → running inline scan");
                 let folders = engine.folders_clone();
                 if folders.is_empty() {
-                    eprintln!("[rift] force_push_now: no watched folders — nothing to scan");
+                    log::warn!("force_push_now: no watched folders — nothing to scan");
                 } else {
                     let targets: Vec<crate::sync::drift_scanner::FolderTarget> = folders
                         .iter()
@@ -865,12 +865,12 @@ impl AutoSyncEngine {
                     let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap))
                         .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
                     let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
-                    eprintln!("[rift] force_push_now: inline scan returned {} entries (cancelled={})",
+                    log::debug!("force_push_now: inline scan returned {} entries (cancelled={})",
                         result.entries.len(), result.cancelled);
                     if !result.cancelled {
                         engine.cache_scan_entries(result.entries.clone());
                         let re_promoted = engine.promote_scan_pushes_to_dirty();
-                        eprintln!("[rift] force_push_now: after inline scan promoted {re_promoted}");
+                        log::debug!("force_push_now: after inline scan promoted {re_promoted}");
                     }
                 }
             }
@@ -890,7 +890,7 @@ impl AutoSyncEngine {
             let (dispatched, ok, fail) = engine.flush_all_now(Some(ct_for_task.clone())).await;
             let cancelled = ct_for_task.is_cancelled();
             let elapsed_ms = started.elapsed().as_millis() as u64;
-            eprintln!("[rift] force_push_now: flush_all_now returned dispatched={dispatched} ok={ok} fail={fail} cancelled={cancelled} elapsed_ms={elapsed_ms}");
+            log::debug!("force_push_now: flush_all_now returned dispatched={dispatched} ok={ok} fail={fail} cancelled={cancelled} elapsed_ms={elapsed_ms}");
 
             // #99: invalidate scan cache only when REAL work happened.
             // Pre-fix gated on `dispatched > 0` which includes Requeued
@@ -900,7 +900,7 @@ impl AutoSyncEngine {
             // the post-push state actually diverges from the cached scan.
             if !cancelled && ok > 0 {
                 engine.cache_scan_entries(Vec::new());
-                eprintln!("[rift] force_push_now: cleared scan cache (was stale post-push)");
+                log::debug!("force_push_now: cleared scan cache (was stale post-push)");
             }
             diagnostics::emit_with_fields(
                 DiagStage::DriftScanResult,
@@ -1274,7 +1274,7 @@ impl AutoSyncEngine {
                     }))
                 }).collect()
             );
-            eprintln!("[rift] reconcile complete: to_push={to_push} to_pull={to_pull} to_delete={to_delete} to_delete_remote={to_delete_remote} conflicts={conflicts} by_resource={breakdown}");
+            log::info!("reconcile complete: to_push={to_push} to_pull={to_pull} to_delete={to_delete} to_delete_remote={to_delete_remote} conflicts={conflicts} by_resource={breakdown}");
 
             // Reconcile is read-only: it refreshes the cached scan result.
             // User must click Push Now / Pull Now to act on the findings.
@@ -1691,7 +1691,7 @@ impl AutoSyncEngine {
     /// local-delete circuit breaker fires before dispatch. Pull progress
     /// surfaces via RemotePullStart/Done into the activity feed.
     pub fn force_pull_now(self: &Arc<Self>) {
-        eprintln!("[rift] force_pull_now: entry");
+        log::debug!("force_pull_now: entry");
         // Register a cancellation token so the modal's Cancel button can stop
         // the operation mid-flight. Replaces any prior token — kick_drift_reconcile
         // sharing the same slot means the user's "cancel" always hits the latest
@@ -1704,7 +1704,7 @@ impl AutoSyncEngine {
         }
         let engine = self.clone();
         let h = tokio::spawn(async move {
-            eprintln!("[rift] force_pull_now: task spawned");
+            log::debug!("force_pull_now: task spawned");
             diagnostics::emit(
                 DiagStage::DriftScanStart,
                 DiagLevel::Info,
@@ -1943,7 +1943,7 @@ impl AutoSyncEngine {
                 // path), so preserve them across the cache wipe so the Sync
                 // modal can still show pending remote-deletes after Pull Now.
                 engine.cache_scan_entries(retained_remote_deletes);
-                eprintln!("[rift] force_pull_now: cleared scan cache (kept {to_delete_remote} ToDeleteRemote entries)");
+                log::debug!("force_pull_now: cleared scan cache (kept {to_delete_remote} ToDeleteRemote entries)");
             }
             // #103: subtract blocked deletes from the to_delete total before
             // emitting so the UI sees dispatched vs blocked separately.

@@ -93,7 +93,6 @@
     try {
       const jobs = await invoke<[string, string][]>("bootstrap_list_files", {
         serverKey,
-        localRoot,
       });
       if (jobs.length === 0) {
         total = 0; done = 0; failed = 0;

@@ -354,10 +354,6 @@ impl<'a> DriftScanner<'a> {
             // some listing paths (worker SFTP) inflate the count otherwise.
             let listing_files = remote_hits.iter().filter(|r| !r.is_dir).count();
             if baseline_n >= 10 && listing_files * 2 < baseline_n {
-                eprintln!(
-                    "[rift] drift scan: suspicious shrink for resource {} (baseline {} files, listing returned {} files) — aborting folder to prevent phantom deletes",
-                    f.resource_name, baseline_n, listing_files,
-                );
                 crate::diagnostics::emit_with_fields(
                     crate::diagnostics::DiagStage::DriftScanProgress,
                     crate::diagnostics::DiagLevel::Warn,

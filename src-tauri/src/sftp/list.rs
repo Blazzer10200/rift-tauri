@@ -386,10 +386,6 @@ async fn list_via_exec(
     }
     let total_skipped = skipped_short + skipped_bad_size + skipped_by_ext;
     if total_skipped > 0 || raw_lines != out.len() as u32 {
-        eprintln!(
-            "[rift] list_via_exec {root}: raw_lines={raw_lines} emitted={} skipped_short={skipped_short} skipped_bad_size={skipped_bad_size} skipped_by_ext={skipped_by_ext} samples={samples_skipped:?}",
-            out.len(),
-        );
         crate::diagnostics::emit_with_fields(
             crate::diagnostics::DiagStage::RemoteScanResult,
             if total_skipped > 0 { crate::diagnostics::DiagLevel::Warn } else { crate::diagnostics::DiagLevel::Debug },

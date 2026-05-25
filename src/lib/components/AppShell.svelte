@@ -4,6 +4,8 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { connection, type ServerProfile } from "../state/connection.svelte";
   import { dialogs } from "../state/dialogs.svelte";
+  import { commandPalette } from "../state/command-palette.svelte";
+  import CommandPalette from "./dialogs/CommandPalette.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
   import ActivityToast from "./ActivityToast.svelte";
@@ -158,7 +160,7 @@
 
   function onGlobalKey(e: KeyboardEvent) {
     // Alt+1..9 → jump to chat tab N (1-indexed). Only fires inside the Chat
-    // workspace so it doesn't hijack from a focused Terminal / Files surface.
+    // workspace so it doesn't hijack from a focused Files / Activity surface.
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)
         && workspace.activeId === "chat") {
       e.preventDefault();
@@ -201,18 +203,7 @@
         return;
       }
     }
-    // Ctrl+` → switch to Terminal workspace.
-    if (!e.shiftKey && !e.altKey && (e.key === "`" || e.key === "~")) {
-      e.preventDefault();
-      workspace.setActive("terminal");
-      return;
-    }
     const k = e.key.toLowerCase();
-    if (e.shiftKey && k === "d") {
-      e.preventDefault();
-      workspace.setActive("diagnostics");
-      return;
-    }
     // Ctrl+0 → return to Chat workspace (was "close right pane" in v0.4.1;
     // closing has no meaning under the workspace shell).
     if (!e.shiftKey && e.key === "0") {
@@ -231,7 +222,9 @@
     }
     if (e.shiftKey) return;
     if (e.key === ",") { e.preventDefault(); gotoSettings(); return; }
-    if (k === "p") { e.preventDefault(); gotoSettings(); return; }
+    // Ctrl+P / Ctrl+K → global command palette. Past Ctrl+P opened Settings;
+    // Ctrl+, still covers that path.
+    if (k === "p" || k === "k") { e.preventDefault(); commandPalette.show(); return; }
     if (k === "n") { e.preventDefault(); openAddServer(); return; }
   }
 
@@ -440,6 +433,8 @@
   <UpdateToast />
 
   <ActivityToast />
+
+  <CommandPalette onAddServer={() => openAddServer(null)} />
 
 </div>
 

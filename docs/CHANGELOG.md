@@ -2,6 +2,30 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.30-alpha — 2026-05-25 — rail simplification + command palette + observability cleanup
+
+Two-track batch: rail trim + command palette on the UI side; eprintln-to-log conversion + frontend IPC tidy + heavy ISSUES.md hygiene on the maintenance side. Closes 20+ audit items that were already shipped quietly but never marked.
+
+**Terminal removed end-to-end.** [src/lib/components/terminal/](src/lib/components/terminal/) (5 files) + [src/lib/state/terminal.svelte.ts](src/lib/state/terminal.svelte.ts) deleted. [src-tauri/src/terminal/mod.rs](src-tauri/src/terminal/mod.rs) deleted. `portable-pty = "0.9"` dropped from `Cargo.toml`. 6 `term_*` Tauri commands + `TerminalState::default()` + `on_window_event` kill hook removed from [lib.rs](src-tauri/src/lib.rs). 16 `rift.terminal.*` localStorage keys added to `LEGACY_KEYS_TO_SWEEP`.
+
+**Workspace rail 8 → 5.** `WorkspaceId` union now `chat|sync|files|activity|settings`. `Conflicts` entry removed (badge migrated to the Sync icon via `getCount: () => connection.conflictCount, getTone: "danger"`). `Diagnostics` entry removed (folded into Activity as a tab). `Terminal` entry removed. Activity kbd `4`, Settings kbd `5`.
+
+**Diagnostics → Activity tab.** [ActivityFeed.svelte](src/lib/components/activity/ActivityFeed.svelte) gains a unified header row (tabs + actions on one bar, info-blue stripe, segmented pill). [Diagnostics.svelte](src/lib/components/diagnostics/Diagnostics.svelte) gains an `embedded?: boolean` prop that skips its own PageHeader when embedded. Palette switches icon between ActivityIcon / Stethoscope per active tab.
+
+**Settings.svelte.** Terminal section (~305L of template + dead CSS) stripped (1505L → 1436L). Terminal-store imports, FONT/CURSOR/BELL opt arrays, `confirmResetTerm`, `shellDdOpen`/`fontDdOpen`, `term_list_shells` invoke all gone. Shortcuts updated `1…7 → 1…5`. Hint copy: "right-edge" → "left-edge".
+
+**AppShell.svelte.** `Ctrl+\`` (terminal) + `Ctrl+Shift+D` (diagnostics) handlers removed. `Ctrl+P` / `Ctrl+K` now open the command palette (`Ctrl+,` still opens Settings).
+
+**Command palette.** New [src/lib/state/command-palette.svelte.ts](src/lib/state/command-palette.svelte.ts) (`open`/`close`/`targetSettingsSection`/`openTick`) + [src/lib/components/dialogs/CommandPalette.svelte](src/lib/components/dialogs/CommandPalette.svelte). 4 groups: Go to (5 workspaces + 6 Settings deep-links) · Servers · Recent chats (top 8) · Actions (new chat, add server, pause diag, clear feed). Fuzzy filter: exact-substring wins, subsequence fallback. Keyboard nav ↑↓ Enter Esc. `Settings.svelte` watches `commandPalette.targetSettingsSection` `$effect` and pulls to the requested section. Mounted in `AppShell` next to `UpdateToast`. CDP-verified live.
+
+**Observability cleanup (#225).** 14 `eprintln!` in [sync/auto_sync.rs](src-tauri/src/sync/auto_sync.rs) (force_push_now / force_pull_now / reconcile) → `log::debug!` (most) + `log::info!` (reconcile summary) + `log::warn!` (no-watched-folders). Drift-scanner duplicate `eprintln!` deleted (the adjacent `emit_with_fields` already carried the payload). Same redundant-`eprintln!` cleanup in [sftp/list.rs](src-tauri/src/sftp/list.rs) (kept `emit_with_fields`). [sftp/ops.rs](src-tauri/src/sftp/ops.rs) probe-cleanup `eprintln!` → `log::warn!`. Test-only `eprintln!` blocks left intact (idiomatic).
+
+**Frontend IPC tidy (#109).** [Bootstrap.svelte](src/lib/components/dialogs/Bootstrap.svelte) — dropped the dead `localRoot` field from the `bootstrap_list_files` IPC payload (backend dropped the `_local_root` param earlier in the v0.4.28 split; frontend wasn't updated then).
+
+**ISSUES.md hygiene.** Pruned 7 stale Terminal blocks (#164, #165, #166, #167, #211, #245) + 2 `scanAgeLabel` blocks (#202, #260) — code already gone. Marked 20+ items VERIFIED SHIPPED with citation lines: #30, #31, #96, #99, #107, #109, #115, #135, #146, #147, #148, #149, #221, #222, #223, #224, #226, #227, #229, #230, #234, #237, #238, #240, #241, #242, #243, #244, #250. Active-work board collapsed Wave-2 frontend cluster + Wave-3 backend security HIGHs (both shipped). #228 re-scoped (dialog plugin still has 5 production sites). Hot-file sizes refreshed (assistant.svelte.ts 2320 → 3355L is now the worst offender).
+
+**Verify.** `svelte-check` 0/0/0 (post-rail-trim, before observability edits). `cargo check` 0 errors (1 pre-existing `private_interfaces` warning on `update_service.rs::ReleaseMeta`, M7 followup). Live dev-server rebuild absorbed the Rust observability edits cleanly.
+
 ## v0.4.29-alpha — 2026-05-24 — UI polish overhaul + ask_user cross-stack + docs truth-up
 
 App-wide visual refresh on top of the v0.4.28 batch. Frontend-heavy w/ the cross-stack `ask_user` interactive-tool feature landing on both sides. Lane 2 #228 dialog-plugin claim corrected (NOT removed — 5 production sites still use it; re-scoped). No backend behavior change beyond the new IPC + MCP surface.
