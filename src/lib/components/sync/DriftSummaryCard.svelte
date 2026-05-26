@@ -2,38 +2,12 @@
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { GitBranch, CheckCircle2 } from "lucide-svelte";
-  import { syncPage, type DriftEntry, type DriftBucket } from "../../state/sync-page.svelte";
+  import { syncPage } from "../../state/sync-page.svelte";
 
-  // Group entries by resource (top-level resource name from the engine).
-  type DivergentGroup = {
-    resource: string;
-    push: number;
-    pull: number;
-    del: number;
-    delRem: number;
-    conflict: number;
-    total: number;
-  };
-
-  const groups = $derived.by<DivergentGroup[]>(() => {
-    const byResource = new Map<string, DivergentGroup>();
-    for (const e of syncPage.entries as DriftEntry[]) {
-      const g = byResource.get(e.resource_name) ?? {
-        resource: e.resource_name,
-        push: 0, pull: 0, del: 0, delRem: 0, conflict: 0, total: 0,
-      };
-      const b: DriftBucket = e.bucket;
-      if (b === "to_push") g.push++;
-      else if (b === "to_pull") g.pull++;
-      else if (b === "to_delete") g.del++;
-      else if (b === "to_delete_remote") g.delRem++;
-      else if (b === "conflict") g.conflict++;
-      else continue;
-      g.total++;
-      byResource.set(e.resource_name, g);
-    }
-    return [...byResource.values()].sort((a, b) => b.total - a.total);
-  });
+  // #200: derive from the already-grouped `syncPage.groups` rather than
+  // re-grouping `syncPage.entries` here — eliminates a parallel O(entries)
+  // pass on every drift event. Each row exposes bucket-array lengths.
+  const groups = $derived(syncPage.groups);
 
   const hasDrift = $derived(groups.length > 0);
 </script>
@@ -66,11 +40,11 @@
         >
           <span class="resource mono" title={g.resource}>{g.resource}</span>
           <span class="pips">
-            {#if g.push > 0}<span class="pip" data-tone="push" title="{g.push} to push">{g.push}↑</span>{/if}
-            {#if g.pull > 0}<span class="pip" data-tone="pull" title="{g.pull} to pull">{g.pull}↓</span>{/if}
-            {#if g.del > 0}<span class="pip" data-tone="delete" title="{g.del} local delete">{g.del}×</span>{/if}
-            {#if g.delRem > 0}<span class="pip" data-tone="delete" title="{g.delRem} remote delete">{g.delRem}⌫</span>{/if}
-            {#if g.conflict > 0}<span class="pip" data-tone="conflict" title="{g.conflict} conflict">{g.conflict}!</span>{/if}
+            {#if g.to_push.length > 0}<span class="pip" data-tone="push" title="{g.to_push.length} to push">{g.to_push.length}↑</span>{/if}
+            {#if g.to_pull.length > 0}<span class="pip" data-tone="pull" title="{g.to_pull.length} to pull">{g.to_pull.length}↓</span>{/if}
+            {#if g.to_delete.length > 0}<span class="pip" data-tone="delete" title="{g.to_delete.length} local delete">{g.to_delete.length}×</span>{/if}
+            {#if g.to_delete_remote.length > 0}<span class="pip" data-tone="delete" title="{g.to_delete_remote.length} remote delete">{g.to_delete_remote.length}⌫</span>{/if}
+            {#if g.conflict.length > 0}<span class="pip" data-tone="conflict" title="{g.conflict.length} conflict">{g.conflict.length}!</span>{/if}
           </span>
         </li>
       {/each}
