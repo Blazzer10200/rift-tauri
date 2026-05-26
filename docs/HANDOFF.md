@@ -2,39 +2,27 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## 2026-05-25 (PM) — autonomous cleanup pass (unshipped, on `main`)
+## v0.4.31-alpha — 2026-05-26 — autonomous cleanup follow-up (shipped)
 
-5 commits past v0.4.30-alpha, ALL on `main`, NOT pushed. No version bump. Updater files untouched — in-flight overhaul below still owns its diff.
-
-- `3e2795b` `0238695` `3f4e3b5` `b70fb16` `ea3d92c` — re-verification pruned ~65 stale Wave-2/3 blocks from `ISSUES.md` (815L → 484L). The tracker now reflects code. Saved 8+ reimplementations of already-shipped items (#134 tokio::join!, #231-233/251/253 release script, #258 writeln, #259 sha1 batch, etc.).
-- Real engineering (3 fixes, all `cargo check` + `npm run check` clean):
-  - **#200** `DriftSummaryCard.svelte` now consumes `syncPage.groups` instead of re-grouping `entries` (drops a parallel O(entries) pass per drift event; component is 35 lines shorter).
-  - **#248** new `diag_log_frontend_error` Tauri cmd + `src/lib/util/diag.ts` helper. 4 sites wired: `connection.svelte.ts` (connect/auto-connect/auto-reconnect) + `SyncActivityBanner.svelte` (reconnect). Frontend failures now show up in Diagnostics panel + activity feed, not just devtools console.
-  - **#249** `diag_state_pump` gated on subscriber refcount (`DiagPumpSubscribers(AtomicU64)`). Idle Rift no longer pays the 500ms collect-lock-emit cost when Diagnostics tab is closed. Refcount handles `<Diagnostics embedded />` nesting; `diagnostics.svelte.ts` `wire()`/`dispose()` manage 1:1 sub/unsub via `subscribed` flag.
-
-Pre-existing `ReleaseMeta` visibility warn in `update_service.rs` is the only `cargo check` warning, unchanged.
+Detail in CHANGELOG. Activity-feed throttle (#254), onMount→$effect migration across 3 components (#262), tracker hygiene. All CDP-verified pre-ship.
 
 ## v0.4.30-alpha — 2026-05-25 — rail trim + command palette + observability cleanup (shipped)
 
 Detail in CHANGELOG.
 
-### In-flight (unshipped) — updater overhaul 2026-05-25
+### Stashed locally — updater overhaul (awaiting two-machine apply test)
 
-Root cause of 5-10 min "Applying…" on buddy's machine: `velopack::UpdateManager::apply_updates_and_restart` spawns `Update.exe --waitPid <pid>` and returns — does NOT exit Tauri. Fix: `app.exit(0)` after `svc.apply()` in `commands/update.rs::apply_pending_update`, 150ms IPC-flush delay.
+`git stash list` → `updater-overhaul-awaiting-2machine-test`. Five files: `commands/update.rs` (`app.exit(0)` + 150ms IPC-flush), `assistant/mod.rs` (`kill_child_processes_on_exit` taskkill before exit), `update_service.rs` (delta-vs-full path log), `UpdateDialog.svelte` (`applyingHint` 20s/90s + Force-Quit button), `updates.svelte.ts` (`applyingElapsedMs` timer + `applyingHint` + `applyingStuck` + #263 singleton doc-comment).
 
-Companion changes:
-- `assistant::kill_child_processes_on_exit()` — `taskkill /F /T` tracked claude CLI children before exit so Update.exe doesn't trip on locked handles.
-- Background pre-download on launch — `updates.checkOnLaunch` auto-fires `download()`; user-initiated apply skips straight to the swap.
-- Apply-phase UX: `applyingHint` swaps copy at 20s + 90s; `applyingStuck` drives a Force-Quit dialog button.
-- Delta-vs-full path logging in `UpdateService.download`.
+Root cause of 5-10 min "Applying…" on buddy's machine: `velopack::UpdateManager::apply_updates_and_restart` spawns `Update.exe --waitPid <pid>` and returns — does NOT exit Tauri. Fix above. Ship only after a real two-machine apply test confirms the swap completes <1 min.
 
-Verified clean both stacks. NOT yet shipped — needs real two-machine apply test before bump.
+Recover: `git stash pop` → build a Setup.exe from the patched tree → install on a second machine → trigger update from v0.4.31 → time the apply phase. If clean, bump + ship via `release.ps1` as v0.4.32-alpha.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.30-alpha** shipped 2026-05-25 (rail trim + command palette + observability cleanup). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.31-alpha** shipped 2026-05-26 (autonomous cleanup follow-up). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Velopack U+00D7 fix** in `release.ps1::Convert-ToAsciiSafe` — don't remove (closed Wave-3 ship-blocker; see CHANGELOG v0.4.27).
 

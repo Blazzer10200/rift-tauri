@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
   import {
     Activity, AlertTriangle, Ban, Clock, FileWarning, FolderSync,
     GitPullRequestArrow, Lock, Network, Pause, Play, Trash2,
@@ -16,15 +15,14 @@
   let copySize = $state(0);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  onMount(() => {
+  $effect(() => {
     // Fire-and-forget: events emitted before wire() resolves are not captured.
     // Ring buffer (1000 entries) on the backend covers the gap.
     void diagnostics.wire();
-  });
-
-  onDestroy(() => {
-    diagnostics.dispose();
-    if (copyTimer) clearTimeout(copyTimer);
+    return () => {
+      diagnostics.dispose();
+      if (copyTimer) clearTimeout(copyTimer);
+    };
   });
 
   const ROW_H = 36;

@@ -126,16 +126,6 @@ Ordered by recommended attack sequence. All cross-reference detailed blocks belo
 - **Severity:** HIGH for long-term sustainability, LOW for current alpha velocity.
 - **Fix sketch:** Start small — Rust unit tests for `sync/ignore.rs` (pure logic, no I/O, easy wins), `state/sync_snapshot.rs` (serialization), `sftp/transfer.rs` atomic rename semantics (needs mock SFTP). Frontend: vitest for `stt.svelte.ts` consume/onResult/onEnd state machine, `assistant.svelte.ts` usage accumulation.
 
-## 22. `console.debug` / `console.warn` noise in production
-
-- **Where:**
-  - [src/lib/state/assistant.svelte.ts:764](../src/lib/state/assistant.svelte.ts#L764) — S105 cache-hit-ratio probe (line shifted from 564 post-S106).
-  - [src/lib/state/assistant.svelte.ts:939](../src/lib/state/assistant.svelte.ts#L939) — new `console.debug` added by S106 telemetry layer.
-  - [src/lib/state/assistant.svelte.ts:821](../src/lib/state/assistant.svelte.ts#L821) — `console.debug` for non-JSON idle stream lines.
-  - [src/lib/state/stt.svelte.ts:104, 202, 266](../src/lib/state/stt.svelte.ts#L104) — warns on routine paths (config load fail, stop fail, recognition error).
-- **Symptom:** Users w/ devtools open see scary-looking spam during normal operation.
-- **Fix sketch:** Strip the S105 probe log (it's served its purpose if cache investigation is complete). Gate routine warns behind a dev flag or downgrade to `console.debug`. Reserve `console.warn` for actionable failure modes only.
-
 ## 23. `use_full_config=true` admits broad MCP tools beyond Rift's own
 
 - **Where:** `src-tauri/src/assistant/mod.rs:1193` (per security fork — I did not re-verify line number, claim is the fork's).
@@ -396,9 +386,8 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 ## 226. ~~Broadcast bus lag silently counted~~ — VERIFIED SHIPPED
 - [diagnostics/mod.rs:481](../src-tauri/src/diagnostics/mod.rs#L481) — `log::warn!("diag bus lagged: {n} events dropped")` lands after `record_bus_lag(n)`.
 
-## 228. `dialog:default` re-scoped — plugin is in use, not dead
-- **Where:** 5 prod frontend sites use `@tauri-apps/plugin-dialog` (ProfileSetup.svelte, ServerAdd.svelte, SSHKeySetup.svelte, assistant.svelte.ts).
-- **Status:** Original "remove plugin" fix is NOT viable (investigated 2026-05-24). Re-scoped to: audit dialog call-sites, replace w/ native Svelte dialogs or remove the call-sites first, then drop plugin.
+## ~~228. `dialog:default`~~ — closed 2026-05-25 (plugin is genuinely required)
+- Audit: 4 unique callers (ProfileSetup, ServerAdd, SSHKeySetup, assistant.svelte.ts) all use `openDialog` for OS-native file/folder pickers. Cannot be replaced w/ Svelte dialogs — needs OS-level chooser. Plugin stays.
 
 ## 229. ~~`opener:default` too broad~~ — VERIFIED SHIPPED 2026-05-25
 - [capabilities/default.json](../src-tauri/capabilities/default.json) already lists the 3 explicit `opener:allow-*` perms; no `opener:default`. Closes #31 + #229.
@@ -435,28 +424,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Where:** [update_service.rs:229](../src-tauri/src/update_service.rs#L229)
 - **Symptom:** `Releases/` has 14 tags already; if newest eligible doesn't carry `releases.win.json`, walker errors out instead of paginating.
 - **Fix:** `per_page=50` + pagination loop following `Link: <url>; rel="next"`.
-
-## 254. `rendered` $derived.by in ActivityFeed — full O(n) regroup on every event
-- **Where:** [ActivityFeed.svelte:218](../src/lib/components/activity/ActivityFeed.svelte#L218)
-- **Symptom:** During sync burst, full re-derivation chain triggers every event.
-- **Fix:** Stable base + burst accumulator; or debounce $derived via setTimeout batching.
-
-## 255. `DriftSummaryCard` $derived.by — O(entries) Map rebuild per drift event
-- **Where:** [DriftSummaryCard.svelte:18](../src/lib/components/sync/DriftSummaryCard.svelte#L18)
-- **Fix:** Move group-by into store as derived field; component reads pre-aggregated.
-
-## 262. SyncPage / Settings / Diagnostics use `onMount/onDestroy` instead of `$effect` (HMR-unsafe)
-- **Where:** [SyncPage.svelte:66-67](../src/lib/components/sync/SyncPage.svelte#L66-L67), [Settings.svelte:43](../src/lib/components/settings/Settings.svelte#L43), [Diagnostics.svelte:39](../src/lib/components/diagnostics/Diagnostics.svelte#L39)
-- **Symptom:** Lifecycle-correct but inconsistent w/ adopted `$effect`-return pattern. Three sites left.
-- **Fix:** Migrate to `$effect(() => { ...add...; return () => ...remove... })`.
-
-## 263. `UpdateStore` listeners are intentional singletons but undocumented
-- **Where:** [updates.svelte.ts:171](../src/lib/state/updates.svelte.ts#L171)
-- **Fix:** Add comment: `// intentional: app-lifetime singleton`.
-
-## 264. `deleteThresholdHint()` single-use helper — inline candidate (INFO)
-- **Where:** [SyncPage.svelte:195](../src/lib/components/sync/SyncPage.svelte#L195)
-- **Fix:** Leave for readability or inline. No action required.
 
 ### Z — Test gap plan (single tracker entry)
 

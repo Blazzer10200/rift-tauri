@@ -62,9 +62,39 @@
   ];
 
   const liveMode = $derived(!paused && !bursting && !userScrolledAway);
+
+  // Throttled mirror of connection.activityFeed for live mode. Without this,
+  // every event triggers the full filter+regroup chain (`filtered` →
+  // `rendered`) — costly at sustained 2-4 events/sec that fall just under the
+  // burst threshold. Leading + trailing edge: first event shows immediately,
+  // subsequent events coalesce into one rebuild per LIVE_THROTTLE_MS. (#254)
+  const LIVE_THROTTLE_MS = 120;
+  let liveSnapshot = $state<ActivityRow[]>(connection.activityFeed.slice());
+  let lastSnapAt = 0;
+  let snapTimer: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    // Subscribe to feed length so this re-fires per event.
+    const _len = connection.activityFeed.length;
+    void _len;
+    const now = Date.now();
+    const elapsed = now - lastSnapAt;
+    if (elapsed >= LIVE_THROTTLE_MS) {
+      liveSnapshot = connection.activityFeed.slice();
+      lastSnapAt = now;
+      if (snapTimer) { clearTimeout(snapTimer); snapTimer = null; }
+    } else if (!snapTimer) {
+      snapTimer = setTimeout(() => {
+        liveSnapshot = connection.activityFeed.slice();
+        lastSnapAt = Date.now();
+        snapTimer = null;
+      }, LIVE_THROTTLE_MS - elapsed);
+    }
+  });
+  onDestroy(() => { if (snapTimer) clearTimeout(snapTimer); });
+
   const source = $derived(
     paused ? frozen
-    : liveMode ? connection.activityFeed
+    : liveMode ? liveSnapshot
     : bufferedFeed
   );
 
