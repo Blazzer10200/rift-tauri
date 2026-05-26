@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -72,32 +71,33 @@
     (totals.del > 0 ? 1 : 0) + (totals.conf > 0 ? 1 : 0)
   );
 
-  onMount(async () => {
+  $effect(() => {
     window.addEventListener("mousedown", onDocMouseDown);
     window.addEventListener("keydown", onDocKey);
     syncPage.loadAutoRescanPrefs();
     void syncPage.refresh();
-    // v0.2.53: sync the Mirror toggle w/ backend state (it's session-scoped
-    // on the engine; if a prior session left it on, surface that).
-    try {
-      const enabled = await invoke<boolean>("sync_get_mirror_mode");
-      syncPage.mirrorEnabled = enabled;
-    } catch { /* not connected — keep default false */ }
-    try {
-      unlistenDiag = await listen<{ stage: string }>("diag://event", (e) => {
-        if (e.payload.stage === "drift_scan_result") {
-          void syncPage.refresh();
-        }
-      });
-    } catch (err) {
-      console.error("SyncPage: failed to attach diag listener", err);
-    }
-  });
-
-  onDestroy(() => {
-    window.removeEventListener("mousedown", onDocMouseDown);
-    window.removeEventListener("keydown", onDocKey);
-    if (unlistenDiag) unlistenDiag();
+    void (async () => {
+      // v0.2.53: sync the Mirror toggle w/ backend state (it's session-scoped
+      // on the engine; if a prior session left it on, surface that).
+      try {
+        const enabled = await invoke<boolean>("sync_get_mirror_mode");
+        syncPage.mirrorEnabled = enabled;
+      } catch { /* not connected — keep default false */ }
+      try {
+        unlistenDiag = await listen<{ stage: string }>("diag://event", (e) => {
+          if (e.payload.stage === "drift_scan_result") {
+            void syncPage.refresh();
+          }
+        });
+      } catch (err) {
+        console.error("SyncPage: failed to attach diag listener", err);
+      }
+    })();
+    return () => {
+      window.removeEventListener("mousedown", onDocMouseDown);
+      window.removeEventListener("keydown", onDocKey);
+      if (unlistenDiag) unlistenDiag();
+    };
   });
 
   // v0.2.55 Phase A: pretty-print bytes (B/KB/MB/GB, tabular-nums friendly).

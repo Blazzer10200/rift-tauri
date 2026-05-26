@@ -2,6 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.31-alpha — 2026-05-26 — autonomous cleanup follow-up (perf + lifecycle + tracker hygiene)
+
+Smaller batch on top of v0.4.30: one perf microfix, one lifecycle migration, tracker hygiene. All CDP-verified on live dev before ship. The in-flight updater overhaul (apply-phase exit fix, kill_child_processes, applyingHint/Stuck UX, delta-vs-full path log) is intentionally NOT in this release — stashed locally, still gated on the two-machine apply test per HANDOFF.
+
+**Activity feed throttle (#254).** [ActivityFeed.svelte](src/lib/components/activity/ActivityFeed.svelte) gains a 120ms leading+trailing `liveSnapshot` mirror of `connection.activityFeed`. Live-mode `source` reads the snapshot, not the raw feed — caps the filter→regroup chain at ~8/sec at sustained sub-burst rates (2-4 events/sec previously paid full O(n) regroup per event). Burst mode + paused + scrolled-away modes already had stable sources, unaffected. CDP-verified: 30-event synthetic burst → 1 group row "30x [endure] server downloaded 15.0 KB 30ms", grouping math intact.
+
+**Lifecycle migration (#262).** `onMount` / `onDestroy` → `$effect(() => { ...add...; return () => ...remove... })` across [SyncPage.svelte](src/lib/components/sync/SyncPage.svelte), [Settings.svelte](src/lib/components/settings/Settings.svelte), [Diagnostics.svelte](src/lib/components/diagnostics/Diagnostics.svelte). HMR-safe runes-native pattern. `untrack(connection.servers.length)` in Settings keeps the migrated effect one-shot. CDP-verified: Settings populates `appVersion=0.4.30-alpha` on mount (proves `invoke("app_version")` ran inside the migrated effect), SyncPage rendered drift summary (proves `refresh()` + diag listener wired), Diagnostics `subscribed` toggles true/false on tab open/close (verifying both $effect cleanup return + #249 refcount path in one trip).
+
+**Tracker hygiene.** [ISSUES.md](docs/ISSUES.md) — closed #228 (audit verdict: dialog plugin genuinely required, 4 callers all need OS-native file pickers, none replaceable with Svelte dialogs). Deleted stale blocks #22 (probes already removed in prior cleanup, remaining `console.warn`s are all error-path), #255 (duplicate of shipped #200), #264 (INFO no-op).
+
+**Verify.** `npm run check` 0 errors / 0 warnings (4094 files). Live CDP on dev server end-to-end. Backend untouched — `cargo check` unchanged (the pre-existing `ReleaseMeta` `private_interfaces` warn in `update_service.rs` is part of the stashed updater overhaul, not this release).
+
 ## v0.4.30-alpha — 2026-05-25 — rail simplification + command palette + observability cleanup
 
 Two-track batch: rail trim + command palette on the UI side; eprintln-to-log conversion + frontend IPC tidy + heavy ISSUES.md hygiene on the maintenance side. Closes 20+ audit items that were already shipped quietly but never marked.

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { invoke } from "@tauri-apps/api/core";
@@ -153,13 +153,15 @@
     }
   }
 
-  onMount(async () => {
-    try { appVersion = await invoke<string>("app_version"); } catch {}
-    // Servers list is shared connection state; skip the refetch if another
-    // mount already populated it. Settings opens often enough for this to matter.
-    if (connection.servers.length === 0) {
-      await connection.loadServers();
-    }
+  $effect(() => {
+    void (async () => {
+      try { appVersion = await invoke<string>("app_version"); } catch {}
+      // Servers list is shared connection state; skip the refetch if another
+      // mount already populated it. Settings opens often enough for this to matter.
+      if (untrack(() => connection.servers.length) === 0) {
+        await connection.loadServers();
+      }
+    })();
   });
 
   // Lazy-load About paths only when the About section is visible.
@@ -171,8 +173,10 @@
     }
   });
 
-  onDestroy(() => {
-    if (diagCopiedTimer) { clearTimeout(diagCopiedTimer); diagCopiedTimer = null; }
+  $effect(() => {
+    return () => {
+      if (diagCopiedTimer) { clearTimeout(diagCopiedTimer); diagCopiedTimer = null; }
+    };
   });
 
   async function pickServer(s: ServerProfile) {
