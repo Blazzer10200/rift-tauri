@@ -4,7 +4,7 @@
 >
 > Open issues only — when something ships, **delete the block** (`git log -- docs/ISSUES.md` preserves history). Each block carries `Where` (file:line, may have drifted — re-grep before acting), `Symptom`, optional `Fix sketch`. Issue IDs are durable — never re-number, only append.
 >
-> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170).
+> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170). Re-verification pass 2026-05-25 removed 28 already-shipped Wave-2/3 blocks (#151-152, #154-162, #168, #173-176, #186-190, #195-196, #199, #205-207, #209, #214) confirmed via in-place greps; AssistantHeader.svelte (referenced by stale #159/#261) no longer exists.
 
 ---
 
@@ -354,70 +354,10 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 149. ~~`openTab` race against `deleteConversation`~~ — VERIFIED SHIPPED
 - [assistant.svelte.ts:2322-2327](../src/lib/state/assistant.svelte.ts#L2322-L2327) — after `refreshConversations`, explicitly closes any tab pointing at the deleted id. `#149` cited inline.
 
-## 151. Theme picker + STT lang picker missing `role="radiogroup"` / `role="radio"`
-- **Where:** [Settings.svelte:539-555](../src/lib/components/settings/Settings.svelte#L539-L555) (theme), [:835-847](../src/lib/components/settings/Settings.svelte#L835-L847) (STT)
-- **Symptom:** Screen readers announce buttons w/o selection state; keyboard users can't navigate as radio groups. Cursor (L435) and Bell (L490) segmented controls already do this correctly.
-- **Fix:** Wrap grids in `role="radiogroup" aria-label="..."`; add `role="radio" aria-checked={...}` per option.
-
-## 152. `srv-card` is `<div role="button">` containing nested `<button>` Edit/Delete — invalid ARIA
-- **Where:** [Settings.svelte:931-958](../src/lib/components/settings/Settings.svelte#L931-L958)
-- **Symptom:** ARIA 1.1 forbids interactive descendants in `role="button"`. Nested Edit/Delete are unreachable as focusable children via AT.
-- **Fix:** Convert outer `<div>` to `<button type="button">` and restructure Edit/Delete as siblings, OR drop `role="button"` on the div + use a dedicated left-column select button.
-
 ## 153. `syncNow()` busy clears before trailing rescan settles — 1.2s race window
 - **Where:** [sync-page.svelte.ts:431,462-464](../src/lib/state/sync-page.svelte.ts#L431)
 - **Symptom:** Double-click Sync within 1.2s starts second `syncNow()` while prior `rescan()` is still pending → overlapping reconciles.
 - **Fix:** Chain `rescan()` into the same promise chain (keep `busy=true` until it returns), OR debounce Sync button for 1.5s post-success.
-
-## 154. `groupSelectionState`/`selectAllIn`/`clearSelectionIn` omit `to_delete_remote`
-- **Where:** [SyncPage.svelte:166-178](../src/lib/components/sync/SyncPage.svelte#L166-L178), [sync-page.svelte.ts:378-395](../src/lib/state/sync-page.svelte.ts#L378-L395)
-- **Symptom:** "Select all" never picks remote-delete entries; group checkbox shows "all selected" while remote-delete rows remain unselected.
-- **Fix:** Add `...g.to_delete_remote` to items array; mirror in store helpers.
-
-## 155. Mirror confirm modal — no focus trap / autofocus / Tab containment
-- **Where:** [SyncPage.svelte:631-683](../src/lib/components/sync/SyncPage.svelte#L631-L683)
-- **Symptom:** Focus stays in sync list when modal opens; Tab escapes the dialog into background controls.
-- **Fix:** `autofocus` on confirm input, OR programmatic `.focus()` on modal mount. Optional focus-trap on first/last focusable.
-
-## 156. `WatchedFoldersTable` diag listener TOCTOU on rapid remount
-- **Where:** [WatchedFoldersTable.svelte:33-43](../src/lib/components/sync/WatchedFoldersTable.svelte#L33-L43)
-- **Symptom:** Async `onMount` awaits `listen()`; if component unmounts before resolve, cleanup variable never set → listener orphaned → remount stacks duplicates → `refresh()` double-fires.
-- **Fix:** `aborted` flag set in `onDestroy`, checked after `listen()` resolves. Or move to synchronous `$effect` w/ cleanup return.
-
-## 157. `relPathLabel` falls back to absolute `local_path` when `rel_path` is empty string
-- **Where:** [SyncPage.svelte:134-136](../src/lib/components/sync/SyncPage.svelte#L134-L136)
-- **Symptom:** Empty-string `rel_path` (backend derivation fallback) → drift list shows full FS path `C:/fxserver/resources/...` — exposes user's local layout.
-- **Fix:** Fall back to `basename(local_path)`; normalize empty → `null` in `refresh()`.
-
-## 158. `.rift-conflict.` copies in `to_push` bucket get no visual distinction
-- **Where:** [SyncPage.svelte:571](../src/lib/components/sync/SyncPage.svelte#L571), [DriftSummaryCard.svelte:69-73](../src/lib/components/sync/DriftSummaryCard.svelte#L69-L73)
-- **Symptom:** Frontend surface of Wave 1 #42. If conflict copies leak into `to_push`, users may unknowingly push them to remote.
-- **Fix:** Detect `/.rift-conflict\./` in `relPathLabel`/render; show warning chip. (Rust-side ignore-rule fix is the authoritative path per #42.)
-
-## 159. `AssistantHeader` pulse setTimeout not cleaned up
-- **Where:** [AssistantHeader.svelte:37-45](../src/lib/components/assistant/AssistantHeader.svelte#L37-L45)
-- **Symptom:** Workspace-switch during 700ms pulse → callback runs on detached closure; `lastSeenUpdate` stays stale.
-- **Fix:** Return cleanup from `$effect` that clears the handle.
-
-## 160. `Composer` `onblur` kills mention picker before mousedown — pick-on-click broken
-- **Where:** [Composer.svelte:648](../src/lib/components/assistant/Composer.svelte#L648)
-- **Symptom:** Click on mention suggestion: textarea blur fires first, sets `mentionState = null`, menu disappears, mousedown never lands on item.
-- **Fix:** Guard blur — `if (!mentionState) return; requestAnimationFrame(() => mentionState = null);` (standard combobox blur-cancel pattern).
-
-## 161. `MessageBubble` tick `setInterval` can double-register on flag co-flip
-- **Where:** [MessageBubble.svelte:147-157](../src/lib/components/assistant/MessageBubble.svelte#L147-L157)
-- **Symptom:** Interval-start branch lacks `!tickHandle` guard. Reactive batch can trigger two effect runs → two intervals → double-rate tick.
-- **Fix:** Unconditionally `clearInterval(tickHandle); tickHandle = null;` at effect-start, then conditionally restart.
-
-## 162. `Markdown` checklist sync $effect fires on every streaming token
-- **Where:** [Markdown.svelte:202-204](../src/lib/components/assistant/Markdown.svelte#L202-L204)
-- **Symptom:** `pinTasksFromChecklist` called per delta. `processed` derives via DOMPurify + 2 DOM-template walks each tick. 200 streaming tokens → ~200 full DOM parses.
-- **Fix:** Debounce, OR equality-check `JSON.stringify(processed.items)` against ref before calling.
-
-## 168. `flash()` setTimeout leaks on unmount
-- **Where:** [ActivityFeed.svelte:360-363](../src/lib/components/activity/ActivityFeed.svelte#L360-L363)
-- **Symptom:** Workspace switch within 1500ms → callback writes `actionFlash` to unmounted component.
-- **Fix:** Track timer id in `$state`; `onDestroy(() => { if (flashTimer) clearTimeout(flashTimer); })`.
 
 ## 169. `dialogs.svelte.ts` callbacks captured at script-init never cleared on AppShell destroy
 - **Where:** [AppShell.svelte:97-100](../src/lib/components/AppShell.svelte#L97-L100)
@@ -438,26 +378,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [connection.svelte.ts:289-291](../src/lib/state/connection.svelte.ts#L289-L291)
 - **Symptom:** Concurrent `retryWire()` (double-click) before `wiring` flips → race between partial-init rollback and re-entry. Listeners survive.
 - **Fix:** Verify `finally { this.wiring = false }` placement happens after all `unlisteners.push()` completes. Stress-test.
-
-## 173. `updates.svelte.ts` Tauri listeners never unregistered (HMR memory leak)
-- **Where:** [updates.svelte.ts:171-185](../src/lib/state/updates.svelte.ts#L171-L185)
-- **Symptom:** `progressUnlisten`/`downloadedUnlisten` set once via `ensureListeners`; no teardown. HMR reload leaves old listeners live, firing into stale store.
-- **Fix:** Expose `dispose()` calling both unlistens; wire into AppShell `onDestroy`.
-
-## 174. `AppShell` has two independent "alive" booleans (`alive` + `shellAlive`)
-- **Where:** [AppShell.svelte:109,289](../src/lib/components/AppShell.svelte#L109)
-- **Symptom:** Confusing parallel state; future edit removing one will diverge them silently.
-- **Fix:** Consolidate to one `$state(true)` shared by both effects.
-
-## 175. `stt.svelte.ts` `this.recognition` dual-role — handle + commit-flag
-- **Where:** [stt.svelte.ts:287](../src/lib/state/stt.svelte.ts#L287)
-- **Symptom:** `onEnd` checks `this.recognition` to decide whether to commit; `cancel()` nulls `recognition` to suppress commit. Intent works but is undocumented + fragile to future edits.
-- **Fix:** Explicit `cancelRequested: boolean` field; separate handle role from intent.
-
-## 176. `Titlebar.svelte` server picker missing ARIA + Escape-key + roles
-- **Where:** [Titlebar.svelte:56-104](../src/lib/components/shell/Titlebar.svelte#L56-L104)
-- **Symptom:** No `aria-expanded` on trigger, no `aria-haspopup`, no `Escape` key handler, no `role="menu"`. Tab focus can drift into the hidden menu.
-- **Fix:** Add `aria-expanded={menuOpen}` + `aria-haspopup="listbox"`; keydown for Escape + arrow nav.
 
 ## 177. `beforeunload` listener leak in assistant store (HMR-only)
 - **Where:** [assistant.svelte.ts:1422-1423](../src/lib/state/assistant.svelte.ts#L1422-L1423)
@@ -501,27 +421,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [assistant.svelte.ts:2356-2364](../src/lib/state/assistant.svelte.ts#L2356-L2364)
 - **Fix:** `let retrying = false` field, or check msg-count after `await stop()`.
 
-## 186. `diagCopied` setTimeout leaks on workspace switch
-- **Where:** [Settings.svelte:109](../src/lib/components/settings/Settings.svelte#L109)
-- **Fix:** Store timer in field; clear in `onDestroy` / effect cleanup.
-
-## 187. `loadAboutPaths()` fires unconditionally on every Settings mount
-- **Where:** [Settings.svelte:190](../src/lib/components/settings/Settings.svelte#L190)
-- **Fix:** Gate in `$effect(() => { if (section === "about") ... })`.
-
-## 188. `connection.loadServers()` no idempotency guard
-- **Where:** [connection.svelte.ts:180](../src/lib/state/connection.svelte.ts#L180), called from [Settings.svelte:191](../src/lib/components/settings/Settings.svelte#L191)
-- **Fix:** Early-exit `if (servers.length > 0) return;` OR move to lazy `$effect`.
-
-## 189. Nav buttons missing `aria-current` — active section not announced
-- **Where:** [Settings.svelte:205](../src/lib/components/settings/Settings.svelte#L205)
-- **Fix:** `aria-current={section === s.id ? "page" : undefined}`.
-
-## 190. `aria-checked` on "Use full Claude config" switch misrepresents persisted state
-- **Where:** [Settings.svelte:595](../src/lib/components/settings/Settings.svelte#L595)
-- **Symptom:** `aria-checked={useFullConfig && !apiKey}` announces false even when stored pref is true (API-key override). Misleads AT.
-- **Fix:** `aria-checked={useFullConfig}` to reflect stored pref; rely on `disabled` + adjacent text for override context.
-
 ## 191. Outside-click dropdown $effect can leave stale listener attached
 - **Where:** [Settings.svelte:41](../src/lib/components/settings/Settings.svelte#L41)
 - **Fix:** Split per-dropdown effects, or unconditional add/remove on mount/destroy.
@@ -539,14 +438,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [Settings.svelte:212-216](../src/lib/components/settings/Settings.svelte#L212-L216)
 - **Fix:** `out` duration 0, OR debounce section change.
 
-## 195. Edit/Delete server buttons have static `aria-label` regardless of server
-- **Where:** [Settings.svelte:950-954](../src/lib/components/settings/Settings.svelte#L950-L954)
-- **Fix:** `` aria-label={`Edit ${s.name}`} `` / `` `Delete ${s.name}` ``.
-
-## 196. `stt.init()` $effect re-evaluates on every section change
-- **Where:** [Settings.svelte:144-148](../src/lib/components/settings/Settings.svelte#L144-L148)
-- **Fix:** Early-return on `section !== "speech"`, OR move to nav button onclick.
-
 ## 197. "Clear" budget button visible-flash on click
 - **Where:** [Settings.svelte:632-634](../src/lib/components/settings/Settings.svelte#L632-L634)
 - **Fix:** Disable button during `asstMaxBudgetSaving`.
@@ -554,10 +445,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 198. `selBreakdown` rebuilds Map per derivation tick from full entries list
 - **Where:** [SyncPage.svelte:117-132](../src/lib/components/sync/SyncPage.svelte#L117-L132)
 - **Fix:** Derive from `syncPage.groups` (already grouped) instead of `entries`.
-
-## 199. `fmtRel` in RecentActivityCard has no null guard (vs WatchedFoldersTable parity)
-- **Where:** [RecentActivityCard.svelte:47-56](../src/lib/components/sync/RecentActivityCard.svelte#L47-L56) vs [WatchedFoldersTable.svelte:66](../src/lib/components/sync/WatchedFoldersTable.svelte#L66)
-- **Fix:** `if (!iso) return "—"` first line.
 
 ## 200. `DriftSummaryCard` re-groups `entries` independently of `syncPage.groups`
 - **Where:** [DriftSummaryCard.svelte:18-36](../src/lib/components/sync/DriftSummaryCard.svelte#L18-L36)
@@ -575,25 +462,9 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [ActivityFeed.svelte:506](../src/lib/components/activity/ActivityFeed.svelte#L506)
 - **Fix:** Remove `rows.length` from key; let derived `rendered` update existing nodes.
 
-## 205. `HistoryDrawer.focusOnMount` action returns nothing — Svelte 5 API mismatch
-- **Where:** [HistoryDrawer.svelte:49-52](../src/lib/components/assistant/HistoryDrawer.svelte#L49-L52)
-- **Fix:** Return `{ destroy() {} }` to silence warning.
-
-## 206. `StepGroup` collapsible `role="button"` div w/o `aria-label`
-- **Where:** [StepGroup.svelte:64-70](../src/lib/components/assistant/StepGroup.svelte#L64-L70)
-- **Fix:** `` aria-label={`Toggle step ${stepNum}: ${headerText}`} ``.
-
-## 207. `Composer` hint popover `role="dialog"` — wrong role, no focus management
-- **Where:** [Composer.svelte:634](../src/lib/components/assistant/Composer.svelte#L634)
-- **Fix:** Use `role="tooltip"` (passive surface) + link via `aria-describedby`.
-
 ## 208. `ChatTabsBar` drag state not reset on `dragcancel` / workspace-switch
 - **Where:** [ChatTabsBar.svelte:88-91](../src/lib/components/shell/ChatTabsBar.svelte#L88-L91)
 - **Fix:** Add `ondragcancel={onDragEnd}` + effect cleanup that resets drag state.
-
-## 209. `Markdown` code-copy `<span role="button">` not keyboard-activatable
-- **Where:** [Markdown.svelte:148-150](../src/lib/components/assistant/Markdown.svelte#L148-L150)
-- **Fix:** Add `onkeydown` for Enter/Space on `.md` wrapper, OR replace `<span>` with `<button>`.
 
 ## 210. `UpdateToast` timer no-ops on rapid visibility re-trigger w/ hover
 - **Where:** [UpdateToast.svelte:24-28](../src/lib/components/UpdateToast.svelte#L24-L28)
@@ -607,10 +478,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Where:** [PageHeader.svelte:73](../src/lib/components/shell/PageHeader.svelte#L73)
 - **Symptom:** `opacity: 0.35` on parent multiplies with `::after { opacity: 0.55 }` → stripe ~0.19. Header text, icon, badges all dimmed.
 - **Fix:** Move `opacity: 0.25` onto `[data-tone="neutral"]::after` only.
-
-## 214. `connection.autoReconnect` has unlimited retries, no backoff
-- **Where:** [connection.svelte.ts:449-478](../src/lib/state/connection.svelte.ts#L449-L478)
-- **Fix:** `reconnectAttempts` counter; cap at 5 or apply `2^n * 1000ms` backoff.
 
 ### INFO (5)
 
@@ -770,11 +637,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Where:** [drift_scanner.rs:384,422,445](../src-tauri/src/sync/drift_scanner.rs#L384)
 - **Symptom:** `get_remote_sha1` calls SSH exec serially within scan loop. Up to 10×RTT wall time per scan.
 - **Fix:** Collect into batch; `FuturesUnordered` bounded by `hash_budget`.
-
-## 261. setTimeout handles not stored in AssistantHeader pulse, ActivityFeed flash, MessageBubble copy
-- **Where:** [AssistantHeader.svelte:43](../src/lib/components/assistant/AssistantHeader.svelte#L43), [ActivityFeed.svelte:362](../src/lib/components/activity/ActivityFeed.svelte#L362), [MessageBubble.svelte:242](../src/lib/components/assistant/MessageBubble.svelte#L242)
-- **Note:** Re-confirmation of #159, #168 — plus new MessageBubble copy timer.
-- **Fix:** Store handles; clear in `$effect` return / `onDestroy`. Pairs with existing Wave 2 entries.
 
 ## 262. SyncPage / Settings / Diagnostics use `onMount/onDestroy` instead of `$effect` (HMR-unsafe)
 - **Where:** [SyncPage.svelte:66-67](../src/lib/components/sync/SyncPage.svelte#L66-L67), [Settings.svelte:43](../src/lib/components/settings/Settings.svelte#L43), [Diagnostics.svelte:39](../src/lib/components/diagnostics/Diagnostics.svelte#L39)
