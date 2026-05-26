@@ -1,5 +1,6 @@
 <script lang="ts">
   import { connection } from "../../state/connection.svelte";
+  import { reportFrontendError } from "../../util/diag";
   import { RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
   import { slide } from "svelte/transition";
 
@@ -82,6 +83,7 @@
       await connection.connect();
     } catch (e) {
       console.error("reconnect failed", e);
+      reportFrontendError("reconnect", e);
     }
   }
 </script>

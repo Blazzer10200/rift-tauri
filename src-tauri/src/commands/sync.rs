@@ -86,6 +86,21 @@ pub fn diag_snapshot_path(server_key: String) -> Result<String, String> {
         .map_err(|e| format!("snapshot path: {e}"))
 }
 
+/// #248: surface frontend-side failures (connect/auto-reconnect/wire errors)
+/// to the DiagBus so the Diagnostics panel + activity feed see them. Pre-fix,
+/// these only `console.error`'d in the WebView console and were invisible to
+/// the operator unless devtools were open. Emits as System/Error.
+#[tauri::command]
+pub fn diag_log_frontend_error(label: String, message: String) {
+    let label = label.chars().take(64).collect::<String>();
+    let message = message.chars().take(512).collect::<String>();
+    diagnostics::emit(
+        diagnostics::DiagStage::System,
+        diagnostics::DiagLevel::Error,
+        format!("frontend/{label}: {message}"),
+    );
+}
+
 #[tauri::command]
 pub async fn sync_reconcile(
     state: tauri::State<'_, AutoSyncState>,

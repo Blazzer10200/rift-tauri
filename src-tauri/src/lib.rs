@@ -213,6 +213,7 @@ pub fn run() {
             commands::list_watched_edits,
             commands::diag_get_state,
             commands::diag_snapshot_path,
+            commands::diag_log_frontend_error,
             commands::sync_reconcile,
             commands::sync_cancel,
             commands::sync_pull_pending,

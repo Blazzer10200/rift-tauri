@@ -325,10 +325,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 
 ### LOW (1)
 
-## 134. `assistant_auth_probe` two-spawn TOCTOU window for CLI replacement
-- **Where:** [assistant/mod.rs:592-658](../src-tauri/src/assistant/mod.rs#L592-L658)
-- **Fix:** Single `claude auth status --version` call if CLI supports it; OR parallel via `tokio::join!`.
-
 ### INFO (1)
 
 ## 135. ~~`force_push_now` promotion log out-of-order~~ — VERIFIED SHIPPED
@@ -410,21 +406,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 ## 230. ~~`core:default` bundles unused~~ — VERIFIED SHIPPED 2026-05-25
 - [capabilities/default.json](../src-tauri/capabilities/default.json) pinned to `core:event:default` + `core:path:default` + `core:webview:default` + `core:window:default` + 4 explicit `core:window:allow-*`. `core:app`/`core:menu`/`core:resources` excluded. `core:path:default` retained — `Settings.svelte` uses `appConfigDir`/`appLogDir`. Closes #30 + #230.
 
-## 231. Cargo.toml version regex not anchored to `[package]` section
-- **Where:** [scripts/release.ps1:34](../scripts/release.ps1#L34), [scripts/bump.ps1:57-63](../scripts/bump.ps1#L57-L63)
-- **Symptom:** First `version = "..."` in Cargo.toml is currently the package — fragile to layout change. Workspace merge or dep-block-before-`[package]` would silently write the wrong field.
-- **Fix:** Anchor pattern: `(?ms)\[package\].*?^\s*version\s*=\s*"([^"]+)"`.
-
-## 232. `vpk upload github` missing `--channel` — implicit `win` default coupling
-- **Where:** [scripts/release.ps1:166-178](../scripts/release.ps1#L166-L178) + [update_service.rs:173](../src-tauri/src/update_service.rs#L173) `UpdateManager::new(src, None, None)`
-- **Symptom:** Both sides default to `win` but neither documents it. Multi-channel rollout would silently diverge w/o compile- or runtime-error.
-- **Fix:** Explicit `--channel win` to vpk + `Some("win")` to `UpdateManager::new`.
-
-## 233. `Releases/` blanket-ignored but `assets.win.json` + `releases.win.json` may be in working tree
-- **Where:** [.gitignore:1](../.gitignore#L1) + `Releases/*.json` artifacts
-- **Symptom:** Local pack regenerates feed files; if accidentally shipped from local rather than GitHub-uploaded, clients hit stale packages.
-- **Fix:** Verify `git ls-files Releases/` empty; add comment in release.ps1 that local files are pack-state only, canonical feed is GitHub asset.
-
 ## 234. ~~Re-cite of #146~~ — VERIFIED SHIPPED (see #146).
 
 ## 240. ~~`aborted_shrunk()` mutex-poison silently returns empty vec~~ — VERIFIED SHIPPED
@@ -447,11 +428,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Symptom:** No structured timing or hierarchical causality. Only `latency_ms` in `log_activity_rich`.
 - **Fix:** Short-term: entry/exit `log::debug!` w/ timing. Long-term: `tracing` + `tracing-log` bridge.
 
-## 248. Frontend connection errors never reach diag bus
-- **Where:** [connection.svelte.ts:230,475](../src/lib/state/connection.svelte.ts#L230)
-- **Symptom:** `connect failed` + `auto-reconnect failed` only `console.error`'d → Diagnostics panel never shows them.
-- **Fix:** Add `diag_log_frontend_error` Tauri cmd publishing `DiagStage::System` / `DiagLevel::Error`.
-
 ## 249. `diag_state_pump` emits every 500ms regardless of subscribers
 - **Where:** [lib.rs:343,386](../src-tauri/src/lib.rs#L343)
 - **Symptom:** Persistent background serialization+emit even when Diagnostics tab closed.
@@ -460,20 +436,10 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 ## 250. ~~STT console.debug calls~~ — VERIFIED SHIPPED 2026-05-25
 - Re-grep of `src/lib/state/stt.svelte.ts` returns zero `console.*` matches. Both #22 and #250 closed.
 
-## 251. Release staging copy hardcoded to 2 files — DLL/redistributable gap
-- **Where:** [scripts/release.ps1:126-130](../scripts/release.ps1#L126-L130)
-- **Symptom:** Only `rift-tauri.exe` + `icon.ico` copied. Future Tauri/WebView2 redistributables would be silently absent from `vpk pack` payload.
-- **Fix:** Comment intent explicitly, OR add `*.dll` glob.
-
 ## 252. `GithubSource::get_release_feed` per_page=10 — pagination gap
 - **Where:** [update_service.rs:229](../src-tauri/src/update_service.rs#L229)
 - **Symptom:** `Releases/` has 14 tags already; if newest eligible doesn't carry `releases.win.json`, walker errors out instead of paginating.
 - **Fix:** `per_page=50` + pagination loop following `Link: <url>; rel="next"`.
-
-## 253. `release.ps1` `Read-Host` silently exits 1 in CI pipe (no TTY)
-- **Where:** [scripts/release.ps1:86-92](../scripts/release.ps1#L86-L92)
-- **Symptom:** Non-TTY stdin returns empty string → exit 1 w/ no log explaining why.
-- **Fix:** Replace w/ `Write-Host` + `-Force` parameter; explicit error message.
 
 ## 254. `rendered` $derived.by in ActivityFeed — full O(n) regroup on every event
 - **Where:** [ActivityFeed.svelte:218](../src/lib/components/activity/ActivityFeed.svelte#L218)
@@ -483,11 +449,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 ## 255. `DriftSummaryCard` $derived.by — O(entries) Map rebuild per drift event
 - **Where:** [DriftSummaryCard.svelte:18](../src/lib/components/sync/DriftSummaryCard.svelte#L18)
 - **Fix:** Move group-by into store as derived field; component reads pre-aggregated.
-
-## 259. `compute_sha1` in drift scanner sequential per file (SSH exec round-trip)
-- **Where:** [drift_scanner.rs:384,422,445](../src-tauri/src/sync/drift_scanner.rs#L384)
-- **Symptom:** `get_remote_sha1` calls SSH exec serially within scan loop. Up to 10×RTT wall time per scan.
-- **Fix:** Collect into batch; `FuturesUnordered` bounded by `hash_budget`.
 
 ## 262. SyncPage / Settings / Diagnostics use `onMount/onDestroy` instead of `$effect` (HMR-unsafe)
 - **Where:** [SyncPage.svelte:66-67](../src/lib/components/sync/SyncPage.svelte#L66-L67), [Settings.svelte:43](../src/lib/components/settings/Settings.svelte#L43), [Diagnostics.svelte:39](../src/lib/components/diagnostics/Diagnostics.svelte#L39)
