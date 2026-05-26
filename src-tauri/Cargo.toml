@@ -57,14 +57,15 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # File system watcher — replaces .NET FileSystemWatcher
 notify = "8"
 
-# Auto-updater — same Velopack ecosystem we use on the WPF side.
-# EXACT pin (=0.0.1298) is intentional: 0.0.x semver = breaking-change
-# noise between patches. Last reviewed 2026-05-17; revisit quarterly
-# (audit B11). Security advisories on velopack-rust → check fasterthanlime/velopack release notes.
-velopack = "=0.0.1298"
-# HTTP client for our custom GithubSource (velopack-rust 0.0.1298 has no
-# GithubSource type; we implement UpdateSource against the GitHub REST API).
-ureq = "3"
+# Auto-updater — Tauri-first-party plugin (migrated from velopack-rust 2026-05-26;
+# see docs/design/updater-migration.md). Mandatory signature verification: signing
+# key at C:/Users/BLAZZER/.tauri/rift.key (env: TAURI_SIGNING_PRIVATE_KEY_PATH),
+# pubkey embedded in tauri.conf.json::plugins.updater.pubkey. Lose the key file
+# and no existing install can ever update again — CRITICAL DON'T-TOUCH class.
+tauri-plugin-updater = "2"
+# Required by tauri-plugin-updater + by updates.svelte.ts's relaunch() call after
+# manual restart UX (rare — Windows installer auto-exits on install).
+tauri-plugin-process = "2"
 
 # Logging
 log = "0.4"

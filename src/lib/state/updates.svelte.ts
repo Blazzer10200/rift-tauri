@@ -58,6 +58,7 @@ class UpdateStore {
 
   private progressUnlisten: UnlistenFn | null = null;
   private downloadedUnlisten: UnlistenFn | null = null;
+  private sizeUnlisten: UnlistenFn | null = null;
 
   /** True when there's an unsnoozed update waiting for user action. */
   get pillVisible(): boolean {
@@ -153,7 +154,14 @@ class UpdateStore {
 
   dismissToast() { this.toastVisible = false; }
 
-  /** Called once on app launch from AppShell.onMount. */
+  /** Called once on app launch from AppShell.onMount.
+   *
+   *  When an unsnoozed update is detected, surface the toast AND start the
+   *  background download. By the time the user opens the dialog → Install,
+   *  the bytes are already on disk so the only wait is the NSIS apply
+   *  (sub-30s on the Tauri-updater path). Idempotent — `download_update`
+   *  on the backend short-circuits when the pending Update is already
+   *  resolved. */
   async checkOnLaunch() {
     await this.refresh();
     if (
@@ -162,6 +170,7 @@ class UpdateStore {
       this.info.version !== this.dismissedVersion
     ) {
       this.toastVisible = true;
+      void this.download();
     }
   }
 
@@ -182,6 +191,16 @@ class UpdateStore {
         this.state = "ready";
       });
     }
+    if (!this.sizeUnlisten) {
+      // tauri-plugin-updater doesn't expose Content-Length before the byte
+      // stream begins, so the backend emits `update-size` once on first
+      // chunk. Patch info.sizeBytes so the dialog's "X of Y MB" label resolves.
+      this.sizeUnlisten = await listen<number>("update-size", (e) => {
+        const bytes = typeof e.payload === "number" ? e.payload : Number(e.payload);
+        if (!Number.isFinite(bytes) || bytes <= 0) return;
+        if (this.info) this.info.sizeBytes = bytes;
+      });
+    }
   }
 
   /** #173: tear down Tauri event listeners. Wired via `import.meta.hot.dispose`
@@ -195,6 +214,10 @@ class UpdateStore {
     if (this.downloadedUnlisten) {
       try { this.downloadedUnlisten(); } catch (e) { console.warn("update-downloaded unlisten threw", e); }
       this.downloadedUnlisten = null;
+    }
+    if (this.sizeUnlisten) {
+      try { this.sizeUnlisten(); } catch (e) { console.warn("update-size unlisten threw", e); }
+      this.sizeUnlisten = null;
     }
   }
 }
