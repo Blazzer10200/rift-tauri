@@ -2,6 +2,22 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.32-alpha — 2026-05-26 — updater migration: Velopack → tauri-plugin-updater
+
+**One-time apply-phase wait on this update.** v0.4.31 ships with the broken Velopack apply path (`apply_updates_and_restart` spawns Update.exe and returns without exiting Tauri, so Update.exe sits idle waiting for the running pid to die). Expect 5-10 min on "Applying…". If it exceeds 15 min, force-quit Rift from Task Manager — Update.exe will finish the swap and relaunch automatically. **This will not happen again** — v0.4.32+ uses Tauri's first-party updater, which exits the app natively before NSIS swaps the binary. As an escape hatch, the Tauri-built `Rift_0.4.32-alpha_x64-setup.exe` is uploaded alongside the Velopack assets on the GitHub release; download + run it directly if auto-update misbehaves.
+
+**Backend rewire.** [src-tauri/src/update_service.rs](src-tauri/src/update_service.rs) (391L Velopack-rust + custom `GithubSource` impl) deleted. [src-tauri/src/commands/update.rs](src-tauri/src/commands/update.rs) rewritten against `tauri_plugin_updater::UpdaterExt`. New `PendingUpdate` managed state holds the `Update` + downloaded bytes across the `check_for_updates` / `download_update` / `apply_pending_update` call chain. Emits `update-size` (one-shot total) + `update-progress` (i16 0..=100) + `update-downloaded` events. `velopack::VelopackApp::build().run()` removed from [src-tauri/src/lib.rs](src-tauri/src/lib.rs); plugin inits for `tauri-plugin-updater` + `tauri-plugin-process` added. `assistant::kill_child_processes_on_exit` wired via `updater_builder().on_before_exit()` so the NSIS swap doesn't trip on claude CLI children holding file handles.
+
+**Frontend store API preserved.** [src/lib/state/updates.svelte.ts](src/lib/state/updates.svelte.ts) public surface unchanged — consumers ([UpdateDialog.svelte](src/lib/components/dialogs/UpdateDialog.svelte), [UpdateToast.svelte](src/lib/components/UpdateToast.svelte), [StatusBar.svelte](src/lib/components/shell/StatusBar.svelte), [Settings.svelte](src/lib/components/settings/Settings.svelte)) untouched. Added `update-size` listener so the dialog's "X of Y MB" label resolves once Tauri's download stream reports Content-Length. `checkOnLaunch` now also fires the background download so the only remaining wait when the user clicks Install is the NSIS apply (~30s, vs Velopack's 5-10 min).
+
+**Signing key.** Tauri-updater mandates ed25519 minisign signatures — cannot be disabled. Key generated at `C:/Users/BLAZZER/.tauri/rift.key` (passwordless local-only); pubkey embedded in [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json) `plugins.updater.pubkey`. CRITICAL: if the private key is lost, no installed v0.4.32+ client can ever update again. Backed up off-machine pre-ship. Documented in HANDOFF CRITICAL DON'T-TOUCH.
+
+**Release pipeline.** [scripts/release.ps1](scripts/release.ps1) rewritten — clean Tauri-only path for v0.4.33+. [scripts/release-bridge.ps1](scripts/release-bridge.ps1) added — one-time hybrid for v0.4.32 only, produces BOTH Velopack assets (so v0.4.31 clients find the update) AND Tauri-updater assets (so v0.4.32+ clients use the new path). Retires after v0.4.33 ships clean.
+
+**Brief.** Full rationale + risk register + rollback plan in [docs/design/updater-migration.md](docs/design/updater-migration.md).
+
+**Verify.** `npm run check` 0 errors / 0 warnings. `cargo check` clean. Live CDP on dev: `app_version` returns 0.4.31-alpha, `check_for_updates` returns null (no `latest.json` published yet — graceful 404 handle), Settings → About panel renders end-to-end.
+
 ## v0.4.31-alpha — 2026-05-26 — autonomous cleanup follow-up (perf + lifecycle + tracker hygiene)
 
 Smaller batch on top of v0.4.30: one perf microfix, one lifecycle migration, tracker hygiene. All CDP-verified on live dev before ship. The in-flight updater overhaul (apply-phase exit fix, kill_child_processes, applyingHint/Stuck UX, delta-vs-full path log) is intentionally NOT in this release — stashed locally, still gated on the two-machine apply test per HANDOFF.

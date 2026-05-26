@@ -156,9 +156,13 @@ $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'src-t
 $nsisDir = Join-Path $targetRoot 'release/bundle/nsis'
 if (-not (Test-Path $nsisDir)) { throw "NSIS bundle dir not produced: $nsisDir" }
 
-$setupCandidates = @(Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' -File)
+# Bundle dir is shared across all builds; filter to the exact current version
+# so we don't pick up artifacts from prior tags. Pattern matches Tauri's NSIS
+# naming: <productName>_<version>_<arch>-setup.exe.
+$setupPattern = "*_${version}_*-setup.exe"
+$setupCandidates = @(Get-ChildItem -Path $nsisDir -Filter $setupPattern -File)
 if ($setupCandidates.Count -ne 1) {
-    throw "Expected exactly one *-setup.exe in $nsisDir, found $($setupCandidates.Count)"
+    throw "Expected exactly one $setupPattern in $nsisDir, found $($setupCandidates.Count)"
 }
 $setupPath = $setupCandidates[0].FullName
 $sigPath = "$setupPath.sig"
