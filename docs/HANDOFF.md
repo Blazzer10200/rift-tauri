@@ -17,15 +17,18 @@ Done on the branch:
 - `scripts/release.ps1` rewritten (Tauri-only, v0.4.33+). `scripts/release-bridge.ps1` written (one-time v0.4.32 hybrid).
 - Signing key generated at `C:/Users/BLAZZER/.tauri/rift.key` (passwordless); `TAURI_SIGNING_PRIVATE_KEY_PATH` exported via `.secrets/env.sh`.
 
-**Resume here:**
-1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Vault / encrypted drive / 1Password. Lose this file = no v0.4.32+ install can ever update again. Non-negotiable before B18.
-2. `pwsh scripts/bump.ps1 0.4.32-alpha` (3-file lockstep).
-3. Add CHANGELOG entry for v0.4.32 — name the one-time 5-10 min apply hang on v0.4.31→v0.4.32 explicitly; link manual Setup.exe.
-4. Local smoke test: `npm run tauri build`. Confirm `*-setup.exe` AND `*-setup.exe.sig` in `src-tauri/target/release/bundle/nsis/`.
-5. `pwsh scripts/release-bridge.ps1` → ships v0.4.32 hybrid (vpk + tauri-updater assets).
-6. Update both machines to v0.4.32. Confirm BOTH are on v0.4.32 before proceeding.
-7. For v0.4.33+: regular flow — `bump.ps1` → CHANGELOG → `release.ps1` (clean Tauri-only).
-8. After v0.4.33 ships clean, retire `release-bridge.ps1` (delete or leave as historical).
+Smoke build verified end-to-end:
+- `npm run tauri build` produces `Rift_0.4.32-alpha_x64-setup.exe` (7.2 MB) + `.sig` (424 B minisign).
+- Required env: `TAURI_SIGNING_PRIVATE_KEY=<path>` AND `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` (both in `.secrets/env.sh`). The empty password is non-negotiable even on a passwordless key — bundler still prompts otherwise.
+- `release.ps1` + `release-bridge.ps1` setup-exe glob is now version-scoped (`*_${version}_*-setup.exe`) so the shared bundle dir's accumulated artifacts don't trip "exactly one" preflight.
+- `vpk`, `gh`, `npm` all on PATH. `latest.json` shape dry-run matches Tauri's expected schema.
+
+**Resume here (everything else still gated on you):**
+1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Vault / encrypted drive / 1Password. Lose this file = no v0.4.32+ install can ever update again. Hard gate.
+2. `pwsh scripts/release-bridge.ps1` → ships v0.4.32-alpha hybrid (vpk + tauri-updater assets).
+3. Update both machines to v0.4.32. Expect 5-10 min apply hang on v0.4.31→v0.4.32 (documented in CHANGELOG; manual Setup.exe in release assets is the escape hatch). Confirm BOTH on v0.4.32 before proceeding.
+4. For v0.4.33+: regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1` (clean Tauri-only).
+5. After v0.4.33 ships clean, retire `release-bridge.ps1` (delete or leave as historical).
 
 ---
 
