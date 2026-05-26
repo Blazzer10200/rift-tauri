@@ -4,7 +4,7 @@
 >
 > Open issues only — when something ships, **delete the block** (`git log -- docs/ISSUES.md` preserves history). Each block carries `Where` (file:line, may have drifted — re-grep before acting), `Symptom`, optional `Fix sketch`. Issue IDs are durable — never re-number, only append.
 >
-> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170). Re-verification pass 2026-05-25 removed 28 already-shipped Wave-2/3 blocks (#151-152, #154-162, #168, #173-176, #186-190, #195-196, #199, #205-207, #209, #214) confirmed via in-place greps; AssistantHeader.svelte (referenced by stale #159/#261) no longer exists.
+> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170). Re-verification pass 2026-05-25 removed ~50 already-shipped Wave-2/3 blocks across two sweeps: leak/ARIA cluster (#151-152, #154-162, #168, #173-176, #186-190, #195-196, #199, #205-207, #209, #214) and assistant/sync/perf cluster (#170, #177-185, #197-198, #201, #203-204, #208, #210, #212-213, #215-216, #239, #246, #257-258). All confirmed via in-place greps. Stale: #191-194 (Settings dropdowns no longer exist), #159/#261 (AssistantHeader.svelte deleted).
 
 ---
 
@@ -364,11 +364,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Symptom:** Singleton holds destroyed-component closures. Route-level HMR remount stacks callbacks; calling stale ones operates on dead `$state`.
 - **Fix:** Move assignments into `onMount`; reset to no-op in `onDestroy`.
 
-## 170. `connection.autoReconnect()` bypasses `connecting` flag → concurrent manual connect possible
-- **Where:** [connection.svelte.ts:465-478](../src/lib/state/connection.svelte.ts#L465-L478)
-- **Symptom:** Auto-reconnect uses separate `reconnecting` boolean; `connect()` guard checks only `connecting`, not `reconnecting`. User toggle during auto-reconnect → two concurrent `start_autosync` IPC calls.
-- **Fix:** Set `this.connecting = true` in `autoReconnect` w/ `finally` clear, OR check both flags in `connect()` guard.
-
 ## 171. `connecting` flag stuck `true` if TOFU modal dismissed without confirm/cancel
 - **Where:** [connection.svelte.ts:207-233](../src/lib/state/connection.svelte.ts#L207-L233)
 - **Symptom:** Fingerprint-probe branch `return`s early without `finally` clearing `connecting`. AppShell `fingerprintHandled` effect normally pipes back the result, but if `askConfirm` never resolves (component unmount mid-dialog), `connecting` stays true → StatusBar button locked.
@@ -379,115 +374,9 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Symptom:** Concurrent `retryWire()` (double-click) before `wiring` flips → race between partial-init rollback and re-entry. Listeners survive.
 - **Fix:** Verify `finally { this.wiring = false }` placement happens after all `unlisteners.push()` completes. Stress-test.
 
-## 177. `beforeunload` listener leak in assistant store (HMR-only)
-- **Where:** [assistant.svelte.ts:1422-1423](../src/lib/state/assistant.svelte.ts#L1422-L1423)
-- **Symptom:** Anonymous listener registered in `init()`, no removal path. Singleton survives prod fine; HMR re-init in dev stacks duplicates.
-- **Fix:** Store handler in class field; provide `destroy()` calling `removeEventListener`.
-
 ### LOW (28)
 
-## 178. `applyTodoWrite` id generation `todo-${i}-${slice}` not stable across calls
-- **Where:** [assistant.svelte.ts:756-763](../src/lib/state/assistant.svelte.ts#L756-L763)
-- **Symptom:** Same content at same index → same id (good); but reorder/insert → all downstream ids change. Keyed `{#each}` unmounts everything, visible flash.
-- **Fix:** Content-based hash, OR preserve existing ids on update when content matches.
-
-## 179. `stop()` doesn't flush pendingText before clearing `streamingMsgId`
-- **Where:** [assistant.svelte.ts:2211-2217](../src/lib/state/assistant.svelte.ts#L2211-L2217)
-- **Symptom:** Stop click → `streamingMsgId = null` first → next rAF tick `mutateStreaming` early-returns → buffered text silently dropped.
-- **Fix:** Call `tab.flushPendingText()` before `tab.streamingMsgId = null`.
-
-## 180. `init()` re-entrance guard skips fresh listeners on HMR
-- **Where:** [assistant.svelte.ts:1341](../src/lib/state/assistant.svelte.ts#L1341)
-- **Symptom:** `unlistens.length > 0` skips re-init; stale module-eval closures handle events with outdated refs.
-- **Fix:** Add `destroy()` that calls all unlistens + resets; wire to `import.meta.hot.dispose`.
-
-## 181. `restoreTabs` `persistTabs()` not in finally — partial state written on throw
-- **Where:** [assistant.svelte.ts:1744-1747](../src/lib/state/assistant.svelte.ts#L1744-L1747)
-- **Fix:** Wrap body in try/finally; call `persistTabs()` in finally.
-
-## 182. Post-done orphaned non-JSON CLI lines silently dropped
-- **Where:** [assistant.svelte.ts:874](../src/lib/state/assistant.svelte.ts#L874)
-- **Fix:** Add `console.debug("[assistant] orphaned non-JSON line (post-done)", raw.slice(0, 80))` for observability.
-
-## 183. `cacheBustHintShown` plain non-reactive — HMR resets in dev (INFO bordering LOW)
-- **Where:** [assistant.svelte.ts:1285](../src/lib/state/assistant.svelte.ts#L1285)
-- **Fix:** Gate via `sessionStorage` key in addition to in-memory flag (dev ergonomics only).
-
-## 184. `send()` doesn't clear `storeLastError` — stale error banner persists into first turn
-- **Where:** [assistant.svelte.ts:2029](../src/lib/state/assistant.svelte.ts#L2029)
-- **Fix:** `this.lastError = null;` after `this.lastNotice = null;` (setter routes correctly).
-
-## 185. `retryLast` no re-entrancy guard — fast double-call pops two pairs
-- **Where:** [assistant.svelte.ts:2356-2364](../src/lib/state/assistant.svelte.ts#L2356-L2364)
-- **Fix:** `let retrying = false` field, or check msg-count after `await stop()`.
-
-## 191. Outside-click dropdown $effect can leave stale listener attached
-- **Where:** [Settings.svelte:41](../src/lib/components/settings/Settings.svelte#L41)
-- **Fix:** Split per-dropdown effects, or unconditional add/remove on mount/destroy.
-
-## 192. Shell + font dropdowns: `role="listbox"` with `<button>` children, no `aria-activedescendant`
-- **Where:** [Settings.svelte:287](../src/lib/components/settings/Settings.svelte#L287) (shell), [:381](../src/lib/components/settings/Settings.svelte#L381) (font)
-- **Symptom:** Mixed-role widget; arrow-key listbox navigation absent.
-- **Fix:** Add ids + `aria-activedescendant`; keydown for Up/Down/Home/End/Enter/Escape.
-
-## 193. `{#key section}` open dropdowns not reset on section change
-- **Where:** [Settings.svelte:212](../src/lib/components/settings/Settings.svelte#L212)
-- **Fix:** Reset `shellDdOpen`/`fontDdOpen` to false in nav `onclick` before updating `section`.
-
-## 194. `{#key section}` + `out:fade`/`in:fly` overlap on rapid nav
-- **Where:** [Settings.svelte:212-216](../src/lib/components/settings/Settings.svelte#L212-L216)
-- **Fix:** `out` duration 0, OR debounce section change.
-
-## 197. "Clear" budget button visible-flash on click
-- **Where:** [Settings.svelte:632-634](../src/lib/components/settings/Settings.svelte#L632-L634)
-- **Fix:** Disable button during `asstMaxBudgetSaving`.
-
-## 198. `selBreakdown` rebuilds Map per derivation tick from full entries list
-- **Where:** [SyncPage.svelte:117-132](../src/lib/components/sync/SyncPage.svelte#L117-L132)
-- **Fix:** Derive from `syncPage.groups` (already grouped) instead of `entries`.
-
-## 200. `DriftSummaryCard` re-groups `entries` independently of `syncPage.groups`
-- **Where:** [DriftSummaryCard.svelte:18-36](../src/lib/components/sync/DriftSummaryCard.svelte#L18-L36)
-- **Fix:** Derive from `syncPage.groups` to eliminate parallel derivation path.
-
-## 201. `.conflicts-inline-chev` no transition — chevron snaps vs animates
-- **Where:** [SyncPage.svelte:1259-1267](../src/lib/components/sync/SyncPage.svelte#L1259-L1267) (CSS)
-- **Fix:** Add `transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1)`.
-
-## 203. `countFor()` O(N×9) per render — not memoized
-- **Where:** [ActivityFeed.svelte:144-146](../src/lib/components/activity/ActivityFeed.svelte#L144-L146)
-- **Fix:** `$derived` map `Record<Group, number>` once per feed update.
-
-## 204. Group-header `{#each}` key includes `rows.length` — forces destroy/recreate on each event
-- **Where:** [ActivityFeed.svelte:506](../src/lib/components/activity/ActivityFeed.svelte#L506)
-- **Fix:** Remove `rows.length` from key; let derived `rendered` update existing nodes.
-
-## 208. `ChatTabsBar` drag state not reset on `dragcancel` / workspace-switch
-- **Where:** [ChatTabsBar.svelte:88-91](../src/lib/components/shell/ChatTabsBar.svelte#L88-L91)
-- **Fix:** Add `ondragcancel={onDragEnd}` + effect cleanup that resets drag state.
-
-## 210. `UpdateToast` timer no-ops on rapid visibility re-trigger w/ hover
-- **Where:** [UpdateToast.svelte:24-28](../src/lib/components/UpdateToast.svelte#L24-L28)
-- **Fix:** Reset `hovering = false` after disarm to ensure re-trigger re-arms.
-
-## 212. `ActivityBar` Settings tooltip shows `Ctrl+9` only, hides `Ctrl+,`
-- **Where:** [ActivityBar.svelte:51](../src/lib/components/shell/ActivityBar.svelte#L51)
-- **Fix:** Append `· Ctrl+,` to title for Settings id.
-
-## 213. `PageHeader` `data-tone="neutral"` dims entire header w/ stacked opacity
-- **Where:** [PageHeader.svelte:73](../src/lib/components/shell/PageHeader.svelte#L73)
-- **Symptom:** `opacity: 0.35` on parent multiplies with `::after { opacity: 0.55 }` → stripe ~0.19. Header text, icon, badges all dimmed.
-- **Fix:** Move `opacity: 0.25` onto `[data-tone="neutral"]::after` only.
-
 ### INFO (5)
-
-## 215. `StatusBar.app_version` duplicates `updates.currentVersion` IPC
-- **Where:** [StatusBar.svelte:61-65](../src/lib/components/shell/StatusBar.svelte#L61-L65)
-- **Fix:** `$derived(() => updates.currentVersion)` after `checkOnLaunch()` resolves.
-
-## 216. `kindVariant "muted"` has no CSS coverage for `data-selected="true"` state
-- **Where:** [ActivityFeed.svelte:332](../src/lib/components/activity/ActivityFeed.svelte#L332), CSS at [:818-821](../src/lib/components/activity/ActivityFeed.svelte#L818-L821)
-- **Fix:** Add `[data-selected="true"][data-variant="muted"]` rule, OR exhaustive switch w/ `satisfies`.
 
 ## 217. `EmptyState.pick()` may not focus textarea if draft unchanged
 - **Where:** [EmptyState.svelte:76-78](../src/lib/components/assistant/EmptyState.svelte#L76-L78)
@@ -552,10 +441,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 
 ## 234. ~~Re-cite of #146~~ — VERIFIED SHIPPED (see #146).
 
-## 239. `SESSION_PIDS`/`SESSION_STOPPED` `.lock().ok()` — re-confirmed
-- **Where:** [assistant/mod.rs:44,51](../src-tauri/src/assistant/mod.rs#L44)
-- **Note:** Dup of #63; T+U confirmed STILL present in v0.4.13. Promote priority.
-
 ## 240. ~~`aborted_shrunk()` mutex-poison silently returns empty vec~~ — VERIFIED SHIPPED
 - [auto_sync.rs:1328-1334](../src-tauri/src/sync/auto_sync.rs#L1328-L1334) — explicit `Err(p)` arm logs + recovers via `p.into_inner().clone()`.
 
@@ -570,11 +455,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 
 ## 244. ~~`edit_trail.rs` destroys trail on SFTP error~~ — VERIFIED SHIPPED
 - [edit_trail.rs:56-67](../src-tauri/src/sync/edit_trail.rs#L56-L67) — `ReadOutcome` enum (`Present`/`Absent`/`Error`); error arm logs + early-returns to preserve remote history.
-
-## 246. Rate-limit critical bypass has no secondary ceiling
-- **Where:** [diagnostics/mod.rs:415-425](../src-tauri/src/diagnostics/mod.rs#L415-L425)
-- **Symptom:** 7 critical event types bypass 200/s cap. Pathological `RemoteScanResult` loop floods Svelte reactivity.
-- **Fix:** Secondary `critical_emitted` counter cap (50/s), or document invariant.
 
 ## 247. No tracing spans on hot paths (flush, scan, SFTP)
 - **Where:** [auto_sync/flush.rs:35](../src-tauri/src/sync/auto_sync/flush.rs#L35), [drift_scanner.rs:122](../src-tauri/src/sync/drift_scanner.rs#L122), [sftp/transfer.rs:20](../src-tauri/src/sftp/transfer.rs#L20)
@@ -622,16 +502,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Where:** [Diagnostics.svelte:127-128](../src/lib/components/diagnostics/Diagnostics.svelte#L127-L128)
 - **Symptom:** `find(e => e.stage === "...")` from front; matching event always near tail.
 - **Fix:** `findLast`, or maintain `Map<stage, at>` index in store.
-
-## 257. `selBreakdown` rebuilds Map even when selection unchanged
-- **Where:** [SyncPage.svelte:117](../src/lib/components/sync/SyncPage.svelte#L117)
-- **Symptom:** Mixed dependency (`entries` + `selected`) → over-invalidates on entry stream-in.
-- **Fix:** Memoize `byPath` map in store (changes only on entries).
-
-## 258. 39 `format_push_string` clippy hits in MCP server
-- **Where:** [mcp_server.rs:185](../src-tauri/src/assistant/mcp_server.rs#L185) (representative)
-- **Symptom:** `out.push_str(&format!(...))` allocates intermediate `String` each call. 39 sites in tight loops.
-- **Fix:** `write!(out, "...", ...)` from `std::fmt::Write` — zero intermediate alloc.
 
 ## 259. `compute_sha1` in drift scanner sequential per file (SSH exec round-trip)
 - **Where:** [drift_scanner.rs:384,422,445](../src-tauri/src/sync/drift_scanner.rs#L384)
