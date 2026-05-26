@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { reportFrontendError } from "../util/diag";
 
 export type ServerProfile = {
   key: string;
@@ -200,7 +201,10 @@ class ConnectionStore {
       console.error("set_last_selected failed", e);
     }
     if (isNew || !this.status) {
-      this.connect().catch((e) => console.error("auto-connect failed", e));
+      this.connect().catch((e) => {
+        console.error("auto-connect failed", e);
+        reportFrontendError("auto-connect", e);
+      });
     }
   }
 
@@ -228,6 +232,7 @@ class ConnectionStore {
     } catch (e) {
       this.lastConnectError = String(e);
       console.error("connect failed", e);
+      reportFrontendError("connect", e);
       this.connecting = false;
       throw e;
     }
@@ -492,6 +497,7 @@ class ConnectionStore {
       this.reconnectAttempts = 0;
     } catch (e) {
       console.error("[rift] auto-reconnect failed", e);
+      reportFrontendError("auto-reconnect", e);
     } finally {
       this.reconnecting = false;
       this.connecting = false;
