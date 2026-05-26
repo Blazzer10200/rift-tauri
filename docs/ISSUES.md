@@ -4,7 +4,7 @@
 >
 > Open issues only — when something ships, **delete the block** (`git log -- docs/ISSUES.md` preserves history). Each block carries `Where` (file:line, may have drifted — re-grep before acting), `Symptom`, optional `Fix sketch`. Issue IDs are durable — never re-number, only append.
 >
-> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170). Re-verification pass 2026-05-25 removed ~50 already-shipped Wave-2/3 blocks across two sweeps: leak/ARIA cluster (#151-152, #154-162, #168, #173-176, #186-190, #195-196, #199, #205-207, #209, #214) and assistant/sync/perf cluster (#170, #177-185, #197-198, #201, #203-204, #208, #210, #212-213, #215-216, #239, #246, #257-258). All confirmed via in-place greps. Stale: #191-194 (Settings dropdowns no longer exist), #159/#261 (AssistantHeader.svelte deleted).
+> Originally captured 2026-05-19 (1638 lines, 265 items). Pruned 2026-05-21 to open items only (~170). Re-verification pass 2026-05-25 removed ~55 already-shipped Wave-2/3 blocks across three sweeps: (1) leak/ARIA cluster #151-152, #154-162, #168, #173-176, #186-190, #195-196, #199, #205-207, #209, #214; (2) assistant/sync/perf cluster #170, #177-185, #197-198, #201, #203-204, #208, #210, #212-213, #215-216, #239, #246, #257-258; (3) dialog/wire/events cluster #169, #172, #200 (shipped this session via DriftSummaryCard.svelte rewrite), #218 (dup of #174). Misanalysis dropped: #256 (events are prepended at diagnostics.svelte.ts:104, so `.find()` from head IS optimal). Stale: #191-194 (Settings dropdowns no longer exist), #159/#261 (AssistantHeader.svelte deleted).
 
 ---
 
@@ -359,20 +359,10 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 - **Symptom:** Double-click Sync within 1.2s starts second `syncNow()` while prior `rescan()` is still pending → overlapping reconciles.
 - **Fix:** Chain `rescan()` into the same promise chain (keep `busy=true` until it returns), OR debounce Sync button for 1.5s post-success.
 
-## 169. `dialogs.svelte.ts` callbacks captured at script-init never cleared on AppShell destroy
-- **Where:** [AppShell.svelte:97-100](../src/lib/components/AppShell.svelte#L97-L100)
-- **Symptom:** Singleton holds destroyed-component closures. Route-level HMR remount stacks callbacks; calling stale ones operates on dead `$state`.
-- **Fix:** Move assignments into `onMount`; reset to no-op in `onDestroy`.
-
 ## 171. `connecting` flag stuck `true` if TOFU modal dismissed without confirm/cancel
 - **Where:** [connection.svelte.ts:207-233](../src/lib/state/connection.svelte.ts#L207-L233)
 - **Symptom:** Fingerprint-probe branch `return`s early without `finally` clearing `connecting`. AppShell `fingerprintHandled` effect normally pipes back the result, but if `askConfirm` never resolves (component unmount mid-dialog), `connecting` stays true → StatusBar button locked.
 - **Fix:** Verify `cancelFingerprint` reaches every dismiss path; OR wrap in try/finally that clears `connecting` if neither callback fired.
-
-## 172. `connection.wireEvents()` guard allows double-bind after `disposeEvents()`
-- **Where:** [connection.svelte.ts:289-291](../src/lib/state/connection.svelte.ts#L289-L291)
-- **Symptom:** Concurrent `retryWire()` (double-click) before `wiring` flips → race between partial-init rollback and re-entry. Listeners survive.
-- **Fix:** Verify `finally { this.wiring = false }` placement happens after all `unlisteners.push()` completes. Stress-test.
 
 ### LOW (28)
 
@@ -381,10 +371,6 @@ Also accepted as INFO (no action expected): `path_guard.rs:21` Linux-only remote
 ## 217. `EmptyState.pick()` may not focus textarea if draft unchanged
 - **Where:** [EmptyState.svelte:76-78](../src/lib/components/assistant/EmptyState.svelte#L76-L78)
 - **Fix:** CDP-verify; if needed, add explicit `tick().then(() => ta?.focus())`.
-
-## 218. AppShell `onResized` listener pattern is correct but uses parallel `alive`/`shellAlive`
-- **Where:** [AppShell.svelte:106-122](../src/lib/components/AppShell.svelte#L106-L122)
-- **Fix:** See #174 — consolidate aliveness flags.
 
 ---
 
@@ -409,7 +395,7 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 
 ## 225. ~~`eprintln!` in sync handlers + drift scanner~~ — SHIPPED 2026-05-25
 - 14 `eprintln!` in `sync/auto_sync.rs` (force_push_now / force_pull_now / reconcile) → `log::debug!` (most) + `log::info!` (reconcile summary) + `log::warn!` (no-watched-folders). Drift-scanner duplicate `eprintln!` deleted (kept the `emit_with_fields` follower). Verify: `Grep eprintln! src-tauri/src/sync/` returns zero.
-- **Out-of-scope eprintlns remaining** (separate cleanup): `profile/mod.rs:248`, `sftp/list.rs:389`, `sftp/ops.rs:88`, `state/sync_snapshot.rs:370,377`.
+- **Remaining eprintlns audited 2026-05-25**: `sftp/list.rs:389`, `sftp/ops.rs:88` already cleaned. `profile/mod.rs:248` + `state/sync_snapshot.rs:370,377` are inside `#[test] #[ignore]` blocks — test diagnostic output, not production code paths. Leave as-is.
 
 ## 226. ~~Broadcast bus lag silently counted~~ — VERIFIED SHIPPED
 - [diagnostics/mod.rs:481](../src-tauri/src/diagnostics/mod.rs#L481) — `log::warn!("diag bus lagged: {n} events dropped")` lands after `record_bus_lag(n)`.
@@ -497,11 +483,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 ## 255. `DriftSummaryCard` $derived.by — O(entries) Map rebuild per drift event
 - **Where:** [DriftSummaryCard.svelte:18](../src/lib/components/sync/DriftSummaryCard.svelte#L18)
 - **Fix:** Move group-by into store as derived field; component reads pre-aggregated.
-
-## 256. `Diagnostics.svelte` two O(n) linear scans on every event push
-- **Where:** [Diagnostics.svelte:127-128](../src/lib/components/diagnostics/Diagnostics.svelte#L127-L128)
-- **Symptom:** `find(e => e.stage === "...")` from front; matching event always near tail.
-- **Fix:** `findLast`, or maintain `Map<stage, at>` index in store.
 
 ## 259. `compute_sha1` in drift scanner sequential per file (SSH exec round-trip)
 - **Where:** [drift_scanner.rs:384,422,445](../src-tauri/src/sync/drift_scanner.rs#L384)
