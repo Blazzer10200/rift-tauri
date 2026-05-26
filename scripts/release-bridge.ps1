@@ -137,9 +137,11 @@ if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
 $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'src-tauri/target' }
 $nsisDir = Join-Path $targetRoot 'release/bundle/nsis'
-$setupCandidates = @(Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' -File)
+# Filter to exact current version — bundle dir is shared across builds.
+$setupPattern = "*_${version}_*-setup.exe"
+$setupCandidates = @(Get-ChildItem -Path $nsisDir -Filter $setupPattern -File)
 if ($setupCandidates.Count -ne 1) {
-    throw "Expected exactly one *-setup.exe in $nsisDir, found $($setupCandidates.Count)"
+    throw "Expected exactly one $setupPattern in $nsisDir, found $($setupCandidates.Count)"
 }
 $setupPath = $setupCandidates[0].FullName
 $sigPath = "$setupPath.sig"
