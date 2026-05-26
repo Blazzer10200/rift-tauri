@@ -2,9 +2,33 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## v0.4.30-alpha — 2026-05-25 — rail simplification + command palette + observability cleanup
+## 2026-05-25 (PM) — autonomous cleanup pass (unshipped, on `main`)
 
-Rail trim + command palette landed alongside an observability sweep (eprintln → log) + #109 frontend tidy. Heavy ISSUES.md hygiene marked 20+ items VERIFIED SHIPPED. Detail in CHANGELOG.
+5 commits past v0.4.30-alpha, ALL on `main`, NOT pushed. No version bump. Updater files untouched — in-flight overhaul below still owns its diff.
+
+- `3e2795b` `0238695` `3f4e3b5` `b70fb16` `ea3d92c` — re-verification pruned ~65 stale Wave-2/3 blocks from `ISSUES.md` (815L → 484L). The tracker now reflects code. Saved 8+ reimplementations of already-shipped items (#134 tokio::join!, #231-233/251/253 release script, #258 writeln, #259 sha1 batch, etc.).
+- Real engineering (3 fixes, all `cargo check` + `npm run check` clean):
+  - **#200** `DriftSummaryCard.svelte` now consumes `syncPage.groups` instead of re-grouping `entries` (drops a parallel O(entries) pass per drift event; component is 35 lines shorter).
+  - **#248** new `diag_log_frontend_error` Tauri cmd + `src/lib/util/diag.ts` helper. 4 sites wired: `connection.svelte.ts` (connect/auto-connect/auto-reconnect) + `SyncActivityBanner.svelte` (reconnect). Frontend failures now show up in Diagnostics panel + activity feed, not just devtools console.
+  - **#249** `diag_state_pump` gated on subscriber refcount (`DiagPumpSubscribers(AtomicU64)`). Idle Rift no longer pays the 500ms collect-lock-emit cost when Diagnostics tab is closed. Refcount handles `<Diagnostics embedded />` nesting; `diagnostics.svelte.ts` `wire()`/`dispose()` manage 1:1 sub/unsub via `subscribed` flag.
+
+Pre-existing `ReleaseMeta` visibility warn in `update_service.rs` is the only `cargo check` warning, unchanged.
+
+## v0.4.30-alpha — 2026-05-25 — rail trim + command palette + observability cleanup (shipped)
+
+Detail in CHANGELOG.
+
+### In-flight (unshipped) — updater overhaul 2026-05-25
+
+Root cause of 5-10 min "Applying…" on buddy's machine: `velopack::UpdateManager::apply_updates_and_restart` spawns `Update.exe --waitPid <pid>` and returns — does NOT exit Tauri. Fix: `app.exit(0)` after `svc.apply()` in `commands/update.rs::apply_pending_update`, 150ms IPC-flush delay.
+
+Companion changes:
+- `assistant::kill_child_processes_on_exit()` — `taskkill /F /T` tracked claude CLI children before exit so Update.exe doesn't trip on locked handles.
+- Background pre-download on launch — `updates.checkOnLaunch` auto-fires `download()`; user-initiated apply skips straight to the swap.
+- Apply-phase UX: `applyingHint` swaps copy at 20s + 90s; `applyingStuck` drives a Force-Quit dialog button.
+- Delta-vs-full path logging in `UpdateService.download`.
+
+Verified clean both stacks. NOT yet shipped — needs real two-machine apply test before bump.
 
 ---
 
