@@ -92,6 +92,11 @@ class DiagnosticsStore {
 
   private unlisteners: UnlistenFn[] = [];
   private wiring = false;
+  // #249: tracks whether we've incremented the backend pump subscriber count,
+  // so dispose() decrements exactly once per successful wire(). Component-level
+  // mount/unmount can't be a 1:1 with wire/dispose because the store is a
+  // singleton + wire() is re-entry-guarded.
+  private subscribed = false;
 
   async wire() {
     if (this.wiring || this.unlisteners.length) return;
@@ -118,6 +123,14 @@ class DiagnosticsStore {
       } catch (err) {
         console.error("diag_get_state failed", err);
       }
+      // #249: ask the backend pump to start its 500ms emit cadence. The pump
+      // is always running but no-ops when subscriber count is 0.
+      try {
+        await invoke("diag_subscribe_state");
+        this.subscribed = true;
+      } catch (err) {
+        console.warn("diag_subscribe_state failed (pump may stay idle)", err);
+      }
     } catch (err) {
       console.error("diagnostics wire failed", err);
       this.dispose();
@@ -129,6 +142,13 @@ class DiagnosticsStore {
   dispose() {
     for (const u of this.unlisteners) u();
     this.unlisteners = [];
+    // #249: decrement the backend pump refcount so it can go idle when no
+    // Diagnostics panel is mounted. Fire-and-forget — IPC failure here just
+    // means the pump emits for a few extra cycles, not a correctness issue.
+    if (this.subscribed) {
+      this.subscribed = false;
+      void invoke("diag_unsubscribe_state").catch(() => {});
+    }
   }
 
   clear() {
