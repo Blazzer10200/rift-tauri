@@ -7,7 +7,8 @@ use tokio_util::sync::CancellationToken;
 use crate::sync::{self, AutoSyncEngine, AutoSyncStatus, ConflictResolution, FolderSpec};
 use crate::sync::auto_sync::{ActivityKind, ActivityRow};
 use crate::{
-    bridge, diagnostics, profile, sftp, state, tunnel, AutoSyncState, TunnelState,
+    bridge, diagnostics, profile, sftp, state, tunnel, AutoSyncState, DiagPumpSubscribers,
+    TunnelState,
 };
 use super::{basename_for_log, reject_path_traversal, require_pinned_fingerprint};
 
@@ -274,7 +275,11 @@ pub async fn diag_ignored_breakdown(
 }
 
 /// Periodic pipeline-state snapshot emitter. 500ms cadence. #106 cancel-aware.
+/// #249: skips the collect+emit when no subscribers are mounted. Pump still
+/// ticks every 500ms (cheap) but the heavy AutoSyncState lock + DTO build +
+/// IPC emit only runs when the Diagnostics tab (or embedded variant) is live.
 pub async fn diag_state_pump(app: tauri::AppHandle, cancel: CancellationToken) {
+    use std::sync::atomic::Ordering;
     use tauri::Emitter;
     use tauri::Manager;
 
@@ -288,11 +293,43 @@ pub async fn diag_state_pump(app: tauri::AppHandle, cancel: CancellationToken) {
             }
             _ = tick.tick() => {}
         }
+        // #249: gate on subscriber refcount. Lookup + atomic load is cheap;
+        // the work we skip (AutoSync lock + DTO build + IPC emit) is not.
+        if app
+            .try_state::<DiagPumpSubscribers>()
+            .is_some_and(|s| s.0.load(Ordering::Relaxed) == 0)
+        {
+            continue;
+        }
         let st = app.state::<AutoSyncState>();
         let engine = { st.0.lock().await.clone() };
         let dto = collect_diag_dto(engine).await;
         let _ = app.emit("diag://state", &dto);
     }
+}
+
+/// #249: increment the pump subscriber refcount. Called from the frontend
+/// Diagnostics surface on mount. Idempotent per caller — pair every subscribe
+/// with exactly one unsubscribe, or the pump never goes idle.
+#[tauri::command]
+pub fn diag_subscribe_state(subs: tauri::State<'_, DiagPumpSubscribers>) {
+    use std::sync::atomic::Ordering;
+    let prev = subs.0.fetch_add(1, Ordering::Relaxed);
+    log::debug!("diag_subscribe_state: refcount {} -> {}", prev, prev + 1);
+}
+
+/// #249: decrement the pump subscriber refcount. Saturating at 0 to avoid
+/// underflow from a stray unsubscribe (e.g. HMR teardown firing twice).
+#[tauri::command]
+pub fn diag_unsubscribe_state(subs: tauri::State<'_, DiagPumpSubscribers>) {
+    use std::sync::atomic::Ordering;
+    let prev = subs.0.load(Ordering::Relaxed);
+    if prev == 0 {
+        log::warn!("diag_unsubscribe_state: refcount already 0 (stray unsub?)");
+        return;
+    }
+    let new = subs.0.fetch_sub(1, Ordering::Relaxed) - 1;
+    log::debug!("diag_unsubscribe_state: refcount {} -> {}", prev, new);
 }
 
 #[derive(Debug, serde::Deserialize)]

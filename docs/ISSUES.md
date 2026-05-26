@@ -428,11 +428,6 @@ Agent T verified via [auto_sync/watch.rs:245](../src-tauri/src/sync/auto_sync/wa
 - **Symptom:** No structured timing or hierarchical causality. Only `latency_ms` in `log_activity_rich`.
 - **Fix:** Short-term: entry/exit `log::debug!` w/ timing. Long-term: `tracing` + `tracing-log` bridge.
 
-## 249. `diag_state_pump` emits every 500ms regardless of subscribers
-- **Where:** [lib.rs:343,386](../src-tauri/src/lib.rs#L343)
-- **Symptom:** Persistent background serialization+emit even when Diagnostics tab closed.
-- **Fix:** `diag_active: AtomicBool` toggled by subscribe/unsubscribe; OR pull model via `diag_get_state`.
-
 ## 250. ~~STT console.debug calls~~ — VERIFIED SHIPPED 2026-05-25
 - Re-grep of `src/lib/state/stt.svelte.ts` returns zero `console.*` matches. Both #22 and #250 closed.
 

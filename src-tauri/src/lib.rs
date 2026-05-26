@@ -50,6 +50,13 @@ pub struct DownloadState(pub AsyncMutex<Option<CancellationToken>>);
 /// on `RunEvent::Exit` so the pump exits before Tauri tears the runtime down.
 pub struct DiagPumpCancel(pub CancellationToken);
 
+/// #249: subscriber refcount for `diag_state_pump`. Pump short-circuits the
+/// 500ms collect+emit when count == 0 (no Diagnostics tab mounted). Refcount
+/// (not bool) because the Diagnostics surface can be mounted twice — as a
+/// page workspace AND as `<Diagnostics embedded />` inside ActivityFeed.
+/// `diag_subscribe_state`/`diag_unsubscribe_state` increment/decrement.
+pub struct DiagPumpSubscribers(pub std::sync::atomic::AtomicU64);
+
 /// Application entry point. Velopack hooks run FIRST (before Tauri spins up)
 /// so install/update commands like `--veloapp-install` exit cleanly without
 /// dragging the whole UI runtime through the lifecycle event. Mirrors the WPF
@@ -160,6 +167,7 @@ pub fn run() {
             // RunEvent::Exit can cancel it cleanly.
             let pump_cancel = CancellationToken::new();
             app.manage(DiagPumpCancel(pump_cancel.clone()));
+            app.manage(DiagPumpSubscribers(std::sync::atomic::AtomicU64::new(0)));
             tauri::async_runtime::spawn(commands::sync::diag_state_pump(app_handle, pump_cancel));
             // Phase E4: best-effort sweep of CLI JSONLs whose sessions were
             // retired by compaction >30 days ago.
@@ -214,6 +222,8 @@ pub fn run() {
             commands::diag_get_state,
             commands::diag_snapshot_path,
             commands::diag_log_frontend_error,
+            commands::diag_subscribe_state,
+            commands::diag_unsubscribe_state,
             commands::sync_reconcile,
             commands::sync_cancel,
             commands::sync_pull_pending,
