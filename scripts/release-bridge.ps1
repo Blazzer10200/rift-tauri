@@ -231,6 +231,9 @@ $uploadArgs = @(
     '--tag', $tag,
     '--token', $ghToken
 )
+# vpk --pre is OK — velopack-rust clients honor it for "allow prerelease"
+# filtering on v0.4.31. Distinct from GH's `--prerelease` which we never
+# set (would 404 the tauri-updater latest.json redirect for v0.4.32+ clients).
 if ($version -match '-(alpha|beta|rc)') {
     $uploadArgs += '--pre'
 }
@@ -240,6 +243,14 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
 Write-Host '=== gh release upload (Tauri assets) ===' -ForegroundColor Cyan
 gh release upload $tag $setupPath $sigPath $latestPath --repo $releaseRepo --clobber
 if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
+
+# vpk creates the GH release marked prerelease (from --pre above), but GitHub's
+# /releases/latest/download/<asset> redirect EXCLUDES prereleases, which would
+# 404 the tauri-updater endpoint for v0.4.32+ clients. Demote post-create.
+# The release stays alpha via the version-string suffix, not the GH flag.
+Write-Host '=== gh release edit --prerelease=false (so latest.json redirect resolves) ===' -ForegroundColor Cyan
+gh release edit $tag --repo $releaseRepo --prerelease=false
+if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed' }
 
 # --- Verify --------------------------------------------------------------
 Write-Host '=== Release published ===' -ForegroundColor Green

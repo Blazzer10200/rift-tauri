@@ -211,9 +211,11 @@ if ($releaseNotesFile) {
 } else {
     $ghArgs += @('--notes', '')
 }
-if ($version -match '-(alpha|beta|rc)') {
-    $ghArgs += '--prerelease'
-}
+# DO NOT add --prerelease, even for alpha/beta/rc. GitHub's
+# releases/latest/download/<asset> redirect EXCLUDES prereleases, which
+# would 404 the tauri-updater endpoint baked into every shipped client
+# (https://github.com/.../releases/latest/download/latest.json). Alpha-ness
+# is communicated via the version suffix (`-alpha`), not the GH flag.
 $ghArgs += @($setupPath, $sigPath, $latestPath)
 
 & gh @ghArgs
