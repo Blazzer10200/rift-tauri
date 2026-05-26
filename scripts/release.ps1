@@ -1,26 +1,26 @@
-# Rift release pipeline -- local execution.
+# Rift release pipeline -- Tauri-only path (v0.4.33+).
 #
-# Reads version from package.json (must match Cargo.toml), runs `npm run tauri
-# build`, packs with Velopack, publishes to GitHub releases. Unsigned for now
-# (audit H4 -- signing deferred until cert + AAS budget is in place).
+# Migrated from velopack 2026-05-26 (see docs/design/updater-migration.md).
+# Produces a single NSIS Setup.exe + .sig, generates latest.json, and uploads
+# all three to the public rift-releases GitHub repo. v0.4.32+ clients poll
+# latest.json via tauri-plugin-updater.
 #
-# Two-repo split: source lives in private `rift-tauri`, releases publish to
-# public `rift-releases` so unauthenticated AutoSource clients can fetch
-# updates. Velopack-rust 0.0.1298 has no auth in AutoSource -- the public
-# releases repo is the only no-fork path.
+# For the ONE-TIME v0.4.32 bridge release (also produces velopack artifacts so
+# v0.4.31 clients can update), use scripts/release-bridge.ps1 instead.
 #
-# Prereqs on PATH: npm, vpk (`dotnet tool install -g vpk`), gh (logged in).
+# Prereqs on PATH: npm, gh (logged in). Tauri signing key env required --
+# TAURI_SIGNING_PRIVATE_KEY_PATH (loaded from .secrets/env.sh) must point at
+# C:/Users/BLAZZER/.tauri/rift.key. If unset, `tauri build` produces no .sig
+# file and clients will reject the update.
 #
-# Bump versions BEFORE running this script -- use `scripts/bump.ps1 <version>`
-# to write the three lockstep files (package.json + Cargo.toml + tauri.conf.json)
-# in one shot. This script never auto-bumps; use `/git-ship` for the full
-# bump-and-publish pipeline.
+# Bump versions BEFORE running -- use `scripts/bump.ps1 <version>` to write the
+# three lockstep files (package.json + Cargo.toml + tauri.conf.json).
 #
-# Release notes are pulled from the top entry of `docs/CHANGELOG.md`. The top
-# entry's version must match the bumped version or the notes are skipped.
+# Release notes are pulled from the top entry of `docs/CHANGELOG.md`. Top entry
+# version must match the bumped version or notes are skipped.
 #
 # Usage:  pwsh ./scripts/release.ps1
-#         pwsh ./scripts/release.ps1 -Force   # bypass dirty-tree refusal (CI/local)
+#         pwsh ./scripts/release.ps1 -Force   # bypass dirty-tree refusal
 
 param(
     [switch]$Force
@@ -31,13 +31,11 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
 
-Write-Host '=== Rift release pipeline ===' -ForegroundColor Cyan
+Write-Host '=== Rift release pipeline (Tauri-updater path) ===' -ForegroundColor Cyan
 
 # --- Preflight: version sync ---------------------------------------------
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
 $cargoText = Get-Content src-tauri/Cargo.toml -Raw
-# Anchor to the [package] section so a workspace [workspace.package] block or a
-# dep-version line before [package] doesn't get picked up by accident (#231).
 if ($cargoText -notmatch '(?ms)\[package\][^\[]*?^\s*version\s*=\s*"([^"]+)"') {
     throw 'Cargo.toml: cannot parse [package] version field'
 }
@@ -50,24 +48,19 @@ $version = $pkg.version
 $tag = "v$version"
 Write-Host "Version: $version (tag $tag)" -ForegroundColor Green
 
-# --- Preflight: extract release notes from CHANGELOG --------------------
-# Pull the top `## v<version>` entry body. Only used if the top entry's
-# version matches the bumped version -- otherwise we'd ship stale notes from
-# a prior release. Silently skipped (warn only) if missing; release still ships.
-#
-# v0.4.26-alpha XML quirk: vpk pack embeds the raw markdown into the nuspec's
-# `<releaseNotes>` element. Velopack strips some non-ASCII chars (em-dash,
-# arrows) but passes Latin-1 supplement chars (e.g. multiplication sign U+00D7)
-# through unescaped, which trips the XmlReader on the read-back path (delta
-# build / setup wrap). v0.4.26 ship hit "Line 17, position 208 XmlException"
-# because of `1.15x` (the unicode multiplication sign) in the entry; workaround
-# used was `--delta None` + skip notes. Convert-ToAsciiSafe pre-strips to pure
-# ASCII so vpk has nothing tricky.
-#
-# Source is kept ASCII-only on purpose -- BOM-less .ps1 read as Win-1252 by
-# PS5.1 would mojibake literal multi-byte chars. \uXXXX regex escapes resolve
-# at .NET regex compile time, not at PS string-parse time, so the source bytes
-# stay ASCII.
+# --- Preflight: signing key ----------------------------------------------
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PATH -and -not $env:TAURI_SIGNING_PRIVATE_KEY) {
+    throw 'TAURI_SIGNING_PRIVATE_KEY[_PATH] not set. Source .secrets/env.sh or set TAURI_SIGNING_PRIVATE_KEY_PATH=C:/Users/BLAZZER/.tauri/rift.key before releasing.'
+}
+if ($env:TAURI_SIGNING_PRIVATE_KEY_PATH -and -not (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) {
+    throw "TAURI_SIGNING_PRIVATE_KEY_PATH points at $($env:TAURI_SIGNING_PRIVATE_KEY_PATH) but no file there."
+}
+
+# --- Preflight: extract release notes from CHANGELOG ---------------------
+# ASCII-only source -- \uXXXX in -replace patterns resolves at .NET regex
+# compile time, NOT at PS string-parse time, so the source bytes stay ASCII.
+# BOM-less .ps1 read as Win-1252 by PS5.1 would mojibake any literal
+# multi-byte chars.
 function Convert-ToAsciiSafe([string]$s) {
     $s = $s -replace '\u2014', '--'   # em-dash
     $s = $s -replace '\u2013', '-'    # en-dash
@@ -94,6 +87,7 @@ function Convert-ToAsciiSafe([string]$s) {
 }
 
 $releaseNotesFile = $null
+$notesBodyAscii = ""
 $changelogPath = 'docs/CHANGELOG.md'
 if (Test-Path $changelogPath) {
     $clText = [System.IO.File]::ReadAllText($changelogPath)
@@ -105,20 +99,10 @@ if (Test-Path $changelogPath) {
         if ($topVer -eq $version) {
             $body = $m.Groups['body'].Value.Trim()
             if ($body) {
-                $bodyAscii = Convert-ToAsciiSafe $body
-                # Sanity: synthesize the nuspec releaseNotes element + parse as
-                # XML before handing to vpk. Catches future char hazards fast,
-                # not after a 5-min build burns.
-                $probeXml = "<?xml version='1.0' encoding='utf-8'?><r>$([System.Security.SecurityElement]::Escape($bodyAscii))</r>"
-                try {
-                    [xml]$null = $probeXml
-                } catch {
-                    throw "Release notes failed XML sanity probe: $($_.Exception.Message)"
-                }
+                $notesBodyAscii = Convert-ToAsciiSafe $body
                 $releaseNotesFile = Join-Path ([System.IO.Path]::GetTempPath()) "rift-release-notes-$version.md"
-                [System.IO.File]::WriteAllText($releaseNotesFile, $bodyAscii)
-                $delta = $body.Length - $bodyAscii.Length
-                Write-Host "Release notes: top CHANGELOG entry ($($bodyAscii.Length) chars, $delta non-ASCII stripped)" -ForegroundColor Green
+                [System.IO.File]::WriteAllText($releaseNotesFile, $notesBodyAscii)
+                Write-Host "Release notes: top CHANGELOG entry ($($notesBodyAscii.Length) chars)" -ForegroundColor Green
             } else {
                 Write-Host "Warning: CHANGELOG entry for v$version has empty body -- skipping notes" -ForegroundColor Yellow
             }
@@ -133,7 +117,7 @@ if (Test-Path $changelogPath) {
 }
 
 # --- Preflight: tools ----------------------------------------------------
-foreach ($t in @('npm', 'vpk', 'gh')) {
+foreach ($t in @('npm', 'gh')) {
     if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
         throw "$t not found on PATH"
     }
@@ -144,8 +128,6 @@ $dirty = git status --porcelain
 if ($dirty) {
     Write-Host 'Working tree dirty:' -ForegroundColor Yellow
     Write-Host $dirty
-    # Read-Host silently exits 1 in CI / non-TTY pipes (no stdin → empty → -ne 'y').
-    # Explicit -Force flag is the only path through. (#253)
     if (-not $Force) {
         Write-Host 'Refusing to ship from a dirty working tree. Re-run with -Force to override.' -ForegroundColor Red
         throw 'release.ps1: working tree dirty (pass -Force to override)'
@@ -154,9 +136,6 @@ if ($dirty) {
 }
 
 # --- Preflight: tag does not already exist ------------------------------
-# `gh release view` exits non-zero + writes to stderr when the release isn't
-# found, which trips ErrorAction=Stop on PS5.1. Wrap to swallow the not-found
-# case and only throw if the release actually exists (exit 0).
 $releaseRepo = 'Blazzer10200/rift-releases'
 try {
     $null = gh release view $tag --repo $releaseRepo --json tagName 2>&1
@@ -165,100 +144,82 @@ try {
     }
 } catch [System.Management.Automation.RuntimeException] {
     if ($_.Exception.Message -like '*already exists*') { throw }
-    # else: not-found -- proceed
 }
 
 # --- Build ---------------------------------------------------------------
-Write-Host '=== tauri build ===' -ForegroundColor Cyan
+Write-Host '=== tauri build (NSIS + .sig) ===' -ForegroundColor Cyan
 npm run tauri build
 if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
-# CARGO_TARGET_DIR (if set globally) redirects the exe out of src-tauri/target/.
-# Resolve against $env:CARGO_TARGET_DIR first, then fall back to the in-tree path.
-$exePath = if ($env:CARGO_TARGET_DIR) {
-    Join-Path $env:CARGO_TARGET_DIR 'release/rift-tauri.exe'
-} else {
-    'src-tauri/target/release/rift-tauri.exe'
+# tauri build emits to either src-tauri/target/ or $env:CARGO_TARGET_DIR.
+$targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'src-tauri/target' }
+$nsisDir = Join-Path $targetRoot 'release/bundle/nsis'
+if (-not (Test-Path $nsisDir)) { throw "NSIS bundle dir not produced: $nsisDir" }
+
+$setupCandidates = @(Get-ChildItem -Path $nsisDir -Filter '*-setup.exe' -File)
+if ($setupCandidates.Count -ne 1) {
+    throw "Expected exactly one *-setup.exe in $nsisDir, found $($setupCandidates.Count)"
 }
-if (-not (Test-Path $exePath)) { throw "exe not produced: $exePath" }
+$setupPath = $setupCandidates[0].FullName
+$sigPath = "$setupPath.sig"
+if (-not (Test-Path $sigPath)) {
+    throw "Signature file missing: $sigPath. Check TAURI_SIGNING_PRIVATE_KEY_PATH and that createUpdaterArtifacts=true in tauri.conf.json."
+}
+Write-Host "  Setup: $setupPath" -ForegroundColor DarkGray
+Write-Host "  Sig:   $sigPath" -ForegroundColor DarkGray
 
-# --- Stage a clean directory for vpk pack -------------------------------
-# vpk pack ships every file in -p verbatim. target/release/ contains build
-# artifacts we don't want in the package; copy only the exe + icon.
-#
-# #251: this list is intentionally exhaustive — Rift currently ships a single
-# self-contained exe + the window icon, and nothing else. If a future Tauri
-# release bundles a WebView2 redistributable, sidecar binary, or any *.dll
-# next to the exe, IT MUST BE ADDED HERE or it will be silently absent from
-# the Velopack package and missing on installed clients.
-#
-# Local feed files (Releases/RELEASES, releases.<channel>.json, *.nupkg) are
-# pack-state only — the canonical update feed is the GitHub release assets in
-# Blazzer10200/rift-releases. Don't ship from local Releases/. (#233)
-$staging = "Releases/staging-$version"
-if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
-New-Item -ItemType Directory -Path $staging -Force | Out-Null
-Copy-Item $exePath $staging
-Copy-Item 'src-tauri/icons/icon.ico' $staging
+# --- Generate latest.json -----------------------------------------------
+Write-Host '=== latest.json ===' -ForegroundColor Cyan
+$sigContent = [System.IO.File]::ReadAllText($sigPath).Trim()
+$pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$setupFileName = [System.IO.Path]::GetFileName($setupPath)
+$downloadUrl = "https://github.com/$releaseRepo/releases/download/$tag/$setupFileName"
 
-# --- vpk pack ------------------------------------------------------------
-Write-Host '=== vpk pack ===' -ForegroundColor Cyan
-$packArgs = @(
-    'pack',
-    '-u', 'Rift',
-    '-v', $version,
-    '-p', $staging,
-    '-e', 'rift-tauri.exe',
-    '--packTitle', 'Rift',
-    '--packAuthors', 'Blazzer',
-    '--icon', "$staging/icon.ico",
-    '-o', 'Releases'
+$latest = [ordered]@{
+    version    = $version
+    notes      = $notesBodyAscii
+    pub_date   = $pubDate
+    platforms  = [ordered]@{
+        "windows-x86_64" = [ordered]@{
+            signature = $sigContent
+            url       = $downloadUrl
+        }
+    }
+}
+$latestJson = $latest | ConvertTo-Json -Depth 6
+
+$releasesDir = Join-Path $repoRoot 'Releases'
+if (-not (Test-Path $releasesDir)) { New-Item -ItemType Directory -Path $releasesDir | Out-Null }
+$latestPath = Join-Path $releasesDir 'latest.json'
+# UTF-8 NO BOM -- Tauri's JSON parser barfs on the BOM signature byte (R5 in brief).
+[System.IO.File]::WriteAllText($latestPath, $latestJson, [System.Text.UTF8Encoding]::new($false))
+Write-Host "  Wrote: $latestPath" -ForegroundColor DarkGray
+
+# --- Create + upload to GitHub ------------------------------------------
+Write-Host '=== gh release create ===' -ForegroundColor Cyan
+$ghArgs = @(
+    'release', 'create', $tag,
+    '--repo', $releaseRepo,
+    '--title', $tag
 )
 if ($releaseNotesFile) {
-    $packArgs += @('--releaseNotes', $releaseNotesFile)
+    $ghArgs += @('--notes-file', $releaseNotesFile)
+} else {
+    $ghArgs += @('--notes', '')
 }
-# Optional: themed splash for the native Velopack installer dialog. Active
-# when `src-tauri/installer-splash.png` exists -- drop a 560x140-ish PNG/GIF
-# matching the in-app theme there to swap the bland default.
-$splashPath = 'src-tauri/installer-splash.png'
-if (Test-Path $splashPath) {
-    Write-Host "  splash: $splashPath" -ForegroundColor DarkGray
-    $packArgs += @('--splashImage', $splashPath)
-}
-& vpk @packArgs
-if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
-
-# --- Upload to GitHub ----------------------------------------------------
-# vpk uploads Setup.exe + .nupkg + delta files as release assets and creates
-# the release/tag. --publish marks it published (not draft).
-Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
-$ghToken = (gh auth token).Trim()
-if (-not $ghToken) { throw 'gh auth token returned empty -- run `gh auth login` first' }
-
-$uploadArgs = @(
-    'upload', 'github',
-    '--repoUrl', "https://github.com/$releaseRepo",
-    '--publish',
-    # Explicit --channel (matches Some("win") in update_service.rs::resolve_manager).
-    # Both sides default to 'win' if omitted; spelling it out keeps multi-channel
-    # rollout from silently diverging. (#232)
-    '--channel', 'win',
-    '--releaseName', $tag,
-    '--tag', $tag,
-    '--token', $ghToken
-)
 if ($version -match '-(alpha|beta|rc)') {
-    $uploadArgs += '--pre'
+    $ghArgs += '--prerelease'
 }
-& vpk @uploadArgs
-if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
+$ghArgs += @($setupPath, $sigPath, $latestPath)
+
+& gh @ghArgs
+if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 
 # --- Verify --------------------------------------------------------------
 Write-Host '=== Release published ===' -ForegroundColor Green
 gh release view $tag --repo $releaseRepo
 
 # --- Cleanup -------------------------------------------------------------
-Remove-Item -Recurse -Force $staging
 if ($releaseNotesFile -and (Test-Path $releaseNotesFile)) {
     Remove-Item -Force $releaseNotesFile
 }

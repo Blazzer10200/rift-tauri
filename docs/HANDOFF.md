@@ -2,29 +2,38 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## v0.4.31-alpha — 2026-05-26 — autonomous cleanup follow-up (shipped)
+## Branch in flight — `updater-migration` — Velopack → tauri-plugin-updater
 
-Detail in CHANGELOG. Activity-feed throttle (#254), onMount→$effect migration across 3 components (#262), tracker hygiene. All CDP-verified pre-ship.
+**Branch:** `updater-migration` (HEAD on main = v0.4.31-alpha). Backend + frontend code complete; `/check` clean (0 errors / 0 warnings), `cargo check` clean. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Old `updater-overhaul-awaiting-2machine-test` stash was **dropped** — superseded.
 
-## v0.4.30-alpha — 2026-05-25 — rail trim + command palette + observability cleanup (shipped)
+Done on the branch:
+- Velopack + ureq removed; `tauri-plugin-updater` + `tauri-plugin-process` added.
+- `update_service.rs` deleted; `commands/update.rs` rewritten against `UpdaterExt`.
+- `lib.rs`: dropped `VelopackApp::build().run()` + `UpdateService` state; added plugin inits.
+- `assistant::kill_child_processes_on_exit` salvaged → wired via `on_before_exit`.
+- Frontend store API preserved; added `update-size` listener + auto-DL on launch.
+- `tauri.conf.json`: `createUpdaterArtifacts: true`, pubkey + `installMode: "passive"`.
+- Capabilities: `updater:default`, `process:default`.
+- `scripts/release.ps1` rewritten (Tauri-only, v0.4.33+). `scripts/release-bridge.ps1` written (one-time v0.4.32 hybrid).
+- Signing key generated at `C:/Users/BLAZZER/.tauri/rift.key` (passwordless); `TAURI_SIGNING_PRIVATE_KEY_PATH` exported via `.secrets/env.sh`.
 
-Detail in CHANGELOG.
-
-### Stashed locally — updater overhaul (awaiting two-machine apply test)
-
-`git stash list` → `updater-overhaul-awaiting-2machine-test`. Five files: `commands/update.rs` (`app.exit(0)` + 150ms IPC-flush), `assistant/mod.rs` (`kill_child_processes_on_exit` taskkill before exit), `update_service.rs` (delta-vs-full path log), `UpdateDialog.svelte` (`applyingHint` 20s/90s + Force-Quit button), `updates.svelte.ts` (`applyingElapsedMs` timer + `applyingHint` + `applyingStuck` + #263 singleton doc-comment).
-
-Root cause of 5-10 min "Applying…" on buddy's machine: `velopack::UpdateManager::apply_updates_and_restart` spawns `Update.exe --waitPid <pid>` and returns — does NOT exit Tauri. Fix above. Ship only after a real two-machine apply test confirms the swap completes <1 min.
-
-Recover: `git stash pop` → build a Setup.exe from the patched tree → install on a second machine → trigger update from v0.4.31 → time the apply phase. If clean, bump + ship via `release.ps1` as v0.4.32-alpha.
+**Resume here:**
+1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Vault / encrypted drive / 1Password. Lose this file = no v0.4.32+ install can ever update again. Non-negotiable before B18.
+2. `pwsh scripts/bump.ps1 0.4.32-alpha` (3-file lockstep).
+3. Add CHANGELOG entry for v0.4.32 — name the one-time 5-10 min apply hang on v0.4.31→v0.4.32 explicitly; link manual Setup.exe.
+4. Local smoke test: `npm run tauri build`. Confirm `*-setup.exe` AND `*-setup.exe.sig` in `src-tauri/target/release/bundle/nsis/`.
+5. `pwsh scripts/release-bridge.ps1` → ships v0.4.32 hybrid (vpk + tauri-updater assets).
+6. Update both machines to v0.4.32. Confirm BOTH are on v0.4.32 before proceeding.
+7. For v0.4.33+: regular flow — `bump.ps1` → CHANGELOG → `release.ps1` (clean Tauri-only).
+8. After v0.4.33 ships clean, retire `release-bridge.ps1` (delete or leave as historical).
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.31-alpha** shipped 2026-05-26 (autonomous cleanup follow-up). Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.31-alpha** shipped 2026-05-26. Migration branch above gates next ship. Tauri 2 + Svelte 5 + Rust + russh.
 
-**Velopack U+00D7 fix** in `release.ps1::Convert-ToAsciiSafe` — don't remove (closed Wave-3 ship-blocker; see CHANGELOG v0.4.27).
+**Velopack U+00D7 fix** in pre-migration `release.ps1::Convert-ToAsciiSafe` — preserved in new `release.ps1` + `release-bridge.ps1` as `×`→`x` regex line (see CHANGELOG v0.4.27).
 
 **Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
@@ -32,8 +41,9 @@ Recover: `git stash pop` → build a Setup.exe from the patched tree → install
 
 ## CRITICAL DON'T-TOUCH
 
+- `C:/Users/BLAZZER/.tauri/rift.key` — Tauri-updater signing key. Lose it and no v0.4.32+ install can update. Pubkey in `tauri.conf.json::plugins.updater.pubkey`; do NOT regenerate. Env: `TAURI_SIGNING_PRIVATE_KEY_PATH` via `.secrets/env.sh`.
 - russh `ring` + reqwest `rustls`. russh `Config{keepalive 20s/3, window 2MiB, packet 32KiB}`.
-- `~/.rift/*.json`: keep `serde(flatten) extra`. `VelopackApp::build().run()` FIRST in `lib.rs::run()`. `bundle.targets:["nsis"]`.
+- `~/.rift/*.json`: keep `serde(flatten) extra`. `bundle.targets:["nsis"]`. `createUpdaterArtifacts: true`.
 - DriftWatcher: never overwrite dirty local. `.rift-trail.jsonl` ignore mandatory.
 - `GITHUB_OWNER`/`REPO` → public `rift-releases`, NOT source repo.
 - `path_guard.rs` frozen; `rename_overwriting_via` ONLY for atomic upload tmp-swap.

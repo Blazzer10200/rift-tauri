@@ -1,10 +1,12 @@
 //! Rift v14 — Tauri + Svelte + russh backend.
 //!
-//! Velopack-Rust auto-update wired at `run()` — banner fires when a newer
-//! version is released to `Blazzer10200/rift-tauri`. The Tauri command surface
-//! lives at the bottom of this file (`run()`'s `invoke_handler!`) and is the
-//! contract with the Svelte frontend. Command fns live under `commands/` —
-//! one file per domain (#20). lib.rs keeps state setup + the handler registry.
+//! Auto-update via `tauri-plugin-updater` (migrated from velopack 2026-05-26;
+//! see docs/design/updater-migration.md). Polls latest.json on the public
+//! `Blazzer10200/rift-releases` repo, verifies an ed25519 signature, and hands
+//! off to the NSIS installer for the file swap (Tauri auto-exits before swap).
+//! Tauri command surface at the bottom of this file (`run()`'s
+//! `invoke_handler!`). Command fns live under `commands/` — one file per
+//! domain (#20).
 
 pub mod assistant;
 pub mod bootstrap;
@@ -22,7 +24,6 @@ pub mod sync;
 pub mod stt;
 pub mod transport;
 pub mod tunnel;
-pub mod update_service;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -57,15 +58,15 @@ pub struct DiagPumpCancel(pub CancellationToken);
 /// `diag_subscribe_state`/`diag_unsubscribe_state` increment/decrement.
 pub struct DiagPumpSubscribers(pub std::sync::atomic::AtomicU64);
 
-/// Application entry point. Velopack hooks run FIRST (before Tauri spins up)
-/// so install/update commands like `--veloapp-install` exit cleanly without
-/// dragging the whole UI runtime through the lifecycle event. Mirrors the WPF
-/// `Main()` pattern. After Velopack, registers managed state + Tauri commands
-/// and blocks on the event loop.
+/// Application entry point. Registers managed state + Tauri commands and
+/// blocks on the event loop. Updater plugin handles install/update lifecycle
+/// natively — no pre-Tauri shim needed (was VelopackApp::build().run() before
+/// 2026-05-26 migration; tauri-plugin-updater's NSIS Setup.exe is a separate
+/// process and doesn't need cooperation from this entry point).
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Logger init BEFORE VelopackApp::build() so install/update lifecycle
-    // events surface in stderr. RUST_LOG controls level; default = info.
+    // Logger init early so panic hook + plugin init events surface in stderr.
+    // RUST_LOG controls level; default = info.
     diagnostics::LogForwarder::install();
 
     // #219: install a global panic hook so async-task panics don't die silently.
@@ -90,8 +91,6 @@ pub fn run() {
             serde_json::json!({ "location": location, "payload": payload }),
         );
     }));
-
-    velopack::VelopackApp::build().run();
 
     // Center the main window inside the primary monitor's WORK AREA (screen
     // minus the taskbar / dock). Tauri's built-in `center: true` uses full
@@ -141,10 +140,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
-        .manage(std::sync::Arc::new(update_service::UpdateService::new()))
+        .manage(commands::update::PendingUpdate::default())
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
