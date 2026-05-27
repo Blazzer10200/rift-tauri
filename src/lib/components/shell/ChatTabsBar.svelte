@@ -10,6 +10,7 @@
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
   let historyOpen = $state(false);
   let historyAnchor = $state<HTMLButtonElement | undefined>();
@@ -254,7 +255,7 @@
     const s = assistant.sessionUsage;
     const cost =
       assistant.totalCostUsd !== null && assistant.totalCostUsd !== undefined
-        ? ` · $${assistant.totalCostUsd.toFixed(4)}`
+        ? ` · ${assistant.totalCostUsd.toFixed(4)}`
         : "";
     const action =
       ctxPct >= 85
@@ -279,7 +280,7 @@
   });
 </script>
 
-<div class="tabsbar" role="tablist" aria-label="Chat tabs">
+<div class="tabsbar" data-model={assistant.model} role="tablist" aria-label="Chat tabs">
   <div class="strip">
     {#each tabs as id, idx (id)}
       <div
@@ -301,7 +302,7 @@
         onclick={() => onTabClick(id)}
         oncontextmenu={(e) => onTabContext(e, id)}
         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTabClick(id); } }}
-        title={isStreamingTab(id) && id !== activeId
+        use:tooltip={isStreamingTab(id) && id !== activeId
           ? `${titleFor(id)} — streaming in background. Click to switch.`
           : titleFor(id)}
       >
@@ -314,13 +315,13 @@
         </span>
         <span class="title">{titleFor(id)}</span>
         {#if paneIndexFor(id) !== null}
-          <span class="pane-badge" title="Open in pane {paneIndexFor(id)}">{paneIndexFor(id)}</span>
+          <span class="pane-badge" use:tooltip={"Open in pane {paneIndexFor(id)}"}>{paneIndexFor(id)}</span>
         {/if}
         <button
           class="close"
           type="button"
           aria-label="Close tab"
-          title="Close (Ctrl+W)"
+          use:tooltip={"Close (Ctrl+W)"}
           onclick={(e) => onClose(e, id)}
         >
           <X size={11}/>
@@ -330,7 +331,7 @@
     <button
       class="new-tab"
       type="button"
-      title="New chat (Ctrl+T)"
+      use:tooltip={"New chat (Ctrl+T)"}
       aria-label="New chat"
       onclick={onNewTab}
     >
@@ -350,7 +351,7 @@
       class="hdr-btn history-btn"
       class:open={historyOpen}
       type="button"
-      title="Conversation history"
+      use:tooltip={"Conversation history"}
       onclick={() => { historyOpen ? (historyOpen = false) : openHistory(); }}
       aria-haspopup="dialog"
       aria-expanded={historyOpen}
@@ -365,13 +366,13 @@
     </button>
 
     {#if assistant.workspace.current}
-      <span class="ws-chip" title={assistant.workspace.current}>
+      <span class="ws-chip" use:tooltip={assistant.workspace.current}>
         <Folder size={11}/>
         <span class="ws-name">{leafName(assistant.workspace.current)}</span>
         <button
           class="ws-x"
           type="button"
-          title="Close folder"
+          use:tooltip={"Close folder"}
           onclick={() => void assistant.clearRoot()}
         ><X size={10}/></button>
       </span>
@@ -379,7 +380,7 @@
       <button
         class="hdr-btn"
         type="button"
-        title="Open project folder"
+        use:tooltip={"Open project folder"}
         onclick={() => void assistant.pickFolder()}
       >
         <FolderOpen size={12}/>
@@ -391,7 +392,7 @@
       <span
         class="auth-warn"
         data-tone={authWarn.tone}
-        title={assistant.auth?.summary ?? authWarn.text}
+        use:tooltip={assistant.auth?.summary ?? authWarn.text}
       >
         <span class="auth-dot"></span>
         <span>{authWarn.text}</span>
@@ -401,7 +402,7 @@
     {#if foreignShell}
       <span
         class="shell-lock"
-        title={`${foreignShell.user}@${foreignShell.host} is running a remote command`}
+        use:tooltip={`${foreignShell.user}@${foreignShell.host} is running a remote command`}
       >
         <TerminalSquare size={11}/>
         <span>{foreignShell.user} ({shortAgo(foreignShell.sinceMs)})</span>
@@ -412,7 +413,7 @@
       <button
         type="button"
         class="agents-pill"
-        title={`${activeAgentTitle}\n\nClick to open a fresh tab — this one keeps streaming in the background, you can chat in the new one.`}
+        use:tooltip={`${activeAgentTitle}\n\nClick to open a fresh tab — this one keeps streaming in the background, you can chat in the new one.`}
         onclick={() => void assistant.newTab()}
       >
         <span class="agents-dot"></span>
@@ -422,18 +423,18 @@
     {/if}
 
     {#if compactWarning}
-      <span class="compact-warn" title="Compact early w/ /compact <focus> if you want fine control over the summary."
+      <span class="compact-warn" use:tooltip={"Compact early w/ /compact <focus> if you want fine control over the summary."}
         >{compactWarning}</span>
     {:else if autoCompactDisabledNudge}
       <span
         class="compact-warn"
         data-tone={ctxPct >= 85 ? "red" : "yellow"}
-        title="Auto-compact is off in Settings → Conversation compaction. Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Enable a threshold to fire compaction automatically, or click the Compact button now."
+        use:tooltip={"Auto-compact is off in Settings → Conversation compaction. Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Enable a threshold to fire compaction automatically, or click the Compact button now."}
         >{autoCompactDisabledNudge}</span>
     {/if}
 
     {#if ctxTokens > 0}
-      <span class="ctx-pill" data-tone={ctxTone} title={ctxTitle}>
+      <span class="ctx-pill" data-tone={ctxTone} use:tooltip={ctxTitle}>
         <span class="ctx-bar"><span class="ctx-fill" style="width: {ctxPct}%"></span></span>
         <span class="ctx-text">{shortK(ctxTokens)}<span class="ctx-sep">/</span>{shortK(ctxWindow)}</span>
         <span class="ctx-pct">{Math.round(ctxPct)}%</span>
@@ -450,7 +451,7 @@
           if (!confirm(`Compact conversation? ${cost} on Haiku · drops context to ~5-10% · next turn carries the summary forward.`)) return;
           void assistant.compactConversation();
         }}
-        title="Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."
+        use:tooltip={"Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."}
       >
         <Layers size={11} />
         <span>Compact</span>
@@ -464,7 +465,7 @@
         class:pulse
         type="button"
         onclick={toggleTasks}
-        title={taskCount > 0
+        use:tooltip={taskCount > 0
           ? `Session panel — ${taskDone}/${taskCount} tasks done`
           : "Session panel"}
       >
@@ -481,7 +482,7 @@
       type="button"
       onclick={() => assistant.addPane()}
       disabled={!canAddPane}
-      title={canAddPane
+      use:tooltip={canAddPane
         ? `Add pane (Ctrl+\\) — ${paneCount} of 4`
         : `Max panes reached (${paneCount}/4)`}
       aria-label="Add pane"
@@ -518,6 +519,7 @@
 
 <style>
   .tabsbar {
+    position: relative;
     height: 34px;
     flex-shrink: 0;
     background: var(--bg);
@@ -526,6 +528,11 @@
     align-items: stretch;
     overflow: hidden;
   }
+  /* Aurora hue follows the active model, matching the composer ring. */
+  .tabsbar[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .tabsbar[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .tabsbar[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .tabsbar                      { --model-color: var(--accent); }
   .strip {
     flex: 1; min-width: 0;
     display: flex;
@@ -578,10 +585,15 @@
     border-color: var(--border);
     /* Top-edge accent — picks the active tab out of the row at a glance.
        Inset box-shadow vs ::before because ::before is reserved for the
-       in-pane indicator. */
-    box-shadow: inset 0 2px 0 0 var(--accent);
+       in-pane indicator. Tinted by current model + soft underglow that
+       washes the lower edge of the tab in model color. */
+    box-shadow:
+      inset 0 2px 0 0 var(--model-color),
+      inset 0 -28px 28px -24px color-mix(in oklch, var(--model-color) 28%, transparent);
     z-index: 1;
   }
+  .tab.active .icon { color: var(--model-color); }
+  .tab.active .dot { background: var(--model-color); box-shadow: 0 0 8px color-mix(in oklch, var(--model-color) 60%, transparent); }
   .tab.active::after {
     content: "";
     position: absolute;

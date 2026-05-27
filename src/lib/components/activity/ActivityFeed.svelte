@@ -16,6 +16,7 @@
   import Diagnostics from "../diagnostics/Diagnostics.svelte";
   import { syncPage } from "../../state/sync-page.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type Tab = "activity" | "diagnostics";
   let tab = $state<Tab>("activity");
 
@@ -474,7 +475,7 @@
           class:ghost={!paused}
           type="button"
           onclick={togglePause}
-          title={paused ? "Resume feed" : "Pause feed"}
+          use:tooltip={paused ? "Resume feed" : "Pause feed"}
         >
           {#if paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
         </button>
@@ -483,7 +484,7 @@
           type="button"
           onclick={() => connection.clearActivity()}
           disabled={connection.activityFeed.length === 0}
-          title="Clear feed"
+          use:tooltip={"Clear feed"}
         >
           <Trash2 size={11}/> Clear
         </button>
@@ -494,7 +495,7 @@
           class:ghost={!diagnostics.paused}
           type="button"
           onclick={() => diagnostics.togglePause()}
-          title={diagnostics.paused ? "Resume capture" : "Pause capture"}
+          use:tooltip={diagnostics.paused ? "Resume capture" : "Pause capture"}
         >
           {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
         </button>
@@ -503,7 +504,7 @@
           type="button"
           onclick={() => diagnostics.clear()}
           disabled={diagnostics.events.length === 0}
-          title="Clear captured events"
+          use:tooltip={"Clear captured events"}
         >
           <Trash2 size={11}/> Clear
         </button>
@@ -558,7 +559,7 @@
           type="button"
           class="burst-pip mono"
           onclick={jumpToTop}
-          title={bursting ? "Burst in progress — click to resume + jump to top" : "Jump to top"}
+          use:tooltip={bursting ? "Burst in progress — click to resume + jump to top" : "Jump to top"}
         >
           {#if bursting}
             <span class="dot live"></span>
@@ -615,7 +616,7 @@
               role="button"
               tabindex="0"
             >
-              <div class="td time mono" title={fmtFullTime(r0.at)}>{fmtTime(r0.at)}</div>
+              <div class="td time mono" use:tooltip={fmtFullTime(r0.at)}>{fmtTime(r0.at)}</div>
               <div class="td kind">
                 <span class="kchip" data-variant={v}>
                   <Icon size={11}/>
@@ -623,16 +624,16 @@
                 <span class="count-chip mono">{item.rows.length}×</span>
               </div>
               <div class="td resource mono">{fmtResource(r0.resource)}</div>
-              <div class="td path mono" title={prefix}>{prefix || "—"}</div>
+              <div class="td path mono" use:tooltip={prefix}>{prefix || "—"}</div>
               <div class="td action">
                 <span class="chev" data-expanded={item.expanded}>
                   {#if item.expanded}<ChevronDown size={11}/>{:else}<ChevronRight size={11}/>{/if}
                 </span>
                 <span class="action-text">{r0.action}</span>
-                {#if r0.actor}<span class="actor-chip mono" title="Actor">{r0.actor}</span>{/if}
+                {#if r0.actor}<span class="actor-chip mono" use:tooltip={"Actor"}>{r0.actor}</span>{/if}
               </div>
-              <div class="td size mono" title="Total across {item.rows.length} events">{fmtSize(groupSize(item.rows))}</div>
-              <div class="td dur mono" title="Max latency across {item.rows.length} events">{fmtLatency(groupMaxLatency(item.rows))}</div>
+              <div class="td size mono" use:tooltip={"Total across {item.rows.length} events"}>{fmtSize(groupSize(item.rows))}</div>
+              <div class="td dur mono" use:tooltip={"Max latency across {item.rows.length} events"}>{fmtLatency(groupMaxLatency(item.rows))}</div>
             </div>
           {:else if item.type === "groupChild"}
             {@const r = item.row}
@@ -648,17 +649,17 @@
               role="button"
               tabindex="0"
             >
-              <div class="td time mono" title={fmtFullTime(r.at)}>{fmtTime(r.at)}</div>
+              <div class="td time mono" use:tooltip={fmtFullTime(r.at)}>{fmtTime(r.at)}</div>
               <div class="td kind">
                 <span class="kchip sm" data-variant={v}>
                   <Icon size={10}/>
                 </span>
               </div>
               <div class="td resource mono">{fmtResource(r.resource)}</div>
-              <div class="td path mono" title={pathOf(r)}>{pathOf(r) || "—"}</div>
-              <div class="td action" title={r.action}>
+              <div class="td path mono" use:tooltip={pathOf(r)}>{pathOf(r) || "—"}</div>
+              <div class="td action" use:tooltip={r.action}>
                 <span class="action-text">{r.action}</span>
-                {#if r.actor}<span class="actor-chip mono" title="Actor">{r.actor}</span>{/if}
+                {#if r.actor}<span class="actor-chip mono" use:tooltip={"Actor"}>{r.actor}</span>{/if}
               </div>
               <div class="td size mono">{fmtSize(r.size_bytes)}</div>
               <div class="td dur mono">{fmtLatency(r.latency_ms)}</div>
@@ -680,17 +681,17 @@
               role="button"
               tabindex="0"
             >
-              <div class="td time mono" title={fmtFullTime(r.at)}>{fmtTime(r.at)}</div>
+              <div class="td time mono" use:tooltip={fmtFullTime(r.at)}>{fmtTime(r.at)}</div>
               <div class="td kind">
                 <span class="kchip" data-variant={v}>
                   <Icon size={11}/>
                 </span>
               </div>
               <div class="td resource mono">{fmtResource(r.resource)}</div>
-              <div class="td path mono" title={pathOf(r)}>{pathOf(r) || "—"}</div>
-              <div class="td action" title={r.action}>
+              <div class="td path mono" use:tooltip={pathOf(r)}>{pathOf(r) || "—"}</div>
+              <div class="td action" use:tooltip={r.action}>
                 <span class="action-text">{r.action}</span>
-                {#if r.actor}<span class="actor-chip mono" title="Actor">{r.actor}</span>{/if}
+                {#if r.actor}<span class="actor-chip mono" use:tooltip={"Actor"}>{r.actor}</span>{/if}
               </div>
               <div class="td size mono">{fmtSize(r.size_bytes)}</div>
               <div class="td dur mono">{fmtLatency(r.latency_ms)}</div>
@@ -726,13 +727,13 @@
       {#if r.sha}
         <div class="meta-row">
           <span class="meta-k">SHA</span>
-          <span class="meta-v mono" title={r.sha}>{shortSha(r.sha)}</span>
+          <span class="meta-v mono" use:tooltip={r.sha}>{shortSha(r.sha)}</span>
         </div>
       {/if}
       {#if localPath}
         <div class="meta-row path-row">
           <span class="meta-k">Path</span>
-          <span class="meta-v mono" title={localPath}>{localPath}</span>
+          <span class="meta-v mono" use:tooltip={localPath}>{localPath}</span>
         </div>
       {/if}
     </div>
@@ -742,7 +743,7 @@
         type="button"
         onclick={(e) => { e.stopPropagation(); openFile(r); }}
         disabled={!localPath}
-        title={localPath ?? "Path unknown"}
+        use:tooltip={localPath ?? "Path unknown"}
       >
         <ExternalLink size={11}/> Open
       </button>
@@ -759,7 +760,7 @@
         type="button"
         onclick={(e) => { e.stopPropagation(); revealInFolder(r); }}
         disabled={!localPath}
-        title="Reveal in OS file browser"
+        use:tooltip={"Reveal in OS file browser"}
       >
         <Folder size={11}/> Reveal
       </button>

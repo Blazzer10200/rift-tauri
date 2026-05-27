@@ -5,6 +5,7 @@
   import { fade } from "svelte/transition";
   import { updates } from "../../state/updates.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Background-mode escape hatch: while a sync op is busy but the modal is
   // dismissed, surface a pill in the status bar so the user can re-open and
   // hit Stop. Without this, "Run in background" was a one-way trip.
@@ -85,7 +86,7 @@
     type="button"
     onclick={toggleWatcher}
     disabled={!connection.selected || connection.connecting}
-    title={connection.isHandshaking ? "Connecting…" : isStale ? `Watching but last scan ${lastScanLabel ?? "long ago"} — click to stop` : watcherOn ? "Click to stop watching" : "Click to start watching"}
+    use:tooltip={connection.isHandshaking ? "Connecting…" : isStale ? `Watching but last scan ${lastScanLabel ?? "long ago"} — click to stop` : watcherOn ? "Click to stop watching" : "Click to start watching"}
   >
     <span class="led" data-state={ledClass}></span>
     <span class="lbl">{connection.isHandshaking ? "connecting" : isStale ? "stale" : stateText}</span>
@@ -98,7 +99,7 @@
       class="grp sync-pill"
       type="button"
       onclick={() => (syncModal.open = true)}
-      title="Sync in progress — click to re-open the modal and Stop"
+      use:tooltip={"Sync in progress — click to re-open the modal and Stop"}
       transition:fade={{ duration: 100 }}
     >
       <span class="sync-dot"></span>
@@ -109,7 +110,7 @@
 
   {#if queue > 0}
     <div class="sep"></div>
-    <div class="grp" title="Pending queue depth (debouncing + in-flight uploads)" transition:fade={{ duration: 100 }}>
+    <div class="grp" use:tooltip={"Pending queue depth (debouncing + in-flight uploads)"} transition:fade={{ duration: 100 }}>
       <Hourglass size={11}/>
       <span class="lbl">queue</span>
       <span class="mono val">{queue}</span>
@@ -118,7 +119,7 @@
 
   {#if failed > 0}
     <div class="sep"></div>
-    <div class="grp" title="Failed transfers awaiting retry" transition:fade={{ duration: 100 }}>
+    <div class="grp" use:tooltip={"Failed transfers awaiting retry"} transition:fade={{ duration: 100 }}>
       <span class="lbl">failed</span>
       <span class="mono val warn">{failed}</span>
     </div>
@@ -126,7 +127,7 @@
 
   {#if conflicts > 0}
     <div class="sep"></div>
-    <div class="grp" title="Unresolved conflicts — open the Conflicts workspace" transition:fade={{ duration: 100 }}>
+    <div class="grp" use:tooltip={"Unresolved conflicts — open the Conflicts workspace"} transition:fade={{ duration: 100 }}>
       <AlertTriangle size={11}/>
       <span class="lbl">conflicts</span>
       <span class="mono val danger">{conflicts}</span>
@@ -136,21 +137,21 @@
   <div class="flex-spacer"></div>
 
   {#if lastScanLabel}
-    <div class="grp" title="Time since last drift scan / sync completion" transition:fade={{ duration: 100 }}>
+    <div class="grp" use:tooltip={"Time since last drift scan / sync completion"} transition:fade={{ duration: 100 }}>
       <span class="lbl">last scan</span>
       <span class="mono val">{lastScanLabel}</span>
     </div>
   {/if}
 
   {#if locks > 0}
-    <div class="grp" title="Active lock files held by this client" transition:fade={{ duration: 100 }}>
+    <div class="grp" use:tooltip={"Active lock files held by this client"} transition:fade={{ duration: 100 }}>
       <Lock size={11}/>
       <span class="mono val warn">{locks}</span>
     </div>
   {/if}
 
   {#if bridgeOn}
-    <div class="grp bridge" title="Bridge token configured — txAdmin/RCON enabled" transition:fade={{ duration: 100 }}>
+    <div class="grp bridge" use:tooltip={"Bridge token configured — txAdmin/RCON enabled"} transition:fade={{ duration: 100 }}>
       <Network size={11}/>
       <span class="lbl">bridge</span>
     </div>
@@ -161,7 +162,7 @@
       class="grp update-pill"
       type="button"
       onclick={() => updates.open()}
-      title="Update available — click to view"
+      use:tooltip={"Update available — click to view"}
       transition:fade={{ duration: 120 }}
     >
       <span class="upd-dot"></span>
@@ -172,7 +173,7 @@
   {/if}
 
   {#if version && version !== "?"}
-    <div class="grp version" title="Rift version">
+    <div class="grp version" use:tooltip={"Rift version"}>
       <span class="mono val faint">v{version}</span>
     </div>
   {/if}

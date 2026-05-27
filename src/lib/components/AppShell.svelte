@@ -25,6 +25,7 @@
   import { syncPage } from "../state/sync-page.svelte";
   import { assistant } from "../state/assistant.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Dialog state
   let addServerOpen = $state(false);
   let editingServer = $state<ServerProfile | null>(null);
@@ -156,6 +157,12 @@
     // Audit H9: resolve any in-flight confirm promises so awaiters unblock.
     for (const resolve of pendingConfirms) resolve(false);
     pendingConfirms.clear();
+    // If HMR/unmount fires mid-TOFU prompt, the .then() handler above bails on
+    // `!alive` before resolving the handshake — leaving `connection.connecting`
+    // stuck true until next manual reconnect. Drop the pending state explicitly.
+    if (connection.pendingFingerprint) {
+      connection.cancelFingerprint();
+    }
   });
 
   function onGlobalKey(e: KeyboardEvent) {
@@ -304,9 +311,20 @@
       body: `First connection to ${name}. Verify this matches what you expect from the server admin before accepting.\n\n${fp}`,
       isDanger: false,
     }).then((ok) => {
-      if (!alive) return;
+      if (!alive) {
+        // #171: shell unmounted mid-dialog. Without this, `connecting` stays
+        // stuck true on the persistent connection store and the StatusBar
+        // reconnect button locks for the next remount. Treat unmount as cancel.
+        connection.cancelFingerprint();
+        return;
+      }
       if (ok) connection.confirmFingerprint();
       else connection.cancelFingerprint();
+      fingerprintHandled = null;
+    }).catch(() => {
+      // Promise rejection (rare: dialog drained on shutdown) — same recovery
+      // as the unmount branch so `connecting` never sticks.
+      connection.cancelFingerprint();
       fingerprintHandled = null;
     });
   });

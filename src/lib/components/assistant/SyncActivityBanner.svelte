@@ -4,6 +4,7 @@
   import { RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
   import { slide } from "svelte/transition";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Active = engine is doing something the user should see. Error = wedged or
   // streak-tripped. Brief "just finished" state holds a green pulse for 2s
   // after the engine returns to idle/watching so a fast push gets visible
@@ -138,7 +139,7 @@
       class="dismiss"
       onclick={() => (dismissed = true)}
       aria-label="Dismiss"
-      title="Dismiss"
+      use:tooltip={"Dismiss"}
     >
       ×
     </button>

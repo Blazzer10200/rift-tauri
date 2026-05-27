@@ -16,6 +16,7 @@
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let { tool, variant = "card" }: { tool: ToolBlock; variant?: "card" | "timeline" } = $props();
   // Agent + TodoWrite + AskUser are first-class card variants — default-expanded
   // since their body IS the message, not a debug detail. All other tools collapse.
@@ -441,7 +442,7 @@
         <span class="agent-desc">{agentDescription}</span>
       {/if}
       {#if durationLabel}
-        <span class="chip-duration mono" title="Wall-clock duration">{durationLabel}</span>
+        <span class="chip-duration mono" use:tooltip={"Wall-clock duration"}>{durationLabel}</span>
       {/if}
       <span class="chip-status">
         {#if tool.status === "pending"}<Loader2 size={12} class="chip-spin" />
@@ -455,9 +456,9 @@
       <span class="agent-icon"><ListChecks size={13} /></span>
       <span class="todo-title">Tasks</span>
       <span class="todo-counts mono">
-        <span class="todo-count done" title="completed">{todoCounts.done}</span>
+        <span class="todo-count done" use:tooltip={"completed"}>{todoCounts.done}</span>
         <span class="todo-sep">/</span>
-        <span class="todo-count total" title="total">{todoCounts.total}</span>
+        <span class="todo-count total" use:tooltip={"total"}>{todoCounts.total}</span>
       </span>
       <span class="chip-status">
         {#if tool.status === "pending"}<Loader2 size={11} class="chip-spin" />
@@ -494,10 +495,10 @@
       <span class="chip-sum mono">{summary}</span>
       {#if !expanded && inlinePreview}
         <span class="chip-arrow" aria-hidden="true">→</span>
-        <span class="chip-preview mono" title={tool.result ?? ""}>{inlinePreview}</span>
+        <span class="chip-preview mono" use:tooltip={tool.result ?? ""}>{inlinePreview}</span>
       {/if}
       {#if durationLabel}
-        <span class="chip-duration mono" title="Wall-clock duration">{durationLabel}</span>
+        <span class="chip-duration mono" use:tooltip={"Wall-clock duration"}>{durationLabel}</span>
       {/if}
       <span class="chip-status">
         {#if tool.status === "pending"}

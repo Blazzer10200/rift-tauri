@@ -4,6 +4,7 @@
   import PageHeader from "../shell/PageHeader.svelte";
   import OpenInPaneMenu from "./OpenInPaneMenu.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // `compact` collapses the page-style PageHeader into a slim popover header
   // so this same component can serve both the workspace surface (removed
   // 2026-05-21) and the in-chat history popover. `onSelected` lets a popover
@@ -143,7 +144,7 @@
         <button
           class="cmp-new"
           type="button"
-          title="New conversation (Ctrl+T)"
+          use:tooltip={"New conversation (Ctrl+T)"}
           onclick={() => { void assistant.newTab(); onSelected(); }}
         >
           <Plus size={12} /> New
@@ -160,7 +161,7 @@
           <button
             class="iconbtn primary"
             type="button"
-            title="New conversation"
+            use:tooltip={"New conversation"}
             onclick={() => void assistant.newTab()}
           >
             <Plus size={13} /> New
@@ -180,12 +181,12 @@
             aria-label="Filter conversations"
           />
           {#if searchQuery}
-            <button class="search-clear" type="button" title="Clear" onclick={() => (searchQuery = "")}>
+            <button class="search-clear" type="button" use:tooltip={"Clear"} onclick={() => (searchQuery = "")}>
               <X size={11} />
             </button>
           {/if}
         </div>
-        <label class="hide-tests" title="Hide canary/ping test conversations (Token-A, ACK-ONE, hello, …)">
+        <label class="hide-tests" use:tooltip={"Hide canary/ping test conversations (Token-A, ACK-ONE, hello, …)"}>
           <input type="checkbox" bind:checked={hideTests} />
           <span>Hide tests</span>
           {#if hiddenTestCount > 0}
@@ -228,7 +229,7 @@
                 onblur={() => void commitRename()}
                 use:focusOnMount
               />
-              <button class="row-btn" type="button" title="Save" onclick={() => void commitRename()}>
+              <button class="row-btn" type="button" use:tooltip={"Save"} onclick={() => void commitRename()}>
                 <Check size={12} />
               </button>
             {:else}
@@ -239,7 +240,7 @@
                   : c.model?.toLowerCase().includes("haiku") ? "haiku"
                   : "sonnet"}
                 onclick={() => { void assistant.openTab(c.id); onSelected(); }}
-                title="Open"
+                use:tooltip={"Open"}
               >
                 <span class="row-title">{c.title}</span>
                 <span class="row-meta">
@@ -251,20 +252,20 @@
                 </span>
               </button>
               <div class="row-tools">
-                <button class="row-btn" type="button" title="Rename" onclick={() => startRename(c)}>
+                <button class="row-btn" type="button" use:tooltip={"Rename"} onclick={() => startRename(c)}>
                   <Pencil size={11} />
                 </button>
                 {#if confirmDeleteId === c.id}
                   <button
                     class="row-btn danger confirm"
                     type="button"
-                    title="Confirm delete"
+                    use:tooltip={"Confirm delete"}
                     onclick={() => { void assistant.deleteConversation(c.id); confirmDeleteId = null; }}
                   >
                     Sure?
                   </button>
                 {:else}
-                  <button class="row-btn" type="button" title="Delete" onclick={() => (confirmDeleteId = c.id)}>
+                  <button class="row-btn" type="button" use:tooltip={"Delete"} onclick={() => (confirmDeleteId = c.id)}>
                     <Trash2 size={11} />
                   </button>
                 {/if}

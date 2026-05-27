@@ -3,6 +3,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import AssistantPane from "./AssistantPane.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   onMount(() => {
     void assistant.init().then(() => {
       if (assistant.openTabs.length === 0) void assistant.newTab();
@@ -166,7 +167,7 @@
               aria-valuemin={Math.round(SPLIT_MIN * 100)}
               aria-valuemax={Math.round((1 - SPLIT_MIN) * 100)}
               tabindex="0"
-              title="Drag to resize · double-click to reset"
+              use:tooltip={"Drag to resize · double-click to reset"}
               onpointerdown={(e) => onDividerPointerDown(e, i)}
               onpointermove={(e) => onDividerPointerMove(e, i)}
               onpointerup={(e) => onDividerPointerUp(e, i)}

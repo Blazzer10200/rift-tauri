@@ -3,6 +3,7 @@
   import { Columns2, Plus } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let {
     tabId,
     x,
@@ -67,7 +68,7 @@
       role="menuitem"
       onclick={() => pickPane(i)}
       disabled={panes[i].tabId === tabId}
-      title={panes[i].tabId === tabId ? "Already in this pane" : `Open in pane ${i + 1}`}
+      use:tooltip={panes[i].tabId === tabId ? "Already in this pane" : `Open in pane ${i + 1}`}
     >
       <Columns2 size={12} />
       <span>Open in pane {i + 1}</span>

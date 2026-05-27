@@ -1,7 +1,8 @@
 <script lang="ts">
   import { WORKSPACES } from "../workspaces";
   import { workspace, WORKSPACE_IDS, type WorkspaceId } from "$lib/state/workspace.svelte";
-</script>
+
+  import { tooltip } from "$lib/actions/tooltip";</script>
 
 <div class="ws-shell">
   {#each WORKSPACE_IDS as id (id)}

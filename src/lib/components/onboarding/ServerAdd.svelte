@@ -41,7 +41,7 @@
     if (!name.trim()) return "Name is required.";
     if (!host.trim()) return "Host is required.";
     if (!user.trim()) return "Username is required.";
-    if (!keyPath.trim()) return "SSH key path is required.";
+    if (!keyPath.trim()) return "SSH private key path is required.";
     if (!remoteRoot.trim() || remoteRoot.trim() === "/") return "Remote root must be a specific path, not '/'.";
     if (!localRoot.trim()) return "Local root missing — go back and pick one.";
     if (port <= 0 || port > 65535) return "Port must be between 1 and 65535.";
@@ -108,7 +108,7 @@
       <input class="input mono" type="text" placeholder="root" bind:value={user} disabled={busy || !!savedKey} />
     </label>
     <label class="full">
-      <span>SSH key path</span>
+      <span>SSH private key</span>
       <div class="key-row">
         <input class="input mono" type="text" placeholder="C:\\Users\\you\\.ssh\\id_rift_ed25519" bind:value={keyPath} disabled={busy || !!savedKey} />
         <button class="btn sm" type="button" onclick={pickKey} disabled={busy || !!savedKey}>

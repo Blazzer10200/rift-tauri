@@ -76,31 +76,53 @@
 
 <style>
   .toast {
+    --tone: var(--info);
     position: fixed;
     bottom: 32px;
     right: 16px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    padding: 8px 12px;
+    background: color-mix(in oklch, var(--bg-elev-1) 90%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid color-mix(in oklch, var(--tone) 22%, var(--border-strong));
+    border-left: 3px solid var(--tone);
+    border-radius: 10px;
+    padding: 10px 14px;
     display: grid;
     grid-template-columns: auto 1fr;
     gap: 10px; align-items: center;
     color: var(--fg);
-    box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.4));
+    box-shadow:
+      0 14px 36px -8px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklch, var(--tone) 10%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     max-width: 360px;
     z-index: 50;
     cursor: pointer;
     text-align: left;
     font: inherit;
-    animation: fade-in 160ms ease-out both;
+    animation: toast-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: border-color 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
   }
-  .toast:hover { border-color: var(--accent); }
-  .toast[data-variant="ok"]     { border-left: 3px solid var(--ok); }
-  .toast[data-variant="warn"]   { border-left: 3px solid var(--warn); }
-  .toast[data-variant="danger"] { border-left: 3px solid var(--danger); }
-  .toast[data-variant="info"]   { border-left: 3px solid var(--info); }
-  .toast[data-variant="muted"]  { border-left: 3px solid var(--border-strong); }
+  .toast:hover {
+    border-color: color-mix(in oklch, var(--tone) 42%, var(--border-strong));
+    transform: translateY(-1px);
+    box-shadow:
+      0 18px 44px -8px oklch(0 0 0 / 0.6),
+      0 0 0 1px color-mix(in oklch, var(--tone) 18%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
+  }
+  .toast[data-variant="ok"]     { --tone: var(--ok); }
+  .toast[data-variant="warn"]   { --tone: var(--warn); }
+  .toast[data-variant="danger"] { --tone: var(--danger); }
+  .toast[data-variant="info"]   { --tone: var(--info); }
+  .toast[data-variant="muted"]  { --tone: var(--border-strong); }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(12px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { animation: none; }
+  }
 
   .kind {
     width: 24px; height: 24px;

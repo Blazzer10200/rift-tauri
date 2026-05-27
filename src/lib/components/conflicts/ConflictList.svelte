@@ -5,6 +5,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { connection, type ConflictRecord } from "../../state/connection.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -93,7 +94,7 @@
           <span class="file mono">{basename(c.local_path)}</span>
         </div>
         <span class="resource mono">{c.resource_name}</span>
-        <span class="path mono dim" title={c.local_path}>{c.local_path}</span>
+        <span class="path mono dim" use:tooltip={c.local_path}>{c.local_path}</span>
       </button>
     {/each}
   </div>

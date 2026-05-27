@@ -3,6 +3,7 @@
   import { Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable } from "lucide-svelte";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let { onAddServer, onEditCurrent }: {
     onAddServer: () => void;
     onEditCurrent: (s: ServerProfile) => void;
@@ -71,7 +72,7 @@
         class="svr-btn"
         onclick={() => (menuOpen = !menuOpen)}
         type="button"
-        title={`${connCfg[connState].label} — ${connCfg[connState].title}`}
+        use:tooltip={`${connCfg[connState].label} — ${connCfg[connState].title}`}
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
       >
@@ -126,7 +127,7 @@
 
   <div class="right">
     {#if sel?.bridgePort}
-      <div class="bridge" title={sel.txAdminUrl ?? `:${sel.bridgePort}`}>
+      <div class="bridge" use:tooltip={sel.txAdminUrl ?? `:${sel.bridgePort}`}>
         <span class="bridge-led" class:on={connState === "connected"}></span>
         <Cable size={12}/>
         <span>txAdmin</span>
@@ -134,13 +135,13 @@
       </div>
     {/if}
     <div class="winctl">
-      <button class="wb" onclick={() => win.minimize()} title="Minimize" type="button" aria-label="Minimize">
+      <button class="wb" onclick={() => win.minimize()} use:tooltip={"Minimize"} type="button" aria-label="Minimize">
         <Minus size={10}/>
       </button>
-      <button class="wb" onclick={() => win.toggleMaximize()} title="Maximize" type="button" aria-label="Maximize">
+      <button class="wb" onclick={() => win.toggleMaximize()} use:tooltip={"Maximize"} type="button" aria-label="Maximize">
         <Square size={9}/>
       </button>
-      <button class="wb close" onclick={() => win.close()} title="Close" type="button" aria-label="Close">
+      <button class="wb close" onclick={() => win.close()} use:tooltip={"Close"} type="button" aria-label="Close">
         <X size={10}/>
       </button>
     </div>

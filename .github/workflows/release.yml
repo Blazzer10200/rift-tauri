@@ -1,0 +1,33 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Placeholder — release pipeline is still run locally via scripts/release.ps1
+# until issue #15 (Azure Code Signing) lands. This skeleton exists so the file
+# shape is in place and #15 only needs to fill in steps, not bootstrap the
+# workflow.
+#
+# TODO(#15): wire the real release pipeline once code signing is available.
+# Outline:
+#   - checkout
+#   - setup-node@v4 (node 20, cache npm)
+#   - dtolnay/rust-toolchain@stable
+#   - cache cargo registry + target (same key as check.yml)
+#   - install vpk (`dotnet tool install -g vpk`) — only while release-bridge.ps1 still ships
+#   - import TAURI_SIGNING_PRIVATE_KEY from secrets (echo > file, set TAURI_SIGNING_PRIVATE_KEY_PATH)
+#   - import Azure Code Signing creds from secrets (#15)
+#   - npm ci
+#   - pwsh scripts/release.ps1  (uses $GITHUB_TOKEN for gh CLI)
+#   - upload-artifact for Setup.exe + .sig + latest.json on failure for forensics
+#
+# Until #15 lands this job is a no-op so tag pushes don't fail loudly.
+
+jobs:
+  placeholder:
+    name: placeholder (signing blocked on #15)
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Release workflow placeholder — signing blocked on Azure Code Signing setup (#15). Run release.ps1 locally for now."

@@ -39,6 +39,7 @@
   import { connection } from "../../state/connection.svelte";
   import { syncPage, type ResourceGroup, type DriftEntry } from "../../state/sync-page.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let unlistenDiag: UnlistenFn | null = null;
   // v0.2.55 Phase A reskin: hero overflow kebab for low-frequency utilities
   // (Mirror toggle, Sweep stale locks, Preview). Click-outside closes.
@@ -228,7 +229,7 @@
           onclick={() => (overflowOpen = !overflowOpen)}
           aria-haspopup="menu"
           aria-expanded={overflowOpen}
-          title="More options"
+          use:tooltip={"More options"}
         >
           <MoreHorizontal size={14}/>
         </button>
@@ -241,7 +242,7 @@
               class:active={syncPage.mirrorEnabled}
               disabled={!watcherOn || syncPage.busy || syncPage.previewMode}
               onclick={() => { syncPage.toggleMirror(!syncPage.mirrorEnabled); overflowOpen = false; }}
-              title="Mirror mode: local-missing files surface as 'delete on remote' bucket instead of pull-restore. Destructive — opt-in only."
+              use:tooltip={"Mirror mode: local-missing files surface as 'delete on remote' bucket instead of pull-restore. Destructive — opt-in only."}
             >
               <span class="kebab-check">{#if syncPage.mirrorEnabled}<Check size={12}/>{/if}</span>
               <Trash2 size={13}/>
@@ -254,7 +255,7 @@
               class="kebab-item"
               class:active={syncPage.autoRescanEnabled}
               onclick={() => syncPage.cycleAutoRescan()}
-              title="Periodic auto-rescan — catches remote-side drift (teammate pushes, out-of-band edits) the local watcher can't see. Click cycles: off → 30s → 1m → 2m → 5m → 10m → off."
+              use:tooltip={"Periodic auto-rescan — catches remote-side drift (teammate pushes, out-of-band edits) the local watcher can't see. Click cycles: off → 30s → 1m → 2m → 5m → 10m → off."}
             >
               <span class="kebab-check">{#if syncPage.autoRescanEnabled}<Check size={12}/>{/if}</span>
               <Timer size={13}/>
@@ -271,7 +272,7 @@
               class="kebab-item"
               disabled={!canSync}
               onclick={() => { syncPage.rescan(); overflowOpen = false; }}
-              title="Re-scan both sides for drift right now (independent of Auto-rescan)"
+              use:tooltip={"Re-scan both sides for drift right now (independent of Auto-rescan)"}
             >
               <span class="kebab-check"></span>
               <RefreshCw size={13} class={syncPage.busy ? "spin" : ""}/>
@@ -283,7 +284,7 @@
               class="kebab-item"
               disabled={!canSync}
               onclick={() => { syncPage.sweepStaleLocks(); overflowOpen = false; }}
-              title="Reclaim our own stale .rift-lock files across every watched root"
+              use:tooltip={"Reclaim our own stale .rift-lock files across every watched root"}
             >
               <span class="kebab-check"></span>
               <Wrench size={13}/>
@@ -297,7 +298,7 @@
               class="kebab-item"
               disabled={!canSync || totals.pull + totals.del === 0}
               onclick={() => { syncPage.pullAll(); overflowOpen = false; }}
-              title="Pull only — fetch every ToPull + ToDelete entry without pushing"
+              use:tooltip={"Pull only — fetch every ToPull + ToDelete entry without pushing"}
             >
               <span class="kebab-check"></span>
               <DownloadCloud size={13}/>
@@ -310,7 +311,7 @@
               class="kebab-item"
               disabled={!canSync || totals.push === 0}
               onclick={() => { syncPage.pushAll(); overflowOpen = false; }}
-              title="Push only — upload every dirty + ToPush entry without pulling first"
+              use:tooltip={"Push only — upload every dirty + ToPush entry without pulling first"}
             >
               <span class="kebab-check"></span>
               <UploadCloud size={13}/>
@@ -324,7 +325,7 @@
               class="kebab-item"
               class:active={syncPage.previewMode}
               onclick={() => { syncPage.previewMode ? syncPage.exitPreview() : syncPage.enterPreview(); overflowOpen = false; }}
-              title="Toggle design-preview fixture covering every bucket. Apply buttons are gated while active."
+              use:tooltip={"Toggle design-preview fixture covering every bucket. Apply buttons are gated while active."}
             >
               <span class="kebab-check">{#if syncPage.previewMode}<Check size={12}/>{/if}</span>
               {#if syncPage.previewMode}<EyeOff size={13}/>{:else}<Eye size={13}/>{/if}
@@ -339,7 +340,7 @@
           type="button"
           onclick={() => syncPage.openMirrorConfirm()}
           disabled={!canSync}
-          title="Delete {totals.delRemote} file(s)/folder(s) from remote — requires typed confirm"
+          use:tooltip={"Delete {totals.delRemote} file(s)/folder(s) from remote — requires typed confirm"}
         >
           <Trash2 size={13}/> Apply Mirror ({totals.delRemote})
         </button>
@@ -349,7 +350,7 @@
         type="button"
         onclick={() => syncPage.syncNow()}
         disabled={!canSync || (totals.push + totals.pull + totals.del === 0)}
-        title="Pull then Push — canonical sync ordering. Pulls remote changes first so push never dispatches against a stale baseline. Conflicts and Mirror remote-deletes stay gated."
+        use:tooltip={"Pull then Push — canonical sync ordering. Pulls remote changes first so push never dispatches against a stale baseline. Conflicts and Mirror remote-deletes stay gated."}
       >
         <RefreshCcw size={13} class={syncPage.syncPhase !== "idle" ? "spin" : ""}/>
         {#if syncPage.syncPhase === "pulling"}
@@ -435,7 +436,7 @@
       </button>
       {#if isOpen}
       <div class="shrink-explain" in:fade={{ duration: 100 }}>
-        <span class="shrink-tip" title="Until rebaselined, new resources or files added inside this bracket will be invisible to Rift — they won't appear in the queue and won't sync to the server.">
+        <span class="shrink-tip" use:tooltip={"Until rebaselined, new resources or files added inside this bracket will be invisible to Rift — they won't appear in the queue and won't sync to the server."}>
           Until rebaselined, new files inside this bracket won't sync. Rebaseline if this shrink was intentional; Dismiss only if you expect the next scan to catch up.
         </span>
       </div>
@@ -548,7 +549,7 @@
               aria-expanded={isOpen}
             >
               <span class="chev" class:rot={isOpen}><ChevronRight size={13}/></span>
-              <span class="res-name mono" title={g.resource}>{g.resource}</span>
+              <span class="res-name mono" use:tooltip={g.resource}>{g.resource}</span>
               <span class="res-counts">
                 {#if g.to_push.length > 0}<span class="pip" data-tone="push">{g.to_push.length} push</span>{/if}
                 {#if g.to_pull.length > 0}<span class="pip" data-tone="pull">{g.to_pull.length} pull</span>{/if}
@@ -573,7 +574,7 @@
                     <span>Select all in <span class="mono">{g.resource}</span></span>
                   </label>
                   {#if g.to_delete.length >= delThresh}
-                    <span class="guard-warn" title="Threshold scales as 30% of total files (clamped 5-25). Explicit user selection bypasses the breaker, but the action is logged to the activity feed.">
+                    <span class="guard-warn" use:tooltip={"Threshold scales as 30% of total files (clamped 5-25). Explicit user selection bypasses the breaker, but the action is logged to the activity feed."}>
                       <AlertTriangle size={11}/>
                       {#if delsel > 0}
                         {delsel}/{g.to_delete.length} deletes selected · over guard ({delThresh}) — will warn
@@ -605,14 +606,14 @@
                         <span class="entry-bucket" data-tone={etone}>{bucketLabel(e.bucket)}</span>
                         <div class="entry-main">
                           <div class="entry-line-1">
-                            <span class="entry-path mono" title={e.local_path}>{relPathLabel(e)}</span>
+                            <span class="entry-path mono" use:tooltip={e.local_path}>{relPathLabel(e)}</span>
                             {#if isConflictCopy(e)}
-                              <span class="conflict-copy-chip" title="Local .rift-conflict.* copy — review before push">conflict-copy</span>
+                              <span class="conflict-copy-chip" use:tooltip={"Local .rift-conflict.* copy — review before push"}>conflict-copy</span>
                             {/if}
                             {#if sizeBytes > 0}<span class="entry-meta-right">{formatSize(sizeBytes)}</span>{/if}
                           </div>
                           <div class="entry-line-2">
-                            <span class="entry-reason" title={e.reason}>{e.reason}</span>
+                            <span class="entry-reason" use:tooltip={e.reason}>{e.reason}</span>
                             {#if mtimeIso}<span class="entry-meta-right muted">{formatMtimeRel(mtimeIso)}</span>{/if}
                           </div>
                         </div>
@@ -659,8 +660,8 @@
       {:else if !isEmpty}
         <span class="foot-hint">
           <span>Pick rows below to queue them, or use</span>
-          <span class="foot-cta">Pull all</span> <span>/</span> <span class="foot-cta">Push all</span>
-          <span>above.</span>
+          <span class="foot-cta">Pull only</span> <span>/</span> <span class="foot-cta">Push only</span>
+          <span>in the menu above.</span>
         </span>
       {/if}
     </div>

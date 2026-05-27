@@ -36,25 +36,40 @@
 
 <style>
   .flash {
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius);
-    padding: 8px 12px;
+    --tone: var(--info);
+    background: color-mix(in oklch, var(--bg-elev-1) 90%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid color-mix(in oklch, var(--tone) 24%, var(--border-strong));
+    border-left: 3px solid var(--tone);
+    border-radius: 10px;
+    padding: 8px 14px;
     display: inline-flex;
     align-items: center;
     gap: 10px;
     color: var(--fg);
-    box-shadow: var(--shadow-lg, 0 10px 30px rgba(0,0,0,0.4));
+    box-shadow:
+      0 12px 32px -8px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklch, var(--tone) 10%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     max-width: 460px;
     cursor: pointer;
     text-align: left;
     font: inherit;
-    animation: fade-in 160ms ease-out both;
+    animation: fade-in 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: border-color 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
   }
-  .flash:hover { border-color: var(--accent); }
-  .flash[data-variant="ok"]     { border-left: 3px solid var(--ok); }
-  .flash[data-variant="danger"] { border-left: 3px solid var(--danger); }
-  .flash[data-variant="info"]   { border-left: 3px solid var(--info); }
+  .flash:hover {
+    border-color: color-mix(in oklch, var(--tone) 45%, var(--border-strong));
+    transform: translateY(-1px);
+    box-shadow:
+      0 16px 40px -8px oklch(0 0 0 / 0.6),
+      0 0 0 1px color-mix(in oklch, var(--tone) 18%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
+  }
+  .flash[data-variant="ok"]     { --tone: var(--ok); }
+  .flash[data-variant="danger"] { --tone: var(--danger); }
+  .flash[data-variant="info"]   { --tone: var(--info); }
 
   .kind {
     width: 22px; height: 22px;
