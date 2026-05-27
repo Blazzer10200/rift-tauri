@@ -48,6 +48,9 @@ import type {
   RemoteLockEvt,
   RemoteShellEvt,
   ThinkingEffort,
+  PermissionMode,
+  PermissionPromptInfo,
+  PermissionSuggestion,
   TurnRecord,
   PaneState,
 } from "./assistant/types";
@@ -60,6 +63,8 @@ import {
   saveModel,
   loadEffort,
   saveEffort,
+  loadPermissionMode,
+  savePermissionMode,
   flattenToolResult,
   previewToolInput,
   messagesHaveContextSignals,
@@ -202,6 +207,13 @@ class TabState {
   unboundAskUserRequestIds: string[] = [];
   /** FIFO of ask_user toolUseIds whose request_id hasn't shown up yet. */
   unboundAskUserToolUseIds: string[] = [];
+
+  /** Live `can_use_tool` permission asks for this tab: toolUseId → info. The
+   *  control-channel ask carries the tool_use_id directly (it pairs to the
+   *  already-streamed tool chip), so unlike ask_user no FIFO reordering is
+   *  needed. Reactive so ToolChip's `$derived` lookup activates the moment the
+   *  ask lands. Entry removed once the user decides (or the turn ends). */
+  permissionPrompts = $state<Map<string, PermissionPromptInfo>>(new Map());
 
   // Non-reactive per-stream internals.
   streamingMsgId: string | null = null;
@@ -581,13 +593,18 @@ class TabState {
       if (accumulate) this.currentTurnRecord.resultUsage = turn;
       else this.currentTurnRecord.envelopeUsage = turn;
     }
-    // #1: only update the pill on the `result` event. Envelope arrives
-    // first w/ a partial count that the result corrects on complex turns
-    // (thinking blocks, tool loops); rendering both made the pill visibly
-    // jump. Pill now sits on the previous turn's confirmed value through
-    // the in-flight turn and lands on the new value once result arrives.
+    // The ctx pill must reflect point-in-time window occupancy, NOT cumulative
+    // task usage. The `assistant` envelope (accumulate=false) carries one
+    // request's usage — its input + cache_read is exactly how full the window
+    // is right now. The `result` event (accumulate=true) sums usage across
+    // every step of the agentic loop, so one long task reports >1M cache_read
+    // (confirmed: anthropics/claude-agent-sdk-python#548). Driving the pill off
+    // `result` spiked it to ~full the instant a task finished and tripped
+    // auto-compact for no reason. So: the last envelope drives the pill; the
+    // result feeds session totals + cost only. Mid-turn envelopes climb the
+    // pill live, which is fine — the auto-compact effect is gated on !streaming.
     if (accumulate) {
-      this.lastTurnUsage = turn;
+      // result = cumulative-per-task → session stats only (intentionally summed).
       this.sessionUsage = {
         totalInput: this.sessionUsage.totalInput + turn.input,
         totalOutput: this.sessionUsage.totalOutput + turn.output,
@@ -595,6 +612,9 @@ class TabState {
         totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
         turns: this.sessionUsage.turns + 1,
       };
+    } else {
+      // assistant envelope = point-in-time window occupancy → drives the pill.
+      this.lastTurnUsage = turn;
     }
   }
 
@@ -798,6 +818,9 @@ class TabState {
     this.streamingMsgId = null;
     this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
+    // Drop any unanswered permission asks — the backend auto-denies on turn
+    // end, so a lingering Allow/Deny chip would be dead.
+    if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
     this.activity = { ...this.activity, currentLabel: null };
     // Finalize telemetry for this turn.
     if (this.currentTurnRecord) {
@@ -828,6 +851,7 @@ class TabState {
     }
     this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
+    if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
     // Finalize telemetry.
     if (this.currentTurnRecord) {
       this.currentTurnRecord.doneAt = Date.now();
@@ -1239,6 +1263,10 @@ class AssistantStore {
   // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
   // Haiku ignores this server-side. Persisted to localStorage.
   thinkingEffort = $state<ThinkingEffort>(loadEffort());
+  // Permission mode passed to the CLI's `--permission-mode`. Global (matches
+  // model/effort). `bypassPermissions` until the user picks otherwise so
+  // existing behavior is unchanged. Persisted to localStorage.
+  permissionMode = $state<PermissionMode>(loadPermissionMode());
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
   // is retained as a no-op flag for back-compat w/ any remaining slash
   // command — History is now its own workspace, not an overlay.
@@ -1325,6 +1353,14 @@ class AssistantStore {
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("effort.change", { from: prev, to: v, midConvo });
     if (midConvo) this.cacheBustHint("effort");
+  }
+
+  setPermissionMode(v: PermissionMode) {
+    if (this.permissionMode === v) return;
+    const prev = this.permissionMode;
+    this.permissionMode = v;
+    savePermissionMode(v);
+    this.telemetry.event("permission_mode.change", { from: prev, to: v });
   }
 
   /** One-shot-per-session-per-kind notice when model/effort flips on a tab
@@ -1458,6 +1494,17 @@ class AssistantStore {
       await listen<{ request_id: string; session_id: string; questions: unknown }>(
         "assistant://ask-user",
         (e) => this.onAskUser(e.payload),
+      ),
+      await listen<{
+        request_id: string;
+        session_id: string;
+        tool_use_id: string;
+        tool_name: string;
+        input: unknown;
+        suggestions: PermissionSuggestion[] | null;
+      }>(
+        "assistant://permission-request",
+        (e) => this.onPermissionRequest(e.payload),
       ),
     );
 
@@ -1606,6 +1653,63 @@ class AssistantStore {
       const next = new Map(tab.askUserBindings);
       next.delete(toolUseId);
       tab.askUserBindings = next;
+    }
+  }
+
+  /** `assistant://permission-request` arrived — the CLI wants to run a gated
+   *  tool in a prompting mode. Pair it to the matching tab by tool_use_id so
+   *  the streamed tool chip renders Allow / Deny. If the tab is gone (closed
+   *  mid-flight), auto-deny so the CLI's control_response doesn't hang. */
+  private onPermissionRequest(payload: {
+    request_id: string;
+    session_id: string;
+    tool_use_id: string;
+    tool_name: string;
+    suggestions: PermissionSuggestion[] | null;
+  }) {
+    const tab = this.tabByCliSession(payload.session_id);
+    if (!tab) {
+      void invoke("assistant_answer_permission", {
+        requestId: payload.request_id,
+        decision: { behavior: "deny", message: "Conversation closed before approval." },
+      }).catch(() => { /* turn already ended — ignore */ });
+      return;
+    }
+    const next = new Map(tab.permissionPrompts);
+    next.set(payload.tool_use_id, {
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      suggestions: payload.suggestions ?? [],
+    });
+    tab.permissionPrompts = next;
+  }
+
+  /** Look up a pending permission ask for a tool block in the active tab.
+   *  Called from ToolChip.svelte via a `$derived` so the chip's Allow/Deny
+   *  buttons appear the moment the ask lands. */
+  permissionPromptFor(toolUseId: string): PermissionPromptInfo | null {
+    return this.activeTab?.permissionPrompts.get(toolUseId) ?? null;
+  }
+
+  /** Answer a `can_use_tool` ask. `allow` writes `{behavior:"allow"}` (the CLI
+   *  reuses the original input); `deny` writes `{behavior:"deny", message}`.
+   *  Resolves the backend oneshot, which writes the control_response to the
+   *  CLI's stdin and unblocks tool execution. The chip flips to its normal
+   *  running/done state via the existing stream pipeline. */
+  async submitPermissionDecision(toolUseId: string, allow: boolean): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const info = tab.permissionPrompts.get(toolUseId);
+    if (!info) return;
+    const decision = allow
+      ? { behavior: "allow" }
+      : { behavior: "deny", message: "User declined this action." };
+    try {
+      await invoke("assistant_answer_permission", { requestId: info.requestId, decision });
+    } finally {
+      const next = new Map(tab.permissionPrompts);
+      next.delete(toolUseId);
+      tab.permissionPrompts = next;
     }
   }
 
@@ -2096,6 +2200,7 @@ class AssistantStore {
         attachments: turnAttachments.length > 0 ? turnAttachments : null,
         dyslexiaMode: accessibility.dyslexiaMode,
         thinkingEffort: this.thinkingEffort,
+        permissionMode: this.permissionMode,
         priorContextSummary: priorSummary,
       });
     } catch (e) {
@@ -2250,11 +2355,29 @@ class AssistantStore {
   }
 
   /** Composer wand: one-shot rewrite of a rough draft into a clearer prompt.
-   *  Stateless — the backend spawns a headless Haiku call and returns the
-   *  rewritten text; the composer shows it as an editable preview. Throws on
-   *  failure (empty/too-long/CLI-missing) so the caller can surface the error. */
-  async enhancePrompt(text: string): Promise<string> {
-    return invoke<string>("assistant_enhance_prompt", { prompt: text });
+   *  Stateless — the backend streams a headless Haiku rewrite token-by-token
+   *  over `assistant://enhance-stream` (so the preview fills within ~1-2s
+   *  instead of blocking on the full completion), then resolves to the
+   *  authoritative final text. `onDelta` receives the accumulated text on each
+   *  chunk for live display. Throws on failure so the caller can surface it. */
+  async enhancePrompt(text: string, onDelta?: (full: string) => void): Promise<string> {
+    const requestId = crypto.randomUUID();
+    let acc = "";
+    const unlisten = await listen<{ request_id: string; delta?: string; done?: boolean }>(
+      "assistant://enhance-stream",
+      (e) => {
+        if (e.payload.request_id !== requestId) return;
+        if (e.payload.delta) {
+          acc += e.payload.delta;
+          onDelta?.(acc);
+        }
+      },
+    );
+    try {
+      return await invoke<string>("assistant_enhance_prompt", { requestId, prompt: text });
+    } finally {
+      unlisten();
+    }
   }
 
   /** Compaction Phase B: one-shot summarize of the current CLI session.

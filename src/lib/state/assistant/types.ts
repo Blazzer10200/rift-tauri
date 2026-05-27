@@ -187,6 +187,30 @@ export type RemoteShellEvt = {
 
 export type ThinkingEffort = "none" | "quick" | "deep";
 
+/** Permission mode handed to the CLI's `--permission-mode`. Mirrors the
+ *  modes Claude Code exposes. Must stay in sync with the validator in
+ *  src-tauri/src/assistant/mod.rs. `bypassPermissions` = run everything
+ *  (Rift's historical default); the prompting modes (`default`, `acceptEdits`,
+ *  `plan`) need the approval surface from Piece 2 to be fully functional. */
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions";
+
+/** A suggestion the CLI attaches to a `can_use_tool` ask — e.g.
+ *  `{ type: "setMode", mode: "acceptEdits", destination: "session" }`, which
+ *  drives the "Allow for the rest of this session" affordance. */
+export type PermissionSuggestion = {
+  type: string;
+  mode?: string;
+  destination?: string;
+};
+
+/** A pending `can_use_tool` permission ask, keyed by the tool's `tool_use_id`
+ *  so the streamed tool chip can render Allow / Deny inline. */
+export type PermissionPromptInfo = {
+  requestId: string;
+  toolName: string;
+  suggestions: PermissionSuggestion[];
+};
+
 /** Telemetry record for a single Claude turn. */
 export type TurnRecord = {
   // Identity

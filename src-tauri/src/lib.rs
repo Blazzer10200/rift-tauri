@@ -143,6 +143,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
+        .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
         .manage(commands::update::PendingUpdate::default())
@@ -252,6 +253,8 @@ pub fn run() {
             commands::assistant_set_allow_remote_shell,
             commands::assistant_get_thinking_effort,
             commands::assistant_set_thinking_effort,
+            commands::assistant_get_permission_mode,
+            commands::assistant_set_permission_mode,
             commands::assistant_get_auto_compact_threshold,
             commands::assistant_set_auto_compact_threshold,
             commands::assistant_get_compact_model,
@@ -262,6 +265,7 @@ pub fn run() {
             commands::assistant_enhance_prompt,
             commands::assistant_stop,
             commands::assistant_answer_ask_user,
+            commands::assistant_answer_permission,
             commands::assistant_list_conversations,
             commands::assistant_load_conversation,
             commands::assistant_save_conversation,

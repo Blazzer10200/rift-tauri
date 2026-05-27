@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check } from "lucide-svelte";
+  import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check,
+    Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import type { PermissionMode } from "../../state/assistant/types";
   import { stt } from "../../state/stt.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { tick, onMount } from "svelte";
@@ -211,16 +213,13 @@
 
   // Slash menu state. Triggers when the draft starts with `/` and the
   // textarea has focus. Filters by the text after the slash.
-  // `modelPickerOpen` is a separate state that flips when /model is picked
-  // and replaces the command list with a model chooser.
-  let modelPickerOpen = $state(false);
-  // Declared here (not beside pickEffort) so the slashOpen derived below can
-  // reference it without a temporal-dead-zone error.
-  let effortPickerOpen = $state(false);
-  let effortIdx = $state(0);
+  // One unified settings popover folds model + thinking depth + permission
+  // mode into a single toolbar control. `settingsOpen` flips it; `settingsIdx`
+  // is the flat cursor across all three sections (see `settingsRows`).
+  let settingsOpen = $state(false);
+  let settingsIdx = $state(0);
   const slashOpen = $derived(
-    !modelPickerOpen &&
-      !effortPickerOpen &&
+    !settingsOpen &&
       draft.startsWith("/") &&
       !draft.includes(" ") &&
       draft.length >= 1,
@@ -230,18 +229,10 @@
     return SLASH_COMMANDS.filter((c) => c.name.startsWith(q));
   });
   let slashIdx = $state(0);
-  let modelIdx = $state(0);
   $effect(() => {
     const _v = slashFiltered.length;
     void _v;
     slashIdx = 0;
-  });
-  // Re-seed the model picker cursor to the current model whenever it opens.
-  $effect(() => {
-    if (modelPickerOpen) {
-      const i = MODEL_OPTIONS.findIndex((m) => m.id === assistant.model);
-      modelIdx = i >= 0 ? i : 0;
-    }
   });
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
@@ -257,27 +248,65 @@
     { id: "deep",  label: "Deep",    level: 3, hint: "Deep — heavy reasoning (~15s extra) for hard problems" },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
-  // Effort picker — mirrors the model pill's affordance (click opens a menu)
-  // so the two adjacent pills behave identically instead of one cycling and
-  // one opening a dropdown. (State declared above, near modelPickerOpen.)
-  $effect(() => {
-    if (effortPickerOpen) {
-      const i = EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort);
-      effortIdx = i >= 0 ? i : 0;
-    }
-  });
   function pickEffort(e: EffortOpt) {
     assistant.setThinkingEffort(e.id);
-    effortPickerOpen = false;
+    settingsOpen = false;
     void tick().then(() => ta?.focus());
+  }
+
+  // Permission-mode picker — mirrors the effort/model pills. Order matches the
+  // VS Code Claude Code menu: ask → auto-edit → plan → auto → bypass. Icons
+  // echo that menu (hand / code / clipboard / zap / infinity).
+  type ModeOpt = { id: PermissionMode; label: string; icon: typeof Hand; hint: string };
+  const MODE_OPTIONS: ModeOpt[] = [
+    { id: "default",           label: "Ask before edits", icon: Hand,          hint: "Ask before edits — approve each change before it's made" },
+    { id: "acceptEdits",       label: "Edit automatically", icon: Code2,       hint: "Edit automatically — apply file edits without asking" },
+    { id: "plan",              label: "Plan mode",        icon: ClipboardList, hint: "Plan mode — explore and present a plan before editing" },
+    { id: "auto",              label: "Auto mode",        icon: Zap,           hint: "Auto mode — pick the best permission mode per task" },
+    { id: "bypassPermissions", label: "Bypass permissions", icon: InfinityIcon, hint: "Bypass permissions — never ask before running anything" },
+  ];
+  const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
+  function pickMode(m: ModeOpt) {
+    assistant.setPermissionMode(m.id);
+    settingsOpen = false;
+    void tick().then(() => ta?.focus());
+  }
+
+  // Flat, navigable row list spanning all three sections of the unified
+  // settings panel. Effort is dropped on Haiku (ignored server-side), exactly
+  // as the old standalone effort pill was hidden there. Drives ArrowUp/Down
+  // + the active highlight; mouse clicks call the per-kind pick fns directly.
+  type SettingsRow =
+    | { kind: "model"; model: ModelOpt }
+    | { kind: "effort"; effort: EffortOpt }
+    | { kind: "mode"; mode: ModeOpt };
+  const settingsRows = $derived.by<SettingsRow[]>(() => {
+    const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
+    if (assistant.model !== "haiku") {
+      rows.push(...EFFORT_OPTIONS.map((e) => ({ kind: "effort" as const, effort: e })));
+    }
+    rows.push(...MODE_OPTIONS.map((m) => ({ kind: "mode" as const, mode: m })));
+    return rows;
+  });
+  // Re-seed the cursor to the current model row whenever the panel opens.
+  $effect(() => {
+    if (settingsOpen) {
+      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === assistant.model);
+      settingsIdx = i >= 0 ? i : 0;
+    }
+  });
+  function pickRow(row: SettingsRow) {
+    if (row.kind === "model") pickModel(row.model);
+    else if (row.kind === "effort") pickEffort(row.effort);
+    else pickMode(row.mode);
   }
 
   function pickSlash(c: SlashCmd) {
     if (c.name === "model") {
-      // Open the model picker instead of inserting `/model ` text.
+      // Open the unified settings panel instead of inserting `/model ` text.
       setDraft("");
       stt.consume();
-      modelPickerOpen = true;
+      settingsOpen = true;
       void tick().then(() => ta?.focus());
       return;
     }
@@ -290,7 +319,7 @@
 
   function pickModel(m: ModelOpt) {
     assistant.setModel(m.id);
-    modelPickerOpen = false;
+    settingsOpen = false;
     void tick().then(() => ta?.focus());
   }
 
@@ -329,7 +358,11 @@
     enhancedPreview = null;
     enhanceError = null;
     try {
-      enhancedPreview = await assistant.enhancePrompt(text);
+      // Stream: deltas fill the preview live (first text in ~1-2s); the
+      // resolved value is the authoritative final text.
+      enhancedPreview = await assistant.enhancePrompt(text, (full) => {
+        enhancedPreview = full;
+      });
     } catch (e) {
       enhanceError = String(e);
     } finally {
@@ -526,7 +559,7 @@
     // draft still moves the caret normally).
     const empty = draft.length === 0;
     const atStart = ta?.selectionStart === 0 && ta?.selectionEnd === 0;
-    if (!modelPickerOpen && !effortPickerOpen && !slashOpen && !mentionState && (empty || atStart)) {
+    if (!settingsOpen && !slashOpen && !mentionState && (empty || atStart)) {
       if (e.key === "ArrowUp") {
         // Recall from THIS tab's promptHistory, not the focused tab's, so
         // each pane has its own prompt-history scroll.
@@ -557,52 +590,30 @@
         return;
       }
     }
-    if (effortPickerOpen) {
+    if (settingsOpen) {
+      const n = settingsRows.length;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        effortIdx = (effortIdx + 1) % EFFORT_OPTIONS.length;
+        settingsIdx = (settingsIdx + 1) % n;
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        effortIdx = (effortIdx - 1 + EFFORT_OPTIONS.length) % EFFORT_OPTIONS.length;
+        settingsIdx = (settingsIdx - 1 + n) % n;
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        pickEffort(EFFORT_OPTIONS[effortIdx]);
+        pickRow(settingsRows[settingsIdx]);
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        effortPickerOpen = false;
+        settingsOpen = false;
         return;
       }
-      if (e.key.length === 1) effortPickerOpen = false;
-    }
-    if (modelPickerOpen) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        modelIdx = (modelIdx + 1) % MODEL_OPTIONS.length;
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        modelIdx = (modelIdx - 1 + MODEL_OPTIONS.length) % MODEL_OPTIONS.length;
-        return;
-      }
-      if (e.key === "Enter" || e.key === "Tab") {
-        e.preventDefault();
-        pickModel(MODEL_OPTIONS[modelIdx]);
-        return;
-      }
-      if (e.key === "Escape") {
-        e.preventDefault();
-        modelPickerOpen = false;
-        return;
-      }
-      // Any other key cancels the picker so the user can type normally.
-      if (e.key.length === 1) modelPickerOpen = false;
+      // Any other key cancels the panel so the user can type normally.
+      if (e.key.length === 1) settingsOpen = false;
     }
     if (slashOpen && slashFiltered.length > 0) {
       if (e.key === "ArrowDown") {
@@ -810,7 +821,7 @@
             <span class="enhance-sub">review before sending</span>
           </div>
           <div class="enhance-text">
-            {#each enhancedWords as w, i (i)}<span class="ew" style="--i:{i}">{w}</span>{/each}
+            {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
           </div>
           <div class="enhance-actions">
             <button type="button" class="enhance-btn enhance-accept" onclick={acceptEnhanced}>
@@ -875,59 +886,84 @@
       </div>
     {/if}
 
-    {#if modelPickerOpen}
-      <div class="slash-menu model-menu" role="listbox">
-        <div class="model-header"><span>Model</span></div>
-        {#each MODEL_OPTIONS as m, i (m.id)}
-          <button
-            type="button"
-            class="slash-item model-item"
-            class:active={i === modelIdx}
-            class:current={m.id === assistant.model}
-            data-id={m.id}
-            style="--idx: {i}"
-            onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
-          >
-            <span class="model-dot" aria-hidden="true"></span>
-            <span class="model-name">
-              <span class="model-label">{m.label}</span>
-              <span class="model-version">{m.version}</span>
-            </span>
-            <span class="slash-desc">{m.tagline}</span>
-            <span class="model-ctx" class:wide={m.ctx === "1M ctx"}>{m.ctx}</span>
-          </button>
-        {/each}
-        <div class="slash-hint model-hint">
-          <span><kbd>↑↓</kbd> navigate</span>
-          <span><kbd>↵</kbd> pick</span>
-          <span><kbd>Esc</kbd> close</span>
+    {#if settingsOpen}
+      <div class="slash-menu model-menu settings-menu" role="listbox">
+        <div class="settings-section">
+          <div class="model-header"><span>Model</span></div>
+          <div class="settings-grid">
+            {#each MODEL_OPTIONS as m (m.id)}
+              {@const idx = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === m.id)}
+              <button
+                type="button"
+                class="settings-item model-card"
+                class:active={idx === settingsIdx}
+                class:current={m.id === assistant.model}
+                data-id={m.id}
+                style="--idx: {idx}"
+                use:tooltip={m.tagline}
+                onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
+              >
+                <span class="card-head">
+                  <span class="model-dot" aria-hidden="true"></span>
+                  <span class="model-label">{m.label}</span>
+                  <span class="model-version">{m.version}</span>
+                </span>
+                <span class="model-ctx" class:wide={m.ctx === "1M ctx"}>{m.ctx}</span>
+              </button>
+            {/each}
+          </div>
         </div>
-      </div>
-    {/if}
-
-    {#if effortPickerOpen}
-      <div class="slash-menu model-menu effort-menu" role="listbox">
-        <div class="model-header"><span>Thinking depth</span></div>
-        {#each EFFORT_OPTIONS as e, i (e.id)}
-          {@const desc = e.hint.includes("— ") ? e.hint.split("— ")[1] : e.hint}
-          <button
-            type="button"
-            class="slash-item model-item effort-item"
-            class:active={i === effortIdx}
-            class:current={e.id === assistant.thinkingEffort}
-            data-level={e.level}
-            style="--idx: {i}"
-            onmousedown={(ev) => { ev.preventDefault(); pickEffort(e); }}
-          >
-            <span class="effort-bars" aria-hidden="true" data-level={e.level}>
-              <span class="bar"></span>
-              <span class="bar"></span>
-              <span class="bar"></span>
-            </span>
-            <span class="model-name"><span class="model-label">{e.label}</span></span>
-            <span class="slash-desc">{desc}</span>
-          </button>
-        {/each}
+        <div class="settings-cols">
+          {#if assistant.model !== "haiku"}
+            <div class="settings-section">
+              <div class="model-header"><span>Thinking depth</span></div>
+              <div class="settings-stack">
+                {#each EFFORT_OPTIONS as e (e.id)}
+                  {@const idx = settingsRows.findIndex((r) => r.kind === "effort" && r.effort.id === e.id)}
+                  <button
+                    type="button"
+                    class="settings-item effort-row"
+                    class:active={idx === settingsIdx}
+                    class:current={e.id === assistant.thinkingEffort}
+                    data-level={e.level}
+                    style="--idx: {idx}"
+                    use:tooltip={e.hint}
+                    onmousedown={(ev) => { ev.preventDefault(); pickEffort(e); }}
+                  >
+                    <span class="effort-bars" aria-hidden="true" data-level={e.level}>
+                      <span class="bar"></span>
+                      <span class="bar"></span>
+                      <span class="bar"></span>
+                    </span>
+                    <span class="model-label">{e.label}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+          <div class="settings-section">
+            <div class="model-header"><span>Permission mode</span></div>
+            <div class="settings-stack">
+              {#each MODE_OPTIONS as m (m.id)}
+                {@const idx = settingsRows.findIndex((r) => r.kind === "mode" && r.mode.id === m.id)}
+                {@const Icon = m.icon}
+                <button
+                  type="button"
+                  class="settings-item mode-row"
+                  class:active={idx === settingsIdx}
+                  class:current={m.id === assistant.permissionMode}
+                  data-id={m.id}
+                  style="--idx: {idx}"
+                  use:tooltip={m.hint}
+                  onmousedown={(ev) => { ev.preventDefault(); pickMode(m); }}
+                >
+                  <span class="mode-icon" aria-hidden="true"><Icon size={15} /></span>
+                  <span class="model-label">{m.label}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        </div>
         <div class="slash-hint model-hint">
           <span><kbd>↑↓</kbd> navigate</span>
           <span><kbd>↵</kbd> pick</span>
@@ -1066,45 +1102,19 @@
         </div>
 
         <div class="toolbar-cluster toolbar-right">
-          {#if assistant.model !== "haiku"}
-            <button
-              type="button"
-              class="effort-pill"
-              class:effort-none={currentEffort.id === "none"}
-              class:effort-quick={currentEffort.id === "quick"}
-              class:effort-deep={currentEffort.id === "deep"}
-              onclick={() => { effortPickerOpen = !effortPickerOpen; modelPickerOpen = false; void tick().then(() => ta?.focus()); }}
-              aria-haspopup="listbox"
-              aria-expanded={effortPickerOpen}
-              use:tooltip={`${currentEffort.hint}\nClick to choose thinking depth`}
-            >
-              {#key currentEffort.id}
-                <span class="effort-bars" aria-hidden="true" data-level={currentEffort.level}>
-                  <span class="bar"></span>
-                  <span class="bar"></span>
-                  <span class="bar"></span>
-                </span>
-                <span class="pill-label">{currentEffort.label}</span>
-              {/key}
-              <span class="pill-caret" aria-hidden="true">▾</span>
-            </button>
-          {/if}
           <button
             type="button"
-            class="model-pill"
-            class:streaming
-            data-model={assistant.model}
-            onclick={() => { modelPickerOpen = !modelPickerOpen; effortPickerOpen = false; void tick().then(() => ta?.focus()); }}
-            use:tooltip={streaming ? `Streaming with ${currentModel?.label ?? assistant.model}` : `Switch model · current: ${currentModel?.label ?? assistant.model}`}
+            class="settings-pill"
+            class:open={settingsOpen}
+            data-mode={currentMode.id}
+            onclick={() => { settingsOpen = !settingsOpen; void tick().then(() => ta?.focus()); }}
+            aria-haspopup="listbox"
+            aria-expanded={settingsOpen}
+            aria-label="Model, thinking depth & permission mode"
+            use:tooltip={`Model · thinking depth · permission mode\n${currentModel?.label ?? assistant.model} · ${currentEffort.label} · ${currentMode.label}`}
           >
-            <span class="model-dot-mini" aria-hidden="true"></span>
-            {#if currentModel}
-              <span class="pill-label">{currentModel.label}</span>
-              <span class="pill-version">{currentModel.version}</span>
-              <span class="pill-caret" aria-hidden="true">▾</span>
-            {:else}
-              model: {assistant.model}
-            {/if}
+            <SlidersHorizontal size={15} />
+            <span class="pill-caret" aria-hidden="true">▾</span>
           </button>
           <button
             class="sendbtn"
@@ -1201,7 +1211,7 @@
   /* ── Composer v3 ─────────────────────────────────────────────────────
      Two-row layout: textarea up top, toolbar below.  Glass-blur surface
      w/ soft accent focus ring + animated streaming edge.  All controls
-     unified under .iconbtn (mic/help) + .effort-pill / .model-pill /
+     unified under .iconbtn (mic/help) + .settings-pill (model/effort/mode) +
      .sendbtn.  Replaces the v2 single-row design. */
   .composer {
     position: relative;
@@ -1904,6 +1914,12 @@
     animation: word-materialize 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: min(calc(var(--i) * 14ms), 650ms);
   }
+  /* While streaming, tokens already arrive staggered — drop the index delay so
+     each word blurs in the moment its delta lands (typewriter feel), instead of
+     queuing behind a growing per-word offset. */
+  .ew.live {
+    animation-delay: 0ms;
+  }
   @keyframes word-materialize {
     from { opacity: 0; filter: blur(7px); }
     to   { opacity: 1; filter: blur(0); }
@@ -2004,74 +2020,37 @@
     letter-spacing: 0.01em;
   }
 
-  .model-pill {
+  /* Unified settings pill — one icon-only control opening the model /
+     thinking-depth / permission-mode panel. `data-mode` faintly tints the
+     icon so the current permission posture (unguarded vs cautious) reads at
+     a glance without spelling it out. */
+  .settings-pill {
     align-self: center;
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 0 8px 0 10px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
-    border-radius: 999px;
-    color: var(--fg-2);
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-    font: inherit;
-    font-size: var(--fs-xs);
-    height: 26px;
-    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
-  }
-  /* Per-model dot — same color logic as the picker. Lets the user scan the
-     pill and know which model is loaded without reading the label. */
-  .model-dot-mini {
-    width: 6px; height: 6px;
-    border-radius: 999px;
-    background: var(--model-color, var(--fg-muted));
-    box-shadow:
-      0 0 0 1.5px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
-      0 0 6px color-mix(in oklch, var(--model-color, var(--fg-muted)) 45%, transparent);
-    flex-shrink: 0;
-  }
-  .model-pill[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .model-pill[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .model-pill[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
-  /* Streaming = breathing glow around the pill + dot grows. Loops in
-     sync (2.6s) w/ the composer top-edge streaming bar. */
-  .model-pill.streaming {
-    border-color: color-mix(in oklch, var(--model-color) 50%, var(--border));
-    animation: model-pill-breathe 2.6s ease-in-out infinite;
-  }
-  .model-pill.streaming .model-dot-mini {
-    animation: model-dot-breathe 2.6s ease-in-out infinite;
-  }
-  @keyframes model-pill-breathe {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
-    50%      { box-shadow: 0 0 14px color-mix(in oklch, var(--model-color) 45%, transparent); }
-  }
-  @keyframes model-dot-breathe {
-    0%, 100% { transform: scale(1);   filter: brightness(1); }
-    50%      { transform: scale(1.25); filter: brightness(1.3); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .model-pill.streaming,
-    .model-pill.streaming .model-dot-mini { animation: none; }
-  }
-
-  .effort-pill {
-    align-self: center;
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 0 10px;
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 0 8px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
     border-radius: 999px;
     color: var(--fg-2);
     cursor: pointer;
     font: inherit;
-    font-size: 10.5px;
-    font-weight: 600;
     height: 26px;
-    letter-spacing: 0.02em;
     overflow: hidden;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
+  .settings-pill:hover {
+    background: color-mix(in oklch, var(--bg-elev-2) 90%, transparent);
+    color: var(--fg);
+    border-color: var(--border);
+  }
+  .settings-pill.open {
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+    color: var(--fg);
+  }
+  .settings-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
+  .settings-pill[data-mode="bypassPermissions"] { color: var(--warn); }
+  .settings-pill[data-mode="default"] { color: var(--accent); }
+  .mode-icon { display: inline-flex; align-items: center; }
   /* Signal-bar effort indicator — 3 vertical bars growing left-to-right.
      `data-level` (1|2|3) fills bars in current color; unfilled bars stay
      dim. Same visual vocab as wifi/battery so the ladder reads instantly. */
@@ -2110,35 +2089,6 @@
     .effort-bars { animation: none; }
     .effort-bars .bar { animation: none; }
   }
-  .effort-pill:hover {
-    background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));
-    color: var(--fg);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
-  }
-  .effort-none {
-    color: oklch(0.78 0.14 145);
-    border-color: color-mix(in oklch, oklch(0.78 0.14 145) 35%, var(--border));
-    background: color-mix(in oklch, oklch(0.78 0.14 145) 8%, var(--bg-elev-2));
-  }
-  .effort-quick {
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
-    background: color-mix(in oklch, var(--accent) 8%, var(--bg-elev-2));
-  }
-  .effort-deep {
-    color: oklch(0.75 0.16 50);
-    border-color: color-mix(in oklch, oklch(0.75 0.16 50) 40%, var(--border));
-    background: color-mix(in oklch, oklch(0.75 0.16 50) 10%, var(--bg-elev-2));
-  }
-  .pill-label { font-weight: 600; }
-  .pill-version {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--model-color, var(--accent));
-    padding: 1px 6px;
-    background: color-mix(in oklch, var(--model-color, var(--accent)) 14%, transparent);
-    border-radius: 999px;
-  }
   .pill-caret {
     font-size: 8px;
     color: var(--fg-faint);
@@ -2146,13 +2096,6 @@
     line-height: 1;
     transition: color 140ms ease-out, transform 140ms ease-out;
   }
-  .model-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
-  .model-pill:hover {
-    background: color-mix(in oklch, var(--bg-elev-2) 95%, transparent);
-    color: var(--fg);
-    border-color: color-mix(in oklch, var(--model-color, var(--accent)) 35%, var(--border));
-  }
-
   .mention-menu { max-height: 280px; }
   .mention-item {
     display: grid;
@@ -2210,41 +2153,6 @@
       color-mix(in oklch, var(--border) 80%, transparent),
       transparent);
   }
-  .model-item {
-    position: relative;
-    display: grid;
-    grid-template-columns: 10px minmax(96px, auto) 1fr auto;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px 10px 18px;
-    border-radius: 8px;
-    transition: background 140ms ease-out;
-  }
-  .model-item::before {
-    content: "";
-    position: absolute;
-    left: 4px;
-    top: 50%;
-    width: 3px;
-    height: 60%;
-    border-radius: 2px;
-    background: var(--accent);
-    box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 55%, transparent);
-    transform: translateY(-50%) scaleY(0);
-    transform-origin: center;
-    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .model-item.current::before { transform: translateY(-50%) scaleY(1); }
-  .model-item.current {
-    background: linear-gradient(90deg,
-      color-mix(in oklch, var(--accent) 14%, transparent),
-      color-mix(in oklch, var(--accent) 4%, transparent) 65%,
-      transparent);
-  }
-  .model-item.active:not(.current) {
-    background: color-mix(in oklch, var(--accent) 9%, transparent);
-  }
-
   .model-dot {
     width: 8px; height: 8px;
     border-radius: 999px;
@@ -2253,35 +2161,82 @@
       0 0 0 2px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
       0 0 8px color-mix(in oklch, var(--model-color, var(--fg-muted)) 55%, transparent);
   }
-  .model-item[data-id="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .model-item[data-id="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .model-item[data-id="haiku"]  { --model-color: oklch(0.78 0.14 180); }
 
-  /* Effort picker — same dropdown chrome as the model menu, compact + right-
-     anchored under the effort pill. Three rungs: signal bars + label + hint. */
-  .effort-menu {
+  /* Unified settings panel — compact, right-anchored under the pill. Model is
+     a 3-up card row; thinking depth + permission mode sit side-by-side below.
+     Descriptions live in hover tooltips so the panel stays short (no scroll)
+     and content-width instead of spanning the whole composer. */
+  .settings-menu {
     left: auto; right: 0;
     width: max-content;
-    min-width: 300px; max-width: 360px;
+    min-width: 440px; max-width: 560px;
+    max-height: min(82vh, 600px);
+    padding: 8px 10px 4px;
   }
-  .effort-item {
-    grid-template-columns: 16px minmax(56px, auto) 1fr;
-    padding-left: 14px;
+  .settings-section { padding: 0 2px; }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 2px 2px 8px;
   }
-  .effort-item .effort-bars {
-    height: 13px;
-    color: var(--fg-muted);
-    animation: none;
+  .settings-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: start;
   }
-  .effort-item .effort-bars .bar { animation: none; }
-  .effort-item.current .effort-bars { color: var(--accent); }
-  .effort-item .model-name { min-width: 0; }
-  .effort-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
+  .settings-stack {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 2px 2px 4px;
+  }
+  .settings-item {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    transition: background 140ms ease-out, border-color 140ms ease-out;
+    animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--idx, 0) * 16ms);
+  }
+  .settings-item:hover,
+  .settings-item.active {
+    background: color-mix(in oklch, var(--accent) 11%, transparent);
+  }
+  .settings-item.current {
+    background: color-mix(in oklch, var(--accent) 13%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 38%, var(--border));
+  }
+  /* Model card — name + version on top, ctx badge beneath; tagline in tooltip. */
+  .model-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 9px 10px;
+  }
+  .model-card .card-head { display: inline-flex; align-items: center; gap: 7px; }
+  .model-card[data-id="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .model-card[data-id="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .model-card[data-id="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .settings-item.current .model-label { color: var(--accent); }
+  .settings-item.current .model-version {
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 16%, transparent);
+  }
+  /* Effort + mode rows — single line: indicator + label, desc in tooltip. */
+  .effort-row .effort-bars { height: 12px; color: var(--fg-muted); animation: none; }
+  .effort-row .effort-bars .bar { animation: none; }
+  .effort-row.current .effort-bars { color: var(--accent); }
+  .mode-row .mode-icon { color: var(--fg-muted); }
+  .mode-row.current .mode-icon { color: var(--accent); }
 
-  .model-name {
-    display: inline-flex; align-items: baseline; gap: 6px;
-    min-width: 96px;
-  }
   .model-label {
     font-weight: 600;
     color: var(--fg);
@@ -2295,16 +2250,6 @@
     padding: 1px 5px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
     border-radius: 4px;
-  }
-  .model-item.current .model-label { color: var(--accent); }
-  .model-item.current .model-version {
-    color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 16%, transparent);
-  }
-  .model-menu .slash-desc {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .model-ctx {
     font-size: 10px;

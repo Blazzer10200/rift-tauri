@@ -131,6 +131,29 @@ describe("assistant.ctxTokensFor()", () => {
   });
 });
 
+describe("recordTurnUsage — ctx pill reads point-in-time, not cumulative task usage", () => {
+  it("the assistant envelope drives lastTurnUsage; the result event must not inflate it", () => {
+    const tab = assistant.ensureTab("ctx-regression-convo", "ctx-regression-sess") as any;
+    // Final assistant envelope of a long task = the true window occupancy now.
+    tab.recordTurnUsage(
+      { input_tokens: 120, cache_read_input_tokens: 198_000, cache_creation_input_tokens: 2_000, output_tokens: 540 },
+      false,
+    );
+    // Result event sums usage across EVERY loop step — a >1M cache_read is normal
+    // on a long task (anthropics/claude-agent-sdk-python#548). It must NOT drive
+    // the pill, or auto-compact false-fires the instant a task finishes.
+    tab.recordTurnUsage(
+      { input_tokens: 1_792, cache_read_input_tokens: 1_346_549, cache_creation_input_tokens: 53_078, output_tokens: 20_027 },
+      true,
+    );
+    expect(tab.lastTurnUsage).toEqual({ input: 120, output: 540, cacheRead: 198_000, cacheCreate: 2_000 });
+    expect(assistant.ctxTokensFor(tab)).toBe(200_120); // 120 + 198_000 + 2_000 — nowhere near 1.3M
+    // Result still feeds the (intentionally cumulative) session totals.
+    expect(tab.sessionUsage.totalCacheRead).toBe(1_346_549);
+    expect(tab.sessionUsage.turns).toBe(1);
+  });
+});
+
 describe("assistant.ctxPctFor()", () => {
   it("returns 0 when no usage", () => {
     const tab = { lastModelId: "claude-sonnet-4-6", lastTurnUsage: null } as any;
