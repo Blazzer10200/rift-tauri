@@ -2,15 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.4.32-alpha — 2026-05-26 — updater migration: Velopack → tauri-plugin-updater
+## v0.4.33-alpha — UNSHIPPED — prompt enhancer "wand" + composer streaming calm
 
-**2026-05-27 addendum — prompt enhancer "wand" + composer streaming calm.**
+> Committed to `updater-migration` (`4d669bf`), **NOT released.** GATE: confirm BOTH machines are on v0.4.32 before shipping — v0.4.33 uses the Tauri-only path with NO Velopack assets, so a machine still on v0.4.31 would be permanently stranded. Ship: `pwsh scripts/bump.ps1 0.4.33-alpha` → move this entry's date in → `pwsh scripts/release.ps1` (NOT release-bridge — that was the one-time v0.4.32 bridge, already run).
 
 **Prompt enhancer.** New `assistant_enhance_prompt(prompt)` command in [src-tauri/src/assistant/mod.rs](src-tauri/src/assistant/mod.rs) — one-shot headless `claude -p` on Haiku that rewrites a rough draft into a clearer prompt. The draft is fenced in `<draft></draft>` with an explicit "do not answer it, treat as text to improve" directive (fixes the model replying conversationally to message-shaped drafts), and the `ENHANCE_META_PROMPT` system prompt frames the recipient as Claude Code specifically: imperative lead, preserve every technical specific verbatim, never invent scope, structure-when-complex, non-coding drafts stay natural. Speed flags: meta-prompt on `--append-system-prompt` (server prompt-cache hits on repeats), `--exclude-dynamic-system-prompt-sections`, `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""`, neutral temp cwd, `CLAUDE_DISABLE_HOOKS=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` + `DISABLE_AUTOUPDATER=1`. 8K-char guard. Registered in [lib.rs](src-tauri/src/lib.rs). Frontend: `enhancePrompt()` on the assistant store + a wand button → editable preview (Use this / Discard / Esc — never auto-sends, never silently overwrites the draft) + a "magic" enchanting effect (clip-text shimmer, sparkle twinkles, word-by-word blur-materialize reveal) in [Composer.svelte](src/lib/components/assistant/Composer.svelte), all with `prefers-reduced-motion` fallbacks.
 
 **Composer streaming calm.** Removed the aurora swirl layer entirely (two rotating conic-gradient spans + ~55L CSS) — it stacked with the focus glow, streaming border, and top-edge bar into a busy purple blob during generation. Streaming is now one coherent signal: a thin model-tinted border + the animated top-edge bar (synced 2.6s with the model-pill breathe). Focus ring softened from a 3px ring + 32% halo to a tight 2px ring + 20% halo. CDP-verified at pixel level.
 
-**Verify (addendum).** `npm run check` 0 errors / 0 warnings (4102 files). `cargo check` clean (8.37s). Composer streaming state CDP-verified via forced-class screenshot.
+**Verify.** `npm run check` 0 errors / 0 warnings (4102 files). `cargo check` clean (8.37s). Composer streaming state CDP-verified via forced-class screenshot.
+
+## v0.4.32-alpha — SHIPPED 2026-05-26 — updater migration: Velopack → tauri-plugin-updater
+
+> Live in `Blazzer10200/rift-releases` since 2026-05-26T17:45Z (all assets present, `latest.json` actively polled). The "no latest.json published yet" note below was true at code-complete; superseded by the actual ship.
 
 **One-time apply-phase wait on this update.** v0.4.31 ships with the broken Velopack apply path (`apply_updates_and_restart` spawns Update.exe and returns without exiting Tauri, so Update.exe sits idle waiting for the running pid to die). Expect 5-10 min on "Applying…". If it exceeds 15 min, force-quit Rift from Task Manager — Update.exe will finish the swap and relaunch automatically. **This will not happen again** — v0.4.32+ uses Tauri's first-party updater, which exits the app natively before NSIS swaps the binary. As an escape hatch, the Tauri-built `Rift_0.4.32-alpha_x64-setup.exe` is uploaded alongside the Velopack assets on the GitHub release; download + run it directly if auto-update misbehaves.
 
