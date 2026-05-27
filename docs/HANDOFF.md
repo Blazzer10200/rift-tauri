@@ -2,29 +2,24 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Branch in flight — `updater-migration` (Velopack → tauri-plugin-updater)
+## Prompt Enhancer "wand" + composer calm — 2026-05-27, COMMITTED, verified
 
-HEAD on main = v0.4.31-alpha; branch package version = v0.4.32-alpha. Backend + FE code complete + `/check` clean. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key`. `release.ps1` (Tauri-only, v0.4.33+) + `release-bridge.ps1` (one-time v0.4.32 hybrid for v0.4.31 clients via Velopack feed). Stale-post-migration ISSUES closed: #16/#19/#25/#28/#252. Per-detail history via `git log -- docs/HANDOFF.md`.
+Composer wand button → one-shot Haiku rewrite of the draft into a clearer, Claude-Code-optimized prompt. Editable preview (Use this / Discard / Esc), never auto-sends, never silently overwrites. On `updater-migration`, folded into the unshipped v0.4.32-alpha.
 
-## Aurora UI pass 2026-05-26 (this session — frontend-only)
-
-Composer-driven visual refresh + reusable tooltip system + app-wide polish. `/check` clean (0/0). No backend / no version bump — `/git-ship` when ready.
-
-**New code:** `src/lib/actions/tooltip.ts` (`use:tooltip={"..."}` Svelte action, glass surface, auto-flip, kbd-chip variant). `.tip/.tip-arrow/.tip-kbd` global CSS. `scripts/migrate-tooltips.mjs` + `fix-tooltip-migration.mjs` (idempotent).
-
-**Migration:** 180 `title=` → `use:tooltip` across 34 files. Component title PROPS preserved. `LockBadge` prop `tooltip` → `tip` (avoid shadowing action import).
-
-**Composer:** aurora conic-gradient tinted by `--model-color` (sonnet=blue, opus=purple, haiku=teal); send-btn ripple + upward chat-column sweep on fire; mic 3-bar waveform; placeholder fade-rotates 6s; drag-and-drop overlay; **effort pill renamed Instant/Smart/Deep w/ signal-bar 1→3**; model pill streaming breathe; menu items stagger; hint popover portaled to body (was clipped by composer's `overflow:hidden + backdrop-filter`).
-
-**Bleed:** ChatTabsBar active tab + underglow tinted by `--model-color`; ActivityBar breathing capsule + halo; MessageBubble per-turn tint from `message.model`; scrollbars accent-tinted; `.dialog-shell`/`.slideover`/all toasts glass-blur + per-tone border.
-
-**Convention:** `import { tooltip } from "$lib/actions/tooltip"` + `use:tooltip={"..."}` going forward.
+- **Backend:** `assistant_enhance_prompt(prompt)` in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs) (above `SUMMARIZE_PROMPT_HEAD`). One-shot `claude -p` text on Haiku. Draft fenced in `<draft></draft>` w/ explicit "do not answer it" directive (fixed the model replying conversationally to message-shaped drafts). `ENHANCE_META_PROMPT` frames recipient as Claude Code: imperative lead, preserve specifics verbatim, never invent scope, structure-when-complex, non-coding drafts stay natural. Speed: meta on `--append-system-prompt` (cache), `--exclude-dynamic-system-prompt-sections`, `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""`, temp cwd, `CLAUDE_DISABLE_HOOKS=1`. 8K-char guard. Registered in [lib.rs](../src-tauri/src/lib.rs).
+- **Frontend:** `enhancePrompt()` on AssistantStore ([assistant.svelte.ts](../src/lib/state/assistant.svelte.ts)); wand + preview panel + "magic" effect in [Composer.svelte](../src/lib/components/assistant/Composer.svelte) — clip-text shimmer, sparkle twinkles, word-by-word blur-materialize reveal. `prefers-reduced-motion` throughout.
+- **Composer streaming calm:** aurora swirl layer REMOVED entirely (spans + ~55L CSS). Streaming = thin model-tinted border + top-edge bar (synced 2.6s w/ pill breathe). Focus ring softened 3px/32% → 2px/20%. CDP pixel-verified.
+- **Verified:** svelte-check 0/0 (4102 files); `cargo check` clean (8.37s); CDP live (enhance: short/long/code/over-length-error/double-click; composer streaming forced-class shot). **Open tweak:** word-reveal stagger 14ms/word, cap 650ms — easy dial.
 
 ---
 
-## Stabilization 2026-05-26 (autonomous, R1-R4)
+## Branch in flight — `updater-migration` (Velopack → tauri-plugin-updater)
 
-Per git log: audit.ps1 + SECURITY.md + Wave A/B tests (96→101 Rust) + ISSUES prune + #20 M0-M5b (`assistant.svelte.ts` 3356→2648L, new `state/assistant/persistence.ts`) + #2/#5 closed + 6 stale-blocks pruned (#8 #18 #32 #81 #153 #247). Last AUDIT GREEN (cargo check+test+audit+machete + svelte-check + npm audit).
+HEAD on main = v0.4.31-alpha; branch package version = v0.4.32-alpha. Backend + FE code complete + `/check` clean. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key`. `release.ps1` (Tauri-only, v0.4.33+) + `release-bridge.ps1` (one-time v0.4.32 hybrid for v0.4.31 clients via Velopack feed).
+
+## Audit 2026-05-27 — RESOLVED (prior session, CDP-verified)
+
+All audit items applied + live-verified. Full doc: [docs/audit-2026-05-27.md](audit-2026-05-27.md). Bugs B1/B3/B6/F12 fixed; P2 effort picker dropdown; P3 user "You" bubble; P5/P6 Settings probe/dirty-flag. Deliberately skipped: image-paste, Sync/Apply, connect/disconnect, streaming, splash (need live mutations).
 
 **Open: 10 numbered issues** — #4 #7 #14 #15 #17 #20(M6-M9) #21 #29 #89 #265.
 
@@ -33,13 +28,12 @@ Per git log: audit.ps1 + SECURITY.md + Wave A/B tests (96→101 Rust) + ISSUES p
 ## Next-session prep (still gated on user, not session work)
 
 **Resume here:**
-1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Vault / encrypted drive / 1Password. Lose this file = no v0.4.32+ install can ever update again. Hard gate.
-2. `pwsh scripts/release-bridge.ps1` → ships v0.4.32-alpha hybrid (vpk + tauri-updater assets).
-3. Update both machines to v0.4.32. Expect 5-10 min apply hang on v0.4.31→v0.4.32 (manual Setup.exe in release assets is the escape hatch). Confirm BOTH on v0.4.32 before proceeding.
-4. v0.4.33+ regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1`.
-5. After v0.4.33 ships clean, retire `release-bridge.ps1`.
-
-Baselines: cargo-audit + cargo-machete installed. Last full audit GREEN 2026-05-26. RUSTSEC-2023-0071 (rsa Marvin) is the only accepted CVE — see `docs/SECURITY.md` for rationale.
+1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Hard gate before any ship.
+2. Commit the UI polish pass above (or fine-tune first, then commit).
+3. `pwsh scripts/release-bridge.ps1` → ships v0.4.32-alpha hybrid.
+4. Update both machines to v0.4.32. Confirm BOTH before proceeding.
+5. v0.4.33+ regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1`.
+6. After v0.4.33 ships clean, retire `release-bridge.ps1`.
 
 ---
 
@@ -47,15 +41,13 @@ Baselines: cargo-audit + cargo-machete installed. Last full audit GREEN 2026-05-
 
 **Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.31-alpha** shipped 2026-05-26. Migration branch above gates next ship. Tauri 2 + Svelte 5 + Rust + russh.
 
-**Velopack U+00D7 fix** in pre-migration `release.ps1::Convert-ToAsciiSafe` — preserved in new `release.ps1` + `release-bridge.ps1` as `×`→`x` regex line (see CHANGELOG v0.4.27).
-
 **Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
 ---
 
 ## CRITICAL DON'T-TOUCH
 
-- `C:/Users/BLAZZER/.tauri/rift.key` — Tauri-updater signing key. Lose it and no v0.4.32+ install can update. Pubkey in `tauri.conf.json::plugins.updater.pubkey`; do NOT regenerate. Env: `TAURI_SIGNING_PRIVATE_KEY_PATH` via `.secrets/env.sh`.
+- `C:/Users/BLAZZER/.tauri/rift.key` — Tauri-updater signing key. Lose it and no v0.4.32+ install can update. Pubkey in `tauri.conf.json::plugins.updater.pubkey`; do NOT regenerate.
 - russh `ring` + reqwest `rustls`. russh `Config{keepalive 20s/3, window 2MiB, packet 32KiB}`.
 - `~/.rift/*.json`: keep `serde(flatten) extra`. `bundle.targets:["nsis"]`. `createUpdaterArtifacts: true`.
 - DriftWatcher: never overwrite dirty local. `.rift-trail.jsonl` ignore mandatory.

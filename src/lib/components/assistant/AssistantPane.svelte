@@ -58,12 +58,14 @@
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
   let stickToBottom = $state(true);
+  let scrolledTop = $state(false);
   let lastTabId: string | null = null;
 
   function onScroll() {
     if (!scrollEl) return;
     const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
     stickToBottom = gap < 80;
+    scrolledTop = scrollEl.scrollTop > 8;
     if (tabId) assistant.setTabScroll(tabId, scrollEl.scrollTop);
   }
 
@@ -308,6 +310,10 @@
       </div>
     {/if}
   </div>
+
+  {#if tabId && !showEmpty}
+    <div class="scroll-fade-top" class:visible={scrolledTop} aria-hidden="true"></div>
+  {/if}
 
   {#if tabId && !showEmpty && !stickToBottom}
     <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"}>
@@ -568,6 +574,28 @@
   }
   .scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .scroll::-webkit-scrollbar-button { display: none; }
+  /* Top fade — once the thread is scrolled down, content tucks under a soft
+     shadow at the pane's top edge instead of hard-cutting at the scroll
+     boundary. Fades in/out with scroll position (scrolledTop). */
+  .scroll-fade-top {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 44px;
+    pointer-events: none;
+    z-index: 2;
+    background: linear-gradient(
+      to bottom,
+      var(--bg) 0%,
+      color-mix(in oklch, var(--bg) 55%, transparent) 50%,
+      transparent 100%
+    );
+    opacity: 0;
+    transition: opacity 220ms ease-out;
+  }
+  .scroll-fade-top.visible { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .scroll-fade-top { transition: none; }
+  }
   .messages {
     display: flex; flex-direction: column;
     gap: 28px;

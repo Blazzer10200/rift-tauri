@@ -259,6 +259,7 @@ pub fn run() {
             commands::assistant_summarize_session,
             commands::assistant_remint_session,
             commands::assistant_send,
+            commands::assistant_enhance_prompt,
             commands::assistant_stop,
             commands::assistant_answer_ask_user,
             commands::assistant_list_conversations,

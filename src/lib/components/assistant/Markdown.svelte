@@ -260,7 +260,7 @@
 <style>
   .md {
     font-size: var(--fs-md);
-    line-height: 1.5;
+    line-height: 1.6;
     color: var(--fg);
     word-wrap: break-word;
     /* Reserve 10px on the left for the heading accent bars. */
@@ -269,9 +269,11 @@
   /* First/last children flush so the bubble itself controls outer padding. */
   .md > :global(*:first-child) { margin-top: 0; }
   .md > :global(*:last-child) { margin-bottom: 0; }
-  .md :global(p) { margin: 0 0 6px; }
+  .md :global(p) { margin: 0 0 9px; }
   .md :global(p:last-child) { margin-bottom: 0; }
-  /* Adjacent paragraphs (no blank-line context) tighten further. */
+  /* Adjacent paragraphs still get the full gap — on bold-led answers (every
+     para opening with a **lead-in**) the extra air reads each point as its
+     own beat instead of a dense bold wall. */
   .md :global(p + p) { margin-top: 0; }
   /* Collapse empty paragraphs — they ship space we don't want. */
   .md :global(p:empty) { display: none; }

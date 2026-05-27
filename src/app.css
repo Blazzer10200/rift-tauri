@@ -78,7 +78,7 @@
      min(960px, 88ch) — 88ch was the limiting term on Inter, producing a
      ~720px column at any viewport ≥1000px and leaving huge dead horizontal
      space at desktop widths. Consumed by AssistantPane/Composer/StatusHub. */
-  --chat-col-max: min(1100px, calc(100% - 48px));
+  --chat-col-max: min(760px, calc(100% - 48px));
 
   /* legacy alias kept for SyncPage.svelte — rest of shadcn aliases removed */
   --muted:               var(--bg-elev-2);

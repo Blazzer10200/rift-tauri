@@ -159,7 +159,7 @@
         data-drag-src={isSrc}
         disabled={def.disabled}
         use:tooltip={def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${def.kbd} · drag to reorder`}
-        aria-label="{def.title} {isActive ? '(active)' : ''}"
+        aria-label={isActive ? `${def.title} (active)` : def.title}
         aria-pressed={isActive}
         onpointerdown={(e) => { if (!def.disabled) onPointerDown(idx, e); }}
         onpointermove={onPointerMove}
@@ -194,7 +194,7 @@
         data-active={isActive}
         data-disabled="false"
         use:tooltip={`${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
-        aria-label="{def.title} {isActive ? '(active)' : ''}"
+        aria-label={isActive ? `${def.title} (active)` : def.title}
         aria-pressed={isActive}
         onclick={() => workspace.setActive("settings")}
       >

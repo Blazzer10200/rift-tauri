@@ -127,6 +127,27 @@ async function copyDiagnostic() {
   let asstMaxBudgetDraft = $state<number | null>(null);
   let asstMaxBudgetSaving = $state(false);
   let asstMaxBudgetMsg = $state<string | null>(null);
+  // Save-button dirty gates (P6) — disabled until the field actually differs
+  // from the stored value, so "no pending edit" is visually distinct.
+  const asstMaxBudgetDirty = $derived(asstMaxBudgetDraft !== assistantStore.maxBudgetUsd);
+  const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
+  // CLI-session probe freshness (P5). Tick every 30s while the section is open
+  // so "Checked Xm ago" stays current without a render-on-every-frame cost.
+  let asstNowTick = $state(Date.now());
+  $effect(() => {
+    if (section !== "assistant") return;
+    asstNowTick = Date.now();
+    const iv = setInterval(() => { asstNowTick = Date.now(); }, 30_000);
+    return () => clearInterval(iv);
+  });
+  function fmtAgo(ts: number, now: number): string {
+    const s = Math.max(0, Math.round((now - ts) / 1000));
+    if (s < 10) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.round(m / 60)}h ago`;
+  }
   $effect(() => {
     if (section !== "assistant") return;
     untrack(() => {
@@ -437,6 +458,9 @@ async function copyDiagnostic() {
                 {:else}
                   <span class="pill muted"><span class="dot"></span>Unknown</span>
                 {/if}
+                {#if assistantStore.authLastProbed && !assistantStore.authChecking}
+                  <span class="set-stamp mono" use:tooltip={"Time since the last CLI session probe"}>Checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
+                {/if}
                 <button class="btn ghost sm" type="button" onclick={() => assistantStore.refreshAuth()} disabled={assistantStore.authChecking}>
                   <RefreshCw size={11}/> Re-probe
                 </button>
@@ -497,7 +521,7 @@ async function copyDiagnostic() {
                   placeholder="5.00"
                   bind:value={asstMaxBudgetDraft}
                 />
-                <button class="btn primary sm" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving}>
+                <button class="btn primary sm" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving || !asstMaxBudgetDirty}>
                   {asstMaxBudgetSaving ? "Saving…" : "Save"}
                 </button>
                 {#if assistantStore.maxBudgetUsd != null}
@@ -552,7 +576,7 @@ async function copyDiagnostic() {
                       {#if asstApiKeyVisible}<EyeOff size={13}/>{:else}<Eye size={13}/>{/if}
                     </button>
                   </div>
-                  <button class="btn primary sm" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving}>
+                  <button class="btn primary sm" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving || !asstApiKeyDirty}>
                     {asstApiKeySaving ? "Saving…" : "Save"}
                   </button>
                 {/if}
@@ -1220,6 +1244,11 @@ async function copyDiagnostic() {
   .set-note {
     font-size: var(--fs-xs);
     color: var(--fg-muted);
+  }
+  .set-stamp {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    white-space: nowrap;
   }
   .set-warn-banner {
     display: block;

@@ -842,6 +842,9 @@ class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
   authError = $state<string | null>(null);
+  /** Epoch ms of the last completed auth probe (success or failure). Drives the
+   *  "last checked Xm ago" freshness label in Settings → Assistant. */
+  authLastProbed = $state<number | null>(null);
 
   /** Per-conversation streaming state, keyed by Rift convoId. One entry per
    *  open chat tab. The store's UI-facing `messages` / `streaming` / `activity`
@@ -1914,6 +1917,7 @@ class AssistantStore {
       this.auth = null;
     } finally {
       this.authChecking = false;
+      this.authLastProbed = Date.now();
     }
   }
 
@@ -2243,6 +2247,14 @@ class AssistantStore {
 
   removeQueued(id: string) {
     this.queue = this.queue.filter((q) => q.id !== id);
+  }
+
+  /** Composer wand: one-shot rewrite of a rough draft into a clearer prompt.
+   *  Stateless — the backend spawns a headless Haiku call and returns the
+   *  rewritten text; the composer shows it as an editable preview. Throws on
+   *  failure (empty/too-long/CLI-missing) so the caller can surface the error. */
+  async enhancePrompt(text: string): Promise<string> {
+    return invoke<string>("assistant_enhance_prompt", { prompt: text });
   }
 
   /** Compaction Phase B: one-shot summarize of the current CLI session.
