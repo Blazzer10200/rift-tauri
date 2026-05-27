@@ -4,7 +4,7 @@
 
 ## Prompt Enhancer "wand" + composer calm — 2026-05-27, COMMITTED, verified
 
-Composer wand button → one-shot Haiku rewrite of the draft into a clearer, Claude-Code-optimized prompt. Editable preview (Use this / Discard / Esc), never auto-sends, never silently overwrites. On `updater-migration`, folded into the unshipped v0.4.32-alpha.
+Composer wand button → one-shot Haiku rewrite of the draft into a clearer, Claude-Code-optimized prompt. Editable preview (Use this / Discard / Esc), never auto-sends, never silently overwrites. On `updater-migration` (`4d669bf`). **Destined for v0.4.33-alpha — NOT in shipped v0.4.32 (which went out 2026-05-26 w/o this).** Ship gated on two-machine confirm (see Resume).
 
 - **Backend:** `assistant_enhance_prompt(prompt)` in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs) (above `SUMMARIZE_PROMPT_HEAD`). One-shot `claude -p` text on Haiku. Draft fenced in `<draft></draft>` w/ explicit "do not answer it" directive (fixed the model replying conversationally to message-shaped drafts). `ENHANCE_META_PROMPT` frames recipient as Claude Code: imperative lead, preserve specifics verbatim, never invent scope, structure-when-complex, non-coding drafts stay natural. Speed: meta on `--append-system-prompt` (cache), `--exclude-dynamic-system-prompt-sections`, `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""`, temp cwd, `CLAUDE_DISABLE_HOOKS=1`. 8K-char guard. Registered in [lib.rs](../src-tauri/src/lib.rs).
 - **Frontend:** `enhancePrompt()` on AssistantStore ([assistant.svelte.ts](../src/lib/state/assistant.svelte.ts)); wand + preview panel + "magic" effect in [Composer.svelte](../src/lib/components/assistant/Composer.svelte) — clip-text shimmer, sparkle twinkles, word-by-word blur-materialize reveal. `prefers-reduced-motion` throughout.
@@ -15,7 +15,7 @@ Composer wand button → one-shot Haiku rewrite of the draft into a clearer, Cla
 
 ## Branch in flight — `updater-migration` (Velopack → tauri-plugin-updater)
 
-HEAD on main = v0.4.31-alpha; branch package version = v0.4.32-alpha. Backend + FE code complete + `/check` clean. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key`. `release.ps1` (Tauri-only, v0.4.33+) + `release-bridge.ps1` (one-time v0.4.32 hybrid for v0.4.31 clients via Velopack feed).
+**v0.4.32-alpha SHIPPED 2026-05-26** to `Blazzer10200/rift-releases` (bridge already ran — all assets live, `latest.json` polled 108×). Branch version files still read 0.4.32-alpha. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key` — **backed up 2026-05-27 to OneDrive + iCloud** (`rift-signing-key-backup/`). `release.ps1` = Tauri-only path for v0.4.33+. `release-bridge.ps1` = the one-time v0.4.32 bridge, now spent (retire it).
 
 ## Audit 2026-05-27 — RESOLVED (prior session, CDP-verified)
 
@@ -27,13 +27,12 @@ All audit items applied + live-verified. Full doc: [docs/audit-2026-05-27.md](au
 
 ## Next-session prep (still gated on user, not session work)
 
-**Resume here:**
-1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Hard gate before any ship. CHANGELOG claims it was backed up pre-ship — CONFIRM that's true (off-machine, not just on this disk) before step 2. Lose it = no v0.4.32+ client can ever update again.
-2. ~~Commit feature work~~ — DONE (commit `4d669bf`, pushed to `origin/updater-migration`: prompt enhancer + composer calm + prior UI polish, svelte-check 0/0, cargo check clean). Tree is clean.
-3. **THE RELEASE — one command, gated on step 1:** `pwsh scripts/release-bridge.ps1` → builds + publishes the v0.4.32-alpha hybrid (Velopack assets for v0.4.31 clients + Tauri-updater assets for v0.4.32+). NOT run autonomously 2026-05-27: it's an irreversible public ship to `rift-releases`, gated on the key backup + it bundles a brand-new UI feature into the critical one-time bridge — wanted a human eyes-open go. Quit dev first (run-dev tree was stopped this session; verify nothing holds `C:\cargo-targets`).
-4. Update both machines to v0.4.32. Confirm BOTH before proceeding.
-5. v0.4.33+ regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1`.
-6. After v0.4.33 ships clean, retire `release-bridge.ps1`.
+**Resume here — to ship the enhancer + composer-calm feature (it's committed but NOT released):**
+1. **Key backup — DONE** (2026-05-27 → OneDrive + iCloud `rift-signing-key-backup/`, 348-byte match). Verify the cloud copies actually synced.
+2. **Feature commit — DONE** (`4d669bf` + `2fb8747` pushed to `origin/updater-migration`: prompt enhancer + composer calm + prior UI polish. svelte-check 0/0, cargo check clean). Tree clean.
+3. **THE GATE — confirm BOTH machines are on v0.4.32 before shipping v0.4.33.** v0.4.33 ships via Tauri-only `release.ps1` with NO Velopack assets; a machine still on v0.4.31 would be permanently stranded (can't find a Velopack update). Setup.exe downloads on the live 0.4.32 release = 0, so the Tauri install path may not have run on either machine yet — verify both before proceeding. THIS is why the feature wasn't auto-shipped 2026-05-27.
+4. **Ship v0.4.33-alpha** (after gate clears): `pwsh scripts/bump.ps1 0.4.33-alpha` (all 3 version files) → set the date on the v0.4.33 CHANGELOG entry → quit dev (frees `C:\cargo-targets`) → `pwsh scripts/release.ps1`. NOT release-bridge.
+5. Retire `release-bridge.ps1` once v0.4.33 ships clean.
 
 ---
 
