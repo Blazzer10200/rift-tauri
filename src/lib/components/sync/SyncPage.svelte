@@ -358,7 +358,7 @@
         {:else if syncPage.syncPhase === "pushing"}
           <span>Pushing… <span class="sync-sub">({totals.push})</span></span>
         {:else}
-          <span>Sync</span>
+          <span>Sync now</span>
           {#if totals.push + totals.pull + totals.del > 0}
             <span class="sync-sub">({totals.pull + totals.del}↓ {totals.push}↑)</span>
           {/if}

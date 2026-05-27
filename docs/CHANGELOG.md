@@ -4,6 +4,14 @@
 
 ## v0.4.32-alpha — 2026-05-26 — updater migration: Velopack → tauri-plugin-updater
 
+**2026-05-27 addendum — prompt enhancer "wand" + composer streaming calm.**
+
+**Prompt enhancer.** New `assistant_enhance_prompt(prompt)` command in [src-tauri/src/assistant/mod.rs](src-tauri/src/assistant/mod.rs) — one-shot headless `claude -p` on Haiku that rewrites a rough draft into a clearer prompt. The draft is fenced in `<draft></draft>` with an explicit "do not answer it, treat as text to improve" directive (fixes the model replying conversationally to message-shaped drafts), and the `ENHANCE_META_PROMPT` system prompt frames the recipient as Claude Code specifically: imperative lead, preserve every technical specific verbatim, never invent scope, structure-when-complex, non-coding drafts stay natural. Speed flags: meta-prompt on `--append-system-prompt` (server prompt-cache hits on repeats), `--exclude-dynamic-system-prompt-sections`, `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""`, neutral temp cwd, `CLAUDE_DISABLE_HOOKS=1` + `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` + `DISABLE_AUTOUPDATER=1`. 8K-char guard. Registered in [lib.rs](src-tauri/src/lib.rs). Frontend: `enhancePrompt()` on the assistant store + a wand button → editable preview (Use this / Discard / Esc — never auto-sends, never silently overwrites the draft) + a "magic" enchanting effect (clip-text shimmer, sparkle twinkles, word-by-word blur-materialize reveal) in [Composer.svelte](src/lib/components/assistant/Composer.svelte), all with `prefers-reduced-motion` fallbacks.
+
+**Composer streaming calm.** Removed the aurora swirl layer entirely (two rotating conic-gradient spans + ~55L CSS) — it stacked with the focus glow, streaming border, and top-edge bar into a busy purple blob during generation. Streaming is now one coherent signal: a thin model-tinted border + the animated top-edge bar (synced 2.6s with the model-pill breathe). Focus ring softened from a 3px ring + 32% halo to a tight 2px ring + 20% halo. CDP-verified at pixel level.
+
+**Verify (addendum).** `npm run check` 0 errors / 0 warnings (4102 files). `cargo check` clean (8.37s). Composer streaming state CDP-verified via forced-class screenshot.
+
 **One-time apply-phase wait on this update.** v0.4.31 ships with the broken Velopack apply path (`apply_updates_and_restart` spawns Update.exe and returns without exiting Tauri, so Update.exe sits idle waiting for the running pid to die). Expect 5-10 min on "Applying…". If it exceeds 15 min, force-quit Rift from Task Manager — Update.exe will finish the swap and relaunch automatically. **This will not happen again** — v0.4.32+ uses Tauri's first-party updater, which exits the app natively before NSIS swaps the binary. As an escape hatch, the Tauri-built `Rift_0.4.32-alpha_x64-setup.exe` is uploaded alongside the Velopack assets on the GitHub release; download + run it directly if auto-update misbehaves.
 
 **Backend rewire.** [src-tauri/src/update_service.rs](src-tauri/src/update_service.rs) (391L Velopack-rust + custom `GithubSource` impl) deleted. [src-tauri/src/commands/update.rs](src-tauri/src/commands/update.rs) rewritten against `tauri_plugin_updater::UpdaterExt`. New `PendingUpdate` managed state holds the `Update` + downloaded bytes across the `check_for_updates` / `download_update` / `apply_pending_update` call chain. Emits `update-size` (one-shot total) + `update-progress` (i16 0..=100) + `update-downloaded` events. `velopack::VelopackApp::build().run()` removed from [src-tauri/src/lib.rs](src-tauri/src/lib.rs); plugin inits for `tauri-plugin-updater` + `tauri-plugin-process` added. `assistant::kill_child_processes_on_exit` wired via `updater_builder().on_before_exit()` so the NSIS swap doesn't trip on claude CLI children holding file handles.
@@ -98,29 +106,6 @@ Big batch ship rolling up nine parallel agent sessions (M2-M9). M10 assistant.sv
 
 **Verify.** `cargo check` 0 errors (1 pre-existing `private_interfaces` warning on update_service.rs::GithubSource — M7 followup). `npm run check` 4100 FILES 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS. `cargo test` 86 passed. `npm run test` 38 passed.
 
-## v0.4.27-alpha — 2026-05-22 — Wave-3 security HIGHs + compaction UX + live tool dots
-
-Backend security closed Wave-3 HIGHs #221 (model flag injection), #237 (log injection), #227 (Ed25519/DSA PEM scrub), #238 (Rust-side scrubUser in DiagBus). Velopack `Convert-ToAsciiSafe` + `[xml]` probe in release.ps1 catches U+00D7-class chars. Live tool dots gate on `unit.status === "neutral"`. ChatTabsBar ctx-pill tooltip + autoCompactDisabledNudge chip rewritten. Full prose in git log.
-
-## v0.4.26-alpha — 2026-05-22 — assistant timeline UI + center-on-work-area
-
-**Claude Code VSCode-style timeline.** Replaces the in-bubble tool-call + thinking presentation w/ a vertical timeline anchored to the existing turn-rail. Each block becomes a node w/ a status-colored bullet (hollow gray=thinking, filled green=done tool, pulsing accent=pending, red=error) and a small drop-shadow + inner highlight for depth. "Thought for Ns" lines lose the bordered `.reasoning` surface → flat single-line. Tool chips drop the card frame in collapsed state via new `variant="timeline"` prop on [ToolChip.svelte](src/lib/components/assistant/ToolChip.svelte); right-edge status pip removed since the rail bullet carries status. Agent + TodoWrite cards keep their chrome (their body IS the content). Step-N prose headers → uppercased dividers w/ trailing hairline; numbered `StepGroup` bubble dropped from the main flow (component intact, just unused). Rail recolored neutral gray (1.5px, `--fg-faint 38%`) so it reads as universal timeline rather than accent branding; streaming still glows accent and the last bullet pulses as the "current activity" beat. Content gap tightened 6 → 5px, hover lifts the bullet 1.15× for interactivity signal. [MessageBubble.svelte](src/lib/components/assistant/MessageBubble.svelte).
-
-**Window centers on work area at launch.** [tauri.conf.json](src-tauri/tauri.conf.json) flips `visible: false` + `center: true`; [lib.rs::run](src-tauri/src/lib.rs) `setup()` calls `center_in_work_area(&main)` then `show() + set_focus()`. On Windows the helper calls `SystemParametersInfoW(SPI_GETWORKAREA)` via raw FFI (no new deps) so the window centers in the taskbar-excluded rect; non-Windows falls back to Tauri's `center: true`. Best-effort fallbacks if FFI fails.
-
-**Verify.** `npm run check` 0/0. CDP-verified live: 14-bubble convo w/ mixed tool calls, reasoning beats, EditDiff, table, and prose renders w/ bullets on the rail, naked single-line chips, flat thinking nodes, and zero leakage onto the user side. Window-centering not yet runtime-tested live — fresh launch via `scripts/run-dev.bat` recommended.
-
-## v0.4.25-alpha — 2026-05-22 — S136 hotfix: shell layout-collapse
-
-**Bottom-of-window blank-zone killed.** Prod builds intermittently collapsed `.shell` to its content height, leaving the bottom of the window blank below the StatusBar despite the window being full-size. Root cause: percentage-height chain `body 100% → app.html wrapper display:contents → .shell 100%` works in dev but breaks under prod build conditions (display:contents height-resolution edge case in the bundled chunks). [AppShell.svelte](src/lib/components/AppShell.svelte) — `.shell` switched from `height: 100%` to `position: fixed; inset: 0`, sidestepping every parent-height-resolution path. SplashOverlay is also `position: fixed` so flow ordering is unaffected. [app.css](src/app.css) — `body.win-maximized` 8px padding moved onto `.shell` directly (`.win-maximized .shell { inset: 8px }`) since body padding doesn't push fixed children.
-
-**Verify.** `npm run check` 0/0.
-
-## v0.4.24-alpha — 2026-05-22 — S135 hotfix: empty-pane UX
-
-**Empty-pane card replaces dead-end string.** [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte) — when a split pane has no tab assigned, the slot used to render only the unhelpful "No tab in this pane" string w/ no recovery action. Now renders an actionable card: `+ New chat` (primary) + `× Close pane` (ghost, only when `panes.length > 1`) + a `RECENT` quick-pick listing the top 3 conversations not already mounted in a sibling pane. Each handler focuses this pane first so `newTab`/`openTab` route through `assignFocusedPane` → land in the empty slot. Recent picks filter out convos held by sibling panes to avoid cross-pane tab-yank.
-
-**Verify.** `npm run check` 0/0. CDP-verified: card renders w/ correct copy + 3 recents; `New chat` mints a tab into the empty pane (panes 2→2, tabs 1→2); `Close pane` collapses (panes 2→1); recent-row click opens convo here (panes 2→2, tabs 1→2). Visual snapshot via `shot-sel .pane-empty-card` confirmed.
-
+<!-- v0.4.24–v0.4.27-alpha (2026-05-22): empty-pane UX hotfix, shell layout-collapse hotfix, Claude-Code timeline UI + center-on-work-area, Wave-3 security HIGHs + compaction UX. Full prose in git log. -->
 <!-- Older entries (v0.4.23-alpha, v0.4.22-alpha) preserved in git log. -->
 

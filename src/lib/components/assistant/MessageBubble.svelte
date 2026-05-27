@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, User } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade } from "svelte/transition";
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
@@ -401,6 +401,13 @@
           </button>
         {/if}
       </div>
+    {:else}
+      <div class="turn-head">
+        <span class="role-name">You</span>
+        <div class="avatar avatar-user" aria-hidden="true">
+          <User size={13} />
+        </div>
+      </div>
     {/if}
 
     {#if !isUser && streaming && grouped.length === 0}
@@ -518,8 +525,7 @@
 
     {#if !isUser && !streaming && costLabel}
       <div class="turn-footer" aria-hidden="true">
-        <span class="turn-footer-rule"></span>
-        <span class="cost-pill mono" use:tooltip={"Turn cost"}>{costLabel}</span>
+        <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>${costLabel}</span>
       </div>
     {/if}
   </div>
@@ -672,12 +678,12 @@
 
   .body { min-width: 0; grid-column: 2; }
   .bubble[data-role="user"] .body { grid-column: 1; }
-  /* Cap assistant body to the reading-column width. Without this, copy +
-     cost-pill (margin-left:auto / align-self:flex-end) float against the
-     full pane width — hundreds of pixels past the actual text. Matches the
-     78ch cap already on .text so closing beats sit flush w/ the prose. */
+  /* Body fills the centered reading column (no 78ch cap). The cap used to
+     left-align the text inside a wider column, so even though the column was
+     centered the *text* read as shoved-left. The column width itself
+     (--chat-col-max) now sets the measure, so text, user bubbles + composer
+     all share one centered band. */
   .bubble[data-role="assistant"] .body {
-    max-width: 78ch;
     width: 100%;
   }
 
@@ -792,22 +798,15 @@
      the assistant turn a clear closing beat so mid-turn tool blocks aren't
      mistaken for the final answer (#2). The rule is the visual divider;
      the pill is the residue. */
+  /* End-of-turn footer — just a quiet right-aligned cost chip. The old
+     full-width rule above it chopped the flow between turns; the 28px
+     inter-turn gap + the rail already separate turns cleanly. */
   .turn-footer {
     display: flex;
+    justify-content: flex-end;
     align-items: center;
-    gap: 10px;
-    margin-top: 14px;
+    margin-top: 10px;
     animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .turn-footer-rule {
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(
-      to right,
-      transparent,
-      color-mix(in oklch, var(--fg-muted) 22%, transparent) 25%,
-      color-mix(in oklch, var(--fg-muted) 22%, transparent) 100%
-    );
   }
   .cost-pill {
     padding: 2px 8px;
@@ -869,14 +868,11 @@
     border-color: color-mix(in oklch, var(--accent) 70%, transparent);
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
-  .tl-node[data-kind="prose"]::before {
-    width: 5px; height: 5px;
-    top: 10px;
-    left: -17px;
-    background: var(--fg-faint);
-    border: 0;
-    opacity: 0.55;
-  }
+  /* Prose paragraphs no longer hang a bullet off the rail. One faint dot per
+     paragraph read as left-margin noise on text-only answers; the continuous
+     rail already groups the turn. Bullets remain for tool/edit/thinking nodes
+     where they carry real status (done/pending/error). */
+  .tl-node[data-kind="prose"]::before { display: none; }
   .tl-node[data-kind="tool"][data-status="done"]::before,
   .tl-node[data-kind="edit"][data-status="done"]::before {
     background: var(--ok, oklch(0.74 0.15 145));

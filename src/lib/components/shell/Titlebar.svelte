@@ -110,7 +110,7 @@
           <div class="divider"></div>
           <button class="menu-item" onclick={() => { onAddServer(); menuOpen = false; }} type="button">
             <Plus size={12}/><span>Add server…</span>
-            <span class="kbd shortcut">⌘N</span>
+            <span class="kbd shortcut">Ctrl+N</span>
           </button>
           {#if sel}
             <button class="menu-item" onclick={() => { onEditCurrent(sel); menuOpen = false; }} type="button">
