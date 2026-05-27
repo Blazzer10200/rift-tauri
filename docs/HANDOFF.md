@@ -2,33 +2,44 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Branch in flight — `updater-migration` — Velopack → tauri-plugin-updater
+## Branch in flight — `updater-migration` (Velopack → tauri-plugin-updater)
 
-**Branch:** `updater-migration` (HEAD on main = v0.4.31-alpha). Backend + frontend code complete; `/check` clean (0 errors / 0 warnings), `cargo check` clean. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Old `updater-overhaul-awaiting-2machine-test` stash was **dropped** — superseded.
+HEAD on main = v0.4.31-alpha; branch package version = v0.4.32-alpha. Backend + FE code complete + `/check` clean. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key`. `release.ps1` (Tauri-only, v0.4.33+) + `release-bridge.ps1` (one-time v0.4.32 hybrid for v0.4.31 clients via Velopack feed). Stale-post-migration ISSUES closed: #16/#19/#25/#28/#252. Per-detail history via `git log -- docs/HANDOFF.md`.
 
-Done on the branch:
-- Velopack + ureq removed; `tauri-plugin-updater` + `tauri-plugin-process` added.
-- `update_service.rs` deleted; `commands/update.rs` rewritten against `UpdaterExt`.
-- `lib.rs`: dropped `VelopackApp::build().run()` + `UpdateService` state; added plugin inits.
-- `assistant::kill_child_processes_on_exit` salvaged → wired via `on_before_exit`.
-- Frontend store API preserved; added `update-size` listener + auto-DL on launch.
-- `tauri.conf.json`: `createUpdaterArtifacts: true`, pubkey + `installMode: "passive"`.
-- Capabilities: `updater:default`, `process:default`.
-- `scripts/release.ps1` rewritten (Tauri-only, v0.4.33+). `scripts/release-bridge.ps1` written (one-time v0.4.32 hybrid).
-- Signing key generated at `C:/Users/BLAZZER/.tauri/rift.key` (passwordless); `TAURI_SIGNING_PRIVATE_KEY_PATH` exported via `.secrets/env.sh`.
+## Aurora UI pass 2026-05-26 (this session — frontend-only)
 
-Smoke build verified end-to-end:
-- `npm run tauri build` produces `Rift_0.4.32-alpha_x64-setup.exe` (7.2 MB) + `.sig` (424 B minisign).
-- Required env: `TAURI_SIGNING_PRIVATE_KEY=<path>` AND `TAURI_SIGNING_PRIVATE_KEY_PASSWORD=""` (both in `.secrets/env.sh`). The empty password is non-negotiable even on a passwordless key — bundler still prompts otherwise.
-- `release.ps1` + `release-bridge.ps1` setup-exe glob is now version-scoped (`*_${version}_*-setup.exe`) so the shared bundle dir's accumulated artifacts don't trip "exactly one" preflight.
-- `vpk`, `gh`, `npm` all on PATH. `latest.json` shape dry-run matches Tauri's expected schema.
+Composer-driven visual refresh + reusable tooltip system + app-wide polish. `/check` clean (0/0). No backend / no version bump — `/git-ship` when ready.
 
-**Resume here (everything else still gated on you):**
+**New code:** `src/lib/actions/tooltip.ts` (`use:tooltip={"..."}` Svelte action, glass surface, auto-flip, kbd-chip variant). `.tip/.tip-arrow/.tip-kbd` global CSS. `scripts/migrate-tooltips.mjs` + `fix-tooltip-migration.mjs` (idempotent).
+
+**Migration:** 180 `title=` → `use:tooltip` across 34 files. Component title PROPS preserved. `LockBadge` prop `tooltip` → `tip` (avoid shadowing action import).
+
+**Composer:** aurora conic-gradient tinted by `--model-color` (sonnet=blue, opus=purple, haiku=teal); send-btn ripple + upward chat-column sweep on fire; mic 3-bar waveform; placeholder fade-rotates 6s; drag-and-drop overlay; **effort pill renamed Instant/Smart/Deep w/ signal-bar 1→3**; model pill streaming breathe; menu items stagger; hint popover portaled to body (was clipped by composer's `overflow:hidden + backdrop-filter`).
+
+**Bleed:** ChatTabsBar active tab + underglow tinted by `--model-color`; ActivityBar breathing capsule + halo; MessageBubble per-turn tint from `message.model`; scrollbars accent-tinted; `.dialog-shell`/`.slideover`/all toasts glass-blur + per-tone border.
+
+**Convention:** `import { tooltip } from "$lib/actions/tooltip"` + `use:tooltip={"..."}` going forward.
+
+---
+
+## Stabilization 2026-05-26 (autonomous, R1-R4)
+
+Per git log: audit.ps1 + SECURITY.md + Wave A/B tests (96→101 Rust) + ISSUES prune + #20 M0-M5b (`assistant.svelte.ts` 3356→2648L, new `state/assistant/persistence.ts`) + #2/#5 closed + 6 stale-blocks pruned (#8 #18 #32 #81 #153 #247). Last AUDIT GREEN (cargo check+test+audit+machete + svelte-check + npm audit).
+
+**Open: 10 numbered issues** — #4 #7 #14 #15 #17 #20(M6-M9) #21 #29 #89 #265.
+
+---
+
+## Next-session prep (still gated on user, not session work)
+
+**Resume here:**
 1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Vault / encrypted drive / 1Password. Lose this file = no v0.4.32+ install can ever update again. Hard gate.
 2. `pwsh scripts/release-bridge.ps1` → ships v0.4.32-alpha hybrid (vpk + tauri-updater assets).
-3. Update both machines to v0.4.32. Expect 5-10 min apply hang on v0.4.31→v0.4.32 (documented in CHANGELOG; manual Setup.exe in release assets is the escape hatch). Confirm BOTH on v0.4.32 before proceeding.
-4. For v0.4.33+: regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1` (clean Tauri-only).
-5. After v0.4.33 ships clean, retire `release-bridge.ps1` (delete or leave as historical).
+3. Update both machines to v0.4.32. Expect 5-10 min apply hang on v0.4.31→v0.4.32 (manual Setup.exe in release assets is the escape hatch). Confirm BOTH on v0.4.32 before proceeding.
+4. v0.4.33+ regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1`.
+5. After v0.4.33 ships clean, retire `release-bridge.ps1`.
+
+Baselines: cargo-audit + cargo-machete installed. Last full audit GREEN 2026-05-26. RUSTSEC-2023-0071 (rsa Marvin) is the only accepted CVE — see `docs/SECURITY.md` for rationale.
 
 ---
 
@@ -58,7 +69,6 @@ Smoke build verified end-to-end:
 - TabState: per-tab field → add to TabState + getter on AssistantStore. Never back on the store.
 - Image paste: `assistant_send` flips `--input-format text→stream-json` w/ attachments. 20MiB cap.
 - Settings is workspace (kbd **5** post-v0.4.30 rail trim), `Ctrl+,` flips; no slideover scrim.
-- `UpdateService` managed Tauri state — `download_update` then `apply_pending_update`.
 - `tauri.conf.json` `dragDropEnabled: false` — required for HTML5 DnD.
 - AssistantPane drop handlers on `.pane` outer only — inner overlays break preventDefault chain.
 - `compactionHistory[]` is camelCase in persisted JSON. Don't rename.

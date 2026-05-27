@@ -4,7 +4,7 @@
 
 ## Stack
 
-Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Velopack updater wired. NSIS installer (perUser).
+Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Self-update: `tauri-plugin-updater` (Velopack retired on `updater-migration` branch, gating ship of v0.4.32+). NSIS installer (perUser).
 
 Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json`. Source of truth for current version: `docs/CHANGELOG.md` (don't hard-code in this file — went stale at v0.2.4 vs v0.2.48 reality before 2026-05-13 cleanup).
 
@@ -17,19 +17,19 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Design briefs | `docs/design/` (3 active: `assistant-compaction.md`, `git-rcon-tools.md`, `ui-audit-2026-05-21.md`) |
+| Design briefs | `docs/design/` (3 active: `git-rcon-tools.md`, `updater-migration.md`, `assistant-svelte-split.md`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
 
-## Hot files (measured 2026-05-17)
+## Hot files (measured 2026-05-26)
 
 Files large enough to matter for agent scoping. Everything else is small enough for inline or `recon`.
 
 | File | Lines | Notes |
 |---|---|---|
 | `src-tauri/src/sync/auto_sync.rs` | 1966 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/assistant/mod.rs` | 2308 | claude CLI integration + auth + workspace (grown w/ ask_user wiring 2026-05-22) |
+| `src-tauri/src/assistant/mod.rs` | 2336 | claude CLI integration + auth + workspace (grown w/ ask_user wiring 2026-05-22) |
 | `src-tauri/src/lib.rs` | 300 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
 | `src-tauri/src/sync/auto_sync/flush.rs` | 653 | flush_batch pipeline (split out 2026-05-13) |
 | `src-tauri/src/assistant/mcp_server.rs` | 587 | stdio JSON-RPC MCP server |
@@ -44,9 +44,9 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 | `src-tauri/src/sync/auto_sync/watch.rs` | 349 | notify lifecycle + queue_path |
 | `src-tauri/src/sftp/mod.rs` | 307 | session core (split v0.2.49 from 1100L → 307L) |
 
-Frontend hot files: `assistant.svelte.ts` 1585L, `Settings.svelte` 1505L, `SyncPage.svelte` 1307L, `ActivityFeed.svelte` 941L, `TerminalPanel.svelte` 851L.
+Frontend hot files (2026-05-26): `assistant.svelte.ts` 2648L (down from 3356L after #20 M0-M5b split — `src/lib/state/assistant/persistence.ts` carved out; M6-M9 still open per [HANDOFF](docs/HANDOFF.md)), `Settings.svelte` 1541L, `SyncPage.svelte` 1343L, `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
 
-`auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2308L) and is the next split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
+`auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2336L) and is the next backend split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
 
 ## Agent routing
 
@@ -55,7 +55,7 @@ Only `operator` + `recon` are defined as local subagents. `architect` / `scout` 
 | Area / task | Default | Why |
 |---|---|---|
 | `sync/`, `sftp/` multi-file changes | **operator** | Coupled state across watcher + queue + transport |
-| `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `update_service.rs` | inline | All <400 lines, single-file edits typical |
+| `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `commands/update.rs` | inline | All <400 lines, single-file edits typical |
 | Svelte/TS / Rust symbol lookup | inline + LSP tool | TS/JS native; Rust via `rust-analyzer-lsp` plugin (installed 2026-05-21). Svelte: no LSP — grep + `/check` (skipped Piebald `svelte-lsp` — needs tweakcc patch) |
 | "Where does X live" (LSP miss) | **recon** | Terse `path:line :: snippet` output |
 | IPC contract change, tradeoff calls | inline (or `Plan` skill for multi-track) | Built-in `architect` agent is available but heavyweight; usually inline reasoning is enough |
