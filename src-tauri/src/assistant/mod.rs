@@ -12,9 +12,11 @@
 
 pub mod ask_user;
 pub mod mcp_server;
+pub mod permission;
 pub mod remote_bridge;
 
 pub use ask_user::AskUserRegistry;
+pub use permission::PermissionRegistry;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -23,7 +25,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -238,6 +240,16 @@ const ERROR_EVENT: &str = "assistant://error";
 /// --resume attempt. Payload `{session_id, prompt}`; frontend resets the
 /// matching tab's convoCreatedAt and re-sends the prompt as a first-turn.
 const SESSION_LOST_EVENT: &str = "assistant://session-lost";
+/// Emitted when the CLI asks to use a gated tool in a prompting permission
+/// mode (default / acceptEdits / plan). Payload carries the control-channel
+/// `request_id`, the `tool_use_id` (pairs to the streamed tool chip), and the
+/// tool name + input + suggestions. Frontend answers via
+/// `assistant_answer_permission`.
+const PERMISSION_EVENT: &str = "assistant://permission-request";
+/// Emitted as the prompt-enhancer wand streams its rewrite token-by-token.
+/// Payload: `{request_id, delta}` per chunk, then `{request_id, done:true}` on
+/// success (the command's return value is the authoritative final text).
+const ENHANCE_STREAM_EVENT: &str = "assistant://enhance-stream";
 
 /// Output of `claude auth status` plus our locally-stored API-key flag.
 /// All fields camelCase to match the CLI's JSON shape verbatim.
@@ -304,6 +316,12 @@ struct AssistantConfig {
     /// Per-turn override rides the `assistant_send` arg; this is the default.
     #[serde(default)]
     thinking_effort: Option<String>,
+    /// Permission mode passed to the CLI's `--permission-mode`. One of
+    /// `default` / `acceptEdits` / `plan` / `auto` / `bypassPermissions`.
+    /// `None` resolves to `bypassPermissions` (Rift's historical behavior).
+    /// Per-turn override rides the `assistant_send` arg; this is the default.
+    #[serde(default)]
+    permission_mode: Option<String>,
     /// Auto-compact threshold as fraction of context window (0.0-1.0). `None` =
     /// disabled (manual only). User has `DISABLE_AUTO_COMPACT=1` set globally
     /// so default to None — opt-in, not opt-out. See `docs/design/assistant-compaction.md`.
@@ -1075,6 +1093,31 @@ pub fn assistant_set_thinking_effort(value: String) -> Result<(), String> {
     save_config(&cfg)
 }
 
+/// The CLI's `--permission-mode` values Rift exposes. `dontAsk` (the CLI's
+/// auto-DENY mode) is intentionally excluded — there's no Rift surface to
+/// approve, so it would silently block everything (see the S92 note below).
+fn is_valid_permission_mode(v: &str) -> bool {
+    matches!(v, "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions")
+}
+
+#[tauri::command]
+pub fn assistant_get_permission_mode() -> Result<String, String> {
+    Ok(load_config()
+        .permission_mode
+        .filter(|v| is_valid_permission_mode(v))
+        .unwrap_or_else(|| "bypassPermissions".to_string()))
+}
+
+#[tauri::command]
+pub fn assistant_set_permission_mode(value: String) -> Result<(), String> {
+    if !is_valid_permission_mode(&value) {
+        return Err(format!("invalid permission_mode: {value}"));
+    }
+    let mut cfg = load_config();
+    cfg.permission_mode = Some(value);
+    save_config(&cfg)
+}
+
 #[tauri::command]
 pub fn assistant_get_auto_compact_threshold() -> Result<Option<f32>, String> {
     Ok(load_config()
@@ -1128,18 +1171,18 @@ pub struct SummarizeResult {
 /// scope. Over-enhancement (ballooning a one-line ask into a spec) is the
 /// failure mode we're guarding against — a coding prompt that grows phantom
 /// requirements is worse than the rough original.
-const ENHANCE_META_PROMPT: &str = "You rewrite a developer's rough draft into a clear instruction for \
+const ENHANCE_META_PROMPT: &str = "You rewrite a developer's rough draft into a clear, actionable instruction for \
 Claude Code — an agentic coding assistant that reads files, runs commands, and edits code directly. \
-Rewrite the draft so Claude Code can act on it precisely.\n\
+Expand the draft so Claude Code can act on it precisely and completely.\n\
 \n\
 Rules:\n\
 - Lead with the concrete goal in direct imperative voice (Add…, Fix…, Refactor…, Investigate…).\n\
 - Preserve EVERY technical specific verbatim: file names, paths, identifiers, versions, numbers, commands, error text.\n\
-- Make the draft's implicit intent explicit, but NEVER invent requirements, file paths, test names, constraints, or scope the draft does not contain.\n\
-- For a bug, keep the stated symptom and any stated cause; do not fabricate a fix or a diagnosis.\n\
-- If the draft has multiple distinct requirements, lay them out as a short bullet list; otherwise keep it to one or two tight sentences.\n\
-- Strip filler, hedging, and pleasantries while keeping the meaning and every constraint exact. If the draft is already clear, make only light touch-ups.\n\
-- If the draft is not a coding task, just make it clear and direct — do not force a coding frame onto it.\n\
+- Make the draft's implicit intent explicit AND add the concrete detail a developer would obviously expect — the specific mechanism, key bindings, states/edge cases to handle, and a brief acceptance check — so the instruction is directly executable. Even a clear one-liner should gain useful, actionable specifics; a bare punctuation/grammar pass is NOT enough.\n\
+- Stay inside the draft's intent: flesh out HOW to accomplish exactly what was asked. Do NOT bolt on unrelated features, files, or scope the draft never implied — added detail must serve the stated goal.\n\
+- For a bug, keep the stated symptom and any stated cause; you may point to likely places to look, but do not assert a fix or diagnosis the draft didn't state.\n\
+- If the result has multiple parts, lay them out as a short bullet list; otherwise a tight paragraph. Add substance, not padding or restatement — no filler, no closing summary.\n\
+- If the draft is not a coding task, just make it clear, direct, and complete — do not force a coding frame onto it.\n\
 \n\
 Output ONLY the rewritten prompt — no preamble, no explanation, no markdown code fences, no surrounding quotes.";
 
@@ -1149,7 +1192,11 @@ Output ONLY the rewritten prompt — no preamble, no explanation, no markdown co
 /// simplest possible call. The frontend shows the result as an editable
 /// preview; this command never mutates conversation state.
 #[tauri::command]
-pub async fn assistant_enhance_prompt(prompt: String) -> Result<String, String> {
+pub async fn assistant_enhance_prompt(
+    app: AppHandle,
+    request_id: String,
+    prompt: String,
+) -> Result<String, String> {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
         return Err("nothing to enhance".into());
@@ -1178,7 +1225,20 @@ pub async fn assistant_enhance_prompt(prompt: String) -> Result<String, String> 
         // Drop per-machine sections (cwd/env/git/memory) from the system
         // prompt — irrelevant to a rewrite, and keeps the cached prefix stable.
         .arg("--exclude-dynamic-system-prompt-sections")
-        .arg("--output-format").arg("text")
+        // Stream the rewrite token-by-token so the UI shows text within ~1-2s
+        // (TTFT) instead of blocking on the full completion. `--verbose` is
+        // required by stream-json; `--include-partial-messages` emits the
+        // per-token `content_block_delta` frames we forward to the frontend.
+        //
+        // CRITICAL: the draft MUST ride text input (`-p <arg>`, null stdin) for
+        // this to actually stream. Measured 2026-05-27: `--input-format
+        // stream-json` (the SDK control path) makes the bundled claude.exe
+        // block-buffer its whole stdout and dump it in one burst at exit — no
+        // streaming. Plain text `-p` input uses the simple completion path that
+        // flushes incrementally. (`--tools ""` is fine; only input mode matters.)
+        .arg("--output-format").arg("stream-json")
+        .arg("--verbose")
+        .arg("--include-partial-messages")
         .arg("--model").arg("haiku")
         // Tight cap — a sub-1K-token rewrite on Haiku costs fractions of a cent.
         .arg("--max-budget-usd").arg("0.20")
@@ -1187,6 +1247,8 @@ pub async fn assistant_enhance_prompt(prompt: String) -> Result<String, String> 
         .arg("--disable-slash-commands")
         .arg("--tools").arg("")
         .arg("--permission-mode").arg("bypassPermissions")
+        // One-shot: never persist this throwaway rewrite to the session store.
+        .arg("--no-session-persistence")
         // Neutral cwd so the CLI loads no project CLAUDE.md / .claude settings.
         .current_dir(std::env::temp_dir())
         // Latency killers: skip SessionStart hooks (~46K-token memory load),
@@ -1199,23 +1261,91 @@ pub async fn assistant_enhance_prompt(prompt: String) -> Result<String, String> 
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = cmd
-        .output()
-        .await
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("spawn `claude` (enhance): {e}"))?;
-    if !output.status.success() {
-        let err = String::from_utf8_lossy(&output.stderr);
-        let msg = err.trim();
+    let stdout = child.stdout.take().ok_or("enhancer stdout unavailable")?;
+    let stderr = child.stderr.take().ok_or("enhancer stderr unavailable")?;
+
+    // Drain stderr concurrently so a chatty CLI can't deadlock on a full pipe
+    // while we read stdout. Bounded — the enhancer's stderr is tiny.
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(l)) = lines.next_line().await {
+            buf.push_str(&l);
+            buf.push('\n');
+            if buf.len() > 8192 {
+                break;
+            }
+        }
+        buf
+    });
+
+    // Read NDJSON stdout, forward each `text_delta` to the UI as it lands, and
+    // accumulate the full rewrite as the authoritative return value.
+    let mut acc = String::new();
+    let mut lines = BufReader::new(stdout).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+            continue;
+        };
+        let ty = v.get("type").and_then(|t| t.as_str());
+        // `result` is the terminal frame — stop reading once it lands.
+        if ty == Some("result") {
+            break;
+        }
+        if ty != Some("stream_event") {
+            continue;
+        }
+        let Some(ev) = v.get("event") else { continue };
+        if ev.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
+            continue;
+        }
+        let delta = ev.get("delta");
+        let is_text = delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
+        if !is_text {
+            continue;
+        }
+        if let Some(txt) = delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
+            if txt.is_empty() {
+                continue;
+            }
+            acc.push_str(txt);
+            let _ = app.emit(
+                ENHANCE_STREAM_EVENT,
+                serde_json::json!({ "request_id": request_id, "delta": txt }),
+            );
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("await claude (enhance): {e}"))?;
+    let stderr_buf = stderr_task.await.unwrap_or_default();
+    if !status.success() {
+        let msg = stderr_buf.trim();
         return Err(if msg.is_empty() {
             "enhancer exited with an error".to_string()
         } else {
             format!("enhance failed: {msg}")
         });
     }
-    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let text = acc.trim().to_string();
     if text.is_empty() {
         return Err("enhancer returned empty output".into());
     }
+    // Terminal marker so the frontend can settle the reveal even though the
+    // command's resolved return value is the canonical text.
+    let _ = app.emit(
+        ENHANCE_STREAM_EVENT,
+        serde_json::json!({ "request_id": request_id, "done": true }),
+    );
     Ok(text)
 }
 
@@ -1632,6 +1762,25 @@ pub async fn assistant_answer_ask_user(
     Ok(())
 }
 
+/// Resolve a pending `can_use_tool` permission ask. The frontend invokes this
+/// from `ToolChip.svelte` when the user clicks Allow / Deny on a gated tool.
+/// `decision` is the inner control-channel response object the CLI expects —
+/// `{ "behavior": "allow", "updatedInput": {..} }` or
+/// `{ "behavior": "deny", "message": ".." }`. The stdout reader awaiting this
+/// oneshot wraps it in a `control_response` and writes it back to the child's
+/// stdin, unblocking tool execution.
+#[tauri::command]
+pub async fn assistant_answer_permission(
+    registry: tauri::State<'_, std::sync::Arc<PermissionRegistry>>,
+    request_id: String,
+    decision: serde_json::Value,
+) -> Result<(), String> {
+    if !registry.resolve(&request_id, decision) {
+        log::debug!("assistant_answer_permission: no pending request for id {request_id}");
+    }
+    Ok(())
+}
+
 /// Enumerate file paths under the active workspace root, relative to the root,
 /// forward-slash normalized. Drives the composer's `@`-file mention picker.
 /// Skip set mirrors `mcp_server::SKIP_DIRS`. Capped at `MENTION_LIMIT` files.
@@ -1828,6 +1977,84 @@ pub struct AssistantAttachment {
     pub data_base64: String,
 }
 
+/// Write a `control_response` envelope (the CLI's expected reply to a
+/// `can_use_tool` ask) to the child's stdin. `response` is the inner decision
+/// object: `{ "behavior": "allow", "updatedInput": {..} }` or
+/// `{ "behavior": "deny", "message": ".." }`.
+async fn write_control_response(
+    stdin: &mut tokio::process::ChildStdin,
+    request_id: &str,
+    response: Value,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let env = serde_json::json!({
+        "type": "control_response",
+        "response": { "subtype": "success", "request_id": request_id, "response": response },
+    });
+    let mut line = serde_json::to_vec(&env).unwrap_or_default();
+    line.push(b'\n');
+    stdin.write_all(&line).await?;
+    stdin.flush().await
+}
+
+/// Handle a `can_use_tool` control_request: register a oneshot, surface the ask
+/// to the frontend (`assistant://permission-request`), await the user's
+/// Allow/Deny via `assistant_answer_permission`, then write the decision back
+/// as a `control_response`. Blocking the reader here is correct — the CLI is
+/// itself blocked waiting for our reply, so no other stdout is in flight.
+async fn handle_permission_request(
+    app: &AppHandle,
+    session_id: &str,
+    stdin: &mut tokio::process::ChildStdin,
+    msg: &Value,
+) {
+    let request_id = msg.get("request_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    let req = msg.get("request").cloned().unwrap_or(Value::Null);
+    let tool_use_id = req.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    let original_input = req.get("input").cloned().unwrap_or(Value::Null);
+
+    let registry = match app.try_state::<std::sync::Arc<PermissionRegistry>>() {
+        Some(r) => r.inner().clone(),
+        None => {
+            // Init bug — deny so the CLI doesn't hang forever.
+            let _ = write_control_response(stdin, &request_id, serde_json::json!({
+                "behavior": "deny", "message": "permission registry unavailable",
+            })).await;
+            return;
+        }
+    };
+
+    let rx = registry.register(request_id.clone());
+    let _ = app.emit(PERMISSION_EVENT, serde_json::json!({
+        "session_id": session_id,
+        "request_id": request_id,
+        "tool_use_id": tool_use_id,
+        "tool_name": req.get("tool_name").cloned().unwrap_or(Value::Null),
+        "input": req.get("input").cloned().unwrap_or(Value::Null),
+        "suggestions": req.get("permission_suggestions").cloned().unwrap_or(Value::Null),
+    }));
+
+    // Cap the wait so a forgotten prompt can't wedge the turn forever; deny on
+    // timeout / cancel (e.g. the user closed the tab).
+    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(1800), rx).await {
+        Ok(Ok(v)) => v,
+        _ => {
+            registry.cancel(&request_id);
+            serde_json::json!({ "behavior": "deny", "message": "No response (timed out or the turn ended)." })
+        }
+    };
+    // The CLI requires `updatedInput` on an allow. The UI sends only the
+    // behavior, so backfill the original (unmodified) tool input here.
+    if decision.get("behavior").and_then(|b| b.as_str()) == Some("allow")
+        && decision.get("updatedInput").is_none()
+    {
+        if let Value::Object(ref mut map) = decision {
+            map.insert("updatedInput".into(), original_input);
+        }
+    }
+    let _ = write_control_response(stdin, &request_id, decision).await;
+}
+
 /// Streaming round-trip. Spawns `claude -p` over stdin, forwards stdout NDJSON
 /// line-by-line on `assistant://stream`. Phase 2 (S72) replaced hand-rolled
 /// `Human:/Assistant:` history replay with native CLI session continuation —
@@ -1849,6 +2076,7 @@ pub async fn assistant_send(
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
+    permission_mode: Option<String>,
     prior_context_summary: Option<String>,
 ) -> Result<(), String> {
     // #220: validate session_id is a canonical UUID (8-4-4-4-12 lowercase hex)
@@ -1870,6 +2098,14 @@ pub async fn assistant_send(
     let effort = thinking_effort
         .or_else(|| cfg.thinking_effort.clone())
         .unwrap_or_else(|| "quick".to_string());
+
+    // Permission mode: per-turn override wins, else stored default, else
+    // "bypassPermissions" (Rift's historical behavior). Renderer-supplied —
+    // validate before it flows into the `--permission-mode` CLI arg.
+    let permission_mode = permission_mode
+        .or_else(|| cfg.permission_mode.clone())
+        .filter(|v| is_valid_permission_mode(v))
+        .unwrap_or_else(|| "bypassPermissions".to_string());
 
     // Workspace root resolution — priority order:
     //   0. (Resume only) The cwd that was active when this session was created,
@@ -2008,7 +2244,11 @@ pub async fn assistant_send(
             }
         }
     }
-    let has_attachments = !attachments.is_empty();
+    // Prompting modes route per-action permission asks through the stream-json
+    // control channel (`--permission-prompt-tool stdio` + the `can_use_tool`
+    // round-trip below). bypass/auto never prompt, so they keep the wide
+    // allowlist + auto-allow behavior unchanged.
+    let prompting_mode = matches!(permission_mode.as_str(), "default" | "acceptEdits" | "plan");
 
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
@@ -2021,16 +2261,27 @@ pub async fn assistant_send(
         // also rides the user message via <system-reminder>.
         .arg("--exclude-dynamic-system-prompt-sections")
         .arg("--output-format").arg("stream-json")
-        .arg("--input-format").arg(if has_attachments { "stream-json" } else { "text" })
+        // Always stream-json input: we now always write a `{type:"user"}`
+        // envelope (so the control channel and image attachments share one
+        // path), and the `initialize` handshake below requires it.
+        .arg("--input-format").arg("stream-json")
         .arg("--verbose")
         .arg("--include-partial-messages")
         .arg("--model").arg(&model)
-        // S92 hot-fix: `dontAsk` auto-DENIES anything that would prompt the
-        // user (incl. MCP tools like `mcp__rift__remote_bash`) even when the
-        // tool is in `--allowed-tools`. There's no interactive surface in
-        // Rift to approve such prompts, so the right mode is
-        // `bypassPermissions` — auto-allows; `--allowed-tools` is the gate.
-        .arg("--permission-mode").arg("bypassPermissions")
+        // Piece 2: route per-action permission asks over the stream-json
+        // control channel. `stdio` makes the CLI emit a `can_use_tool`
+        // `control_request` on stdout (instead of headless auto-deny) and
+        // block on a `control_response` we write back to stdin. This is what
+        // the Agent SDK passes when a `canUseTool` callback is set; the flag
+        // is undocumented in `--help` but present in v2.1.152. Harmless for
+        // bypass/auto (they never trigger a permission check). The
+        // `--permission-mode` flag still drives WHICH tools ask: bypass/auto
+        // auto-allow, default asks per tool, acceptEdits auto-allows edits,
+        // plan blocks mutations. The `--allowed-tools` allowlist (below) is a
+        // second always-allow gate, narrowed in prompting modes so the gated
+        // tools actually reach the prompt.
+        .arg("--permission-prompt-tool").arg("stdio")
+        .arg("--permission-mode").arg(&permission_mode)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -2076,7 +2327,20 @@ pub async fn assistant_send(
         // Excluding it makes the model fall back to asking in plain text,
         // which works correctly in `-p` mode.
         const BUILTINS: &str = "Agent,Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
-        let allowed: String = if use_full_config {
+        // Read-only / non-mutating subset always auto-approved even in a
+        // prompting mode — these shouldn't interrupt the user. Everything
+        // omitted (Bash, Edit, Write, MultiEdit, NotebookEdit, Agent, Skill,
+        // SlashCommand, ExitPlanMode, and the mutating mcp__rift__* tools)
+        // falls through to the `can_use_tool` prompt.
+        const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TodoWrite,WebFetch,WebSearch";
+        const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user";
+        let allowed: String = if prompting_mode {
+            // Narrow allowlist: only the safe set auto-approves; the CLI prompts
+            // for the rest via the control channel. Applies across config
+            // variants — mutating MCP tools (remote_bash, push/pull, apply)
+            // intentionally prompt here.
+            format!("{SAFE_BUILTINS},{SAFE_MCP}")
+        } else if use_full_config {
             // `mcp__*` admits any tool from user MCP servers that the CLI
             // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
             // via the explicit-name entries.
@@ -2130,8 +2394,8 @@ pub async fn assistant_send(
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} effort={} use_full_config={} mcp={} api_key={} remote_shell={}",
-        session_id, is_first_turn, model, effort_level, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
+        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={} remote_shell={}",
+        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
@@ -2207,49 +2471,43 @@ pub async fn assistant_send(
         mark_session_stopped(&session_id);
     }
 
-    // Write the user's prompt to stdin, then close it so the CLI knows the
-    // input stream is complete and starts streaming back. With attachments,
-    // serialize a stream-json `user` envelope (text + image blocks);
-    // otherwise pipe the bare prompt for text input-format.
-    // #117: previously a silent None branch left the child waiting on stdin
-    // forever — claude blocks reading EOF before producing output. Fail
-    // loudly + kill the child so the wait loop unblocks instead of hanging
-    // until the user clicks Stop.
+    // stdin stays OPEN for the whole turn: the control channel writes a
+    // `control_response` back mid-stream after each `can_use_tool` ask, so we
+    // can't EOF up front like the old text-input path did. The reader task
+    // below owns stdin and drops it (EOF) once the turn's `result` lands.
+    // #117: a None stdin would otherwise leave the child waiting forever —
+    // fail loudly + kill so the wait loop unblocks.
     if child.stdin.is_none() {
         let _ = child.start_kill();
         return Err("claude stdin unavailable — process killed".into());
     }
-    if let Some(mut stdin) = child.stdin.take() {
-        use tokio::io::AsyncWriteExt;
-        let payload: Vec<u8> = if has_attachments {
-            let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
-            content.push(serde_json::json!({ "type": "text", "text": effective_prompt }));
-            for a in &attachments {
-                content.push(serde_json::json!({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": a.mime,
-                        "data": a.data_base64,
-                    }
-                }));
-            }
-            let envelope = serde_json::json!({
-                "type": "user",
-                "message": { "role": "user", "content": content }
-            });
-            let mut line = serde_json::to_vec(&envelope)
-                .map_err(|e| format!("serialize input envelope: {e}"))?;
-            line.push(b'\n');
-            line
-        } else {
-            effective_prompt.as_bytes().to_vec()
-        };
-        if let Err(e) = stdin.write_all(&payload).await {
-            return Err(format!("write prompt to stdin: {e}"));
+    let stdin = child.stdin.take().expect("stdin checked is_some above");
+
+    // The per-turn user message — always a stream-json `user` envelope now
+    // (text + optional image blocks). Sent by the reader task once the
+    // `initialize` handshake is acknowledged.
+    let user_line: Vec<u8> = {
+        let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
+        content.push(serde_json::json!({ "type": "text", "text": effective_prompt }));
+        for a in &attachments {
+            content.push(serde_json::json!({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": a.mime,
+                    "data": a.data_base64,
+                }
+            }));
         }
-        drop(stdin); // EOF
-    }
+        let envelope = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": content }
+        });
+        let mut line = serde_json::to_vec(&envelope)
+            .map_err(|e| format!("serialize input envelope: {e}"))?;
+        line.push(b'\n');
+        line
+    };
 
     let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
@@ -2257,13 +2515,66 @@ pub async fn assistant_send(
     let app_out = app.clone();
     let stream_sid = session_id.clone();
     let stdout_task = tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = stdin; // owned by the task; dropped → EOF on turn end
         let mut lines = BufReader::new(stdout).lines();
+
+        // 1) initialize handshake — required so the CLI routes permission asks
+        //    over the control channel as `can_use_tool` instead of the headless
+        //    auto-deny short-circuit. Mirrors what the Agent SDK sends.
+        const INIT: &[u8] = b"{\"type\":\"control_request\",\"request_id\":\"rift-init\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}\n";
+        if let Err(e) = stdin.write_all(INIT).await {
+            let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                "session_id": stream_sid, "message": format!("write initialize: {e}"),
+            }));
+            return;
+        }
+        let _ = stdin.flush().await;
+
+        let mut user_sent = false;
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
                         continue;
+                    }
+                    // Intercept control-channel frames before forwarding.
+                    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+                        let ty = v.get("type").and_then(|x| x.as_str());
+                        // The first `control_response` is the init ack → fire
+                        // the user turn once. Don't forward it to the UI.
+                        if !user_sent && ty == Some("control_response") {
+                            user_sent = true;
+                            if let Err(e) = stdin.write_all(&user_line).await {
+                                let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                    "session_id": stream_sid, "message": format!("write user turn: {e}"),
+                                }));
+                                break;
+                            }
+                            let _ = stdin.flush().await;
+                            continue;
+                        }
+                        // Permission ask → resolve via the registry + UI, write
+                        // the decision back as a `control_response`.
+                        let is_perm = ty == Some("control_request")
+                            && v.get("request")
+                                .and_then(|r| r.get("subtype"))
+                                .and_then(|s| s.as_str())
+                                == Some("can_use_tool");
+                        if is_perm {
+                            handle_permission_request(&app_out, &stream_sid, &mut stdin, &v).await;
+                            continue;
+                        }
+                        // `result` is the last frame — forward it, then break so
+                        // stdin drops (EOF) and the CLI exits even if it would
+                        // otherwise wait for more stream-json input.
+                        if ty == Some("result") {
+                            let _ = app_out.emit(STREAM_EVENT, serde_json::json!({
+                                "session_id": stream_sid, "line": trimmed,
+                            }));
+                            break;
+                        }
                     }
                     // Forward raw NDJSON line, tagged with the CLI session_id
                     // so multi-tab UIs route the event to the right bubble.
@@ -2285,6 +2596,7 @@ pub async fn assistant_send(
                 }
             }
         }
+        // stdin dropped here → EOF.
     });
 
     // Drain stderr to a buffer for error-event surfacing on non-zero exit.

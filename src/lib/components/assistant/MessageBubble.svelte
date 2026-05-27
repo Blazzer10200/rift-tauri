@@ -6,6 +6,7 @@
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
+  import PermissionBar from "./PermissionBar.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Tool blocks that render inline as a full side-by-side diff (vs the
@@ -488,8 +489,10 @@
           {:else}
             <EditDiff input={b.input} />
           {/if}
+          <PermissionBar toolUseId={b.id} toolName={b.name} />
         {:else if b.type === "tool"}
           <ToolChip tool={b} variant={isUser ? "card" : "timeline"} />
+          <PermissionBar toolUseId={b.id} toolName={b.name} />
         {/if}
       {/snippet}
 

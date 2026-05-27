@@ -19,11 +19,12 @@ Clear before next ship cuts. Each is a UI/live-build verification, not a code ch
 - **S131 Shiki** — send ` ```rust ` fenced block → confirm header bar + syntax highlight
 - **S132 splash** — cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
 - **S133 Whisper FFI** — `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`; CPU first, then CUDA (`whisper-cuda` feature)
-- **S124** — auto-compact + ctx stats still in gate
+- **S124** — ctx-pill inflation **FIXED 2026-05-27** (unshipped): pill read cumulative `result.usage` → spiked ~1M after a multi-step task, false-tripping auto-compact. Now reads the last `assistant` envelope (point-in-time) — `recordTurnUsage` in [assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) + regression test. Auto-compact threshold itself still needs a live multi-step verify.
 
 ### Code lanes (pick one)
 Ordered by recommended attack sequence. All cross-reference detailed blocks below.
 
+0. **Permission modes — Piece 2 (NEXT SESSION)** — Piece 1 (picker UI + plumbing) DONE & uncommitted, see HANDOFF. Modes `default`/`acceptEdits`/`plan` are wired but DEAD: headless `claude -p` surfaces per-action permission requests over the stream-json **control channel** (no `--permission-prompt-tool` in CLI v2.1.152), and Rift has no catcher/UI. Build the approval round-trip reusing `ask_user` ([ask_user.rs](../src-tauri/src/assistant/ask_user.rs)). **Spike first (~30min):** capture the exact `control_request`/`can_use_tool` wire format. Then: `--input-format stream-json` always-on in `assistant_send` + a control-message parser writing `control_response` to stdin + UI prompt component.
 1. **Files diff-dot per row** — needs new `drift_scanner` per-row verdict backend cmd. (Not in numbered tracker; lane-only.)
 2. **Hot-file splits** — issue **#20**: `lib.rs` DONE (285L post-split into `commands/*.rs`); `assistant.svelte.ts` **3355L** (grew) → per-concern classes next; `assistant/mod.rs` **2308L** → continued extraction; `auto_sync.rs` **2207L** (crossed threshold) → next candidate after `assistant.svelte.ts`.
 3. **Design brief `git-rcon-tools.md` v2.2** — git + RCON MCP tools. See `docs/design/git-rcon-tools.md`.

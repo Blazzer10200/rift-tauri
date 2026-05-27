@@ -2,10 +2,15 @@
 // of `src/lib/state/assistant.svelte.ts`. Zero state, zero IPC; only
 // localStorage prefs + pure transforms. Safe to import anywhere.
 
-import type { ChatMessage, ThinkingEffort } from "./types";
+import type { ChatMessage, PermissionMode, ThinkingEffort } from "./types";
 
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
+const PERMISSION_KEY = "rift.assistant.permissionMode";
+
+const PERMISSION_MODES: readonly PermissionMode[] = [
+  "default", "acceptEdits", "plan", "auto", "bypassPermissions",
+] as const;
 
 export function loadModel(): "sonnet" | "opus" | "haiku" {
   try {
@@ -38,6 +43,25 @@ export function loadEffort(): ThinkingEffort {
 export function saveEffort(v: ThinkingEffort) {
   try {
     if (typeof localStorage !== "undefined") localStorage.setItem(EFFORT_KEY, v);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+export function loadPermissionMode(): PermissionMode {
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(PERMISSION_KEY) : null;
+    if (v && (PERMISSION_MODES as readonly string[]).includes(v)) return v as PermissionMode;
+  } catch {
+    /* SSR or storage disabled */
+  }
+  // Preserve Rift's historical behavior until the user picks a mode.
+  return "bypassPermissions";
+}
+
+export function savePermissionMode(v: PermissionMode) {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(PERMISSION_KEY, v);
   } catch {
     /* storage disabled */
   }
