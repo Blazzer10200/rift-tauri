@@ -28,9 +28,9 @@ All audit items applied + live-verified. Full doc: [docs/audit-2026-05-27.md](au
 ## Next-session prep (still gated on user, not session work)
 
 **Resume here:**
-1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Hard gate before any ship.
-2. Commit the UI polish pass above (or fine-tune first, then commit).
-3. `pwsh scripts/release-bridge.ps1` → ships v0.4.32-alpha hybrid.
+1. **BACK UP `C:/Users/BLAZZER/.tauri/rift.key` OFF-MACHINE.** Hard gate before any ship. CHANGELOG claims it was backed up pre-ship — CONFIRM that's true (off-machine, not just on this disk) before step 2. Lose it = no v0.4.32+ client can ever update again.
+2. ~~Commit feature work~~ — DONE (commit `4d669bf`, pushed to `origin/updater-migration`: prompt enhancer + composer calm + prior UI polish, svelte-check 0/0, cargo check clean). Tree is clean.
+3. **THE RELEASE — one command, gated on step 1:** `pwsh scripts/release-bridge.ps1` → builds + publishes the v0.4.32-alpha hybrid (Velopack assets for v0.4.31 clients + Tauri-updater assets for v0.4.32+). NOT run autonomously 2026-05-27: it's an irreversible public ship to `rift-releases`, gated on the key backup + it bundles a brand-new UI feature into the critical one-time bridge — wanted a human eyes-open go. Quit dev first (run-dev tree was stopped this session; verify nothing holds `C:\cargo-targets`).
 4. Update both machines to v0.4.32. Confirm BOTH before proceeding.
 5. v0.4.33+ regular flow — `bump.ps1` → CHANGELOG entry → `pwsh scripts/release.ps1`.
 6. After v0.4.33 ships clean, retire `release-bridge.ps1`.
