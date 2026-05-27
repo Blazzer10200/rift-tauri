@@ -33,3 +33,6 @@ scratch/
 # Anchored to root so it doesn't swallow src/lib/state/ (Svelte 5 store dir).
 /state/
 scripts/cdp/.audit/
+
+# Ruff cache — stray when something Python ran in-tree.
+.ruff_cache/
