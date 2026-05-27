@@ -3,6 +3,7 @@
   import { WORKSPACES } from "../workspaces";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Pointer-event drag-to-reorder. The previous HTML5 DnD path didn't fire
   // reliably from <button> inside WebView2 (no ghost image, dragstart
   // suppressed by the button's click activation). Pointer events bypass that
@@ -157,7 +158,7 @@
         data-disabled={def.disabled ? "true" : "false"}
         data-drag-src={isSrc}
         disabled={def.disabled}
-        title={def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${def.kbd} · drag to reorder`}
+        use:tooltip={def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${def.kbd} · drag to reorder`}
         aria-label="{def.title} {isActive ? '(active)' : ''}"
         aria-pressed={isActive}
         onpointerdown={(e) => { if (!def.disabled) onPointerDown(idx, e); }}
@@ -192,7 +193,7 @@
         type="button"
         data-active={isActive}
         data-disabled="false"
-        title={`${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
+        use:tooltip={`${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
         aria-label="{def.title} {isActive ? '(active)' : ''}"
         aria-pressed={isActive}
         onclick={() => workspace.setActive("settings")}
@@ -286,7 +287,8 @@
   }
   /* Soft capsule indicator on the outer edge — replaces the hard 2px stripe.
      Centered vertically at 55% of the button height. Accent glow makes the
-     active workspace pick out of the rail at a glance. */
+     active workspace pick out of the rail at a glance. Now breathes gently
+     so the rail feels alive — matches the prompter's pulse cadence. */
   .ab-btn[data-active="true"]::before {
     content: "";
     position: absolute;
@@ -298,6 +300,32 @@
     background: var(--accent);
     border-radius: 0 3px 3px 0;
     box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 55%, transparent);
+    animation: ab-stripe-breathe 3.4s ease-in-out infinite;
+  }
+  /* Faint outward halo on the active hit — a subtle scaling ring that
+     decays in opacity. Loops slowly so it reads as ambient, not urgent. */
+  .ab-btn[data-active="true"] .ab-hit::after {
+    content: "";
+    position: absolute;
+    inset: -3px;
+    border-radius: 11px;
+    border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    animation: ab-halo 3.4s ease-in-out infinite;
+  }
+  @keyframes ab-stripe-breathe {
+    0%, 100% { box-shadow: 0 0 6px  color-mix(in oklch, var(--accent) 40%, transparent); }
+    50%      { box-shadow: 0 0 14px color-mix(in oklch, var(--accent) 75%, transparent); }
+  }
+  @keyframes ab-halo {
+    0%   { transform: scale(0.85); opacity: 0; }
+    50%  { transform: scale(1);    opacity: 0.55; }
+    100% { transform: scale(1.15); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ab-btn[data-active="true"]::before { animation: none; }
+    .ab-btn[data-active="true"] .ab-hit::after { animation: none; opacity: 0; }
   }
   /* Hover halo on the hit-target — subtle accent ring on hover so non-active
      workspaces feel reactive, not just bg-tinted. */

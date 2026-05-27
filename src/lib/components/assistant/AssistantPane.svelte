@@ -8,6 +8,7 @@
   import TasksDock from "./TasksDock.svelte";
   import SyncActivityBanner from "./SyncActivityBanner.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let {
     tabId,
     focused,
@@ -50,7 +51,7 @@
       `Ctx: ${used.toLocaleString()} / ${w.toLocaleString()} (${paneCtxPct.toFixed(1)}%)`,
     ];
     if (paneModel) lines.push(`Model: ${paneModel}`);
-    if (paneCost != null) lines.push(`Cost: $${paneCost.toFixed(4)}`);
+    if (paneCost != null) lines.push(`Cost: ${paneCost.toFixed(4)}`);
     return lines.join("\n");
   });
 
@@ -234,9 +235,9 @@
   {/if}
   {#if assistant.splitActive}
     <div class="pane-chrome" aria-hidden="true">
-      <span class="pane-label" title="Pane {paneIdx + 1} of {assistant.panes.length}">{paneIdx + 1}</span>
+      <span class="pane-label" use:tooltip={"Pane {paneIdx + 1} of {assistant.panes.length}"}>{paneIdx + 1}</span>
       {#if tabId && tab}
-        <span class="pane-ctx-chip" data-tone={paneCtxTone} title={paneChipTitle}>
+        <span class="pane-ctx-chip" data-tone={paneCtxTone} use:tooltip={paneChipTitle}>
           <span class="pane-ctx-bar"><span class="pane-ctx-fill" style="width: {Math.min(100, paneCtxPct)}%"></span></span>
           <span class="pane-ctx-pct">{Math.round(paneCtxPct)}%</span>
           {#if paneCost != null}
@@ -247,7 +248,7 @@
       <button
         class="pane-close"
         type="button"
-        title="Close this pane (Ctrl+Shift+\)"
+        use:tooltip={"Close this pane (Ctrl+Shift+\\)"}
         aria-label="Close pane"
         onclick={onClosePane}
       >
@@ -282,7 +283,7 @@
                   class="pane-empty-recent-row"
                   type="button"
                   onclick={() => onEmptyOpenRecent(c.id)}
-                  title={c.title}
+                  use:tooltip={c.title}
                 >
                   <span class="pane-empty-recent-title">{c.title}</span>
                   <span class="pane-empty-recent-meta">{c.messageCount} msg</span>
@@ -309,7 +310,7 @@
   </div>
 
   {#if tabId && !showEmpty && !stickToBottom}
-    <button class="jump-latest" type="button" onclick={jumpToLatest} title="Jump to latest">
+    <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"}>
       <ChevronDown size={12}/>
       <span>Latest</span>
     </button>
@@ -318,7 +319,7 @@
   {#if showError || showNotice || showShellBanner}
     <div class="alerts">
       {#if showShellBanner}
-        <button class="alert notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} title="Got it — don't show again">
+        <button class="alert notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} use:tooltip={"Got it — don't show again"}>
           <span class="notice-icon">⚡</span>
           <span class="notice-text">
             Claude just ran a remote shell command on your server. Gated by Settings → Assistant → Allow remote shell + a workspace-scoped lock. Click to dismiss.
@@ -327,7 +328,7 @@
         </button>
       {/if}
       {#if showNotice}
-        <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} title="Click to dismiss">
+        <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} use:tooltip={"Click to dismiss"}>
           <span class="notice-icon">ℹ</span>
           <span class="notice-text">{assistant.lastNotice}</span>
         </button>

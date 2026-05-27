@@ -1,7 +1,8 @@
 <script lang="ts">
   import { Lock } from "lucide-svelte";
-  type Props = { holder: string; tooltip?: string };
-  let { holder, tooltip }: Props = $props();
+  import { tooltip } from "$lib/actions/tooltip";
+  type Props = { holder: string; tip?: string };
+  let { holder, tip }: Props = $props();
 
   const initials = $derived.by(() => {
     const at = holder.indexOf("@");
@@ -10,7 +11,7 @@
   });
 </script>
 
-<span class="lock" title={tooltip ?? `Locked by ${holder}`}>
+<span class="lock" use:tooltip={tip ?? `Locked by ${holder}`}>
   <Lock size={10}/>
   <span class="initials mono">{initials}</span>
 </span>

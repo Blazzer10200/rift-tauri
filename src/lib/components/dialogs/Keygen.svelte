@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { Key, X, Copy, RefreshCw, Check, AlertTriangle } from "lucide-svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type KeyPaths = {
     privatePath: string;
     publicPath: string;
@@ -148,7 +149,7 @@
           type="button"
           onclick={generate}
           disabled={exists || busy}
-          title={exists ? "Key already exists" : "Generate ed25519 keypair"}
+          use:tooltip={exists ? "Key already exists" : "Generate ed25519 keypair"}
         >
           <RefreshCw size={11} class={busy ? "spin" : ""}/>
           {busy ? "Generating…" : exists ? "Exists" : "Generate"}

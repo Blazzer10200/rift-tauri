@@ -244,6 +244,30 @@ Write-Host '=== gh release upload (Tauri assets) ===' -ForegroundColor Cyan
 gh release upload $tag $setupPath $sigPath $latestPath --repo $releaseRepo --clobber
 if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed' }
 
+# --- Round-trip verify (Tauri Setup.exe only) ---------------------------
+# Catches corrupt uploads before v0.4.32+ clients try to apply (issue #18).
+# Velopack's vpk-built Setup.exe is NOT verified here — v0.4.31 clients have
+# their own checksum mechanism via releases.win.json.
+Write-Host '=== Round-trip verify (SHA256) ===' -ForegroundColor Cyan
+$verifyDir = Join-Path $releasesDir "verify-$version"
+if (Test-Path $verifyDir) { Remove-Item -Recurse -Force $verifyDir }
+New-Item -ItemType Directory -Path $verifyDir | Out-Null
+# Match exact Tauri-built filename — vpk also uploads a *Setup.exe so we
+# can't pattern-match loosely. Use the exact filename from $setupPath.
+gh release download $tag --repo $releaseRepo --pattern $setupFileName -D $verifyDir
+if ($LASTEXITCODE -ne 0) { throw 'gh release download (verify) failed' }
+$downloadedPath = Join-Path $verifyDir $setupFileName
+if (-not (Test-Path $downloadedPath)) {
+    throw "Expected $setupFileName in $verifyDir after gh release download"
+}
+$localHash = (Get-FileHash -Algorithm SHA256 -Path $setupPath).Hash
+$remoteHash = (Get-FileHash -Algorithm SHA256 -Path $downloadedPath).Hash
+if ($localHash -ne $remoteHash) {
+    throw "Round-trip verify FAILED: local SHA256=$localHash remote SHA256=$remoteHash. Tauri Setup.exe upload corrupted."
+}
+Write-Host "  SHA256 match: $localHash" -ForegroundColor Green
+Remove-Item -Recurse -Force $verifyDir
+
 # vpk creates the GH release marked prerelease (from --pre above), but GitHub's
 # /releases/latest/download/<asset> redirect EXCLUDES prereleases, which would
 # 404 the tauri-updater endpoint for v0.4.32+ clients. Demote post-create.

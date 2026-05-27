@@ -2,6 +2,7 @@
   import { Send, Square, X, Mic, Loader2, HelpCircle } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
+  import { tooltip } from "$lib/actions/tooltip";
   import { tick, onMount } from "svelte";
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
@@ -73,10 +74,9 @@
     { id: "haiku",  label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", ctx: "200K ctx" },
   ];
 
-  // Session-rotated idle placeholders — one tip-shaped variant per mount.
-  // Tells the user about @/, Shift+Enter etc. without a dedicated onboarding
-  // strip. Plain "Ask Claude" is the fallback every few rotations so the
-  // composer never feels noisy.
+  // Session-rotated idle placeholders — cycle every ~6s while the composer is
+  // unfocused + empty, so the user sees tips drift past without staring at a
+  // single line. Pauses on focus/draft so it never moves under the cursor.
   const IDLE_PLACEHOLDERS = [
     "Ask Claude",
     "Ask Claude · @ to mention a file",
@@ -84,9 +84,18 @@
     "Ask Claude · Shift+Enter for newline",
     "Ask Claude · paste an image to attach",
   ];
-  const idlePlaceholder = IDLE_PLACEHOLDERS[
-    Math.floor(Math.random() * IDLE_PLACEHOLDERS.length)
-  ];
+  let placeholderIdx = $state(Math.floor(Math.random() * IDLE_PLACEHOLDERS.length));
+  let placeholderKey = $state(0); // bumps to retrigger fade animation
+  let composerFocused = $state(false);
+  const idlePlaceholder = $derived(IDLE_PLACEHOLDERS[placeholderIdx % IDLE_PLACEHOLDERS.length]);
+  $effect(() => {
+    if (composerFocused || draft.length > 0 || streaming || attachments.length > 0) return;
+    const h = setInterval(() => {
+      placeholderIdx = (placeholderIdx + 1) % IDLE_PLACEHOLDERS.length;
+      placeholderKey++;
+    }, 6000);
+    return () => clearInterval(h);
+  });
 
   function autosize() {
     if (!ta) return;
@@ -234,12 +243,13 @@
 
   // Effort ladder. Haiku skips extended thinking server-side regardless, so
   // hide the pill on Haiku to avoid implying it does something. Cycle on click:
-  // none → quick → deep → none.
-  type EffortOpt = { id: "none" | "quick" | "deep"; label: string; hint: string };
+  // none → quick → deep → none. Names describe quality not speed — "Fast"
+  // and "Quick" were ambiguous siblings; Instant/Smart/Deep is a real ladder.
+  type EffortOpt = { id: "none" | "quick" | "deep"; label: string; hint: string; level: 1 | 2 | 3 };
   const EFFORT_OPTIONS: EffortOpt[] = [
-    { id: "none",  label: "Fast",  hint: "No extended thinking — fastest reply" },
-    { id: "quick", label: "Quick", hint: "Light thinking (~2K tokens) — balanced" },
-    { id: "deep",  label: "Deep",  hint: "Heavy thinking (10K tokens) — slowest, best on hard asks" },
+    { id: "none",  label: "Instant", level: 1, hint: "Instant — straight to the answer, no thinking time" },
+    { id: "quick", label: "Smart",   level: 2, hint: "Smart — thinks briefly before answering (~5s extra)" },
+    { id: "deep",  label: "Deep",    level: 3, hint: "Deep — heavy reasoning (~15s extra) for hard problems" },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
   function cycleEffort() {
@@ -270,12 +280,18 @@
     void tick().then(() => ta?.focus());
   }
 
+  // Bumps on every fire() — drives the send-button ripple + chat-column
+  // upward sweep keyed off `{#key}`. Both pulses are pure-CSS one-shots,
+  // mounted by the key flip and self-removed after their animation ends.
+  let fireKey = $state(0);
+
   function fire() {
     const text = draft.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
     if (!text && attachments.length === 0) return;
     setDraft("");
     stt.consume();
+    fireKey++;
     onsubmit(text);
     void tick().then(autosize);
   }
@@ -327,19 +343,52 @@
     return btoa(bin);
   }
 
-  // Phase 3a: hint popover replaces the dedicated hint row. Click toggles;
-  // global mousedown closes on outside click.
+  // Portal action — moves the node to <body> so it escapes the composer's
+  // overflow:hidden + backdrop-filter containing block (any ancestor with
+  // backdrop-filter traps `position: fixed` descendants inside it, which is
+  // exactly what we need to avoid here).
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy() { node.remove(); } };
+  }
+
+  // Hint popover — keyboard shortcuts. Portals to <body> + position: fixed
+  // w/ JS-computed coords so it escapes the composer's clip + backdrop-filter
+  // containing block.
   let hintOpen = $state(false);
   let hintWrap = $state<HTMLDivElement | null>(null);
+  let hintPop = $state<HTMLDivElement | null>(null);
+  let hintPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
+  function positionHint() {
+    if (!hintWrap || !hintPop) return;
+    const a = hintWrap.getBoundingClientRect();
+    const ph = hintPop.offsetHeight || 160;
+    const pw = hintPop.offsetWidth || 240;
+    // Prefer above the trigger (matches the old visual); flip down if no room.
+    let top = a.top - ph - 8;
+    if (top < 8) top = a.bottom + 8;
+    let left = a.left;
+    const maxLeft = window.innerWidth - pw - 8;
+    if (left > maxLeft) left = maxLeft;
+    if (left < 8) left = 8;
+    hintPos = { top, left };
+  }
   function onDocHintMousedown(ev: MouseEvent) {
     if (!hintOpen) return;
-    if (hintWrap && ev.target instanceof Node && !hintWrap.contains(ev.target)) {
-      hintOpen = false;
-    }
+    if (hintWrap && ev.target instanceof Node && hintWrap.contains(ev.target)) return;
+    if (hintPop && ev.target instanceof Node && hintPop.contains(ev.target)) return;
+    hintOpen = false;
   }
   $effect(() => {
     window.addEventListener("mousedown", onDocHintMousedown);
     return () => window.removeEventListener("mousedown", onDocHintMousedown);
+  });
+  $effect(() => {
+    if (!hintOpen) return;
+    void tick().then(positionHint);
+    const onResize = () => positionHint();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   });
 
   let attachError = $state<string | null>(null);
@@ -528,14 +577,77 @@
       ((draft.trim().length > 0 || attachments.length > 0) &&
         (assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")),
   );
+
+  // ── Drag-over highlight ────────────────────────────────────────────────
+  // Files dragged anywhere over the composer shell flip a glow + dashed
+  // border w/ "Drop image to attach" overlay. We only react to actual file
+  // drags (dataTransfer.types contains "Files") — internal text/HTML drags
+  // shouldn't trip the visual. Counter-based to survive enter/leave on
+  // descendants without flicker.
+  let dragDepth = $state(0);
+  const dragOver = $derived(dragDepth > 0);
+  function isFileDrag(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    if (!types) return false;
+    for (let i = 0; i < types.length; i++) if (types[i] === "Files") return true;
+    return false;
+  }
+  function onDragEnter(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+  }
+  function onDragLeave(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+  }
+  function onDragOverShell(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  }
+  async function onDrop(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    attachError = null;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 20 * 1024 * 1024) {
+        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
+        continue;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const dataBase64 = bytesToBase64(buf);
+        const ok = assistant.addAttachment({
+          mime: file.type || "image/png",
+          dataBase64,
+          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
+          sizeBytes: file.size,
+        }, tabId);
+        if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
+      } catch (err) {
+        attachError = `Failed to read dropped image: ${String(err)}`;
+      }
+    }
+  }
 </script>
 
-<div class="composer-wrap">
+<div class="composer-wrap" data-model={assistant.model}>
+  {#key fireKey}
+    {#if fireKey > 0}
+      <span class="send-sweep" aria-hidden="true"></span>
+    {/if}
+  {/key}
   {#if queue.length > 0}
     <div class="queue">
       <span class="queue-label">Queued ({queue.length}):</span>
       {#each queue as q (q.id)}
-        <span class="qpill" title={q.text}>
+        <span class="qpill" use:tooltip={q.text}>
           <span class="qtext">{q.text}</span>
           <button
             class="qx"
@@ -562,7 +674,7 @@
   {#if attachments.length > 0 || attachError}
     <div class="attachments">
       {#each attachments as a (a.id)}
-        <div class="attach-chip" title={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
+        <div class="attach-chip" use:tooltip={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
           <img class="attach-thumb" src={a.previewUrl} alt="pasted attachment" />
           <span class="attach-meta">
             <span class="attach-name">image</span>
@@ -589,7 +701,24 @@
     </div>
   {/if}
 
-  <div class="composer-shell">
+  <div
+    class="composer-shell"
+    class:drag-over={dragOver}
+    role="region"
+    aria-label="Message composer"
+    ondragenter={onDragEnter}
+    ondragleave={onDragLeave}
+    ondragover={onDragOverShell}
+    ondrop={onDrop}
+  >
+    {#if dragOver}
+      <div class="drop-overlay" aria-hidden="true">
+        <div class="drop-pill">
+          <span class="drop-dot" aria-hidden="true"></span>
+          Drop image to attach
+        </div>
+      </div>
+    {/if}
     {#if slashOpen && slashFiltered.length > 0}
       <div class="slash-menu" role="listbox">
         {#each slashFiltered as c, i (c.name)}
@@ -597,6 +726,7 @@
             type="button"
             class="slash-item"
             class:active={i === slashIdx}
+            style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickSlash(c); }}
           >
             <span class="slash-name">/{c.name}</span>
@@ -617,6 +747,7 @@
             type="button"
             class="slash-item mention-item"
             class:active={i === mentionIdx}
+            style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickMention(path); }}
           >
             <span class="mention-base">{base}</span>
@@ -641,6 +772,7 @@
             class:active={i === modelIdx}
             class:current={m.id === assistant.model}
             data-id={m.id}
+            style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
           >
             <span class="model-dot" aria-hidden="true"></span>
@@ -661,29 +793,39 @@
     {/if}
 
     <div class="composer" class:streaming={streaming} data-mode={mode}>
-      <span class="composer-glow" aria-hidden="true"></span>
-      <textarea
-        bind:this={ta}
-        value={draft}
-        oninput={(e) => {
-          setDraft((e.currentTarget as HTMLTextAreaElement).value);
-          resetRecall(); autosize(); refreshMention();
-        }}
-        onkeyup={refreshMention}
-        onclick={refreshMention}
-        onblur={() => {
-          if (!mentionState) return;
-          requestAnimationFrame(() => { mentionState = null; });
-        }}
-        onkeydown={onKey}
-        onpaste={onPaste}
-        placeholder={streaming
-          ? "Type to queue — Enter sends, /stop halts"
-          : attachments.length > 0
-          ? "Ask about the image…"
-          : idlePlaceholder}
-        rows="1"
-      ></textarea>
+      <span class="composer-aurora" aria-hidden="true"></span>
+      <span class="composer-aurora-2" aria-hidden="true"></span>
+      <div class="textarea-wrap">
+        <textarea
+          bind:this={ta}
+          value={draft}
+          oninput={(e) => {
+            setDraft((e.currentTarget as HTMLTextAreaElement).value);
+            resetRecall(); autosize(); refreshMention();
+          }}
+          onkeyup={refreshMention}
+          onclick={refreshMention}
+          onfocus={() => { composerFocused = true; }}
+          onblur={() => {
+            composerFocused = false;
+            if (!mentionState) return;
+            requestAnimationFrame(() => { mentionState = null; });
+          }}
+          onkeydown={onKey}
+          onpaste={onPaste}
+          placeholder=""
+          rows="1"
+        ></textarea>
+        {#if draft.length === 0 && !streaming && attachments.length === 0}
+          {#key placeholderKey}
+            <span class="placeholder-ghost" aria-hidden="true">{idlePlaceholder}</span>
+          {/key}
+        {:else if streaming}
+          <span class="placeholder-ghost static" aria-hidden="true">Type to queue — Enter sends, /stop halts</span>
+        {:else if attachments.length > 0 && draft.length === 0}
+          <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
+        {/if}
+      </div>
 
       <div class="composer-toolbar">
         <div class="toolbar-cluster">
@@ -698,7 +840,7 @@
             type="button"
             onclick={toggleMic}
             disabled={micBusy || stt.transcribing}
-            title={
+            use:tooltip={
               stt.recording ? "Stop recording" :
               stt.transcribing ? "Transcribing…" :
               stt.config.engine === "whisper" ? "Dictate (Whisper, local)" : "Dictate (Web Speech)"
@@ -708,7 +850,9 @@
             {#if stt.transcribing}
               <Loader2 size={14} class="mic-spin" />
             {:else if stt.recording}
-              <Square size={11} fill="currentColor" />
+              <span class="mic-wave" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </span>
             {:else}
               <Mic size={14} />
             {/if}
@@ -722,21 +866,35 @@
               aria-expanded={hintOpen}
               aria-label="Composer hints"
               aria-describedby={hintOpen ? "composer-hint-pop" : undefined}
-              title="Keyboard shortcuts"
+              use:tooltip={"Keyboard shortcuts"}
             >
               <HelpCircle size={14} />
             </button>
             {#if hintOpen}
-              <div id="composer-hint-pop" class="hint-pop" role="tooltip">
-                <div class="hint-row"><kbd>Enter</kbd><span>send</span></div>
-                <div class="hint-row"><kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span></div>
-                <div class="hint-row"><kbd>/</kbd><span>commands</span></div>
-                <div class="hint-row"><kbd>@</kbd><span>mention file</span></div>
+              <div
+                id="composer-hint-pop"
+                class="hint-pop"
+                role="tooltip"
+                bind:this={hintPop}
+                use:portal
+                style="top: {hintPos.top}px; left: {hintPos.left}px;"
+              >
+                <div class="hint-head">Keyboard shortcuts</div>
+                <div class="hint-row"><span class="hint-keys"><kbd>Enter</kbd></span><span>Send message</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>Shift</kbd><kbd>Enter</kbd></span><span>New line</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>/</kbd></span><span>Slash command menu</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>@</kbd></span><span>Mention a file</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>↑</kbd></span><span>Recall previous prompt</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>Esc</kbd></span><span>Close any open menu</span></div>
               </div>
             {/if}
           </div>
           {#if draft.length > 0}
-            <span class="char-count" class:warn={draft.length > 4000} title="Character count">
+            <span
+              class="char-count"
+              class:warn={draft.length > 4000}
+              use:tooltip={draft.length > 4000 ? `${draft.length.toLocaleString()} characters · long prompts may slow first reply` : `${draft.length.toLocaleString()} characters in this draft`}
+            >
               {draft.length.toLocaleString()}
             </span>
           {/if}
@@ -751,17 +909,25 @@
               class:effort-quick={currentEffort.id === "quick"}
               class:effort-deep={currentEffort.id === "deep"}
               onclick={cycleEffort}
-              title={currentEffort.hint + " — click to cycle"}
+              use:tooltip={`${currentEffort.hint}\nClick to cycle thinking depth`}
             >
-              <span class="pill-label">{currentEffort.label}</span>
+              {#key currentEffort.id}
+                <span class="effort-bars" aria-hidden="true" data-level={currentEffort.level}>
+                  <span class="bar"></span>
+                  <span class="bar"></span>
+                  <span class="bar"></span>
+                </span>
+                <span class="pill-label">{currentEffort.label}</span>
+              {/key}
             </button>
           {/if}
           <button
             type="button"
             class="model-pill"
+            class:streaming
             data-model={assistant.model}
             onclick={() => { modelPickerOpen = !modelPickerOpen; void tick().then(() => ta?.focus()); }}
-            title="Switch model"
+            use:tooltip={streaming ? `Streaming with ${currentModel?.label ?? assistant.model}` : `Switch model · current: ${currentModel?.label ?? assistant.model}`}
           >
             <span class="model-dot-mini" aria-hidden="true"></span>
             {#if currentModel}
@@ -779,12 +945,22 @@
             type="button"
             onclick={onBtnClick}
             disabled={!canFire}
-            title={mode === "stop" ? "Stop current turn" : mode === "queue" ? "Queue this message" : "Send (Enter)"}
+            use:tooltip={mode === "stop"
+              ? { text: "Halt the current turn", kbd: "Esc" }
+              : mode === "queue"
+              ? { text: "Queue after current turn", kbd: "Enter" }
+              : { text: "Send", kbd: "Enter" }}
           >
             <span class="icon-stack">
               <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
               <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
             </span>
+            {#key fireKey}
+              {#if fireKey > 0}
+                <span class="send-ripple" aria-hidden="true"></span>
+                <span class="send-ripple send-ripple-2" aria-hidden="true"></span>
+              {/if}
+            {/key}
           </button>
         </div>
       </div>
@@ -794,13 +970,65 @@
 
 <style>
   .composer-wrap {
+    position: relative;
     padding: 10px 18px 14px;
     max-width: var(--chat-col-max);
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
   }
+  /* Aurora hue follows the active model — sonnet=blue, opus=purple,
+     haiku=teal. Resolved here so every accent inside (border, ripple,
+     send-sweep, model-pill pulse) reads from the same single source. */
+  .composer-wrap[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .composer-wrap[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .composer-wrap[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .composer-wrap                      { --model-color: var(--accent); }
   .composer-shell { position: relative; }
+  .composer-shell.drag-over .composer {
+    border-color: color-mix(in oklch, var(--model-color) 70%, transparent);
+    border-style: dashed;
+    box-shadow:
+      0 0 0 4px color-mix(in oklch, var(--model-color) 22%, transparent),
+      0 12px 36px -8px color-mix(in oklch, var(--model-color) 45%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
+    transform: translateY(-1px);
+  }
+  .drop-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 8;
+    pointer-events: none;
+    animation: drop-in 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .drop-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
+    border: 1px solid color-mix(in oklch, var(--model-color) 50%, transparent);
+    border-radius: 999px;
+    color: var(--fg);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px -6px color-mix(in oklch, var(--model-color) 40%, transparent);
+  }
+  .drop-dot {
+    width: 8px; height: 8px;
+    border-radius: 999px;
+    background: var(--model-color);
+    box-shadow: 0 0 8px color-mix(in oklch, var(--model-color) 70%, transparent);
+    animation: drop-dot-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes drop-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes drop-dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.3); opacity: 0.7; }
+  }
 
   /* ── Composer v3 ─────────────────────────────────────────────────────
      Two-row layout: textarea up top, toolbar below.  Glass-blur surface
@@ -825,34 +1053,70 @@
     overflow: hidden;
   }
   .composer:focus-within {
-    border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+    border-color: color-mix(in oklch, var(--model-color) 55%, transparent);
     box-shadow:
-      0 0 0 3px var(--accent-soft),
-      0 12px 32px -8px color-mix(in oklch, var(--accent) 28%, transparent),
+      0 0 0 3px color-mix(in oklch, var(--model-color) 18%, transparent),
+      0 12px 32px -8px color-mix(in oklch, var(--model-color) 32%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
   }
-  /* Soft accent radial glow visible only on focus / streaming — sits behind
-     all content via overflow:hidden + negative z-index on the layer. */
-  .composer-glow {
+  /* ── Aurora layer ──────────────────────────────────────────────────────
+     Two slow-rotating conic gradients tinted by --model-color. Layer 1
+     spins clockwise, layer 2 counter-clockwise at a different period so
+     the two interfere and produce a slow-drifting hue field behind the
+     composer chrome. Opacity ramps with focus + streaming. */
+  .composer-aurora,
+  .composer-aurora-2 {
     position: absolute;
-    inset: -40%;
-    background: radial-gradient(
-      circle at 50% 100%,
-      color-mix(in oklch, var(--accent) 22%, transparent) 0%,
-      transparent 55%
-    );
-    opacity: 0;
+    inset: -60%;
     pointer-events: none;
-    transition: opacity 280ms ease-out;
+    opacity: 0;
+    transition: opacity 320ms ease-out;
     z-index: 0;
+    filter: blur(22px);
+    border-radius: 50%;
   }
-  .composer:focus-within .composer-glow { opacity: 0.55; }
-  .composer.streaming .composer-glow { opacity: 0.7; }
+  .composer-aurora {
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      color-mix(in oklch, var(--model-color) 35%, transparent) 60deg,
+      transparent 140deg,
+      color-mix(in oklch, var(--model-color) 22%, transparent) 220deg,
+      transparent 320deg
+    );
+    animation: aurora-spin 16s linear infinite;
+  }
+  .composer-aurora-2 {
+    background: conic-gradient(
+      from 180deg,
+      transparent 0deg,
+      color-mix(in oklch, var(--model-color) 18%, transparent) 80deg,
+      transparent 200deg,
+      color-mix(in oklch, var(--model-color) 28%, transparent) 290deg,
+      transparent 360deg
+    );
+    animation: aurora-spin-rev 22s linear infinite;
+  }
+  .composer:focus-within .composer-aurora,
+  .composer:focus-within .composer-aurora-2 { opacity: 0.75; }
+  .composer.streaming .composer-aurora,
+  .composer.streaming .composer-aurora-2 { opacity: 0.95; }
+  @keyframes aurora-spin {
+    to { transform: rotate(360deg); }
+  }
+  @keyframes aurora-spin-rev {
+    to { transform: rotate(-360deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-aurora, .composer-aurora-2 { animation: none; opacity: 0.25; }
+    .composer:focus-within .composer-aurora,
+    .composer:focus-within .composer-aurora-2 { opacity: 0.4; }
+  }
 
   .composer.streaming {
-    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-color: color-mix(in oklch, var(--model-color) 50%, var(--border));
   }
-  /* Animated top-edge streaming bar — replaces the StatusHub indicator. */
+  /* Animated top-edge streaming bar — tinted to current model. */
   .composer.streaming::before {
     content: "";
     position: absolute;
@@ -860,9 +1124,9 @@
     height: 1.5px;
     background: linear-gradient(90deg,
       transparent,
-      var(--accent),
-      color-mix(in oklch, var(--accent) 70%, white 30%),
-      var(--accent),
+      var(--model-color),
+      color-mix(in oklch, var(--model-color) 70%, white 30%),
+      var(--model-color),
       transparent);
     background-size: 200% 100%;
     animation: composer-stream 2.6s ease-in-out infinite;
@@ -878,6 +1142,11 @@
     .composer.streaming::before { animation: none; opacity: 0.7; }
   }
 
+  .textarea-wrap {
+    position: relative;
+    z-index: 1;
+    display: flex;
+  }
   textarea {
     position: relative;
     z-index: 1;
@@ -895,10 +1164,34 @@
     overflow-y: auto;
   }
   textarea::placeholder {
-    color: var(--fg-subtle);
-    transition: color 200ms ease-out;
+    color: transparent;
   }
-  .composer:focus-within textarea::placeholder { color: var(--fg-faint); }
+  /* Custom ghost placeholder — sits over the textarea, fades+rotates so the
+     idle composer feels alive but not noisy. {#key placeholderKey} retriggers
+     `placeholder-fade` on each cycle. `.static` skips the animation for
+     non-rotating contexts (streaming / attachment hints). */
+  .placeholder-ghost {
+    position: absolute;
+    top: 8px; left: 10px; right: 10px;
+    pointer-events: none;
+    font-size: var(--fs-md);
+    line-height: 1.5;
+    color: var(--fg-subtle);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    animation: placeholder-fade 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    z-index: 0;
+  }
+  .placeholder-ghost.static { animation: none; }
+  .composer:focus-within .placeholder-ghost { color: var(--fg-faint); }
+  @keyframes placeholder-fade {
+    from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+    to   { opacity: 1; transform: translateY(0);   filter: blur(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .placeholder-ghost { animation: none; }
+  }
 
   /* Toolbar row — left cluster (input affordances) + right cluster (action). */
   .composer-toolbar {
@@ -959,6 +1252,31 @@
   @keyframes mic-pulse {
     0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 45%, transparent); }
     50%      { box-shadow: 0 0 0 6px transparent; }
+  }
+  /* Live recording waveform — 3 bars w/ staggered scaleY pulses. Pure CSS;
+     no audio analyser needed for the visual cue. The .recording state on
+     .micbtn paints the bg red and forces white bars via currentColor. */
+  .mic-wave {
+    display: inline-flex; align-items: center; gap: 2px;
+    height: 12px;
+  }
+  .mic-wave span {
+    width: 2.5px;
+    height: 100%;
+    background: currentColor;
+    border-radius: 999px;
+    transform-origin: center;
+    animation: mic-bar 0.9s ease-in-out infinite;
+  }
+  .mic-wave span:nth-child(1) { animation-delay: 0s; }
+  .mic-wave span:nth-child(2) { animation-delay: 0.15s; }
+  .mic-wave span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes mic-bar {
+    0%, 100% { transform: scaleY(0.35); }
+    50%      { transform: scaleY(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mic-wave span { animation: none; transform: scaleY(0.7); }
   }
 
   /* Live character count — surfaces only when draft is non-empty. Warns
@@ -1032,6 +1350,58 @@
   .sendbtn.stop:hover { filter: brightness(1.08); transform: translateY(-1px); }
   .sendbtn.queue {
     background: color-mix(in oklch, var(--accent) 70%, var(--surface));
+  }
+  /* Launch ripple — two concentric rings expand outward on every fire().
+     Mounted by {#key fireKey}; self-removed when the animation ends via
+     the unmount on the next key flip. */
+  .send-ripple {
+    position: absolute;
+    inset: -2px;
+    border-radius: 14px;
+    border: 1.5px solid color-mix(in oklch, var(--model-color) 70%, transparent);
+    opacity: 0.85;
+    pointer-events: none;
+    animation: send-ripple 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .send-ripple-2 {
+    animation-delay: 90ms;
+    border-color: color-mix(in oklch, var(--model-color) 55%, transparent);
+  }
+  @keyframes send-ripple {
+    from { transform: scale(0.6); opacity: 0.9; }
+    to   { transform: scale(2.2); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .send-ripple { animation: none; opacity: 0; }
+  }
+  /* Upward chat-column sweep — a thin gradient bar shoots upward from the
+     composer into the chat scroller on every fire(). Anchored to
+     .composer-wrap (which is position: relative), travels 100vh up via
+     translateY animation; clipped invisibly by the scroller's overflow. */
+  .send-sweep {
+    position: absolute;
+    left: 18px; right: 18px;
+    top: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in oklch, var(--model-color) 65%, transparent) 30%,
+      color-mix(in oklch, var(--model-color) 85%, white 10%) 50%,
+      color-mix(in oklch, var(--model-color) 65%, transparent) 70%,
+      transparent 100%);
+    box-shadow: 0 0 14px color-mix(in oklch, var(--model-color) 55%, transparent);
+    pointer-events: none;
+    z-index: 5;
+    animation: send-sweep 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes send-sweep {
+    0%   { transform: translateY(0)     scaleX(0.3); opacity: 0; }
+    18%  { transform: translateY(-12px) scaleX(1);   opacity: 1; }
+    100% { transform: translateY(-72vh) scaleX(0.4); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .send-sweep { animation: none; opacity: 0; }
   }
 
   .icon-stack {
@@ -1201,6 +1571,16 @@
     cursor: pointer;
     font: inherit;
     transition: background 140ms ease-out;
+    /* Stagger each item's entry — driven by inline style="--idx: {i}". */
+    animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--idx, 0) * 22ms);
+  }
+  @keyframes slash-item-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .slash-item { animation: none; }
   }
   .slash-item:hover, .slash-item.active {
     background: color-mix(in oklch, var(--accent) 11%, transparent);
@@ -1243,41 +1623,77 @@
     background: var(--accent-soft);
     opacity: 1;
   }
-  .hint-pop {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
-    min-width: 180px;
-    padding: 8px 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 10px 24px oklch(0 0 0 / 0.35);
-    z-index: 12;
-    display: flex; flex-direction: column; gap: 6px;
-    animation: hint-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Hint popover — viewport-fixed so it escapes .composer's overflow:hidden.
+     Coords computed in positionHint(). `:global()` because Svelte 5 scopes
+     style by the markup it sees; this element renders inside the composer
+     but the CSS would otherwise be tree-shaken since the popover has been
+     moved out of scoped scope by some HMR paths. */
+  :global(.hint-pop) {
+    position: fixed;
+    min-width: 240px;
+    padding: 10px 14px 8px;
+    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border));
+    border-radius: 12px;
+    box-shadow:
+      0 16px 40px -8px oklch(0 0 0 / 0.6),
+      0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    z-index: 9998;
+    display: flex; flex-direction: column; gap: 2px;
+    animation: hint-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
     transform-origin: bottom left;
+  }
+  :global(.hint-pop .hint-head) {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
   }
   @keyframes hint-in {
     from { opacity: 0; transform: translateY(4px) scale(0.98); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .hint-pop { animation: none; }
+    :global(.hint-pop) { animation: none; }
   }
-  .hint-row {
-    display: inline-flex; align-items: center; gap: 6px;
+  :global(.hint-pop .hint-row) {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 2px;
     font-size: var(--fs-xs);
-    color: var(--fg-muted);
+    color: var(--fg-2);
   }
-  .hint-row kbd {
-    font-family: inherit;
-    font-size: 10px;
-    padding: 1px 5px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 3px;
+  :global(.hint-pop .hint-keys) {
+    display: inline-flex; align-items: center; gap: 3px;
+    justify-content: flex-start;
+  }
+  :global(.hint-pop .hint-row > span:last-child) {
     color: var(--fg-muted);
+    text-align: left;
+    line-height: 1.3;
+  }
+  :global(.hint-pop kbd) {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px;
+    padding: 0 6px;
+    font-family: var(--font-ui);
+    font-size: 10.5px;
+    font-weight: 600;
+    background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border-strong) 70%, transparent);
+    border-radius: 4px;
+    color: var(--fg);
+    line-height: 1;
+    letter-spacing: 0.01em;
   }
 
   .model-pill {
@@ -1309,10 +1725,31 @@
   .model-pill[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
   .model-pill[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
   .model-pill[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  /* Streaming = breathing glow around the pill + dot grows. Loops in
+     sync (2.6s) w/ the composer top-edge streaming bar. */
+  .model-pill.streaming {
+    border-color: color-mix(in oklch, var(--model-color) 50%, var(--border));
+    animation: model-pill-breathe 2.6s ease-in-out infinite;
+  }
+  .model-pill.streaming .model-dot-mini {
+    animation: model-dot-breathe 2.6s ease-in-out infinite;
+  }
+  @keyframes model-pill-breathe {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
+    50%      { box-shadow: 0 0 14px color-mix(in oklch, var(--model-color) 45%, transparent); }
+  }
+  @keyframes model-dot-breathe {
+    0%, 100% { transform: scale(1);   filter: brightness(1); }
+    50%      { transform: scale(1.25); filter: brightness(1.3); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .model-pill.streaming,
+    .model-pill.streaming .model-dot-mini { animation: none; }
+  }
 
   .effort-pill {
     align-self: center;
-    display: inline-flex; align-items: center;
+    display: inline-flex; align-items: center; gap: 5px;
     padding: 0 10px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
@@ -1324,7 +1761,46 @@
     font-weight: 600;
     height: 26px;
     letter-spacing: 0.02em;
+    overflow: hidden;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+  }
+  /* Signal-bar effort indicator — 3 vertical bars growing left-to-right.
+     `data-level` (1|2|3) fills bars in current color; unfilled bars stay
+     dim. Same visual vocab as wifi/battery so the ladder reads instantly. */
+  .effort-bars {
+    display: inline-flex; align-items: flex-end; gap: 2px;
+    height: 11px;
+    animation: effort-bars-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .effort-bars .bar {
+    width: 2.5px;
+    background: color-mix(in oklch, currentColor 22%, transparent);
+    border-radius: 1px;
+    transition: background 200ms ease-out, height 200ms ease-out;
+  }
+  .effort-bars .bar:nth-child(1) { height: 35%; }
+  .effort-bars .bar:nth-child(2) { height: 65%; }
+  .effort-bars .bar:nth-child(3) { height: 100%; }
+  .effort-bars[data-level="1"] .bar:nth-child(1),
+  .effort-bars[data-level="2"] .bar:nth-child(-n+2),
+  .effort-bars[data-level="3"] .bar { background: currentColor; }
+  /* Active bar gets a tiny pulse — draws the eye to the current rung. */
+  .effort-bars[data-level="1"] .bar:nth-child(1),
+  .effort-bars[data-level="2"] .bar:nth-child(2),
+  .effort-bars[data-level="3"] .bar:nth-child(3) {
+    animation: effort-bar-tip 1.8s ease-in-out infinite;
+  }
+  @keyframes effort-bars-in {
+    from { opacity: 0; transform: translateY(-2px) scale(0.6); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+  @keyframes effort-bar-tip {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.6; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .effort-bars { animation: none; }
+    .effort-bars .bar { animation: none; }
   }
   .effort-pill:hover {
     background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));

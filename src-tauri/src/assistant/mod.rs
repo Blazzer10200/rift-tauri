@@ -1025,9 +1025,12 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     Ok(out)
 }
 
+/// Phase 6 (#37): renderer must never see the secret value — only whether
+/// one is configured. Replaces the legacy `assistant_get_api_key` cmd which
+/// returned the plaintext value to JS.
 #[tauri::command]
-pub fn assistant_get_api_key() -> Result<Option<String>, String> {
-    Ok(current_api_key())
+pub fn assistant_get_api_key_present() -> Result<bool, String> {
+    Ok(current_api_key().is_some())
 }
 
 #[tauri::command]

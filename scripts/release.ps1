@@ -221,6 +221,28 @@ $ghArgs += @($setupPath, $sigPath, $latestPath)
 & gh @ghArgs
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 
+# --- Round-trip verify ---------------------------------------------------
+# Download the just-uploaded Setup.exe and SHA256-compare against the local
+# pre-upload artifact. Catches corrupt/wrong-asset uploads before clients see
+# a broken update (issue #18).
+Write-Host '=== Round-trip verify (SHA256) ===' -ForegroundColor Cyan
+$verifyDir = Join-Path $releasesDir "verify-$version"
+if (Test-Path $verifyDir) { Remove-Item -Recurse -Force $verifyDir }
+New-Item -ItemType Directory -Path $verifyDir | Out-Null
+gh release download $tag --repo $releaseRepo --pattern "*-setup.exe" -D $verifyDir
+if ($LASTEXITCODE -ne 0) { throw 'gh release download (verify) failed' }
+$downloaded = @(Get-ChildItem -Path $verifyDir -Filter '*-setup.exe' -File)
+if ($downloaded.Count -ne 1) {
+    throw "Expected exactly one downloaded *-setup.exe in $verifyDir, found $($downloaded.Count)"
+}
+$localHash = (Get-FileHash -Algorithm SHA256 -Path $setupPath).Hash
+$remoteHash = (Get-FileHash -Algorithm SHA256 -Path $downloaded[0].FullName).Hash
+if ($localHash -ne $remoteHash) {
+    throw "Round-trip verify FAILED: local SHA256=$localHash remote SHA256=$remoteHash. Setup.exe upload corrupted."
+}
+Write-Host "  SHA256 match: $localHash" -ForegroundColor Green
+Remove-Item -Recurse -Force $verifyDir
+
 # --- Verify --------------------------------------------------------------
 Write-Host '=== Release published ===' -ForegroundColor Green
 gh release view $tag --repo $releaseRepo

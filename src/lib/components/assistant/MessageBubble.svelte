@@ -7,6 +7,7 @@
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Tool blocks that render inline as a full side-by-side diff (vs the
   // compact ToolChip). Edit-family only — everything else gets a chip.
   function isInlineDiffTool(name: string): boolean {
@@ -274,8 +275,16 @@
     return `${name} ${m[2]}.${m[3]}`;
   }
   const modelLabel = $derived(message.model ? shortModel(message.model) : null);
+  // Family key for aurora tinting — drives the bubble's left rail + avatar
+  // halo color so each assistant turn carries the same hue as the composer
+  // that produced it.
+  const modelFamily = $derived.by<"sonnet" | "opus" | "haiku" | null>(() => {
+    if (!message.model) return null;
+    const m = /claude-(opus|sonnet|haiku)/i.exec(message.model);
+    return m ? (m[1].toLowerCase() as "sonnet" | "opus" | "haiku") : null;
+  });
   const costLabel = $derived(
-    typeof message.costUsd === "number" ? `$${message.costUsd.toFixed(4)}` : null,
+    typeof message.costUsd === "number" ? `${message.costUsd.toFixed(4)}` : null,
   );
 
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
@@ -334,18 +343,18 @@
       onclick={() => (boundaryExpanded = !boundaryExpanded)}
       aria-expanded={boundaryExpanded}
       disabled={isCompacting}
-      title={isCompacting ? "Summarizing…" : `Click to ${boundaryExpanded ? "hide" : "show"} the compaction summary`}
+      use:tooltip={isCompacting ? "Summarizing…" : `Click to ${boundaryExpanded ? "hide" : "show"} the compaction summary`}
     >
       <span class="boundary-line" aria-hidden="true"></span>
       <span class="boundary-pill">
         <Sparkles size={11} />
         {#if isCompacting}
-          <span class="live-dot" aria-label="Compacting" title="Summarizing in progress"></span>
+          <span class="live-dot" aria-label="Compacting" use:tooltip={"Summarizing in progress"}></span>
           <span>Compacting · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} · {boundaryBlock.summary.length.toLocaleString()} chars</span>
         {:else}
           <span>Conversation compacted · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} archived</span>
           {#if typeof boundaryBlock.ctxPctBefore === "number" && typeof boundaryBlock.ctxPctEstAfter === "number"}
-            <span class="boundary-meta mono" title="Context window utilization — pre-compact → estimated post-compact">
+            <span class="boundary-meta mono" use:tooltip={"Context window utilization — pre-compact → estimated post-compact"}>
               Ctx {Math.round(boundaryBlock.ctxPctBefore)}% → est {Math.round(boundaryBlock.ctxPctEstAfter)}%
             </span>
           {/if}
@@ -362,7 +371,7 @@
     {/if}
   </div>
 {:else}
-<div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
+<div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null}>
   {#if !isUser}
     <div class="turn-rail" aria-hidden="true"></div>
   {/if}
@@ -376,14 +385,14 @@
         <span class="role-name">Claude</span>
         {#if modelLabel}
           <span class="head-sep" aria-hidden="true">·</span>
-          <span class="head-model" title="Model for this turn">{modelLabel}</span>
+          <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
         {/if}
         {#if streaming}
-          <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
-          {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
+          <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
+          {#if heartbeatLabel}<span class="heartbeat mono" use:tooltip={"Elapsed since turn started"}>{heartbeatLabel}</span>{/if}
         {/if}
         {#if plainText.length > 0}
-          <button class="copybtn" type="button" onclick={copy} title="Copy">
+          <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
             {#if copied}
               <Check size={11} />
             {:else}
@@ -419,7 +428,7 @@
           <button
             type="button"
             class="user-image-thumb"
-            title="Click to view full size"
+            use:tooltip={"Click to view full size"}
             onclick={() => window.open(`data:${b.mime};base64,${b.dataBase64}`, "_blank")}
           >
             <img
@@ -488,10 +497,16 @@
             streaming && isLastNode && unit.status === "neutral"
               ? "pending"
               : unit.status}
+          {@const prev = ui > 0 ? grouped[ui - 1] : null}
+          {@const groupCont =
+            unit.block.type !== "text" &&
+            prev?.kind === "block" &&
+            prev.block.type !== "image"}
           <div
             class="tl-node"
             data-kind={nodeKind(unit.block)}
             data-status={nodeStatus}
+            data-group-cont={groupCont ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
             {@render renderBlock(unit.block, ui)}
@@ -502,7 +517,10 @@
     </div>
 
     {#if !isUser && !streaming && costLabel}
-      <div class="cost-pill mono" title="Turn cost">{costLabel}</div>
+      <div class="turn-footer" aria-hidden="true">
+        <span class="turn-footer-rule"></span>
+        <span class="cost-pill mono" use:tooltip={"Turn cost"}>{costLabel}</span>
+      </div>
     {/if}
   </div>
 </div>
@@ -588,6 +606,12 @@
     position: relative;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  /* Per-bubble aurora color — sonnet=blue, opus=purple, haiku=teal. Falls
+     back to --accent for system/user turns without a model. */
+  .bubble[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .bubble[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .bubble[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .bubble                      { --model-color: var(--accent); }
   /* User bubbles drop the rail entirely + right-align — the bubble shape
      already signals "you", and the position differentiates from Claude
      without forcing a rail on user messages. */
@@ -613,12 +637,12 @@
     transition: background 200ms ease-out;
   }
   .bubble[data-streaming="true"] .turn-rail {
-    background: color-mix(in oklch, var(--accent) 55%, transparent);
+    background: color-mix(in oklch, var(--model-color) 55%, transparent);
     animation: rail-stream 2.4s ease-in-out infinite;
   }
   @keyframes rail-stream {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
-    50%      { box-shadow: 0 0 6px 0 color-mix(in oklch, var(--accent) 28%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
+    50%      { box-shadow: 0 0 6px 0 color-mix(in oklch, var(--model-color) 32%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bubble[data-streaming="true"] .turn-rail { animation: none; }
@@ -630,17 +654,17 @@
     width: 22px; height: 22px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: color-mix(in oklch, var(--model-color) 14%, transparent);
+    color: var(--model-color);
     flex-shrink: 0;
-    transition: box-shadow 240ms ease-out;
+    transition: box-shadow 240ms ease-out, background 240ms ease-out, color 240ms ease-out;
   }
   .bubble[data-streaming="true"] .avatar {
     animation: avatar-halo 1.8s ease-in-out infinite;
   }
   @keyframes avatar-halo {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
-    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
+    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--model-color) 28%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bubble[data-streaming="true"] .avatar { animation: none; }
@@ -764,11 +788,28 @@
     .skl, .stage-dot, .stage-label, .skeleton-lines { animation: none; }
   }
 
-  /* Cost pill — sits flush-right under the turn's content as the "closing
-     beat" for a finished turn. Migrated out of the orphan footer-line. */
+  /* End-of-turn footer — thin full-width rule + cost-pill on the right gives
+     the assistant turn a clear closing beat so mid-turn tool blocks aren't
+     mistaken for the final answer (#2). The rule is the visual divider;
+     the pill is the residue. */
+  .turn-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .turn-footer-rule {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(
+      to right,
+      transparent,
+      color-mix(in oklch, var(--fg-muted) 22%, transparent) 25%,
+      color-mix(in oklch, var(--fg-muted) 22%, transparent) 100%
+    );
+  }
   .cost-pill {
-    align-self: flex-end;
-    margin-top: 10px;
     padding: 2px 8px;
     border-radius: 999px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
@@ -778,7 +819,6 @@
     line-height: 1.4;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
-    animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .body { display: flex; flex-direction: column; }
 
@@ -790,6 +830,18 @@
     position: relative;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--idx, 0) * 35ms);
+  }
+  /* #2 Option A — narration-grouping spacing. A tool/edit/thinking node that
+     follows a prose or tool block in the same turn sits tight (4px) so it
+     visually belongs to the preceding narration. A tool/edit/thinking that
+     starts a new group, or a prose node that follows a tool (= new narration),
+     gets a wider gap (12px) — telegraphs "new beat" so multi-Edit turns stop
+     reading as if the message ended after the first big block. */
+  .bubble[data-role="assistant"] .tl-node:not(:first-child) {
+    margin-top: 0.5rem;
+  }
+  .bubble[data-role="assistant"] .tl-node[data-group-cont="true"] {
+    margin-top: 0.25rem;
   }
   .tl-node::before {
     content: "";
@@ -887,7 +939,7 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .tl-node, .tl-divider, .cost-pill { animation: none; }
+    .tl-node, .tl-divider, .cost-pill, .turn-footer { animation: none; }
     .tl-node[data-status="pending"]::before,
     .tl-node[data-kind="thinking"][data-status="pending"]::before { animation: none; }
   }

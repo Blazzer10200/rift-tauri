@@ -199,3 +199,67 @@ pub fn set_server_fingerprint(server_key: String, fingerprint: String) -> Result
 pub fn read_default_ssh_pub_key() -> Option<String> {
     transport::SshKeygen::read_default_pub_key()
 }
+
+/// Quick sanity-check of an arbitrary SSH private-key file. Verifies the path
+/// exists, is a file, isn't empty, and starts with a recognized header
+/// (`-----BEGIN ` for PEM / OpenSSH). Doesn't try to parse the key — that's
+/// russh's job at connect time — just catches "picked the wrong file" before
+/// the user proceeds past the import step.
+#[tauri::command]
+pub fn validate_ssh_key_file(path: String) -> Result<(), String> {
+    let p = std::path::PathBuf::from(&path);
+    reject_path_traversal(&p, "path")?;
+    let meta = std::fs::metadata(&p).map_err(|e| format!("not readable: {e}"))?;
+    if !meta.is_file() {
+        return Err("path is not a file".into());
+    }
+    if meta.len() == 0 {
+        return Err("file is empty".into());
+    }
+    let mut buf = [0u8; 32];
+    use std::io::Read;
+    let n = std::fs::File::open(&p)
+        .and_then(|mut f| f.read(&mut buf))
+        .map_err(|e| format!("read header: {e}"))?;
+    let head = std::str::from_utf8(&buf[..n]).unwrap_or("");
+    if !head.starts_with("-----BEGIN ") {
+        return Err("doesn't look like an SSH private key (missing -----BEGIN header)".into());
+    }
+    Ok(())
+}
+
+/// Clear the pinned TOFU fingerprint for `server_key`. Next connect re-triggers
+/// the fingerprint-confirm dialog. Use after the remote host's SSH host key
+/// has legitimately rotated (server re-key, OS reinstall).
+#[tauri::command]
+pub fn clear_server_fingerprint(server_key: String) -> Result<(), String> {
+    let mut cfg = profile::RiftConfig::load()?;
+    let pos = cfg
+        .servers
+        .iter()
+        .position(|s| s.key == server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?;
+    cfg.servers[pos].fingerprint = None;
+    cfg.save().map_err(|e| format!("save profile: {e}"))?;
+    Ok(())
+}
+
+/// Generate a fresh random bridge token for `server_key`, store it in the OS
+/// keychain, and return the new value so the UI can show it once for the user
+/// to copy into the remote bridge config. 24 bytes, base64url-encoded — same
+/// shape as the local assistant bridge token.
+#[tauri::command]
+pub fn rotate_bridge_token(server_key: String) -> Result<String, String> {
+    let cfg = profile::RiftConfig::load()?;
+    if !cfg.servers.iter().any(|s| s.key == server_key) {
+        return Err(format!("no server with key '{server_key}'"));
+    }
+    let mut bytes = [0u8; 24];
+    rand::fill(&mut bytes);
+    let token = base64::Engine::encode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        bytes,
+    );
+    profile::set_server_bridge_token(&server_key, Some(&token))?;
+    Ok(token)
+}

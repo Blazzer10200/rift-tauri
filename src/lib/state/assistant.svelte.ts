@@ -7,567 +7,96 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { accessibility } from "./accessibility.svelte";
 
-export type WorkspaceState = {
-  current: string | null;
-  recent: string[];
-};
+// M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
+// here so external callers like `import type { Block } from "$lib/state/assistant.svelte"`
+// keep working. See `docs/design/assistant-svelte-split.md`.
+export type {
+  WorkspaceState,
+  AuthStatus,
+  ToolBlock,
+  TextBlock,
+  ThinkingBlock,
+  BoundaryBlock,
+  ImageBlock,
+  Block,
+  ChatMessage,
+  ConversationMeta,
+  SummarizeResult,
+  ThinkingEffort,
+  PaneState,
+} from "./assistant/types";
+export { MAX_PANES } from "./assistant/types";
+import type {
+  WorkspaceState,
+  AuthStatus,
+  ToolBlock,
+  ThinkingBlock,
+  BoundaryBlock,
+  ImageBlock,
+  Block,
+  ChatMessage,
+  ConversationMeta,
+  SummarizeResult,
+  CompactionHistoryEntry,
+  ConversationRecord,
+  ContentBlock,
+  StreamDelta,
+  StreamEvent,
+  StreamEnvelope,
+  RemoteLockEvt,
+  RemoteShellEvt,
+  ThinkingEffort,
+  TurnRecord,
+  PaneState,
+} from "./assistant/types";
+import { MAX_PANES } from "./assistant/types";
 
-export type AuthStatus = {
-  cliPresent: boolean;
-  cliVersion: string | null;
-  loggedIn: boolean;
-  authMethod: string | null;
-  apiProvider: string | null;
-  email: string | null;
-  subscriptionType: string | null;
-  apiKeyConfigured: boolean;
-  pill: "green" | "yellow" | "red";
-  summary: string;
-};
+// M1 split (2026-05-26): helpers lifted to `./assistant/helpers`. Re-export
+// the one externally-imported symbol so call sites stay unchanged.
+import {
+  loadModel,
+  saveModel,
+  loadEffort,
+  saveEffort,
+  flattenToolResult,
+  previewToolInput,
+  messagesHaveContextSignals,
+  effortToFlag,
+} from "./assistant/helpers";
+export { messagesHaveContextSignals } from "./assistant/helpers";
 
-export type ToolBlock = {
-  type: "tool";
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  result: string | null;
-  isError: boolean;
-  status: "pending" | "done" | "error";
-  // S124: wall-clock start (ms epoch) on tool_use, end (ms epoch) on
-  // tool_result. Lets the chip render an inline duration badge when the
-  // call was slow (>1s). Optional — legacy records omit both fields.
-  startedAt?: number;
-  durationMs?: number;
-};
-
-export type TextBlock = {
-  type: "text";
-  text: string;
-};
-
-export type ThinkingBlock = {
-  type: "thinking";
-  // Plaintext reasoning if the API streamed it. Often empty in -p mode —
-  // Anthropic encrypts thinking content and only emits the signature, in
-  // which case we show duration + a "reasoning recorded" hint instead.
-  text: string;
-  // Encrypted signature blob received (presence flag — we don't render it).
-  hasSignature: boolean;
-  // Wall-clock start (ms epoch) — set on content_block_start. Used by the
-  // bubble to render a live elapsed counter during active reasoning. Without
-  // this the UI sat at "Thinking …" for the full 17-40s of an Opus reasoning
-  // block; the live counter converts dead air into a heartbeat.
-  startedAt: number;
-  // Wall-clock duration of the reasoning step. Null while still active.
-  durationMs: number | null;
-  status: "active" | "done";
-};
-
-/** Compaction Phase C: synthetic block that marks the boundary where a
- *  CLI session was retired in favor of a summary. Renders as a collapsed
- *  pill ("Conversation compacted · N turns archived") with the summary
- *  text on expand. Owned by a `role: "system"` message — third role
- *  alongside user/assistant. */
-export type BoundaryBlock = {
-  type: "boundary";
-  summary: string;
-  at: number;
-  archivedCount: number;
-  costUsd: number;
-  summaryModel: string;
-  // S124: true while the summarize call is in-flight; flipped to false on
-  // the final 'done' event. Drives the streaming spinner in MessageBubble.
-  streaming?: boolean;
-  // Phase E1: ctx% snapshot at the moment the compact fired (pre) and the
-  // estimated ctx% the new session starts at (post = summary tokens / window).
-  // Rendered as "Ctx X% → est Y%" in the boundary pill so the user sees
-  // headroom won. Optional for legacy boundaries pre-E1.
-  ctxPctBefore?: number;
-  ctxPctEstAfter?: number;
-};
-
-/** User-attached image — pasted/dropped into the composer, persisted on the
- *  outgoing user message so the chat shows what the user actually sent (not
- *  just the text). Mirrors the composer attachment shape minus `id` (id is
- *  composer-local). dataBase64 is the source-of-truth; previewUrl is an
- *  ephemeral blob URL re-mintable from data if missing. */
-export type ImageBlock = {
-  type: "image";
-  mime: string;
-  dataBase64: string;
-  sizeBytes: number;
-};
-
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
-
-export type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "system";
-  blocks: Block[];
-  /** Per-turn cost in USD captured from the CLI `result` envelope. Only set
-   *  on assistant messages after the turn completes. */
-  costUsd?: number | null;
-  /** Resolved model id captured from the CLI `system:init` envelope. */
-  model?: string | null;
-};
-
-export type ConversationMeta = {
-  id: string;
-  title: string;
-  model: string;
-  messageCount: number;
-  createdAt: number;
-  updatedAt: number;
-  /** Phase E5: flattened compactionHistory summaries for HistoryDrawer
-   *  search. Absent or empty for convos that never compacted. */
-  compactionSummaries?: string[];
-};
-
-/** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in
- *  `assistant/mod.rs` (camelCase serde). Phase C consumes the summary
- *  text + cost figures when minting a boundary message. */
-export type SummarizeResult = {
-  summary: string;
-  model: string;
-  costUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreateTokens: number;
-};
-
-type CompactionHistoryEntry = {
-  at: number;
-  priorSessionId: string;
-  newSessionId: string;
-  summary: string;
-  costUsd: number;
-  summaryModel: string;
-  archivedCount: number;
-};
-
-type ConversationRecord = {
-  id: string;
-  title: string;
-  model: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: ChatMessage[];
-  // CLI session UUID (--session-id / --resume target). Decoupled from `id` in
-  // S103 so compaction can mint a fresh CLI session without breaking tab
-  // persistence. Optional for backward compat — legacy convos fall back to
-  // `id` on load.
-  cliSessionId?: string;
-  // Phase E prerequisite: ordered list of compactions that happened on this
-  // convo. The BoundaryBlock in `messages` is the user-visible artifact; this
-  // is the structured record for search / cleanup sweep. Absent for legacy.
-  compactionHistory?: CompactionHistoryEntry[];
-};
-
-// Minimal stream-json envelope shape we care about.
-type ContentBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking?: string; signature?: string }
-  | { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean };
-
-type StreamDelta = {
-  type?: string;
-  text?: string;
-  thinking?: string;
-  signature?: string;
-};
-
-type StreamEvent = {
-  type?: string;
-  index?: number;
-  content_block?: ContentBlock;
-  delta?: StreamDelta;
-};
-
-type StreamEnvelope =
-  | { type: "system"; subtype?: string; [k: string]: unknown }
-  | { type: "stream_event"; event?: StreamEvent; [k: string]: unknown }
-  | { type: "assistant"; message: { content: ContentBlock[] } }
-  | { type: "user"; message: { content: ContentBlock[] } }
-  | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
-
-type RemoteLockEvt = {
-  file_path: string;
-  user: string;
-  host: string;
-  since: string;
-};
-
-type RemoteShellEvt = {
-  command: string;
-  remote_root: string;
-  at: string;
-};
-
-const MODEL_KEY = "rift.assistant.model";
-const EFFORT_KEY = "rift.assistant.thinkingEffort";
-
-export type ThinkingEffort = "none" | "quick" | "deep";
-
-function loadModel(): "sonnet" | "opus" | "haiku" {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(MODEL_KEY) : null;
-    if (v === "sonnet" || v === "opus" || v === "haiku") return v;
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return "sonnet";
-}
-
-function saveModel(v: "sonnet" | "opus" | "haiku") {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(MODEL_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
-}
-
-function loadEffort(): ThinkingEffort {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(EFFORT_KEY) : null;
-    if (v === "none" || v === "quick" || v === "deep") return v;
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return "quick";
-}
-
-function saveEffort(v: ThinkingEffort) {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(EFFORT_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
-}
-
-function flattenToolResult(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text: unknown }).text ?? "") : ""))
-      .join("");
-  }
-  return "";
-}
-
-/** Telemetry record for a single Claude turn. Filled progressively as
- *  envelopes arrive; finalized on done / error / session-lost. Captured into
- *  AssistantStore.telemetry.turns so a `/diag` export can show the full
- *  session shape (cache behavior, tool patterns, blank turns, model switches,
- *  cost trend). */
-type TurnRecord = {
-  // Identity
-  ts: number;                                      // turn start (ms epoch)
-  convoId: string;
-  cliSessionId: string;
-  isFirstTurn: boolean;
-  model: "sonnet" | "opus" | "haiku";
-  effort: "none" | "quick" | "deep";
-  /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping).
-   *  Haiku doesn't get an effort flag → null. */
-  effortFlag: "low" | "medium" | "high" | null;
-  // Input
-  promptLen: number;
-  /** First ~120 chars of the user's prompt, post-trim. Lets a `/diag` reader
-   *  identify which turn was which without the raw text dump. */
-  promptPreview: string;
-  attachmentsCount: number;
-  attachmentsBytes: number;
-  // Usage (filled progressively — envelope = mid-stream, result = final)
-  envelopeUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
-  resultUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
-  modelId: string | null;                          // resolved "claude-sonnet-4-6" etc.
-  costUsd: number | null;
-  // Stream stats
-  deltaCount: number;
-  /** Number of `stream_event` envelopes received this turn. Zero is the
-   *  smoking gun for `--include-partial-messages` not being honored. */
-  streamEventCount: number;
-  /** Number of `assistant` envelopes (per-message snapshots). */
-  assistantEnvCount: number;
-  /** Longest pause btw consecutive `stream_event` envelopes this turn (ms).
-   *  CONFLATED w/ tool wall-time: a 12s Bash will register as a 12s gap b/c
-   *  the CLI sits idle waiting for `tool_result`. Cross-ref with the largest
-   *  `toolUses[].durationMs` of the same turn — if maxStreamGapMs ≈ that
-   *  tool's duration, it's just tool wait. If it's bigger or there's no
-   *  matching tool, it's a real API/network stall. */
-  maxStreamGapMs: number;
-  /** Per-tool record w/ wall timing + error status + a short input preview.
-   *  `completedAt` stays null if the `tool_result` never arrived (turn ended
-   *  early or tool hung). `inputPreview` is first ~120 chars of the most
-   *  diagnostic field (command for Bash, file_path for Read/Write/Edit,
-   *  pattern for Grep/Glob, url for WebFetch, query for WebSearch) — answers
-   *  "the Bash ran 12s, doing WHAT?". */
-  toolUses: {
-    name: string;
-    id: string;
-    startedAt: number;
-    completedAt: number | null;
-    durationMs: number | null;
-    isError: boolean | null;
-    inputPreview: string | null;
-  }[];
-  thinkingCount: number;
-  thinkingTotalMs: number;
-  /** Per-block detail filled in endThinking. Lets a `/diag` reader see if a
-   *  turn had one long think vs many short interleaved thinks. */
-  /** `charCount` stays 0 in `-p` mode (API encrypts thinking plaintext);
-   *  `hasSignature` is the truthier "did we get a real thinking block" signal. */
-  thinkingBlocks: { startedAt: number; durationMs: number; charCount: number; hasSignature: boolean }[];
-  envelopeFallback: boolean;                       // fired the "zero deltas, flush envelope" path
-  blankTurn: boolean;                              // ended w/ no text + no tools
-  // Timing
-  firstPaintAt: number | null;
-  doneAt: number | null;
-  endKind: "success" | "user-stop" | "session-lost" | "error" | null;
-  errorMsg?: string;
-};
-
-/** First-priority field to preview for each known tool. Returns first ~120
- *  chars of that field's string value, or null. Keeps /diag readable while
- *  still answering "what did this tool actually do?". */
-function previewToolInput(name: string, input: Record<string, unknown> | undefined): string | null {
-  if (!input) return null;
-  const fields = ["command", "file_path", "pattern", "path", "url", "query"] as const;
-  for (const f of fields) {
-    const v = input[f];
-    if (typeof v === "string" && v.length > 0) {
-      return v.length > 120 ? v.slice(0, 120) + "…" : v;
-    }
-  }
-  return null;
-}
-
-/** Tool names whose presence in a tab's stream means the Session-panel right
- *  rail has content worth surfacing (files Claude edited, URLs it fetched).
- *  Used by `messagesHaveContextSignals` to gate dock visibility without
- *  duplicating the per-section iteration logic that lives in TasksDock. */
-const CONTEXT_SIGNAL_TOOLS = new Set([
-  "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch",
-]);
-
-/** Early-exit scan: does this message list contain ANY Edit/Write/WebFetch/etc
- *  tool call? Used by AssistantPane + ChatTabsBar to decide whether to render
- *  the Session dock when `tasks` is empty. Cheap — bails on first match. */
-export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
-  for (const m of messages) {
-    for (const b of m.blocks) {
-      if (b.type === "tool" && CONTEXT_SIGNAL_TOOLS.has(b.name)) return true;
-    }
-  }
-  return false;
-}
-
-/** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/mod.rs. */
-function effortToFlag(
-  effort: "none" | "quick" | "deep",
-  model: "sonnet" | "opus" | "haiku",
-): "low" | "medium" | "high" | null {
-  if (model === "haiku") return null;
-  if (effort === "none") return "low";
-  if (effort === "deep") return "high";
-  return "medium";
-}
-
-/** Session-wide telemetry singleton. */
-class SessionTelemetry {
-  startedAt = Date.now();
-  turns: TurnRecord[] = [];
-  /** Non-turn lifecycle events: tab open/close/new/switch, slash commands,
-   *  workspace changes, session-lost recoveries, etc. Cheap to capture. */
-  events: { ts: number; kind: string; detail?: unknown }[] = [];
-
-  event(kind: string, detail?: unknown) {
-    this.events.push({ ts: Date.now(), kind, detail });
-  }
-
-  /** JSON snapshot for /diag clipboard export. */
-  snapshot() {
-    return {
-      startedAt: this.startedAt,
-      capturedAt: Date.now(),
-      durationMs: Date.now() - this.startedAt,
-      turnCount: this.turns.length,
-      summary: this.summarize(),
-      turns: this.turns,
-      events: this.events,
-    };
-  }
-
-  /** Per-session rollup. Self-summarizing JSON so a `/diag` reader doesn't
-   *  have to fold over `turns[]` to see the basics. */
-  private summarize() {
-    const byModel: Record<string, {
-      turns: number;
-      costUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens: number;
-      cacheCreateTokens: number;
-      thinkingTurns: number;
-      blankTurns: number;
-      envelopeFallbacks: number;
-      avgTtfpMs: number | null;
-      avgDoneMs: number | null;
-    }> = {};
-    let totalCost = 0;
-    let blank = 0;
-    let envFallback = 0;
-    let thinkingTurns = 0;
-    let toolCallTotal = 0;
-    let toolErrorTotal = 0;
-    let slowestTool: { name: string; durationMs: number; turnIdx: number } | null = null;
-    const toolNameCounts: Record<string, number> = {};
-    let slowestTurn: { idx: number; durationMs: number } | null = null;
-    let costliestTurn: { idx: number; costUsd: number } | null = null;
-    let firstTurnCostUsd: number | null = null;
-    let coldStartCacheCreate: number | null = null;
-    let totalOutputTokens = 0;
-    let totalStreamMs = 0;
-    let mostParallelTurn: { idx: number; maxConcurrentTools: number } | null = null;
-    let staleCacheTurns = 0;
-    const ttfps: number[] = [];
-    const doneTimes: number[] = [];
-    for (let i = 0; i < this.turns.length; i++) {
-      const t = this.turns[i];
-      // Skip user-stop / error turns w/ no resolved modelId from the byModel
-      // rollup — they otherwise create a phantom "opus"/"sonnet"/"haiku"
-      // bucket alongside the real "claude-opus-4-7" etc.
-      if (t.modelId == null && t.endKind !== "success") continue;
-      const key = t.modelId || t.model;
-      const bucket = byModel[key] ||= {
-        turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0,
-        cacheReadTokens: 0, cacheCreateTokens: 0,
-        thinkingTurns: 0, blankTurns: 0, envelopeFallbacks: 0,
-        avgTtfpMs: null, avgDoneMs: null,
-      };
-      bucket.turns += 1;
-      bucket.costUsd += t.costUsd ?? 0;
-      const u = t.resultUsage || t.envelopeUsage;
-      if (u) {
-        bucket.inputTokens += u.input;
-        bucket.outputTokens += u.output;
-        bucket.cacheReadTokens += u.cacheRead;
-        bucket.cacheCreateTokens += u.cacheCreate;
-      }
-      if (t.thinkingCount > 0) { bucket.thinkingTurns += 1; thinkingTurns += 1; }
-      if (t.blankTurn) { bucket.blankTurns += 1; blank += 1; }
-      if (t.envelopeFallback) { bucket.envelopeFallbacks += 1; envFallback += 1; }
-      totalCost += t.costUsd ?? 0;
-      if (t.firstPaintAt != null) ttfps.push(t.firstPaintAt - t.ts);
-      if (t.doneAt != null) {
-        const dur = t.doneAt - t.ts;
-        doneTimes.push(dur);
-        if (!slowestTurn || dur > slowestTurn.durationMs) slowestTurn = { idx: i, durationMs: dur };
-      }
-      if (t.costUsd != null && (!costliestTurn || t.costUsd > costliestTurn.costUsd)) {
-        costliestTurn = { idx: i, costUsd: t.costUsd };
-      }
-      // Tool rollup + parallelism detection via sweep-line over intervals.
-      const intervals: { ts: number; delta: 1 | -1 }[] = [];
-      for (const tu of t.toolUses) {
-        toolCallTotal += 1;
-        toolNameCounts[tu.name] = (toolNameCounts[tu.name] ?? 0) + 1;
-        if (tu.isError === true) toolErrorTotal += 1;
-        if (tu.durationMs != null && (!slowestTool || tu.durationMs > slowestTool.durationMs)) {
-          slowestTool = { name: tu.name, durationMs: tu.durationMs, turnIdx: i };
-        }
-        if (tu.completedAt != null) {
-          intervals.push({ ts: tu.startedAt, delta: 1 });
-          intervals.push({ ts: tu.completedAt, delta: -1 });
-        }
-      }
-      if (intervals.length > 0) {
-        intervals.sort((a, b) => a.ts - b.ts || b.delta - a.delta);
-        let active = 0;
-        let peak = 0;
-        for (const iv of intervals) {
-          active += iv.delta;
-          if (active > peak) peak = active;
-        }
-        if (!mostParallelTurn || peak > mostParallelTurn.maxConcurrentTools) {
-          mostParallelTurn = { idx: i, maxConcurrentTools: peak };
-        }
-      }
-      // Cold-start surfacing: the first turn typically pays the SessionStart
-      // 40-50K cache_creation tax; we record turn[0]'s cost+cacheCreate to
-      // make that tax legible without folding turns[].
-      if (i === 0) {
-        firstTurnCostUsd = t.costUsd ?? null;
-        const u0 = t.resultUsage || t.envelopeUsage;
-        coldStartCacheCreate = u0?.cacheCreate ?? null;
-      }
-      // Stale-cache flag: a continuation turn that paid full cache_create but
-      // got zero cache_read = the API isn't reusing our prefix. Flagged what
-      // surfaced the sonnet cache anomaly during effort A/B.
-      if (!t.isFirstTurn && t.endKind === "success") {
-        const uForCache = t.resultUsage || t.envelopeUsage;
-        if (uForCache && uForCache.cacheRead === 0 && uForCache.cacheCreate > 0) {
-          staleCacheTurns += 1;
-        }
-      }
-      // Streaming velocity accumulator.
-      if (t.firstPaintAt != null && t.doneAt != null && t.doneAt > t.firstPaintAt) {
-        const u = t.resultUsage || t.envelopeUsage;
-        if (u) {
-          totalOutputTokens += u.output;
-          totalStreamMs += t.doneAt - t.firstPaintAt;
-        }
-      }
-    }
-    // Per-model timing averages
-    for (const key of Object.keys(byModel)) {
-      const bucket = byModel[key];
-      const tns = this.turns.filter((t) => (t.modelId || t.model) === key);
-      const t1 = tns.map((t) => (t.firstPaintAt != null ? t.firstPaintAt - t.ts : null)).filter((n): n is number => n != null);
-      const t2 = tns.map((t) => (t.doneAt != null ? t.doneAt - t.ts : null)).filter((n): n is number => n != null);
-      bucket.avgTtfpMs = t1.length ? Math.round(t1.reduce((a, b) => a + b, 0) / t1.length) : null;
-      bucket.avgDoneMs = t2.length ? Math.round(t2.reduce((a, b) => a + b, 0) / t2.length) : null;
-    }
-    return {
-      totalTurns: this.turns.length,
-      totalCostUsd: Math.round(totalCost * 10000) / 10000,
-      blankTurns: blank,
-      envelopeFallbacks: envFallback,
-      thinkingTurns,
-      avgTtfpMs: ttfps.length ? Math.round(ttfps.reduce((a, b) => a + b, 0) / ttfps.length) : null,
-      avgDoneMs: doneTimes.length ? Math.round(doneTimes.reduce((a, b) => a + b, 0) / doneTimes.length) : null,
-      toolCallTotal,
-      toolErrorTotal,
-      toolNameCounts,
-      slowestTool,
-      slowestTurn,
-      costliestTurn,
-      firstTurnCostUsd,
-      coldStartCacheCreate,
-      mostParallelTurn,
-      staleCacheTurns,
-      outputTokensPerSec: totalStreamMs > 0
-        ? Math.round((totalOutputTokens / totalStreamMs) * 1000)
-        : null,
-      byModel,
-      eventCounts: this.events.reduce<Record<string, number>>((acc, e) => {
-        acc[e.kind] = (acc[e.kind] ?? 0) + 1;
-        return acc;
-      }, {}),
-    };
-  }
-
-  reset() {
-    this.startedAt = Date.now();
-    this.turns = [];
-    this.events = [];
-  }
-}
+// M2 split (2026-05-26): SessionTelemetry class lifted to `./assistant/telemetry`.
+import { SessionTelemetry } from "./assistant/telemetry";
+// M4 split (2026-05-26): attachment free fns in `./assistant/attachments`.
+import {
+  addAttachment as attAdd,
+  removeAttachment as attRemove,
+  clearAttachments as attClear,
+} from "./assistant/attachments";
+// M3 split (2026-05-26): workspace free fns in `./assistant/workspace`.
+import {
+  refreshWorkspace as wsRefresh,
+  pickFolder as wsPickFolder,
+  setRoot as wsSetRoot,
+  clearRoot as wsClearRoot,
+  removeRecentRoot as wsRemoveRecentRoot,
+  loadWorkspaceFiles as wsLoadFiles,
+} from "./assistant/workspace";
+// M5 split (2026-05-26): conversation persistence + tab-list save in
+// `./assistant/persistence`. loadConversation + deleteConversation stay on
+// the class (M5b — gated on M6 tabs lifecycle extraction).
+import {
+  refreshConversations as persistRefresh,
+  buildSaveRecord as persistBuildRecord,
+  flushNow as persistFlushNow,
+  scheduleSave as persistSchedule,
+  renameConversation as persistRename,
+  persistTabs as persistTabsImpl,
+  loadConversation as persistLoad,
+  deleteConversation as persistDelete,
+} from "./assistant/persistence";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -1309,17 +838,6 @@ class TabState {
   }
 }
 
-/** Per-pane reference into the openTabs list. v2 split UI: `panes` is always
- *  an array of length ≥1. Length 1 = single-pane (no visible split). Length
- *  2..MAX_PANES = horizontal split. Each pane shows the chat for its `tabId`;
- *  `null` tabId = empty pane (drop a tab into it from the tabsbar). */
-export type PaneState = { tabId: string | null };
-
-/** Hard cap on horizontal panes. 4 × min-width 320px = 1280px — fits any
- *  modern window. Bump if you're on ultrawide; UI is array-driven so the
- *  only knob is this constant. */
-export const MAX_PANES = 4;
-
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
@@ -1331,7 +849,9 @@ class AssistantStore {
    *  `session_id` to whichever tab owns that CLI session. Concurrent live
    *  streaming on 2+ tabs works because each tab carries its own messages
    *  buffer, pacer state, and thinking tracker. */
-  private tabs = $state(new Map<string, TabState>());
+  // M5: relaxed from `private` so extracted persistence module can iterate.
+  // Still internal-by-convention — no external module reads `assistant.tabs`.
+  tabs = $state(new Map<string, TabState>());
 
   /** The TabState bound to `currentConvoId`, or null if no tab is active.
    *  Getter-derived so it tracks both `tabs` and `currentConvoId` reactively. */
@@ -1612,7 +1132,8 @@ class AssistantStore {
 
   /** Get-or-create the TabState for a convo. Used by send() on first turn
    *  and by tab lifecycle methods. Reassigning the map triggers reactivity. */
-  private ensureTab(convoId: string, cliSessionId: string): TabState {
+  // M5b: relaxed from `private` so persistence module's loadConversation can call.
+  ensureTab(convoId: string, cliSessionId: string): TabState {
     const existing = this.tabs.get(convoId);
     if (existing) return existing;
     const tab = new TabState(cliSessionId);
@@ -1624,7 +1145,8 @@ class AssistantStore {
   }
 
   /** Tear down a tab's TabState. Called from closeTab / closeAllTabs. */
-  private dropTab(convoId: string) {
+  // M5b: relaxed from `private` so persistence module's deleteConversation can call.
+  dropTab(convoId: string) {
     const tab = this.tabs.get(convoId);
     if (!tab) return;
     // #139: cancel the outstanding rAF + finalize any pending text BEFORE
@@ -1661,7 +1183,8 @@ class AssistantStore {
    *  serialize-and-export. */
   telemetry = new SessionTelemetry();
 
-  apiKey = $state<string | null>(null);
+  /** Phase 6 (#37): the value never crosses IPC — only whether one is set. */
+  hasApiKey = $state<boolean>(false);
   useFullConfig = $state<boolean>(true);
   maxBudgetUsd = $state<number | null>(null);
   allowRemoteShell = $state<boolean>(false);
@@ -1752,12 +1275,14 @@ class AssistantStore {
   set currentCliSessionId(v: string | null) {
     if (this.activeTab) this.activeTab.cliSessionId = v ?? "";
   }
-  private get convoCreatedAt(): number | null { return this.activeTab?.convoCreatedAt ?? null; }
-  private set convoCreatedAt(v: number | null) {
+  // M5b: relaxed for persistence module loadConversation host access.
+  get convoCreatedAt(): number | null { return this.activeTab?.convoCreatedAt ?? null; }
+  set convoCreatedAt(v: number | null) {
     if (this.activeTab) this.activeTab.convoCreatedAt = v;
   }
-  private get convoTitle(): string | null { return this.activeTab?.convoTitle ?? null; }
-  private set convoTitle(v: string | null) {
+  // M5: relaxed from `private` so persistence module can read/write through host ref.
+  get convoTitle(): string | null { return this.activeTab?.convoTitle ?? null; }
+  set convoTitle(v: string | null) {
     if (this.activeTab) this.activeTab.convoTitle = v;
   }
 
@@ -1886,9 +1411,9 @@ class AssistantStore {
     );
     await this.refreshAuth();
     try {
-      this.apiKey = await invoke<string | null>("assistant_get_api_key");
+      this.hasApiKey = await invoke<boolean>("assistant_get_api_key_present");
     } catch (e) {
-      console.warn("assistant_get_api_key failed", e);
+      console.warn("assistant_get_api_key_present failed", e);
     }
     try {
       this.useFullConfig = await invoke<boolean>("assistant_get_use_full_config");
@@ -2088,163 +1613,26 @@ class AssistantStore {
     } catch { /* same as above */ }
   }
 
-  async refreshWorkspace() {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_get_workspace");
-    } catch (e) {
-      console.warn("assistant_get_workspace failed", e);
-    }
-  }
+  // M3 split (2026-05-26): workspace IPC ops in `./assistant/workspace`.
+  // Fields stay on Store; methods become thunks routing to free fns.
+  refreshWorkspace() { return wsRefresh(this); }
+  pickFolder() { return wsPickFolder(this); }
+  setRoot(path: string) { return wsSetRoot(this, path); }
+  clearRoot() { return wsClearRoot(this); }
+  removeRecentRoot(path: string) { return wsRemoveRecentRoot(this, path); }
+  loadWorkspaceFiles() { return wsLoadFiles(this); }
 
-  /** Native folder picker → set as active root. Returns false if user cancelled. */
-  async pickFolder(): Promise<boolean> {
-    try {
-      const result = await openDialog({ directory: true, multiple: false });
-      const path = typeof result === "string" ? result : null;
-      if (!path) return false;
-      await this.setRoot(path);
-      return true;
-    } catch (e) {
-      this.lastError = `Open folder failed: ${String(e)}`;
-      return false;
-    }
-  }
+  refreshConversations() { return persistRefresh(this); }
 
-  async setRoot(path: string) {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
-      this.workspaceFiles = [];
-      this.lastNotice = `Workspace: ${path}`;
-    } catch (e) {
-      this.lastError = `Set workspace failed: ${String(e)}`;
-    }
-  }
-
-  async clearRoot() {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_clear_root");
-      this.workspaceFiles = [];
-    } catch (e) {
-      console.warn("assistant_clear_root failed", e);
-    }
-  }
-
-  async removeRecentRoot(path: string) {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_remove_recent_root", { path });
-    } catch (e) {
-      console.warn("assistant_remove_recent_root failed", e);
-    }
-  }
-
-  /** Lazy-load relative file paths under the current workspace root. Caches
-   *  per-root in `workspaceFiles`; concurrent calls are de-duped via the
-   *  `workspaceFilesLoadingFor` guard. */
-  async loadWorkspaceFiles() {
-    const root = this.workspace.current;
-    if (!root) { this.workspaceFiles = []; return; }
-    if (this.workspaceFilesLoadingFor === root) return;
-    this.workspaceFilesLoadingFor = root;
-    try {
-      this.workspaceFiles = await invoke<string[]>("assistant_list_workspace_files");
-    } catch (e) {
-      console.warn("assistant_list_workspace_files failed", e);
-    } finally {
-      this.workspaceFilesLoadingFor = null;
-    }
-  }
-
-  async refreshConversations() {
-    try {
-      this.conversations = await invoke<ConversationMeta[]>("assistant_list_conversations");
-    } catch (e) {
-      console.warn("assistant_list_conversations failed", e);
-    }
-  }
-
-  /** Derive a human-friendly title from the first user message. #145: now
-   *  takes the tab as an arg so a debounced doSave reads from the originating
-   *  tab's messages, not whichever tab is active when the timer fires. */
-  private deriveTitle(tab: TabState): string {
-    const first = tab.messages.find((m) => m.role === "user");
-    if (!first) return "New conversation";
-    const text = first.blocks
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim()
-      .replace(/\s+/g, " ");
-    return text.length > 60 ? text.slice(0, 60) + "…" : text || "New conversation";
-  }
-
-  /** Build the on-disk record + fire-and-forget save for a single tab.
-   *  Shared by flushNow + scheduleSave so the snapshot semantics live in one
-   *  place. #145: cliSessionId / createdAt / title all sourced from the tab
-   *  passed in, not store-level — debounced save can't redirect mid-flight. */
+  // M5: deriveTitle + buildSaveRecord moved to ./assistant/persistence. Kept
+  // as private thunk for any in-class callers that still reference it.
   private buildSaveRecord(convoId: string, tab: TabState): ConversationRecord {
-    return {
-      id: convoId,
-      title: tab.convoTitle ?? this.deriveTitle(tab),
-      model: this.model,
-      createdAt: tab.convoCreatedAt ?? Date.now(),
-      updatedAt: Date.now(),
-      messages: tab.messages,
-      cliSessionId: tab.cliSessionId || convoId,
-      compactionHistory: tab.compactionHistory.length > 0 ? tab.compactionHistory : undefined,
-    };
+    return persistBuildRecord(this, convoId, tab);
   }
 
-  /** Best-effort synchronous flush of all open tabs. Wired to
-   *  `beforeunload` in init() — without this, a window close within the
-   *  scheduleSave 700ms debounce loses the last turn. We fire the IPC
-   *  without awaiting (browser drops pending promises on unload), but the
-   *  Tauri runtime typically completes the in-flight invoke before the
-   *  process actually exits.
-   *  #145: iterate every tab with content, not just the active one. A
-   *  background-tab turn that finished mid-debounce would otherwise be lost. */
-  flushNow() {
-    for (const [convoId, tab] of this.tabs) {
-      if (tab.messages.length === 0) continue;
-      if (tab.saveTimer) {
-        clearTimeout(tab.saveTimer);
-        tab.saveTimer = null;
-      }
-      const record = this.buildSaveRecord(convoId, tab);
-      tab.convoTitle = record.title;
-      tab.convoCreatedAt = record.createdAt;
-      void invoke("assistant_save_conversation", { convo: record }).catch((e) => {
-        console.warn("flushNow save failed", e);
-      });
-    }
-  }
+  flushNow() { persistFlushNow(this); }
 
-  /** Persist the current conversation. Debounced — callers can fire freely;
-   *  only one disk write per ~700ms per tab. Set `flush=true` to write
-   *  immediately. #145: snapshots (tab, convoId) at call time so a 700ms
-   *  delay can't dispatch the save against whichever tab is active when the
-   *  timer fires. */
-  private scheduleSave(flush = false) {
-    const convoId = this.currentConvoId;
-    const tab = this.activeTab;
-    if (!tab || !convoId || tab.messages.length === 0) return;
-    if (tab.saveTimer) {
-      clearTimeout(tab.saveTimer);
-      tab.saveTimer = null;
-    }
-    const doSave = async () => {
-      tab.saveTimer = null;
-      const record = this.buildSaveRecord(convoId, tab);
-      tab.convoTitle = record.title;
-      tab.convoCreatedAt = record.createdAt;
-      try {
-        await invoke("assistant_save_conversation", { convo: record });
-        await this.refreshConversations();
-      } catch (e) {
-        console.warn("assistant_save_conversation failed", e);
-      }
-    };
-    if (flush) void doSave();
-    else tab.saveTimer = setTimeout(doSave, 700);
-  }
+  private scheduleSave(flush = false) { persistSchedule(this, flush); }
 
   /** Start a fresh conversation. Flushes the current one first so nothing
    *  is lost when the user clicks `+ New`. */
@@ -2261,89 +1649,11 @@ class AssistantStore {
     this.convoTitle = null;
   }
 
-  async loadConversation(id: string) {
-    if (this.streaming) await this.stop();
-    if (this.messages.length > 0 && this.currentConvoId && this.currentConvoId !== id) {
-      this.scheduleSave(true);
-    }
-    try {
-      const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-      // Legacy convos lack cliSessionId — fall back to id so --resume still
-      // hits the original JSONL. New convos persist cliSessionId explicitly.
-      const cliSid = convo.cliSessionId ?? convo.id;
-      const tab = this.ensureTab(convo.id, cliSid);
-      // Re-hydrate from disk — overwrites in-memory state if the tab was
-      // previously open with stale data.
-      tab.messages = convo.messages ?? [];
-      tab.cliSessionId = cliSid;
-      tab.compactionHistory = convo.compactionHistory ?? [];
-      tab.tasks = [];
-      tab.lastError = null;
-      tab.totalCostUsd = null;
-      tab.resetUsage();
-      tab.promptHistory = (convo.messages ?? [])
-        .filter((m) => m.role === "user")
-        .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())
-        .filter((s) => s.length > 0)
-        .slice(-50);
-      tab.dockAutoOpenedThisConvo = false;
-      this.currentConvoId = convo.id;
-      this.currentCliSessionId = cliSid;
-      this.convoCreatedAt = convo.createdAt;
-      this.convoTitle = convo.title;
-      this.queue = [];
-      this.lastNotice = null;
-      this.ui.historyOpen = false;
-      if (convo.model === "sonnet" || convo.model === "opus" || convo.model === "haiku") {
-        this.setModel(convo.model);
-      }
-    } catch (e) {
-      this.lastError = `Failed to load conversation: ${String(e)}`;
-    }
-  }
-
-  async deleteConversation(id: string) {
-    try {
-      await invoke("assistant_delete_conversation", { id });
-      if (this.openTabs.includes(id)) {
-        // Reuse closeTab so neighbor-pick + active-switch logic stays in one place.
-        await this.closeTab(id);
-      } else if (this.currentConvoId === id) {
-        this.dropTab(id);
-        this.currentConvoId = null;
-        this.currentCliSessionId = null;
-        this.convoCreatedAt = null;
-        this.convoTitle = null;
-      } else {
-        // Convo was open as a TabState (e.g. background) but not the active tab.
-        this.dropTab(id);
-      }
-      await this.refreshConversations();
-      // #149: an openTab(id) that started before the delete may have racy-
-      // pushed id into openTabs while we were awaiting the IPC; close it now
-      // so the user doesn't end up with a tab pointing at a deleted convo.
-      if (this.openTabs.includes(id)) {
-        await this.closeTab(id);
-      }
-    } catch (e) {
-      this.lastError = `Failed to delete conversation: ${String(e)}`;
-    }
-  }
+  loadConversation(id: string) { return persistLoad(this, id); }
+  deleteConversation(id: string) { return persistDelete(this, id); }
 
   // ── v0.4 tabs ────────────────────────────────────────────────────────
-  private persistTabs() {
-    try {
-      localStorage.setItem(
-        "rift.ui.tabs.v1",
-        JSON.stringify({
-          openTabs: this.openTabs,
-          activeTabId: this.currentConvoId,
-          panes: this.panes,
-          focusedPaneIdx: this.focusedPaneIdx,
-        }),
-      );
-    } catch { /* localStorage unavailable */ }
-  }
+  private persistTabs() { persistTabsImpl(this); }
 
   private async restoreTabs() {
     // #181: persistTabs() in finally so a throw mid-restore doesn't leave the
@@ -2592,20 +1902,7 @@ class AssistantStore {
 
   // ── /v0.4 tabs ───────────────────────────────────────────────────────
 
-  async renameConversation(id: string, title: string) {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    try {
-      const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-      convo.title = trimmed.slice(0, 120);
-      convo.updatedAt = Date.now();
-      await invoke("assistant_save_conversation", { convo });
-      if (this.currentConvoId === id) this.convoTitle = convo.title;
-      await this.refreshConversations();
-    } catch (e) {
-      this.lastError = `Failed to rename conversation: ${String(e)}`;
-    }
-  }
+  renameConversation(id: string, title: string) { return persistRename(this, id, title); }
 
   async refreshAuth() {
     this.authChecking = true;
@@ -2623,7 +1920,7 @@ class AssistantStore {
   async setApiKey(key: string | null) {
     const v = key && key.trim().length > 0 ? key.trim() : null;
     await invoke("assistant_set_api_key", { apiKey: v });
-    this.apiKey = v;
+    this.hasApiKey = v !== null;
     await this.refreshAuth();
   }
 
@@ -2807,28 +2104,24 @@ class AssistantStore {
   /** Stage a binary attachment on `tabId`'s tab — defaults to the active
    *  (focused-pane) tab when omitted. 20 MiB cumulative cap mirrors the
    *  backend guard. Returns false on overflow. */
+  // M4 split (2026-05-26): per-tab attachment logic in `./assistant/attachments`.
+  // Store methods stay as thin tab-resolving thunks routing to active/specified tab.
   addAttachment(
     att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number },
     tabId?: string | null,
   ): boolean {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) return false;
-    const CAP = 20 * 1024 * 1024;
-    const current = tab.attachments.reduce((s, a) => s + a.sizeBytes, 0);
-    if (current + att.sizeBytes > CAP) return false;
-    tab.attachments = [...tab.attachments, { id: crypto.randomUUID(), ...att }];
-    return true;
+    return tab ? attAdd(tab, att) : false;
   }
 
   removeAttachment(id: string, tabId?: string | null) {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) return;
-    tab.attachments = tab.attachments.filter((a) => a.id !== id);
+    if (tab) attRemove(tab, id);
   }
 
   clearAttachments(tabId?: string | null) {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (tab) tab.attachments = [];
+    if (tab) attClear(tab);
   }
 
   /** User-driven pin from a chat checklist into the Tasks dock.

@@ -7,6 +7,7 @@
   import { Loader2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when omitted, falls back to the active tab (single-pane
   // mode compat). Split-pane mode passes the pane's tabId so each pane shows
   // its own stream status independently.
@@ -80,7 +81,7 @@
       <span class="hub-label" class:mono={isShell}>{label}</span>
     {/key}
     {#if elapsed}
-      <span class="hub-elapsed" title="Elapsed since turn started">{elapsed}</span>
+      <span class="hub-elapsed" use:tooltip={"Elapsed since turn started"}>{elapsed}</span>
     {/if}
   </div>
 {/if}

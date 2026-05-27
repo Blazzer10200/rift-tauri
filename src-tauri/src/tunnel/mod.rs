@@ -70,6 +70,7 @@ impl SshTunnel {
             keepalive_max: 3,
             window_size: 2 * 1024 * 1024,
             maximum_packet_size: 32 * 1024,
+            preferred: crate::sftp::rift_preferred(),
             ..client::Config::default()
         });
         let addr = format!("{}:{}", args.host, args.port);

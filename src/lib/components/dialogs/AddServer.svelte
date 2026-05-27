@@ -85,7 +85,7 @@
       const p = parseInt(port.trim(), 10);
       if (!Number.isFinite(p) || p < 1 || p > 65535) return "Port must be 1-65535.";
       if (!user.trim()) return "User is required.";
-      if (!keyPath.trim()) return "SSH key path is required.";
+      if (!keyPath.trim()) return "SSH private key path is required.";
     } else if (s === 1) {
       if (!remoteRoot.trim()) return "Remote root is required.";
       if (!localRoot.trim()) return "Local root is required.";
@@ -259,7 +259,7 @@
           {/if}
           <div class="field">
             <label class="field-label" for="as-key">
-              Identity file <span class="field-sub">private key · ed25519 recommended</span>
+              SSH private key <span class="field-sub">ed25519 recommended</span>
             </label>
             <div class="input-row">
               <input id="as-key" class="input mono" type="text" bind:value={keyPath} placeholder="C:\Users\you\.ssh\id_ed25519"/>

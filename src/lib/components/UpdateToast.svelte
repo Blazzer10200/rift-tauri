@@ -84,14 +84,17 @@
     width: 360px;
     max-width: calc(100vw - 36px);
     background: linear-gradient(180deg,
-      color-mix(in oklch, var(--accent) 10%, var(--bg-elev-2)) 0%,
-      var(--bg-elev-2) 100%);
-    border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--border-strong));
-    border-radius: var(--radius);
+      color-mix(in oklch, var(--accent) 14%, color-mix(in oklch, var(--bg-elev-1) 88%, transparent)) 0%,
+      color-mix(in oklch, var(--bg-elev-1) 92%, transparent) 100%);
+    backdrop-filter: blur(18px) saturate(140%);
+    -webkit-backdrop-filter: blur(18px) saturate(140%);
+    border: 1px solid color-mix(in oklch, var(--accent) 38%, var(--border-strong));
+    border-radius: 12px;
     box-shadow:
-      0 18px 48px -16px rgba(0, 0, 0, 0.55),
-      0 6px 18px -8px rgba(0, 0, 0, 0.4),
-      0 0 24px -6px color-mix(in oklch, var(--accent) 30%, transparent);
+      0 22px 56px -14px oklch(0 0 0 / 0.6),
+      0 6px 18px -8px oklch(0 0 0 / 0.4),
+      0 0 28px -6px color-mix(in oklch, var(--accent) 38%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
     color: var(--fg);
     cursor: pointer;
     text-align: left;
