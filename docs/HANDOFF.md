@@ -2,14 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Prompt Enhancer "wand" + composer calm — 2026-05-27, COMMITTED, verified
+## Prompt Enhancer "wand" + composer calm — 2026-05-27, COMMITTED (`4d669bf`), verified
 
-Composer wand button → one-shot Haiku rewrite of the draft into a clearer, Claude-Code-optimized prompt. Editable preview (Use this / Discard / Esc), never auto-sends, never silently overwrites. On `updater-migration` (`4d669bf`). **Destined for v0.4.33-alpha — NOT in shipped v0.4.32 (which went out 2026-05-26 w/o this).** Ship gated on two-machine confirm (see Resume).
+Composer wand → one-shot Haiku rewrite of the draft into a clearer prompt. Editable preview (Use this / Discard / Esc), never auto-sends. **Destined for v0.4.33-alpha — NOT in shipped v0.4.32.** Full detail in CHANGELOG. Files: `assistant_enhance_prompt` [assistant/mod.rs](../src-tauri/src/assistant/mod.rs) + registered [lib.rs](../src-tauri/src/lib.rs); `enhancePrompt()` + wand + preview + magic effect across [Composer.svelte](../src/lib/components/assistant/Composer.svelte) / [assistant.svelte.ts](../src/lib/state/assistant.svelte.ts).
 
-- **Backend:** `assistant_enhance_prompt(prompt)` in [assistant/mod.rs](../src-tauri/src/assistant/mod.rs) (above `SUMMARIZE_PROMPT_HEAD`). One-shot `claude -p` text on Haiku. Draft fenced in `<draft></draft>` w/ explicit "do not answer it" directive (fixed the model replying conversationally to message-shaped drafts). `ENHANCE_META_PROMPT` frames recipient as Claude Code: imperative lead, preserve specifics verbatim, never invent scope, structure-when-complex, non-coding drafts stay natural. Speed: meta on `--append-system-prompt` (cache), `--exclude-dynamic-system-prompt-sections`, `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""`, temp cwd, `CLAUDE_DISABLE_HOOKS=1`. 8K-char guard. Registered in [lib.rs](../src-tauri/src/lib.rs).
-- **Frontend:** `enhancePrompt()` on AssistantStore ([assistant.svelte.ts](../src/lib/state/assistant.svelte.ts)); wand + preview panel + "magic" effect in [Composer.svelte](../src/lib/components/assistant/Composer.svelte) — clip-text shimmer, sparkle twinkles, word-by-word blur-materialize reveal. `prefers-reduced-motion` throughout.
-- **Composer streaming calm:** aurora swirl layer REMOVED entirely (spans + ~55L CSS). Streaming = thin model-tinted border + top-edge bar (synced 2.6s w/ pill breathe). Focus ring softened 3px/32% → 2px/20%. CDP pixel-verified.
-- **Verified:** svelte-check 0/0 (4102 files); `cargo check` clean (8.37s); CDP live (enhance: short/long/code/over-length-error/double-click; composer streaming forced-class shot). **Open tweak:** word-reveal stagger 14ms/word, cap 650ms — easy dial.
+- Key fix: draft fenced in `<draft></draft>` w/ "do not answer it" directive; `ENHANCE_META_PROMPT` frames recipient as Claude Code (imperative, preserve specifics, never invent scope). 8K guard.
+- Composer calm: aurora swirl layer REMOVED; streaming = thin border + top-edge bar (synced 2.6s). Focus ring 3px/32% → 2px/20%. Verified: svelte-check 0/0, cargo check clean, CDP live. Open tweak: word-reveal stagger 14ms/word, cap 650ms.
+- **THIS MACHINE manually patched (NOT a release):** branch `tauri build --no-bundle` swapped over `…\Rift\current\rift-tauri.exe` — runs 0.4.33 code, reports v0.4.32. Rollback: copy `rift-tauri.exe.bak-pre-enhancer` back. Other machine untouched (genuine 0.4.32; 0.4.32 reached this machine fine via Velopack — no updater bug).
 
 ---
 
@@ -19,9 +18,7 @@ Composer wand button → one-shot Haiku rewrite of the draft into a clearer, Cla
 
 ## Audit 2026-05-27 — RESOLVED (prior session, CDP-verified)
 
-All audit items applied + live-verified. Full doc: [docs/audit-2026-05-27.md](audit-2026-05-27.md). Bugs B1/B3/B6/F12 fixed; P2 effort picker dropdown; P3 user "You" bubble; P5/P6 Settings probe/dirty-flag. Deliberately skipped: image-paste, Sync/Apply, connect/disconnect, streaming, splash (need live mutations).
-
-**Open: 10 numbered issues** — #4 #7 #14 #15 #17 #20(M6-M9) #21 #29 #89 #265.
+All items applied + live-verified — full doc [docs/audit-2026-05-27.md](audit-2026-05-27.md). **Open queue: 10 issues** — #4 #7 #14 #15 #17 #20(M6-M9) #21 #29 #89 #265.
 
 ---
 
@@ -38,7 +35,7 @@ All audit items applied + live-verified. Full doc: [docs/audit-2026-05-27.md](au
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. HEAD = **v0.4.31-alpha** shipped 2026-05-26. Migration branch above gates next ship. Tauri 2 + Svelte 5 + Rust + russh.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. Latest public release = **v0.4.32-alpha** (shipped 2026-05-26, bridge). Next ship = v0.4.33 on `updater-migration` — gated (see Resume). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
