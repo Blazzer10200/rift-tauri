@@ -253,6 +253,8 @@ pub fn run() {
             commands::assistant_set_thinking_effort,
             commands::assistant_get_permission_mode,
             commands::assistant_set_permission_mode,
+            commands::assistant_get_trust_level,
+            commands::assistant_set_trust_level,
             commands::assistant_get_auto_compact_threshold,
             commands::assistant_set_auto_compact_threshold,
             commands::assistant_get_compact_model,

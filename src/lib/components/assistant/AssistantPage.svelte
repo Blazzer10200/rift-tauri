@@ -1,11 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { cubicOut } from "svelte/easing";
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
+
+  // Slide the browser dock open/closed by animating its real width (not a clip)
+  // so the stage's ResizeObserver fires syncBounds and the native child webview
+  // tracks the motion instead of blinking. Mirrors the side panel's
+  // 220ms cubic-bezier(0.22,1,0.36,1) width + opacity reveal.
+  function dockSlide(node: HTMLElement, params: { duration?: number } = {}) {
+    const w = node.getBoundingClientRect().width;
+    return {
+      duration: params.duration ?? 220,
+      easing: cubicOut,
+      css: (t: number) => `width:${t * w}px; opacity:${t};`,
+    };
+  }
   onMount(() => {
     void assistant.init().then(() => {
       if (assistant.openTabs.length === 0) void assistant.newTab();
@@ -213,22 +227,28 @@
   </div>
 
   {#if browserDock.open}
-    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
-      class="dock-divider"
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize browser panel"
-      tabindex="0"
-      use:tooltip={"Drag to resize the browser panel"}
-      onpointerdown={onDockPointerDown}
-      onpointermove={onDockPointerMove}
-      onpointerup={onDockPointerUp}
-      onpointercancel={onDockPointerUp}
-    ><span class="divider-grip" aria-hidden="true"></span></div>
-    <div class="browser-dock" style="width: {browserDock.width}px">
-      <WebBrowserPage />
+      class="dock-wrap"
+      style="width: {browserDock.width + 6}px"
+      transition:dockSlide
+    >
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div
+        class="dock-divider"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize browser panel"
+        tabindex="0"
+        use:tooltip={"Drag to resize the browser panel"}
+        onpointerdown={onDockPointerDown}
+        onpointermove={onDockPointerMove}
+        onpointerup={onDockPointerUp}
+        onpointercancel={onDockPointerUp}
+      ><span class="divider-grip" aria-hidden="true"></span></div>
+      <div class="browser-dock">
+        <WebBrowserPage />
+      </div>
     </div>
   {/if}
   </div>
@@ -253,8 +273,18 @@
     overflow: hidden;
     position: relative;
   }
-  .browser-dock {
+  /* Animated reveal container — holds the resize divider + dock as one flex
+     item. Its width (set inline as dock width + 6px divider) is what the
+     dockSlide transition animates; overflow:hidden keeps the inner dock from
+     spilling while the width tweens. */
+  .dock-wrap {
     flex: 0 0 auto;
+    min-width: 0; min-height: 0;
+    display: flex;
+    overflow: hidden;
+  }
+  .browser-dock {
+    flex: 1 1 auto;
     min-width: 0; min-height: 0;
     display: flex; flex-direction: column;
     overflow: hidden;

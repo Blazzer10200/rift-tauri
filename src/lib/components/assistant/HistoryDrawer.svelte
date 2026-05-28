@@ -18,20 +18,7 @@
   let renameDraft = $state("");
   let confirmDeleteId = $state<string | null>(null);
   let searchQuery = $state("");
-  let hideTests = $state(localStorage.getItem("rift.history.hideTests") === "1");
   let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
-
-  // Heuristic test-title detector — catches the canary/ping pairs (Token-A,
-  // ACK-ONE, Memorize) plus generic "hello"/"please respond" probe titles
-  // that clutter History during dev sessions.
-  const TEST_TITLE_RE = /^(token-?[a-z]?\.?|ack-?one|memorize this token|hello!?$|hello\s|please (do exactly|respond)|i want to audit)/i;
-  function isTestTitle(t: string): boolean {
-    return TEST_TITLE_RE.test(t.trim());
-  }
-
-  $effect(() => {
-    localStorage.setItem("rift.history.hideTests", hideTests ? "1" : "0");
-  });
 
   function onRowContext(e: MouseEvent, id: string) {
     e.preventDefault();
@@ -48,8 +35,7 @@
 
   const filteredConversations = $derived.by(() => {
     const q = searchQuery.trim().toLowerCase();
-    let base = assistant.conversations;
-    if (hideTests) base = base.filter((c) => !isTestTitle(c.title));
+    const base = assistant.conversations;
     if (!q) return base;
     return base.filter((c) => {
       if (c.title.toLowerCase().includes(q)) return true;
@@ -92,10 +78,6 @@
       .filter((k) => groups[k].length > 0)
       .map((k) => ({ key: k, label: BUCKET_LABELS[k], items: groups[k] }));
   });
-
-  const hiddenTestCount = $derived(
-    hideTests ? assistant.conversations.filter((c) => isTestTitle(c.title)).length : 0,
-  );
 
   function startRename(c: ConversationMeta) {
     renameId = c.id;
@@ -186,13 +168,6 @@
             </button>
           {/if}
         </div>
-        <label class="hide-tests" use:tooltip={"Hide canary/ping test conversations (Token-A, ACK-ONE, hello, …)"}>
-          <input type="checkbox" bind:checked={hideTests} />
-          <span>Hide tests</span>
-          {#if hiddenTestCount > 0}
-            <span class="hide-tests-count">{hiddenTestCount}</span>
-          {/if}
-        </label>
       </div>
     {/if}
 
@@ -364,29 +339,6 @@
   .filters {
     display: flex; align-items: center; gap: 8px;
     margin: 8px 10px 4px;
-  }
-  .hide-tests {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 9px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    cursor: pointer;
-    user-select: none;
-    white-space: nowrap;
-    transition: border-color 120ms, color 120ms, background 120ms;
-  }
-  .hide-tests:hover { color: var(--fg); border-color: var(--border-strong); }
-  .hide-tests input { margin: 0; cursor: pointer; accent-color: var(--accent); }
-  .hide-tests-count {
-    color: var(--fg-faint);
-    font-variant-numeric: tabular-nums;
-    font-size: 10px;
-    padding: 1px 5px;
-    background: var(--surface);
-    border-radius: 999px;
   }
   .group-label {
     display: flex; align-items: center; gap: 10px;

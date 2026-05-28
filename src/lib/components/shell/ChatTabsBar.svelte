@@ -4,9 +4,10 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown, Globe } from "lucide-svelte";
+  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown, Globe } from "lucide-svelte";
   import { onDestroy } from "svelte";
-  import { assistant, messagesHaveContextSignals } from "../../state/assistant.svelte";
+  import { assistant } from "../../state/assistant.svelte";
+  import { modelFamily } from "../../state/assistant/helpers";
   import { browserDock } from "../../state/browserDock.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
@@ -219,19 +220,12 @@
     const a = assistant.auth;
     if (!a) return null;
     if (a.pill === "yellow") return { tone: "yellow", text: "API key" };
-    if (a.pill === "red") return { tone: "red", text: "Not connected" };
+    if (a.pill === "red") return { tone: "red", text: "Sign in" };
     return null;
   });
 
   const taskCount = $derived(assistant.tasks.length);
   const taskDone = $derived(assistant.tasks.filter((t) => t.status === "completed").length);
-  // Session-dock visibility extends past tasks — Edit/Write/WebFetch streams
-  // also populate the right rail, so the toggle button appears whenever the
-  // active tab has any dock-worthy content.
-  const dockHasContext = $derived(
-    messagesHaveContextSignals(assistant.activeTab?.messages ?? []),
-  );
-  const dockTotal = $derived(taskCount > 0 || dockHasContext);
 
   let pulse = $state(false);
   let lastSeenUpdate = 0;
@@ -320,7 +314,7 @@
   });
 </script>
 
-<div class="tabsbar" data-model={assistant.model} role="tablist" aria-label="Chat tabs">
+<div class="tabsbar" data-model={modelFamily(assistant.model)} role="tablist" aria-label="Chat tabs">
   <div class="strip">
     {#each tabs as id, idx (id)}
       <div
@@ -387,18 +381,6 @@
   </div>
 
   <div class="actions">
-    <button
-      class="hdr-btn"
-      class:open={browserDock.open}
-      type="button"
-      use:tooltip={"Toggle web browser panel"}
-      onclick={() => browserDock.toggle()}
-      aria-pressed={browserDock.open}
-    >
-      <Globe size={12}/>
-      <span class="hdr-btn-label">Browser</span>
-    </button>
-
     <button
       class="hdr-btn history-btn"
       class:open={historyOpen}
@@ -520,40 +502,50 @@
       </button>
     {/if}
 
-    {#if dockTotal}
+    <div class="seg" role="group" aria-label="View">
       <button
-        class="dock-toggle"
-        class:open={tasksOpen}
+        class="seg-btn"
+        class:on={browserDock.open}
+        type="button"
+        use:tooltip={"Web browser panel"}
+        onclick={() => browserDock.toggle()}
+        aria-pressed={browserDock.open}
+      >
+        <Globe size={13}/>
+      </button>
+      <button
+        class="seg-btn"
+        class:on={tasksOpen}
         class:pulse
         type="button"
         onclick={toggleTasks}
+        aria-pressed={tasksOpen}
         use:tooltip={taskCount > 0
-          ? `Session panel — ${taskDone}/${taskCount} tasks done`
-          : "Session panel"}
+          ? `Side panel — Session · Activity (${taskDone}/${taskCount} tasks done)`
+          : "Side panel — Session · Activity"}
       >
-        <ListChecks size={12} />
+        <PanelRight size={13} />
         {#if taskCount > 0}
-          <span class="task-chip">{taskDone}/{taskCount}</span>
+          <span class="seg-chip">{taskDone}/{taskCount}</span>
         {/if}
       </button>
-    {/if}
-
-    <button
-      class="split-toggle"
-      class:active={splitActive}
-      type="button"
-      onclick={() => assistant.addPane()}
-      disabled={!canAddPane}
-      use:tooltip={canAddPane
-        ? `Add pane (Ctrl+\\) — ${paneCount} of 4`
-        : `Max panes reached (${paneCount}/4)`}
-      aria-label="Add pane"
-    >
-      <SplitSquareHorizontal size={12} />
-      {#if splitActive}
-        <span class="split-count">{paneCount}</span>
-      {/if}
-    </button>
+      <button
+        class="seg-btn"
+        class:on={splitActive}
+        type="button"
+        onclick={() => assistant.addPane()}
+        disabled={!canAddPane}
+        use:tooltip={canAddPane
+          ? `Add pane (Ctrl+\\) — ${paneCount} of 4`
+          : `Max panes reached (${paneCount}/4)`}
+        aria-label="Add pane"
+      >
+        <SplitSquareHorizontal size={13} />
+        {#if splitActive}
+          <span class="seg-chip">{paneCount}</span>
+        {/if}
+      </button>
+    </div>
   </div>
 </div>
 
@@ -1205,71 +1197,40 @@
   .ctx-panel-compact[data-tone="yellow"] { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, var(--border)); }
   .ctx-panel-compact[data-tone="red"] { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 40%, var(--border)); }
 
-  .dock-toggle {
+  /* Segmented view control — Browser · Panel · Split grouped into one unit so
+     the action cluster reads as a single block instead of three loose chips.
+     Icon-only; tooltips carry the names. */
+  .seg {
+    display: inline-flex; align-items: center;
+    gap: 2px;
+    padding: 2px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+  }
+  .seg-btn {
     display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 8px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--fg-muted);
-    cursor: pointer;
-    font: inherit;
-    font-size: var(--fs-xs);
-    line-height: 1;
-    transition: background 120ms, color 120ms, border-color 120ms;
+    height: 22px; padding: 0 7px;
+    background: transparent; border: 0; border-radius: 5px;
+    color: var(--fg-muted); cursor: pointer;
+    font: inherit; font-size: var(--fs-xs); line-height: 1;
+    transition: background 120ms ease, color 120ms ease;
   }
-  .dock-toggle:hover { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
-  .dock-toggle.open {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  }
-  .dock-toggle.pulse { animation: dock-pulse 700ms ease-out; }
-
-  .split-toggle {
-    display: inline-flex; align-items: center; justify-content: center;
-    gap: 3px;
-    min-width: 26px; height: 22px;
-    padding: 0 5px;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    color: var(--fg-muted);
-    cursor: pointer;
-    transition: background 120ms, color 120ms, border-color 120ms;
-  }
-  .split-toggle:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
-  .split-toggle.active {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  }
-  .split-toggle:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-  .split-count {
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-  }
+  .seg-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+  .seg-btn.on { background: var(--accent-soft); color: var(--accent); }
+  .seg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .seg-btn.pulse { animation: dock-pulse 700ms ease-out; }
 
   @keyframes dock-pulse {
-    0%   { box-shadow: 0 0 0 0 var(--accent-soft); border-color: var(--accent); }
+    0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
     60%  { box-shadow: 0 0 0 6px transparent; }
     100% { box-shadow: 0 0 0 0 transparent; }
   }
-  .task-chip {
-    font-size: 10px;
-    padding: 1px 5px;
-    background: var(--accent);
-    color: var(--accent-fg);
-    border-radius: 999px;
-    font-weight: 600;
-  }
-  .dock-toggle:not(.open) .task-chip {
-    background: var(--accent-soft);
+  .seg-chip {
+    font-size: 10px; font-weight: 700; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    padding: 1px 4px; border-radius: 999px;
+    background: color-mix(in oklch, var(--accent) 20%, transparent);
     color: var(--accent);
   }
 

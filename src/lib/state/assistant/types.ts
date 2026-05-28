@@ -185,7 +185,21 @@ export type RemoteShellEvt = {
   at: string;
 };
 
-export type ThinkingEffort = "none" | "quick" | "deep";
+/** Extended-thinking tier. `ultra` = ultracode: xhigh effort + autonomous
+ *  dynamic-workflow orchestration, enabled via the CLI's `ultracode` settings
+ *  key (see assistant_send in mod.rs). Haiku ignores all tiers server-side. */
+export type ThinkingEffort = "none" | "quick" | "deep" | "ultra";
+
+/** Model selection — stored value IS the string handed to the CLI's `--model`,
+ *  so it flows through `assistant_send` untouched. `opus` is the short alias
+ *  that always resolves to the newest Opus (currently 4.8) with the 1M-ctx
+ *  beta; `claude-opus-4-7` pins the prior Opus. `sonnet`/`haiku` stay aliases.
+ *  Must satisfy the Rust `is_valid_model_name` validator (no brackets). */
+export type ModelSel = "sonnet" | "opus" | "claude-opus-4-7" | "haiku";
+
+/** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,
+ *  haiku=teal). Both Opus versions collapse to "opus". */
+export type ModelFamily = "sonnet" | "opus" | "haiku";
 
 /** Permission mode handed to the CLI's `--permission-mode`. Mirrors the
  *  modes Claude Code exposes. Must stay in sync with the validator in
@@ -193,6 +207,12 @@ export type ThinkingEffort = "none" | "quick" | "deep";
  *  (Rift's historical default); the prompting modes (`default`, `acceptEdits`,
  *  `plan`) need the approval surface from Piece 2 to be fully functional. */
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions";
+
+/** Assistant trust level gating the local git tools (and, later, RCON). Must
+ *  stay in sync with `is_valid_trust_level` in src-tauri/src/assistant/mod.rs.
+ *  `readonly` → git status/diff/log; `standard` → adds commit/pull/push;
+ *  `full` → reserved for RCON raw passthrough (phase 2). */
+export type TrustLevel = "readonly" | "standard" | "full";
 
 /** A suggestion the CLI attaches to a `can_use_tool` ask — e.g.
  *  `{ type: "setMode", mode: "acceptEdits", destination: "session" }`, which
@@ -218,10 +238,10 @@ export type TurnRecord = {
   convoId: string;
   cliSessionId: string;
   isFirstTurn: boolean;
-  model: "sonnet" | "opus" | "haiku";
-  effort: "none" | "quick" | "deep";
+  model: ModelSel;
+  effort: ThinkingEffort;
   /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping). */
-  effortFlag: "low" | "medium" | "high" | null;
+  effortFlag: "low" | "medium" | "high" | "xhigh" | null;
   // Input
   promptLen: number;
   promptPreview: string;

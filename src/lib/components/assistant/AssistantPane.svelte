@@ -1,11 +1,11 @@
 <script lang="ts">
   import { tick } from "svelte";
   import { ChevronDown, Plus, X } from "lucide-svelte";
-  import { assistant, messagesHaveContextSignals } from "../../state/assistant.svelte";
+  import { assistant } from "../../state/assistant.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import EmptyState from "./EmptyState.svelte";
   import Composer from "./Composer.svelte";
-  import TasksDock from "./TasksDock.svelte";
+  import SidePanel from "./SidePanel.svelte";
   import SyncActivityBanner from "./SyncActivityBanner.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -30,11 +30,10 @@
   // Per-tab error renders in whichever pane owns the erroring tab, focused or
   // not — otherwise a background-pane send-failure is silent until refocus.
   const showError = $derived(!!lastError);
-  const dockOpen = $derived(
-    assistant.ui.dockOpen
-      && !!tab
-      && (tab.tasks.length > 0 || messagesHaveContextSignals(tab.messages)),
-  );
+  // Open whenever the user toggled the panel and a tab exists — the panel now
+  // has an Activity tab that always has something to show (live + empty-state),
+  // so the old "only if there are context signals" gate no longer applies.
+  const dockOpen = $derived(assistant.ui.dockOpen && !!tab);
 
   // Per-pane status chip — own tab's ctx%, model, cost — independent of focus.
   const paneCtxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
@@ -381,7 +380,7 @@
 </div>
 
   <aside class="pane-dock-slot" class:open={dockOpen} aria-hidden={!dockOpen}>
-    <TasksDock {tabId} />
+    <SidePanel {tabId} />
   </aside>
 </div>
 
@@ -401,8 +400,8 @@
     flex-shrink: 0;
     border-left: 1px solid var(--border);
   }
-  .pane-dock-slot.open { width: 260px; opacity: 1; }
-  .pane-dock-slot :global(.dock) { flex: 1; min-width: 260px; }
+  .pane-dock-slot.open { width: 300px; opacity: 1; }
+  .pane-dock-slot :global(.side-panel) { flex: 1; min-width: 300px; }
 
   .pane {
     flex: 1 1 0;

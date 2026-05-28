@@ -478,7 +478,7 @@ async function copyDiagnostic() {
                   class="switch"
                   role="switch"
                   aria-label="Use full Claude Code config"
-                  aria-checked={assistantStore.useFullConfig}
+                  aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey}
                   data-on={assistantStore.useFullConfig && !assistantStore.hasApiKey}
                   disabled={assistantStore.hasApiKey}
                   onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}
@@ -500,6 +500,30 @@ async function copyDiagnostic() {
                   data-on={assistantStore.allowRemoteShell}
                   onclick={() => void assistantStore.setAllowRemoteShell(!assistantStore.allowRemoteShell)}
                 ><span class="switch-knob"></span></button>
+              </div>
+            </div>
+            <div class="set-row">
+              <div class="set-row-l">
+                <span class="set-label">Git tools</span>
+                <span class="set-hint">Local <code>git</code> tools for the model. Read-only = status, diff, log. Standard adds commit, pull, and push (auth via your system git/SSH). Enabling “Allow remote shell” grants Standard automatically.</span>
+              </div>
+              <div class="set-row-r">
+                <div class="seg" role="radiogroup" aria-label="Git tools trust level">
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={assistantStore.trustLevel === "readonly"}
+                    data-active={assistantStore.trustLevel === "readonly"}
+                    onclick={() => void assistantStore.setTrustLevel("readonly")}
+                  >Read-only</button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={assistantStore.trustLevel !== "readonly"}
+                    data-active={assistantStore.trustLevel !== "readonly"}
+                    onclick={() => void assistantStore.setTrustLevel("standard")}
+                  >Standard</button>
+                </div>
               </div>
             </div>
           </section>
@@ -645,6 +669,7 @@ async function copyDiagnostic() {
                 <button
                   type="button"
                   class="btn primary sm"
+                  disabled={assistantStore.activeTab?.compactingNow}
                   onclick={() => void assistantStore.compactConversation()}
                 >Compact now</button>
               </div>

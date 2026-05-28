@@ -176,6 +176,13 @@ class ConnectionStore {
    *  this to the resource name + flips workspace to "activity"; ActivityFeed reads
    *  it once on mount and clears. Null between handoffs. */
   activityFilter = $state<string | null>(null);
+  /** #7 onboarding gate: whether Rift's default SSH key exists on disk. `null`
+   *  until probed — the first-run gate treats null as "unknown → don't show",
+   *  so existing users never flash the onboarding flow before the probe lands. */
+  defaultSshKeyExists = $state<boolean | null>(null);
+  /** True once `loadServers` has resolved at least once — gates the first-run
+   *  empty check so it can't fire before the server list has loaded. */
+  serversLoaded = $state<boolean>(false);
 
   selected = $derived(
     this.selectedKey
@@ -220,9 +227,20 @@ class ConnectionStore {
       this.selectedKey ? Promise.resolve<string | null>(null) : invoke<string | null>("get_last_selected"),
     ]);
     this.servers = servers;
+    this.serversLoaded = true;
     if (!this.selectedKey && last && servers.some((s) => s.key === last)) {
       this.selectedKey = last;
       this.connect().catch((e) => console.error("auto-connect on load failed", e));
+    }
+  }
+
+  /** #7 onboarding gate: probe whether Rift's default SSH key exists. Called
+   *  once from AppShell on mount. Failure leaves `null` (gate stays closed). */
+  async probeSshKey() {
+    try {
+      this.defaultSshKeyExists = await invoke<boolean>("default_ssh_key_exists");
+    } catch (e) {
+      console.debug("probeSshKey failed", e);
     }
   }
 
