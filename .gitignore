@@ -36,3 +36,7 @@ scripts/cdp/.audit/
 
 # Ruff cache — stray when something Python ran in-tree.
 .ruff_cache/
+
+# Local secrets — env files for the release pipeline (signing-key password etc.).
+# NEVER commit. release.ps1 auto-sources .secrets/env.ps1 if present.
+.secrets/

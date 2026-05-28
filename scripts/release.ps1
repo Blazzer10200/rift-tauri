@@ -33,6 +33,29 @@ Set-Location $repoRoot
 
 Write-Host '=== Rift release pipeline (Tauri-updater path) ===' -ForegroundColor Cyan
 
+# --- Auto-load signing creds (key file + secrets/env.ps1) ----------------
+# Tauri's `tauri build` reads $env:TAURI_SIGNING_PRIVATE_KEY (key content, not
+# a path) and $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD (if the key is encrypted).
+# Past failure mode: relying on the operator to set these per-shell — got the
+# wrong env name (_PATH vs no suffix) and missed the password entirely, hanging
+# the signer on an interactive prompt inside a non-interactive build (2026-05-27
+# v0.4.33 first attempt). Fix: auto-load both here so future ships don't need
+# any per-shell env juggling.
+$keyFile = 'C:/Users/BLAZZER/.tauri/rift.key'
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and (Test-Path $keyFile)) {
+    $env:TAURI_SIGNING_PRIVATE_KEY = [System.IO.File]::ReadAllText($keyFile)
+    Write-Host "  Loaded signing key from $keyFile" -ForegroundColor DarkGray
+}
+$secretsScript = Join-Path $repoRoot '.secrets/env.ps1'
+if (Test-Path $secretsScript) {
+    . $secretsScript
+    Write-Host "  Sourced $secretsScript" -ForegroundColor DarkGray
+}
+if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+    Write-Host "  Note: TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set. If the signing key has a passphrase, the build will hang on the decrypt prompt." -ForegroundColor Yellow
+    Write-Host "        Set it in .secrets/env.ps1 (gitignored)." -ForegroundColor Yellow
+}
+
 # --- Preflight: version sync ---------------------------------------------
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
 $cargoText = Get-Content src-tauri/Cargo.toml -Raw
@@ -148,7 +171,19 @@ try {
 
 # --- Build ---------------------------------------------------------------
 Write-Host '=== tauri build (NSIS + .sig) ===' -ForegroundColor Cyan
-npm run tauri build
+# Tauri 2.11.1's signer always emits "Decrypting updater signing key, expect a
+# prompt for password" and reads stdin for the passphrase — even when the key
+# is passwordless and the env var is set. In a non-interactive shell (script /
+# CI / Claude-driven session) that read blocks forever. PowerShell's native-
+# command pipe (`'' | npm ...`) does NOT reliably propagate through the npm.cmd
+# → node → tauri-cli → signer shim chain on Windows. cmd.exe's pipe DOES,
+# because each layer inherits the parent's stdin handle directly. So we invoke
+# `cmd /c "echo. | npm run tauri build"` — echo. emits a CRLF, the signer reads
+# it as an empty password, decryption succeeds (passwordless key), build
+# proceeds. The chosen redirect target is the empty string + newline, not NUL,
+# because the signer's prompt does a blocking line-read; NUL would close stdin
+# but the signer treats EOF the same as a missing key.
+& cmd /c "echo. | npm run tauri build"
 if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
 # tauri build emits to either src-tauri/target/ or $env:CARGO_TARGET_DIR.
