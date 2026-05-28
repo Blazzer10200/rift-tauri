@@ -8,14 +8,13 @@
   import CommandPalette from "./dialogs/CommandPalette.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
-  import ActivityToast from "./ActivityToast.svelte";
+  import ToastHost from "./ToastHost.svelte";
   import AddServer from "./dialogs/AddServer.svelte";
   import Bootstrap from "./dialogs/Bootstrap.svelte";
   import Keygen from "./dialogs/Keygen.svelte";
   import Confirm from "./dialogs/Confirm.svelte";
   import Reupload, { type ReuploadChoice } from "./dialogs/Reupload.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
-  import UpdateToast from "./UpdateToast.svelte";
   import ChatTabsBar from "./shell/ChatTabsBar.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
   import ActivityBar from "./shell/ActivityBar.svelte";
@@ -450,9 +449,8 @@
   {/if}
 
   <UpdateDialog />
-  <UpdateToast />
 
-  <ActivityToast />
+  <ToastHost />
 
   <CommandPalette onAddServer={() => openAddServer(null)} />
 

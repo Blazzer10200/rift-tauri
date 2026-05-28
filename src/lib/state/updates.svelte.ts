@@ -20,6 +20,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { Sparkles } from "lucide-svelte";
+import { toast } from "./toast.svelte";
 
 export type UpdateInfo = {
   version: string;
@@ -61,6 +63,8 @@ class UpdateStore {
   dialogOpen = $state(false);
   toastVisible = $state(false);
   dismissedVersion = $state<string | null>(loadDismissed());
+  /** Active toast id when an update notification is on screen. */
+  private toastId: number | null = null;
 
   /** True when there's an unsnoozed update waiting for user action. */
   get pillVisible(): boolean {
@@ -136,11 +140,44 @@ class UpdateStore {
       this.dismissedVersion = this.info.version;
       saveDismissed(this.info.version);
     }
-    this.toastVisible = false;
+    this.clearToast();
     this.dialogOpen = false;
   }
 
-  dismissToast() { this.toastVisible = false; }
+  dismissToast() { this.clearToast(); }
+
+  private clearToast() {
+    if (this.toastId != null) {
+      const id = this.toastId;
+      this.toastId = null;
+      toast.dismiss(id, /* callHandler */ false);
+    }
+    this.toastVisible = false;
+  }
+
+  private showToast() {
+    if (!this.info) return;
+    if (this.toastId != null) return;
+    this.toastVisible = true;
+    const target = this.info.version;
+    const cur = this.currentVersion;
+    const size = this.sizeLabel ? ` · ${this.sizeLabel}` : "";
+    this.toastId = toast.push({
+      severity: "info",
+      icon: Sparkles,
+      title: "Update available",
+      detail: `v${cur} → v${target}${size}`,
+      mono: true,
+      sticky: true,
+      action: { label: "View", onClick: () => this.open() },
+      onDismiss: () => {
+        // Close button → snooze this version (matches prior UpdateToast × behavior).
+        this.toastId = null;
+        this.toastVisible = false;
+        this.snooze();
+      },
+    });
+  }
 
   /** Called once on app launch from AppShell.onMount. Pops the toast if a
    *  newer release exists and the user hasn't snoozed that exact version. */
@@ -151,11 +188,11 @@ class UpdateStore {
       this.info &&
       this.info.version !== this.dismissedVersion
     ) {
-      this.toastVisible = true;
+      this.showToast();
     }
   }
 
-  open()  { this.dialogOpen = true; this.toastVisible = false; }
+  open()  { this.dialogOpen = true; this.clearToast(); }
   close() { this.dialogOpen = false; }
 
   /** No-op in the GH-release path — kept so HMR teardown callers don't error. */

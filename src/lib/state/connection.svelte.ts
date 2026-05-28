@@ -1,6 +1,40 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import {
+  RefreshCw, Download, Trash2, AlertTriangle, Check,
+  GitBranch, Network, Lock, XCircle, Info,
+} from "lucide-svelte";
 import { reportFrontendError } from "../util/diag";
+import { toast, type ToastSeverity } from "./toast.svelte";
+
+function activityIcon(k: ActivityKind) {
+  switch (k) {
+    case "sync": return RefreshCw;
+    case "pull": return Download;
+    case "delete": return Trash2;
+    case "conflict": return AlertTriangle;
+    case "conflict_resolved": return Check;
+    case "drift": return GitBranch;
+    case "bridge": return Network;
+    case "block": return Lock;
+    case "error": return XCircle;
+    case "system": return Info;
+  }
+}
+function activitySeverity(k: ActivityKind): ToastSeverity {
+  switch (k) {
+    case "sync":
+    case "conflict_resolved": return "ok";
+    case "pull":
+    case "bridge": return "info";
+    case "drift":
+    case "delete":
+    case "block": return "warn";
+    case "conflict":
+    case "error": return "danger";
+    default: return "muted";
+  }
+}
 
 export type ServerProfile = {
   key: string;
@@ -328,8 +362,16 @@ class ConnectionStore {
       );
       this.unlisteners.push(
         await listen<ActivityRow>("autosync://activity", (e) => {
-          this.lastActivity = e.payload;
-          this.activityFeed = [e.payload, ...this.activityFeed].slice(0, 200);
+          const row = e.payload;
+          this.lastActivity = row;
+          this.activityFeed = [row, ...this.activityFeed].slice(0, 200);
+          toast.push({
+            severity: activitySeverity(row.kind),
+            icon: activityIcon(row.kind),
+            title: row.action,
+            detail: row.file ? `${row.resource} · ${row.file}` : row.resource,
+            mono: true,
+          });
         }),
       );
       this.unlisteners.push(
