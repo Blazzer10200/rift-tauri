@@ -44,7 +44,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 | `src-tauri/src/sync/auto_sync/watch.rs` | 349 | notify lifecycle + queue_path |
 | `src-tauri/src/sftp/mod.rs` | 307 | session core (split v0.2.49 from 1100L → 307L) |
 
-Frontend hot files (2026-05-26): `assistant.svelte.ts` 2648L (down from 3356L after #20 M0-M5b split — `src/lib/state/assistant/persistence.ts` carved out; M6-M9 still open per [HANDOFF](docs/HANDOFF.md)), `Settings.svelte` 1541L, `SyncPage.svelte` 1343L, `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
+Frontend hot files (2026-05-27): `assistant.svelte.ts` 2285L (down from 3356L; #20 M0-M5b carved `persistence.ts` 261L in v0.4.32, M6/M7 carved `tabs.ts` 468L + `compaction.ts` 237L in v0.4.33; M8/M9 still open), `Settings.svelte` 1541L, `SyncPage.svelte` 1343L, `ChatTabsBar.svelte` 1307L (grew w/ Browser toggle + portaled ctx popover v0.4.33), `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
 
 `auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2336L) and is the next backend split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
 
