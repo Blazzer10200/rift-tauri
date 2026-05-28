@@ -11,6 +11,7 @@
 pub mod assistant;
 pub mod bootstrap;
 pub mod bridge;
+pub mod browser;
 pub mod commands;
 pub mod diagnostics;
 pub mod edit;
@@ -275,6 +276,13 @@ pub fn run() {
             commands::assistant_clear_root,
             commands::assistant_remove_recent_root,
             commands::assistant_list_workspace_files,
+            commands::browser_open,
+            commands::browser_navigate,
+            commands::browser_set_bounds,
+            commands::browser_show,
+            commands::browser_hide,
+            commands::browser_current_url,
+            commands::browser_close,
             stt::stt_get_config,
             stt::stt_set_config,
             stt::stt_set_engine,

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check,
+  import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
     Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { PermissionMode } from "../../state/assistant/types";
@@ -29,6 +29,19 @@
   const attachments = $derived(tab?.attachments ?? []);
   const queue = $derived(tab?.queue ?? []);
   const streaming = $derived(tab?.streaming ?? false);
+
+  // Context gauge — feeds the composer divider's fill. Per-tab so each pane
+  // shows its own conversation's window usage. Tone steps mirror the tab-bar
+  // ctx-pill (yellow ≥70, red ≥90) so the two readouts never disagree.
+  const ctxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
+  const ctxTokens = $derived(tab ? assistant.ctxTokensFor(tab) : 0);
+  const ctxWindow = $derived(tab ? assistant.ctxWindowFor(tab) : 0);
+  const ctxTone = $derived(ctxPct >= 90 ? "red" : ctxPct >= 70 ? "yellow" : "ok");
+  const ctxTitle = $derived(
+    ctxTokens > 0
+      ? `Context: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens (${ctxPct.toFixed(1)}%) — fills as the conversation grows`
+      : "Context window — fills as the conversation grows",
+  );
 
   function setDraft(v: string) { if (tab) tab.draft = v; }
   function setAttachments(
@@ -728,6 +741,39 @@
       }
     }
   }
+
+  // ── Click-to-attach ───────────────────────────────────────────────────────
+  // Paste + drag-drop already stage images; this adds the discoverable path
+  // the placeholder has long advertised. Same staging + 20 MiB guard as onDrop.
+  let fileInput = $state<HTMLInputElement | undefined>();
+  function openFilePicker() { fileInput?.click(); }
+  async function onFilePick(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+    attachError = null;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 20 * 1024 * 1024) {
+        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
+        continue;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const dataBase64 = bytesToBase64(buf);
+        const ok = assistant.addAttachment({
+          mime: file.type || "image/png",
+          dataBase64,
+          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
+          sizeBytes: file.size,
+        }, tabId);
+        if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
+      } catch (err) {
+        attachError = `Failed to read image: ${String(err)}`;
+      }
+    }
+    input.value = ""; // allow re-picking the same file
+  }
 </script>
 
 <div class="composer-wrap" data-model={assistant.model}>
@@ -998,7 +1044,7 @@
           {#key placeholderKey}
             <span class="placeholder-ghost" aria-hidden="true">{idlePlaceholder}</span>
           {/key}
-        {:else if streaming}
+        {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Type to queue — Enter sends, /stop halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
@@ -1015,8 +1061,35 @@
         {/if}
       </div>
 
+      <!-- Divider + context gauge in one. Base hairline separates the input
+           zone from the toolbar; the fill tracks context-window usage. -->
+      <div class="composer-divider" data-tone={ctxTone} use:tooltip={ctxTitle} role="img" aria-label={ctxTitle}>
+        {#if ctxTokens > 0}
+          <span class="composer-divider-fill" style="width: {Math.min(100, ctxPct)}%" aria-hidden="true"></span>
+        {/if}
+      </div>
+
       <div class="composer-toolbar">
         <div class="toolbar-cluster">
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept="image/*"
+            multiple
+            class="file-input-hidden"
+            onchange={onFilePick}
+            tabindex="-1"
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            class="iconbtn attachbtn"
+            onclick={openFilePicker}
+            use:tooltip={"Attach image — or paste / drag-drop"}
+            aria-label="Attach image"
+          >
+            <Paperclip size={14} />
+          </button>
           {#if stt.config.enabled && (
             (stt.config.engine === "web_speech" && stt.supported) ||
             (stt.config.engine === "whisper" && stt.backendAvailable)
@@ -1090,7 +1163,7 @@
               <Wand2 size={14} />
             </button>
           {/if}
-          {#if draft.length > 0}
+          {#if draft.length > 500}
             <span
               class="char-count"
               class:warn={draft.length > 4000}
@@ -1114,6 +1187,7 @@
             use:tooltip={`Model · thinking depth · permission mode\n${currentModel?.label ?? assistant.model} · ${currentEffort.label} · ${currentMode.label}`}
           >
             <SlidersHorizontal size={15} />
+            <span class="pill-label">{currentModel?.label ?? assistant.model}</span>
             <span class="pill-caret" aria-hidden="true">▾</span>
           </button>
           <button
@@ -1324,6 +1398,55 @@
     .placeholder-ghost { animation: none; }
   }
 
+  /* Divider between the input zone and the toolbar — doubles as a context
+     gauge. The base hairline always shows (structure); the fill sweeps across
+     proportional to context-window usage, tinted by the active model and
+     stepping to warn/danger as the window fills. One element, two jobs. */
+  .composer-divider {
+    position: relative;
+    height: 1.5px;
+    margin: 5px 8px 3px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--border) 55%, transparent);
+    overflow: hidden;
+  }
+  .composer-divider-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    height: 100%;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--model-color) 75%, transparent);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--model-color) 45%, transparent);
+    transition: width 360ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms ease-out;
+  }
+  .composer-divider[data-tone="yellow"] .composer-divider-fill {
+    background: var(--warn);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--warn) 50%, transparent);
+  }
+  .composer-divider[data-tone="red"] .composer-divider-fill {
+    background: var(--danger);
+    box-shadow: 0 0 8px color-mix(in oklch, var(--danger) 55%, transparent);
+    animation: ctx-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes ctx-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.6; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-divider-fill { animation: none; transition: none; }
+  }
+
+  /* Hidden native file input — driven by the paperclip .attachbtn. */
+  .file-input-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
   /* Toolbar row — left cluster (input affordances) + right cluster (action). */
   .composer-toolbar {
     position: relative;
@@ -1349,7 +1472,7 @@
     border-radius: 8px;
     cursor: pointer;
     flex-shrink: 0;
-    opacity: 0.75;
+    opacity: 0.85;
     padding: 0;
     transition: color 140ms, background 140ms, border-color 140ms, opacity 140ms, transform 140ms;
   }
@@ -1410,7 +1533,8 @@
     .mic-wave span { animation: none; transform: scaleY(0.7); }
   }
 
-  /* Live character count — surfaces only when draft is non-empty. Warns
+  /* Live character count — stays hidden until the draft passes 500 chars, so
+     it reads as a "getting long" signal rather than constant clutter. Warns
      past 4000 chars (rough one-turn ceiling for short prompts). */
   .char-count {
     margin-left: 4px;
@@ -2050,6 +2174,18 @@
   .settings-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
   .settings-pill[data-mode="bypassPermissions"] { color: var(--warn); }
   .settings-pill[data-mode="default"] { color: var(--accent); }
+  /* Current-model label on the pill — replaces the icon-only rest state so
+     the active model reads at a glance without hovering. */
+  .pill-label {
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .mode-icon { display: inline-flex; align-items: center; }
   /* Signal-bar effort indicator — 3 vertical bars growing left-to-right.
      `data-level` (1|2|3) fills bars in current color; unfilled bars stay

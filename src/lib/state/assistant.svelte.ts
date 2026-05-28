@@ -102,6 +102,32 @@ import {
   loadConversation as persistLoad,
   deleteConversation as persistDelete,
 } from "./assistant/persistence";
+// M6 split (2026-05-27): tab lifecycle + split-pane management in
+// `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
+// tabByCliSession) + scroll cache stay on the class; only the lifecycle
+// logic moves. Store methods below are thin thunks onto these.
+import {
+  addPane as tabsAddPane,
+  closePane as tabsClosePane,
+  setFocusedPane as tabsSetFocusedPane,
+  dropTabIntoPane as tabsDropTabIntoPane,
+  restoreTabs as tabsRestore,
+  openTab as tabsOpenTab,
+  closeTab as tabsCloseTab,
+  newTab as tabsNewTab,
+  reorderTabs as tabsReorder,
+  cycleTab as tabsCycle,
+  closeOtherTabs as tabsCloseOthers,
+  closeAllTabs as tabsCloseAll,
+  closeTabsToRight as tabsCloseToRight,
+} from "./assistant/tabs";
+// M7 split (2026-05-27): summarize + compact pipeline in `./assistant/compaction`.
+// Per-tab compaction fields stay on TabState; threshold/model setters stay on
+// the store. The two pipeline methods below are thin thunks onto these.
+import {
+  summarizeCurrentSession as compactSummarize,
+  compactConversation as compactRun,
+} from "./assistant/compaction";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -981,172 +1007,20 @@ class AssistantStore {
    *  New pane is auto-filled with the next openTab not already in any pane,
    *  else stays empty (drop a tab in from the tabsbar). Focus moves to new
    *  pane. Persists. */
-  addPane() {
-    if (this.panes.length >= MAX_PANES) return;
-    const taken = new Set(this.panes.map((p) => p.tabId).filter((x): x is string => !!x));
-    const fill = this.openTabs.find((id) => !taken.has(id)) ?? null;
-    const insertAt = this.focusedPaneIdx + 1;
-    const next = this.panes.slice();
-    next.splice(insertAt, 0, { tabId: fill });
-    this.panes = next;
-    this.telemetry.event("pane.add", { count: next.length, fill });
-    // Focus the freshly-added pane so subsequent newTab/openTab assigns to it.
-    this.stashTabUi(this.currentConvoId);
-    this.focusedPaneIdx = insertAt;
-    if (fill) {
-      const inMeta = this.conversations.some((c) => c.id === fill);
-      if (inMeta && !this.tabs.get(fill)) {
-        void this.loadConversation(fill);
-      } else {
-        this.currentConvoId = fill;
-      }
-    }
-    this.restoreTabUi(fill);
-    this.persistTabs();
-  }
+  addPane() { tabsAddPane(this); }
 
   /** Close a pane (the pane container, not the tab inside it). Tabs stay in
    *  openTabs — closing a pane just unhooks it. Last pane never closes (always
    *  length≥1). Focused idx is clamped to the new array bounds. Persists. */
-  closePane(idx: number) {
-    if (this.panes.length <= 1) return;
-    if (idx < 0 || idx >= this.panes.length) return;
-    const next = this.panes.slice();
-    next.splice(idx, 1);
-    this.panes = next;
-    this.telemetry.event("pane.close", { remaining: next.length });
-    // Clamp focused. If we closed the focused pane (or one before it), shift left.
-    let newFocus = this.focusedPaneIdx;
-    if (idx < this.focusedPaneIdx) newFocus -= 1;
-    else if (idx === this.focusedPaneIdx) newFocus = Math.min(idx, next.length - 1);
-    newFocus = Math.max(0, Math.min(newFocus, next.length - 1));
-    if (newFocus !== this.focusedPaneIdx) {
-      this.setFocusedPane(newFocus);
-    } else {
-      this.persistTabs();
-    }
-  }
+  closePane(idx: number) { tabsClosePane(this, idx); }
 
   /** Move focus to a pane. Stashes outgoing composer draft + restores incoming
    *  so each pane carries its own draft. No-op in single-pane mode. */
-  setFocusedPane(idx: number) {
-    if (idx < 0 || idx >= this.panes.length) return;
-    if (this.focusedPaneIdx === idx && this.currentConvoId === this.panes[idx].tabId) return;
-    this.stashTabUi(this.currentConvoId);
-    this.focusedPaneIdx = idx;
-    const next = this.panes[idx].tabId;
-    if (next) {
-      const inMeta = this.conversations.some((c) => c.id === next);
-      if (inMeta && !this.tabs.get(next)) {
-        void this.loadConversation(next);
-      } else {
-        this.currentConvoId = next;
-      }
-    } else {
-      this.currentConvoId = null;
-    }
-    this.restoreTabUi(next);
-    this.persistTabs();
-  }
+  setFocusedPane(idx: number) { tabsSetFocusedPane(this, idx); }
 
-  /** Assign a tab to the currently-focused pane. Called by openTab/newTab so
-   *  the focused pane's slot follows the active selection. Works in both
-   *  single-pane (length=1) and split modes. */
-  private assignFocusedPane(tabId: string | null) {
-    const cur = this.panes[this.focusedPaneIdx];
-    if (!cur || cur.tabId === tabId) return;
-    const next = this.panes.slice();
-    next[this.focusedPaneIdx] = { tabId };
-    this.panes = next;
-  }
-
-  /** Drop a tab from the tabsbar into a specific pane.
-   *  - Single-pane mode (panes.length===1) + dropping a DIFFERENT tab on a
-   *    half → enter 2-pane split (existing behavior).
-   *  - Multi-pane mode → if target pane already holds this tab, just focus it.
-   *    If a SIBLING pane holds it, swap. Else assign + focus.
-   *  - paneIdx === panes.length is a sentinel meaning "drop in a new pane at
-   *    the end" — auto-adds (cap-aware) and assigns. */
-  dropTabIntoPane(tabId: string, paneIdx: number) {
-    if (!this.openTabs.includes(tabId)) return;
-    if (paneIdx < 0) return;
-
-    // Sentinel: "add new pane at end". Cap-respecting.
-    if (paneIdx >= this.panes.length) {
-      if (this.panes.length >= MAX_PANES) return;
-      const next = this.panes.slice();
-      next.push({ tabId });
-      this.panes = next;
-      const newIdx = next.length - 1;
-      this.stashTabUi(this.currentConvoId);
-      this.focusedPaneIdx = newIdx;
-      const inMeta = this.conversations.some((c) => c.id === tabId);
-      if (inMeta && !this.tabs.get(tabId)) {
-        void this.loadConversation(tabId);
-      } else {
-        this.currentConvoId = tabId;
-      }
-      this.restoreTabUi(tabId);
-      this.persistTabs();
-      return;
-    }
-
-    if (this.panes.length === 1) {
-      // Single-pane → drop on a half = enter split. paneIdx is 0 or 1 from
-      // the half-detect. If the dragged tab IS the only-pane tab, ignore.
-      if (tabId === this.currentConvoId) return;
-      const other = paneIdx === 0 ? 1 : 0;
-      const next: PaneState[] = [{ tabId: null }, { tabId: null }];
-      next[paneIdx] = { tabId };
-      next[other] = { tabId: this.currentConvoId };
-      this.panes = next;
-      this.telemetry.event("pane.split.on", { via: "drag", p0: next[0].tabId, p1: next[1].tabId });
-    } else {
-      // Already split: same tab in target = focus only.
-      if (this.panes[paneIdx].tabId === tabId) {
-        this.setFocusedPane(paneIdx);
-        return;
-      }
-      // Same tab in a SIBLING pane = swap (mirror UX).
-      const siblingIdx = this.panes.findIndex((p, i) => i !== paneIdx && p.tabId === tabId);
-      if (siblingIdx !== -1) {
-        const swapped = this.panes.slice();
-        swapped[siblingIdx] = { tabId: this.panes[paneIdx].tabId };
-        swapped[paneIdx] = { tabId };
-        this.panes = swapped;
-        this.setFocusedPane(paneIdx);
-        return;
-      }
-      const next = this.panes.slice();
-      next[paneIdx] = { tabId };
-      this.panes = next;
-    }
-    // Move focus to the freshly-dropped pane + sync currentConvoId.
-    this.stashTabUi(this.currentConvoId);
-    this.focusedPaneIdx = paneIdx;
-    if (tabId !== this.currentConvoId) {
-      const inMeta = this.conversations.some((c) => c.id === tabId);
-      if (inMeta && !this.tabs.get(tabId)) {
-        void this.loadConversation(tabId);
-      } else {
-        this.currentConvoId = tabId;
-      }
-    }
-    this.restoreTabUi(tabId);
-    this.persistTabs();
-  }
-
-  /** When a tab closes, scrub it from any pane that pointed at it. Panes
-   *  become empty (null); the pane container stays so the user can drop a
-   *  different tab in or close the pane manually. */
-  private scrubTabFromPanes(id: string) {
-    let changed = false;
-    const next = this.panes.map((p) => {
-      if (p.tabId === id) { changed = true; return { tabId: null }; }
-      return p;
-    });
-    if (changed) this.panes = next;
-  }
+  /** Drop a tab from the tabsbar into a specific pane. See tabs.ts for the
+   *  single→split / sibling-swap / end-sentinel behavior. */
+  dropTabIntoPane(tabId: string, paneIdx: number) { tabsDropTabIntoPane(this, tabId, paneIdx); }
 
   /** Look up the TabState whose CLI session matches the event's session_id.
    *  Linear scan over open tabs is fine — typical user has <10. */
@@ -1382,8 +1256,9 @@ class AssistantStore {
   // longer need to stash/restore. stashTabUi/restoreTabUi are kept as no-ops
   // so the call-sites in addPane/closePane/setFocusedPane/dropTabIntoPane
   // don't need surgery; the per-tab fields already carry the right value.
-  private stashTabUi(_id: string | null) { /* no-op since v2.1 */ }
-  private restoreTabUi(_id: string | null) { /* no-op since v2.1 */ }
+  // M6: relaxed from `private` so the tabs module calls them through the host ref.
+  stashTabUi(_id: string | null) { /* no-op since v2.1 */ }
+  restoreTabUi(_id: string | null) { /* no-op since v2.1 */ }
 
   /** AssistantPage writes the active tab's scrollTop here on scroll, then
    *  reads it back on tab activation. Kept in the store so it survives
@@ -1398,7 +1273,8 @@ class AssistantStore {
   /** Drop all per-tab UI scratch for a closed tab. Draft + attachments live
    *  on TabState now, so dropTab() teardown handles those; only scroll cache
    *  needs explicit pruning here. */
-  private pruneTabUi(id: string) {
+  // M6: relaxed from `private` so the tabs module calls it through the host ref.
+  pruneTabUi(id: string) {
     this.tabScroll.delete(id);
   }
 
@@ -1739,7 +1615,8 @@ class AssistantStore {
 
   flushNow() { persistFlushNow(this); }
 
-  private scheduleSave(flush = false) { persistSchedule(this, flush); }
+  // M6: relaxed from `private` so the tabs module calls it through the host ref.
+  scheduleSave(flush = false) { persistSchedule(this, flush); }
 
   /** Start a fresh conversation. Flushes the current one first so nothing
    *  is lost when the user clicks `+ New`. */
@@ -1760,252 +1637,38 @@ class AssistantStore {
   deleteConversation(id: string) { return persistDelete(this, id); }
 
   // ── v0.4 tabs ────────────────────────────────────────────────────────
-  private persistTabs() { persistTabsImpl(this); }
+  // M6: relaxed from `private` so the tabs module calls it through the host ref.
+  persistTabs() { persistTabsImpl(this); }
 
-  private async restoreTabs() {
-    // #181: persistTabs() in finally so a throw mid-restore doesn't leave the
-    // disk record diverged from in-memory state.
-    try {
-      const raw = localStorage.getItem("rift.ui.tabs.v1");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        openTabs?: unknown;
-        activeTabId?: unknown;
-        panes?: unknown;
-        focusedPaneIdx?: unknown;
-      };
-      const ids = Array.isArray(parsed.openTabs)
-        ? parsed.openTabs.filter((s): s is string => typeof s === "string")
-        : [];
-      const existing = new Set(this.conversations.map((c) => c.id));
-      const valid = ids.filter((id) => existing.has(id));
-      this.openTabs = valid;
-      const active = typeof parsed.activeTabId === "string" ? parsed.activeTabId : null;
-      if (active && valid.includes(active)) {
-        await this.loadConversation(active);
-      } else if (valid.length > 0) {
-        await this.loadConversation(valid[0]);
-      }
-      // Restore split state — N-pane shape. Accepts length 1..MAX_PANES.
-      // Stale tab refs are pruned to null (pane survives, empty). Legacy
-      // null/missing keeps single-pane default.
-      if (Array.isArray(parsed.panes) && parsed.panes.length >= 1 && parsed.panes.length <= MAX_PANES) {
-        const norm = (p: unknown): PaneState => {
-          const id = (p as { tabId?: unknown })?.tabId;
-          return { tabId: typeof id === "string" && valid.includes(id) ? id : null };
-        };
-        const restored = parsed.panes.map(norm);
-        // Keep at least one pane; if all restored panes are empty and we're
-        // single-length, that's fine — assignFocusedPane will fill on next open.
-        this.panes = restored.length > 0 ? restored : [{ tabId: null }];
-        const fi = typeof parsed.focusedPaneIdx === "number" ? parsed.focusedPaneIdx : 0;
-        this.focusedPaneIdx = Math.max(0, Math.min(fi, this.panes.length - 1));
-        // Sync currentConvoId to focused pane if needed.
-        const focused = this.panes[this.focusedPaneIdx].tabId;
-        if (focused && focused !== this.currentConvoId) {
-          await this.loadConversation(focused);
-        }
-      }
-    } catch (e) {
-      console.warn("restoreTabs failed", e);
-    } finally {
-      this.persistTabs();
-    }
-  }
+  private restoreTabs() { return tabsRestore(this); }
 
   /** Open a saved convo as a tab. Push to openTabs if not already there;
    *  activate + load from disk. Unsaved new-tab ids (minted by newTab() but
    *  no send yet → no disk record) drop into a fresh in-memory state instead
    *  of disk-load. Singleton stream pipeline — mid-stream switch is handled
    *  by loadConversation() calling stop(). */
-  async openTab(id: string) {
-    if (!this.openTabs.includes(id)) {
-      this.openTabs = [...this.openTabs, id];
-    }
-    if (this.currentConvoId === id) {
-      this.persistTabs();
-      return;
-    }
-    this.telemetry.event("tab.switch", { from: this.currentConvoId, to: id });
-    if (this.messages.length > 0 && this.currentConvoId) {
-      this.scheduleSave(true);
-    }
-    // Stash outgoing tab's composer + attachments before any state change.
-    this.stashTabUi(this.currentConvoId);
-    const inMeta = this.conversations.some((c) => c.id === id);
-    if (inMeta) {
-      await this.loadConversation(id);
-    } else {
-      // Fresh in-memory tab (no disk record yet). Mint a TabState with
-      // cliSessionId seeded from convoId — first send() finalizes. Don't
-      // stop() here: if another tab was streaming, leave it running in the
-      // bg. #143: per-tab fields are already null on the fresh TabState;
-      // writing them via store setters would clobber cliSessionId.
-      this.ensureTab(id, id);
-      this.currentConvoId = id;
-      this.queue = [];
-      this.lastNotice = null;
-    }
-    // Restore incoming tab's composer + attachments (loadConversation cleared
-    // them; we re-fill from cache if the user had a draft mid-typing).
-    this.restoreTabUi(id);
-    this.assignFocusedPane(id);
-    this.persistTabs();
-  }
+  openTab(id: string) { return tabsOpenTab(this, id); }
 
   /** Close a tab. Removes from openTabs; convo stays on disk → still in History.
    *  Active-tab close picks the right neighbor (or left if at end); last-tab
    *  close drops to empty state w/ currentConvoId=null. */
-  async closeTab(id: string) {
-    const idx = this.openTabs.indexOf(id);
-    if (idx === -1) return;
-    const wasActive = this.currentConvoId === id;
-    this.telemetry.event("tab.close", { convoId: id, wasActive });
-    const next = this.openTabs.slice();
-    next.splice(idx, 1);
-    this.openTabs = next;
-    // Drop the closing tab's UI scratch + TabState. The convo itself stays
-    // on disk via scheduleSave below; only in-memory streaming state is retired.
-    this.pruneTabUi(id);
-    this.scrubTabFromPanes(id);
-    if (wasActive) {
-      // Save unsaved tail of the closing tab before switching/clearing.
-      if (this.messages.length > 0 && this.convoCreatedAt) {
-        this.scheduleSave(true);
-      }
-      if (this.streaming) await this.stop();
-    }
-    this.dropTab(id);
-    if (wasActive) {
-      if (next.length === 0) {
-        this.currentConvoId = null;
-        this.currentCliSessionId = null;
-        this.convoCreatedAt = null;
-        this.convoTitle = null;
-        this.queue = [];
-        this.lastNotice = null;
-      } else {
-        // Right-priority: the entry that shifted into idx, else last.
-        const neighbor = next[idx] ?? next[next.length - 1];
-        const inMeta = this.conversations.some((c) => c.id === neighbor);
-        if (inMeta) {
-          await this.loadConversation(neighbor);
-        } else {
-          // #143: ensureTab seeds the fresh tab's cliSessionId to neighbor;
-          // don't store-write null afterwards or the setter clobbers it.
-          this.ensureTab(neighbor, neighbor);
-          this.currentConvoId = neighbor;
-          this.queue = [];
-          this.lastNotice = null;
-        }
-        this.restoreTabUi(neighbor);
-        this.assignFocusedPane(neighbor);
-      }
-    }
-    this.persistTabs();
-  }
+  closeTab(id: string) { return tabsCloseTab(this, id); }
 
   /** Open a fresh empty tab. Mints currentConvoId up-front so the tab can
    *  render before the first send; convoCreatedAt stays null so send() still
    *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
-  async newTab() {
-    // Don't stop the previous tab's stream — newTab leaves background tabs
-    // streaming. Save unsaved tail of the previous tab before swapping.
-    if (this.messages.length > 0 && this.currentConvoId) {
-      this.scheduleSave(true);
-    }
-    // Snapshot outgoing tab's composer state before we mint the new one.
-    this.stashTabUi(this.currentConvoId);
-    const id = crypto.randomUUID();
-    this.openTabs = [...this.openTabs, id];
-    // Fresh TabState — empty messages, no streaming. cliSessionId defaults
-    // to the convoId; first send() finalizes if needed.
-    this.ensureTab(id, id);
-    this.telemetry.event("tab.new", { convoId: id });
-    this.currentConvoId = id;
-    // #143: per-tab fields default to null/<id> on the freshly minted
-    // TabState; writing through the store setters here would clobber
-    // cliSessionId back to "" (loses ensureTab's seed value).
-    this.queue = [];
-    this.lastNotice = null;
-    // Fresh tab → empty composer (no cache entry yet).
-    this.composerDraft = "";
-    this.composerAttachments = [];
-    this.assignFocusedPane(id);
-    this.persistTabs();
-  }
+  newTab() { return tabsNewTab(this); }
 
-  reorderTabs(fromIdx: number, toIdx: number) {
-    if (fromIdx === toIdx) return;
-    if (fromIdx < 0 || fromIdx >= this.openTabs.length) return;
-    const next = this.openTabs.slice();
-    const [moved] = next.splice(fromIdx, 1);
-    const clamped = Math.max(0, Math.min(toIdx, next.length));
-    next.splice(clamped, 0, moved);
-    this.openTabs = next;
-    this.persistTabs();
-  }
+  reorderTabs(fromIdx: number, toIdx: number) { tabsReorder(this, fromIdx, toIdx); }
 
-  async cycleTab(direction: 1 | -1) {
-    if (this.openTabs.length === 0) return;
-    const cur = this.currentConvoId ? this.openTabs.indexOf(this.currentConvoId) : -1;
-    const n = this.openTabs.length;
-    const nextIdx = ((cur < 0 ? 0 : cur + direction) + n) % n;
-    await this.openTab(this.openTabs[nextIdx]);
-  }
+  cycleTab(direction: 1 | -1) { return tabsCycle(this, direction); }
 
-  async closeOtherTabs(keepId: string) {
-    const others = this.openTabs.filter((id) => id !== keepId);
-    if (others.length === 0) return;
-    // #144: tear down per-tab state for removed tabs so tabs Map +
-    // tabDrafts/tabAttachments/tabScroll don't accumulate over long sessions.
-    for (const id of others) {
-      this.dropTab(id);
-      this.pruneTabUi(id);
-    }
-    this.openTabs = [keepId];
-    if (this.currentConvoId !== keepId) {
-      await this.loadConversation(keepId);
-    }
-    this.persistTabs();
-  }
+  closeOtherTabs(keepId: string) { return tabsCloseOthers(this, keepId); }
 
-  /** Wipe all open tabs and drop into the empty-tabs state. Flushes the
-   *  current convo if it has messages so nothing's lost; closes streams. */
-  async closeAllTabs() {
-    if (this.streaming) await this.stop();
-    if (this.messages.length > 0 && this.convoCreatedAt) {
-      this.scheduleSave(true);
-    }
-    // Drop every TabState; the convos persisted to disk above.
-    this.tabs = new Map();
-    this.openTabs = [];
-    this.currentConvoId = null;
-    this.currentCliSessionId = null;
-    this.convoCreatedAt = null;
-    this.convoTitle = null;
-    this.queue = [];
-    this.lastNotice = null;
-    this.persistTabs();
-  }
+  /** Wipe all open tabs and drop into the empty-tabs state. */
+  closeAllTabs() { return tabsCloseAll(this); }
 
-  async closeTabsToRight(anchorId: string) {
-    const idx = this.openTabs.indexOf(anchorId);
-    if (idx === -1 || idx === this.openTabs.length - 1) return;
-    const kept = this.openTabs.slice(0, idx + 1);
-    const removed = this.openTabs.slice(idx + 1);
-    const removedActive = this.currentConvoId && !kept.includes(this.currentConvoId);
-    // #144
-    for (const id of removed) {
-      this.dropTab(id);
-      this.pruneTabUi(id);
-    }
-    this.openTabs = kept;
-    if (removedActive) {
-      await this.loadConversation(anchorId);
-    }
-    this.persistTabs();
-  }
+  closeTabsToRight(anchorId: string) { return tabsCloseToRight(this, anchorId); }
 
   // ── /v0.4 tabs ───────────────────────────────────────────────────────
 
@@ -2388,26 +2051,8 @@ class AssistantStore {
    *  Returns the SummarizeResult on success, or null if no active session
    *  or the call fails (error surfaces via `lastError`). The cost/usage
    *  fields let Phase C populate the boundary message pill. */
-  async summarizeCurrentSession(focus?: string): Promise<SummarizeResult | null> {
-    const sid = this.currentCliSessionId;
-    if (!sid) {
-      this.lastError = "No active session yet — send a message first.";
-      return null;
-    }
-    const tasksJson = JSON.stringify(
-      this.tasks.map((t) => ({ content: t.content, status: t.status })),
-    );
-    try {
-      const res = await invoke<SummarizeResult>("assistant_summarize_session", {
-        sessionId: sid,
-        focus: focus ?? null,
-        tasksJson,
-      });
-      return res;
-    } catch (e) {
-      this.lastError = `Summarize failed: ${String(e)}`;
-      return null;
-    }
+  summarizeCurrentSession(focus?: string): Promise<SummarizeResult | null> {
+    return compactSummarize(this, focus);
   }
 
   /** Compaction Phase C: full compact action. Summarizes the current
@@ -2423,151 +2068,8 @@ class AssistantStore {
    *
    *  Cost is fully internal — no UI confirmation here; the Compact button
    *  in the header should confirm before calling (Phase E1 polish). */
-  async compactConversation(focus?: string, tabId?: string | null): Promise<boolean> {
-    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) {
-      this.lastError = "No active tab.";
-      return false;
-    }
-    if (tab.streaming) {
-      this.lastError = "Wait for the current turn to finish before compacting.";
-      return false;
-    }
-    if (tab.compactingNow) {
-      this.lastError = "Compaction already in progress.";
-      return false;
-    }
-    if (tab.messages.length < 4) {
-      this.lastError = "Conversation too short to compact (need ≥4 messages).";
-      return false;
-    }
-    const oldSid = tab.cliSessionId;
-    if (!oldSid) {
-      this.lastError = "No CLI session to compact.";
-      return false;
-    }
-
-    tab.compactingNow = true;
-    this.lastNotice = "Compacting conversation…";
-
-    // S124: pre-stage the boundary message w/ streaming:true BEFORE the
-    // summarize call. As progress events land, we patch the same block in
-    // place so the user sees the summary fill live.
-    const archivedCount = tab.messages.length;
-    const boundaryId = crypto.randomUUID();
-    const placeholderModel = this.compactModel ?? "haiku";
-    const ctxPctBefore = this.ctxPct;
-    const ctxWindowAtCompact = this.ctxWindow;
-    const stagedBoundary: ChatMessage = {
-      id: boundaryId,
-      role: "system",
-      blocks: [
-        {
-          type: "boundary",
-          summary: "",
-          at: Date.now(),
-          archivedCount,
-          costUsd: 0,
-          summaryModel: placeholderModel,
-          streaming: true,
-          ctxPctBefore,
-        },
-      ],
-    };
-    tab.messages = [...tab.messages, stagedBoundary];
-
-    // Live updater — replace the boundary block's summary field as the
-    // backend emits progress chunks. Tab-aware so background tabs don't
-    // get clobbered if a user switches mid-compact.
-    const patchBoundary = (patch: Partial<BoundaryBlock>) => {
-      const idx = tab.messages.findIndex((m) => m.id === boundaryId);
-      if (idx === -1) return;
-      const msg = tab.messages[idx];
-      const block = msg.blocks[0];
-      if (block?.type !== "boundary") return;
-      const nextBlock: BoundaryBlock = { ...block, ...patch };
-      const nextMsg: ChatMessage = { ...msg, blocks: [nextBlock] };
-      const next = tab.messages.slice();
-      next[idx] = nextMsg;
-      tab.messages = next;
-    };
-    let progressUnlisten: UnlistenFn | null = null;
-    try {
-      progressUnlisten = await listen<{
-        session_id: string;
-        summary_so_far: string;
-        status: "streaming" | "done";
-      }>("assistant://summarize-progress", (e) => {
-        if (e.payload.session_id !== oldSid) return;
-        patchBoundary({ summary: e.payload.summary_so_far });
-      });
-      const res = await this.summarizeCurrentSession(focus);
-      if (!res) {
-        // summarizeCurrentSession already set lastError. Drop the staged
-        // boundary so the chat doesn't keep a half-rendered pill.
-        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
-        return false;
-      }
-      const newSid = crypto.randomUUID();
-      try {
-        await invoke("assistant_remint_session", {
-          oldSessionId: oldSid,
-          newSessionId: newSid,
-        });
-      } catch (e) {
-        this.lastError = `Remint failed: ${String(e)}`;
-        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
-        return false;
-      }
-
-      // Finalize the staged boundary with the real summary + cost + model
-      // and clear streaming. archivedCount stays the snapshot from pre-compact.
-      // E1: post-compact ctx estimate — the new session starts with only the
-      // summary in context (seeded as <system-reminder> on the next user turn).
-      const ctxPctEstAfter =
-        ctxWindowAtCompact > 0
-          ? Math.min(100, (res.outputTokens / ctxWindowAtCompact) * 100)
-          : 0;
-      patchBoundary({
-        summary: res.summary,
-        costUsd: res.costUsd,
-        summaryModel: res.model,
-        streaming: false,
-        ctxPctEstAfter,
-      });
-
-      // Flip the tab's CLI handle to the new session and force the next
-      // send into first-turn mode (mints --session-id <new> instead of
-      // --resume <new>, which would fail since there's no JSONL yet).
-      tab.cliSessionId = newSid;
-      tab.convoCreatedAt = null;
-      tab.forceNextFirstTurn = true;
-      tab.pendingCompactionSummary = res.summary;
-      tab.resetUsage();
-      const now = Date.now();
-      tab.lastCompactionAt = now;
-      tab.compactionHistory = [
-        ...tab.compactionHistory,
-        {
-          at: now,
-          priorSessionId: oldSid,
-          newSessionId: newSid,
-          summary: res.summary,
-          costUsd: res.costUsd,
-          summaryModel: res.model,
-          archivedCount,
-        },
-      ];
-
-      this.scheduleSave(true);
-      const inTk = res.inputTokens + res.cacheReadTokens + res.cacheCreateTokens;
-      this.lastNotice =
-        `Compacted ${archivedCount} message(s) · $${res.costUsd.toFixed(4)} · ${inTk.toLocaleString()} in / ${res.outputTokens.toLocaleString()} out · ${res.model}. Next turn seeds the new session with the summary.`;
-      return true;
-    } finally {
-      tab.compactingNow = false;
-      if (progressUnlisten) progressUnlisten();
-    }
+  compactConversation(focus?: string, tabId?: string | null): Promise<boolean> {
+    return compactRun(this, focus, tabId);
   }
 
   /** Client-side slash commands. Returns true if input was consumed. */
