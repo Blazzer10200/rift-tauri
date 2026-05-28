@@ -62,15 +62,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # File system watcher — replaces .NET FileSystemWatcher
 notify = "8"
 
-# Auto-updater — Tauri-first-party plugin (migrated from velopack-rust 2026-05-26;
-# see docs/design/updater-migration.md). Mandatory signature verification: signing
-# key at C:/Users/BLAZZER/.tauri/rift.key (env: TAURI_SIGNING_PRIVATE_KEY_PATH),
-# pubkey embedded in tauri.conf.json::plugins.updater.pubkey. Lose the key file
-# and no existing install can ever update again — CRITICAL DON'T-TOUCH class.
-tauri-plugin-updater = "2"
-# Required by tauri-plugin-updater + by updates.svelte.ts's relaunch() call after
-# manual restart UX (rare — Windows installer auto-exits on install).
-tauri-plugin-process = "2"
+# Auto-updater: GH-release-API path (v0.4.34+, replaced tauri-plugin-updater).
+# See src-tauri/src/commands/update.rs header. No plugin needed — frontend
+# opens the Setup.exe asset URL via tauri-plugin-opener; NSIS handles install.
 
 # Logging
 log = "0.4"
@@ -90,7 +84,7 @@ walkdir = "2.5.0"
 # directly lets us import w/o relying on transitive paths.
 regex = "1"
 futures = "0.3.32"
-reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream", "json"] }
 
 # Phase 1h: server pubkey fingerprint pinning (OpenSSH-style SHA256:base64).
 # `sha2` for the digest, `base64` w/ NO_PAD engine to match OpenSSH's
