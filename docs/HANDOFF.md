@@ -2,6 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-27 (late night) — v0.4.33 SHIPPED + signing-key rotated
+
+**v0.4.33 LIVE** at https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.33 — Tauri-only path, all 3 assets uploaded, SHA256 round-trip matched. Single commit `f8ed3fd` bundled browser dock + multi-target CDP + assistant split M6/M7 + the prior committed v0.4.33 work (enhancer, permission modes, ctx-pill).
+
+**Signing key rotated.** Prior `rift.key` was encrypted w/ unrecoverable passphrase — found AFTER build hung on signer's `CONIN$` decrypt prompt (no stdin pipe path through `npm.cmd → node → tauri-cli → rpassword`). New ed25519 keypair generated w/ `--password "rift-updater-2026"` (non-empty — tauri-cli 2.11.1 treats empty `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` as unset, prompts). New pubkey baked in `tauri.conf.json::plugins.updater.pubkey`. **CONSEQUENCE: every v0.4.32 install on the net has the OLD pubkey and will refuse the v0.4.33 signature** → manual `Setup.exe` install bridge required ONE TIME per machine. Direct URL in CHANGELOG. From v0.4.33+, auto-update resumes normally.
+
+**Pipeline polish (never hang silent again).** [scripts/release.ps1](scripts/release.ps1) auto-loads key from `~/.tauri/rift.key` via `[System.IO.File]::ReadAllText` (preserves trailing newline; bash `$(<file)` strips it and was the cause of one earlier mis-decrypt) + dot-sources [.secrets/env.ps1](.secrets/) (now `.gitignore`d) for password env. Build invocation `& cmd /c "echo. | npm run tauri build"` provides empty-stdin failsafe. Warns loudly when password env missing. Old encrypted key archived to `~/.tauri/rift.key.encrypted-irrecoverable-2026-05-27`; new key backed up `OneDrive + iCloud/rift-signing-key-backup/rift.key{.pub}.bak-2026-05-27-rotated-pwd`.
+
+### Next Steps
+1. **Tell buddy:** download + run `Rift_0.4.33_x64-setup.exe` from the GitHub release link ONE TIME. After that the in-app updater takes over.
+2. **MCP browser tools** (next feature) — expose `browser_navigate` / `browser_eval` / screenshot via `mcp_server.rs` so the in-app Claude assistant can drive the browser dock.
+3. Retire `scripts/release-bridge.ps1` — fully spent now that v0.4.33 shipped on the clean Tauri path.
+
+### CRITICAL DON'T-TOUCH — updated
+- `~/.tauri/rift.key` is the **NEW** rotated key (password `rift-updater-2026`, stored in `.secrets/env.ps1` — gitignored). Pubkey in `tauri.conf.json::plugins.updater.pubkey` matches; do NOT regenerate without a transition release. Old encrypted key kept at `*.encrypted-irrecoverable-2026-05-27` for archival, NOT usable.
+- `.secrets/` is gitignored. The signing-key password lives there. Don't paste it into source files.
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` MUST be non-empty for v0.4.34+ ships — tauri-cli 2.11.1 prompts on empty.
+
+---
+
 ## Session 2026-05-27 (night) — in-app web browser dock
 
 ### Completed
