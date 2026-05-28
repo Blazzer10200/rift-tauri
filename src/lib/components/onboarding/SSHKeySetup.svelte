@@ -55,11 +55,17 @@
       directory: false,
     });
     if (typeof picked !== "string") return;
-    keyPath = picked;
-    mode = "ready";
-    // We don't read the pub key for imported paths — the user already has it
-    // wherever they normally manage it.
-    pubKey = null;
+    busy = true;
+    try {
+      await invoke("validate_ssh_key_file", { path: picked });
+      keyPath = picked;
+      mode = "ready";
+      pubKey = null;
+    } catch (e) {
+      error = `Import failed: ${e}`;
+    } finally {
+      busy = false;
+    }
   }
 
   async function onCopyPub() {

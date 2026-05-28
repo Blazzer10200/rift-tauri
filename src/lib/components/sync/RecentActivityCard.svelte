@@ -10,6 +10,7 @@
   import { connection, type ActivityKind } from "../../state/connection.svelte";
   import { workspace } from "../../state/workspace.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   const tail = $derived(connection.activityFeed.slice(0, 5));
 
   function kindIcon(k: ActivityKind) {
@@ -93,11 +94,11 @@
             easing: quintOut,
           }}
         >
-          <span class="time mono" title={new Date(r.at).toLocaleString([], { hour12: true })}>{fmtRel(r.at)}</span>
+          <span class="time mono" use:tooltip={new Date(r.at).toLocaleString([], { hour12: true })}>{fmtRel(r.at)}</span>
           <span class="kchip" data-variant={v}><Icon size={10}/></span>
           <span class="resource mono">{r.resource ? `[${r.resource}]` : "—"}</span>
-          <span class="path mono" title={r.rel_path ?? r.file}>{r.rel_path ?? r.file ?? "—"}</span>
-          <span class="action" title={r.action}>{r.action}</span>
+          <span class="path mono" use:tooltip={r.rel_path ?? r.file}>{r.rel_path ?? r.file ?? "—"}</span>
+          <span class="action" use:tooltip={r.action}>{r.action}</span>
         </li>
       {/each}
     </ul>

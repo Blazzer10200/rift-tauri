@@ -14,6 +14,7 @@
   import EmptyState from "../shell/EmptyState.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   const filesSubtitle = $derived(
     connection.selected ? `${connection.selected.name} · resources` : "No server selected",
   );
@@ -336,7 +337,7 @@
         <button
           type="button" class="tab-label"
           onclick={() => browserTabs.setActive(i)}
-          title={t.localPath || t.remotePath}
+          use:tooltip={t.localPath || t.remotePath}
         >
           {tabDisplay(t)}
         </button>
@@ -345,7 +346,7 @@
             type="button" class="tab-x"
             onclick={() => browserTabs.close(i)}
             aria-label="Close tab"
-            title="Close tab (Ctrl+W)"
+            use:tooltip={"Close tab (Ctrl+W)"}
           ><X size={10}/></button>
         {/if}
       </div>
@@ -381,7 +382,7 @@
         aria-valuemin={Math.round(SPLIT_MIN * 100)}
         aria-valuemax={Math.round(SPLIT_MAX * 100)}
         tabindex="0"
-        title="Drag to resize · double-click to reset"
+        use:tooltip={"Drag to resize · double-click to reset"}
         onpointerdown={onDividerPointerDown}
         onpointermove={onDividerPointerMove}
         onpointerup={onDividerPointerUp}

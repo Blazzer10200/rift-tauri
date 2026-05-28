@@ -1,6 +1,7 @@
 <script lang="ts">
   import { AppWindow, Server, RefreshCw, Filter } from "lucide-svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type Props = {
     side: "local" | "remote";
     path: string;
@@ -42,7 +43,7 @@
     {#if side === "local"}<AppWindow size={11}/>{:else}<Server size={11}/>{/if}
     <span>{side === "local" ? "LOCAL" : "REMOTE"}</span>
   </div>
-  <div class="path-scroll" title={path}>
+  <div class="path-scroll" use:tooltip={path}>
     <nav class="path mono" aria-label="Path breadcrumbs">
       {#each crumbs as c, i (c.full)}
         {#if i > 0}<span class="sep" aria-hidden="true">›</span>{/if}
@@ -52,12 +53,12 @@
   </div>
   <div class="actions">
     {#if onRefresh}
-      <button class="btn ghost xs" onclick={onRefresh} type="button" title="Refresh" aria-label="Refresh">
+      <button class="btn ghost xs" onclick={onRefresh} type="button" use:tooltip={"Refresh"} aria-label="Refresh">
         <RefreshCw size={11}/>
       </button>
     {/if}
     {#if onFilterChange}
-      <button class="btn ghost xs" onclick={() => (showFilter = !showFilter)} type="button" title="Filter" aria-label="Filter" data-active={showFilter}>
+      <button class="btn ghost xs" onclick={() => (showFilter = !showFilter)} type="button" use:tooltip={"Filter"} aria-label="Filter" data-active={showFilter}>
         <Filter size={11}/>
       </button>
     {/if}

@@ -5,12 +5,14 @@
 //! (path-traversal guard, fingerprint pin guard, log-basename) live here.
 
 pub mod assistant;
+pub mod browser;
 pub mod profile;
 pub mod sftp;
 pub mod sync;
 pub mod update;
 
 pub use assistant::*;
+pub use browser::*;
 pub use profile::*;
 pub use sftp::*;
 pub use sync::*;

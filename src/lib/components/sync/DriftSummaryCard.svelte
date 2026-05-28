@@ -4,6 +4,7 @@
   import { GitBranch, CheckCircle2 } from "lucide-svelte";
   import { syncPage } from "../../state/sync-page.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // #200: derive from the already-grouped `syncPage.groups` rather than
   // re-grouping `syncPage.entries` here — eliminates a parallel O(entries)
   // pass on every drift event. Each row exposes bucket-array lengths.
@@ -38,13 +39,13 @@
             easing: quintOut,
           }}
         >
-          <span class="resource mono" title={g.resource}>{g.resource}</span>
+          <span class="resource mono" use:tooltip={g.resource}>{g.resource}</span>
           <span class="pips">
-            {#if g.to_push.length > 0}<span class="pip" data-tone="push" title="{g.to_push.length} to push">{g.to_push.length}↑</span>{/if}
-            {#if g.to_pull.length > 0}<span class="pip" data-tone="pull" title="{g.to_pull.length} to pull">{g.to_pull.length}↓</span>{/if}
-            {#if g.to_delete.length > 0}<span class="pip" data-tone="delete" title="{g.to_delete.length} local delete">{g.to_delete.length}×</span>{/if}
-            {#if g.to_delete_remote.length > 0}<span class="pip" data-tone="delete" title="{g.to_delete_remote.length} remote delete">{g.to_delete_remote.length}⌫</span>{/if}
-            {#if g.conflict.length > 0}<span class="pip" data-tone="conflict" title="{g.conflict.length} conflict">{g.conflict.length}!</span>{/if}
+            {#if g.to_push.length > 0}<span class="pip" data-tone="push" use:tooltip={"{g.to_push.length} to push"}>{g.to_push.length}↑</span>{/if}
+            {#if g.to_pull.length > 0}<span class="pip" data-tone="pull" use:tooltip={"{g.to_pull.length} to pull"}>{g.to_pull.length}↓</span>{/if}
+            {#if g.to_delete.length > 0}<span class="pip" data-tone="delete" use:tooltip={"{g.to_delete.length} local delete"}>{g.to_delete.length}×</span>{/if}
+            {#if g.to_delete_remote.length > 0}<span class="pip" data-tone="delete" use:tooltip={"{g.to_delete_remote.length} remote delete"}>{g.to_delete_remote.length}⌫</span>{/if}
+            {#if g.conflict.length > 0}<span class="pip" data-tone="conflict" use:tooltip={"{g.conflict.length} conflict"}>{g.conflict.length}!</span>{/if}
           </span>
         </li>
       {/each}

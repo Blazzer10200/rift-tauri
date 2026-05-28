@@ -1,0 +1,266 @@
+// M0 (per docs/design/assistant-svelte-split.md) — pure type defs lifted out of
+// `src/lib/state/assistant.svelte.ts` so the (still very large) host module
+// has less to lex. Zero runtime; types + the `MAX_PANES` const only.
+//
+// Public API frozen: all type defs that were re-exported from
+// `assistant.svelte.ts` continue to be re-exported there — external imports
+// like `import type { Block, ChatMessage } from "$lib/state/assistant.svelte"`
+// keep working unchanged.
+
+export type WorkspaceState = {
+  current: string | null;
+  recent: string[];
+};
+
+export type AuthStatus = {
+  cliPresent: boolean;
+  cliVersion: string | null;
+  loggedIn: boolean;
+  authMethod: string | null;
+  apiProvider: string | null;
+  email: string | null;
+  subscriptionType: string | null;
+  apiKeyConfigured: boolean;
+  pill: "green" | "yellow" | "red";
+  summary: string;
+};
+
+export type ToolBlock = {
+  type: "tool";
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  result: string | null;
+  isError: boolean;
+  status: "pending" | "done" | "error";
+  // S124: wall-clock start (ms epoch) on tool_use, end (ms epoch) on
+  // tool_result. Lets the chip render an inline duration badge when the
+  // call was slow (>1s). Optional — legacy records omit both fields.
+  startedAt?: number;
+  durationMs?: number;
+};
+
+export type TextBlock = {
+  type: "text";
+  text: string;
+};
+
+export type ThinkingBlock = {
+  type: "thinking";
+  // Plaintext reasoning if the API streamed it. Often empty in -p mode —
+  // Anthropic encrypts thinking content and only emits the signature, in
+  // which case we show duration + a "reasoning recorded" hint instead.
+  text: string;
+  // Encrypted signature blob received (presence flag — we don't render it).
+  hasSignature: boolean;
+  // Wall-clock start (ms epoch) — set on content_block_start. Used by the
+  // bubble to render a live elapsed counter during active reasoning.
+  startedAt: number;
+  // Wall-clock duration of the reasoning step. Null while still active.
+  durationMs: number | null;
+  status: "active" | "done";
+};
+
+/** Compaction Phase C: synthetic block that marks the boundary where a
+ *  CLI session was retired in favor of a summary. */
+export type BoundaryBlock = {
+  type: "boundary";
+  summary: string;
+  at: number;
+  archivedCount: number;
+  costUsd: number;
+  summaryModel: string;
+  // S124: true while the summarize call is in-flight; flipped to false on
+  // the final 'done' event.
+  streaming?: boolean;
+  // Phase E1: ctx% snapshot at the moment the compact fired (pre) and the
+  // estimated ctx% the new session starts at (post = summary tokens / window).
+  ctxPctBefore?: number;
+  ctxPctEstAfter?: number;
+};
+
+/** User-attached image — pasted/dropped into the composer, persisted on the
+ *  outgoing user message. */
+export type ImageBlock = {
+  type: "image";
+  mime: string;
+  dataBase64: string;
+  sizeBytes: number;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
+
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  blocks: Block[];
+  costUsd?: number | null;
+  model?: string | null;
+};
+
+export type ConversationMeta = {
+  id: string;
+  title: string;
+  model: string;
+  messageCount: number;
+  createdAt: number;
+  updatedAt: number;
+  /** Phase E5: flattened compactionHistory summaries for HistoryDrawer search. */
+  compactionSummaries?: string[];
+};
+
+/** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in
+ *  `assistant/mod.rs` (camelCase serde). */
+export type SummarizeResult = {
+  summary: string;
+  model: string;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreateTokens: number;
+};
+
+export type CompactionHistoryEntry = {
+  at: number;
+  priorSessionId: string;
+  newSessionId: string;
+  summary: string;
+  costUsd: number;
+  summaryModel: string;
+  archivedCount: number;
+};
+
+export type ConversationRecord = {
+  id: string;
+  title: string;
+  model: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+  // CLI session UUID (--session-id / --resume target).
+  cliSessionId?: string;
+  // Phase E prerequisite: ordered list of compactions that happened on this convo.
+  compactionHistory?: CompactionHistoryEntry[];
+};
+
+// Minimal stream-json envelope shape we care about.
+export type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "thinking"; thinking?: string; signature?: string }
+  | { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> }
+  | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean };
+
+export type StreamDelta = {
+  type?: string;
+  text?: string;
+  thinking?: string;
+  signature?: string;
+};
+
+export type StreamEvent = {
+  type?: string;
+  index?: number;
+  content_block?: ContentBlock;
+  delta?: StreamDelta;
+};
+
+export type StreamEnvelope =
+  | { type: "system"; subtype?: string; [k: string]: unknown }
+  | { type: "stream_event"; event?: StreamEvent; [k: string]: unknown }
+  | { type: "assistant"; message: { content: ContentBlock[] } }
+  | { type: "user"; message: { content: ContentBlock[] } }
+  | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
+
+export type RemoteLockEvt = {
+  file_path: string;
+  user: string;
+  host: string;
+  since: string;
+};
+
+export type RemoteShellEvt = {
+  command: string;
+  remote_root: string;
+  at: string;
+};
+
+export type ThinkingEffort = "none" | "quick" | "deep";
+
+/** Permission mode handed to the CLI's `--permission-mode`. Mirrors the
+ *  modes Claude Code exposes. Must stay in sync with the validator in
+ *  src-tauri/src/assistant/mod.rs. `bypassPermissions` = run everything
+ *  (Rift's historical default); the prompting modes (`default`, `acceptEdits`,
+ *  `plan`) need the approval surface from Piece 2 to be fully functional. */
+export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions";
+
+/** A suggestion the CLI attaches to a `can_use_tool` ask — e.g.
+ *  `{ type: "setMode", mode: "acceptEdits", destination: "session" }`, which
+ *  drives the "Allow for the rest of this session" affordance. */
+export type PermissionSuggestion = {
+  type: string;
+  mode?: string;
+  destination?: string;
+};
+
+/** A pending `can_use_tool` permission ask, keyed by the tool's `tool_use_id`
+ *  so the streamed tool chip can render Allow / Deny inline. */
+export type PermissionPromptInfo = {
+  requestId: string;
+  toolName: string;
+  suggestions: PermissionSuggestion[];
+};
+
+/** Telemetry record for a single Claude turn. */
+export type TurnRecord = {
+  // Identity
+  ts: number;
+  convoId: string;
+  cliSessionId: string;
+  isFirstTurn: boolean;
+  model: "sonnet" | "opus" | "haiku";
+  effort: "none" | "quick" | "deep";
+  /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping). */
+  effortFlag: "low" | "medium" | "high" | null;
+  // Input
+  promptLen: number;
+  promptPreview: string;
+  attachmentsCount: number;
+  attachmentsBytes: number;
+  // Usage (filled progressively)
+  envelopeUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  resultUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  modelId: string | null;
+  costUsd: number | null;
+  // Stream stats
+  deltaCount: number;
+  streamEventCount: number;
+  assistantEnvCount: number;
+  maxStreamGapMs: number;
+  toolUses: {
+    name: string;
+    id: string;
+    startedAt: number;
+    completedAt: number | null;
+    durationMs: number | null;
+    isError: boolean | null;
+    inputPreview: string | null;
+  }[];
+  thinkingCount: number;
+  thinkingTotalMs: number;
+  thinkingBlocks: { startedAt: number; durationMs: number; charCount: number; hasSignature: boolean }[];
+  envelopeFallback: boolean;
+  blankTurn: boolean;
+  // Timing
+  firstPaintAt: number | null;
+  doneAt: number | null;
+  endKind: "success" | "user-stop" | "session-lost" | "error" | null;
+  errorMsg?: string;
+};
+
+/** Per-pane reference into the openTabs list. v2 split UI: `panes` is always
+ *  an array of length ≥1. `null` tabId = empty pane. */
+export type PaneState = { tabId: string | null };
+
+/** Hard cap on horizontal panes. 4 × min-width 320px = 1280px. */
+export const MAX_PANES = 4;

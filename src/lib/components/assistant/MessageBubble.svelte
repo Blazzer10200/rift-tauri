@@ -1,12 +1,14 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, User } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade } from "svelte/transition";
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
+  import PermissionBar from "./PermissionBar.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Tool blocks that render inline as a full side-by-side diff (vs the
   // compact ToolChip). Edit-family only — everything else gets a chip.
   function isInlineDiffTool(name: string): boolean {
@@ -274,8 +276,16 @@
     return `${name} ${m[2]}.${m[3]}`;
   }
   const modelLabel = $derived(message.model ? shortModel(message.model) : null);
+  // Family key for aurora tinting — drives the bubble's left rail + avatar
+  // halo color so each assistant turn carries the same hue as the composer
+  // that produced it.
+  const modelFamily = $derived.by<"sonnet" | "opus" | "haiku" | null>(() => {
+    if (!message.model) return null;
+    const m = /claude-(opus|sonnet|haiku)/i.exec(message.model);
+    return m ? (m[1].toLowerCase() as "sonnet" | "opus" | "haiku") : null;
+  });
   const costLabel = $derived(
-    typeof message.costUsd === "number" ? `$${message.costUsd.toFixed(4)}` : null,
+    typeof message.costUsd === "number" ? `${message.costUsd.toFixed(4)}` : null,
   );
 
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
@@ -334,18 +344,18 @@
       onclick={() => (boundaryExpanded = !boundaryExpanded)}
       aria-expanded={boundaryExpanded}
       disabled={isCompacting}
-      title={isCompacting ? "Summarizing…" : `Click to ${boundaryExpanded ? "hide" : "show"} the compaction summary`}
+      use:tooltip={isCompacting ? "Summarizing…" : `Click to ${boundaryExpanded ? "hide" : "show"} the compaction summary`}
     >
       <span class="boundary-line" aria-hidden="true"></span>
       <span class="boundary-pill">
         <Sparkles size={11} />
         {#if isCompacting}
-          <span class="live-dot" aria-label="Compacting" title="Summarizing in progress"></span>
+          <span class="live-dot" aria-label="Compacting" use:tooltip={"Summarizing in progress"}></span>
           <span>Compacting · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} · {boundaryBlock.summary.length.toLocaleString()} chars</span>
         {:else}
           <span>Conversation compacted · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} archived</span>
           {#if typeof boundaryBlock.ctxPctBefore === "number" && typeof boundaryBlock.ctxPctEstAfter === "number"}
-            <span class="boundary-meta mono" title="Context window utilization — pre-compact → estimated post-compact">
+            <span class="boundary-meta mono" use:tooltip={"Context window utilization — pre-compact → estimated post-compact"}>
               Ctx {Math.round(boundaryBlock.ctxPctBefore)}% → est {Math.round(boundaryBlock.ctxPctEstAfter)}%
             </span>
           {/if}
@@ -362,7 +372,7 @@
     {/if}
   </div>
 {:else}
-<div class="bubble" data-role={message.role} data-streaming={streaming ? "true" : null}>
+<div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null}>
   {#if !isUser}
     <div class="turn-rail" aria-hidden="true"></div>
   {/if}
@@ -376,21 +386,35 @@
         <span class="role-name">Claude</span>
         {#if modelLabel}
           <span class="head-sep" aria-hidden="true">·</span>
-          <span class="head-model" title="Model for this turn">{modelLabel}</span>
+          <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
         {/if}
         {#if streaming}
-          <span class="live-dot" aria-label="Streaming" title="Streaming response"></span>
-          {#if heartbeatLabel}<span class="heartbeat mono" title="Elapsed since turn started">{heartbeatLabel}</span>{/if}
+          <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
+          {#if heartbeatLabel}<span class="heartbeat mono" use:tooltip={"Elapsed since turn started"}>{heartbeatLabel}</span>{/if}
         {/if}
-        {#if plainText.length > 0}
-          <button class="copybtn" type="button" onclick={copy} title="Copy">
-            {#if copied}
-              <Check size={11} />
-            {:else}
-              <Copy size={11} />
+        {#if plainText.length > 0 || (!streaming && costLabel)}
+          <div class="turn-actions">
+            {#if !streaming && costLabel}
+              <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>${costLabel}</span>
             {/if}
-          </button>
+            {#if plainText.length > 0}
+              <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
+                {#if copied}
+                  <Check size={11} />
+                {:else}
+                  <Copy size={11} />
+                {/if}
+              </button>
+            {/if}
+          </div>
         {/if}
+      </div>
+    {:else}
+      <div class="turn-head">
+        <span class="role-name">You</span>
+        <div class="avatar avatar-user" aria-hidden="true">
+          <User size={13} />
+        </div>
       </div>
     {/if}
 
@@ -419,7 +443,7 @@
           <button
             type="button"
             class="user-image-thumb"
-            title="Click to view full size"
+            use:tooltip={"Click to view full size"}
             onclick={() => window.open(`data:${b.mime};base64,${b.dataBase64}`, "_blank")}
           >
             <img
@@ -472,8 +496,10 @@
           {:else}
             <EditDiff input={b.input} />
           {/if}
+          <PermissionBar toolUseId={b.id} toolName={b.name} />
         {:else if b.type === "tool"}
           <ToolChip tool={b} variant={isUser ? "card" : "timeline"} />
+          <PermissionBar toolUseId={b.id} toolName={b.name} />
         {/if}
       {/snippet}
 
@@ -488,10 +514,17 @@
             streaming && isLastNode && unit.status === "neutral"
               ? "pending"
               : unit.status}
+          {@const prev = ui > 0 ? grouped[ui - 1] : null}
+          {@const groupCont =
+            unit.block.type !== "text" &&
+            prev?.kind === "block" &&
+            prev.block.type !== "image"}
           <div
             class="tl-node"
             data-kind={nodeKind(unit.block)}
             data-status={nodeStatus}
+            data-group-cont={groupCont ? "true" : null}
+            data-quick={(unit.block.type === "thinking" && unit.block.status === "done" && unit.block.durationMs != null && unit.block.durationMs < 2000) ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
             {@render renderBlock(unit.block, ui)}
@@ -500,10 +533,6 @@
       {/each}
 
     </div>
-
-    {#if !isUser && !streaming && costLabel}
-      <div class="cost-pill mono" title="Turn cost">{costLabel}</div>
-    {/if}
   </div>
 </div>
 {/if}
@@ -588,6 +617,12 @@
     position: relative;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  /* Per-bubble aurora color — sonnet=blue, opus=purple, haiku=teal. Falls
+     back to --accent for system/user turns without a model. */
+  .bubble[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .bubble[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .bubble[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .bubble                      { --model-color: var(--accent); }
   /* User bubbles drop the rail entirely + right-align — the bubble shape
      already signals "you", and the position differentiates from Claude
      without forcing a rail on user messages. */
@@ -613,12 +648,12 @@
     transition: background 200ms ease-out;
   }
   .bubble[data-streaming="true"] .turn-rail {
-    background: color-mix(in oklch, var(--accent) 55%, transparent);
+    background: color-mix(in oklch, var(--model-color) 55%, transparent);
     animation: rail-stream 2.4s ease-in-out infinite;
   }
   @keyframes rail-stream {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
-    50%      { box-shadow: 0 0 6px 0 color-mix(in oklch, var(--accent) 28%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
+    50%      { box-shadow: 0 0 6px 0 color-mix(in oklch, var(--model-color) 32%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bubble[data-streaming="true"] .turn-rail { animation: none; }
@@ -630,17 +665,17 @@
     width: 22px; height: 22px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: color-mix(in oklch, var(--model-color) 14%, transparent);
+    color: var(--model-color);
     flex-shrink: 0;
-    transition: box-shadow 240ms ease-out;
+    transition: box-shadow 240ms ease-out, background 240ms ease-out, color 240ms ease-out;
   }
   .bubble[data-streaming="true"] .avatar {
     animation: avatar-halo 1.8s ease-in-out infinite;
   }
   @keyframes avatar-halo {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent); }
-    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
+    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--model-color) 28%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bubble[data-streaming="true"] .avatar { animation: none; }
@@ -648,12 +683,12 @@
 
   .body { min-width: 0; grid-column: 2; }
   .bubble[data-role="user"] .body { grid-column: 1; }
-  /* Cap assistant body to the reading-column width. Without this, copy +
-     cost-pill (margin-left:auto / align-self:flex-end) float against the
-     full pane width — hundreds of pixels past the actual text. Matches the
-     78ch cap already on .text so closing beats sit flush w/ the prose. */
+  /* Body fills the centered reading column (no 78ch cap). The cap used to
+     left-align the text inside a wider column, so even though the column was
+     centered the *text* read as shoved-left. The column width itself
+     (--chat-col-max) now sets the measure, so text, user bubbles + composer
+     all share one centered band. */
   .bubble[data-role="assistant"] .body {
-    max-width: 78ch;
     width: 100%;
   }
 
@@ -764,11 +799,9 @@
     .skl, .stage-dot, .stage-label, .skeleton-lines { animation: none; }
   }
 
-  /* Cost pill — sits flush-right under the turn's content as the "closing
-     beat" for a finished turn. Migrated out of the orphan footer-line. */
+  /* Cost chip — lives in the turn header's action cluster (see .turn-actions),
+     a quiet residue of the turn's spend next to the copy button. */
   .cost-pill {
-    align-self: flex-end;
-    margin-top: 10px;
     padding: 2px 8px;
     border-radius: 999px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
@@ -778,7 +811,6 @@
     line-height: 1.4;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
-    animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .body { display: flex; flex-direction: column; }
 
@@ -790,6 +822,18 @@
     position: relative;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--idx, 0) * 35ms);
+  }
+  /* #2 Option A — narration-grouping spacing. A tool/edit/thinking node that
+     follows a prose or tool block in the same turn sits tight (4px) so it
+     visually belongs to the preceding narration. A tool/edit/thinking that
+     starts a new group, or a prose node that follows a tool (= new narration),
+     gets a wider gap (12px) — telegraphs "new beat" so multi-Edit turns stop
+     reading as if the message ended after the first big block. */
+  .bubble[data-role="assistant"] .tl-node:not(:first-child) {
+    margin-top: 0.5rem;
+  }
+  .bubble[data-role="assistant"] .tl-node[data-group-cont="true"] {
+    margin-top: 0.25rem;
   }
   .tl-node::before {
     content: "";
@@ -817,14 +861,11 @@
     border-color: color-mix(in oklch, var(--accent) 70%, transparent);
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
-  .tl-node[data-kind="prose"]::before {
-    width: 5px; height: 5px;
-    top: 10px;
-    left: -17px;
-    background: var(--fg-faint);
-    border: 0;
-    opacity: 0.55;
-  }
+  /* Prose paragraphs no longer hang a bullet off the rail. One faint dot per
+     paragraph read as left-margin noise on text-only answers; the continuous
+     rail already groups the turn. Bullets remain for tool/edit/thinking nodes
+     where they carry real status (done/pending/error). */
+  .tl-node[data-kind="prose"]::before { display: none; }
   .tl-node[data-kind="tool"][data-status="done"]::before,
   .tl-node[data-kind="edit"][data-status="done"]::before {
     background: var(--ok, oklch(0.74 0.15 145));
@@ -849,6 +890,21 @@
     50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 20%, transparent),
                           inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
   }
+  /* Short (<2s) done thinking blocks — visually recede so they don't create
+     a wall of "Thought for <1s" noise between tool calls. Still readable and
+     expandable on hover, just not competing with substantive content. */
+  .tl-node[data-quick="true"] .tn-think-head {
+    opacity: 0.42;
+  }
+  .tl-node[data-quick="true"]:hover .tn-think-head {
+    opacity: 0.78;
+  }
+  /* Tighter vertical margin for quick thinking nodes — 8px default leaves too
+     much gap when several appear between tool calls. */
+  .bubble[data-role="assistant"] .tl-node[data-quick="true"] {
+    margin-top: 1px;
+  }
+
   /* Hover lifts the bullet — small but signals interactivity on tool/edit rows. */
   .tl-node[data-kind="tool"]:hover::before,
   .tl-node[data-kind="edit"]:hover::before {
@@ -891,9 +947,18 @@
     .tl-node[data-status="pending"]::before,
     .tl-node[data-kind="thinking"][data-status="pending"]::before { animation: none; }
   }
+  /* Copy + cost grouped inline right after the model label so they read as
+     one action cluster next to the header — not pinned to the far column edge
+     (which left them floating ~1000px from the content). Cost-first so the
+     hover-only copy button doesn't reserve a gap at rest. */
+  .turn-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 2px;
+  }
   .copybtn {
     opacity: 0;
-    margin-left: auto;
     background: transparent;
     border: 0;
     color: var(--fg-faint);

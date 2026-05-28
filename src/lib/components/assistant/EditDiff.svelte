@@ -8,6 +8,7 @@
   import { diffArrays } from "diff";
   import { FilePen, ChevronDown } from "lucide-svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let {
     input,
     compact = false,
@@ -140,11 +141,11 @@
         class="edit-head"
         class:clickable={!compact}
         onclick={toggleExpanded}
-        title={expanded ? "Collapse diff" : "Show diff"}
+        use:tooltip={expanded ? "Collapse diff" : "Show diff"}
       >
         <span class="edit-icon"><FilePen size={12} /></span>
         <span class="edit-tool">Edit</span>
-        <span class="edit-path mono" title={filePath}>{shortPath(filePath)}</span>
+        <span class="edit-path mono" use:tooltip={filePath}>{shortPath(filePath)}</span>
         <span class="edit-counts mono">
           <span class="ct-add">+{counts.adds}</span>
           <span class="ct-del">−{counts.dels}</span>
@@ -166,7 +167,7 @@
           {#if p.kind === "meta"}
             <div class="diff-meta">{p.text}</div>
           {:else if p.kind === "gap"}
-            <div class="diff-gap" data-multi={p.lines > 1} title={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
+            <div class="diff-gap" data-multi={p.lines > 1} use:tooltip={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
               {#if p.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{p.lines} blank lines</span>{/if}
             </div>
           {:else if unified}

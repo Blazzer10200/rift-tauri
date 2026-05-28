@@ -6,6 +6,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import { connection } from "../../state/connection.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
   // tab's draft instead of the focused-pane shim. Falls back to focused tab
   // when omitted (single-pane / pre-pane callers).
@@ -167,7 +168,7 @@
         <button
           class="ws-action"
           type="button"
-          title="Close folder"
+          use:tooltip={"Close folder"}
           onclick={() => void assistant.clearRoot()}
         ><X size={13}/></button>
       </div>
@@ -195,7 +196,7 @@
                   class="recent-open"
                   type="button"
                   onclick={() => void assistant.setRoot(r)}
-                  title={r}
+                  use:tooltip={r}
                 >
                   <Folder size={11}/>
                   <span class="recent-name">{leafName(r)}</span>
@@ -204,7 +205,7 @@
                 <button
                   class="recent-x"
                   type="button"
-                  title="Forget"
+                  use:tooltip={"Forget"}
                   onclick={() => void assistant.removeRecentRoot(r)}
                 ><X size={10}/></button>
               </div>
@@ -229,7 +230,7 @@
                 : c.model?.toLowerCase().includes("haiku") ? "haiku"
                 : "sonnet"}
               onclick={() => void assistant.openTab(c.id)}
-              title={c.title}
+              use:tooltip={c.title}
             >
               <span class="tile-title">{c.title}</span>
               <span class="tile-meta">

@@ -10,7 +10,7 @@ use crate::{
     bootstrap, edit, local_fs, path_guard, profile, sftp, AutoSyncState, DownloadState,
     EditInPlaceState,
 };
-use super::{basename_for_log, reject_path_traversal, require_pinned_fingerprint};
+use super::{basename_for_log, require_pinned_fingerprint};
 use super::sync::validate_watched_local_path;
 
 /// Browser-pane LocalEntry shape. Distinct from `local_fs::LocalEntry` because
@@ -25,13 +25,20 @@ pub struct LocalEntry {
 }
 
 #[tauri::command]
-pub fn local_list_dir(path: String) -> Result<Vec<LocalEntry>, String> {
-    let p = std::path::Path::new(&path);
-    reject_path_traversal(p, "path")?;
-    if !p.is_dir() {
-        return Err(format!("not a directory: {path}"));
+pub fn local_list_dir(
+    server_key: String,
+    path: String,
+) -> Result<Vec<LocalEntry>, String> {
+    let cfg = profile::RiftConfig::load()?;
+    let server = cfg
+        .find(&server_key)
+        .ok_or_else(|| format!("no server with key '{server_key}'"))?;
+    let canon = path_guard::validate_local_listable(server, &path)
+        .map_err(|e| format!("local list guard: {e}"))?;
+    if !canon.is_dir() {
+        return Err(format!("not a directory: {}", canon.display()));
     }
-    Ok(local_fs::list_directory(p)
+    Ok(local_fs::list_directory(&canon)
         .into_iter()
         .map(|e| LocalEntry {
             name: e.name,

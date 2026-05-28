@@ -1,7 +1,10 @@
 <script lang="ts">
-  import { Send, Square, X, Mic, Loader2, HelpCircle } from "lucide-svelte";
+  import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
+    Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import type { PermissionMode } from "../../state/assistant/types";
   import { stt } from "../../state/stt.svelte";
+  import { tooltip } from "$lib/actions/tooltip";
   import { tick, onMount } from "svelte";
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
@@ -26,6 +29,19 @@
   const attachments = $derived(tab?.attachments ?? []);
   const queue = $derived(tab?.queue ?? []);
   const streaming = $derived(tab?.streaming ?? false);
+
+  // Context gauge — feeds the composer divider's fill. Per-tab so each pane
+  // shows its own conversation's window usage. Tone steps mirror the tab-bar
+  // ctx-pill (yellow ≥70, red ≥90) so the two readouts never disagree.
+  const ctxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
+  const ctxTokens = $derived(tab ? assistant.ctxTokensFor(tab) : 0);
+  const ctxWindow = $derived(tab ? assistant.ctxWindowFor(tab) : 0);
+  const ctxTone = $derived(ctxPct >= 90 ? "red" : ctxPct >= 70 ? "yellow" : "ok");
+  const ctxTitle = $derived(
+    ctxTokens > 0
+      ? `Context: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens (${ctxPct.toFixed(1)}%) — fills as the conversation grows`
+      : "Context window — fills as the conversation grows",
+  );
 
   function setDraft(v: string) { if (tab) tab.draft = v; }
   function setAttachments(
@@ -73,10 +89,9 @@
     { id: "haiku",  label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", ctx: "200K ctx" },
   ];
 
-  // Session-rotated idle placeholders — one tip-shaped variant per mount.
-  // Tells the user about @/, Shift+Enter etc. without a dedicated onboarding
-  // strip. Plain "Ask Claude" is the fallback every few rotations so the
-  // composer never feels noisy.
+  // Session-rotated idle placeholders — cycle every ~6s while the composer is
+  // unfocused + empty, so the user sees tips drift past without staring at a
+  // single line. Pauses on focus/draft so it never moves under the cursor.
   const IDLE_PLACEHOLDERS = [
     "Ask Claude",
     "Ask Claude · @ to mention a file",
@@ -84,9 +99,18 @@
     "Ask Claude · Shift+Enter for newline",
     "Ask Claude · paste an image to attach",
   ];
-  const idlePlaceholder = IDLE_PLACEHOLDERS[
-    Math.floor(Math.random() * IDLE_PLACEHOLDERS.length)
-  ];
+  let placeholderIdx = $state(Math.floor(Math.random() * IDLE_PLACEHOLDERS.length));
+  let placeholderKey = $state(0); // bumps to retrigger fade animation
+  let composerFocused = $state(false);
+  const idlePlaceholder = $derived(IDLE_PLACEHOLDERS[placeholderIdx % IDLE_PLACEHOLDERS.length]);
+  $effect(() => {
+    if (composerFocused || draft.length > 0 || streaming || attachments.length > 0) return;
+    const h = setInterval(() => {
+      placeholderIdx = (placeholderIdx + 1) % IDLE_PLACEHOLDERS.length;
+      placeholderKey++;
+    }, 6000);
+    return () => clearInterval(h);
+  });
 
   function autosize() {
     if (!ta) return;
@@ -202,11 +226,13 @@
 
   // Slash menu state. Triggers when the draft starts with `/` and the
   // textarea has focus. Filters by the text after the slash.
-  // `modelPickerOpen` is a separate state that flips when /model is picked
-  // and replaces the command list with a model chooser.
-  let modelPickerOpen = $state(false);
+  // One unified settings popover folds model + thinking depth + permission
+  // mode into a single toolbar control. `settingsOpen` flips it; `settingsIdx`
+  // is the flat cursor across all three sections (see `settingsRows`).
+  let settingsOpen = $state(false);
+  let settingsIdx = $state(0);
   const slashOpen = $derived(
-    !modelPickerOpen &&
+    !settingsOpen &&
       draft.startsWith("/") &&
       !draft.includes(" ") &&
       draft.length >= 1,
@@ -216,44 +242,84 @@
     return SLASH_COMMANDS.filter((c) => c.name.startsWith(q));
   });
   let slashIdx = $state(0);
-  let modelIdx = $state(0);
   $effect(() => {
     const _v = slashFiltered.length;
     void _v;
     slashIdx = 0;
-  });
-  // Re-seed the model picker cursor to the current model whenever it opens.
-  $effect(() => {
-    if (modelPickerOpen) {
-      const i = MODEL_OPTIONS.findIndex((m) => m.id === assistant.model);
-      modelIdx = i >= 0 ? i : 0;
-    }
   });
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
 
   // Effort ladder. Haiku skips extended thinking server-side regardless, so
   // hide the pill on Haiku to avoid implying it does something. Cycle on click:
-  // none → quick → deep → none.
-  type EffortOpt = { id: "none" | "quick" | "deep"; label: string; hint: string };
+  // none → quick → deep → none. Names describe quality not speed — "Fast"
+  // and "Quick" were ambiguous siblings; Instant/Smart/Deep is a real ladder.
+  type EffortOpt = { id: "none" | "quick" | "deep"; label: string; hint: string; level: 1 | 2 | 3 };
   const EFFORT_OPTIONS: EffortOpt[] = [
-    { id: "none",  label: "Fast",  hint: "No extended thinking — fastest reply" },
-    { id: "quick", label: "Quick", hint: "Light thinking (~2K tokens) — balanced" },
-    { id: "deep",  label: "Deep",  hint: "Heavy thinking (10K tokens) — slowest, best on hard asks" },
+    { id: "none",  label: "Instant", level: 1, hint: "Instant — straight to the answer, no thinking time" },
+    { id: "quick", label: "Smart",   level: 2, hint: "Smart — thinks briefly before answering (~5s extra)" },
+    { id: "deep",  label: "Deep",    level: 3, hint: "Deep — heavy reasoning (~15s extra) for hard problems" },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
-  function cycleEffort() {
-    const i = EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort);
-    const next = EFFORT_OPTIONS[(i + 1) % EFFORT_OPTIONS.length];
-    assistant.setThinkingEffort(next.id);
+  function pickEffort(e: EffortOpt) {
+    assistant.setThinkingEffort(e.id);
+    settingsOpen = false;
+    void tick().then(() => ta?.focus());
+  }
+
+  // Permission-mode picker — mirrors the effort/model pills. Order matches the
+  // VS Code Claude Code menu: ask → auto-edit → plan → auto → bypass. Icons
+  // echo that menu (hand / code / clipboard / zap / infinity).
+  type ModeOpt = { id: PermissionMode; label: string; icon: typeof Hand; hint: string };
+  const MODE_OPTIONS: ModeOpt[] = [
+    { id: "default",           label: "Ask before edits", icon: Hand,          hint: "Ask before edits — approve each change before it's made" },
+    { id: "acceptEdits",       label: "Edit automatically", icon: Code2,       hint: "Edit automatically — apply file edits without asking" },
+    { id: "plan",              label: "Plan mode",        icon: ClipboardList, hint: "Plan mode — explore and present a plan before editing" },
+    { id: "auto",              label: "Auto mode",        icon: Zap,           hint: "Auto mode — pick the best permission mode per task" },
+    { id: "bypassPermissions", label: "Bypass permissions", icon: InfinityIcon, hint: "Bypass permissions — never ask before running anything" },
+  ];
+  const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
+  function pickMode(m: ModeOpt) {
+    assistant.setPermissionMode(m.id);
+    settingsOpen = false;
+    void tick().then(() => ta?.focus());
+  }
+
+  // Flat, navigable row list spanning all three sections of the unified
+  // settings panel. Effort is dropped on Haiku (ignored server-side), exactly
+  // as the old standalone effort pill was hidden there. Drives ArrowUp/Down
+  // + the active highlight; mouse clicks call the per-kind pick fns directly.
+  type SettingsRow =
+    | { kind: "model"; model: ModelOpt }
+    | { kind: "effort"; effort: EffortOpt }
+    | { kind: "mode"; mode: ModeOpt };
+  const settingsRows = $derived.by<SettingsRow[]>(() => {
+    const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
+    if (assistant.model !== "haiku") {
+      rows.push(...EFFORT_OPTIONS.map((e) => ({ kind: "effort" as const, effort: e })));
+    }
+    rows.push(...MODE_OPTIONS.map((m) => ({ kind: "mode" as const, mode: m })));
+    return rows;
+  });
+  // Re-seed the cursor to the current model row whenever the panel opens.
+  $effect(() => {
+    if (settingsOpen) {
+      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === assistant.model);
+      settingsIdx = i >= 0 ? i : 0;
+    }
+  });
+  function pickRow(row: SettingsRow) {
+    if (row.kind === "model") pickModel(row.model);
+    else if (row.kind === "effort") pickEffort(row.effort);
+    else pickMode(row.mode);
   }
 
   function pickSlash(c: SlashCmd) {
     if (c.name === "model") {
-      // Open the model picker instead of inserting `/model ` text.
+      // Open the unified settings panel instead of inserting `/model ` text.
       setDraft("");
       stt.consume();
-      modelPickerOpen = true;
+      settingsOpen = true;
       void tick().then(() => ta?.focus());
       return;
     }
@@ -266,9 +332,14 @@
 
   function pickModel(m: ModelOpt) {
     assistant.setModel(m.id);
-    modelPickerOpen = false;
+    settingsOpen = false;
     void tick().then(() => ta?.focus());
   }
+
+  // Bumps on every fire() — drives the send-button ripple + chat-column
+  // upward sweep keyed off `{#key}`. Both pulses are pure-CSS one-shots,
+  // mounted by the key flip and self-removed after their animation ends.
+  let fireKey = $state(0);
 
   function fire() {
     const text = draft.trim();
@@ -276,8 +347,52 @@
     if (!text && attachments.length === 0) return;
     setDraft("");
     stt.consume();
+    fireKey++;
     onsubmit(text);
     void tick().then(autosize);
+  }
+
+  // ── Prompt enhancer (wand) ───────────────────────────────────────────────
+  // One-shot Haiku rewrite of the current draft into a clearer prompt. Result
+  // shows as an editable preview above the composer — Accept drops it into the
+  // textarea, Discard dismisses. Never auto-sends, never overwrites silently.
+  let enhancing = $state(false);
+  let enhancedPreview = $state<string | null>(null);
+  let enhanceError = $state<string | null>(null);
+  // Split preserving whitespace so the reveal can stagger word-by-word while
+  // keeping spacing/newlines intact. Each chunk gets its own materialize delay.
+  const enhancedWords = $derived(
+    enhancedPreview === null ? [] : enhancedPreview.split(/(\s+)/),
+  );
+  async function runEnhance() {
+    const text = draft.trim();
+    if (!text || enhancing) return;
+    enhancing = true;
+    enhancedPreview = null;
+    enhanceError = null;
+    try {
+      // Stream: deltas fill the preview live (first text in ~1-2s); the
+      // resolved value is the authoritative final text.
+      enhancedPreview = await assistant.enhancePrompt(text, (full) => {
+        enhancedPreview = full;
+      });
+    } catch (e) {
+      enhanceError = String(e);
+    } finally {
+      enhancing = false;
+    }
+  }
+  function acceptEnhanced() {
+    if (enhancedPreview === null) return;
+    setDraft(enhancedPreview);
+    enhancedPreview = null;
+    enhanceError = null;
+    void tick().then(() => { autosize(); ta?.focus(); });
+  }
+  function dismissEnhanced() {
+    enhancedPreview = null;
+    enhanceError = null;
+    void tick().then(() => ta?.focus());
   }
 
   // S88: mic toggle. The stt store writes recognized text directly into the
@@ -327,19 +442,52 @@
     return btoa(bin);
   }
 
-  // Phase 3a: hint popover replaces the dedicated hint row. Click toggles;
-  // global mousedown closes on outside click.
+  // Portal action — moves the node to <body> so it escapes the composer's
+  // overflow:hidden + backdrop-filter containing block (any ancestor with
+  // backdrop-filter traps `position: fixed` descendants inside it, which is
+  // exactly what we need to avoid here).
+  function portal(node: HTMLElement) {
+    document.body.appendChild(node);
+    return { destroy() { node.remove(); } };
+  }
+
+  // Hint popover — keyboard shortcuts. Portals to <body> + position: fixed
+  // w/ JS-computed coords so it escapes the composer's clip + backdrop-filter
+  // containing block.
   let hintOpen = $state(false);
   let hintWrap = $state<HTMLDivElement | null>(null);
+  let hintPop = $state<HTMLDivElement | null>(null);
+  let hintPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
+  function positionHint() {
+    if (!hintWrap || !hintPop) return;
+    const a = hintWrap.getBoundingClientRect();
+    const ph = hintPop.offsetHeight || 160;
+    const pw = hintPop.offsetWidth || 240;
+    // Prefer above the trigger (matches the old visual); flip down if no room.
+    let top = a.top - ph - 8;
+    if (top < 8) top = a.bottom + 8;
+    let left = a.left;
+    const maxLeft = window.innerWidth - pw - 8;
+    if (left > maxLeft) left = maxLeft;
+    if (left < 8) left = 8;
+    hintPos = { top, left };
+  }
   function onDocHintMousedown(ev: MouseEvent) {
     if (!hintOpen) return;
-    if (hintWrap && ev.target instanceof Node && !hintWrap.contains(ev.target)) {
-      hintOpen = false;
-    }
+    if (hintWrap && ev.target instanceof Node && hintWrap.contains(ev.target)) return;
+    if (hintPop && ev.target instanceof Node && hintPop.contains(ev.target)) return;
+    hintOpen = false;
   }
   $effect(() => {
     window.addEventListener("mousedown", onDocHintMousedown);
     return () => window.removeEventListener("mousedown", onDocHintMousedown);
+  });
+  $effect(() => {
+    if (!hintOpen) return;
+    void tick().then(positionHint);
+    const onResize = () => positionHint();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   });
 
   let attachError = $state<string | null>(null);
@@ -389,6 +537,12 @@
   function resetRecall() { recallOffset = -1; }
 
   function onKey(e: KeyboardEvent) {
+    // Enhance preview claims Escape first — dismiss it before menu handlers.
+    if ((enhancedPreview !== null || enhanceError !== null) && e.key === "Escape") {
+      e.preventDefault();
+      dismissEnhanced();
+      return;
+    }
     // Mention picker keys take precedence — runs before history recall so
     // arrow keys navigate the list, not the prompt history.
     if (mentionState && mentionResults.length > 0) {
@@ -418,7 +572,7 @@
     // draft still moves the caret normally).
     const empty = draft.length === 0;
     const atStart = ta?.selectionStart === 0 && ta?.selectionEnd === 0;
-    if (!modelPickerOpen && !slashOpen && !mentionState && (empty || atStart)) {
+    if (!settingsOpen && !slashOpen && !mentionState && (empty || atStart)) {
       if (e.key === "ArrowUp") {
         // Recall from THIS tab's promptHistory, not the focused tab's, so
         // each pane has its own prompt-history scroll.
@@ -449,29 +603,30 @@
         return;
       }
     }
-    if (modelPickerOpen) {
+    if (settingsOpen) {
+      const n = settingsRows.length;
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        modelIdx = (modelIdx + 1) % MODEL_OPTIONS.length;
+        settingsIdx = (settingsIdx + 1) % n;
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        modelIdx = (modelIdx - 1 + MODEL_OPTIONS.length) % MODEL_OPTIONS.length;
+        settingsIdx = (settingsIdx - 1 + n) % n;
         return;
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        pickModel(MODEL_OPTIONS[modelIdx]);
+        pickRow(settingsRows[settingsIdx]);
         return;
       }
       if (e.key === "Escape") {
         e.preventDefault();
-        modelPickerOpen = false;
+        settingsOpen = false;
         return;
       }
-      // Any other key cancels the picker so the user can type normally.
-      if (e.key.length === 1) modelPickerOpen = false;
+      // Any other key cancels the panel so the user can type normally.
+      if (e.key.length === 1) settingsOpen = false;
     }
     if (slashOpen && slashFiltered.length > 0) {
       if (e.key === "ArrowDown") {
@@ -528,14 +683,110 @@
       ((draft.trim().length > 0 || attachments.length > 0) &&
         (assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")),
   );
+
+  // ── Drag-over highlight ────────────────────────────────────────────────
+  // Files dragged anywhere over the composer shell flip a glow + dashed
+  // border w/ "Drop image to attach" overlay. We only react to actual file
+  // drags (dataTransfer.types contains "Files") — internal text/HTML drags
+  // shouldn't trip the visual. Counter-based to survive enter/leave on
+  // descendants without flicker.
+  let dragDepth = $state(0);
+  const dragOver = $derived(dragDepth > 0);
+  function isFileDrag(e: DragEvent): boolean {
+    const types = e.dataTransfer?.types;
+    if (!types) return false;
+    for (let i = 0; i < types.length; i++) if (types[i] === "Files") return true;
+    return false;
+  }
+  function onDragEnter(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth += 1;
+  }
+  function onDragLeave(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+  }
+  function onDragOverShell(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  }
+  async function onDrop(e: DragEvent) {
+    if (!isFileDrag(e)) return;
+    e.preventDefault();
+    dragDepth = 0;
+    const files = e.dataTransfer?.files;
+    if (!files || files.length === 0) return;
+    attachError = null;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 20 * 1024 * 1024) {
+        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
+        continue;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const dataBase64 = bytesToBase64(buf);
+        const ok = assistant.addAttachment({
+          mime: file.type || "image/png",
+          dataBase64,
+          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
+          sizeBytes: file.size,
+        }, tabId);
+        if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
+      } catch (err) {
+        attachError = `Failed to read dropped image: ${String(err)}`;
+      }
+    }
+  }
+
+  // ── Click-to-attach ───────────────────────────────────────────────────────
+  // Paste + drag-drop already stage images; this adds the discoverable path
+  // the placeholder has long advertised. Same staging + 20 MiB guard as onDrop.
+  let fileInput = $state<HTMLInputElement | undefined>();
+  function openFilePicker() { fileInput?.click(); }
+  async function onFilePick(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const files = input.files;
+    if (!files || files.length === 0) return;
+    attachError = null;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith("image/")) continue;
+      if (file.size > 20 * 1024 * 1024) {
+        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
+        continue;
+      }
+      try {
+        const buf = await file.arrayBuffer();
+        const dataBase64 = bytesToBase64(buf);
+        const ok = assistant.addAttachment({
+          mime: file.type || "image/png",
+          dataBase64,
+          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
+          sizeBytes: file.size,
+        }, tabId);
+        if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
+      } catch (err) {
+        attachError = `Failed to read image: ${String(err)}`;
+      }
+    }
+    input.value = ""; // allow re-picking the same file
+  }
 </script>
 
-<div class="composer-wrap">
+<div class="composer-wrap" data-model={assistant.model}>
+  {#key fireKey}
+    {#if fireKey > 0}
+      <span class="send-sweep" aria-hidden="true"></span>
+    {/if}
+  {/key}
   {#if queue.length > 0}
     <div class="queue">
       <span class="queue-label">Queued ({queue.length}):</span>
       {#each queue as q (q.id)}
-        <span class="qpill" title={q.text}>
+        <span class="qpill" use:tooltip={q.text}>
           <span class="qtext">{q.text}</span>
           <button
             class="qx"
@@ -562,7 +813,7 @@
   {#if attachments.length > 0 || attachError}
     <div class="attachments">
       {#each attachments as a (a.id)}
-        <div class="attach-chip" title={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
+        <div class="attach-chip" use:tooltip={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
           <img class="attach-thumb" src={a.previewUrl} alt="pasted attachment" />
           <span class="attach-meta">
             <span class="attach-name">image</span>
@@ -589,7 +840,55 @@
     </div>
   {/if}
 
-  <div class="composer-shell">
+  <div
+    class="composer-shell"
+    class:drag-over={dragOver}
+    role="region"
+    aria-label="Message composer"
+    ondragenter={onDragEnter}
+    ondragleave={onDragLeave}
+    ondragover={onDragOverShell}
+    ondrop={onDrop}
+  >
+    {#if dragOver}
+      <div class="drop-overlay" aria-hidden="true">
+        <div class="drop-pill">
+          <span class="drop-dot" aria-hidden="true"></span>
+          Drop image to attach
+        </div>
+      </div>
+    {/if}
+    {#if enhancedPreview !== null || enhanceError !== null}
+      <div class="enhance-panel" role="region" aria-label="Enhanced prompt">
+        {#if enhancedPreview !== null}
+          <div class="enhance-head">
+            <Wand2 size={13} />
+            <span class="enhance-title">Enhanced prompt</span>
+            <span class="enhance-sub">review before sending</span>
+          </div>
+          <div class="enhance-text">
+            {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
+          </div>
+          <div class="enhance-actions">
+            <button type="button" class="enhance-btn enhance-accept" onclick={acceptEnhanced}>
+              <Check size={13} /> Use this
+            </button>
+            <button type="button" class="enhance-btn enhance-discard" onclick={dismissEnhanced}>
+              Discard
+            </button>
+            <span class="enhance-kbd">Esc to dismiss</span>
+          </div>
+        {:else if enhanceError !== null}
+          <div class="enhance-error" role="alert">
+            <span class="enhance-error-msg">{enhanceError}</span>
+            <button type="button" class="attach-error-x" onclick={dismissEnhanced} aria-label="Dismiss">
+              <X size={11} />
+            </button>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
     {#if slashOpen && slashFiltered.length > 0}
       <div class="slash-menu" role="listbox">
         {#each slashFiltered as c, i (c.name)}
@@ -597,6 +896,7 @@
             type="button"
             class="slash-item"
             class:active={i === slashIdx}
+            style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickSlash(c); }}
           >
             <span class="slash-name">/{c.name}</span>
@@ -617,6 +917,7 @@
             type="button"
             class="slash-item mention-item"
             class:active={i === mentionIdx}
+            style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickMention(path); }}
           >
             <span class="mention-base">{base}</span>
@@ -631,27 +932,84 @@
       </div>
     {/if}
 
-    {#if modelPickerOpen}
-      <div class="slash-menu model-menu" role="listbox">
-        <div class="model-header"><span>Model</span></div>
-        {#each MODEL_OPTIONS as m, i (m.id)}
-          <button
-            type="button"
-            class="slash-item model-item"
-            class:active={i === modelIdx}
-            class:current={m.id === assistant.model}
-            data-id={m.id}
-            onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
-          >
-            <span class="model-dot" aria-hidden="true"></span>
-            <span class="model-name">
-              <span class="model-label">{m.label}</span>
-              <span class="model-version">{m.version}</span>
-            </span>
-            <span class="slash-desc">{m.tagline}</span>
-            <span class="model-ctx" class:wide={m.ctx === "1M ctx"}>{m.ctx}</span>
-          </button>
-        {/each}
+    {#if settingsOpen}
+      <div class="slash-menu model-menu settings-menu" role="listbox">
+        <div class="settings-section">
+          <div class="model-header"><span>Model</span></div>
+          <div class="settings-grid">
+            {#each MODEL_OPTIONS as m (m.id)}
+              {@const idx = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === m.id)}
+              <button
+                type="button"
+                class="settings-item model-card"
+                class:active={idx === settingsIdx}
+                class:current={m.id === assistant.model}
+                data-id={m.id}
+                style="--idx: {idx}"
+                use:tooltip={m.tagline}
+                onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
+              >
+                <span class="card-head">
+                  <span class="model-dot" aria-hidden="true"></span>
+                  <span class="model-label">{m.label}</span>
+                  <span class="model-version">{m.version}</span>
+                </span>
+                <span class="model-ctx" class:wide={m.ctx === "1M ctx"}>{m.ctx}</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+        <div class="settings-cols">
+          {#if assistant.model !== "haiku"}
+            <div class="settings-section">
+              <div class="model-header"><span>Thinking depth</span></div>
+              <div class="settings-stack">
+                {#each EFFORT_OPTIONS as e (e.id)}
+                  {@const idx = settingsRows.findIndex((r) => r.kind === "effort" && r.effort.id === e.id)}
+                  <button
+                    type="button"
+                    class="settings-item effort-row"
+                    class:active={idx === settingsIdx}
+                    class:current={e.id === assistant.thinkingEffort}
+                    data-level={e.level}
+                    style="--idx: {idx}"
+                    use:tooltip={e.hint}
+                    onmousedown={(ev) => { ev.preventDefault(); pickEffort(e); }}
+                  >
+                    <span class="effort-bars" aria-hidden="true" data-level={e.level}>
+                      <span class="bar"></span>
+                      <span class="bar"></span>
+                      <span class="bar"></span>
+                    </span>
+                    <span class="model-label">{e.label}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+          {/if}
+          <div class="settings-section">
+            <div class="model-header"><span>Permission mode</span></div>
+            <div class="settings-stack">
+              {#each MODE_OPTIONS as m (m.id)}
+                {@const idx = settingsRows.findIndex((r) => r.kind === "mode" && r.mode.id === m.id)}
+                {@const Icon = m.icon}
+                <button
+                  type="button"
+                  class="settings-item mode-row"
+                  class:active={idx === settingsIdx}
+                  class:current={m.id === assistant.permissionMode}
+                  data-id={m.id}
+                  style="--idx: {idx}"
+                  use:tooltip={m.hint}
+                  onmousedown={(ev) => { ev.preventDefault(); pickMode(m); }}
+                >
+                  <span class="mode-icon" aria-hidden="true"><Icon size={15} /></span>
+                  <span class="model-label">{m.label}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+        </div>
         <div class="slash-hint model-hint">
           <span><kbd>↑↓</kbd> navigate</span>
           <span><kbd>↵</kbd> pick</span>
@@ -660,33 +1018,78 @@
       </div>
     {/if}
 
-    <div class="composer" class:streaming={streaming} data-mode={mode}>
-      <span class="composer-glow" aria-hidden="true"></span>
-      <textarea
-        bind:this={ta}
-        value={draft}
-        oninput={(e) => {
-          setDraft((e.currentTarget as HTMLTextAreaElement).value);
-          resetRecall(); autosize(); refreshMention();
-        }}
-        onkeyup={refreshMention}
-        onclick={refreshMention}
-        onblur={() => {
-          if (!mentionState) return;
-          requestAnimationFrame(() => { mentionState = null; });
-        }}
-        onkeydown={onKey}
-        onpaste={onPaste}
-        placeholder={streaming
-          ? "Type to queue — Enter sends, /stop halts"
-          : attachments.length > 0
-          ? "Ask about the image…"
-          : idlePlaceholder}
-        rows="1"
-      ></textarea>
+    <div class="composer" class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
+      <div class="textarea-wrap">
+        <textarea
+          bind:this={ta}
+          value={draft}
+          oninput={(e) => {
+            setDraft((e.currentTarget as HTMLTextAreaElement).value);
+            resetRecall(); autosize(); refreshMention();
+          }}
+          onkeyup={refreshMention}
+          onclick={refreshMention}
+          onfocus={() => { composerFocused = true; }}
+          onblur={() => {
+            composerFocused = false;
+            if (!mentionState) return;
+            requestAnimationFrame(() => { mentionState = null; });
+          }}
+          onkeydown={onKey}
+          onpaste={onPaste}
+          placeholder=""
+          rows="1"
+        ></textarea>
+        {#if draft.length === 0 && !streaming && attachments.length === 0}
+          {#key placeholderKey}
+            <span class="placeholder-ghost" aria-hidden="true">{idlePlaceholder}</span>
+          {/key}
+        {:else if streaming && draft.length === 0}
+          <span class="placeholder-ghost static" aria-hidden="true">Type to queue — Enter sends, /stop halts</span>
+        {:else if attachments.length > 0 && draft.length === 0}
+          <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
+        {/if}
+        {#if enhancing}
+          <span class="magic-aura" aria-hidden="true"></span>
+          <div class="magic-text" aria-hidden="true">{draft}</div>
+          <span class="magic-stars" aria-hidden="true">
+            <i style="--sx:7%;  --sy:30%; --sz:9px; --sd:0s"></i>
+            <i style="--sx:24%; --sy:60%; --sz:6px; --sd:.5s"></i>
+            <i style="--sx:40%; --sy:32%; --sz:7px; --sd:.85s"></i>
+            <i style="--sx:15%; --sy:74%; --sz:5px; --sd:.3s"></i>
+          </span>
+        {/if}
+      </div>
+
+      <!-- Divider + context gauge in one. Base hairline separates the input
+           zone from the toolbar; the fill tracks context-window usage. -->
+      <div class="composer-divider" data-tone={ctxTone} use:tooltip={ctxTitle} role="img" aria-label={ctxTitle}>
+        {#if ctxTokens > 0}
+          <span class="composer-divider-fill" style="width: {Math.min(100, ctxPct)}%" aria-hidden="true"></span>
+        {/if}
+      </div>
 
       <div class="composer-toolbar">
         <div class="toolbar-cluster">
+          <input
+            bind:this={fileInput}
+            type="file"
+            accept="image/*"
+            multiple
+            class="file-input-hidden"
+            onchange={onFilePick}
+            tabindex="-1"
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            class="iconbtn attachbtn"
+            onclick={openFilePicker}
+            use:tooltip={"Attach image — or paste / drag-drop"}
+            aria-label="Attach image"
+          >
+            <Paperclip size={14} />
+          </button>
           {#if stt.config.enabled && (
             (stt.config.engine === "web_speech" && stt.supported) ||
             (stt.config.engine === "whisper" && stt.backendAvailable)
@@ -698,7 +1101,7 @@
             type="button"
             onclick={toggleMic}
             disabled={micBusy || stt.transcribing}
-            title={
+            use:tooltip={
               stt.recording ? "Stop recording" :
               stt.transcribing ? "Transcribing…" :
               stt.config.engine === "whisper" ? "Dictate (Whisper, local)" : "Dictate (Web Speech)"
@@ -708,7 +1111,9 @@
             {#if stt.transcribing}
               <Loader2 size={14} class="mic-spin" />
             {:else if stt.recording}
-              <Square size={11} fill="currentColor" />
+              <span class="mic-wave" aria-hidden="true">
+                <span></span><span></span><span></span>
+              </span>
             {:else}
               <Mic size={14} />
             {/if}
@@ -722,55 +1127,68 @@
               aria-expanded={hintOpen}
               aria-label="Composer hints"
               aria-describedby={hintOpen ? "composer-hint-pop" : undefined}
-              title="Keyboard shortcuts"
+              use:tooltip={"Keyboard shortcuts"}
             >
               <HelpCircle size={14} />
             </button>
             {#if hintOpen}
-              <div id="composer-hint-pop" class="hint-pop" role="tooltip">
-                <div class="hint-row"><kbd>Enter</kbd><span>send</span></div>
-                <div class="hint-row"><kbd>Shift</kbd>+<kbd>Enter</kbd><span>newline</span></div>
-                <div class="hint-row"><kbd>/</kbd><span>commands</span></div>
-                <div class="hint-row"><kbd>@</kbd><span>mention file</span></div>
+              <div
+                id="composer-hint-pop"
+                class="hint-pop"
+                role="tooltip"
+                bind:this={hintPop}
+                use:portal
+                style="top: {hintPos.top}px; left: {hintPos.left}px;"
+              >
+                <div class="hint-head">Keyboard shortcuts</div>
+                <div class="hint-row"><span class="hint-keys"><kbd>Enter</kbd></span><span>Send message</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>Shift</kbd><kbd>Enter</kbd></span><span>New line</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>/</kbd></span><span>Slash command menu</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>@</kbd></span><span>Mention a file</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>↑</kbd></span><span>Recall previous prompt</span></div>
+                <div class="hint-row"><span class="hint-keys"><kbd>Esc</kbd></span><span>Close any open menu</span></div>
               </div>
             {/if}
           </div>
-          {#if draft.length > 0}
-            <span class="char-count" class:warn={draft.length > 4000} title="Character count">
+          {#if draft.trim().length > 0 && !streaming}
+            <button
+              class="iconbtn wandbtn"
+              class:enhancing
+              type="button"
+              onclick={runEnhance}
+              disabled={enhancing}
+              use:tooltip={enhancing ? "Enhancing…" : "Enhance prompt — clean up & clarify"}
+              aria-label="Enhance prompt"
+            >
+              <Wand2 size={14} />
+            </button>
+          {/if}
+          {#if draft.length > 500}
+            <span
+              class="char-count"
+              class:warn={draft.length > 4000}
+              use:tooltip={draft.length > 4000 ? `${draft.length.toLocaleString()} characters · long prompts may slow first reply` : `${draft.length.toLocaleString()} characters in this draft`}
+            >
               {draft.length.toLocaleString()}
             </span>
           {/if}
         </div>
 
         <div class="toolbar-cluster toolbar-right">
-          {#if assistant.model !== "haiku"}
-            <button
-              type="button"
-              class="effort-pill"
-              class:effort-none={currentEffort.id === "none"}
-              class:effort-quick={currentEffort.id === "quick"}
-              class:effort-deep={currentEffort.id === "deep"}
-              onclick={cycleEffort}
-              title={currentEffort.hint + " — click to cycle"}
-            >
-              <span class="pill-label">{currentEffort.label}</span>
-            </button>
-          {/if}
           <button
             type="button"
-            class="model-pill"
-            data-model={assistant.model}
-            onclick={() => { modelPickerOpen = !modelPickerOpen; void tick().then(() => ta?.focus()); }}
-            title="Switch model"
+            class="settings-pill"
+            class:open={settingsOpen}
+            data-mode={currentMode.id}
+            onclick={() => { settingsOpen = !settingsOpen; void tick().then(() => ta?.focus()); }}
+            aria-haspopup="listbox"
+            aria-expanded={settingsOpen}
+            aria-label="Model, thinking depth & permission mode"
+            use:tooltip={`Model · thinking depth · permission mode\n${currentModel?.label ?? assistant.model} · ${currentEffort.label} · ${currentMode.label}`}
           >
-            <span class="model-dot-mini" aria-hidden="true"></span>
-            {#if currentModel}
-              <span class="pill-label">{currentModel.label}</span>
-              <span class="pill-version">{currentModel.version}</span>
-              <span class="pill-caret" aria-hidden="true">▾</span>
-            {:else}
-              model: {assistant.model}
-            {/if}
+            <SlidersHorizontal size={15} />
+            <span class="pill-label">{currentModel?.label ?? assistant.model}</span>
+            <span class="pill-caret" aria-hidden="true">▾</span>
           </button>
           <button
             class="sendbtn"
@@ -779,12 +1197,22 @@
             type="button"
             onclick={onBtnClick}
             disabled={!canFire}
-            title={mode === "stop" ? "Stop current turn" : mode === "queue" ? "Queue this message" : "Send (Enter)"}
+            use:tooltip={mode === "stop"
+              ? { text: "Halt the current turn", kbd: "Esc" }
+              : mode === "queue"
+              ? { text: "Queue after current turn", kbd: "Enter" }
+              : { text: "Send", kbd: "Enter" }}
           >
             <span class="icon-stack">
               <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
               <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
             </span>
+            {#key fireKey}
+              {#if fireKey > 0}
+                <span class="send-ripple" aria-hidden="true"></span>
+                <span class="send-ripple send-ripple-2" aria-hidden="true"></span>
+              {/if}
+            {/key}
           </button>
         </div>
       </div>
@@ -794,18 +1222,70 @@
 
 <style>
   .composer-wrap {
+    position: relative;
     padding: 10px 18px 14px;
     max-width: var(--chat-col-max);
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
   }
+  /* Aurora hue follows the active model — sonnet=blue, opus=purple,
+     haiku=teal. Resolved here so every accent inside (border, ripple,
+     send-sweep, model-pill pulse) reads from the same single source. */
+  .composer-wrap[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .composer-wrap[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .composer-wrap[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .composer-wrap                      { --model-color: var(--accent); }
   .composer-shell { position: relative; }
+  .composer-shell.drag-over .composer {
+    border-color: color-mix(in oklch, var(--model-color) 70%, transparent);
+    border-style: dashed;
+    box-shadow:
+      0 0 0 4px color-mix(in oklch, var(--model-color) 22%, transparent),
+      0 12px 36px -8px color-mix(in oklch, var(--model-color) 45%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
+    transform: translateY(-1px);
+  }
+  .drop-overlay {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    z-index: 8;
+    pointer-events: none;
+    animation: drop-in 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .drop-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 8px 16px;
+    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
+    border: 1px solid color-mix(in oklch, var(--model-color) 50%, transparent);
+    border-radius: 999px;
+    color: var(--fg);
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 8px 24px -6px color-mix(in oklch, var(--model-color) 40%, transparent);
+  }
+  .drop-dot {
+    width: 8px; height: 8px;
+    border-radius: 999px;
+    background: var(--model-color);
+    box-shadow: 0 0 8px color-mix(in oklch, var(--model-color) 70%, transparent);
+    animation: drop-dot-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes drop-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @keyframes drop-dot-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50%      { transform: scale(1.3); opacity: 0.7; }
+  }
 
   /* ── Composer v3 ─────────────────────────────────────────────────────
      Two-row layout: textarea up top, toolbar below.  Glass-blur surface
      w/ soft accent focus ring + animated streaming edge.  All controls
-     unified under .iconbtn (mic/help) + .effort-pill / .model-pill /
+     unified under .iconbtn (mic/help) + .settings-pill (model/effort/mode) +
      .sendbtn.  Replaces the v2 single-row design. */
   .composer {
     position: relative;
@@ -824,35 +1304,24 @@
                 transform 140ms ease-out;
     overflow: hidden;
   }
+  /* Calm focus ring — a tight 2px tint + a soft, low halo. The old glow
+     (3px ring + 32% halo) stacked with the streaming treatment into a busy
+     purple blob; this keeps focus legible without competing. */
   .composer:focus-within {
-    border-color: color-mix(in oklch, var(--accent) 55%, transparent);
+    border-color: color-mix(in oklch, var(--model-color) 45%, transparent);
     box-shadow:
-      0 0 0 3px var(--accent-soft),
-      0 12px 32px -8px color-mix(in oklch, var(--accent) 28%, transparent),
+      0 0 0 2px color-mix(in oklch, var(--model-color) 13%, transparent),
+      0 8px 22px -12px color-mix(in oklch, var(--model-color) 20%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
   }
-  /* Soft accent radial glow visible only on focus / streaming — sits behind
-     all content via overflow:hidden + negative z-index on the layer. */
-  .composer-glow {
-    position: absolute;
-    inset: -40%;
-    background: radial-gradient(
-      circle at 50% 100%,
-      color-mix(in oklch, var(--accent) 22%, transparent) 0%,
-      transparent 55%
-    );
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 280ms ease-out;
-    z-index: 0;
-  }
-  .composer:focus-within .composer-glow { opacity: 0.55; }
-  .composer.streaming .composer-glow { opacity: 0.7; }
 
+  /* Streaming = ONE coherent signal: a thin model-tinted border + the
+     animated top-edge bar below (synced 2.6s with the model-pill breathe).
+     No aurora swirl, no extra glow — calm and in-sync. */
   .composer.streaming {
-    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-color: color-mix(in oklch, var(--model-color) 42%, var(--border));
   }
-  /* Animated top-edge streaming bar — replaces the StatusHub indicator. */
+  /* Animated top-edge streaming bar — tinted to current model. */
   .composer.streaming::before {
     content: "";
     position: absolute;
@@ -860,9 +1329,9 @@
     height: 1.5px;
     background: linear-gradient(90deg,
       transparent,
-      var(--accent),
-      color-mix(in oklch, var(--accent) 70%, white 30%),
-      var(--accent),
+      var(--model-color),
+      color-mix(in oklch, var(--model-color) 70%, white 30%),
+      var(--model-color),
       transparent);
     background-size: 200% 100%;
     animation: composer-stream 2.6s ease-in-out infinite;
@@ -878,6 +1347,11 @@
     .composer.streaming::before { animation: none; opacity: 0.7; }
   }
 
+  .textarea-wrap {
+    position: relative;
+    z-index: 1;
+    display: flex;
+  }
   textarea {
     position: relative;
     z-index: 1;
@@ -895,10 +1369,83 @@
     overflow-y: auto;
   }
   textarea::placeholder {
-    color: var(--fg-subtle);
-    transition: color 200ms ease-out;
+    color: transparent;
   }
-  .composer:focus-within textarea::placeholder { color: var(--fg-faint); }
+  /* Custom ghost placeholder — sits over the textarea, fades+rotates so the
+     idle composer feels alive but not noisy. {#key placeholderKey} retriggers
+     `placeholder-fade` on each cycle. `.static` skips the animation for
+     non-rotating contexts (streaming / attachment hints). */
+  .placeholder-ghost {
+    position: absolute;
+    top: 8px; left: 10px; right: 10px;
+    pointer-events: none;
+    font-size: var(--fs-md);
+    line-height: 1.5;
+    color: var(--fg-subtle);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    animation: placeholder-fade 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    z-index: 0;
+  }
+  .placeholder-ghost.static { animation: none; }
+  .composer:focus-within .placeholder-ghost { color: var(--fg-faint); }
+  @keyframes placeholder-fade {
+    from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
+    to   { opacity: 1; transform: translateY(0);   filter: blur(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .placeholder-ghost { animation: none; }
+  }
+
+  /* Divider between the input zone and the toolbar — doubles as a context
+     gauge. The base hairline always shows (structure); the fill sweeps across
+     proportional to context-window usage, tinted by the active model and
+     stepping to warn/danger as the window fills. One element, two jobs. */
+  .composer-divider {
+    position: relative;
+    height: 1.5px;
+    margin: 5px 8px 3px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--border) 55%, transparent);
+    overflow: hidden;
+  }
+  .composer-divider-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    height: 100%;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--model-color) 75%, transparent);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--model-color) 45%, transparent);
+    transition: width 360ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms ease-out;
+  }
+  .composer-divider[data-tone="yellow"] .composer-divider-fill {
+    background: var(--warn);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--warn) 50%, transparent);
+  }
+  .composer-divider[data-tone="red"] .composer-divider-fill {
+    background: var(--danger);
+    box-shadow: 0 0 8px color-mix(in oklch, var(--danger) 55%, transparent);
+    animation: ctx-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes ctx-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.6; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .composer-divider-fill { animation: none; transition: none; }
+  }
+
+  /* Hidden native file input — driven by the paperclip .attachbtn. */
+  .file-input-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
 
   /* Toolbar row — left cluster (input affordances) + right cluster (action). */
   .composer-toolbar {
@@ -925,7 +1472,7 @@
     border-radius: 8px;
     cursor: pointer;
     flex-shrink: 0;
-    opacity: 0.75;
+    opacity: 0.85;
     padding: 0;
     transition: color 140ms, background 140ms, border-color 140ms, opacity 140ms, transform 140ms;
   }
@@ -960,8 +1507,34 @@
     0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 45%, transparent); }
     50%      { box-shadow: 0 0 0 6px transparent; }
   }
+  /* Live recording waveform — 3 bars w/ staggered scaleY pulses. Pure CSS;
+     no audio analyser needed for the visual cue. The .recording state on
+     .micbtn paints the bg red and forces white bars via currentColor. */
+  .mic-wave {
+    display: inline-flex; align-items: center; gap: 2px;
+    height: 12px;
+  }
+  .mic-wave span {
+    width: 2.5px;
+    height: 100%;
+    background: currentColor;
+    border-radius: 999px;
+    transform-origin: center;
+    animation: mic-bar 0.9s ease-in-out infinite;
+  }
+  .mic-wave span:nth-child(1) { animation-delay: 0s; }
+  .mic-wave span:nth-child(2) { animation-delay: 0.15s; }
+  .mic-wave span:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes mic-bar {
+    0%, 100% { transform: scaleY(0.35); }
+    50%      { transform: scaleY(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mic-wave span { animation: none; transform: scaleY(0.7); }
+  }
 
-  /* Live character count — surfaces only when draft is non-empty. Warns
+  /* Live character count — stays hidden until the draft passes 500 chars, so
+     it reads as a "getting long" signal rather than constant clutter. Warns
      past 4000 chars (rough one-turn ceiling for short prompts). */
   .char-count {
     margin-left: 4px;
@@ -1032,6 +1605,58 @@
   .sendbtn.stop:hover { filter: brightness(1.08); transform: translateY(-1px); }
   .sendbtn.queue {
     background: color-mix(in oklch, var(--accent) 70%, var(--surface));
+  }
+  /* Launch ripple — two concentric rings expand outward on every fire().
+     Mounted by {#key fireKey}; self-removed when the animation ends via
+     the unmount on the next key flip. */
+  .send-ripple {
+    position: absolute;
+    inset: -2px;
+    border-radius: 14px;
+    border: 1.5px solid color-mix(in oklch, var(--model-color) 70%, transparent);
+    opacity: 0.85;
+    pointer-events: none;
+    animation: send-ripple 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .send-ripple-2 {
+    animation-delay: 90ms;
+    border-color: color-mix(in oklch, var(--model-color) 55%, transparent);
+  }
+  @keyframes send-ripple {
+    from { transform: scale(0.6); opacity: 0.9; }
+    to   { transform: scale(2.2); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .send-ripple { animation: none; opacity: 0; }
+  }
+  /* Upward chat-column sweep — a thin gradient bar shoots upward from the
+     composer into the chat scroller on every fire(). Anchored to
+     .composer-wrap (which is position: relative), travels 100vh up via
+     translateY animation; clipped invisibly by the scroller's overflow. */
+  .send-sweep {
+    position: absolute;
+    left: 18px; right: 18px;
+    top: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in oklch, var(--model-color) 65%, transparent) 30%,
+      color-mix(in oklch, var(--model-color) 85%, white 10%) 50%,
+      color-mix(in oklch, var(--model-color) 65%, transparent) 70%,
+      transparent 100%);
+    box-shadow: 0 0 14px color-mix(in oklch, var(--model-color) 55%, transparent);
+    pointer-events: none;
+    z-index: 5;
+    animation: send-sweep 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes send-sweep {
+    0%   { transform: translateY(0)     scaleX(0.3); opacity: 0; }
+    18%  { transform: translateY(-12px) scaleX(1);   opacity: 1; }
+    100% { transform: translateY(-72vh) scaleX(0.4); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .send-sweep { animation: none; opacity: 0; }
   }
 
   .icon-stack {
@@ -1201,6 +1826,16 @@
     cursor: pointer;
     font: inherit;
     transition: background 140ms ease-out;
+    /* Stagger each item's entry — driven by inline style="--idx: {i}". */
+    animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--idx, 0) * 22ms);
+  }
+  @keyframes slash-item-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .slash-item { animation: none; }
   }
   .slash-item:hover, .slash-item.active {
     background: color-mix(in oklch, var(--accent) 11%, transparent);
@@ -1227,6 +1862,199 @@
     border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
   }
 
+  /* ── Prompt enhancer preview ─────────────────────────────────────────
+     Glass panel above the composer (mirrors .slash-menu positioning) holding
+     the Haiku-rewritten draft. Accent reads from --model-color so it matches
+     the active model's hue like the rest of the composer chrome. */
+  .enhance-panel {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    background: color-mix(in oklch, var(--surface) 88%, transparent);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid color-mix(in oklch, var(--model-color) 32%, var(--border));
+    border-radius: 14px;
+    box-shadow:
+      0 18px 44px -8px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklch, var(--model-color) 10%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    padding: 12px;
+    z-index: 10;
+    animation: slash-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .enhance-head {
+    display: flex; align-items: center; gap: 7px;
+    margin-bottom: 8px;
+    color: var(--model-color);
+  }
+  .enhance-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
+  .enhance-sub {
+    font-size: 10px; font-weight: 500;
+    color: var(--fg-faint);
+    margin-left: auto;
+    letter-spacing: 0.02em;
+  }
+  .enhance-text {
+    font-size: var(--fs-md);
+    line-height: 1.55;
+    color: var(--fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+    padding: 2px 0;
+    margin-bottom: 10px;
+  }
+  .enhance-actions { display: flex; align-items: center; gap: 8px; }
+  .enhance-btn {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    font: inherit; font-size: var(--fs-sm); font-weight: 600;
+    cursor: pointer;
+    transition: background 140ms ease-out, border-color 140ms ease-out, transform 120ms ease-out;
+  }
+  .enhance-btn:active { transform: scale(0.96); }
+  .enhance-accept {
+    background: var(--model-color);
+    color: oklch(0.16 0.02 260);
+    border: 1px solid transparent;
+  }
+  .enhance-accept:hover { background: color-mix(in oklch, var(--model-color) 88%, white 12%); }
+  .enhance-discard {
+    background: transparent;
+    color: var(--fg-muted);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  }
+  .enhance-discard:hover {
+    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
+    color: var(--fg);
+  }
+  .enhance-kbd { margin-left: auto; font-size: 10px; color: var(--fg-faint); }
+  .enhance-error {
+    display: flex; align-items: center; gap: 8px;
+    font-size: var(--fs-sm);
+    color: var(--danger);
+  }
+  .enhance-error-msg { flex: 1; }
+
+  /* ── Magic "enchanting" state ─────────────────────────────────────────
+     While the wand call is in flight, the effect lands on the message itself:
+     the user's own draft turns into a sweeping gradient shimmer (clip-text)
+     over a soft model-tinted aura with a few twinkling stars — not a spinner.
+     The real textarea text + caret go transparent so the shimmer clone is the
+     only thing visible. */
+  .composer.enchanting textarea { color: transparent; caret-color: transparent; }
+  .magic-text {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: 8px 10px 6px;
+    font: inherit;
+    font-size: var(--fs-md);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: hidden;
+    pointer-events: none;
+    background-image: linear-gradient(
+      100deg,
+      color-mix(in oklch, var(--fg) 62%, transparent) 0%,
+      color-mix(in oklch, var(--fg) 62%, transparent) 36%,
+      color-mix(in oklch, var(--model-color) 55%, white) 46%,
+      oklch(0.98 0.02 250) 50%,
+      color-mix(in oklch, var(--model-color) 65%, white) 54%,
+      color-mix(in oklch, var(--fg) 62%, transparent) 64%,
+      color-mix(in oklch, var(--fg) 62%, transparent) 100%
+    );
+    background-size: 220% 100%;
+    background-clip: text;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+    animation: magic-shimmer 1.15s linear infinite;
+  }
+  @keyframes magic-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -60% 0; }
+  }
+  .magic-aura {
+    position: absolute;
+    inset: -2px;
+    z-index: 0;
+    pointer-events: none;
+    border-radius: 12px;
+    background: radial-gradient(
+      120% 80% at 50% 50%,
+      color-mix(in oklch, var(--model-color) 16%, transparent),
+      transparent 70%
+    );
+    animation: magic-aura-pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes magic-aura-pulse {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 0.85; }
+  }
+  .magic-stars { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+  .magic-stars i {
+    position: absolute;
+    left: var(--sx); top: var(--sy);
+    width: var(--sz, 7px); height: var(--sz, 7px);
+    background: color-mix(in oklch, white 78%, var(--model-color));
+    /* 4-point sparkle — concave diamond reads as "magic" where a round dot
+       read as a stray bug. */
+    clip-path: polygon(50% 0%, 58% 42%, 100% 50%, 58% 58%, 50% 100%, 42% 58%, 0% 50%, 42% 42%);
+    filter: drop-shadow(0 0 4px color-mix(in oklch, var(--model-color) 85%, transparent));
+    opacity: 0;
+    transform-origin: center;
+    animation: magic-twinkle 1.6s ease-in-out infinite;
+    animation-delay: var(--sd);
+  }
+  @keyframes magic-twinkle {
+    0%, 100% { opacity: 0; transform: scale(0.2) rotate(0deg); }
+    40%      { opacity: 1; transform: scale(1) rotate(40deg); }
+    70%      { opacity: 0.5; transform: scale(0.7) rotate(70deg); }
+  }
+
+  /* Wand button glows + breathes while enchanting (instead of a spinner). */
+  .wandbtn:hover:not(:disabled) { color: var(--model-color); }
+  .wandbtn.enhancing {
+    color: var(--model-color);
+    border-color: color-mix(in oklch, var(--model-color) 40%, var(--border));
+    opacity: 1;
+    animation: wand-pulse 1.3s ease-in-out infinite;
+  }
+  @keyframes wand-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 40%, transparent); transform: scale(1); }
+    50%      { box-shadow: 0 0 10px 2px color-mix(in oklch, var(--model-color) 32%, transparent); transform: scale(1.08); }
+  }
+
+  /* Reveal — each chunk of the enhanced text materializes out of blur,
+     staggered. Delay capped so long outputs don't crawl in over seconds. */
+  .ew {
+    animation: word-materialize 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: min(calc(var(--i) * 14ms), 650ms);
+  }
+  /* While streaming, tokens already arrive staggered — drop the index delay so
+     each word blurs in the moment its delta lands (typewriter feel), instead of
+     queuing behind a growing per-word offset. */
+  .ew.live {
+    animation-delay: 0ms;
+  }
+  @keyframes word-materialize {
+    from { opacity: 0; filter: blur(7px); }
+    to   { opacity: 1; filter: blur(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .magic-text { animation: none; -webkit-text-fill-color: var(--fg-muted); }
+    .magic-aura, .magic-stars i { animation: none; }
+    .magic-stars i { opacity: 0.7; }
+    .ew { animation: none; }
+  }
+
   /* Phase 3a: hint popover. Replaces the dedicated hint row; lives adjacent
      to the mic in the composer row. Pop animates fade + 4px translate-y +
      scale 0.98→1 over 140ms. */
@@ -1243,117 +2071,159 @@
     background: var(--accent-soft);
     opacity: 1;
   }
-  .hint-pop {
-    position: absolute;
-    bottom: calc(100% + 6px);
-    left: 0;
-    min-width: 180px;
-    padding: 8px 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    box-shadow: 0 10px 24px oklch(0 0 0 / 0.35);
-    z-index: 12;
-    display: flex; flex-direction: column; gap: 6px;
-    animation: hint-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Hint popover — viewport-fixed so it escapes .composer's overflow:hidden.
+     Coords computed in positionHint(). `:global()` because Svelte 5 scopes
+     style by the markup it sees; this element renders inside the composer
+     but the CSS would otherwise be tree-shaken since the popover has been
+     moved out of scoped scope by some HMR paths. */
+  :global(.hint-pop) {
+    position: fixed;
+    min-width: 240px;
+    padding: 10px 14px 8px;
+    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border));
+    border-radius: 12px;
+    box-shadow:
+      0 16px 40px -8px oklch(0 0 0 / 0.6),
+      0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    z-index: 9998;
+    display: flex; flex-direction: column; gap: 2px;
+    animation: hint-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
     transform-origin: bottom left;
+  }
+  :global(.hint-pop .hint-head) {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    padding-bottom: 6px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
   }
   @keyframes hint-in {
     from { opacity: 0; transform: translateY(4px) scale(0.98); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .hint-pop { animation: none; }
+    :global(.hint-pop) { animation: none; }
   }
-  .hint-row {
-    display: inline-flex; align-items: center; gap: 6px;
+  :global(.hint-pop .hint-row) {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 2px;
     font-size: var(--fs-xs);
-    color: var(--fg-muted);
-  }
-  .hint-row kbd {
-    font-family: inherit;
-    font-size: 10px;
-    padding: 1px 5px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--fg-muted);
-  }
-
-  .model-pill {
-    align-self: center;
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 0 8px 0 10px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
-    border-radius: 999px;
     color: var(--fg-2);
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-    font: inherit;
-    font-size: var(--fs-xs);
-    height: 26px;
-    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
-  /* Per-model dot — same color logic as the picker. Lets the user scan the
-     pill and know which model is loaded without reading the label. */
-  .model-dot-mini {
-    width: 6px; height: 6px;
-    border-radius: 999px;
-    background: var(--model-color, var(--fg-muted));
-    box-shadow:
-      0 0 0 1.5px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
-      0 0 6px color-mix(in oklch, var(--model-color, var(--fg-muted)) 45%, transparent);
-    flex-shrink: 0;
+  :global(.hint-pop .hint-keys) {
+    display: inline-flex; align-items: center; gap: 3px;
+    justify-content: flex-start;
   }
-  .model-pill[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .model-pill[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .model-pill[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
-
-  .effort-pill {
-    align-self: center;
-    display: inline-flex; align-items: center;
-    padding: 0 10px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
-    border-radius: 999px;
-    color: var(--fg-2);
-    cursor: pointer;
-    font: inherit;
+  :global(.hint-pop .hint-row > span:last-child) {
+    color: var(--fg-muted);
+    text-align: left;
+    line-height: 1.3;
+  }
+  :global(.hint-pop kbd) {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 18px; height: 18px;
+    padding: 0 6px;
+    font-family: var(--font-ui);
     font-size: 10.5px;
     font-weight: 600;
+    background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border-strong) 70%, transparent);
+    border-radius: 4px;
+    color: var(--fg);
+    line-height: 1;
+    letter-spacing: 0.01em;
+  }
+
+  /* Unified settings pill — one icon-only control opening the model /
+     thinking-depth / permission-mode panel. `data-mode` faintly tints the
+     icon so the current permission posture (unguarded vs cautious) reads at
+     a glance without spelling it out. */
+  .settings-pill {
+    align-self: center;
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 0 8px;
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+    border-radius: 999px;
+    color: var(--fg-2);
+    cursor: pointer;
+    font: inherit;
     height: 26px;
-    letter-spacing: 0.02em;
+    overflow: hidden;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
-  .effort-pill:hover {
-    background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2));
+  .settings-pill:hover {
+    background: color-mix(in oklch, var(--bg-elev-2) 90%, transparent);
     color: var(--fg);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    border-color: var(--border);
   }
-  .effort-none {
-    color: oklch(0.78 0.14 145);
-    border-color: color-mix(in oklch, oklch(0.78 0.14 145) 35%, var(--border));
-    background: color-mix(in oklch, oklch(0.78 0.14 145) 8%, var(--bg-elev-2));
+  .settings-pill.open {
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+    color: var(--fg);
   }
-  .effort-quick {
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
-    background: color-mix(in oklch, var(--accent) 8%, var(--bg-elev-2));
-  }
-  .effort-deep {
-    color: oklch(0.75 0.16 50);
-    border-color: color-mix(in oklch, oklch(0.75 0.16 50) 40%, var(--border));
-    background: color-mix(in oklch, oklch(0.75 0.16 50) 10%, var(--bg-elev-2));
-  }
-  .pill-label { font-weight: 600; }
-  .pill-version {
-    font-size: 10px;
+  .settings-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
+  .settings-pill[data-mode="bypassPermissions"] { color: var(--warn); }
+  .settings-pill[data-mode="default"] { color: var(--accent); }
+  /* Current-model label on the pill — replaces the icon-only rest state so
+     the active model reads at a glance without hovering. */
+  .pill-label {
+    font-size: 11px;
     font-weight: 600;
-    color: var(--model-color, var(--accent));
-    padding: 1px 6px;
-    background: color-mix(in oklch, var(--model-color, var(--accent)) 14%, transparent);
-    border-radius: 999px;
+    line-height: 1;
+    letter-spacing: 0.01em;
+    max-width: 72px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mode-icon { display: inline-flex; align-items: center; }
+  /* Signal-bar effort indicator — 3 vertical bars growing left-to-right.
+     `data-level` (1|2|3) fills bars in current color; unfilled bars stay
+     dim. Same visual vocab as wifi/battery so the ladder reads instantly. */
+  .effort-bars {
+    display: inline-flex; align-items: flex-end; gap: 2px;
+    height: 11px;
+    animation: effort-bars-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .effort-bars .bar {
+    width: 2.5px;
+    background: color-mix(in oklch, currentColor 22%, transparent);
+    border-radius: 1px;
+    transition: background 200ms ease-out, height 200ms ease-out;
+  }
+  .effort-bars .bar:nth-child(1) { height: 35%; }
+  .effort-bars .bar:nth-child(2) { height: 65%; }
+  .effort-bars .bar:nth-child(3) { height: 100%; }
+  .effort-bars[data-level="1"] .bar:nth-child(1),
+  .effort-bars[data-level="2"] .bar:nth-child(-n+2),
+  .effort-bars[data-level="3"] .bar { background: currentColor; }
+  /* Active bar gets a tiny pulse — draws the eye to the current rung. */
+  .effort-bars[data-level="1"] .bar:nth-child(1),
+  .effort-bars[data-level="2"] .bar:nth-child(2),
+  .effort-bars[data-level="3"] .bar:nth-child(3) {
+    animation: effort-bar-tip 1.8s ease-in-out infinite;
+  }
+  @keyframes effort-bars-in {
+    from { opacity: 0; transform: translateY(-2px) scale(0.6); }
+    to   { opacity: 1; transform: translateY(0)    scale(1); }
+  }
+  @keyframes effort-bar-tip {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.6; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .effort-bars { animation: none; }
+    .effort-bars .bar { animation: none; }
   }
   .pill-caret {
     font-size: 8px;
@@ -1362,13 +2232,6 @@
     line-height: 1;
     transition: color 140ms ease-out, transform 140ms ease-out;
   }
-  .model-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
-  .model-pill:hover {
-    background: color-mix(in oklch, var(--bg-elev-2) 95%, transparent);
-    color: var(--fg);
-    border-color: color-mix(in oklch, var(--model-color, var(--accent)) 35%, var(--border));
-  }
-
   .mention-menu { max-height: 280px; }
   .mention-item {
     display: grid;
@@ -1426,41 +2289,6 @@
       color-mix(in oklch, var(--border) 80%, transparent),
       transparent);
   }
-  .model-item {
-    position: relative;
-    display: grid;
-    grid-template-columns: 10px minmax(96px, auto) 1fr auto;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 14px 10px 18px;
-    border-radius: 8px;
-    transition: background 140ms ease-out;
-  }
-  .model-item::before {
-    content: "";
-    position: absolute;
-    left: 4px;
-    top: 50%;
-    width: 3px;
-    height: 60%;
-    border-radius: 2px;
-    background: var(--accent);
-    box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 55%, transparent);
-    transform: translateY(-50%) scaleY(0);
-    transform-origin: center;
-    transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .model-item.current::before { transform: translateY(-50%) scaleY(1); }
-  .model-item.current {
-    background: linear-gradient(90deg,
-      color-mix(in oklch, var(--accent) 14%, transparent),
-      color-mix(in oklch, var(--accent) 4%, transparent) 65%,
-      transparent);
-  }
-  .model-item.active:not(.current) {
-    background: color-mix(in oklch, var(--accent) 9%, transparent);
-  }
-
   .model-dot {
     width: 8px; height: 8px;
     border-radius: 999px;
@@ -1469,14 +2297,82 @@
       0 0 0 2px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
       0 0 8px color-mix(in oklch, var(--model-color, var(--fg-muted)) 55%, transparent);
   }
-  .model-item[data-id="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .model-item[data-id="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .model-item[data-id="haiku"]  { --model-color: oklch(0.78 0.14 180); }
 
-  .model-name {
-    display: inline-flex; align-items: baseline; gap: 6px;
-    min-width: 96px;
+  /* Unified settings panel — compact, right-anchored under the pill. Model is
+     a 3-up card row; thinking depth + permission mode sit side-by-side below.
+     Descriptions live in hover tooltips so the panel stays short (no scroll)
+     and content-width instead of spanning the whole composer. */
+  .settings-menu {
+    left: auto; right: 0;
+    width: max-content;
+    min-width: 440px; max-width: 560px;
+    max-height: min(82vh, 600px);
+    padding: 8px 10px 4px;
   }
+  .settings-section { padding: 0 2px; }
+  .settings-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    padding: 2px 2px 8px;
+  }
+  .settings-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: start;
+  }
+  .settings-stack {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 2px 2px 4px;
+  }
+  .settings-item {
+    position: relative;
+    display: flex; align-items: center; gap: 8px;
+    width: 100%;
+    padding: 7px 10px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    color: var(--fg);
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    transition: background 140ms ease-out, border-color 140ms ease-out;
+    animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--idx, 0) * 16ms);
+  }
+  .settings-item:hover,
+  .settings-item.active {
+    background: color-mix(in oklch, var(--accent) 11%, transparent);
+  }
+  .settings-item.current {
+    background: color-mix(in oklch, var(--accent) 13%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 38%, var(--border));
+  }
+  /* Model card — name + version on top, ctx badge beneath; tagline in tooltip. */
+  .model-card {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 9px 10px;
+  }
+  .model-card .card-head { display: inline-flex; align-items: center; gap: 7px; }
+  .model-card[data-id="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .model-card[data-id="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .model-card[data-id="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .settings-item.current .model-label { color: var(--accent); }
+  .settings-item.current .model-version {
+    color: var(--accent);
+    background: color-mix(in oklch, var(--accent) 16%, transparent);
+  }
+  /* Effort + mode rows — single line: indicator + label, desc in tooltip. */
+  .effort-row .effort-bars { height: 12px; color: var(--fg-muted); animation: none; }
+  .effort-row .effort-bars .bar { animation: none; }
+  .effort-row.current .effort-bars { color: var(--accent); }
+  .mode-row .mode-icon { color: var(--fg-muted); }
+  .mode-row.current .mode-icon { color: var(--accent); }
+
   .model-label {
     font-weight: 600;
     color: var(--fg);
@@ -1490,16 +2386,6 @@
     padding: 1px 5px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
     border-radius: 4px;
-  }
-  .model-item.current .model-label { color: var(--accent); }
-  .model-item.current .model-version {
-    color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 16%, transparent);
-  }
-  .model-menu .slash-desc {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .model-ctx {
     font-size: 10px;

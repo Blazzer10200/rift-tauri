@@ -309,6 +309,12 @@ pub struct AutoSyncEngine {
     /// scan returns empty. 500 ms lets Windows finish writing the files,
     /// then one scan picks the whole tree up.
     pending_dir_reconcile: AtomicBool,
+    /// Set while `force_push_now` or `force_pull_now` is in-flight. Both
+    /// commands serialize against this flag — a duplicate click while one is
+    /// running logs + returns rather than spawning an overlapping flush.
+    /// Cleared at the end of each spawned task. Frontend `connection.svelte.ts`
+    /// debounces too (#153) but this is the backend authority.
+    force_busy: AtomicBool,
 }
 
 impl AutoSyncEngine {
@@ -358,6 +364,7 @@ impl AutoSyncEngine {
             stop_tx,
             disposed: AtomicBool::new(false),
             pending_dir_reconcile: AtomicBool::new(false),
+            force_busy: AtomicBool::new(false),
         });
 
         // Channel for FS events from the notify thread → tokio runtime.
@@ -817,6 +824,14 @@ impl AutoSyncEngine {
     /// Push wasn't. This restores parity.
     pub fn force_push_now(self: &Arc<Self>) {
         log::debug!("force_push_now: entry");
+        if self
+            .force_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            log::warn!("force_push_now: another force op in flight, ignoring");
+            return;
+        }
         let ct = CancellationToken::new();
         let ct_for_task = ct.clone();
         let my_nonce = self.cancel_nonce.fetch_add(1, Ordering::Relaxed);
@@ -929,6 +944,7 @@ impl AutoSyncEngine {
                     "from_cache": true,
                 }),
             );
+            engine.force_busy.store(false, Ordering::Release);
         });
         self.track_background(h);
     }
@@ -1692,6 +1708,14 @@ impl AutoSyncEngine {
     /// surfaces via RemotePullStart/Done into the activity feed.
     pub fn force_pull_now(self: &Arc<Self>) {
         log::debug!("force_pull_now: entry");
+        if self
+            .force_busy
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            log::warn!("force_pull_now: another force op in flight, ignoring");
+            return;
+        }
         // Register a cancellation token so the modal's Cancel button can stop
         // the operation mid-flight. Replaces any prior token — kick_drift_reconcile
         // sharing the same slot means the user's "cancel" always hits the latest
@@ -1984,6 +2008,7 @@ impl AutoSyncEngine {
                     }
                 }
             }
+            engine.force_busy.store(false, Ordering::Release);
         });
         self.track_background(h);
     }
