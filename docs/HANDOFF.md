@@ -2,6 +2,39 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-28 — v0.4.35 + v0.4.36 shipped: toast overhaul + opener fix
+
+### Completed
+- **Unified toast system** (v0.4.35): deleted `ActivityToast.svelte` + `UpdateToast.svelte` (overlapped same corner, different z-indexes, no stacking). Replaced with `src/lib/state/toast.svelte.ts` (queue, max 3, severity timeouts, sticky/action support) + `src/lib/components/ToastHost.svelte` (single stack, quiet blurred-surface style, flip animation). All `autosync://activity` events push to store; update notice is a sticky toast w/ "View" action.
+- **Opener URL scope fix** (v0.4.36): `tauri-plugin-opener` 2.x silently blocks all URLs w/o explicit scope — `default.json` `opener:allow-open-url` upgraded to object w/ `https://**`, `http://**`, `mailto:**` allow-list. This was biting the installer download + any openUrl call post-bundle.
+- **UpdateDialog error reporting fix** (v0.4.36): `download()` no longer flips `state→"error"` on openUrl fail. New `downloadError` field keeps `state="available"` + surfaces inline error in dialog w/ real message + GitHub fallback link.
+- Both versions committed, pushed, built (NSIS), GH-released, SHA256-verified. v0.4.36 is live.
+
+### Failed / Don't Retry
+- v0.4.35 ships broken (opener scope) — GH release exists but users should skip straight to v0.4.36.
+
+### Key Decisions
+- Per-model composer tinting (Sonnet=cyan, Opus=purple, Haiku=teal) confirmed working-as-designed — not changed.
+- Toast visual language: quiet blurred-surface palette throughout; dropped UpdateToast's gradient + glow halo.
+
+### Next Steps
+1. **Install v0.4.36 manually** — v0.4.35 binary has broken opener scope so its Download button fails. Download [Rift_0.4.36_x64-setup.exe](https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.36) from browser + run once. v0.4.37+ auto-updates resume.
+2. Continue UI polish pass — toast foundation is done; next surfaces to consider: ActivityFeed density/grouping, sync status pill, any other cluttered panels.
+3. Remaining `updater-migration` branch cleanup (HANDOFF from last session) — merge to main when on v0.4.36.
+
+### Files Modified This Session
+- `src/lib/state/toast.svelte.ts` (new)
+- `src/lib/components/ToastHost.svelte` (new)
+- `src/lib/components/AppShell.svelte` (swap mounts)
+- `src/lib/state/connection.svelte.ts` (activity → toast.push)
+- `src/lib/state/updates.svelte.ts` (sticky toast, downloadError field)
+- `src/lib/components/dialogs/UpdateDialog.svelte` (downloadError inline card)
+- `src-tauri/capabilities/default.json` (opener URL scope)
+- `src/lib/components/ActivityToast.svelte` (deleted)
+- `src/lib/components/UpdateToast.svelte` (deleted)
+
+---
+
 ## Session 2026-05-28 — v0.4.34 SHIPPED + post-ship cleanup
 
 **v0.4.34 LIVE** → https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.34. The brittle updater system is gone for good. No more signing keys, no more `latest.json`, no more `.sig` files, no more CONIN$ passphrase trap. The new path is `commands/update.rs` polling `api.github.com/.../releases/latest`, semver-comparing, opening Setup.exe in the user's browser on confirm. ~200L Rust + ~150L Svelte replaced ~700L of plugin glue + signing infrastructure.
