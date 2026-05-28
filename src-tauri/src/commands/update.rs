@@ -1,17 +1,16 @@
-//! Updater — v0.4.34+ GH-release-API path.
+//! Updater — GH-release-API path (v0.4.34+).
 //!
-//! Replaced `tauri-plugin-updater` (2026-05-26 → 2026-05-27 brief lifetime).
+//! Replaced `tauri-plugin-updater` (had a brief 2026-05-26 → 2026-05-27 run).
 //! That plugin's ed25519 signature check cannot be disabled per its docs —
 //! losing the signing key bricks every installed client forever, which is what
-//! prompted the v0.4.33 key rotation + buddy reinstall. This module hits the
+//! prompted the v0.4.33 key rotation + manual reinstall. This module hits the
 //! public GitHub Releases API instead, semver-compares the latest tag against
 //! the running build, and (on user confirm) opens the Setup.exe asset URL in
 //! the user's browser via `tauri-plugin-opener`. Install = standard NSIS
 //! wizard; Tauri's NSIS template handles "close running app" prompt + relaunch.
 //!
-//! No signing key. No `latest.json`. No `*.sig` files (v0.4.34 release.ps1
-//! still publishes them one last time as a bridge so v0.4.33 clients can
-//! receive v0.4.34 via the OLD path; v0.4.35+ release pipeline can drop them).
+//! No signing key. No `latest.json`. No `*.sig` files. Lose the build machine
+//! and the next release just ships from a different one.
 
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
