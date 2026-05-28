@@ -63,6 +63,10 @@ class UpdateStore {
   dialogOpen = $state(false);
   toastVisible = $state(false);
   dismissedVersion = $state<string | null>(loadDismissed());
+  /** Error from the most recent `download()` attempt. Distinct from
+   *  `error` (which is feed/check failures only) — keeps `state` on
+   *  "available" so the user can retry the Download button. */
+  downloadError = $state("");
   /** Active toast id when an update notification is on screen. */
   private toastId: number | null = null;
 
@@ -120,13 +124,14 @@ class UpdateStore {
    *  prompts to close Rift if needed, installs, then relaunches. */
   async download() {
     if (this.state !== "available" || !this.info?.downloadUrl) return;
-    this.error = "";
+    this.downloadError = "";
     try {
       await openUrl(this.info.downloadUrl);
       this.state = "launched";
     } catch (e) {
-      this.error = String(e);
-      this.state = "error";
+      // Keep state "available" so the user sees the inline error AND can
+      // retry the Download button without re-querying GitHub.
+      this.downloadError = String(e);
     }
   }
 

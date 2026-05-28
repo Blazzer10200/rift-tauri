@@ -139,6 +139,17 @@
             </div>
           {/if}
 
+          {#if updates.state === "available" && updates.downloadError}
+            <div class="err-card">
+              <AlertTriangle size={16}/>
+              <div class="err-text">
+                <div class="err-title">Couldn't open the installer link.</div>
+                <div class="err-detail mono">{updates.downloadError}</div>
+                <div class="err-hint">Click "View release on GitHub" below to download manually, or try again after relaunch.</div>
+              </div>
+            </div>
+          {/if}
+
           {#if updates.info?.notesMarkdown && notes.length > 0}
             <div class="notes-card">
               <div class="notes-head">
