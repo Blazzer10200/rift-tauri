@@ -4,7 +4,7 @@
 
 ## Stack
 
-Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Self-update: `tauri-plugin-updater` (Velopack retired on `updater-migration` branch, gating ship of v0.4.32+). NSIS installer (perUser).
+Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Self-update: GH-release-API path — `commands/update.rs` polls `api.github.com/repos/Blazzer10200/rift-releases/releases/latest`, semver-compares, opens Setup.exe in browser on user confirm (no signing key, no `latest.json`, no `.sig`; replaced `tauri-plugin-updater` in v0.4.34 after key-loss bricked all clients on v0.4.33). NSIS installer (perUser).
 
 Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json`. Source of truth for current version: `docs/CHANGELOG.md` (don't hard-code in this file — went stale at v0.2.4 vs v0.2.48 reality before 2026-05-13 cleanup).
 
@@ -17,7 +17,7 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Design briefs | `docs/design/` (3 active: `git-rcon-tools.md`, `updater-migration.md`, `assistant-svelte-split.md`) |
+| Design briefs | `docs/design/` (2 active: `git-rcon-tools.md`, `assistant-svelte-split.md`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
@@ -29,8 +29,8 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 | File | Lines | Notes |
 |---|---|---|
 | `src-tauri/src/sync/auto_sync.rs` | 1966 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/assistant/mod.rs` | 2336 | claude CLI integration + auth + workspace (grown w/ ask_user wiring 2026-05-22) |
-| `src-tauri/src/lib.rs` | 300 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
+| `src-tauri/src/assistant/mod.rs` | 2309 | claude CLI integration + auth + workspace (lost kill_child_processes_on_exit in v0.4.34 updater cleanup) |
+| `src-tauri/src/lib.rs` | 292 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
 | `src-tauri/src/sync/auto_sync/flush.rs` | 653 | flush_batch pipeline (split out 2026-05-13) |
 | `src-tauri/src/assistant/mcp_server.rs` | 587 | stdio JSON-RPC MCP server |
 | `src-tauri/src/sync/drift_scanner.rs` | 555 | 3-way drift diff |
@@ -59,7 +59,7 @@ Only `operator` + `recon` are defined as local subagents. `architect` / `scout` 
 | Svelte/TS / Rust symbol lookup | inline + LSP tool | TS/JS native; Rust via `rust-analyzer-lsp` plugin (installed 2026-05-21). Svelte: no LSP — grep + `/check` (skipped Piebald `svelte-lsp` — needs tweakcc patch) |
 | "Where does X live" (LSP miss) | **recon** | Terse `path:line :: snippet` output |
 | IPC contract change, tradeoff calls | inline (or `Plan` skill for multi-track) | Built-in `architect` agent is available but heavyweight; usually inline reasoning is enough |
-| Tauri 2 / russh / Velopack docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
+| Tauri 2 / russh docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
 
 ## Verification
 
@@ -99,7 +99,8 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 2. **Self-replace dance** — `tauri build` fails (Win file-lock) if Rift is running. Quit instance → sleep 1 → build to temp → `cp` over → relaunch. (memory: `reference_self_replace_dance`)
 3. **Doc size cap** — `CHANGELOG.md` + `HANDOFF.md` ≤600 words each. Truncate older entries when extending — `git log` preserves history. (Raised 300 → 600 on 2026-05-12 after the v0.2.46 → v0.2.48 arc; 300 was too tight for an arc summary + RESUME HERE + CRITICAL DON'T-TOUCH inline.)
 4. **Build = batch only** — dev server (`npm run dev` or `scripts/run-dev.bat`) is the default loop. The full "build" pipeline (bump → changelog → check → build → install → shortcut → iconcache → commit) only runs when a batch is ready to ship. Never trigger mid-session.
-5. **Version lockstep — THREE files** — `package.json`, `Cargo.toml`, AND `src-tauri/tauri.conf.json` must all match. `scripts/release.ps1` preflight bails on any mismatch. Bumping only two is the most common failure mode (2026-05-12: v0.2.49 first ship attempt died here). All three, always.
+5. **Version lockstep — THREE files** — `package.json`, `Cargo.toml`, AND `src-tauri/tauri.conf.json` must all match. `scripts/release.ps1` preflight bails on any mismatch. Bumping only two is the most common failure mode (2026-05-12: v0.2.49 first ship attempt died here). All three, always. **Plus `Cargo.lock`** — the workspace version bump auto-updates it; `release.ps1` dirty-tree refusal will catch this if you forget to commit (happened on v0.4.34 ship).
+6. **Releases repo is gitignored locally** — `Releases/` is a scratch dir for `release.ps1`'s SHA256 round-trip verify (writes `verify-<ver>/` then cleans). Don't track its contents.
 
 ## Don't-do
 

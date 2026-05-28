@@ -841,31 +841,6 @@ pub fn cleanup_mcp_config_on_exit() {
     }
 }
 
-/// Best-effort `taskkill /F /T` on every tracked claude CLI child PID. Wired
-/// to `tauri-plugin-updater`'s `on_before_exit` so the NSIS Setup.exe doesn't
-/// trip on a child process holding a file handle inside the install dir
-/// during the v0.4.32+ updater migration. Errors swallowed — we're about to
-/// exit anyway.
-#[cfg(target_os = "windows")]
-pub fn kill_child_processes_on_exit() {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let pids: Vec<u32> = with_session_pids(|m| m.values().copied().collect()).unwrap_or_default();
-    if pids.is_empty() { return; }
-    log::info!("update: taskkill /F /T on {} claude CLI children before exit", pids.len());
-    for pid in pids {
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-pub fn kill_child_processes_on_exit() {}
-
 /// Phase E4: housekeeping sweep for CLI JSONLs that belong to sessions
 /// retired by compaction. After a compact, the old `<uuid>.jsonl` under
 /// `~/.claude/projects/<cwd-hash>/` is dead weight — Rift's own convo JSON

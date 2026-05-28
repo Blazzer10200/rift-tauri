@@ -31,7 +31,6 @@ Ordered by recommended attack sequence. All cross-reference detailed blocks belo
 
 ### Active design briefs
 - `docs/design/git-rcon-tools.md` (lane 3)
-- `docs/design/updater-migration.md` (v0.4.32 ship-gate)
 - `docs/design/assistant-svelte-split.md` (#20 M0-M9 extraction plan)
 
 ---
@@ -48,27 +47,27 @@ Ordered by recommended attack sequence. All cross-reference detailed blocks belo
 - **Symptom:** Unknown what happens on a fresh install — no profile, no SSH keys, no server configured, no Claude auth. Empty states across Sync / Assistant / Activity pages will likely confuse a new user.
 - **Fix sketch:** Deliberate first-run flow — welcome → SSH key generate-or-import → profile setup → server add → Claude auth handoff → first sync. Empty states across every page should guide, not confuse. Should be self-contained: no manual file edits, no env vars.
 
-## 14. No CI — release path still local-only (PARTIAL)
+## 14. No CI — release path still local-only
 
-- **Status:** `.github/workflows/check.yml` SHIPPED (cargo + svelte-check on PR). `release.yml` exists as a skeleton awaiting #15 (code signing) before it can replace local `release.ps1`.
-- **Symptom (release path):** 5-15 min wall time blocking your machine per release. Mid-run build failure leaves stale `Releases/staging-*` (cleanup is on success path only). No cross-machine reproducibility — only works on Blazzer's box w/ `gh auth` + `vpk` + Node toolchain installed.
-- **Fix sketch:** Flesh out `release.yml` once #15 unblocks signing. Job: checkout → setup-node → cargo cache → `dotnet tool install -g vpk` → `release.ps1` w/ `GITHUB_TOKEN` + signing secret. Add cleanup hook for `Releases/staging-*` on failure.
+- **Status:** `.github/workflows/check.yml` SHIPPED (cargo + svelte-check on PR). No release workflow — old `release.yml` placeholder was deleted in the v0.4.34 cleanup since it referenced the dead vpk + signing path.
+- **Symptom (release path):** ~5 min wall time blocking the build machine per release. Only ships from Blazzer's box (needs `gh auth` + Node + Rust toolchain). Cross-machine reproducibility: theoretically anyone w/ those tools + repo access can run `release.ps1`, but never tested elsewhere.
+- **Fix sketch:** New `release.yml` on tag-push: checkout → setup-node@v4 → dtolnay/rust-toolchain@stable → cargo cache (same key as check.yml) → `npm ci` → `pwsh scripts/release.ps1 -Force` w/ `${{ secrets.GITHUB_TOKEN }}`. Much smaller scope than the deleted placeholder b/c no signing secrets to inject anymore.
 
 ## 15. Unsigned Windows builds (SmartScreen blocker)
 
-- **Where:** Acknowledged in [scripts/release.ps1:4-5](../scripts/release.ps1#L4-L5): "Unsigned for now (audit H4 — signing deferred until cert + AAS budget is in place)."
+- **Where:** No code-signing step in `scripts/release.ps1`. Setup.exe ships raw.
 - **Symptom:** Every fresh install triggers Windows SmartScreen "Unknown publisher" dialog. Real adoption blocker for non-technical users.
 - **Fix sketch (options ranked by cost/value):**
   1. **Azure Code Signing** (~$10/mo) — EV-equivalent reputation, no hardware token, CI-friendly.
   2. **SignPath.io free OSS tier** — only viable if the repo goes public.
   3. **DigiCert/Sectigo EV cert** (~$300-400/yr) — instant SmartScreen reputation, hardware token, less CI-friendly.
-- **Pipeline integration:** `vpk pack --signParams` flag exists; CI secret holds the cert handle.
+- **Pipeline integration:** Sign the NSIS Setup.exe post-build, pre-`gh release create`. Authenticode is recoverable on key/cert loss (unlike the ed25519 path we ripped out in v0.4.34) — buy a new cert, existing timestamped binaries still verify.
 
-## 17. Two-repo split exists only for the velopack auth gap
+## 17. Two-repo split — historic, low-priority collapse
 
-- **Where:** Coupling btw [scripts/release.ps1:62](../scripts/release.ps1#L62) (`Blazzer10200/rift-releases` hardcoded) + the GH owner/repo refs in `commands/update.rs` (post tauri-updater migration).
-- **Symptom:** Every release requires manual sync btw private source repo and public releases repo. Forks/contributors can't test the update path against the real source.
-- **Fix sketch:** Revisit post-#16. The tauri-updater migration (2026-05-26) removed the velopack auth gap, so the split is now historic only — could collapse to a single repo if the source repo goes public.
+- **Where:** [scripts/release.ps1](../scripts/release.ps1) hardcodes `Blazzer10200/rift-releases`; [src-tauri/src/commands/update.rs](../src-tauri/src/commands/update.rs) hits `api.github.com/repos/Blazzer10200/rift-releases/releases/latest`.
+- **Symptom:** Every release requires manual sync between private source repo and public releases repo. Forks/contributors can't test the update path against the real source.
+- **Fix sketch:** Collapse to a single repo if the source repo goes public. Two-line change (release.ps1 + commands/update.rs constant). The original velopack auth gap that forced the split is long gone.
 
 ## 20. Hot files exceeding the 2000-line agent-split threshold
 

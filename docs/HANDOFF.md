@@ -2,35 +2,23 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-27 (late night) — v0.4.33 SHIPPED + signing-key rotated
+## Session 2026-05-28 — v0.4.34 SHIPPED + post-ship cleanup
 
-**v0.4.33 LIVE** → https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.33. Single commit `f8ed3fd` bundled browser dock + multi-target CDP + assistant M6/M7 + prior committed v0.4.33 work. Follow-up `40f4be4` = pubkey + release.ps1 fixes. Detail in CHANGELOG.
+**v0.4.34 LIVE** → https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.34. The brittle updater system is gone for good. No more signing keys, no more `latest.json`, no more `.sig` files, no more CONIN$ passphrase trap. The new path is `commands/update.rs` polling `api.github.com/.../releases/latest`, semver-comparing, opening Setup.exe in the user's browser on confirm. ~200L Rust + ~150L Svelte replaced ~700L of plugin glue + signing infrastructure.
 
-**Signing key rotated** because prior `rift.key` had a lost passphrase. New ed25519 keypair, password `rift-updater-2026` in `.secrets/env.ps1` (gitignored). New pubkey in `tauri.conf.json`. **CONSEQUENCE:** v0.4.32 clients reject v0.4.33 signature → one-time manual `Setup.exe` install required (see Next Step 1).
-
-**Pipeline polish.** `release.ps1` auto-loads key via PS `ReadAllText` (bash `$(<file)` strips trailing newline = corrupt key), dot-sources `.secrets/env.ps1`, pipes empty stdin to `cmd /c npm run tauri build` as failsafe, warns when password env missing. Old key archived `rift.key.encrypted-irrecoverable-2026-05-27`; new key backed up OneDrive + iCloud `rift-signing-key-backup/`.
+**Cleanup landed in same session** — `scripts/release-bridge.ps1` deleted (spent), `docs/design/updater-migration.md` deleted (superseded by the v0.4.34 implementation itself), `.github/workflows/release.yml` placeholder deleted (referenced vpk + Azure signing — all dead), `Releases/` scratch dir cleared (27 stale velopack nupkgs + RELEASES + assets.win.json + Rift-win-Setup.exe), `src-tauri/src/assistant::kill_child_processes_on_exit` removed (orphan after deleting `on_before_exit` hook). HANDOFF + CHANGELOG + CLAUDE.md + ISSUES.md (#14/#15/#17) all reflect current reality.
 
 ### Next Steps
-1. **Tell buddy:** download + run `Rift_0.4.33_x64-setup.exe` from the release link ONE TIME (v0.4.32 pubkey ≠ v0.4.33 pubkey, in-app updater will refuse). v0.4.34+ auto-updates resume.
-2. **🔄 NEXT SESSION = updater system overhaul** (user-flagged). Today's ship surfaced the brittleness — encrypted key w/ lost passphrase, `rpassword` CONIN$ prompt that can't be piped, shim-chain swallows stdin. Decision needed: harden `release.ps1` incrementally vs greenfield rebuild (maybe drop tauri-updater entirely). Start session w/ `/plan`.
-3. **MCP browser tools** — expose `browser_navigate` / `browser_eval` / screenshot via `mcp_server.rs` so the assistant can drive the dock.
-4. Retire `scripts/release-bridge.ps1` (spent).
-
----
-
-## Session 2026-05-27 (night) — in-app browser dock + multi-target CDP [compressed → shipped]
-Native child webview (Tauri `unstable` `Window::add_child`) embedded in the assistant page, no taskbar bleed, native scroll/select/click. New `browser/mod.rs` + `commands/browser.rs` (7 async commands — sync deadlocks `add_child` on Windows), `WebBrowserPage.svelte`, `browserDock.svelte.ts`. CDP wrapper got a per-target connection registry (`-t browser` flag, auto-heal across nav). All shipped in v0.4.33. Detail → CHANGELOG + git.
-
-## Session 2026-05-27 (evening) — dev-speed + assistant split M6/M7 [compressed → shipped]
-Hook fix (cargo-check-kills-dev), svelte-check bin path, M6 tabs, M7 compaction, Composer ctx-gauge + attach, MessageBubble turn-actions regroup, ChatTabsBar detail popover. Shipped in v0.4.33.
+1. **Tell buddy:** download + run `Rift_0.4.34_x64-setup.exe` from the release link ONE TIME (v0.4.33's old plugin can't see v0.4.34 — no `latest.json` published this release). v0.4.35+ auto-updates resume via the new GH-release-API path with zero friction.
+2. **Delete the signing keys** (no longer needed): `~/.tauri/rift.key`, `~/.tauri/rift.key.pub`, OneDrive + iCloud `rift-signing-key-backup/`. Optional but recommended — they're attack surface for zero gain now.
+3. **Merge `updater-migration` → `main`** when buddy is on v0.4.34 + you've confirmed the in-app updater dialog says "You're up to date" running v0.4.34.
+4. **Real `release.yml` CI** (issue #14) — much smaller scope now that no signing secrets exist; ~30L on `tag-push: v*`. Optional, not blocking anything.
 
 ---
 
 ## RESUME HERE — first read every new session
 
-**Project:** `C:/AI Workflow/projects/rift-tauri/`. Latest public release = **v0.4.33** (shipped 2026-05-27 via Tauri-only `release.ps1`, signing key rotated — see late-night session above). Branch `updater-migration` still in flight; merge to main is its own task. Tauri 2 + Svelte 5 + Rust + russh.
-
-**Next session = updater system overhaul** per user request — see Next Steps in late-night session. Start with `/plan` to weigh incremental hardening vs greenfield replacement.
+**Project:** `C:/AI Workflow/projects/rift-tauri/`. Latest public release = **v0.4.34** (shipped 2026-05-28 via GH-release-API path, no signing key). Branch `updater-migration` still in flight; merge to main is queued (see Next Step 3). Tauri 2 + Svelte 5 + Rust + russh.
 
 **Open queue → [docs/ISSUES.md](ISSUES.md#active-work--current-sprint).** This file = session state + don't-touch invariants only.
 
@@ -38,11 +26,10 @@ Hook fix (cargo-check-kills-dev), svelte-check bin path, M6 tabs, M7 compaction,
 
 ## CRITICAL DON'T-TOUCH
 
-- `C:/Users/BLAZZER/.tauri/rift.key` — Tauri-updater signing key, ROTATED 2026-05-27 (v0.4.33). Password `rift-updater-2026` lives in `.secrets/env.ps1` (gitignored). Pubkey in `tauri.conf.json::plugins.updater.pubkey` matches the new key; do NOT regenerate without a transition release (would strand v0.4.33 clients). Old encrypted key archived as `*.encrypted-irrecoverable-2026-05-27`. Backups: OneDrive + iCloud `rift-signing-key-backup/*.bak-2026-05-27-rotated-pwd`.
 - russh `ring` + reqwest `rustls`. russh `Config{keepalive 20s/3, window 2MiB, packet 32KiB}`.
-- `~/.rift/*.json`: keep `serde(flatten) extra`. `bundle.targets:["nsis"]`. `createUpdaterArtifacts: true`.
+- `~/.rift/*.json`: keep `serde(flatten) extra`. `bundle.targets:["nsis"]`.
 - DriftWatcher: never overwrite dirty local. `.rift-trail.jsonl` ignore mandatory.
-- `GITHUB_OWNER`/`REPO` → public `rift-releases`, NOT source repo.
+- `GITHUB_OWNER`/`REPO` → public `rift-releases`, NOT source repo. Hardcoded in `release.ps1` + `commands/update.rs::RELEASES_REPO`.
 - `path_guard.rs` frozen; `rename_overwriting_via` ONLY for atomic upload tmp-swap.
 - `FileAttributes::default()` SETSTAT = data-loss — use `empty()`. `DriftBucket::ToDelete`=LOCAL; `ToDeleteRemote`=REMOTE.
 - Time displays MUST pass `[], { hour12: true }`. `spawn_frontend_pump` 200/s rate-limit.
@@ -56,3 +43,4 @@ Hook fix (cargo-check-kills-dev), svelte-check bin path, M6 tabs, M7 compaction,
 - AssistantPane drop handlers on `.pane` outer only — inner overlays break preventDefault chain.
 - `compactionHistory[]` is camelCase in persisted JSON. Don't rename.
 - `.shell` MUST be `position: fixed; inset: 0` (AppShell). `body.win-maximized .shell { inset: 8px }` for borderless-maximized.
+- Updater is signing-key-free as of v0.4.34. Do NOT reintroduce `tauri-plugin-updater` / `createUpdaterArtifacts` / `.sig` / `latest.json` — see CHANGELOG v0.4.34 for why.
