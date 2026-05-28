@@ -24,6 +24,8 @@
   import { updates } from "../state/updates.svelte";
   import { syncPage } from "../state/sync-page.svelte";
   import { assistant } from "../state/assistant.svelte";
+  import { onboarding } from "../state/onboarding.svelte";
+  import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Dialog state
@@ -39,6 +41,17 @@
     isDanger: boolean;
     onResult: (ok: boolean) => void;
   }>({ open: false, title: "", body: "", isDanger: false, onResult: () => {} });
+
+  // #7 first-run gate. Shows the guided onboarding flow only for a genuinely
+  // fresh install — no servers AND no default SSH key — and only after BOTH
+  // signals have resolved (serversLoaded + a non-null key probe), so existing
+  // users never flash it. Dismissible + persisted via the onboarding store.
+  const showOnboarding = $derived(
+    !onboarding.dismissed &&
+    connection.serversLoaded &&
+    connection.servers.length === 0 &&
+    connection.defaultSshKeyExists === false,
+  );
 
   // v0.2.55: auto-scan drift the moment a server is ready. Fires once
   // per server-key per session (latch in syncPage). Drops the
@@ -96,6 +109,7 @@
   onMount(() => {
     browserDock.init();
     updates.checkOnLaunch();
+    void connection.probeSshKey();
     dialogs.onAddServer = () => openAddServer(null);
     dialogs.onEditServer = (s) => openAddServer(s);
     dialogs.onDeleteServer = (s) => void deleteServer(s);
@@ -376,22 +390,26 @@
   />
 
   <div class="middle">
-    {#if connection.wireError}
-      <div class="wire-error" role="alert">
-        <span>Tauri event wiring failed — status, locks, and activity are frozen. {connection.wireError}</span>
-        <button type="button" onclick={retryWire}>Retry</button>
+    {#if showOnboarding}
+      <OnboardingFlow onDone={() => onboarding.dismiss()} />
+    {:else}
+      {#if connection.wireError}
+        <div class="wire-error" role="alert">
+          <span>Tauri event wiring failed — status, locks, and activity are frozen. {connection.wireError}</span>
+          <button type="button" onclick={retryWire}>Retry</button>
+        </div>
+      {/if}
+
+      <div class="tabs-rail" data-show={workspace.activeId === "chat"} aria-hidden={workspace.activeId !== "chat"}>
+        <ChatTabsBar />
+      </div>
+      <div class="body">
+        <ActivityBar />
+        <main class="pane">
+          <WorkspaceShell />
+        </main>
       </div>
     {/if}
-
-    <div class="tabs-rail" data-show={workspace.activeId === "chat"} aria-hidden={workspace.activeId !== "chat"}>
-      <ChatTabsBar />
-    </div>
-    <div class="body">
-      <ActivityBar />
-      <main class="pane">
-        <WorkspaceShell />
-      </main>
-    </div>
   </div>
 
   <StatusBar />

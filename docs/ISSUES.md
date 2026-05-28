@@ -19,7 +19,23 @@ Clear before next ship cuts. Each is a UI/live-build verification, not a code ch
 - **S131 Shiki** — send ` ```rust ` fenced block → confirm header bar + syntax highlight
 - **S132 splash** — cold-launch eyes-on; muddy-blur fallback = drop `backdrop-filter`, keep flat `--bg @ 86%`
 - **S133 Whisper FFI** — `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`; CPU first, then CUDA (`whisper-cuda` feature)
-- **S124** — ctx-pill inflation **FIXED 2026-05-27** (unshipped): pill read cumulative `result.usage` → spiked ~1M after a multi-step task, false-tripping auto-compact. Now reads the last `assistant` envelope (point-in-time) — `recordTurnUsage` in [assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) + regression test. Auto-compact threshold itself still needs a live multi-step verify.
+- **S124** — ctx-pill inflation **FIXED 2026-05-27** (unshipped): pill read cumulative `result.usage` → spiked ~1M after a multi-step task, false-tripping auto-compact. Now reads the last `assistant` envelope (point-in-time) — `recordTurnUsage` in [assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) + regression test. Auto-compact threshold itself still needs a live multi-step verify. **S124 live-verified 2026-05-28** — pill shows point-in-time (47K), not inflated.
+
+### Code review 2026-05-28 — uncommitted git-rcon + onboarding + UI batch
+Adversarial review (18-agent workflow) of the uncommitted batch. **4 FIXED + verified this session** (cargo check green · 3/3 `git_local` tests · svelte-check 0/0; still UNSHIPPED, ride the batch):
+- `git_local.rs` `tool_git_diff` truncation — `&out.stdout[..MAX_DIFF_BYTES]` could **panic** mid-codepoint on a >64 KB multibyte diff (the prior `is_char_boundary` check ran on the already-sliced str = tautology). Now steps back to the last char boundary *before* slicing.
+- `git_local.rs` `validate_path` — Windows drive-relative (`C:foo`) / UNC (`\\server\share`) paths report `is_absolute()==false` with no `ParentDir`, slipping past both validation branches. Now rejects any `Prefix` component on a non-absolute path; +3 `#[cfg(windows)]` regression cases.
+- `mod.rs` `assistant_send` allowlist — `GIT_WRITE_MCP` was in `--allowed-tools` even at `readonly` trust (server still blocked it, but allowlist > gate). Now gated on `trust_level ∈ {standard,full}` via a `git_write` suffix, mirroring `mcp_server::trust_at_least`.
+- `assistant.svelte.ts` `setAllowRemoteShell` — didn't refresh `trustLevel`, so the Settings Git-tools segment showed stale state after toggling remote-shell. Now re-pulls `assistant_get_trust_level`.
+
+**OPEN (reviewed, not fixed — lower severity):**
+- **CR1 (warning)** `AssistantPage.svelte:15-21` — `dockSlide` width keyframe is a no-op; inline `style="width…"` (~line 232) overrides it (CSS specificity) so only opacity animates → the ResizeObserver→syncBounds intent for the native WebView is defeated. Animate a wrapper or drive width solely via the transition.
+- **CR2 (minor)** `FirstSync.svelte:9` — `serverKey` prop typed but never destructured in `$props()`; silently dropped (no current reader; would break any future use). `OnboardingFlow` passes it.
+- **CR3 (minor)** `AppShell.svelte` gate — `probeSshKey()` fires from onMount *after* SplashOverlay sets `serversLoaded`; on a slow fresh-install IPC the normal UI can flash before onboarding snaps in. Fix: probe inside SplashOverlay alongside `loadServers`. (`=== false` guard already prevents existing-user flash.)
+- **CR4 (minor)** `ActivityPanel.svelte:30` — passes the 1 s `now` ticker as `liveActivity` `fallbackTs`, forcing a re-sort/alloc every tick even with no pending legacy blocks. Use a constant fallback (mount time).
+- **CR5 (minor)** `assistant.svelte.ts:10` — `Info` (lucide-svelte component) imported into a `.ts` state module (layering smell; matches the established toast API, low impact).
+- **CR-UX** Trust segment is binary (Read-only/Standard) over a **ternary** backend enum (`readonly/standard/full`). Once clicked, `trust_level` pins and can never return to the derived `None`→"full" state via UI; "full" (rank 2) is functionally identical to "standard" (nothing checks `trust_at_least("full")`, `remote_bash` gates independently). Decide: collapse to a true 2-level enum, or surface "full".
+- **Permission round-trip (lane 0) — still NOT live-verified.** Bash auto-approves even in a prompting mode (it's in the user's full-config allowlist; and programmatic `setPermissionMode` didn't drive the per-turn arg — config stayed `null`). The only deterministic trigger left (git-write) has real side-effects on a live repo. Needs the in-app mode selector + a throwaway repo.
 
 ### Code lanes (pick one)
 Ordered by recommended attack sequence. All cross-reference detailed blocks below.

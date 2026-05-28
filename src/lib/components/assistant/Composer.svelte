@@ -1,8 +1,10 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
-    Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal } from "lucide-svelte";
+    Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal,
+    Bot, Terminal, ListPlus, Sparkles } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import type { PermissionMode } from "../../state/assistant/types";
+  import type { ModelSel, PermissionMode } from "../../state/assistant/types";
+  import { modelFamily, liveActivity } from "../../state/assistant/helpers";
   import { stt } from "../../state/stt.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { tick, onMount } from "svelte";
@@ -43,6 +45,40 @@
       : "Context window — fills as the conversation grows",
   );
 
+  // ── Live activity pills ───────────────────────────────────────────────
+  // Compact, additive readout of in-flight work — reuses the Activity panel's
+  // `liveActivity` derivation (single source of truth) plus the telemetry
+  // tok/s, so a busy turn surfaces ◍ agents · ▸ shells · elapsed + tok/s ·
+  // queued without opening the panel. The idle bar renders none of this. The
+  // 1s ticker only runs while streaming (drives elapsed + tok/s refresh).
+  let now = $state(Date.now());
+  $effect(() => {
+    if (!streaming) return;
+    const h = setInterval(() => { now = Date.now(); }, 1000);
+    return () => clearInterval(h);
+  });
+  const liveItems = $derived(liveActivity(tab?.messages ?? [], tab?.agentSpawns ?? [], now));
+  const agentCount = $derived(liveItems.filter((i) => i.kind === "agent").length);
+  const shellCount = $derived(liveItems.filter((i) => i.kind === "shell").length);
+  const turnStartedAt = $derived(tab?.activity.turnStartedAt ?? null);
+  const turnElapsed = $derived(
+    streaming && turnStartedAt != null ? fmtClock(now - turnStartedAt) : null,
+  );
+  // tok/s is session-global telemetry; recompute each tick by touching `now`.
+  const tokPerSec = $derived.by(() => {
+    void now;
+    return streaming ? assistant.telemetry.snapshot().summary.outputTokensPerSec : null;
+  });
+  const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || queue.length > 0);
+  function fmtClock(ms: number): string {
+    const s = Math.max(0, Math.floor(ms / 1000));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  }
+  function openActivity() {
+    assistant.ui.panelTab = "activity";
+    assistant.ui.dockOpen = true;
+  }
+
   function setDraft(v: string) { if (tab) tab.draft = v; }
   function setAttachments(
     v: { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[],
@@ -77,16 +113,21 @@
   // the alias (`sonnet`/`opus`/`haiku`); version is display-only and pulled
   // from CLAUDE.md's source-of-truth section on the current model family.
   type ModelOpt = {
-    id: "sonnet" | "opus" | "haiku";
+    id: ModelSel;
     label: string;
     version: string;
     tagline: string;
     ctx: string;
   };
+  // Laid out 2×2 (row-major): Sonnet · Haiku on top, the two Opus versions
+  // below. `opus` is the alias → newest Opus (4.8, 1M-ctx beta);
+  // `claude-opus-4-7` pins the prior generation. Both render purple via the
+  // shared opus family hue.
   const MODEL_OPTIONS: ModelOpt[] = [
-    { id: "sonnet", label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default", ctx: "1M ctx" },
-    { id: "opus",   label: "Opus",   version: "4.7", tagline: "Most capable — complex reasoning + agentic coding", ctx: "1M ctx" },
-    { id: "haiku",  label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", ctx: "200K ctx" },
+    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default", ctx: "1M ctx" },
+    { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", ctx: "200K ctx" },
+    { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning", ctx: "1M ctx" },
+    { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx" },
   ];
 
   // Session-rotated idle placeholders — cycle every ~6s while the composer is
@@ -254,11 +295,12 @@
   // hide the pill on Haiku to avoid implying it does something. Cycle on click:
   // none → quick → deep → none. Names describe quality not speed — "Fast"
   // and "Quick" were ambiguous siblings; Instant/Smart/Deep is a real ladder.
-  type EffortOpt = { id: "none" | "quick" | "deep"; label: string; hint: string; level: 1 | 2 | 3 };
+  type EffortOpt = { id: "none" | "quick" | "deep" | "ultra"; label: string; hint: string; level: 1 | 2 | 3 | 4 };
   const EFFORT_OPTIONS: EffortOpt[] = [
     { id: "none",  label: "Instant", level: 1, hint: "Instant — straight to the answer, no thinking time" },
     { id: "quick", label: "Smart",   level: 2, hint: "Smart — thinks briefly before answering (~5s extra)" },
     { id: "deep",  label: "Deep",    level: 3, hint: "Deep — heavy reasoning (~15s extra) for hard problems" },
+    { id: "ultra", label: "Ultracode", level: 4, hint: "Ultracode — max reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
   function pickEffort(e: EffortOpt) {
@@ -776,7 +818,7 @@
   }
 </script>
 
-<div class="composer-wrap" data-model={assistant.model}>
+<div class="composer-wrap" data-model={modelFamily(assistant.model)}>
   {#key fireKey}
     {#if fireKey > 0}
       <span class="send-sweep" aria-hidden="true"></span>
@@ -971,16 +1013,21 @@
                     class="settings-item effort-row"
                     class:active={idx === settingsIdx}
                     class:current={e.id === assistant.thinkingEffort}
+                    class:ultra={e.id === "ultra"}
                     data-level={e.level}
                     style="--idx: {idx}"
                     use:tooltip={e.hint}
                     onmousedown={(ev) => { ev.preventDefault(); pickEffort(e); }}
                   >
-                    <span class="effort-bars" aria-hidden="true" data-level={e.level}>
-                      <span class="bar"></span>
-                      <span class="bar"></span>
-                      <span class="bar"></span>
-                    </span>
+                    {#if e.id === "ultra"}
+                      <span class="effort-ultra-icon" aria-hidden="true"><Sparkles size={13} /></span>
+                    {:else}
+                      <span class="effort-bars" aria-hidden="true" data-level={e.level}>
+                        <span class="bar"></span>
+                        <span class="bar"></span>
+                        <span class="bar"></span>
+                      </span>
+                    {/if}
                     <span class="model-label">{e.label}</span>
                   </button>
                 {/each}
@@ -1062,10 +1109,17 @@
       </div>
 
       <!-- Divider + context gauge in one. Base hairline separates the input
-           zone from the toolbar; the fill tracks context-window usage. -->
-      <div class="composer-divider" data-tone={ctxTone} use:tooltip={ctxTitle} role="img" aria-label={ctxTitle}>
+           zone from the toolbar; the fill tracks context-window usage, and the
+           trailing readout puts the live ctx% next to the bar (only once the
+           conversation has tokens, so a fresh composer stays clean). -->
+      <div class="composer-gauge">
+        <div class="composer-divider" data-tone={ctxTone} use:tooltip={ctxTitle} role="img" aria-label={ctxTitle}>
+          {#if ctxTokens > 0}
+            <span class="composer-divider-fill" style="width: {Math.min(100, ctxPct)}%" aria-hidden="true"></span>
+          {/if}
+        </div>
         {#if ctxTokens > 0}
-          <span class="composer-divider-fill" style="width: {Math.min(100, ctxPct)}%" aria-hidden="true"></span>
+          <span class="ctx-readout" data-tone={ctxTone} aria-hidden="true">{ctxPct < 1 ? "<1" : Math.round(ctxPct)}%</span>
         {/if}
       </div>
 
@@ -1174,20 +1228,78 @@
           {/if}
         </div>
 
+        {#if showLivePills}
+          <div class="live-pills" role="group" aria-label="Live turn activity">
+            {#if turnElapsed}
+              <button
+                type="button"
+                class="live-pill turn"
+                onclick={openActivity}
+                use:tooltip={"Current turn — elapsed · output speed. Click to open Activity."}
+              >
+                <span class="lp-dot" aria-hidden="true"></span>
+                <span class="mono">{turnElapsed}</span>
+                {#if tokPerSec != null}
+                  <span class="lp-sep" aria-hidden="true">·</span>
+                  <span class="mono">{tokPerSec}<span class="lp-unit"> tok/s</span></span>
+                {/if}
+              </button>
+            {/if}
+            {#if agentCount > 0}
+              <button
+                type="button"
+                class="live-pill"
+                onclick={openActivity}
+                use:tooltip={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running. Click to open Activity.`}
+              >
+                <Bot size={12} />
+                <span class="mono">{agentCount}</span>
+              </button>
+            {/if}
+            {#if shellCount > 0}
+              <button
+                type="button"
+                class="live-pill"
+                onclick={openActivity}
+                use:tooltip={`${shellCount} shell${shellCount === 1 ? "" : "s"} running. Click to open Activity.`}
+              >
+                <Terminal size={12} />
+                <span class="mono">{shellCount}</span>
+              </button>
+            {/if}
+            {#if queue.length > 0}
+              <button
+                type="button"
+                class="live-pill queued"
+                onclick={openActivity}
+                use:tooltip={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}
+              >
+                <ListPlus size={12} />
+                <span class="mono">{queue.length}</span>
+              </button>
+            {/if}
+          </div>
+        {/if}
+
         <div class="toolbar-cluster toolbar-right">
           <button
             type="button"
             class="settings-pill"
             class:open={settingsOpen}
+            class:ultra={assistant.thinkingEffort === "ultra"}
             data-mode={currentMode.id}
             onclick={() => { settingsOpen = !settingsOpen; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
             aria-label="Model, thinking depth & permission mode"
-            use:tooltip={`Model · thinking depth · permission mode\n${currentModel?.label ?? assistant.model} · ${currentEffort.label} · ${currentMode.label}`}
+            use:tooltip={`Model · thinking depth · permission mode\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model} · ${currentEffort.label} · ${currentMode.label}`}
           >
             <SlidersHorizontal size={15} />
-            <span class="pill-label">{currentModel?.label ?? assistant.model}</span>
+            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model}</span>
+            {#if assistant.thinkingEffort === "ultra"}
+              <span class="pill-ultra" aria-hidden="true" use:tooltip={"Ultracode — max reasoning + autonomous workflows"}><Sparkles size={11} /></span>
+            {/if}
+            <span class="mode-dot" aria-hidden="true"></span>
             <span class="pill-caret" aria-hidden="true">▾</span>
           </button>
           <button
@@ -1402,14 +1514,32 @@
      gauge. The base hairline always shows (structure); the fill sweeps across
      proportional to context-window usage, tinted by the active model and
      stepping to warn/danger as the window fills. One element, two jobs. */
+  /* Gauge row: the hairline track takes all remaining width, the ctx% readout
+     sits flush to its right. Margin lives here now (was on the divider). */
+  .composer-gauge {
+    display: flex; align-items: center; gap: 8px;
+    margin: 5px 8px 3px;
+  }
   .composer-divider {
     position: relative;
+    flex: 1;
     height: 1.5px;
-    margin: 5px 8px 3px;
     border-radius: 999px;
     background: color-mix(in oklch, var(--border) 55%, transparent);
     overflow: hidden;
   }
+  /* Trailing ctx% — tabular so it doesn't jitter as the number ticks; tone
+     steps mirror the fill (yellow ≥70, red ≥90). */
+  .ctx-readout {
+    flex-shrink: 0;
+    font-size: 9px; font-weight: 600; line-height: 1;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-faint);
+    transition: color 240ms ease-out;
+  }
+  .ctx-readout[data-tone="yellow"] { color: var(--warn); }
+  .ctx-readout[data-tone="red"] { color: var(--danger); }
   .composer-divider-fill {
     position: absolute;
     inset: 0 auto 0 0;
@@ -1554,6 +1684,59 @@
     border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
     background: color-mix(in oklch, var(--warn) 10%, transparent);
   }
+
+  /* Live turn pills — additive readout that only mounts while a turn is in
+     flight (or work is queued). Sits centered between the input affordances
+     and the action cluster; the idle bar shows none of this. All pills tint to
+     the active model and open the Activity panel on click. */
+  /* One neutral capsule (same surface as the settings pill) holding quiet
+     ghost stats split by hairline dividers — reads as a single intentional
+     "live" readout rather than three loud floating badges. Color is held back
+     to --fg-muted; the model hue is reserved for the one pulsing live dot so
+     the cluster blends into the toolbar instead of competing with it. */
+  .live-pills {
+    display: inline-flex; align-items: center;
+    height: 26px;
+    padding: 0 2px;
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 65%, transparent);
+    border-radius: 999px;
+    min-width: 0;
+    animation: enter 180ms ease-out;
+  }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 100%; padding: 0 9px;
+    font: inherit; font-size: 11px; font-weight: 600; line-height: 1;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 0;
+    border-radius: 999px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 140ms ease-out;
+  }
+  /* Hairline divider before every pill after the first. */
+  .live-pill + .live-pill {
+    box-shadow: inset 1px 0 0 color-mix(in oklch, var(--border) 55%, transparent);
+  }
+  .live-pill:hover { color: var(--fg); }
+  .live-pill:active { transform: scale(0.97); }
+  .live-pill:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .live-pill :global(svg) { color: var(--fg-faint); transition: color 140ms ease-out; }
+  .live-pill:hover :global(svg) { color: var(--fg-muted); }
+  .live-pill .mono { font-variant-numeric: tabular-nums; color: var(--fg-2); }
+  .live-pill .lp-sep { color: var(--fg-faint); margin: 0 1px; }
+  .live-pill .lp-unit { color: var(--fg-faint); font-weight: 500; margin-left: 2px; }
+  /* The one accent — a pulsing model-tinted dot marking the live turn. */
+  .lp-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--model-color);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--model-color) 65%, transparent);
+    animation: lp-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes lp-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .lp-dot { animation: none; } }
 
   /* Send — primary CTA, accent surface w/ glow. Bigger than v2 (32px), more
      pronounced shadow, smoother mode-swap (send → stop → queue). */
@@ -2172,7 +2355,10 @@
     color: var(--fg);
   }
   .settings-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
-  .settings-pill[data-mode="bypassPermissions"] { color: var(--warn); }
+  /* Bypass = unguarded. Don't flood the whole pill in warning-amber (it washed
+     the model name + clashed with the violet ultracode marker). Keep the label
+     neutral; the posture reads from the dot alone. */
+  .settings-pill[data-mode="bypassPermissions"] { color: var(--fg-2); }
   .settings-pill[data-mode="default"] { color: var(--accent); }
   /* Current-model label on the pill — replaces the icon-only rest state so
      the active model reads at a glance without hovering. */
@@ -2224,6 +2410,23 @@
   @media (prefers-reduced-motion: reduce) {
     .effort-bars { animation: none; }
     .effort-bars .bar { animation: none; }
+  }
+  /* Permission-mode dot — one consistent at-a-glance signal for all five
+     modes (the pill's text-tint only covered ask/bypass). Colored per mode:
+     ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */
+  .mode-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+    background: var(--fg-faint);
+    transition: background 140ms ease-out;
+  }
+  .settings-pill[data-mode="default"] .mode-dot       { background: var(--accent); }
+  .settings-pill[data-mode="acceptEdits"] .mode-dot   { background: var(--ok); }
+  .settings-pill[data-mode="plan"] .mode-dot          { background: oklch(0.74 0.13 230); }
+  .settings-pill[data-mode="auto"] .mode-dot          { background: var(--accent); }
+  .settings-pill[data-mode="bypassPermissions"] .mode-dot {
+    background: oklch(0.72 0.165 55);
+    box-shadow: 0 0 5px color-mix(in oklch, oklch(0.72 0.165 55) 70%, transparent);
   }
   .pill-caret {
     font-size: 8px;
@@ -2299,7 +2502,7 @@
   }
 
   /* Unified settings panel — compact, right-anchored under the pill. Model is
-     a 3-up card row; thinking depth + permission mode sit side-by-side below.
+     a 2×2 card grid; thinking depth + permission mode sit side-by-side below.
      Descriptions live in hover tooltips so the panel stays short (no scroll)
      and content-width instead of spanning the whole composer. */
   .settings-menu {
@@ -2312,7 +2515,7 @@
   .settings-section { padding: 0 2px; }
   .settings-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 6px;
     padding: 2px 2px 8px;
   }
@@ -2358,9 +2561,10 @@
     padding: 9px 10px;
   }
   .model-card .card-head { display: inline-flex; align-items: center; gap: 7px; }
-  .model-card[data-id="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .model-card[data-id="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .model-card[data-id="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .model-card[data-id="sonnet"]          { --model-color: oklch(0.74 0.13 230); }
+  .model-card[data-id="opus"]            { --model-color: oklch(0.70 0.18 295); }
+  .model-card[data-id="claude-opus-4-7"] { --model-color: oklch(0.70 0.18 295); }
+  .model-card[data-id="haiku"]           { --model-color: oklch(0.78 0.14 180); }
   .settings-item.current .model-label { color: var(--accent); }
   .settings-item.current .model-version {
     color: var(--accent);
@@ -2372,6 +2576,39 @@
   .effort-row.current .effort-bars { color: var(--accent); }
   .mode-row .mode-icon { color: var(--fg-muted); }
   .mode-row.current .mode-icon { color: var(--accent); }
+  /* Ultracode tier — the top rung, set apart from the bar ladder. Violet (the
+     CLI's own ultracode accent) + a sparkle glyph signal "beyond the ladder":
+     xhigh effort + autonomous multi-agent workflow orchestration. */
+  .effort-ultra-icon {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 12px; height: 12px;
+    color: oklch(0.72 0.19 300);
+    opacity: 0.7;
+    transition: opacity 160ms ease-out, filter 160ms ease-out;
+  }
+  .effort-row.ultra.current .effort-ultra-icon,
+  .effort-row.ultra.active .effort-ultra-icon {
+    opacity: 1;
+    filter: drop-shadow(0 0 5px color-mix(in oklch, oklch(0.72 0.19 300) 55%, transparent));
+  }
+  .effort-row.ultra.current .model-label { color: oklch(0.79 0.14 300); }
+  /* Glanceable pill marker when ultracode is the active tier. */
+  .pill-ultra {
+    display: inline-flex; align-items: center;
+    color: oklch(0.75 0.18 300);
+    filter: drop-shadow(0 0 4px color-mix(in oklch, oklch(0.72 0.19 300) 55%, transparent));
+    animation: ultra-pulse 2.6s ease-in-out infinite;
+  }
+  .settings-pill.ultra {
+    border-color: color-mix(in oklch, oklch(0.72 0.19 300) 42%, var(--border));
+  }
+  @keyframes ultra-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.62; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pill-ultra { animation: none; }
+  }
 
   .model-label {
     font-weight: 600;

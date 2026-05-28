@@ -7,7 +7,9 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { Info } from "lucide-svelte";
 import { accessibility } from "./accessibility.svelte";
+import { toast } from "./toast.svelte";
 
 // M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
 // here so external callers like `import type { Block } from "$lib/state/assistant.svelte"`
@@ -48,7 +50,9 @@ import type {
   RemoteLockEvt,
   RemoteShellEvt,
   ThinkingEffort,
+  ModelSel,
   PermissionMode,
+  TrustLevel,
   PermissionPromptInfo,
   PermissionSuggestion,
   TurnRecord,
@@ -933,7 +937,7 @@ class AssistantStore {
     if (/\[1m\]/i.test(model)) return 1_000_000;
     const id = model.toLowerCase();
     if (id.includes("haiku")) return 200_000;
-    if (/sonnet-4-[56]/.test(id) || /opus-4-[67]/.test(id)) return 1_000_000;
+    if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id)) return 1_000_000;
     return 200_000;
   }
   ctxTokensFor(tab: TabState | null): number {
@@ -1089,6 +1093,10 @@ class AssistantStore {
   useFullConfig = $state<boolean>(true);
   maxBudgetUsd = $state<number | null>(null);
   allowRemoteShell = $state<boolean>(false);
+  // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
+  // backend, which derives it from allowRemoteShell when unset. "full" appears
+  // when remote-shell is on; the Settings seg treats full as ⊇ standard.
+  trustLevel = $state<TrustLevel>("readonly");
   // Phase D: fraction (0-1] of ctx window that auto-fires compactConversation.
   // Null = manual only (matches the user's DISABLE_AUTO_COMPACT=1 stance).
   autoCompactThreshold = $state<number | null>(null);
@@ -1132,7 +1140,7 @@ class AssistantStore {
   // User's chosen model — flipped by /model slash command. Carried through
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
-  model = $state<"sonnet" | "opus" | "haiku">(loadModel());
+  model = $state<ModelSel>(loadModel());
   // Extended-thinking budget tier. "none" = no extended thinking (fastest);
   // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
   // Haiku ignores this server-side. Persisted to localStorage.
@@ -1144,7 +1152,7 @@ class AssistantStore {
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
   // is retained as a no-op flag for back-compat w/ any remaining slash
   // command — History is now its own workspace, not an overlay.
-  ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false });
+  ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity" });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
@@ -1209,7 +1217,7 @@ class AssistantStore {
   // envelopeTextBuffer / rawLineLog / pendingText / drainHandle / lastDrainAt /
   // thinkingByIndex / activeThinkingIndex now live on TabState.
 
-  setModel(v: "sonnet" | "opus" | "haiku") {
+  setModel(v: ModelSel) {
     if (this.model === v) return;
     const prev = this.model;
     this.model = v;
@@ -1246,10 +1254,17 @@ class AssistantStore {
   private cacheBustHint(kind: "model" | "effort") {
     if (this.cacheBustHintShown[kind]) return;
     this.cacheBustHintShown[kind] = true;
-    this.lastNotice =
-      kind === "effort"
-        ? "Heads up — changing effort mid-conversation can bust the prompt cache (esp. on Sonnet). Next turn may pay full cache_create."
-        : "Heads up — switching models mid-conversation rebuilds the prefix cache from scratch. Next turn will pay full cache_create.";
+    // Ephemeral heads-up → toast stack (top-right), not the composer notice
+    // banner. It's a transient FYI, not a blocking notice, so it auto-dismisses
+    // and stays out of the chat column.
+    toast.push({
+      severity: "info",
+      icon: Info,
+      title: kind === "effort" ? "Effort changed mid-conversation" : "Model switched mid-conversation",
+      detail: kind === "effort"
+        ? "May bust the prompt cache (esp. Sonnet) — next turn could pay full cache_create."
+        : "Rebuilds the prefix cache — next turn will pay full cache_create.",
+    });
   }
 
   // Draft + attachments live on TabState directly in v2.1 — focus changes no
@@ -1344,6 +1359,11 @@ class AssistantStore {
       this.allowRemoteShell = await invoke<boolean>("assistant_get_allow_remote_shell");
     } catch (e) {
       console.warn("assistant_get_allow_remote_shell failed", e);
+    }
+    try {
+      this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
+    } catch (e) {
+      console.warn("assistant_get_trust_level failed", e);
     }
     try {
       this.autoCompactThreshold = await invoke<number | null>("assistant_get_auto_compact_threshold");
@@ -1709,6 +1729,15 @@ class AssistantStore {
   async setAllowRemoteShell(value: boolean) {
     await invoke("assistant_set_allow_remote_shell", { value });
     this.allowRemoteShell = value;
+    // Remote-shell toggles the *derived* trust level when no explicit
+    // trust_level is persisted (backend effective_trust_level), so re-pull it
+    // or the Settings Git-tools segment shows a stale state until reload.
+    this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
+  }
+
+  async setTrustLevel(value: TrustLevel) {
+    await invoke("assistant_set_trust_level", { value });
+    this.trustLevel = value;
   }
 
   async setAutoCompactThreshold(value: number | null) {

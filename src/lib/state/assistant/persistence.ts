@@ -17,6 +17,7 @@ import type {
   CompactionHistoryEntry,
   ConversationMeta,
   ConversationRecord,
+  ModelSel,
   PaneState,
 } from "./types";
 
@@ -63,7 +64,7 @@ export type PersistenceHost = {
   ui: { historyOpen: boolean; dockOpen: boolean };
   stop(): Promise<void>;
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
-  setModel(m: "sonnet" | "opus" | "haiku"): void;
+  setModel(m: ModelSel): void;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
 };
@@ -210,7 +211,10 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     host.queue = [];
     host.lastNotice = null;
     host.ui.historyOpen = false;
-    if (convo.model === "sonnet" || convo.model === "opus" || convo.model === "haiku") {
+    if (
+      convo.model === "sonnet" || convo.model === "opus" ||
+      convo.model === "claude-opus-4-7" || convo.model === "haiku"
+    ) {
       host.setModel(convo.model);
     }
   } catch (e) {

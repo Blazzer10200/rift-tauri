@@ -11,6 +11,7 @@
 //! spawn with `--bare` + `ANTHROPIC_API_KEY` env so the CLI ignores OAuth.
 
 pub mod ask_user;
+pub mod git_local;
 pub mod mcp_server;
 pub mod permission;
 pub mod remote_bridge;
@@ -322,6 +323,11 @@ struct AssistantConfig {
     /// Per-turn override rides the `assistant_send` arg; this is the default.
     #[serde(default)]
     permission_mode: Option<String>,
+    /// Assistant trust level gating the local git tools. One of `readonly` /
+    /// `standard` / `full`. `None` derives from `allow_remote_shell` (true →
+    /// full, else → readonly) so upgrades don't silently grant git-write.
+    #[serde(default)]
+    trust_level: Option<String>,
     /// Auto-compact threshold as fraction of context window (0.0-1.0). `None` =
     /// disabled (manual only). User has `DISABLE_AUTO_COMPACT=1` set globally
     /// so default to None — opt-in, not opt-out. See `docs/design/assistant-compaction.md`.
@@ -720,6 +726,7 @@ fn write_mcp_config(
     roots: &[PathBuf],
     bridge: Option<&remote_bridge::BridgeInfo>,
     remote_shell_enabled: bool,
+    trust_level: &str,
 ) -> Result<PathBuf, String> {
     let home = dirs_home()?;
     let dir = home.join(".rift").join("assistant");
@@ -744,6 +751,9 @@ fn write_mcp_config(
     // bridge request — the frontend pairs incoming `assistant://ask-user`
     // events against the correct chat tab by session_id.
     env_map.insert("RIFT_SESSION_ID".into(), Value::from(session_id.to_string()));
+    // Trust level gates the local git tools in the MCP child. Always injected —
+    // git is a local op, no bridge needed. See `mcp_server::trust_level`.
+    env_map.insert("RIFT_TRUST_LEVEL".into(), Value::from(trust_level.to_string()));
     // #62: always pass the read-only token so sync_status / shell_lock_status
     // are available; only inject the write-scoped RIFT_BRIDGE_TOKEN when the
     // user has explicitly opted into remote-shell. A compromised MCP tool with
@@ -1054,13 +1064,13 @@ pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
 pub fn assistant_get_thinking_effort() -> Result<String, String> {
     Ok(load_config()
         .thinking_effort
-        .filter(|v| matches!(v.as_str(), "none" | "quick" | "deep"))
+        .filter(|v| matches!(v.as_str(), "none" | "quick" | "deep" | "ultra"))
         .unwrap_or_else(|| "quick".to_string()))
 }
 
 #[tauri::command]
 pub fn assistant_set_thinking_effort(value: String) -> Result<(), String> {
-    if !matches!(value.as_str(), "none" | "quick" | "deep") {
+    if !matches!(value.as_str(), "none" | "quick" | "deep" | "ultra") {
         return Err(format!("invalid thinking_effort: {value}"));
     }
     let mut cfg = load_config();
@@ -1090,6 +1100,41 @@ pub fn assistant_set_permission_mode(value: String) -> Result<(), String> {
     }
     let mut cfg = load_config();
     cfg.permission_mode = Some(value);
+    save_config(&cfg)
+}
+
+/// The Assistant trust levels Rift exposes. Gates the local git tools in the
+/// MCP server (`git_local.rs`): `readonly` → status/diff/log; `standard` →
+/// adds pull/commit/push; `full` → reserved for RCON raw passthrough (phase 2).
+fn is_valid_trust_level(v: &str) -> bool {
+    matches!(v, "readonly" | "standard" | "full")
+}
+
+/// Resolve the effective trust level. Explicit setting wins; when unset, derive
+/// from the legacy `allow_remote_shell` toggle so upgrades don't silently grant
+/// git-write: remote-shell on → `full`, off → `readonly`.
+fn effective_trust_level(trust_level: &Option<String>, allow_remote_shell: Option<bool>) -> String {
+    trust_level
+        .clone()
+        .filter(|v| is_valid_trust_level(v))
+        .unwrap_or_else(|| {
+            if allow_remote_shell == Some(true) { "full".into() } else { "readonly".into() }
+        })
+}
+
+#[tauri::command]
+pub fn assistant_get_trust_level() -> Result<String, String> {
+    let cfg = load_config();
+    Ok(effective_trust_level(&cfg.trust_level, cfg.allow_remote_shell))
+}
+
+#[tauri::command]
+pub fn assistant_set_trust_level(value: String) -> Result<(), String> {
+    if !is_valid_trust_level(&value) {
+        return Err(format!("invalid trust_level: {value}"));
+    }
+    let mut cfg = load_config();
+    cfg.trust_level = Some(value);
     save_config(&cfg)
 }
 
@@ -2151,6 +2196,9 @@ pub async fn assistant_send(
     };
     let allow_remote_shell = cfg.allow_remote_shell.unwrap_or(false);
     let remote_shell_enabled = allow_remote_shell && bridge_info.is_some();
+    // Trust level for the local git tools — explicit setting wins, else derived
+    // from the remote-shell toggle so upgrades don't silently grant git-write.
+    let trust_level = effective_trust_level(&cfg.trust_level, cfg.allow_remote_shell);
 
     // Provision a temp MCP config when we have at least one root. Addendum
     // stays cache-stable — only the two static strings ever land in
@@ -2160,7 +2208,7 @@ pub async fn assistant_send(
     let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
         (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(&session_id, &roots, bridge_info.as_ref(), remote_shell_enabled) {
+        match write_mcp_config(&session_id, &roots, bridge_info.as_ref(), remote_shell_enabled, &trust_level) {
             Ok(p) => {
                 let guard = McpConfigGuard(p.clone());
                 (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
@@ -2309,21 +2357,38 @@ pub async fn assistant_send(
         // falls through to the `can_use_tool` prompt.
         const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TodoWrite,WebFetch,WebSearch";
         const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user";
+        // Local git tools (git_local.rs). Read set is non-mutating → safe to
+        // auto-approve even in prompting modes. Write set is admitted in
+        // non-prompting variants but deliberately OMITTED from the prompting
+        // allowlist so it rides the can_use_tool prompt. RIFT_TRUST_LEVEL is the
+        // real authority server-side; these just keep the CLI from rejecting
+        // the call before it reaches the server.
+        const GIT_READ_MCP: &str = "mcp__rift__git_status,mcp__rift__git_diff,mcp__rift__git_log";
+        const GIT_WRITE_MCP: &str = "mcp__rift__git_pull,mcp__rift__git_commit,mcp__rift__git_push";
+        // Mirror the server-side gate (mcp_server::trust_at_least("standard")) in
+        // the CLI allowlist: only list the git-write tools when trust actually
+        // permits them, so the outer allowlist is never wider than the server
+        // gate (defense-in-depth — a patched CLI can't call what isn't listed).
+        let git_write = if matches!(trust_level.as_str(), "standard" | "full") {
+            format!(",{GIT_WRITE_MCP}")
+        } else {
+            String::new()
+        };
         let allowed: String = if prompting_mode {
             // Narrow allowlist: only the safe set auto-approves; the CLI prompts
             // for the rest via the control channel. Applies across config
-            // variants — mutating MCP tools (remote_bash, push/pull, apply)
-            // intentionally prompt here.
-            format!("{SAFE_BUILTINS},{SAFE_MCP}")
+            // variants — mutating MCP tools (remote_bash, push/pull, apply,
+            // git write) intentionally prompt here.
+            format!("{SAFE_BUILTINS},{SAFE_MCP},{GIT_READ_MCP}")
         } else if use_full_config {
             // `mcp__*` admits any tool from user MCP servers that the CLI
             // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
             // via the explicit-name entries.
             format!("{BUILTINS},mcp__*")
         } else if remote_shell_enabled {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__remote_bash,mcp__rift__push_pending,mcp__rift__pull_pending,mcp__rift__reconcile_apply,mcp__rift__ask_user")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__remote_bash,mcp__rift__push_pending,mcp__rift__pull_pending,mcp__rift__reconcile_apply,mcp__rift__ask_user,{GIT_READ_MCP}{git_write}")
         } else {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user,{GIT_READ_MCP}{git_write}")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);
@@ -2362,10 +2427,21 @@ pub async fn assistant_send(
     let effort_level = match effort.as_str() {
         "none" => "low",
         "deep" => "high",
+        "ultra" => "xhigh",
         _ /* "quick" or unknown */ => "medium",
     };
     if model != "haiku" {
         cmd.arg("--effort").arg(effort_level);
+        // Ultracode tier: xhigh effort + autonomous dynamic-workflow
+        // orchestration. The workflow behavior rides the CLI's `ultracode`
+        // settings key (a boolean read into app state, gated server-side by the
+        // user's plan entitlement). `--settings` merges this additively over
+        // user/project/local settings — when unentitled the CLI ignores it and
+        // the session simply runs at xhigh effort. Haiku is excluded (it skips
+        // extended thinking + workflow orchestration wholesale).
+        if effort == "ultra" {
+            cmd.arg("--settings").arg(r#"{"ultracode":true}"#);
+        }
     }
 
     log::info!(

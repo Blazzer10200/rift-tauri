@@ -43,6 +43,8 @@ fn apply_bridge_timeouts(stream: &TcpStream, read: Duration, write: Duration, la
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::assistant::git_local;
+
 const PROTOCOL_VERSION: &str = "2025-03-26";
 const MAX_READ_BYTES: u64 = 500 * 1024;
 const MAX_LIST_ENTRIES: usize = 500;
@@ -340,6 +342,45 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
 /// disabled tool, the call is rejected at the server side.
 fn remote_shell_enabled() -> bool {
     std::env::var("RIFT_REMOTE_SHELL_ENABLED").as_deref() == Ok("1")
+}
+
+/// Assistant trust level for this MCP child, from `RIFT_TRUST_LEVEL` (injected
+/// by `mod::write_mcp_config`). Gates the local git tools. Unknown/unset →
+/// `readonly` (safe floor).
+fn trust_level() -> &'static str {
+    match std::env::var("RIFT_TRUST_LEVEL").as_deref() {
+        Ok("full") => "full",
+        Ok("standard") => "standard",
+        _ => "readonly",
+    }
+}
+
+fn trust_rank(level: &str) -> u8 {
+    match level {
+        "full" => 2,
+        "standard" => 1,
+        _ => 0,
+    }
+}
+
+/// True when the current trust level is at least `min`. Gates both tool listing
+/// AND dispatch, mirroring `remote_shell_enabled`.
+fn trust_at_least(min: &str) -> bool {
+    trust_rank(trust_level()) >= trust_rank(min)
+}
+
+/// Best-effort count of pending uploads in the Rift sync queue via the bridge
+/// `sync_status` op. `None` when the bridge is unreachable / not connected /
+/// the query fails — `git_push` treats `None` as "can't tell, proceed".
+pub fn bridge_pending_uploads() -> Option<u64> {
+    if !bridge_enabled() {
+        return None;
+    }
+    let data = bridge_call("sync_status", false, Value::Null).ok()?;
+    if data.get("connected").and_then(|v| v.as_bool()) == Some(false) {
+        return None;
+    }
+    data.get("pending").and_then(|v| v.as_u64())
 }
 
 /// Whether the loopback bridge is reachable from this MCP-child spawn.
@@ -905,6 +946,74 @@ fn tools_list_payload() -> Value {
             }
         }),
     ];
+    // Local git tools (git_local.rs). Read set always listed; write set needs
+    // Standard trust. Dispatch enforces the same gate server-side.
+    tools.push(json!({
+        "name": "git_status",
+        "description": "Show the git working-tree status of the user's Rift workspace (branch + changed files, porcelain). Read-only. Use before committing or to see what changed.",
+        "inputSchema": { "type": "object", "properties": {}, "required": [] }
+    }));
+    tools.push(json!({
+        "name": "git_diff",
+        "description": "Show a unified git diff for the user's Rift workspace. Read-only. `cached: true` shows staged changes; optional `path` scopes to one file. Output truncated at 64 KB.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "cached": { "type": "boolean", "description": "Show staged (index) changes instead of working-tree changes." },
+                "path": { "type": "string", "description": "Optional workspace-relative file to scope the diff to." }
+            },
+            "required": []
+        }
+    }));
+    tools.push(json!({
+        "name": "git_log",
+        "description": "Show recent commits (oneline) for the user's Rift workspace. Read-only. `max` caps the count (default 20, hard max 100).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "max": { "type": "integer", "description": "Number of commits (1-100). Default 20.", "minimum": 1, "maximum": 100 }
+            },
+            "required": []
+        }
+    }));
+    if trust_at_least("standard") {
+        tools.push(json!({
+            "name": "git_pull",
+            "description": "Pull the current branch from upstream in the user's Rift workspace. Fast-forward only by default; `rebase: true` rebases. Refuses on a dirty working tree (stash/commit first). Surfaces merge errors verbatim — never silently merges.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "rebase": { "type": "boolean", "description": "Use --rebase instead of --ff-only." }
+                },
+                "required": []
+            }
+        }));
+        tools.push(json!({
+            "name": "git_commit",
+            "description": "Stage and commit changes in the user's Rift workspace. `message` is required. Provide `paths` (workspace-relative) to stage specific files, or `all: true` to stage everything; omit both to commit only what's already staged. Refuses an empty message or an empty index.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string", "description": "Commit message (1-4096 bytes)." },
+                    "paths": { "type": "array", "items": { "type": "string" }, "description": "Workspace-relative paths to stage before committing." },
+                    "all": { "type": "boolean", "description": "Stage all tracked+untracked changes (git add -A) before committing." }
+                },
+                "required": ["message"]
+            }
+        }));
+        tools.push(json!({
+            "name": "git_push",
+            "description": "Push the current branch to its remote in the user's Rift workspace. Defaults to `origin` + current branch. Force push is NOT permitted. If the Rift sync queue has pending uploads the push is refused with a note so you can wait for it to drain (call sync_status). Auth uses the user's system git/SSH config.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "remote": { "type": "string", "description": "Remote name. Default `origin`." },
+                    "branch": { "type": "string", "description": "Branch to push. Default = current branch." }
+                },
+                "required": []
+            }
+        }));
+    }
     if bridge_enabled() {
         tools.push(json!({
             "name": "ask_user",
@@ -1045,6 +1154,12 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "read_file" => tool_read_file(&args, roots),
                 "list_dir" => tool_list_dir(&args, roots),
                 "grep" => tool_grep(&args, roots),
+                "git_status" => git_local::tool_git_status(&args, roots),
+                "git_diff" => git_local::tool_git_diff(&args, roots),
+                "git_log" => git_local::tool_git_log(&args, roots),
+                "git_pull" if trust_at_least("standard") => git_local::tool_git_pull(&args, roots),
+                "git_commit" if trust_at_least("standard") => git_local::tool_git_commit(&args, roots),
+                "git_push" if trust_at_least("standard") => git_local::tool_git_push(&args, roots),
                 // #72: gate call-path the same way the list-path gates the
                 // tool declaration. Env-stripped MCP launchers see "unknown
                 // tool" instead of a silent ignore + no response.

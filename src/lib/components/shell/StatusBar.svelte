@@ -1,5 +1,6 @@
 <script lang="ts">
   import { connection } from "../../state/connection.svelte";
+  import { assistant } from "../../state/assistant.svelte";
   import { syncModal } from "../../state/sync-modal.svelte";
   import { Lock, RefreshCw, Download, Upload, AlertTriangle, Hourglass, Network, Sparkles } from "lucide-svelte";
   import { fade } from "svelte/transition";
@@ -64,6 +65,28 @@
     stateText === "watching" || stateText === "idle" ? "ok" :
     "muted"
   );
+
+  // ── Claude ambient pulse — active-conversation metrics ─────────────────
+  // model + cost are reactive store getters; tool count derives from the
+  // active tab's blocks; tok/s is session-global (telemetry) refreshed by the
+  // 5s `now` ticker above — ambient cadence, the live panel is the live view.
+  function shortModel(id: string | null): string | null {
+    if (!id) return null;
+    const s = id.toLowerCase();
+    if (s.includes("opus")) return "Opus";
+    if (s.includes("sonnet")) return "Sonnet";
+    if (s.includes("haiku")) return "Haiku";
+    return id;
+  }
+  const aModel = $derived(shortModel(assistant.lastModelId));
+  const aCost = $derived(assistant.totalCostUsd);
+  const aTools = $derived.by(() => {
+    let n = 0;
+    for (const m of assistant.messages) for (const b of m.blocks) if (b.type === "tool") n += 1;
+    return n;
+  });
+  const aTokPerSec = $derived.by(() => { void now; return assistant.telemetry.snapshot().summary.outputTokensPerSec; });
+  const hasAssistant = $derived(assistant.activeTab != null && (aTools > 0 || aCost != null));
 
   // App version comes from updates.currentVersion once checkOnLaunch resolves
   // (UpdateService fetches it via the same `app_version` IPC). Re-using avoids
@@ -136,6 +159,16 @@
 
   <div class="flex-spacer"></div>
 
+  {#if hasAssistant}
+    <div class="grp asst" use:tooltip={assistant.lastModelId ?? "Active conversation"} transition:fade={{ duration: 100 }}>
+      {#if aModel}<span class="asst-model">{aModel}</span>{/if}
+      <span class="lbl">{aTools} tool{aTools === 1 ? "" : "s"}</span>
+      {#if aTokPerSec != null}<span class="lbl">{aTokPerSec} t/s</span>{/if}
+      {#if aCost != null}<span class="mono val ok">${aCost.toFixed(2)}</span>{/if}
+    </div>
+    <div class="sep"></div>
+  {/if}
+
   {#if lastScanLabel}
     <div class="grp" use:tooltip={"Time since last drift scan / sync completion"} transition:fade={{ duration: 100 }}>
       <span class="lbl">last scan</span>
@@ -195,6 +228,12 @@
   .val.warn { color: var(--warn); }
   .val.danger { color: var(--danger); }
   .val.faint { color: var(--fg-faint); }
+  .val.ok { color: var(--ok); }
+  .asst { gap: 10px; }
+  .asst-model {
+    color: var(--accent);
+    font-weight: 600;
+  }
   .sep { width: 1px; height: 12px; background: var(--border); }
   .flex-spacer { flex: 1; }
   .led {
