@@ -9,6 +9,7 @@
   import { connection } from "../../state/connection.svelte";
   import { workspace } from "../../state/workspace.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type WatchedFolderInfo = {
     name: string;
     remote_root: string;
@@ -133,7 +134,7 @@
           class="row"
           role="row"
           onclick={() => deeplink(f.name)}
-          title="Open Activity filtered to {f.name}"
+          use:tooltip={"Open Activity filtered to {f.name}"}
           in:fly={{
             y: 4,
             duration: 200,
@@ -144,11 +145,11 @@
           <span class="name mono">{f.name}</span>
           {#if allEmpty}
             <span class="right">
-              <span class="idle-pip" title="Watcher registered — no recent activity, locks, or counted files">idle</span>
+              <span class="idle-pip" use:tooltip={"Watcher registered — no recent activity, locks, or counted files"}>idle</span>
             </span>
           {:else}
             {#if showFiles}<span class="right mono">{f.file_count.toLocaleString()}</span>{/if}
-            {#if showLast}<span class="right mono" title={last ?? "no events"}>{fmtRel(last)}</span>{/if}
+            {#if showLast}<span class="right mono" use:tooltip={last ?? "no events"}>{fmtRel(last)}</span>{/if}
             {#if showLocks}
               <span class="right">
                 {#if locks > 0}

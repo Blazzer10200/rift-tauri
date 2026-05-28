@@ -8,6 +8,7 @@
   import { connection } from "../../state/connection.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let { embedded = false }: { embedded?: boolean } = $props();
 
   let expanded = $state<number | null>(null);
@@ -175,10 +176,10 @@
       tone="info"
     >
       {#snippet actions()}
-        <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} title={diagnostics.paused ? "Resume capture" : "Pause capture"}>
+        <button class="btn ghost sm" type="button" onclick={() => diagnostics.togglePause()} use:tooltip={diagnostics.paused ? "Resume capture" : "Pause capture"}>
           {#if diagnostics.paused}<Play size={11}/> Resume{:else}<Pause size={11}/> Pause{/if}
         </button>
-        <button class="btn ghost sm" type="button" onclick={() => diagnostics.clear()} disabled={diagnostics.events.length === 0} title="Clear captured events">
+        <button class="btn ghost sm" type="button" onclick={() => diagnostics.clear()} disabled={diagnostics.events.length === 0} use:tooltip={"Clear captured events"}>
           <Trash2 size={11}/> Clear
         </button>
       {/snippet}
@@ -237,9 +238,9 @@
         {@const open = expanded === e.seq}
         {@const _i = i}
         <div class="row" class:open style="height:{open ? "auto" : ROW_H + "px"}">
-          <button class="row-head" type="button" onclick={() => (expanded = open ? null : e.seq)} title={open ? "Collapse" : "Expand"}>
+          <button class="row-head" type="button" onclick={() => (expanded = open ? null : e.seq)} use:tooltip={open ? "Collapse" : "Expand"}>
             <span class="time mono">{fmtTime(e.at)}</span>
-            <span class="kind" data-variant={v} title={e.stage}>
+            <span class="kind" data-variant={v} use:tooltip={e.stage}>
               <Icon size={12}/>
             </span>
             <span class="stage mono">{e.stage}</span>

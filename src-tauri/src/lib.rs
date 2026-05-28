@@ -1,14 +1,21 @@
 //! Rift v14 — Tauri + Svelte + russh backend.
 //!
-//! Velopack-Rust auto-update wired at `run()` — banner fires when a newer
-//! version is released to `Blazzer10200/rift-tauri`. The Tauri command surface
-//! lives at the bottom of this file (`run()`'s `invoke_handler!`) and is the
-//! contract with the Svelte frontend. Command fns live under `commands/` —
-//! one file per domain (#20). lib.rs keeps state setup + the handler registry.
+//! Auto-update via the GH-release-API path (v0.4.34+, see
+//! `commands/update.rs`). Frontend polls the latest GitHub release on launch,
+//! offers a one-click "Download" that opens the Setup.exe asset URL via
+//! `tauri-plugin-opener`; NSIS handles install over the running binary.
+//! No signing key, no `latest.json`, no plugin runtime dependency — the
+//! prior `tauri-plugin-updater` path bricked all clients on key loss
+//! (2026-05-27 incident → v0.4.34 rebuild).
+//!
+//! Tauri command surface at the bottom of this file (`run()`'s
+//! `invoke_handler!`). Command fns live under `commands/` — one file per
+//! domain (#20).
 
 pub mod assistant;
 pub mod bootstrap;
 pub mod bridge;
+pub mod browser;
 pub mod commands;
 pub mod diagnostics;
 pub mod edit;
@@ -22,7 +29,6 @@ pub mod sync;
 pub mod stt;
 pub mod transport;
 pub mod tunnel;
-pub mod update_service;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -57,15 +63,13 @@ pub struct DiagPumpCancel(pub CancellationToken);
 /// `diag_subscribe_state`/`diag_unsubscribe_state` increment/decrement.
 pub struct DiagPumpSubscribers(pub std::sync::atomic::AtomicU64);
 
-/// Application entry point. Velopack hooks run FIRST (before Tauri spins up)
-/// so install/update commands like `--veloapp-install` exit cleanly without
-/// dragging the whole UI runtime through the lifecycle event. Mirrors the WPF
-/// `Main()` pattern. After Velopack, registers managed state + Tauri commands
-/// and blocks on the event loop.
+/// Application entry point. Registers managed state + Tauri commands and
+/// blocks on the event loop. Update flow lives in `commands/update.rs` —
+/// frontend pulls GitHub release metadata, opens Setup.exe URL on confirm.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Logger init BEFORE VelopackApp::build() so install/update lifecycle
-    // events surface in stderr. RUST_LOG controls level; default = info.
+    // Logger init early so panic hook + plugin init events surface in stderr.
+    // RUST_LOG controls level; default = info.
     diagnostics::LogForwarder::install();
 
     // #219: install a global panic hook so async-task panics don't die silently.
@@ -90,8 +94,6 @@ pub fn run() {
             serde_json::json!({ "location": location, "payload": payload }),
         );
     }));
-
-    velopack::VelopackApp::build().run();
 
     // Center the main window inside the primary monitor's WORK AREA (screen
     // minus the taskbar / dock). Tauri's built-in `center: true` uses full
@@ -142,9 +144,9 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
+        .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
-        .manage(std::sync::Arc::new(update_service::UpdateService::new()))
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
@@ -212,9 +214,10 @@ pub fn run() {
             commands::read_default_ssh_pub_key,
             commands::probe_server_fingerprint,
             commands::set_server_fingerprint,
+            commands::clear_server_fingerprint,
+            commands::rotate_bridge_token,
+            commands::validate_ssh_key_file,
             commands::check_for_updates,
-            commands::download_update,
-            commands::apply_pending_update,
             commands::begin_edit_in_place,
             commands::save_edit_in_place,
             commands::close_edit_in_place,
@@ -238,7 +241,7 @@ pub fn run() {
             commands::sync_get_mirror_mode,
             commands::diag_ignored_breakdown,
             commands::assistant_auth_probe,
-            commands::assistant_get_api_key,
+            commands::assistant_get_api_key_present,
             commands::assistant_set_api_key,
             commands::assistant_get_use_full_config,
             commands::assistant_set_use_full_config,
@@ -248,6 +251,8 @@ pub fn run() {
             commands::assistant_set_allow_remote_shell,
             commands::assistant_get_thinking_effort,
             commands::assistant_set_thinking_effort,
+            commands::assistant_get_permission_mode,
+            commands::assistant_set_permission_mode,
             commands::assistant_get_auto_compact_threshold,
             commands::assistant_set_auto_compact_threshold,
             commands::assistant_get_compact_model,
@@ -255,8 +260,10 @@ pub fn run() {
             commands::assistant_summarize_session,
             commands::assistant_remint_session,
             commands::assistant_send,
+            commands::assistant_enhance_prompt,
             commands::assistant_stop,
             commands::assistant_answer_ask_user,
+            commands::assistant_answer_permission,
             commands::assistant_list_conversations,
             commands::assistant_load_conversation,
             commands::assistant_save_conversation,
@@ -266,6 +273,13 @@ pub fn run() {
             commands::assistant_clear_root,
             commands::assistant_remove_recent_root,
             commands::assistant_list_workspace_files,
+            commands::browser_open,
+            commands::browser_navigate,
+            commands::browser_set_bounds,
+            commands::browser_show,
+            commands::browser_hide,
+            commands::browser_current_url,
+            commands::browser_close,
             stt::stt_get_config,
             stt::stt_set_config,
             stt::stt_set_engine,

@@ -40,11 +40,18 @@ pub const SHA1_MAX_BYTES: i64 = 64 * 1024 * 1024;
 impl SyncSnapshot {
     pub fn new(profile_key: &str) -> std::io::Result<Self> {
         let path = cache_path("snapshot", profile_key)?;
+        Ok(Self::for_path(path))
+    }
+
+    /// Construct a snapshot rooted at an arbitrary path — used by tests to
+    /// inject a tempfile location and avoid `~/.rift/` pollution. Prod path
+    /// stays `new(profile_key)` which resolves under `cache_path("snapshot", …)`.
+    pub fn for_path(path: PathBuf) -> Self {
         let data = load_or_default(&path);
-        Ok(Self {
+        Self {
             path,
             data: Mutex::new(data),
-        })
+        }
     }
 
     pub fn try_get(&self, remote_path: &str) -> Option<Entry> {
@@ -509,6 +516,157 @@ mod tests {
         let snap = SyncSnapshot::new(&key).unwrap();
         assert_eq!(snap.count(), 0);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn count_under_respects_path_boundary() {
+        // Sibling prefix "/opt/fxserver-evil" must NOT be counted under "/opt/fxserver".
+        let (snap, _c) = make();
+        let mtime = Utc::now();
+        snap.set("/opt/fxserver/a.lua", 1, mtime, 1, mtime, None);
+        snap.set("/opt/fxserver/sub/b.lua", 1, mtime, 1, mtime, None);
+        snap.set("/opt/fxserver-evil/c.lua", 1, mtime, 1, mtime, None);
+        snap.set("/other/root/d.lua", 1, mtime, 1, mtime, None);
+        // Direct equality + true children counted; sibling-prefix excluded.
+        assert_eq!(snap.count_under("/opt/fxserver"), 2);
+        // Trailing slash on prefix tolerated.
+        assert_eq!(snap.count_under("/opt/fxserver/"), 2);
+        // Disjoint root.
+        assert_eq!(snap.count_under("/nothing"), 0);
+    }
+
+    #[test]
+    fn replace_under_swaps_prefix_subtree() {
+        let (snap, _c) = make();
+        let mtime = Utc::now();
+        snap.set("/r/a.lua", 1, mtime, 1, mtime, None);
+        snap.set("/r/b.lua", 2, mtime, 2, mtime, None);
+        snap.set("/r/keep.lua", 9, mtime, 9, mtime, None);
+        snap.set("/other/z.lua", 7, mtime, 7, mtime, None);
+        assert_eq!(snap.count(), 4);
+
+        let mut next = HashMap::new();
+        next.insert(
+            "/r/a.lua".to_string(),
+            Entry { local_size: 100, local_mtime_utc: mtime, remote_size: 100, remote_mtime_utc: mtime, sha1: None },
+        );
+        next.insert(
+            "/r/new.lua".to_string(),
+            Entry { local_size: 50, local_mtime_utc: mtime, remote_size: 50, remote_mtime_utc: mtime, sha1: None },
+        );
+        let (old_count, new_count) = snap.replace_under("/r", next).unwrap();
+        assert_eq!(old_count, 3);
+        assert_eq!(new_count, 2);
+        // Untouched subtree preserved.
+        assert!(snap.try_get("/other/z.lua").is_some());
+        // Old keys under prefix evicted; new keys present; pre-existing collider replaced.
+        assert!(snap.try_get("/r/b.lua").is_none());
+        assert!(snap.try_get("/r/keep.lua").is_none());
+        assert!(snap.try_get("/r/new.lua").is_some());
+        assert_eq!(snap.try_get("/r/a.lua").unwrap().local_size, 100);
+    }
+
+    #[test]
+    fn mtime_tolerance_exact_boundary_inclusive() {
+        // mtime equality must hold at exactly +/- MTIME_TOLERANCE_SECS, exclusive past it.
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        let e = Entry {
+            local_size: 1024,
+            local_mtime_utc: mtime,
+            remote_size: 1024,
+            remote_mtime_utc: mtime,
+            sha1: None,
+        };
+        let tol = chrono::Duration::seconds(MTIME_TOLERANCE_SECS);
+        assert!(SyncSnapshot::local_matches(&e, 1024, mtime + tol));
+        assert!(SyncSnapshot::local_matches(&e, 1024, mtime - tol));
+        assert!(!SyncSnapshot::local_matches(&e, 1024, mtime + tol + chrono::Duration::milliseconds(1)));
+    }
+
+    // ── Batch 1 (#21 Wave B): for_path tempfile-injected tests ──────────
+
+    fn temp_snapshot_path() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("rift-snap-{}", unique_key()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir.join("snapshot.json")
+    }
+
+    #[test]
+    fn for_path_empty_read_returns_no_entries() {
+        let p = temp_snapshot_path();
+        let snap = SyncSnapshot::for_path(p.clone());
+        assert_eq!(snap.count(), 0);
+        assert!(snap.try_get("/anything").is_none());
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn for_path_write_then_read_roundtrip() {
+        let p = temp_snapshot_path();
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        {
+            let snap = SyncSnapshot::for_path(p.clone());
+            snap.set("/r/x.lua", 42, mtime, 42, mtime, Some("DEAD".into()));
+        }
+        let snap2 = SyncSnapshot::for_path(p.clone());
+        let e = snap2.try_get("/r/x.lua").expect("loaded");
+        assert_eq!(e.local_size, 42);
+        assert_eq!(e.sha1.as_deref(), Some("DEAD"));
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn for_path_replace_under_with_tempfile_root() {
+        let p = temp_snapshot_path();
+        let snap = SyncSnapshot::for_path(p.clone());
+        let mtime = Utc::now();
+        snap.set("/r/a.lua", 1, mtime, 1, mtime, None);
+        snap.set("/r/b.lua", 2, mtime, 2, mtime, None);
+        snap.set("/other/z.lua", 9, mtime, 9, mtime, None);
+
+        let mut next = HashMap::new();
+        next.insert(
+            "/r/only.lua".to_string(),
+            Entry { local_size: 7, local_mtime_utc: mtime, remote_size: 7, remote_mtime_utc: mtime, sha1: None },
+        );
+        let (old, new) = snap.replace_under("/r", next).unwrap();
+        assert_eq!(old, 2);
+        assert_eq!(new, 1);
+        assert!(snap.try_get("/r/a.lua").is_none());
+        assert!(snap.try_get("/r/only.lua").is_some());
+        assert!(snap.try_get("/other/z.lua").is_some());
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn for_path_count_under_with_tempfile() {
+        let p = temp_snapshot_path();
+        let snap = SyncSnapshot::for_path(p.clone());
+        let mtime = Utc::now();
+        snap.set("/opt/a.lua", 1, mtime, 1, mtime, None);
+        snap.set("/opt/sub/b.lua", 1, mtime, 1, mtime, None);
+        snap.set("/opt-evil/c.lua", 1, mtime, 1, mtime, None);
+        assert_eq!(snap.count_under("/opt"), 2);
+        assert_eq!(snap.count_under("/opt-evil"), 1);
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
+    }
+
+    #[test]
+    fn for_path_mtime_tolerance_at_boundary() {
+        // Re-verify boundary behavior independently of the cache_path-based
+        // round-trip — pure for_path injection path.
+        let p = temp_snapshot_path();
+        let snap = SyncSnapshot::for_path(p.clone());
+        let mtime = Utc.with_ymd_and_hms(2026, 5, 7, 12, 0, 0).unwrap();
+        snap.set("/r/a.lua", 100, mtime, 100, mtime, None);
+        let e = snap.try_get("/r/a.lua").unwrap();
+        let tol = chrono::Duration::seconds(MTIME_TOLERANCE_SECS);
+        assert!(SyncSnapshot::local_matches(&e, 100, mtime + tol));
+        assert!(!SyncSnapshot::local_matches(
+            &e, 100,
+            mtime + tol + chrono::Duration::milliseconds(1),
+        ));
+        let _ = std::fs::remove_dir_all(p.parent().unwrap());
     }
 
     #[test]

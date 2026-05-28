@@ -12,7 +12,9 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
+  import { scrubUser } from "$lib/util/redact";
 
+  import { tooltip } from "$lib/actions/tooltip";
   // SSH keys merged into Network section as a header action — one fewer nav row,
   // since the keys panel was just a single button anyway.
   type Section = "appearance" | "accessibility" | "assistant" | "speech" | "network" | "about";
@@ -39,6 +41,19 @@
   let appVersion = $state("?");
   let configDir = $state<string>("");
   let logDir = $state<string>("");
+  let sshKeyConfigured = $state<boolean | null>(null);
+  let sshKeyPath = $state<string | null>(null);
+
+  async function refreshSshKeyStatus() {
+    try {
+      const exists = await invoke<boolean>("default_ssh_key_exists");
+      sshKeyConfigured = exists;
+      sshKeyPath = exists ? await invoke<string | null>("default_ssh_key_path") : null;
+    } catch (e) {
+      console.debug("ssh key status probe failed:", e);
+      sshKeyConfigured = null;
+    }
+  }
   let diagCopied = $state(false);
   let diagCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -50,14 +65,7 @@
     if (!p) return;
     try { await openPath(p); } catch (e) { console.error("openPath failed", e); }
   }
-  function scrubUser(p: string): string {
-    if (!p) return p;
-    return p
-      .replace(/([A-Za-z]:[\\/]Users[\\/])[^\\/]+/g, "$1<user>")
-      .replace(/(\/home\/)[^/]+/g, "$1<user>")
-      .replace(/(\/Users\/)[^/]+/g, "$1<user>");
-  }
-  async function copyDiagnostic() {
+async function copyDiagnostic() {
     const lines = [
       `Rift ${appVersion}`,
       `Platform: ${navigator.platform}`,
@@ -119,11 +127,34 @@
   let asstMaxBudgetDraft = $state<number | null>(null);
   let asstMaxBudgetSaving = $state(false);
   let asstMaxBudgetMsg = $state<string | null>(null);
+  // Save-button dirty gates (P6) — disabled until the field actually differs
+  // from the stored value, so "no pending edit" is visually distinct.
+  const asstMaxBudgetDirty = $derived(asstMaxBudgetDraft !== assistantStore.maxBudgetUsd);
+  const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
+  // CLI-session probe freshness (P5). Tick every 30s while the section is open
+  // so "Checked Xm ago" stays current without a render-on-every-frame cost.
+  let asstNowTick = $state(Date.now());
+  $effect(() => {
+    if (section !== "assistant") return;
+    asstNowTick = Date.now();
+    const iv = setInterval(() => { asstNowTick = Date.now(); }, 30_000);
+    return () => clearInterval(iv);
+  });
+  function fmtAgo(ts: number, now: number): string {
+    const s = Math.max(0, Math.round((now - ts) / 1000));
+    if (s < 10) return "just now";
+    if (s < 60) return `${s}s ago`;
+    const m = Math.round(s / 60);
+    if (m < 60) return `${m}m ago`;
+    return `${Math.round(m / 60)}h ago`;
+  }
   $effect(() => {
     if (section !== "assistant") return;
     untrack(() => {
       void assistantStore.init().then(() => {
-        asstApiKeyDraft = assistantStore.apiKey ?? "";
+        // Phase 6 (#37): never prefill the draft with a stored value — the
+        // renderer no longer receives it. Draft holds only what the user just typed.
+        asstApiKeyDraft = "";
         asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
       });
     });
@@ -145,7 +176,7 @@
     asstMaxBudgetMsg = null;
     try {
       await assistantStore.setMaxBudgetUsd(asstMaxBudgetDraft);
-      asstMaxBudgetMsg = assistantStore.maxBudgetUsd != null ? `Saved: $${assistantStore.maxBudgetUsd.toFixed(2)} cap.` : "Cleared (no cap).";
+      asstMaxBudgetMsg = assistantStore.maxBudgetUsd != null ? `Saved: ${assistantStore.maxBudgetUsd.toFixed(2)} cap.` : "Cleared (no cap).";
     } catch (e) {
       asstMaxBudgetMsg = `Failed: ${e}`;
     } finally {
@@ -161,6 +192,7 @@
       if (untrack(() => connection.servers.length) === 0) {
         await connection.loadServers();
       }
+      await refreshSshKeyStatus();
     })();
   });
 
@@ -181,6 +213,49 @@
 
   async function pickServer(s: ServerProfile) {
     await connection.select(s.key);
+  }
+
+  let rotatedToken = $state<{ key: string; token: string } | null>(null);
+  let rotatedTokenCopied = $state(false);
+
+  async function onUnpinFingerprint(s: ServerProfile) {
+    if (!s.fingerprint) return;
+    const ok = confirm(
+      `Clear pinned fingerprint for "${s.name}"?\n\nNext connect will re-prompt to trust the host key. Only do this after a deliberate server re-key.`
+    );
+    if (!ok) return;
+    try {
+      await invoke("clear_server_fingerprint", { serverKey: s.key });
+      await connection.loadServers();
+    } catch (e) {
+      alert(`Failed to clear fingerprint: ${e}`);
+    }
+  }
+
+  async function onRotateBridgeToken(s: ServerProfile) {
+    const ok = confirm(
+      `Rotate bridge token for "${s.name}"?\n\nThe new value will be shown ONCE — copy it into your remote bridge config (RIFT_BRIDGE_TOKEN env var) before closing. The old token stops working immediately.`
+    );
+    if (!ok) return;
+    try {
+      const token = await invoke<string>("rotate_bridge_token", { serverKey: s.key });
+      rotatedToken = { key: s.key, token };
+      rotatedTokenCopied = false;
+      await connection.loadServers();
+    } catch (e) {
+      alert(`Failed to rotate token: ${e}`);
+    }
+  }
+
+  async function onCopyRotatedToken() {
+    if (!rotatedToken) return;
+    try {
+      await navigator.clipboard.writeText(rotatedToken.token);
+      rotatedTokenCopied = true;
+      setTimeout(() => { rotatedTokenCopied = false; }, 1800);
+    } catch (e) {
+      console.error("clipboard failed", e);
+    }
   }
 
   const SHORTCUTS: { combo: string[]; label: string }[] = [
@@ -226,9 +301,6 @@
           </div>
           {#if section === "network"}
             <div class="section-head-r">
-              <button class="btn ghost sm" onclick={onLaunchKeygen} type="button">
-                <Key size={11}/> SSH key setup
-              </button>
               <button class="btn primary sm" onclick={onAddServer} type="button">
                 <Plus size={11}/> Add server
               </button>
@@ -251,7 +323,7 @@
                 <span class="set-hint">Click an icon on the left-edge activity bar to swap the main pane. Drag icons to reorder — the Ctrl+1…5 shortcuts follow the bar's order.</span>
               </div>
               <div class="set-row-r">
-                <button class="btn danger sm" type="button" onclick={() => void assistantStore.closeAllTabs()} title="Close every chat tab in this session">
+                <button class="btn danger sm" type="button" onclick={() => void assistantStore.closeAllTabs()} use:tooltip={"Close every chat tab in this session"}>
                   <X size={11}/> Close all chat tabs
                 </button>
               </div>
@@ -386,6 +458,9 @@
                 {:else}
                   <span class="pill muted"><span class="dot"></span>Unknown</span>
                 {/if}
+                {#if assistantStore.authLastProbed && !assistantStore.authChecking}
+                  <span class="set-stamp mono" use:tooltip={"Time since the last CLI session probe"}>Checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
+                {/if}
                 <button class="btn ghost sm" type="button" onclick={() => assistantStore.refreshAuth()} disabled={assistantStore.authChecking}>
                   <RefreshCw size={11}/> Re-probe
                 </button>
@@ -395,6 +470,7 @@
               <div class="set-row-l">
                 <span class="set-label">Use my full Claude Code config</span>
                 <span class="set-hint">Layers <code>~/.claude/CLAUDE.md</code>, slash commands, skills, and MCP servers into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only).</span>
+                <span class="set-hint">Admits MCP tools from your global Claude config (<code>~/.claude/.mcp.json</code>). Disable to restrict tool surface to Rift's built-ins only.</span>
               </div>
               <div class="set-row-r">
                 <button
@@ -403,8 +479,8 @@
                   role="switch"
                   aria-label="Use full Claude Code config"
                   aria-checked={assistantStore.useFullConfig}
-                  data-on={assistantStore.useFullConfig && !assistantStore.apiKey}
-                  disabled={!!assistantStore.apiKey}
+                  data-on={assistantStore.useFullConfig && !assistantStore.hasApiKey}
+                  disabled={assistantStore.hasApiKey}
                   onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}
                 ><span class="switch-knob"></span></button>
               </div>
@@ -445,7 +521,7 @@
                   placeholder="5.00"
                   bind:value={asstMaxBudgetDraft}
                 />
-                <button class="btn primary sm" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving}>
+                <button class="btn primary sm" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving || !asstMaxBudgetDirty}>
                   {asstMaxBudgetSaving ? "Saving…" : "Save"}
                 </button>
                 {#if assistantStore.maxBudgetUsd != null}
@@ -466,35 +542,42 @@
             <div class="set-row">
               <div class="set-row-l">
                 <label class="set-label" for="asst-apikey">API-key fallback</label>
-                <span class="set-hint">Pay-per-token via console.anthropic.com. When set, overrides the CLI session (forces <code>--bare</code>). Stored plaintext in <code>~/.rift/assistant/config.json</code>.</span>
+                <span class="set-hint">Pay-per-token via console.anthropic.com. When set, overrides the CLI session (forces <code>--bare</code>). Stored in the OS keychain (Windows Credential Manager).</span>
               </div>
               <div class="set-row-r">
-                <div class="set-secret-wrap">
-                  <input
-                    id="asst-apikey"
-                    class="input mono set-input"
-                    type={asstApiKeyVisible ? "text" : "password"}
-                    placeholder="sk-ant-api03-…"
-                    bind:value={asstApiKeyDraft}
-                    autocomplete="off"
-                    spellcheck="false"
-                  />
+                {#if assistantStore.hasApiKey}
+                  <span class="pill ok"><span class="dot"></span>Configured</span>
                   <button
-                    class="set-eye"
+                    class="btn ghost sm"
                     type="button"
-                    onclick={() => (asstApiKeyVisible = !asstApiKeyVisible)}
-                    aria-label={asstApiKeyVisible ? "Hide API key" : "Show API key"}
-                    title={asstApiKeyVisible ? "Hide API key" : "Show API key"}
+                    disabled={asstApiKeySaving}
+                    onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}
                   >
-                    {#if asstApiKeyVisible}<EyeOff size={13}/>{:else}<Eye size={13}/>{/if}
-                  </button>
-                </div>
-                <button class="btn primary sm" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving}>
-                  {asstApiKeySaving ? "Saving…" : "Save"}
-                </button>
-                {#if assistantStore.apiKey}
-                  <button class="btn ghost sm" type="button" onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}>
                     Clear
+                  </button>
+                {:else}
+                  <div class="set-secret-wrap">
+                    <input
+                      id="asst-apikey"
+                      class="input mono set-input"
+                      type={asstApiKeyVisible ? "text" : "password"}
+                      placeholder="sk-ant-api03-…"
+                      bind:value={asstApiKeyDraft}
+                      autocomplete="off"
+                      spellcheck="false"
+                    />
+                    <button
+                      class="set-eye"
+                      type="button"
+                      onclick={() => (asstApiKeyVisible = !asstApiKeyVisible)}
+                      aria-label={asstApiKeyVisible ? "Hide API key" : "Show API key"}
+                      use:tooltip={asstApiKeyVisible ? "Hide API key" : "Show API key"}
+                    >
+                      {#if asstApiKeyVisible}<EyeOff size={13}/>{:else}<Eye size={13}/>{/if}
+                    </button>
+                  </div>
+                  <button class="btn primary sm" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving || !asstApiKeyDirty}>
+                    {asstApiKeySaving ? "Saving…" : "Save"}
                   </button>
                 {/if}
               </div>
@@ -695,7 +778,7 @@
                         {:else}
                           <span class="pill ok"><span class="dot"></span>Active</span>
                         {/if}
-                        <button type="button" class="btn ghost sm" onclick={() => void stt.deleteModel(m.id)} title="Delete model" aria-label="Delete">
+                        <button type="button" class="btn ghost sm" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label="Delete">
                           <Trash2 size={11}/>
                         </button>
                       {:else}
@@ -732,7 +815,7 @@
                       <option value={d}>{d}</option>
                     {/each}
                   </select>
-                  <button type="button" class="btn ghost sm" onclick={() => void stt.refreshInputDevices()} title="Refresh device list" aria-label="Refresh">
+                  <button type="button" class="btn ghost sm" onclick={() => void stt.refreshInputDevices()} use:tooltip={"Refresh device list"} aria-label="Refresh">
                     <RefreshCw size={11}/>
                   </button>
                 </div>
@@ -871,15 +954,25 @@
                           <div class="mono dim srv-host">{s.user}@{s.host}{s.port !== 22 ? `:${s.port}` : ""}</div>
                         </div>
                       </div>
-                      <div class="srv-meta mono dim" title={s.fingerprint ?? "no fingerprint pinned"}>
+                      <div class="srv-meta mono dim" use:tooltip={s.fingerprint ?? "no fingerprint pinned"}>
                         {s.fingerprint ? `ed25519 · ${s.fingerprint.slice(0, 18)}…` : "no fingerprint pinned"}
                       </div>
                     </button>
                     <div class="srv-r">
-                      <button class="btn ghost sm" onclick={() => onEditServer(s)} type="button" title={`Edit ${s.name}`} aria-label={`Edit server ${s.name}`}>
+                      {#if s.fingerprint}
+                        <button class="btn ghost sm" onclick={() => onUnpinFingerprint(s)} type="button" use:tooltip={`Clear pinned fingerprint for ${s.name}`} aria-label={`Unpin fingerprint for ${s.name}`}>
+                          <X size={11}/>
+                        </button>
+                      {/if}
+                      {#if s.hasBridgeToken}
+                        <button class="btn ghost sm" onclick={() => onRotateBridgeToken(s)} type="button" use:tooltip={`Rotate bridge token for ${s.name}`} aria-label={`Rotate bridge token for ${s.name}`}>
+                          <RefreshCw size={11}/>
+                        </button>
+                      {/if}
+                      <button class="btn ghost sm" onclick={() => onEditServer(s)} type="button" use:tooltip={`Edit ${s.name}`} aria-label={`Edit server ${s.name}`}>
                         <Pencil size={11}/>
                       </button>
-                      <button class="btn ghost sm" onclick={() => onDeleteServer(s)} type="button" title={`Delete ${s.name}`} aria-label={`Delete server ${s.name}`}>
+                      <button class="btn ghost sm" onclick={() => onDeleteServer(s)} type="button" use:tooltip={`Delete ${s.name}`} aria-label={`Delete server ${s.name}`}>
                         <Trash2 size={11}/>
                       </button>
                     </div>
@@ -890,19 +983,51 @@
           </section>
 
           <section class="set-group">
-            <header class="set-group-head">SSH keypair</header>
+            <header class="set-group-head">SSH private key</header>
             <div class="set-row">
               <div class="set-row-l">
-                <span class="set-label">Local key</span>
-                <span class="set-hint">ed25519 keypair stored at <code>%APPDATA%/Rift/keys/</code>. Generate or copy your public key from the setup dialog.</span>
+                <span class="set-label">Default keypair</span>
+                {#if sshKeyConfigured === true && sshKeyPath}
+                  <span class="set-hint">
+                    <Check size={11} style="color: var(--success, oklch(0.78 0.16 145)); vertical-align: -1px;"/>
+                    Configured · <code class="mono">{sshKeyPath}</code>
+                  </span>
+                {:else if sshKeyConfigured === false}
+                  <span class="set-hint">
+                    Not configured. Generate or import a private key, then copy the public half into the server's <code>authorized_keys</code>.
+                  </span>
+                {:else}
+                  <span class="set-hint">ed25519 keypair stored at <code>%APPDATA%/Rift/keys/</code>.</span>
+                {/if}
               </div>
               <div class="set-row-r">
-                <button class="btn ghost sm" onclick={onLaunchKeygen} type="button">
-                  <Key size={11}/> Open key setup
+                <button class="btn ghost sm" onclick={() => { onLaunchKeygen(); void refreshSshKeyStatus(); }} type="button">
+                  <Key size={11}/> {sshKeyConfigured ? "Manage key" : "Set up key"}
                 </button>
               </div>
             </div>
           </section>
+
+          {#if rotatedToken}
+            <section class="set-group">
+              <header class="set-group-head">New bridge token — copy now</header>
+              <div class="set-row">
+                <div class="set-row-l">
+                  <span class="set-label">{connection.servers.find(s => s.key === rotatedToken!.key)?.name ?? rotatedToken.key}</span>
+                  <span class="set-hint">Paste this into the remote bridge's <code>RIFT_BRIDGE_TOKEN</code> env var. Once you close this panel the token is no longer shown.</span>
+                </div>
+                <div class="set-row-r" style="display:flex; gap:6px; align-items:center;">
+                  <code class="mono" style="font-size:11px; padding:4px 6px; background:var(--bg-elev-2); border-radius:var(--radius-xs); user-select:all;">{rotatedToken.token}</code>
+                  <button class="btn ghost sm" onclick={onCopyRotatedToken} type="button" use:tooltip={"Copy token"}>
+                    {#if rotatedTokenCopied}<Check size={11}/>{:else}<Copy size={11}/>{/if}
+                  </button>
+                  <button class="btn ghost sm" onclick={() => (rotatedToken = null)} type="button" use:tooltip={"Dismiss"}>
+                    <X size={11}/>
+                  </button>
+                </div>
+              </div>
+            </section>
+          {/if}
 
         {:else if section === "about"}
           <section class="set-group">
@@ -934,7 +1059,7 @@
             <div class="set-row">
               <div class="set-row-l">
                 <span class="set-label">Config</span>
-                <span class="set-hint mono path-val" title={configDir}>{configDir || "—"}</span>
+                <span class="set-hint mono path-val" use:tooltip={configDir}>{configDir || "—"}</span>
               </div>
               <div class="set-row-r">
                 <button class="btn ghost sm" type="button" disabled={!configDir} onclick={() => openDir(configDir)}>
@@ -945,7 +1070,7 @@
             <div class="set-row">
               <div class="set-row-l">
                 <span class="set-label">Logs</span>
-                <span class="set-hint mono path-val" title={logDir}>{logDir || "—"}</span>
+                <span class="set-hint mono path-val" use:tooltip={logDir}>{logDir || "—"}</span>
               </div>
               <div class="set-row-r">
                 <button class="btn ghost sm" type="button" disabled={!logDir} onclick={() => openDir(logDir)}>
@@ -1119,6 +1244,11 @@
   .set-note {
     font-size: var(--fs-xs);
     color: var(--fg-muted);
+  }
+  .set-stamp {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    white-space: nowrap;
   }
   .set-warn-banner {
     display: block;

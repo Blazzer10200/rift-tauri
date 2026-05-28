@@ -9,6 +9,7 @@
   import { fmtRelative, fmtAbsolute } from "../../utils/time";
   import { fmtSize, pickIcon, isEditableTarget, clampMenuPos } from "../../utils/file-display";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type RemoteEntry = {
     full_path: string;
     name: string;
@@ -308,7 +309,7 @@
   />
   <div class="headcols">
     <div class="col col-name">name</div>
-    <div class="col col-status" title="sync status">●</div>
+    <div class="col col-status" use:tooltip={"sync status"}>●</div>
     <div class="col col-size">size</div>
     <div class="col col-mtime">modified</div>
   </div>
@@ -379,16 +380,16 @@
                   {/if}
                   <span class="row-label mono">{e.name}</span>
                   {#if lk}
-                    <LockBadge holder={`${lk.user}@${lk.host}`} tooltip={`Locked by ${lk.user}@${lk.host}`} />
+                    <LockBadge holder={`${lk.user}@${lk.host}`} tip={`Locked by ${lk.user}@${lk.host}`} />
                   {/if}
                 </span>
-                <span class="row-status" title={status}>
+                <span class="row-status" use:tooltip={status}>
                   {#if status === "conflict"}
                     <span class="sym danger">▲</span>
                   {/if}
                 </span>
                 <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
-                <span class="row-mtime mono" title={fmtTimeAbs(e.last_modified)}>{fmtTime(e.last_modified)}</span>
+                <span class="row-mtime mono" use:tooltip={fmtTimeAbs(e.last_modified)}>{fmtTime(e.last_modified)}</span>
               </div>
             {/each}
           {/if}

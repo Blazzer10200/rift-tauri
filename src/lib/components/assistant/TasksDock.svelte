@@ -14,7 +14,9 @@
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
+  import { scrubUser } from "$lib/util/redact";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let { tabId = null }: { tabId?: string | null } = $props();
 
   const tab = $derived(tabId == null ? assistant.activeTab : assistant.tabFor(tabId));
@@ -89,7 +91,7 @@
   async function openOutput(path: string) {
     if (!opener) return;
     try { await opener.openPath(path); }
-    catch (e) { console.warn("[SessionDock] openPath failed", path, e); }
+    catch (e) { console.warn("[SessionDock] openPath failed", scrubUser(path), e); }
   }
   async function openSource(item: SourceItem) {
     if (!opener) return;
@@ -108,7 +110,7 @@
       <header class="sect-head">
         <ListChecks size={12} />
         <span class="sect-title">Tasks</span>
-        <span class="counter mono" title="{taskCounts.done} done · {taskCounts.active} in progress · {taskCounts.total} total">
+        <span class="counter mono" use:tooltip={"{taskCounts.done} done · {taskCounts.active} in progress · {taskCounts.total} total"}>
           {taskCounts.done}<span class="counter-sep">/</span>{taskCounts.total}
         </span>
       </header>
@@ -143,7 +145,7 @@
       <header class="sect-head">
         <FileText size={12} />
         <span class="sect-title">Outputs</span>
-        <span class="counter mono" title="{outputs.length} file{outputs.length === 1 ? '' : 's'} touched">{outputs.length}</span>
+        <span class="counter mono" use:tooltip={"{outputs.length} file{outputs.length === 1 ? '' : 's'} touched"}>{outputs.length}</span>
       </header>
       <ul class="rows">
         {#each outputs as o (o.path)}
@@ -152,7 +154,7 @@
               type="button"
               class="row-btn"
               onclick={() => openOutput(o.path)}
-              title={o.path}
+              use:tooltip={o.path}
             >
               <span class="row-icon"><FileText size={12} /></span>
               <span class="row-text">{basename(o.path)}</span>
@@ -170,7 +172,7 @@
       <header class="sect-head">
         <Globe size={12} />
         <span class="sect-title">Sources</span>
-        <span class="counter mono" title="{sources.length} web reference{sources.length === 1 ? '' : 's'}">{sources.length}</span>
+        <span class="counter mono" use:tooltip={"{sources.length} web reference{sources.length === 1 ? '' : 's'}"}>{sources.length}</span>
       </header>
       <ul class="rows">
         {#each sources as s, i (s.kind + ':' + s.value + ':' + i)}
@@ -179,7 +181,7 @@
               type="button"
               class="row-btn"
               onclick={() => openSource(s)}
-              title={s.kind === "url" ? s.value : `Search: ${s.value}\n(click to copy)`}
+              use:tooltip={s.kind === "url" ? s.value : `Search: ${s.value}\n(click to copy)`}
             >
               <span class="row-icon">
                 {#if s.kind === "url"}<Globe size={12} />{:else}<Search size={12} />{/if}

@@ -4,17 +4,26 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown } from "lucide-svelte";
+  import { MessageSquare, Plus, X, ListChecks, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown, Globe } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { assistant, messagesHaveContextSignals } from "../../state/assistant.svelte";
+  import { browserDock } from "../../state/browserDock.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
   let historyOpen = $state(false);
   let historyAnchor = $state<HTMLButtonElement | undefined>();
   let historyPopover = $state<HTMLDivElement | undefined>();
   let historyPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
+
+  // Context-detail popover — the ctx-pill's tooltip dumped a wall of text;
+  // this turns it into a clickable panel with the same breakdown laid out.
+  let ctxPanelOpen = $state(false);
+  let ctxAnchor = $state<HTMLButtonElement | undefined>();
+  let ctxPanel = $state<HTMLDivElement | undefined>();
+  let ctxPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
 
   // Portal action — moves the node to <body> so the popover escapes the
   // `.tabs-rail` overflow:hidden clip (that clip exists to drive the
@@ -45,6 +54,32 @@
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") { historyOpen = false; historyAnchor?.focus(); }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  });
+
+  function toggleCtxPanel() {
+    if (ctxPanelOpen) { ctxPanelOpen = false; return; }
+    if (!ctxAnchor) return;
+    const r = ctxAnchor.getBoundingClientRect();
+    ctxPos = { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) };
+    ctxPanelOpen = true;
+  }
+  $effect(() => {
+    if (!ctxPanelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ctxAnchor?.contains(t)) return;
+      if (ctxPanel?.contains(t)) return;
+      ctxPanelOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { ctxPanelOpen = false; ctxAnchor?.focus(); }
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -235,6 +270,12 @@
   const ctxWindow = $derived(assistant.ctxWindow);
   const ctxPct = $derived(assistant.ctxPct);
   const ctxTone = $derived(ctxPct >= 90 ? "red" : ctxPct >= 70 ? "yellow" : "ok");
+  // Detail-panel sources (mirror the data the old tooltip text concatenated).
+  const lastTurnUsage = $derived(assistant.lastTurnUsage);
+  const sessionUsage = $derived(assistant.sessionUsage);
+  const totalCostUsd = $derived(assistant.totalCostUsd);
+  const lastModelId = $derived(assistant.lastModelId);
+  const autoCompactThreshold = $derived(assistant.autoCompactThreshold);
   const compactWarning = $derived(assistant.compactWarning);
   const activeAgents = $derived(
     (assistant.activeTab?.agentSpawns ?? []).filter((a) => a.completedAt === null),
@@ -254,7 +295,7 @@
     const s = assistant.sessionUsage;
     const cost =
       assistant.totalCostUsd !== null && assistant.totalCostUsd !== undefined
-        ? ` · $${assistant.totalCostUsd.toFixed(4)}`
+        ? ` · ${assistant.totalCostUsd.toFixed(4)}`
         : "";
     const action =
       ctxPct >= 85
@@ -279,7 +320,7 @@
   });
 </script>
 
-<div class="tabsbar" role="tablist" aria-label="Chat tabs">
+<div class="tabsbar" data-model={assistant.model} role="tablist" aria-label="Chat tabs">
   <div class="strip">
     {#each tabs as id, idx (id)}
       <div
@@ -301,7 +342,7 @@
         onclick={() => onTabClick(id)}
         oncontextmenu={(e) => onTabContext(e, id)}
         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onTabClick(id); } }}
-        title={isStreamingTab(id) && id !== activeId
+        use:tooltip={isStreamingTab(id) && id !== activeId
           ? `${titleFor(id)} — streaming in background. Click to switch.`
           : titleFor(id)}
       >
@@ -314,13 +355,13 @@
         </span>
         <span class="title">{titleFor(id)}</span>
         {#if paneIndexFor(id) !== null}
-          <span class="pane-badge" title="Open in pane {paneIndexFor(id)}">{paneIndexFor(id)}</span>
+          <span class="pane-badge" use:tooltip={"Open in pane {paneIndexFor(id)}"}>{paneIndexFor(id)}</span>
         {/if}
         <button
           class="close"
           type="button"
           aria-label="Close tab"
-          title="Close (Ctrl+W)"
+          use:tooltip={"Close (Ctrl+W)"}
           onclick={(e) => onClose(e, id)}
         >
           <X size={11}/>
@@ -330,7 +371,7 @@
     <button
       class="new-tab"
       type="button"
-      title="New chat (Ctrl+T)"
+      use:tooltip={"New chat (Ctrl+T)"}
       aria-label="New chat"
       onclick={onNewTab}
     >
@@ -347,10 +388,22 @@
 
   <div class="actions">
     <button
+      class="hdr-btn"
+      class:open={browserDock.open}
+      type="button"
+      use:tooltip={"Toggle web browser panel"}
+      onclick={() => browserDock.toggle()}
+      aria-pressed={browserDock.open}
+    >
+      <Globe size={12}/>
+      <span class="hdr-btn-label">Browser</span>
+    </button>
+
+    <button
       class="hdr-btn history-btn"
       class:open={historyOpen}
       type="button"
-      title="Conversation history"
+      use:tooltip={"Conversation history"}
       onclick={() => { historyOpen ? (historyOpen = false) : openHistory(); }}
       aria-haspopup="dialog"
       aria-expanded={historyOpen}
@@ -365,13 +418,13 @@
     </button>
 
     {#if assistant.workspace.current}
-      <span class="ws-chip" title={assistant.workspace.current}>
+      <span class="ws-chip" use:tooltip={assistant.workspace.current}>
         <Folder size={11}/>
         <span class="ws-name">{leafName(assistant.workspace.current)}</span>
         <button
           class="ws-x"
           type="button"
-          title="Close folder"
+          use:tooltip={"Close folder"}
           onclick={() => void assistant.clearRoot()}
         ><X size={10}/></button>
       </span>
@@ -379,7 +432,7 @@
       <button
         class="hdr-btn"
         type="button"
-        title="Open project folder"
+        use:tooltip={"Open project folder"}
         onclick={() => void assistant.pickFolder()}
       >
         <FolderOpen size={12}/>
@@ -391,7 +444,7 @@
       <span
         class="auth-warn"
         data-tone={authWarn.tone}
-        title={assistant.auth?.summary ?? authWarn.text}
+        use:tooltip={assistant.auth?.summary ?? authWarn.text}
       >
         <span class="auth-dot"></span>
         <span>{authWarn.text}</span>
@@ -401,7 +454,7 @@
     {#if foreignShell}
       <span
         class="shell-lock"
-        title={`${foreignShell.user}@${foreignShell.host} is running a remote command`}
+        use:tooltip={`${foreignShell.user}@${foreignShell.host} is running a remote command`}
       >
         <TerminalSquare size={11}/>
         <span>{foreignShell.user} ({shortAgo(foreignShell.sinceMs)})</span>
@@ -412,7 +465,7 @@
       <button
         type="button"
         class="agents-pill"
-        title={`${activeAgentTitle}\n\nClick to open a fresh tab — this one keeps streaming in the background, you can chat in the new one.`}
+        use:tooltip={`${activeAgentTitle}\n\nClick to open a fresh tab — this one keeps streaming in the background, you can chat in the new one.`}
         onclick={() => void assistant.newTab()}
       >
         <span class="agents-dot"></span>
@@ -422,22 +475,32 @@
     {/if}
 
     {#if compactWarning}
-      <span class="compact-warn" title="Compact early w/ /compact <focus> if you want fine control over the summary."
+      <span class="compact-warn" use:tooltip={"Compact early w/ /compact <focus> if you want fine control over the summary."}
         >{compactWarning}</span>
     {:else if autoCompactDisabledNudge}
       <span
         class="compact-warn"
         data-tone={ctxPct >= 85 ? "red" : "yellow"}
-        title="Auto-compact is off in Settings → Conversation compaction. Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Enable a threshold to fire compaction automatically, or click the Compact button now."
+        use:tooltip={"Auto-compact is off in Settings → Conversation compaction. Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Enable a threshold to fire compaction automatically, or click the Compact button now."}
         >{autoCompactDisabledNudge}</span>
     {/if}
 
     {#if ctxTokens > 0}
-      <span class="ctx-pill" data-tone={ctxTone} title={ctxTitle}>
+      <button
+        type="button"
+        class="ctx-pill"
+        class:open={ctxPanelOpen}
+        data-tone={ctxTone}
+        bind:this={ctxAnchor}
+        onclick={toggleCtxPanel}
+        aria-haspopup="dialog"
+        aria-expanded={ctxPanelOpen}
+        use:tooltip={"Context window — click for the full breakdown"}
+      >
         <span class="ctx-bar"><span class="ctx-fill" style="width: {ctxPct}%"></span></span>
         <span class="ctx-text">{shortK(ctxTokens)}<span class="ctx-sep">/</span>{shortK(ctxWindow)}</span>
         <span class="ctx-pct">{Math.round(ctxPct)}%</span>
-      </span>
+      </button>
     {/if}
 
     {#if ctxPct >= 50}
@@ -450,7 +513,7 @@
           if (!confirm(`Compact conversation? ${cost} on Haiku · drops context to ~5-10% · next turn carries the summary forward.`)) return;
           void assistant.compactConversation();
         }}
-        title="Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."
+        use:tooltip={"Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."}
       >
         <Layers size={11} />
         <span>Compact</span>
@@ -464,7 +527,7 @@
         class:pulse
         type="button"
         onclick={toggleTasks}
-        title={taskCount > 0
+        use:tooltip={taskCount > 0
           ? `Session panel — ${taskDone}/${taskCount} tasks done`
           : "Session panel"}
       >
@@ -481,7 +544,7 @@
       type="button"
       onclick={() => assistant.addPane()}
       disabled={!canAddPane}
-      title={canAddPane
+      use:tooltip={canAddPane
         ? `Add pane (Ctrl+\\) — ${paneCount} of 4`
         : `Max panes reached (${paneCount}/4)`}
       aria-label="Add pane"
@@ -516,8 +579,75 @@
   </div>
 {/if}
 
+{#if ctxPanelOpen}
+  <div
+    class="ctx-panel"
+    role="dialog"
+    aria-label="Context window details"
+    bind:this={ctxPanel}
+    use:portal
+    style="top: {ctxPos.top}px; right: {ctxPos.right}px;"
+  >
+    <div class="ctx-panel-head">
+      <span class="ctx-panel-dot" data-tone={ctxTone}></span>
+      <span class="ctx-panel-title">Context window</span>
+      <span class="ctx-panel-pct" data-tone={ctxTone}>{ctxPct.toFixed(1)}%</span>
+    </div>
+    <div class="ctx-panel-bar">
+      <span class="ctx-panel-fill" data-tone={ctxTone} style="width: {Math.min(100, ctxPct)}%"></span>
+    </div>
+    <div class="ctx-panel-sub">
+      {ctxTokens.toLocaleString()} / {ctxWindow.toLocaleString()} tokens — the model's hard input cap
+    </div>
+
+    {#if lastTurnUsage}
+      <div class="ctx-panel-section">
+        <div class="ctx-panel-section-label">This turn</div>
+        <div class="ctx-row"><span>New (input + cache-create)</span><span class="num">{newTokens.toLocaleString()}</span></div>
+        <div class="ctx-row"><span>Cache-read (replayed)</span><span class="num">{lastTurnUsage.cacheRead.toLocaleString()}</span></div>
+        <div class="ctx-row"><span>Output</span><span class="num">{lastTurnUsage.output.toLocaleString()}</span></div>
+      </div>
+      <div class="ctx-panel-section">
+        <div class="ctx-panel-section-label">Session · {sessionUsage.turns} turn{sessionUsage.turns === 1 ? "" : "s"}</div>
+        <div class="ctx-row"><span>Input</span><span class="num">{sessionUsage.totalInput.toLocaleString()}</span></div>
+        <div class="ctx-row"><span>Output</span><span class="num">{sessionUsage.totalOutput.toLocaleString()}</span></div>
+        <div class="ctx-row"><span>Cache read / write</span><span class="num">{sessionUsage.totalCacheRead.toLocaleString()} / {sessionUsage.totalCacheCreate.toLocaleString()}</span></div>
+        {#if totalCostUsd != null}
+          <div class="ctx-row"><span>Cost</span><span class="num">${totalCostUsd.toFixed(4)}</span></div>
+        {/if}
+      </div>
+      <div class="ctx-panel-note">
+        Cache only saves billing — those tokens occupy the window every send, same as fresh input.
+      </div>
+    {:else}
+      <div class="ctx-panel-empty">Send a message to populate usage.</div>
+    {/if}
+
+    <div class="ctx-panel-foot">
+      <span class="ctx-panel-meta">
+        {lastModelId ?? "—"} · auto-compact {autoCompactThreshold === null ? "off" : `${autoCompactThreshold}%`}
+      </span>
+      <button
+        type="button"
+        class="ctx-panel-compact"
+        data-tone={ctxTone}
+        onclick={() => {
+          const cost = ctxPct >= 70 ? "≈ $0.91" : "≈ $0.30";
+          if (!confirm(`Compact conversation? ${cost} on Haiku · drops context to ~5-10% · next turn carries the summary forward.`)) return;
+          ctxPanelOpen = false;
+          void assistant.compactConversation();
+        }}
+        use:tooltip={"Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."}
+      >
+        <Layers size={11} /> Compact now
+      </button>
+    </div>
+  </div>
+{/if}
+
 <style>
   .tabsbar {
+    position: relative;
     height: 34px;
     flex-shrink: 0;
     background: var(--bg);
@@ -526,6 +656,11 @@
     align-items: stretch;
     overflow: hidden;
   }
+  /* Aurora hue follows the active model, matching the composer ring. */
+  .tabsbar[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
+  .tabsbar[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
+  .tabsbar[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  .tabsbar                      { --model-color: var(--accent); }
   .strip {
     flex: 1; min-width: 0;
     display: flex;
@@ -578,10 +713,15 @@
     border-color: var(--border);
     /* Top-edge accent — picks the active tab out of the row at a glance.
        Inset box-shadow vs ::before because ::before is reserved for the
-       in-pane indicator. */
-    box-shadow: inset 0 2px 0 0 var(--accent);
+       in-pane indicator. Tinted by current model + soft underglow that
+       washes the lower edge of the tab in model color. */
+    box-shadow:
+      inset 0 2px 0 0 var(--model-color),
+      inset 0 -28px 28px -24px color-mix(in oklch, var(--model-color) 28%, transparent);
     z-index: 1;
   }
+  .tab.active .icon { color: var(--model-color); }
+  .tab.active .dot { background: var(--model-color); box-shadow: 0 0 8px color-mix(in oklch, var(--model-color) 60%, transparent); }
   .tab.active::after {
     content: "";
     position: absolute;
@@ -951,9 +1091,13 @@
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     color: var(--fg-muted);
-    cursor: help;
+    cursor: pointer;
+    font-family: inherit;
     font-variant-numeric: tabular-nums;
+    transition: border-color 120ms ease-out, background 120ms ease-out;
   }
+  .ctx-pill:hover { border-color: var(--border-strong); }
+  .ctx-pill.open { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
   .ctx-pill .ctx-bar {
     position: relative;
     width: 38px;
@@ -984,6 +1128,82 @@
   }
   .ctx-pill[data-tone="red"] .ctx-text { color: var(--danger); }
   .ctx-pill[data-tone="red"] .ctx-fill { background: var(--danger); }
+
+  /* Context-detail popover — replaces the old wall-of-text tooltip. */
+  .ctx-panel {
+    position: fixed;
+    width: 320px;
+    max-width: calc(100vw - 24px);
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+    z-index: 50;
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: var(--fs-xs);
+    animation: ctx-panel-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes ctx-panel-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .ctx-panel { animation: none; } }
+  .ctx-panel-head { display: flex; align-items: center; gap: 8px; }
+  .ctx-panel-dot {
+    width: 8px; height: 8px; border-radius: 999px;
+    background: var(--accent);
+  }
+  .ctx-panel-dot[data-tone="yellow"] { background: var(--warn); }
+  .ctx-panel-dot[data-tone="red"] { background: var(--danger); }
+  .ctx-panel-title { font-weight: 600; color: var(--fg); font-size: var(--fs-sm); }
+  .ctx-panel-pct {
+    margin-left: auto; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--fg-2);
+  }
+  .ctx-panel-pct[data-tone="yellow"] { color: var(--warn); }
+  .ctx-panel-pct[data-tone="red"] { color: var(--danger); }
+  .ctx-panel-bar {
+    height: 6px; border-radius: 999px; overflow: hidden;
+    background: var(--surface-hover);
+  }
+  .ctx-panel-fill {
+    display: block; height: 100%; border-radius: 999px;
+    background: var(--accent); transition: width 200ms ease-out;
+  }
+  .ctx-panel-fill[data-tone="yellow"] { background: var(--warn); }
+  .ctx-panel-fill[data-tone="red"] { background: var(--danger); }
+  .ctx-panel-sub { color: var(--fg-muted); line-height: 1.4; }
+  .ctx-panel-section { display: flex; flex-direction: column; gap: 3px; }
+  .ctx-panel-section-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase; color: var(--fg-faint);
+    margin-bottom: 1px;
+  }
+  .ctx-row {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    color: var(--fg-2);
+  }
+  .ctx-row .num { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .ctx-panel-note { color: var(--fg-faint); line-height: 1.4; font-size: 10.5px; }
+  .ctx-panel-empty { color: var(--fg-muted); padding: 4px 0; }
+  .ctx-panel-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    padding-top: 10px;
+  }
+  .ctx-panel-meta { color: var(--fg-faint); font-size: 10.5px; }
+  .ctx-panel-compact {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 8px;
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    color: var(--fg-2); cursor: pointer; font: inherit; font-size: var(--fs-xs);
+    white-space: nowrap;
+    transition: border-color 120ms ease-out, color 120ms ease-out, background 120ms ease-out;
+  }
+  .ctx-panel-compact:hover { border-color: var(--border-strong); color: var(--fg); }
+  .ctx-panel-compact[data-tone="yellow"] { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, var(--border)); }
+  .ctx-panel-compact[data-tone="red"] { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 40%, var(--border)); }
 
   .dock-toggle {
     display: inline-flex; align-items: center; gap: 5px;

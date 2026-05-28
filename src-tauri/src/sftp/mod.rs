@@ -37,6 +37,29 @@ use std::sync::{Arc, Mutex};
 
 use crate::transport::ssh_handler::PinningHandler;
 
+/// Positive host-key allowlist for both `sftp::open_session` and `tunnel::start`.
+/// Mirrors `russh::Preferred::DEFAULT` for cipher / MAC / KEX (already excludes
+/// 3DES, CBC, RC4, SHA-1 MACs, DH-G1/G14-SHA1) but tightens the host-key list:
+/// drops `Rsa { hash: None }` (rsa-sha1 fallback) and the FIDO security-key
+/// variants (`SkEd25519`, `SkEcdsaSha2NistP256`) which Rift never auth-flows
+/// through. Keeps ECDSA P256/384/521 to avoid breaking existing servers that
+/// present an ECDSA host key. If russh upstream loosens DEFAULT for cipher/
+/// MAC/KEX in a future release, repin those here too.
+pub(crate) fn rift_preferred() -> russh::Preferred {
+    use russh::keys::{Algorithm, EcdsaCurve, HashAlg};
+    russh::Preferred {
+        key: std::borrow::Cow::Borrowed(&[
+            Algorithm::Ed25519,
+            Algorithm::Ecdsa { curve: EcdsaCurve::NistP256 },
+            Algorithm::Ecdsa { curve: EcdsaCurve::NistP384 },
+            Algorithm::Ecdsa { curve: EcdsaCurve::NistP521 },
+            Algorithm::Rsa { hash: Some(HashAlg::Sha512) },
+            Algorithm::Rsa { hash: Some(HashAlg::Sha256) },
+        ]),
+        ..russh::Preferred::DEFAULT
+    }
+}
+
 mod list;
 pub(crate) mod ops;
 pub(crate) mod remote_exec;
@@ -142,6 +165,7 @@ async fn open_session(
         keepalive_max: 3,
         window_size: 2 * 1024 * 1024,
         maximum_packet_size: 32 * 1024,
+        preferred: rift_preferred(),
         ..client::Config::default()
     });
     let addr = format!("{}:{}", args.host, args.port);

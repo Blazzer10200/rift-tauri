@@ -7,567 +7,127 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { accessibility } from "./accessibility.svelte";
 
-export type WorkspaceState = {
-  current: string | null;
-  recent: string[];
-};
+// M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
+// here so external callers like `import type { Block } from "$lib/state/assistant.svelte"`
+// keep working. See `docs/design/assistant-svelte-split.md`.
+export type {
+  WorkspaceState,
+  AuthStatus,
+  ToolBlock,
+  TextBlock,
+  ThinkingBlock,
+  BoundaryBlock,
+  ImageBlock,
+  Block,
+  ChatMessage,
+  ConversationMeta,
+  SummarizeResult,
+  ThinkingEffort,
+  PaneState,
+} from "./assistant/types";
+export { MAX_PANES } from "./assistant/types";
+import type {
+  WorkspaceState,
+  AuthStatus,
+  ToolBlock,
+  ThinkingBlock,
+  BoundaryBlock,
+  ImageBlock,
+  Block,
+  ChatMessage,
+  ConversationMeta,
+  SummarizeResult,
+  CompactionHistoryEntry,
+  ConversationRecord,
+  ContentBlock,
+  StreamDelta,
+  StreamEvent,
+  StreamEnvelope,
+  RemoteLockEvt,
+  RemoteShellEvt,
+  ThinkingEffort,
+  PermissionMode,
+  PermissionPromptInfo,
+  PermissionSuggestion,
+  TurnRecord,
+  PaneState,
+} from "./assistant/types";
+import { MAX_PANES } from "./assistant/types";
 
-export type AuthStatus = {
-  cliPresent: boolean;
-  cliVersion: string | null;
-  loggedIn: boolean;
-  authMethod: string | null;
-  apiProvider: string | null;
-  email: string | null;
-  subscriptionType: string | null;
-  apiKeyConfigured: boolean;
-  pill: "green" | "yellow" | "red";
-  summary: string;
-};
+// M1 split (2026-05-26): helpers lifted to `./assistant/helpers`. Re-export
+// the one externally-imported symbol so call sites stay unchanged.
+import {
+  loadModel,
+  saveModel,
+  loadEffort,
+  saveEffort,
+  loadPermissionMode,
+  savePermissionMode,
+  flattenToolResult,
+  previewToolInput,
+  messagesHaveContextSignals,
+  effortToFlag,
+} from "./assistant/helpers";
+export { messagesHaveContextSignals } from "./assistant/helpers";
 
-export type ToolBlock = {
-  type: "tool";
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  result: string | null;
-  isError: boolean;
-  status: "pending" | "done" | "error";
-  // S124: wall-clock start (ms epoch) on tool_use, end (ms epoch) on
-  // tool_result. Lets the chip render an inline duration badge when the
-  // call was slow (>1s). Optional — legacy records omit both fields.
-  startedAt?: number;
-  durationMs?: number;
-};
-
-export type TextBlock = {
-  type: "text";
-  text: string;
-};
-
-export type ThinkingBlock = {
-  type: "thinking";
-  // Plaintext reasoning if the API streamed it. Often empty in -p mode —
-  // Anthropic encrypts thinking content and only emits the signature, in
-  // which case we show duration + a "reasoning recorded" hint instead.
-  text: string;
-  // Encrypted signature blob received (presence flag — we don't render it).
-  hasSignature: boolean;
-  // Wall-clock start (ms epoch) — set on content_block_start. Used by the
-  // bubble to render a live elapsed counter during active reasoning. Without
-  // this the UI sat at "Thinking …" for the full 17-40s of an Opus reasoning
-  // block; the live counter converts dead air into a heartbeat.
-  startedAt: number;
-  // Wall-clock duration of the reasoning step. Null while still active.
-  durationMs: number | null;
-  status: "active" | "done";
-};
-
-/** Compaction Phase C: synthetic block that marks the boundary where a
- *  CLI session was retired in favor of a summary. Renders as a collapsed
- *  pill ("Conversation compacted · N turns archived") with the summary
- *  text on expand. Owned by a `role: "system"` message — third role
- *  alongside user/assistant. */
-export type BoundaryBlock = {
-  type: "boundary";
-  summary: string;
-  at: number;
-  archivedCount: number;
-  costUsd: number;
-  summaryModel: string;
-  // S124: true while the summarize call is in-flight; flipped to false on
-  // the final 'done' event. Drives the streaming spinner in MessageBubble.
-  streaming?: boolean;
-  // Phase E1: ctx% snapshot at the moment the compact fired (pre) and the
-  // estimated ctx% the new session starts at (post = summary tokens / window).
-  // Rendered as "Ctx X% → est Y%" in the boundary pill so the user sees
-  // headroom won. Optional for legacy boundaries pre-E1.
-  ctxPctBefore?: number;
-  ctxPctEstAfter?: number;
-};
-
-/** User-attached image — pasted/dropped into the composer, persisted on the
- *  outgoing user message so the chat shows what the user actually sent (not
- *  just the text). Mirrors the composer attachment shape minus `id` (id is
- *  composer-local). dataBase64 is the source-of-truth; previewUrl is an
- *  ephemeral blob URL re-mintable from data if missing. */
-export type ImageBlock = {
-  type: "image";
-  mime: string;
-  dataBase64: string;
-  sizeBytes: number;
-};
-
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
-
-export type ChatMessage = {
-  id: string;
-  role: "user" | "assistant" | "system";
-  blocks: Block[];
-  /** Per-turn cost in USD captured from the CLI `result` envelope. Only set
-   *  on assistant messages after the turn completes. */
-  costUsd?: number | null;
-  /** Resolved model id captured from the CLI `system:init` envelope. */
-  model?: string | null;
-};
-
-export type ConversationMeta = {
-  id: string;
-  title: string;
-  model: string;
-  messageCount: number;
-  createdAt: number;
-  updatedAt: number;
-  /** Phase E5: flattened compactionHistory summaries for HistoryDrawer
-   *  search. Absent or empty for convos that never compacted. */
-  compactionSummaries?: string[];
-};
-
-/** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in
- *  `assistant/mod.rs` (camelCase serde). Phase C consumes the summary
- *  text + cost figures when minting a boundary message. */
-export type SummarizeResult = {
-  summary: string;
-  model: string;
-  costUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreateTokens: number;
-};
-
-type CompactionHistoryEntry = {
-  at: number;
-  priorSessionId: string;
-  newSessionId: string;
-  summary: string;
-  costUsd: number;
-  summaryModel: string;
-  archivedCount: number;
-};
-
-type ConversationRecord = {
-  id: string;
-  title: string;
-  model: string;
-  createdAt: number;
-  updatedAt: number;
-  messages: ChatMessage[];
-  // CLI session UUID (--session-id / --resume target). Decoupled from `id` in
-  // S103 so compaction can mint a fresh CLI session without breaking tab
-  // persistence. Optional for backward compat — legacy convos fall back to
-  // `id` on load.
-  cliSessionId?: string;
-  // Phase E prerequisite: ordered list of compactions that happened on this
-  // convo. The BoundaryBlock in `messages` is the user-visible artifact; this
-  // is the structured record for search / cleanup sweep. Absent for legacy.
-  compactionHistory?: CompactionHistoryEntry[];
-};
-
-// Minimal stream-json envelope shape we care about.
-type ContentBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking?: string; signature?: string }
-  | { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> }
-  | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean };
-
-type StreamDelta = {
-  type?: string;
-  text?: string;
-  thinking?: string;
-  signature?: string;
-};
-
-type StreamEvent = {
-  type?: string;
-  index?: number;
-  content_block?: ContentBlock;
-  delta?: StreamDelta;
-};
-
-type StreamEnvelope =
-  | { type: "system"; subtype?: string; [k: string]: unknown }
-  | { type: "stream_event"; event?: StreamEvent; [k: string]: unknown }
-  | { type: "assistant"; message: { content: ContentBlock[] } }
-  | { type: "user"; message: { content: ContentBlock[] } }
-  | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
-
-type RemoteLockEvt = {
-  file_path: string;
-  user: string;
-  host: string;
-  since: string;
-};
-
-type RemoteShellEvt = {
-  command: string;
-  remote_root: string;
-  at: string;
-};
-
-const MODEL_KEY = "rift.assistant.model";
-const EFFORT_KEY = "rift.assistant.thinkingEffort";
-
-export type ThinkingEffort = "none" | "quick" | "deep";
-
-function loadModel(): "sonnet" | "opus" | "haiku" {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(MODEL_KEY) : null;
-    if (v === "sonnet" || v === "opus" || v === "haiku") return v;
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return "sonnet";
-}
-
-function saveModel(v: "sonnet" | "opus" | "haiku") {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(MODEL_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
-}
-
-function loadEffort(): ThinkingEffort {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(EFFORT_KEY) : null;
-    if (v === "none" || v === "quick" || v === "deep") return v;
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return "quick";
-}
-
-function saveEffort(v: ThinkingEffort) {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(EFFORT_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
-}
-
-function flattenToolResult(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text: unknown }).text ?? "") : ""))
-      .join("");
-  }
-  return "";
-}
-
-/** Telemetry record for a single Claude turn. Filled progressively as
- *  envelopes arrive; finalized on done / error / session-lost. Captured into
- *  AssistantStore.telemetry.turns so a `/diag` export can show the full
- *  session shape (cache behavior, tool patterns, blank turns, model switches,
- *  cost trend). */
-type TurnRecord = {
-  // Identity
-  ts: number;                                      // turn start (ms epoch)
-  convoId: string;
-  cliSessionId: string;
-  isFirstTurn: boolean;
-  model: "sonnet" | "opus" | "haiku";
-  effort: "none" | "quick" | "deep";
-  /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping).
-   *  Haiku doesn't get an effort flag → null. */
-  effortFlag: "low" | "medium" | "high" | null;
-  // Input
-  promptLen: number;
-  /** First ~120 chars of the user's prompt, post-trim. Lets a `/diag` reader
-   *  identify which turn was which without the raw text dump. */
-  promptPreview: string;
-  attachmentsCount: number;
-  attachmentsBytes: number;
-  // Usage (filled progressively — envelope = mid-stream, result = final)
-  envelopeUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
-  resultUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
-  modelId: string | null;                          // resolved "claude-sonnet-4-6" etc.
-  costUsd: number | null;
-  // Stream stats
-  deltaCount: number;
-  /** Number of `stream_event` envelopes received this turn. Zero is the
-   *  smoking gun for `--include-partial-messages` not being honored. */
-  streamEventCount: number;
-  /** Number of `assistant` envelopes (per-message snapshots). */
-  assistantEnvCount: number;
-  /** Longest pause btw consecutive `stream_event` envelopes this turn (ms).
-   *  CONFLATED w/ tool wall-time: a 12s Bash will register as a 12s gap b/c
-   *  the CLI sits idle waiting for `tool_result`. Cross-ref with the largest
-   *  `toolUses[].durationMs` of the same turn — if maxStreamGapMs ≈ that
-   *  tool's duration, it's just tool wait. If it's bigger or there's no
-   *  matching tool, it's a real API/network stall. */
-  maxStreamGapMs: number;
-  /** Per-tool record w/ wall timing + error status + a short input preview.
-   *  `completedAt` stays null if the `tool_result` never arrived (turn ended
-   *  early or tool hung). `inputPreview` is first ~120 chars of the most
-   *  diagnostic field (command for Bash, file_path for Read/Write/Edit,
-   *  pattern for Grep/Glob, url for WebFetch, query for WebSearch) — answers
-   *  "the Bash ran 12s, doing WHAT?". */
-  toolUses: {
-    name: string;
-    id: string;
-    startedAt: number;
-    completedAt: number | null;
-    durationMs: number | null;
-    isError: boolean | null;
-    inputPreview: string | null;
-  }[];
-  thinkingCount: number;
-  thinkingTotalMs: number;
-  /** Per-block detail filled in endThinking. Lets a `/diag` reader see if a
-   *  turn had one long think vs many short interleaved thinks. */
-  /** `charCount` stays 0 in `-p` mode (API encrypts thinking plaintext);
-   *  `hasSignature` is the truthier "did we get a real thinking block" signal. */
-  thinkingBlocks: { startedAt: number; durationMs: number; charCount: number; hasSignature: boolean }[];
-  envelopeFallback: boolean;                       // fired the "zero deltas, flush envelope" path
-  blankTurn: boolean;                              // ended w/ no text + no tools
-  // Timing
-  firstPaintAt: number | null;
-  doneAt: number | null;
-  endKind: "success" | "user-stop" | "session-lost" | "error" | null;
-  errorMsg?: string;
-};
-
-/** First-priority field to preview for each known tool. Returns first ~120
- *  chars of that field's string value, or null. Keeps /diag readable while
- *  still answering "what did this tool actually do?". */
-function previewToolInput(name: string, input: Record<string, unknown> | undefined): string | null {
-  if (!input) return null;
-  const fields = ["command", "file_path", "pattern", "path", "url", "query"] as const;
-  for (const f of fields) {
-    const v = input[f];
-    if (typeof v === "string" && v.length > 0) {
-      return v.length > 120 ? v.slice(0, 120) + "…" : v;
-    }
-  }
-  return null;
-}
-
-/** Tool names whose presence in a tab's stream means the Session-panel right
- *  rail has content worth surfacing (files Claude edited, URLs it fetched).
- *  Used by `messagesHaveContextSignals` to gate dock visibility without
- *  duplicating the per-section iteration logic that lives in TasksDock. */
-const CONTEXT_SIGNAL_TOOLS = new Set([
-  "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch",
-]);
-
-/** Early-exit scan: does this message list contain ANY Edit/Write/WebFetch/etc
- *  tool call? Used by AssistantPane + ChatTabsBar to decide whether to render
- *  the Session dock when `tasks` is empty. Cheap — bails on first match. */
-export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
-  for (const m of messages) {
-    for (const b of m.blocks) {
-      if (b.type === "tool" && CONTEXT_SIGNAL_TOOLS.has(b.name)) return true;
-    }
-  }
-  return false;
-}
-
-/** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/mod.rs. */
-function effortToFlag(
-  effort: "none" | "quick" | "deep",
-  model: "sonnet" | "opus" | "haiku",
-): "low" | "medium" | "high" | null {
-  if (model === "haiku") return null;
-  if (effort === "none") return "low";
-  if (effort === "deep") return "high";
-  return "medium";
-}
-
-/** Session-wide telemetry singleton. */
-class SessionTelemetry {
-  startedAt = Date.now();
-  turns: TurnRecord[] = [];
-  /** Non-turn lifecycle events: tab open/close/new/switch, slash commands,
-   *  workspace changes, session-lost recoveries, etc. Cheap to capture. */
-  events: { ts: number; kind: string; detail?: unknown }[] = [];
-
-  event(kind: string, detail?: unknown) {
-    this.events.push({ ts: Date.now(), kind, detail });
-  }
-
-  /** JSON snapshot for /diag clipboard export. */
-  snapshot() {
-    return {
-      startedAt: this.startedAt,
-      capturedAt: Date.now(),
-      durationMs: Date.now() - this.startedAt,
-      turnCount: this.turns.length,
-      summary: this.summarize(),
-      turns: this.turns,
-      events: this.events,
-    };
-  }
-
-  /** Per-session rollup. Self-summarizing JSON so a `/diag` reader doesn't
-   *  have to fold over `turns[]` to see the basics. */
-  private summarize() {
-    const byModel: Record<string, {
-      turns: number;
-      costUsd: number;
-      inputTokens: number;
-      outputTokens: number;
-      cacheReadTokens: number;
-      cacheCreateTokens: number;
-      thinkingTurns: number;
-      blankTurns: number;
-      envelopeFallbacks: number;
-      avgTtfpMs: number | null;
-      avgDoneMs: number | null;
-    }> = {};
-    let totalCost = 0;
-    let blank = 0;
-    let envFallback = 0;
-    let thinkingTurns = 0;
-    let toolCallTotal = 0;
-    let toolErrorTotal = 0;
-    let slowestTool: { name: string; durationMs: number; turnIdx: number } | null = null;
-    const toolNameCounts: Record<string, number> = {};
-    let slowestTurn: { idx: number; durationMs: number } | null = null;
-    let costliestTurn: { idx: number; costUsd: number } | null = null;
-    let firstTurnCostUsd: number | null = null;
-    let coldStartCacheCreate: number | null = null;
-    let totalOutputTokens = 0;
-    let totalStreamMs = 0;
-    let mostParallelTurn: { idx: number; maxConcurrentTools: number } | null = null;
-    let staleCacheTurns = 0;
-    const ttfps: number[] = [];
-    const doneTimes: number[] = [];
-    for (let i = 0; i < this.turns.length; i++) {
-      const t = this.turns[i];
-      // Skip user-stop / error turns w/ no resolved modelId from the byModel
-      // rollup — they otherwise create a phantom "opus"/"sonnet"/"haiku"
-      // bucket alongside the real "claude-opus-4-7" etc.
-      if (t.modelId == null && t.endKind !== "success") continue;
-      const key = t.modelId || t.model;
-      const bucket = byModel[key] ||= {
-        turns: 0, costUsd: 0, inputTokens: 0, outputTokens: 0,
-        cacheReadTokens: 0, cacheCreateTokens: 0,
-        thinkingTurns: 0, blankTurns: 0, envelopeFallbacks: 0,
-        avgTtfpMs: null, avgDoneMs: null,
-      };
-      bucket.turns += 1;
-      bucket.costUsd += t.costUsd ?? 0;
-      const u = t.resultUsage || t.envelopeUsage;
-      if (u) {
-        bucket.inputTokens += u.input;
-        bucket.outputTokens += u.output;
-        bucket.cacheReadTokens += u.cacheRead;
-        bucket.cacheCreateTokens += u.cacheCreate;
-      }
-      if (t.thinkingCount > 0) { bucket.thinkingTurns += 1; thinkingTurns += 1; }
-      if (t.blankTurn) { bucket.blankTurns += 1; blank += 1; }
-      if (t.envelopeFallback) { bucket.envelopeFallbacks += 1; envFallback += 1; }
-      totalCost += t.costUsd ?? 0;
-      if (t.firstPaintAt != null) ttfps.push(t.firstPaintAt - t.ts);
-      if (t.doneAt != null) {
-        const dur = t.doneAt - t.ts;
-        doneTimes.push(dur);
-        if (!slowestTurn || dur > slowestTurn.durationMs) slowestTurn = { idx: i, durationMs: dur };
-      }
-      if (t.costUsd != null && (!costliestTurn || t.costUsd > costliestTurn.costUsd)) {
-        costliestTurn = { idx: i, costUsd: t.costUsd };
-      }
-      // Tool rollup + parallelism detection via sweep-line over intervals.
-      const intervals: { ts: number; delta: 1 | -1 }[] = [];
-      for (const tu of t.toolUses) {
-        toolCallTotal += 1;
-        toolNameCounts[tu.name] = (toolNameCounts[tu.name] ?? 0) + 1;
-        if (tu.isError === true) toolErrorTotal += 1;
-        if (tu.durationMs != null && (!slowestTool || tu.durationMs > slowestTool.durationMs)) {
-          slowestTool = { name: tu.name, durationMs: tu.durationMs, turnIdx: i };
-        }
-        if (tu.completedAt != null) {
-          intervals.push({ ts: tu.startedAt, delta: 1 });
-          intervals.push({ ts: tu.completedAt, delta: -1 });
-        }
-      }
-      if (intervals.length > 0) {
-        intervals.sort((a, b) => a.ts - b.ts || b.delta - a.delta);
-        let active = 0;
-        let peak = 0;
-        for (const iv of intervals) {
-          active += iv.delta;
-          if (active > peak) peak = active;
-        }
-        if (!mostParallelTurn || peak > mostParallelTurn.maxConcurrentTools) {
-          mostParallelTurn = { idx: i, maxConcurrentTools: peak };
-        }
-      }
-      // Cold-start surfacing: the first turn typically pays the SessionStart
-      // 40-50K cache_creation tax; we record turn[0]'s cost+cacheCreate to
-      // make that tax legible without folding turns[].
-      if (i === 0) {
-        firstTurnCostUsd = t.costUsd ?? null;
-        const u0 = t.resultUsage || t.envelopeUsage;
-        coldStartCacheCreate = u0?.cacheCreate ?? null;
-      }
-      // Stale-cache flag: a continuation turn that paid full cache_create but
-      // got zero cache_read = the API isn't reusing our prefix. Flagged what
-      // surfaced the sonnet cache anomaly during effort A/B.
-      if (!t.isFirstTurn && t.endKind === "success") {
-        const uForCache = t.resultUsage || t.envelopeUsage;
-        if (uForCache && uForCache.cacheRead === 0 && uForCache.cacheCreate > 0) {
-          staleCacheTurns += 1;
-        }
-      }
-      // Streaming velocity accumulator.
-      if (t.firstPaintAt != null && t.doneAt != null && t.doneAt > t.firstPaintAt) {
-        const u = t.resultUsage || t.envelopeUsage;
-        if (u) {
-          totalOutputTokens += u.output;
-          totalStreamMs += t.doneAt - t.firstPaintAt;
-        }
-      }
-    }
-    // Per-model timing averages
-    for (const key of Object.keys(byModel)) {
-      const bucket = byModel[key];
-      const tns = this.turns.filter((t) => (t.modelId || t.model) === key);
-      const t1 = tns.map((t) => (t.firstPaintAt != null ? t.firstPaintAt - t.ts : null)).filter((n): n is number => n != null);
-      const t2 = tns.map((t) => (t.doneAt != null ? t.doneAt - t.ts : null)).filter((n): n is number => n != null);
-      bucket.avgTtfpMs = t1.length ? Math.round(t1.reduce((a, b) => a + b, 0) / t1.length) : null;
-      bucket.avgDoneMs = t2.length ? Math.round(t2.reduce((a, b) => a + b, 0) / t2.length) : null;
-    }
-    return {
-      totalTurns: this.turns.length,
-      totalCostUsd: Math.round(totalCost * 10000) / 10000,
-      blankTurns: blank,
-      envelopeFallbacks: envFallback,
-      thinkingTurns,
-      avgTtfpMs: ttfps.length ? Math.round(ttfps.reduce((a, b) => a + b, 0) / ttfps.length) : null,
-      avgDoneMs: doneTimes.length ? Math.round(doneTimes.reduce((a, b) => a + b, 0) / doneTimes.length) : null,
-      toolCallTotal,
-      toolErrorTotal,
-      toolNameCounts,
-      slowestTool,
-      slowestTurn,
-      costliestTurn,
-      firstTurnCostUsd,
-      coldStartCacheCreate,
-      mostParallelTurn,
-      staleCacheTurns,
-      outputTokensPerSec: totalStreamMs > 0
-        ? Math.round((totalOutputTokens / totalStreamMs) * 1000)
-        : null,
-      byModel,
-      eventCounts: this.events.reduce<Record<string, number>>((acc, e) => {
-        acc[e.kind] = (acc[e.kind] ?? 0) + 1;
-        return acc;
-      }, {}),
-    };
-  }
-
-  reset() {
-    this.startedAt = Date.now();
-    this.turns = [];
-    this.events = [];
-  }
-}
+// M2 split (2026-05-26): SessionTelemetry class lifted to `./assistant/telemetry`.
+import { SessionTelemetry } from "./assistant/telemetry";
+// M4 split (2026-05-26): attachment free fns in `./assistant/attachments`.
+import {
+  addAttachment as attAdd,
+  removeAttachment as attRemove,
+  clearAttachments as attClear,
+} from "./assistant/attachments";
+// M3 split (2026-05-26): workspace free fns in `./assistant/workspace`.
+import {
+  refreshWorkspace as wsRefresh,
+  pickFolder as wsPickFolder,
+  setRoot as wsSetRoot,
+  clearRoot as wsClearRoot,
+  removeRecentRoot as wsRemoveRecentRoot,
+  loadWorkspaceFiles as wsLoadFiles,
+} from "./assistant/workspace";
+// M5 split (2026-05-26): conversation persistence + tab-list save in
+// `./assistant/persistence`. loadConversation + deleteConversation stay on
+// the class (M5b — gated on M6 tabs lifecycle extraction).
+import {
+  refreshConversations as persistRefresh,
+  buildSaveRecord as persistBuildRecord,
+  flushNow as persistFlushNow,
+  scheduleSave as persistSchedule,
+  renameConversation as persistRename,
+  persistTabs as persistTabsImpl,
+  loadConversation as persistLoad,
+  deleteConversation as persistDelete,
+} from "./assistant/persistence";
+// M6 split (2026-05-27): tab lifecycle + split-pane management in
+// `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
+// tabByCliSession) + scroll cache stay on the class; only the lifecycle
+// logic moves. Store methods below are thin thunks onto these.
+import {
+  addPane as tabsAddPane,
+  closePane as tabsClosePane,
+  setFocusedPane as tabsSetFocusedPane,
+  dropTabIntoPane as tabsDropTabIntoPane,
+  restoreTabs as tabsRestore,
+  openTab as tabsOpenTab,
+  closeTab as tabsCloseTab,
+  newTab as tabsNewTab,
+  reorderTabs as tabsReorder,
+  cycleTab as tabsCycle,
+  closeOtherTabs as tabsCloseOthers,
+  closeAllTabs as tabsCloseAll,
+  closeTabsToRight as tabsCloseToRight,
+} from "./assistant/tabs";
+// M7 split (2026-05-27): summarize + compact pipeline in `./assistant/compaction`.
+// Per-tab compaction fields stay on TabState; threshold/model setters stay on
+// the store. The two pipeline methods below are thin thunks onto these.
+import {
+  summarizeCurrentSession as compactSummarize,
+  compactConversation as compactRun,
+} from "./assistant/compaction";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -673,6 +233,13 @@ class TabState {
   unboundAskUserRequestIds: string[] = [];
   /** FIFO of ask_user toolUseIds whose request_id hasn't shown up yet. */
   unboundAskUserToolUseIds: string[] = [];
+
+  /** Live `can_use_tool` permission asks for this tab: toolUseId → info. The
+   *  control-channel ask carries the tool_use_id directly (it pairs to the
+   *  already-streamed tool chip), so unlike ask_user no FIFO reordering is
+   *  needed. Reactive so ToolChip's `$derived` lookup activates the moment the
+   *  ask lands. Entry removed once the user decides (or the turn ends). */
+  permissionPrompts = $state<Map<string, PermissionPromptInfo>>(new Map());
 
   // Non-reactive per-stream internals.
   streamingMsgId: string | null = null;
@@ -1052,13 +619,18 @@ class TabState {
       if (accumulate) this.currentTurnRecord.resultUsage = turn;
       else this.currentTurnRecord.envelopeUsage = turn;
     }
-    // #1: only update the pill on the `result` event. Envelope arrives
-    // first w/ a partial count that the result corrects on complex turns
-    // (thinking blocks, tool loops); rendering both made the pill visibly
-    // jump. Pill now sits on the previous turn's confirmed value through
-    // the in-flight turn and lands on the new value once result arrives.
+    // The ctx pill must reflect point-in-time window occupancy, NOT cumulative
+    // task usage. The `assistant` envelope (accumulate=false) carries one
+    // request's usage — its input + cache_read is exactly how full the window
+    // is right now. The `result` event (accumulate=true) sums usage across
+    // every step of the agentic loop, so one long task reports >1M cache_read
+    // (confirmed: anthropics/claude-agent-sdk-python#548). Driving the pill off
+    // `result` spiked it to ~full the instant a task finished and tripped
+    // auto-compact for no reason. So: the last envelope drives the pill; the
+    // result feeds session totals + cost only. Mid-turn envelopes climb the
+    // pill live, which is fine — the auto-compact effect is gated on !streaming.
     if (accumulate) {
-      this.lastTurnUsage = turn;
+      // result = cumulative-per-task → session stats only (intentionally summed).
       this.sessionUsage = {
         totalInput: this.sessionUsage.totalInput + turn.input,
         totalOutput: this.sessionUsage.totalOutput + turn.output,
@@ -1066,6 +638,9 @@ class TabState {
         totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
         turns: this.sessionUsage.turns + 1,
       };
+    } else {
+      // assistant envelope = point-in-time window occupancy → drives the pill.
+      this.lastTurnUsage = turn;
     }
   }
 
@@ -1269,6 +844,9 @@ class TabState {
     this.streamingMsgId = null;
     this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
+    // Drop any unanswered permission asks — the backend auto-denies on turn
+    // end, so a lingering Allow/Deny chip would be dead.
+    if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
     this.activity = { ...this.activity, currentLabel: null };
     // Finalize telemetry for this turn.
     if (this.currentTurnRecord) {
@@ -1299,6 +877,7 @@ class TabState {
     }
     this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
+    if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
     // Finalize telemetry.
     if (this.currentTurnRecord) {
       this.currentTurnRecord.doneAt = Date.now();
@@ -1309,21 +888,13 @@ class TabState {
   }
 }
 
-/** Per-pane reference into the openTabs list. v2 split UI: `panes` is always
- *  an array of length ≥1. Length 1 = single-pane (no visible split). Length
- *  2..MAX_PANES = horizontal split. Each pane shows the chat for its `tabId`;
- *  `null` tabId = empty pane (drop a tab into it from the tabsbar). */
-export type PaneState = { tabId: string | null };
-
-/** Hard cap on horizontal panes. 4 × min-width 320px = 1280px — fits any
- *  modern window. Bump if you're on ultrawide; UI is array-driven so the
- *  only knob is this constant. */
-export const MAX_PANES = 4;
-
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
   authError = $state<string | null>(null);
+  /** Epoch ms of the last completed auth probe (success or failure). Drives the
+   *  "last checked Xm ago" freshness label in Settings → Assistant. */
+  authLastProbed = $state<number | null>(null);
 
   /** Per-conversation streaming state, keyed by Rift convoId. One entry per
    *  open chat tab. The store's UI-facing `messages` / `streaming` / `activity`
@@ -1331,7 +902,9 @@ class AssistantStore {
    *  `session_id` to whichever tab owns that CLI session. Concurrent live
    *  streaming on 2+ tabs works because each tab carries its own messages
    *  buffer, pacer state, and thinking tracker. */
-  private tabs = $state(new Map<string, TabState>());
+  // M5: relaxed from `private` so extracted persistence module can iterate.
+  // Still internal-by-convention — no external module reads `assistant.tabs`.
+  tabs = $state(new Map<string, TabState>());
 
   /** The TabState bound to `currentConvoId`, or null if no tab is active.
    *  Getter-derived so it tracks both `tabs` and `currentConvoId` reactively. */
@@ -1434,172 +1007,20 @@ class AssistantStore {
    *  New pane is auto-filled with the next openTab not already in any pane,
    *  else stays empty (drop a tab in from the tabsbar). Focus moves to new
    *  pane. Persists. */
-  addPane() {
-    if (this.panes.length >= MAX_PANES) return;
-    const taken = new Set(this.panes.map((p) => p.tabId).filter((x): x is string => !!x));
-    const fill = this.openTabs.find((id) => !taken.has(id)) ?? null;
-    const insertAt = this.focusedPaneIdx + 1;
-    const next = this.panes.slice();
-    next.splice(insertAt, 0, { tabId: fill });
-    this.panes = next;
-    this.telemetry.event("pane.add", { count: next.length, fill });
-    // Focus the freshly-added pane so subsequent newTab/openTab assigns to it.
-    this.stashTabUi(this.currentConvoId);
-    this.focusedPaneIdx = insertAt;
-    if (fill) {
-      const inMeta = this.conversations.some((c) => c.id === fill);
-      if (inMeta && !this.tabs.get(fill)) {
-        void this.loadConversation(fill);
-      } else {
-        this.currentConvoId = fill;
-      }
-    }
-    this.restoreTabUi(fill);
-    this.persistTabs();
-  }
+  addPane() { tabsAddPane(this); }
 
   /** Close a pane (the pane container, not the tab inside it). Tabs stay in
    *  openTabs — closing a pane just unhooks it. Last pane never closes (always
    *  length≥1). Focused idx is clamped to the new array bounds. Persists. */
-  closePane(idx: number) {
-    if (this.panes.length <= 1) return;
-    if (idx < 0 || idx >= this.panes.length) return;
-    const next = this.panes.slice();
-    next.splice(idx, 1);
-    this.panes = next;
-    this.telemetry.event("pane.close", { remaining: next.length });
-    // Clamp focused. If we closed the focused pane (or one before it), shift left.
-    let newFocus = this.focusedPaneIdx;
-    if (idx < this.focusedPaneIdx) newFocus -= 1;
-    else if (idx === this.focusedPaneIdx) newFocus = Math.min(idx, next.length - 1);
-    newFocus = Math.max(0, Math.min(newFocus, next.length - 1));
-    if (newFocus !== this.focusedPaneIdx) {
-      this.setFocusedPane(newFocus);
-    } else {
-      this.persistTabs();
-    }
-  }
+  closePane(idx: number) { tabsClosePane(this, idx); }
 
   /** Move focus to a pane. Stashes outgoing composer draft + restores incoming
    *  so each pane carries its own draft. No-op in single-pane mode. */
-  setFocusedPane(idx: number) {
-    if (idx < 0 || idx >= this.panes.length) return;
-    if (this.focusedPaneIdx === idx && this.currentConvoId === this.panes[idx].tabId) return;
-    this.stashTabUi(this.currentConvoId);
-    this.focusedPaneIdx = idx;
-    const next = this.panes[idx].tabId;
-    if (next) {
-      const inMeta = this.conversations.some((c) => c.id === next);
-      if (inMeta && !this.tabs.get(next)) {
-        void this.loadConversation(next);
-      } else {
-        this.currentConvoId = next;
-      }
-    } else {
-      this.currentConvoId = null;
-    }
-    this.restoreTabUi(next);
-    this.persistTabs();
-  }
+  setFocusedPane(idx: number) { tabsSetFocusedPane(this, idx); }
 
-  /** Assign a tab to the currently-focused pane. Called by openTab/newTab so
-   *  the focused pane's slot follows the active selection. Works in both
-   *  single-pane (length=1) and split modes. */
-  private assignFocusedPane(tabId: string | null) {
-    const cur = this.panes[this.focusedPaneIdx];
-    if (!cur || cur.tabId === tabId) return;
-    const next = this.panes.slice();
-    next[this.focusedPaneIdx] = { tabId };
-    this.panes = next;
-  }
-
-  /** Drop a tab from the tabsbar into a specific pane.
-   *  - Single-pane mode (panes.length===1) + dropping a DIFFERENT tab on a
-   *    half → enter 2-pane split (existing behavior).
-   *  - Multi-pane mode → if target pane already holds this tab, just focus it.
-   *    If a SIBLING pane holds it, swap. Else assign + focus.
-   *  - paneIdx === panes.length is a sentinel meaning "drop in a new pane at
-   *    the end" — auto-adds (cap-aware) and assigns. */
-  dropTabIntoPane(tabId: string, paneIdx: number) {
-    if (!this.openTabs.includes(tabId)) return;
-    if (paneIdx < 0) return;
-
-    // Sentinel: "add new pane at end". Cap-respecting.
-    if (paneIdx >= this.panes.length) {
-      if (this.panes.length >= MAX_PANES) return;
-      const next = this.panes.slice();
-      next.push({ tabId });
-      this.panes = next;
-      const newIdx = next.length - 1;
-      this.stashTabUi(this.currentConvoId);
-      this.focusedPaneIdx = newIdx;
-      const inMeta = this.conversations.some((c) => c.id === tabId);
-      if (inMeta && !this.tabs.get(tabId)) {
-        void this.loadConversation(tabId);
-      } else {
-        this.currentConvoId = tabId;
-      }
-      this.restoreTabUi(tabId);
-      this.persistTabs();
-      return;
-    }
-
-    if (this.panes.length === 1) {
-      // Single-pane → drop on a half = enter split. paneIdx is 0 or 1 from
-      // the half-detect. If the dragged tab IS the only-pane tab, ignore.
-      if (tabId === this.currentConvoId) return;
-      const other = paneIdx === 0 ? 1 : 0;
-      const next: PaneState[] = [{ tabId: null }, { tabId: null }];
-      next[paneIdx] = { tabId };
-      next[other] = { tabId: this.currentConvoId };
-      this.panes = next;
-      this.telemetry.event("pane.split.on", { via: "drag", p0: next[0].tabId, p1: next[1].tabId });
-    } else {
-      // Already split: same tab in target = focus only.
-      if (this.panes[paneIdx].tabId === tabId) {
-        this.setFocusedPane(paneIdx);
-        return;
-      }
-      // Same tab in a SIBLING pane = swap (mirror UX).
-      const siblingIdx = this.panes.findIndex((p, i) => i !== paneIdx && p.tabId === tabId);
-      if (siblingIdx !== -1) {
-        const swapped = this.panes.slice();
-        swapped[siblingIdx] = { tabId: this.panes[paneIdx].tabId };
-        swapped[paneIdx] = { tabId };
-        this.panes = swapped;
-        this.setFocusedPane(paneIdx);
-        return;
-      }
-      const next = this.panes.slice();
-      next[paneIdx] = { tabId };
-      this.panes = next;
-    }
-    // Move focus to the freshly-dropped pane + sync currentConvoId.
-    this.stashTabUi(this.currentConvoId);
-    this.focusedPaneIdx = paneIdx;
-    if (tabId !== this.currentConvoId) {
-      const inMeta = this.conversations.some((c) => c.id === tabId);
-      if (inMeta && !this.tabs.get(tabId)) {
-        void this.loadConversation(tabId);
-      } else {
-        this.currentConvoId = tabId;
-      }
-    }
-    this.restoreTabUi(tabId);
-    this.persistTabs();
-  }
-
-  /** When a tab closes, scrub it from any pane that pointed at it. Panes
-   *  become empty (null); the pane container stays so the user can drop a
-   *  different tab in or close the pane manually. */
-  private scrubTabFromPanes(id: string) {
-    let changed = false;
-    const next = this.panes.map((p) => {
-      if (p.tabId === id) { changed = true; return { tabId: null }; }
-      return p;
-    });
-    if (changed) this.panes = next;
-  }
+  /** Drop a tab from the tabsbar into a specific pane. See tabs.ts for the
+   *  single→split / sibling-swap / end-sentinel behavior. */
+  dropTabIntoPane(tabId: string, paneIdx: number) { tabsDropTabIntoPane(this, tabId, paneIdx); }
 
   /** Look up the TabState whose CLI session matches the event's session_id.
    *  Linear scan over open tabs is fine — typical user has <10. */
@@ -1612,7 +1033,8 @@ class AssistantStore {
 
   /** Get-or-create the TabState for a convo. Used by send() on first turn
    *  and by tab lifecycle methods. Reassigning the map triggers reactivity. */
-  private ensureTab(convoId: string, cliSessionId: string): TabState {
+  // M5b: relaxed from `private` so persistence module's loadConversation can call.
+  ensureTab(convoId: string, cliSessionId: string): TabState {
     const existing = this.tabs.get(convoId);
     if (existing) return existing;
     const tab = new TabState(cliSessionId);
@@ -1624,7 +1046,8 @@ class AssistantStore {
   }
 
   /** Tear down a tab's TabState. Called from closeTab / closeAllTabs. */
-  private dropTab(convoId: string) {
+  // M5b: relaxed from `private` so persistence module's deleteConversation can call.
+  dropTab(convoId: string) {
     const tab = this.tabs.get(convoId);
     if (!tab) return;
     // #139: cancel the outstanding rAF + finalize any pending text BEFORE
@@ -1661,7 +1084,8 @@ class AssistantStore {
    *  serialize-and-export. */
   telemetry = new SessionTelemetry();
 
-  apiKey = $state<string | null>(null);
+  /** Phase 6 (#37): the value never crosses IPC — only whether one is set. */
+  hasApiKey = $state<boolean>(false);
   useFullConfig = $state<boolean>(true);
   maxBudgetUsd = $state<number | null>(null);
   allowRemoteShell = $state<boolean>(false);
@@ -1713,6 +1137,10 @@ class AssistantStore {
   // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
   // Haiku ignores this server-side. Persisted to localStorage.
   thinkingEffort = $state<ThinkingEffort>(loadEffort());
+  // Permission mode passed to the CLI's `--permission-mode`. Global (matches
+  // model/effort). `bypassPermissions` until the user picks otherwise so
+  // existing behavior is unchanged. Persisted to localStorage.
+  permissionMode = $state<PermissionMode>(loadPermissionMode());
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
   // is retained as a no-op flag for back-compat w/ any remaining slash
   // command — History is now its own workspace, not an overlay.
@@ -1752,12 +1180,14 @@ class AssistantStore {
   set currentCliSessionId(v: string | null) {
     if (this.activeTab) this.activeTab.cliSessionId = v ?? "";
   }
-  private get convoCreatedAt(): number | null { return this.activeTab?.convoCreatedAt ?? null; }
-  private set convoCreatedAt(v: number | null) {
+  // M5b: relaxed for persistence module loadConversation host access.
+  get convoCreatedAt(): number | null { return this.activeTab?.convoCreatedAt ?? null; }
+  set convoCreatedAt(v: number | null) {
     if (this.activeTab) this.activeTab.convoCreatedAt = v;
   }
-  private get convoTitle(): string | null { return this.activeTab?.convoTitle ?? null; }
-  private set convoTitle(v: string | null) {
+  // M5: relaxed from `private` so persistence module can read/write through host ref.
+  get convoTitle(): string | null { return this.activeTab?.convoTitle ?? null; }
+  set convoTitle(v: string | null) {
     if (this.activeTab) this.activeTab.convoTitle = v;
   }
 
@@ -1799,6 +1229,14 @@ class AssistantStore {
     if (midConvo) this.cacheBustHint("effort");
   }
 
+  setPermissionMode(v: PermissionMode) {
+    if (this.permissionMode === v) return;
+    const prev = this.permissionMode;
+    this.permissionMode = v;
+    savePermissionMode(v);
+    this.telemetry.event("permission_mode.change", { from: prev, to: v });
+  }
+
   /** One-shot-per-session-per-kind notice when model/effort flips on a tab
    *  that already has turns. Sonnet's cache empirically does NOT survive
    *  effort changes (S106 measurement: 0 cacheRead on 3 consecutive sonnet
@@ -1818,8 +1256,9 @@ class AssistantStore {
   // longer need to stash/restore. stashTabUi/restoreTabUi are kept as no-ops
   // so the call-sites in addPane/closePane/setFocusedPane/dropTabIntoPane
   // don't need surgery; the per-tab fields already carry the right value.
-  private stashTabUi(_id: string | null) { /* no-op since v2.1 */ }
-  private restoreTabUi(_id: string | null) { /* no-op since v2.1 */ }
+  // M6: relaxed from `private` so the tabs module calls them through the host ref.
+  stashTabUi(_id: string | null) { /* no-op since v2.1 */ }
+  restoreTabUi(_id: string | null) { /* no-op since v2.1 */ }
 
   /** AssistantPage writes the active tab's scrollTop here on scroll, then
    *  reads it back on tab activation. Kept in the store so it survives
@@ -1834,7 +1273,8 @@ class AssistantStore {
   /** Drop all per-tab UI scratch for a closed tab. Draft + attachments live
    *  on TabState now, so dropTab() teardown handles those; only scroll cache
    *  needs explicit pruning here. */
-  private pruneTabUi(id: string) {
+  // M6: relaxed from `private` so the tabs module calls it through the host ref.
+  pruneTabUi(id: string) {
     this.tabScroll.delete(id);
   }
 
@@ -1886,9 +1326,9 @@ class AssistantStore {
     );
     await this.refreshAuth();
     try {
-      this.apiKey = await invoke<string | null>("assistant_get_api_key");
+      this.hasApiKey = await invoke<boolean>("assistant_get_api_key_present");
     } catch (e) {
-      console.warn("assistant_get_api_key failed", e);
+      console.warn("assistant_get_api_key_present failed", e);
     }
     try {
       this.useFullConfig = await invoke<boolean>("assistant_get_use_full_config");
@@ -1930,6 +1370,17 @@ class AssistantStore {
       await listen<{ request_id: string; session_id: string; questions: unknown }>(
         "assistant://ask-user",
         (e) => this.onAskUser(e.payload),
+      ),
+      await listen<{
+        request_id: string;
+        session_id: string;
+        tool_use_id: string;
+        tool_name: string;
+        input: unknown;
+        suggestions: PermissionSuggestion[] | null;
+      }>(
+        "assistant://permission-request",
+        (e) => this.onPermissionRequest(e.payload),
       ),
     );
 
@@ -2081,6 +1532,63 @@ class AssistantStore {
     }
   }
 
+  /** `assistant://permission-request` arrived — the CLI wants to run a gated
+   *  tool in a prompting mode. Pair it to the matching tab by tool_use_id so
+   *  the streamed tool chip renders Allow / Deny. If the tab is gone (closed
+   *  mid-flight), auto-deny so the CLI's control_response doesn't hang. */
+  private onPermissionRequest(payload: {
+    request_id: string;
+    session_id: string;
+    tool_use_id: string;
+    tool_name: string;
+    suggestions: PermissionSuggestion[] | null;
+  }) {
+    const tab = this.tabByCliSession(payload.session_id);
+    if (!tab) {
+      void invoke("assistant_answer_permission", {
+        requestId: payload.request_id,
+        decision: { behavior: "deny", message: "Conversation closed before approval." },
+      }).catch(() => { /* turn already ended — ignore */ });
+      return;
+    }
+    const next = new Map(tab.permissionPrompts);
+    next.set(payload.tool_use_id, {
+      requestId: payload.request_id,
+      toolName: payload.tool_name,
+      suggestions: payload.suggestions ?? [],
+    });
+    tab.permissionPrompts = next;
+  }
+
+  /** Look up a pending permission ask for a tool block in the active tab.
+   *  Called from ToolChip.svelte via a `$derived` so the chip's Allow/Deny
+   *  buttons appear the moment the ask lands. */
+  permissionPromptFor(toolUseId: string): PermissionPromptInfo | null {
+    return this.activeTab?.permissionPrompts.get(toolUseId) ?? null;
+  }
+
+  /** Answer a `can_use_tool` ask. `allow` writes `{behavior:"allow"}` (the CLI
+   *  reuses the original input); `deny` writes `{behavior:"deny", message}`.
+   *  Resolves the backend oneshot, which writes the control_response to the
+   *  CLI's stdin and unblocks tool execution. The chip flips to its normal
+   *  running/done state via the existing stream pipeline. */
+  async submitPermissionDecision(toolUseId: string, allow: boolean): Promise<void> {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const info = tab.permissionPrompts.get(toolUseId);
+    if (!info) return;
+    const decision = allow
+      ? { behavior: "allow" }
+      : { behavior: "deny", message: "User declined this action." };
+    try {
+      await invoke("assistant_answer_permission", { requestId: info.requestId, decision });
+    } finally {
+      const next = new Map(tab.permissionPrompts);
+      next.delete(toolUseId);
+      tab.permissionPrompts = next;
+    }
+  }
+
   ackRemoteShellBanner() {
     this.remoteShellBannerSeen = true;
     try {
@@ -2088,163 +1596,27 @@ class AssistantStore {
     } catch { /* same as above */ }
   }
 
-  async refreshWorkspace() {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_get_workspace");
-    } catch (e) {
-      console.warn("assistant_get_workspace failed", e);
-    }
-  }
+  // M3 split (2026-05-26): workspace IPC ops in `./assistant/workspace`.
+  // Fields stay on Store; methods become thunks routing to free fns.
+  refreshWorkspace() { return wsRefresh(this); }
+  pickFolder() { return wsPickFolder(this); }
+  setRoot(path: string) { return wsSetRoot(this, path); }
+  clearRoot() { return wsClearRoot(this); }
+  removeRecentRoot(path: string) { return wsRemoveRecentRoot(this, path); }
+  loadWorkspaceFiles() { return wsLoadFiles(this); }
 
-  /** Native folder picker → set as active root. Returns false if user cancelled. */
-  async pickFolder(): Promise<boolean> {
-    try {
-      const result = await openDialog({ directory: true, multiple: false });
-      const path = typeof result === "string" ? result : null;
-      if (!path) return false;
-      await this.setRoot(path);
-      return true;
-    } catch (e) {
-      this.lastError = `Open folder failed: ${String(e)}`;
-      return false;
-    }
-  }
+  refreshConversations() { return persistRefresh(this); }
 
-  async setRoot(path: string) {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
-      this.workspaceFiles = [];
-      this.lastNotice = `Workspace: ${path}`;
-    } catch (e) {
-      this.lastError = `Set workspace failed: ${String(e)}`;
-    }
-  }
-
-  async clearRoot() {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_clear_root");
-      this.workspaceFiles = [];
-    } catch (e) {
-      console.warn("assistant_clear_root failed", e);
-    }
-  }
-
-  async removeRecentRoot(path: string) {
-    try {
-      this.workspace = await invoke<WorkspaceState>("assistant_remove_recent_root", { path });
-    } catch (e) {
-      console.warn("assistant_remove_recent_root failed", e);
-    }
-  }
-
-  /** Lazy-load relative file paths under the current workspace root. Caches
-   *  per-root in `workspaceFiles`; concurrent calls are de-duped via the
-   *  `workspaceFilesLoadingFor` guard. */
-  async loadWorkspaceFiles() {
-    const root = this.workspace.current;
-    if (!root) { this.workspaceFiles = []; return; }
-    if (this.workspaceFilesLoadingFor === root) return;
-    this.workspaceFilesLoadingFor = root;
-    try {
-      this.workspaceFiles = await invoke<string[]>("assistant_list_workspace_files");
-    } catch (e) {
-      console.warn("assistant_list_workspace_files failed", e);
-    } finally {
-      this.workspaceFilesLoadingFor = null;
-    }
-  }
-
-  async refreshConversations() {
-    try {
-      this.conversations = await invoke<ConversationMeta[]>("assistant_list_conversations");
-    } catch (e) {
-      console.warn("assistant_list_conversations failed", e);
-    }
-  }
-
-  /** Derive a human-friendly title from the first user message. #145: now
-   *  takes the tab as an arg so a debounced doSave reads from the originating
-   *  tab's messages, not whichever tab is active when the timer fires. */
-  private deriveTitle(tab: TabState): string {
-    const first = tab.messages.find((m) => m.role === "user");
-    if (!first) return "New conversation";
-    const text = first.blocks
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim()
-      .replace(/\s+/g, " ");
-    return text.length > 60 ? text.slice(0, 60) + "…" : text || "New conversation";
-  }
-
-  /** Build the on-disk record + fire-and-forget save for a single tab.
-   *  Shared by flushNow + scheduleSave so the snapshot semantics live in one
-   *  place. #145: cliSessionId / createdAt / title all sourced from the tab
-   *  passed in, not store-level — debounced save can't redirect mid-flight. */
+  // M5: deriveTitle + buildSaveRecord moved to ./assistant/persistence. Kept
+  // as private thunk for any in-class callers that still reference it.
   private buildSaveRecord(convoId: string, tab: TabState): ConversationRecord {
-    return {
-      id: convoId,
-      title: tab.convoTitle ?? this.deriveTitle(tab),
-      model: this.model,
-      createdAt: tab.convoCreatedAt ?? Date.now(),
-      updatedAt: Date.now(),
-      messages: tab.messages,
-      cliSessionId: tab.cliSessionId || convoId,
-      compactionHistory: tab.compactionHistory.length > 0 ? tab.compactionHistory : undefined,
-    };
+    return persistBuildRecord(this, convoId, tab);
   }
 
-  /** Best-effort synchronous flush of all open tabs. Wired to
-   *  `beforeunload` in init() — without this, a window close within the
-   *  scheduleSave 700ms debounce loses the last turn. We fire the IPC
-   *  without awaiting (browser drops pending promises on unload), but the
-   *  Tauri runtime typically completes the in-flight invoke before the
-   *  process actually exits.
-   *  #145: iterate every tab with content, not just the active one. A
-   *  background-tab turn that finished mid-debounce would otherwise be lost. */
-  flushNow() {
-    for (const [convoId, tab] of this.tabs) {
-      if (tab.messages.length === 0) continue;
-      if (tab.saveTimer) {
-        clearTimeout(tab.saveTimer);
-        tab.saveTimer = null;
-      }
-      const record = this.buildSaveRecord(convoId, tab);
-      tab.convoTitle = record.title;
-      tab.convoCreatedAt = record.createdAt;
-      void invoke("assistant_save_conversation", { convo: record }).catch((e) => {
-        console.warn("flushNow save failed", e);
-      });
-    }
-  }
+  flushNow() { persistFlushNow(this); }
 
-  /** Persist the current conversation. Debounced — callers can fire freely;
-   *  only one disk write per ~700ms per tab. Set `flush=true` to write
-   *  immediately. #145: snapshots (tab, convoId) at call time so a 700ms
-   *  delay can't dispatch the save against whichever tab is active when the
-   *  timer fires. */
-  private scheduleSave(flush = false) {
-    const convoId = this.currentConvoId;
-    const tab = this.activeTab;
-    if (!tab || !convoId || tab.messages.length === 0) return;
-    if (tab.saveTimer) {
-      clearTimeout(tab.saveTimer);
-      tab.saveTimer = null;
-    }
-    const doSave = async () => {
-      tab.saveTimer = null;
-      const record = this.buildSaveRecord(convoId, tab);
-      tab.convoTitle = record.title;
-      tab.convoCreatedAt = record.createdAt;
-      try {
-        await invoke("assistant_save_conversation", { convo: record });
-        await this.refreshConversations();
-      } catch (e) {
-        console.warn("assistant_save_conversation failed", e);
-      }
-    };
-    if (flush) void doSave();
-    else tab.saveTimer = setTimeout(doSave, 700);
-  }
+  // M6: relaxed from `private` so the tabs module calls it through the host ref.
+  scheduleSave(flush = false) { persistSchedule(this, flush); }
 
   /** Start a fresh conversation. Flushes the current one first so nothing
    *  is lost when the user clicks `+ New`. */
@@ -2261,351 +1633,46 @@ class AssistantStore {
     this.convoTitle = null;
   }
 
-  async loadConversation(id: string) {
-    if (this.streaming) await this.stop();
-    if (this.messages.length > 0 && this.currentConvoId && this.currentConvoId !== id) {
-      this.scheduleSave(true);
-    }
-    try {
-      const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-      // Legacy convos lack cliSessionId — fall back to id so --resume still
-      // hits the original JSONL. New convos persist cliSessionId explicitly.
-      const cliSid = convo.cliSessionId ?? convo.id;
-      const tab = this.ensureTab(convo.id, cliSid);
-      // Re-hydrate from disk — overwrites in-memory state if the tab was
-      // previously open with stale data.
-      tab.messages = convo.messages ?? [];
-      tab.cliSessionId = cliSid;
-      tab.compactionHistory = convo.compactionHistory ?? [];
-      tab.tasks = [];
-      tab.lastError = null;
-      tab.totalCostUsd = null;
-      tab.resetUsage();
-      tab.promptHistory = (convo.messages ?? [])
-        .filter((m) => m.role === "user")
-        .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())
-        .filter((s) => s.length > 0)
-        .slice(-50);
-      tab.dockAutoOpenedThisConvo = false;
-      this.currentConvoId = convo.id;
-      this.currentCliSessionId = cliSid;
-      this.convoCreatedAt = convo.createdAt;
-      this.convoTitle = convo.title;
-      this.queue = [];
-      this.lastNotice = null;
-      this.ui.historyOpen = false;
-      if (convo.model === "sonnet" || convo.model === "opus" || convo.model === "haiku") {
-        this.setModel(convo.model);
-      }
-    } catch (e) {
-      this.lastError = `Failed to load conversation: ${String(e)}`;
-    }
-  }
-
-  async deleteConversation(id: string) {
-    try {
-      await invoke("assistant_delete_conversation", { id });
-      if (this.openTabs.includes(id)) {
-        // Reuse closeTab so neighbor-pick + active-switch logic stays in one place.
-        await this.closeTab(id);
-      } else if (this.currentConvoId === id) {
-        this.dropTab(id);
-        this.currentConvoId = null;
-        this.currentCliSessionId = null;
-        this.convoCreatedAt = null;
-        this.convoTitle = null;
-      } else {
-        // Convo was open as a TabState (e.g. background) but not the active tab.
-        this.dropTab(id);
-      }
-      await this.refreshConversations();
-      // #149: an openTab(id) that started before the delete may have racy-
-      // pushed id into openTabs while we were awaiting the IPC; close it now
-      // so the user doesn't end up with a tab pointing at a deleted convo.
-      if (this.openTabs.includes(id)) {
-        await this.closeTab(id);
-      }
-    } catch (e) {
-      this.lastError = `Failed to delete conversation: ${String(e)}`;
-    }
-  }
+  loadConversation(id: string) { return persistLoad(this, id); }
+  deleteConversation(id: string) { return persistDelete(this, id); }
 
   // ── v0.4 tabs ────────────────────────────────────────────────────────
-  private persistTabs() {
-    try {
-      localStorage.setItem(
-        "rift.ui.tabs.v1",
-        JSON.stringify({
-          openTabs: this.openTabs,
-          activeTabId: this.currentConvoId,
-          panes: this.panes,
-          focusedPaneIdx: this.focusedPaneIdx,
-        }),
-      );
-    } catch { /* localStorage unavailable */ }
-  }
+  // M6: relaxed from `private` so the tabs module calls it through the host ref.
+  persistTabs() { persistTabsImpl(this); }
 
-  private async restoreTabs() {
-    // #181: persistTabs() in finally so a throw mid-restore doesn't leave the
-    // disk record diverged from in-memory state.
-    try {
-      const raw = localStorage.getItem("rift.ui.tabs.v1");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        openTabs?: unknown;
-        activeTabId?: unknown;
-        panes?: unknown;
-        focusedPaneIdx?: unknown;
-      };
-      const ids = Array.isArray(parsed.openTabs)
-        ? parsed.openTabs.filter((s): s is string => typeof s === "string")
-        : [];
-      const existing = new Set(this.conversations.map((c) => c.id));
-      const valid = ids.filter((id) => existing.has(id));
-      this.openTabs = valid;
-      const active = typeof parsed.activeTabId === "string" ? parsed.activeTabId : null;
-      if (active && valid.includes(active)) {
-        await this.loadConversation(active);
-      } else if (valid.length > 0) {
-        await this.loadConversation(valid[0]);
-      }
-      // Restore split state — N-pane shape. Accepts length 1..MAX_PANES.
-      // Stale tab refs are pruned to null (pane survives, empty). Legacy
-      // null/missing keeps single-pane default.
-      if (Array.isArray(parsed.panes) && parsed.panes.length >= 1 && parsed.panes.length <= MAX_PANES) {
-        const norm = (p: unknown): PaneState => {
-          const id = (p as { tabId?: unknown })?.tabId;
-          return { tabId: typeof id === "string" && valid.includes(id) ? id : null };
-        };
-        const restored = parsed.panes.map(norm);
-        // Keep at least one pane; if all restored panes are empty and we're
-        // single-length, that's fine — assignFocusedPane will fill on next open.
-        this.panes = restored.length > 0 ? restored : [{ tabId: null }];
-        const fi = typeof parsed.focusedPaneIdx === "number" ? parsed.focusedPaneIdx : 0;
-        this.focusedPaneIdx = Math.max(0, Math.min(fi, this.panes.length - 1));
-        // Sync currentConvoId to focused pane if needed.
-        const focused = this.panes[this.focusedPaneIdx].tabId;
-        if (focused && focused !== this.currentConvoId) {
-          await this.loadConversation(focused);
-        }
-      }
-    } catch (e) {
-      console.warn("restoreTabs failed", e);
-    } finally {
-      this.persistTabs();
-    }
-  }
+  private restoreTabs() { return tabsRestore(this); }
 
   /** Open a saved convo as a tab. Push to openTabs if not already there;
    *  activate + load from disk. Unsaved new-tab ids (minted by newTab() but
    *  no send yet → no disk record) drop into a fresh in-memory state instead
    *  of disk-load. Singleton stream pipeline — mid-stream switch is handled
    *  by loadConversation() calling stop(). */
-  async openTab(id: string) {
-    if (!this.openTabs.includes(id)) {
-      this.openTabs = [...this.openTabs, id];
-    }
-    if (this.currentConvoId === id) {
-      this.persistTabs();
-      return;
-    }
-    this.telemetry.event("tab.switch", { from: this.currentConvoId, to: id });
-    if (this.messages.length > 0 && this.currentConvoId) {
-      this.scheduleSave(true);
-    }
-    // Stash outgoing tab's composer + attachments before any state change.
-    this.stashTabUi(this.currentConvoId);
-    const inMeta = this.conversations.some((c) => c.id === id);
-    if (inMeta) {
-      await this.loadConversation(id);
-    } else {
-      // Fresh in-memory tab (no disk record yet). Mint a TabState with
-      // cliSessionId seeded from convoId — first send() finalizes. Don't
-      // stop() here: if another tab was streaming, leave it running in the
-      // bg. #143: per-tab fields are already null on the fresh TabState;
-      // writing them via store setters would clobber cliSessionId.
-      this.ensureTab(id, id);
-      this.currentConvoId = id;
-      this.queue = [];
-      this.lastNotice = null;
-    }
-    // Restore incoming tab's composer + attachments (loadConversation cleared
-    // them; we re-fill from cache if the user had a draft mid-typing).
-    this.restoreTabUi(id);
-    this.assignFocusedPane(id);
-    this.persistTabs();
-  }
+  openTab(id: string) { return tabsOpenTab(this, id); }
 
   /** Close a tab. Removes from openTabs; convo stays on disk → still in History.
    *  Active-tab close picks the right neighbor (or left if at end); last-tab
    *  close drops to empty state w/ currentConvoId=null. */
-  async closeTab(id: string) {
-    const idx = this.openTabs.indexOf(id);
-    if (idx === -1) return;
-    const wasActive = this.currentConvoId === id;
-    this.telemetry.event("tab.close", { convoId: id, wasActive });
-    const next = this.openTabs.slice();
-    next.splice(idx, 1);
-    this.openTabs = next;
-    // Drop the closing tab's UI scratch + TabState. The convo itself stays
-    // on disk via scheduleSave below; only in-memory streaming state is retired.
-    this.pruneTabUi(id);
-    this.scrubTabFromPanes(id);
-    if (wasActive) {
-      // Save unsaved tail of the closing tab before switching/clearing.
-      if (this.messages.length > 0 && this.convoCreatedAt) {
-        this.scheduleSave(true);
-      }
-      if (this.streaming) await this.stop();
-    }
-    this.dropTab(id);
-    if (wasActive) {
-      if (next.length === 0) {
-        this.currentConvoId = null;
-        this.currentCliSessionId = null;
-        this.convoCreatedAt = null;
-        this.convoTitle = null;
-        this.queue = [];
-        this.lastNotice = null;
-      } else {
-        // Right-priority: the entry that shifted into idx, else last.
-        const neighbor = next[idx] ?? next[next.length - 1];
-        const inMeta = this.conversations.some((c) => c.id === neighbor);
-        if (inMeta) {
-          await this.loadConversation(neighbor);
-        } else {
-          // #143: ensureTab seeds the fresh tab's cliSessionId to neighbor;
-          // don't store-write null afterwards or the setter clobbers it.
-          this.ensureTab(neighbor, neighbor);
-          this.currentConvoId = neighbor;
-          this.queue = [];
-          this.lastNotice = null;
-        }
-        this.restoreTabUi(neighbor);
-        this.assignFocusedPane(neighbor);
-      }
-    }
-    this.persistTabs();
-  }
+  closeTab(id: string) { return tabsCloseTab(this, id); }
 
   /** Open a fresh empty tab. Mints currentConvoId up-front so the tab can
    *  render before the first send; convoCreatedAt stays null so send() still
    *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
-  async newTab() {
-    // Don't stop the previous tab's stream — newTab leaves background tabs
-    // streaming. Save unsaved tail of the previous tab before swapping.
-    if (this.messages.length > 0 && this.currentConvoId) {
-      this.scheduleSave(true);
-    }
-    // Snapshot outgoing tab's composer state before we mint the new one.
-    this.stashTabUi(this.currentConvoId);
-    const id = crypto.randomUUID();
-    this.openTabs = [...this.openTabs, id];
-    // Fresh TabState — empty messages, no streaming. cliSessionId defaults
-    // to the convoId; first send() finalizes if needed.
-    this.ensureTab(id, id);
-    this.telemetry.event("tab.new", { convoId: id });
-    this.currentConvoId = id;
-    // #143: per-tab fields default to null/<id> on the freshly minted
-    // TabState; writing through the store setters here would clobber
-    // cliSessionId back to "" (loses ensureTab's seed value).
-    this.queue = [];
-    this.lastNotice = null;
-    // Fresh tab → empty composer (no cache entry yet).
-    this.composerDraft = "";
-    this.composerAttachments = [];
-    this.assignFocusedPane(id);
-    this.persistTabs();
-  }
+  newTab() { return tabsNewTab(this); }
 
-  reorderTabs(fromIdx: number, toIdx: number) {
-    if (fromIdx === toIdx) return;
-    if (fromIdx < 0 || fromIdx >= this.openTabs.length) return;
-    const next = this.openTabs.slice();
-    const [moved] = next.splice(fromIdx, 1);
-    const clamped = Math.max(0, Math.min(toIdx, next.length));
-    next.splice(clamped, 0, moved);
-    this.openTabs = next;
-    this.persistTabs();
-  }
+  reorderTabs(fromIdx: number, toIdx: number) { tabsReorder(this, fromIdx, toIdx); }
 
-  async cycleTab(direction: 1 | -1) {
-    if (this.openTabs.length === 0) return;
-    const cur = this.currentConvoId ? this.openTabs.indexOf(this.currentConvoId) : -1;
-    const n = this.openTabs.length;
-    const nextIdx = ((cur < 0 ? 0 : cur + direction) + n) % n;
-    await this.openTab(this.openTabs[nextIdx]);
-  }
+  cycleTab(direction: 1 | -1) { return tabsCycle(this, direction); }
 
-  async closeOtherTabs(keepId: string) {
-    const others = this.openTabs.filter((id) => id !== keepId);
-    if (others.length === 0) return;
-    // #144: tear down per-tab state for removed tabs so tabs Map +
-    // tabDrafts/tabAttachments/tabScroll don't accumulate over long sessions.
-    for (const id of others) {
-      this.dropTab(id);
-      this.pruneTabUi(id);
-    }
-    this.openTabs = [keepId];
-    if (this.currentConvoId !== keepId) {
-      await this.loadConversation(keepId);
-    }
-    this.persistTabs();
-  }
+  closeOtherTabs(keepId: string) { return tabsCloseOthers(this, keepId); }
 
-  /** Wipe all open tabs and drop into the empty-tabs state. Flushes the
-   *  current convo if it has messages so nothing's lost; closes streams. */
-  async closeAllTabs() {
-    if (this.streaming) await this.stop();
-    if (this.messages.length > 0 && this.convoCreatedAt) {
-      this.scheduleSave(true);
-    }
-    // Drop every TabState; the convos persisted to disk above.
-    this.tabs = new Map();
-    this.openTabs = [];
-    this.currentConvoId = null;
-    this.currentCliSessionId = null;
-    this.convoCreatedAt = null;
-    this.convoTitle = null;
-    this.queue = [];
-    this.lastNotice = null;
-    this.persistTabs();
-  }
+  /** Wipe all open tabs and drop into the empty-tabs state. */
+  closeAllTabs() { return tabsCloseAll(this); }
 
-  async closeTabsToRight(anchorId: string) {
-    const idx = this.openTabs.indexOf(anchorId);
-    if (idx === -1 || idx === this.openTabs.length - 1) return;
-    const kept = this.openTabs.slice(0, idx + 1);
-    const removed = this.openTabs.slice(idx + 1);
-    const removedActive = this.currentConvoId && !kept.includes(this.currentConvoId);
-    // #144
-    for (const id of removed) {
-      this.dropTab(id);
-      this.pruneTabUi(id);
-    }
-    this.openTabs = kept;
-    if (removedActive) {
-      await this.loadConversation(anchorId);
-    }
-    this.persistTabs();
-  }
+  closeTabsToRight(anchorId: string) { return tabsCloseToRight(this, anchorId); }
 
   // ── /v0.4 tabs ───────────────────────────────────────────────────────
 
-  async renameConversation(id: string, title: string) {
-    const trimmed = title.trim();
-    if (!trimmed) return;
-    try {
-      const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-      convo.title = trimmed.slice(0, 120);
-      convo.updatedAt = Date.now();
-      await invoke("assistant_save_conversation", { convo });
-      if (this.currentConvoId === id) this.convoTitle = convo.title;
-      await this.refreshConversations();
-    } catch (e) {
-      this.lastError = `Failed to rename conversation: ${String(e)}`;
-    }
-  }
+  renameConversation(id: string, title: string) { return persistRename(this, id, title); }
 
   async refreshAuth() {
     this.authChecking = true;
@@ -2617,13 +1684,14 @@ class AssistantStore {
       this.auth = null;
     } finally {
       this.authChecking = false;
+      this.authLastProbed = Date.now();
     }
   }
 
   async setApiKey(key: string | null) {
     const v = key && key.trim().length > 0 ? key.trim() : null;
     await invoke("assistant_set_api_key", { apiKey: v });
-    this.apiKey = v;
+    this.hasApiKey = v !== null;
     await this.refreshAuth();
   }
 
@@ -2795,6 +1863,7 @@ class AssistantStore {
         attachments: turnAttachments.length > 0 ? turnAttachments : null,
         dyslexiaMode: accessibility.dyslexiaMode,
         thinkingEffort: this.thinkingEffort,
+        permissionMode: this.permissionMode,
         priorContextSummary: priorSummary,
       });
     } catch (e) {
@@ -2807,28 +1876,24 @@ class AssistantStore {
   /** Stage a binary attachment on `tabId`'s tab — defaults to the active
    *  (focused-pane) tab when omitted. 20 MiB cumulative cap mirrors the
    *  backend guard. Returns false on overflow. */
+  // M4 split (2026-05-26): per-tab attachment logic in `./assistant/attachments`.
+  // Store methods stay as thin tab-resolving thunks routing to active/specified tab.
   addAttachment(
     att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number },
     tabId?: string | null,
   ): boolean {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) return false;
-    const CAP = 20 * 1024 * 1024;
-    const current = tab.attachments.reduce((s, a) => s + a.sizeBytes, 0);
-    if (current + att.sizeBytes > CAP) return false;
-    tab.attachments = [...tab.attachments, { id: crypto.randomUUID(), ...att }];
-    return true;
+    return tab ? attAdd(tab, att) : false;
   }
 
   removeAttachment(id: string, tabId?: string | null) {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) return;
-    tab.attachments = tab.attachments.filter((a) => a.id !== id);
+    if (tab) attRemove(tab, id);
   }
 
   clearAttachments(tabId?: string | null) {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (tab) tab.attachments = [];
+    if (tab) attClear(tab);
   }
 
   /** User-driven pin from a chat checklist into the Tasks dock.
@@ -2952,6 +2017,32 @@ class AssistantStore {
     this.queue = this.queue.filter((q) => q.id !== id);
   }
 
+  /** Composer wand: one-shot rewrite of a rough draft into a clearer prompt.
+   *  Stateless — the backend streams a headless Haiku rewrite token-by-token
+   *  over `assistant://enhance-stream` (so the preview fills within ~1-2s
+   *  instead of blocking on the full completion), then resolves to the
+   *  authoritative final text. `onDelta` receives the accumulated text on each
+   *  chunk for live display. Throws on failure so the caller can surface it. */
+  async enhancePrompt(text: string, onDelta?: (full: string) => void): Promise<string> {
+    const requestId = crypto.randomUUID();
+    let acc = "";
+    const unlisten = await listen<{ request_id: string; delta?: string; done?: boolean }>(
+      "assistant://enhance-stream",
+      (e) => {
+        if (e.payload.request_id !== requestId) return;
+        if (e.payload.delta) {
+          acc += e.payload.delta;
+          onDelta?.(acc);
+        }
+      },
+    );
+    try {
+      return await invoke<string>("assistant_enhance_prompt", { requestId, prompt: text });
+    } finally {
+      unlisten();
+    }
+  }
+
   /** Compaction Phase B: one-shot summarize of the current CLI session.
    *  Pure read — does NOT mutate `messages`, doesn't archive, doesn't
    *  remint. Phase C wires this into the actual compaction flow; until
@@ -2960,26 +2051,8 @@ class AssistantStore {
    *  Returns the SummarizeResult on success, or null if no active session
    *  or the call fails (error surfaces via `lastError`). The cost/usage
    *  fields let Phase C populate the boundary message pill. */
-  async summarizeCurrentSession(focus?: string): Promise<SummarizeResult | null> {
-    const sid = this.currentCliSessionId;
-    if (!sid) {
-      this.lastError = "No active session yet — send a message first.";
-      return null;
-    }
-    const tasksJson = JSON.stringify(
-      this.tasks.map((t) => ({ content: t.content, status: t.status })),
-    );
-    try {
-      const res = await invoke<SummarizeResult>("assistant_summarize_session", {
-        sessionId: sid,
-        focus: focus ?? null,
-        tasksJson,
-      });
-      return res;
-    } catch (e) {
-      this.lastError = `Summarize failed: ${String(e)}`;
-      return null;
-    }
+  summarizeCurrentSession(focus?: string): Promise<SummarizeResult | null> {
+    return compactSummarize(this, focus);
   }
 
   /** Compaction Phase C: full compact action. Summarizes the current
@@ -2995,151 +2068,8 @@ class AssistantStore {
    *
    *  Cost is fully internal — no UI confirmation here; the Compact button
    *  in the header should confirm before calling (Phase E1 polish). */
-  async compactConversation(focus?: string, tabId?: string | null): Promise<boolean> {
-    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) {
-      this.lastError = "No active tab.";
-      return false;
-    }
-    if (tab.streaming) {
-      this.lastError = "Wait for the current turn to finish before compacting.";
-      return false;
-    }
-    if (tab.compactingNow) {
-      this.lastError = "Compaction already in progress.";
-      return false;
-    }
-    if (tab.messages.length < 4) {
-      this.lastError = "Conversation too short to compact (need ≥4 messages).";
-      return false;
-    }
-    const oldSid = tab.cliSessionId;
-    if (!oldSid) {
-      this.lastError = "No CLI session to compact.";
-      return false;
-    }
-
-    tab.compactingNow = true;
-    this.lastNotice = "Compacting conversation…";
-
-    // S124: pre-stage the boundary message w/ streaming:true BEFORE the
-    // summarize call. As progress events land, we patch the same block in
-    // place so the user sees the summary fill live.
-    const archivedCount = tab.messages.length;
-    const boundaryId = crypto.randomUUID();
-    const placeholderModel = this.compactModel ?? "haiku";
-    const ctxPctBefore = this.ctxPct;
-    const ctxWindowAtCompact = this.ctxWindow;
-    const stagedBoundary: ChatMessage = {
-      id: boundaryId,
-      role: "system",
-      blocks: [
-        {
-          type: "boundary",
-          summary: "",
-          at: Date.now(),
-          archivedCount,
-          costUsd: 0,
-          summaryModel: placeholderModel,
-          streaming: true,
-          ctxPctBefore,
-        },
-      ],
-    };
-    tab.messages = [...tab.messages, stagedBoundary];
-
-    // Live updater — replace the boundary block's summary field as the
-    // backend emits progress chunks. Tab-aware so background tabs don't
-    // get clobbered if a user switches mid-compact.
-    const patchBoundary = (patch: Partial<BoundaryBlock>) => {
-      const idx = tab.messages.findIndex((m) => m.id === boundaryId);
-      if (idx === -1) return;
-      const msg = tab.messages[idx];
-      const block = msg.blocks[0];
-      if (block?.type !== "boundary") return;
-      const nextBlock: BoundaryBlock = { ...block, ...patch };
-      const nextMsg: ChatMessage = { ...msg, blocks: [nextBlock] };
-      const next = tab.messages.slice();
-      next[idx] = nextMsg;
-      tab.messages = next;
-    };
-    let progressUnlisten: UnlistenFn | null = null;
-    try {
-      progressUnlisten = await listen<{
-        session_id: string;
-        summary_so_far: string;
-        status: "streaming" | "done";
-      }>("assistant://summarize-progress", (e) => {
-        if (e.payload.session_id !== oldSid) return;
-        patchBoundary({ summary: e.payload.summary_so_far });
-      });
-      const res = await this.summarizeCurrentSession(focus);
-      if (!res) {
-        // summarizeCurrentSession already set lastError. Drop the staged
-        // boundary so the chat doesn't keep a half-rendered pill.
-        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
-        return false;
-      }
-      const newSid = crypto.randomUUID();
-      try {
-        await invoke("assistant_remint_session", {
-          oldSessionId: oldSid,
-          newSessionId: newSid,
-        });
-      } catch (e) {
-        this.lastError = `Remint failed: ${String(e)}`;
-        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
-        return false;
-      }
-
-      // Finalize the staged boundary with the real summary + cost + model
-      // and clear streaming. archivedCount stays the snapshot from pre-compact.
-      // E1: post-compact ctx estimate — the new session starts with only the
-      // summary in context (seeded as <system-reminder> on the next user turn).
-      const ctxPctEstAfter =
-        ctxWindowAtCompact > 0
-          ? Math.min(100, (res.outputTokens / ctxWindowAtCompact) * 100)
-          : 0;
-      patchBoundary({
-        summary: res.summary,
-        costUsd: res.costUsd,
-        summaryModel: res.model,
-        streaming: false,
-        ctxPctEstAfter,
-      });
-
-      // Flip the tab's CLI handle to the new session and force the next
-      // send into first-turn mode (mints --session-id <new> instead of
-      // --resume <new>, which would fail since there's no JSONL yet).
-      tab.cliSessionId = newSid;
-      tab.convoCreatedAt = null;
-      tab.forceNextFirstTurn = true;
-      tab.pendingCompactionSummary = res.summary;
-      tab.resetUsage();
-      const now = Date.now();
-      tab.lastCompactionAt = now;
-      tab.compactionHistory = [
-        ...tab.compactionHistory,
-        {
-          at: now,
-          priorSessionId: oldSid,
-          newSessionId: newSid,
-          summary: res.summary,
-          costUsd: res.costUsd,
-          summaryModel: res.model,
-          archivedCount,
-        },
-      ];
-
-      this.scheduleSave(true);
-      const inTk = res.inputTokens + res.cacheReadTokens + res.cacheCreateTokens;
-      this.lastNotice =
-        `Compacted ${archivedCount} message(s) · $${res.costUsd.toFixed(4)} · ${inTk.toLocaleString()} in / ${res.outputTokens.toLocaleString()} out · ${res.model}. Next turn seeds the new session with the summary.`;
-      return true;
-    } finally {
-      tab.compactingNow = false;
-      if (progressUnlisten) progressUnlisten();
-    }
+  compactConversation(focus?: string, tabId?: string | null): Promise<boolean> {
+    return compactRun(this, focus, tabId);
   }
 
   /** Client-side slash commands. Returns true if input was consumed. */

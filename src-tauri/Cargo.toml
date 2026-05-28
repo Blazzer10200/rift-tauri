@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.4.31-alpha"
+version = "0.4.34"
 description = "Rift v14 — remote dev workspace for FiveM/RedM teams"
 authors = ["Blazzer"]
 edition = "2021"
@@ -33,7 +33,10 @@ whisper-cuda = ["whisper-rs", "whisper-rs/cuda"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `unstable` gates the multiwebview API (Window::add_child) used to embed the
+# in-app browser as a native child webview docked beside the chat. Non-semver-
+# stable surface — pin tauri minor + re-verify add_child on tauri upgrades.
+tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-opener = "2"
 # Native OS folder picker — Assistant uses it for "Open Folder…" so the user
 # can point Rift at any local project, decoupled from Sync's server folders.
@@ -49,6 +52,8 @@ russh = { version = "~0.60", default-features = false, features = ["ring", "rsa"
 russh-sftp = "2.1"
 
 # L9: force `ring` crypto provider on rustls — drops aws-lc-rs from dep tree.
+# Declared for feature control only — never `use rustls::*` directly (cargo-machete
+# flags it as unused; see [package.metadata.cargo-machete] below).
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 # M13: structured cancellation tokens for in-flight downloads.
@@ -57,14 +62,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # File system watcher — replaces .NET FileSystemWatcher
 notify = "8"
 
-# Auto-updater — same Velopack ecosystem we use on the WPF side.
-# EXACT pin (=0.0.1298) is intentional: 0.0.x semver = breaking-change
-# noise between patches. Last reviewed 2026-05-17; revisit quarterly
-# (audit B11). Security advisories on velopack-rust → check fasterthanlime/velopack release notes.
-velopack = "=0.0.1298"
-# HTTP client for our custom GithubSource (velopack-rust 0.0.1298 has no
-# GithubSource type; we implement UpdateSource against the GitHub REST API).
-ureq = "3"
+# Auto-updater: GH-release-API path (v0.4.34+, replaced tauri-plugin-updater).
+# See src-tauri/src/commands/update.rs header. No plugin needed — frontend
+# opens the Setup.exe asset URL via tauri-plugin-opener; NSIS handles install.
 
 # Logging
 log = "0.4"
@@ -84,7 +84,7 @@ walkdir = "2.5.0"
 # directly lets us import w/o relying on transitive paths.
 regex = "1"
 futures = "0.3.32"
-reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream", "json"] }
 
 # Phase 1h: server pubkey fingerprint pinning (OpenSSH-style SHA256:base64).
 # `sha2` for the digest, `base64` w/ NO_PAD engine to match OpenSSH's
@@ -121,6 +121,11 @@ webrtc-vad = "0.4"
 # for the install + opt-in instructions. Marked `optional = true` so the
 # default `cargo build` works on machines without LLVM/Clang installed.
 whisper-rs = { version = "0.14", default-features = false, optional = true }
+
+[package.metadata.cargo-machete]
+# rustls is declared at the top-level to force the `ring` crypto provider features
+# across the transitive tree (via reqwest/russh); we never `use rustls::*` directly.
+ignored = ["rustls"]
 
 # Speech-to-text — Phase 2: local Whisper pipeline.
 #   - `webkitSpeechRecognition` (Web Speech / Azure) kept as legacy engine.

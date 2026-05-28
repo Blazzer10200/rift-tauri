@@ -109,6 +109,43 @@ pub fn validate_remote_listable(profile: &ServerProfile, path: &str) -> Result<S
     Ok(normalized)
 }
 
+/// Like `validate_local_child` but allows the path to equal `profile.local_root`.
+/// Used by directory-listing commands where the root itself is a valid target.
+/// Still rejects `..`, paths outside the root, and non-existent paths.
+pub fn validate_local_listable(profile: &ServerProfile, path: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("local path is empty".into());
+    }
+    let p = Path::new(trimmed);
+    for c in p.components() {
+        if matches!(c, Component::ParentDir) {
+            return Err("local path contains '..'".into());
+        }
+    }
+    let canon = p
+        .canonicalize()
+        .map_err(|e| format!("canonicalize '{}': {e}", p.display()))?;
+    let local_root = profile.local_root.trim();
+    if local_root.is_empty() {
+        return Err("profile.local_root is empty".into());
+    }
+    let root_canon = Path::new(local_root)
+        .canonicalize()
+        .map_err(|e| format!("canonicalize local_root '{local_root}': {e}"))?;
+    if canon == root_canon {
+        return Ok(canon);
+    }
+    if !canon.starts_with(&root_canon) {
+        return Err(format!(
+            "local path '{}' escapes local_root '{}'",
+            canon.display(),
+            root_canon.display()
+        ));
+    }
+    Ok(canon)
+}
+
 /// Validate a local path stays strictly under `profile.local_root`. Canonicalizes
 /// the target (or its parent, for not-yet-existing rename targets) before the
 /// containment check so symlinks can't smuggle escapes.
@@ -387,5 +424,93 @@ mod tests {
         let nonexistent = std::env::temp_dir().join("rift-pathguard-no-such-file.lua");
         let res = validate_local_child(&p, nonexistent.to_str().unwrap());
         assert!(res.is_err());
+    }
+
+    // ── validate_local_listable (permissive: root itself OK) ────────────
+
+    fn unique_tmp(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rift-pathguard-{label}-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
+        ))
+    }
+
+    #[test]
+    fn local_listable_accepts_root_itself() {
+        let root = unique_tmp("listable-root");
+        std::fs::create_dir_all(&root).unwrap();
+        let p = profile_with_roots("/r", root.to_str().unwrap());
+        let canon = validate_local_listable(&p, root.to_str().unwrap()).unwrap();
+        assert_eq!(canon, root.canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_listable_accepts_child() {
+        let root = unique_tmp("listable-child");
+        let child = root.join("nested");
+        std::fs::create_dir_all(&child).unwrap();
+        let p = profile_with_roots("/r", root.to_str().unwrap());
+        let canon = validate_local_listable(&p, child.to_str().unwrap()).unwrap();
+        let canon_root = root.canonicalize().unwrap();
+        assert!(canon.starts_with(&canon_root), "canon {} not under {}", canon.display(), canon_root.display());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_listable_rejects_dotdot() {
+        let root = unique_tmp("listable-dotdot");
+        std::fs::create_dir_all(&root).unwrap();
+        let p = profile_with_roots("/r", root.to_str().unwrap());
+        // path-component check rejects `..` before canonicalize runs
+        let bad = format!("{}/../other", root.to_str().unwrap());
+        let err = validate_local_listable(&p, &bad).unwrap_err();
+        assert!(err.contains(".."), "err = {err}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn local_listable_rejects_sibling_escape() {
+        // Two siblings: <tmp>/listable-sib-A/, <tmp>/listable-sib-B/
+        // Listing under root=A with target=B must escape.
+        let base = unique_tmp("listable-sib");
+        let root = base.join("A");
+        let sibling = base.join("B");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        let p = profile_with_roots("/r", root.to_str().unwrap());
+        let err = validate_local_listable(&p, sibling.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("escapes local_root"), "err = {err}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn local_listable_errors_when_root_missing() {
+        let root = unique_tmp("listable-missing-root");
+        // root not created on disk → canonicalize must error cleanly.
+        let p = profile_with_roots("/r", root.to_str().unwrap());
+        let probe = unique_tmp("listable-missing-probe");
+        std::fs::create_dir_all(&probe).unwrap();
+        let err = validate_local_listable(&p, probe.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("canonicalize"), "err = {err}");
+        let _ = std::fs::remove_dir_all(&probe);
+    }
+
+    #[test]
+    fn local_listable_rejects_empty_local_root() {
+        let p = profile_with_roots("/r", "");
+        let probe = unique_tmp("listable-empty-root");
+        std::fs::create_dir_all(&probe).unwrap();
+        let err = validate_local_listable(&p, probe.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("local_root is empty"), "err = {err}");
+        let _ = std::fs::remove_dir_all(&probe);
+    }
+
+    #[test]
+    fn local_listable_rejects_empty_path() {
+        let p = profile_with_roots("/r", "C:/x");
+        assert!(validate_local_listable(&p, "").is_err());
+        assert!(validate_local_listable(&p, "   ").is_err());
     }
 }

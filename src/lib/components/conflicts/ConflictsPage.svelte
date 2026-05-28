@@ -6,6 +6,7 @@
   import ConflictList from "./ConflictList.svelte";
   import ConflictResolver from "./ConflictResolver.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let selected = $state<ConflictRecord | null>(null);
 
   // Clear selection if the conflict resolves out from under us.

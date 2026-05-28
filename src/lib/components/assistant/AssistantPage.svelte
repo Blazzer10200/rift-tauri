@@ -1,8 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { browserDock } from "../../state/browserDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
+  import WebBrowserPage from "../webview/WebBrowserPage.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   onMount(() => {
     void assistant.init().then(() => {
       if (assistant.openTabs.length === 0) void assistant.newTab();
@@ -137,9 +140,32 @@
       resetSplit();
     }
   }
+
+  // ── Browser dock resize ───────────────────────────────────────────────────
+  // The dock sits on the right at browserDock.width; dragging its divider left
+  // widens the browser. Width is measured from the workbench's right edge.
+  let workbenchEl = $state<HTMLDivElement | undefined>();
+  let dockDragging = $state(false);
+
+  function onDockPointerDown(e: PointerEvent) {
+    e.preventDefault();
+    dockDragging = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onDockPointerMove(e: PointerEvent) {
+    if (!dockDragging || !workbenchEl) return;
+    const rect = workbenchEl.getBoundingClientRect();
+    browserDock.setWidth(rect.right - e.clientX);
+  }
+  function onDockPointerUp(e: PointerEvent) {
+    if (!dockDragging) return;
+    dockDragging = false;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+  }
 </script>
 
 <div class="assistant">
+  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging}>
   <div class="layout">
     {#if assistant.splitActive}
       <div
@@ -166,7 +192,7 @@
               aria-valuemin={Math.round(SPLIT_MIN * 100)}
               aria-valuemax={Math.round((1 - SPLIT_MIN) * 100)}
               tabindex="0"
-              title="Drag to resize · double-click to reset"
+              use:tooltip={"Drag to resize · double-click to reset"}
               onpointerdown={(e) => onDividerPointerDown(e, i)}
               onpointermove={(e) => onDividerPointerMove(e, i)}
               onpointerup={(e) => onDividerPointerUp(e, i)}
@@ -185,6 +211,27 @@
       />
     {/if}
   </div>
+
+  {#if browserDock.open}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div
+      class="dock-divider"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize browser panel"
+      tabindex="0"
+      use:tooltip={"Drag to resize the browser panel"}
+      onpointerdown={onDockPointerDown}
+      onpointermove={onDockPointerMove}
+      onpointerup={onDockPointerUp}
+      onpointercancel={onDockPointerUp}
+    ><span class="divider-grip" aria-hidden="true"></span></div>
+    <div class="browser-dock" style="width: {browserDock.width}px">
+      <WebBrowserPage />
+    </div>
+  {/if}
+  </div>
 </div>
 
 <style>
@@ -195,11 +242,40 @@
     background: var(--bg);
     color: var(--fg);
   }
+  .workbench {
+    flex: 1; min-height: 0; min-width: 0;
+    display: flex;
+    overflow: hidden;
+  }
   .layout {
-    flex: 1; min-height: 0;
+    flex: 1; min-height: 0; min-width: 0;
     display: flex;
     overflow: hidden;
     position: relative;
+  }
+  .browser-dock {
+    flex: 0 0 auto;
+    min-width: 0; min-height: 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  }
+  .dock-divider {
+    position: relative;
+    flex: 0 0 6px;
+    cursor: col-resize;
+    background: var(--border);
+    align-self: stretch;
+    user-select: none;
+    transition: background 120ms ease-out;
+  }
+  .dock-divider:hover,
+  .workbench[data-dock-dragging="true"] .dock-divider {
+    background: color-mix(in oklch, var(--accent) 50%, var(--border));
+  }
+  .dock-divider:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
   .split {
     flex: 1; min-width: 0; min-height: 0;
@@ -233,5 +309,7 @@
     transition: opacity 120ms ease-out;
   }
   .divider:hover .divider-grip,
-  .split[data-dragging="true"] .divider-grip { opacity: 0.7; }
+  .split[data-dragging="true"] .divider-grip,
+  .dock-divider:hover .divider-grip,
+  .workbench[data-dock-dragging="true"] .divider-grip { opacity: 0.7; }
 </style>

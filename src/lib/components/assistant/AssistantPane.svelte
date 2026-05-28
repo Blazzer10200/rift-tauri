@@ -8,6 +8,7 @@
   import TasksDock from "./TasksDock.svelte";
   import SyncActivityBanner from "./SyncActivityBanner.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   let {
     tabId,
     focused,
@@ -50,19 +51,21 @@
       `Ctx: ${used.toLocaleString()} / ${w.toLocaleString()} (${paneCtxPct.toFixed(1)}%)`,
     ];
     if (paneModel) lines.push(`Model: ${paneModel}`);
-    if (paneCost != null) lines.push(`Cost: $${paneCost.toFixed(4)}`);
+    if (paneCost != null) lines.push(`Cost: ${paneCost.toFixed(4)}`);
     return lines.join("\n");
   });
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
   let stickToBottom = $state(true);
+  let scrolledTop = $state(false);
   let lastTabId: string | null = null;
 
   function onScroll() {
     if (!scrollEl) return;
     const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
     stickToBottom = gap < 80;
+    scrolledTop = scrollEl.scrollTop > 8;
     if (tabId) assistant.setTabScroll(tabId, scrollEl.scrollTop);
   }
 
@@ -234,9 +237,9 @@
   {/if}
   {#if assistant.splitActive}
     <div class="pane-chrome" aria-hidden="true">
-      <span class="pane-label" title="Pane {paneIdx + 1} of {assistant.panes.length}">{paneIdx + 1}</span>
+      <span class="pane-label" use:tooltip={"Pane {paneIdx + 1} of {assistant.panes.length}"}>{paneIdx + 1}</span>
       {#if tabId && tab}
-        <span class="pane-ctx-chip" data-tone={paneCtxTone} title={paneChipTitle}>
+        <span class="pane-ctx-chip" data-tone={paneCtxTone} use:tooltip={paneChipTitle}>
           <span class="pane-ctx-bar"><span class="pane-ctx-fill" style="width: {Math.min(100, paneCtxPct)}%"></span></span>
           <span class="pane-ctx-pct">{Math.round(paneCtxPct)}%</span>
           {#if paneCost != null}
@@ -247,7 +250,7 @@
       <button
         class="pane-close"
         type="button"
-        title="Close this pane (Ctrl+Shift+\)"
+        use:tooltip={"Close this pane (Ctrl+Shift+\\)"}
         aria-label="Close pane"
         onclick={onClosePane}
       >
@@ -282,7 +285,7 @@
                   class="pane-empty-recent-row"
                   type="button"
                   onclick={() => onEmptyOpenRecent(c.id)}
-                  title={c.title}
+                  use:tooltip={c.title}
                 >
                   <span class="pane-empty-recent-title">{c.title}</span>
                   <span class="pane-empty-recent-meta">{c.messageCount} msg</span>
@@ -308,8 +311,12 @@
     {/if}
   </div>
 
+  {#if tabId && !showEmpty}
+    <div class="scroll-fade-top" class:visible={scrolledTop} aria-hidden="true"></div>
+  {/if}
+
   {#if tabId && !showEmpty && !stickToBottom}
-    <button class="jump-latest" type="button" onclick={jumpToLatest} title="Jump to latest">
+    <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"}>
       <ChevronDown size={12}/>
       <span>Latest</span>
     </button>
@@ -318,7 +325,7 @@
   {#if showError || showNotice || showShellBanner}
     <div class="alerts">
       {#if showShellBanner}
-        <button class="alert notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} title="Got it — don't show again">
+        <button class="alert notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} use:tooltip={"Got it — don't show again"}>
           <span class="notice-icon">⚡</span>
           <span class="notice-text">
             Claude just ran a remote shell command on your server. Gated by Settings → Assistant → Allow remote shell + a workspace-scoped lock. Click to dismiss.
@@ -327,7 +334,7 @@
         </button>
       {/if}
       {#if showNotice}
-        <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} title="Click to dismiss">
+        <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} use:tooltip={"Click to dismiss"}>
           <span class="notice-icon">ℹ</span>
           <span class="notice-text">{assistant.lastNotice}</span>
         </button>
@@ -567,6 +574,28 @@
   }
   .scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .scroll::-webkit-scrollbar-button { display: none; }
+  /* Top fade — once the thread is scrolled down, content tucks under a soft
+     shadow at the pane's top edge instead of hard-cutting at the scroll
+     boundary. Fades in/out with scroll position (scrolledTop). */
+  .scroll-fade-top {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 44px;
+    pointer-events: none;
+    z-index: 2;
+    background: linear-gradient(
+      to bottom,
+      var(--bg) 0%,
+      color-mix(in oklch, var(--bg) 55%, transparent) 50%,
+      transparent 100%
+    );
+    opacity: 0;
+    transition: opacity 220ms ease-out;
+  }
+  .scroll-fade-top.visible { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) {
+    .scroll-fade-top { transition: none; }
+  }
   .messages {
     display: flex; flex-direction: column;
     gap: 28px;

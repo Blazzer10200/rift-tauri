@@ -6,6 +6,7 @@
   import { syncModal, type SyncActivityKind } from "../../state/sync-modal.svelte";
   import { connection } from "../../state/connection.svelte";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type DiagEvent = { stage: string; fields: unknown; at?: string; resource?: string | null };
   type DriftProgressFields = { current?: number; total?: number; resource?: string };
   type DriftResultFields = {
@@ -313,7 +314,7 @@
           onclick={() => (canForceClose ? onForceClose() : onDismiss())}
           disabled={syncModal.phase === "scanning" && !canForceClose}
           aria-label="Close"
-          title={syncModal.phase === "scanning"
+          use:tooltip={syncModal.phase === "scanning"
             ? (canForceClose ? "Close anyway — op continues in background" : "Cancel first")
             : "Close"}
         ><X size={14}/></button>
@@ -393,7 +394,7 @@
         {#if syncModal.phase === "scanning"}
           {#if canForceClose}
             <button type="button" class="btn btn-ghost" onclick={onForceClose}
-              title="Close the modal — backend will keep bailing in the background. Status bar will track it.">
+              use:tooltip={"Close the modal — backend will keep bailing in the background. Status bar will track it."}>
               Close anyway
             </button>
           {:else}

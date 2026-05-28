@@ -4,7 +4,7 @@
 
 ## Stack
 
-Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Velopack updater wired. NSIS installer (perUser).
+Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Self-update: GH-release-API path — `commands/update.rs` polls `api.github.com/repos/Blazzer10200/rift-releases/releases/latest`, semver-compares, opens Setup.exe in browser on user confirm (no signing key, no `latest.json`, no `.sig`; replaced `tauri-plugin-updater` in v0.4.34 after key-loss bricked all clients on v0.4.33). NSIS installer (perUser).
 
 Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json`. Source of truth for current version: `docs/CHANGELOG.md` (don't hard-code in this file — went stale at v0.2.4 vs v0.2.48 reality before 2026-05-13 cleanup).
 
@@ -17,20 +17,20 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Design briefs | `docs/design/` (3 active: `assistant-compaction.md`, `git-rcon-tools.md`, `ui-audit-2026-05-21.md`) |
+| Design briefs | `docs/design/` (2 active: `git-rcon-tools.md`, `assistant-svelte-split.md`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
 
-## Hot files (measured 2026-05-17)
+## Hot files (measured 2026-05-26)
 
 Files large enough to matter for agent scoping. Everything else is small enough for inline or `recon`.
 
 | File | Lines | Notes |
 |---|---|---|
 | `src-tauri/src/sync/auto_sync.rs` | 1966 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/assistant/mod.rs` | 2308 | claude CLI integration + auth + workspace (grown w/ ask_user wiring 2026-05-22) |
-| `src-tauri/src/lib.rs` | 300 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
+| `src-tauri/src/assistant/mod.rs` | 2309 | claude CLI integration + auth + workspace (lost kill_child_processes_on_exit in v0.4.34 updater cleanup) |
+| `src-tauri/src/lib.rs` | 292 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
 | `src-tauri/src/sync/auto_sync/flush.rs` | 653 | flush_batch pipeline (split out 2026-05-13) |
 | `src-tauri/src/assistant/mcp_server.rs` | 587 | stdio JSON-RPC MCP server |
 | `src-tauri/src/sync/drift_scanner.rs` | 555 | 3-way drift diff |
@@ -44,9 +44,9 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 | `src-tauri/src/sync/auto_sync/watch.rs` | 349 | notify lifecycle + queue_path |
 | `src-tauri/src/sftp/mod.rs` | 307 | session core (split v0.2.49 from 1100L → 307L) |
 
-Frontend hot files: `assistant.svelte.ts` 1585L, `Settings.svelte` 1505L, `SyncPage.svelte` 1307L, `ActivityFeed.svelte` 941L, `TerminalPanel.svelte` 851L.
+Frontend hot files (2026-05-27): `assistant.svelte.ts` 2285L (down from 3356L; #20 M0-M5b carved `persistence.ts` 261L in v0.4.32, M6/M7 carved `tabs.ts` 468L + `compaction.ts` 237L in v0.4.33; M8/M9 still open), `Settings.svelte` 1541L, `SyncPage.svelte` 1343L, `ChatTabsBar.svelte` 1307L (grew w/ Browser toggle + portaled ctx popover v0.4.33), `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
 
-`auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2308L) and is the next split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
+`auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2336L) and is the next backend split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
 
 ## Agent routing
 
@@ -55,11 +55,11 @@ Only `operator` + `recon` are defined as local subagents. `architect` / `scout` 
 | Area / task | Default | Why |
 |---|---|---|
 | `sync/`, `sftp/` multi-file changes | **operator** | Coupled state across watcher + queue + transport |
-| `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `update_service.rs` | inline | All <400 lines, single-file edits typical |
+| `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `commands/update.rs` | inline | All <400 lines, single-file edits typical |
 | Svelte/TS / Rust symbol lookup | inline + LSP tool | TS/JS native; Rust via `rust-analyzer-lsp` plugin (installed 2026-05-21). Svelte: no LSP — grep + `/check` (skipped Piebald `svelte-lsp` — needs tweakcc patch) |
 | "Where does X live" (LSP miss) | **recon** | Terse `path:line :: snippet` output |
 | IPC contract change, tradeoff calls | inline (or `Plan` skill for multi-track) | Built-in `architect` agent is available but heavyweight; usually inline reasoning is enough |
-| Tauri 2 / russh / Velopack docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
+| Tauri 2 / russh docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
 
 ## Verification
 
@@ -99,7 +99,8 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 2. **Self-replace dance** — `tauri build` fails (Win file-lock) if Rift is running. Quit instance → sleep 1 → build to temp → `cp` over → relaunch. (memory: `reference_self_replace_dance`)
 3. **Doc size cap** — `CHANGELOG.md` + `HANDOFF.md` ≤600 words each. Truncate older entries when extending — `git log` preserves history. (Raised 300 → 600 on 2026-05-12 after the v0.2.46 → v0.2.48 arc; 300 was too tight for an arc summary + RESUME HERE + CRITICAL DON'T-TOUCH inline.)
 4. **Build = batch only** — dev server (`npm run dev` or `scripts/run-dev.bat`) is the default loop. The full "build" pipeline (bump → changelog → check → build → install → shortcut → iconcache → commit) only runs when a batch is ready to ship. Never trigger mid-session.
-5. **Version lockstep — THREE files** — `package.json`, `Cargo.toml`, AND `src-tauri/tauri.conf.json` must all match. `scripts/release.ps1` preflight bails on any mismatch. Bumping only two is the most common failure mode (2026-05-12: v0.2.49 first ship attempt died here). All three, always.
+5. **Version lockstep — THREE files** — `package.json`, `Cargo.toml`, AND `src-tauri/tauri.conf.json` must all match. `scripts/release.ps1` preflight bails on any mismatch. Bumping only two is the most common failure mode (2026-05-12: v0.2.49 first ship attempt died here). All three, always. **Plus `Cargo.lock`** — the workspace version bump auto-updates it; `release.ps1` dirty-tree refusal will catch this if you forget to commit (happened on v0.4.34 ship).
+6. **Releases repo is gitignored locally** — `Releases/` is a scratch dir for `release.ps1`'s SHA256 round-trip verify (writes `verify-<ver>/` then cleans). Don't track its contents.
 
 ## Don't-do
 
@@ -107,7 +108,7 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 - Don't run `npm run build` or `npm run tauri build` unless told.
 - Don't use Playwright MCP (global ban — user verifies UI in browser).
 - Don't `EnterPlanMode` — use the `/plan` skill instead.
-- **Don't run `cargo check` while `npm run tauri dev` is alive.** Tauri dev watches Rust files and triggers incremental rebuilds; an external `cargo check` collides with its lock state and kills the running Rift Dev process w/o re-launching. Run `/check` before launching dev, or quit dev first. (S16 2026-05-09)
+- **Don't run `cargo check` while `npm run tauri dev` is alive.** Tauri dev watches Rust files and triggers incremental rebuilds; an external `cargo check` collides with its lock state and kills the running Rift Dev process w/o re-launching. Run `/check` before launching dev, or quit dev first. (S16 2026-05-09) — **The post-edit verify hook now auto-skips `cargo check` when `rift-tauri.exe` (the dev binary) is running, so per-edit Rust verification no longer nukes dev. During a dev session tauri dev's own console IS the Rust verifier — read errors there; don't manually `/check` backend until dev is quit.** (2026-05-27)
 
 ## Live state pointer
 

@@ -10,6 +10,7 @@
   import { fmtRelative, fmtAbsolute } from "../../utils/time";
   import { fmtSize, pickIcon, isEditableTarget, clampMenuPos } from "../../utils/file-display";
 
+  import { tooltip } from "$lib/actions/tooltip";
   type LocalEntry = {
     name: string;
     path: string;
@@ -64,10 +65,16 @@
   async function load() {
     const token = ++loadToken;
     if (!path) { entries = []; return; }
+    const serverKey = connection.selectedKey;
+    if (!serverKey) {
+      entries = [];
+      error = "No server selected.";
+      return;
+    }
     loading = true;
     error = null;
     try {
-      const result = await invoke<LocalEntry[]>("local_list_dir", { path });
+      const result = await invoke<LocalEntry[]>("local_list_dir", { serverKey, path });
       if (token !== loadToken) return;
       entries = result;
       selected = new Set();
@@ -329,7 +336,7 @@
   />
   <div class="headcols">
     <div class="col col-name">name</div>
-    <div class="col col-status" title="sync status">●</div>
+    <div class="col col-status" use:tooltip={"sync status"}>●</div>
     <div class="col col-size">size</div>
     <div class="col col-mtime">modified</div>
   </div>
@@ -398,16 +405,16 @@
                   {/if}
                   <span class="row-label mono">{e.name}</span>
                   {#if lk}
-                    <LockBadge holder={`${lk.user}@${lk.host}`} tooltip={`Locked remotely by ${lk.user}@${lk.host}`} />
+                    <LockBadge holder={`${lk.user}@${lk.host}`} tip={`Locked remotely by ${lk.user}@${lk.host}`} />
                   {/if}
                 </span>
-                <span class="row-status" title={status}>
+                <span class="row-status" use:tooltip={status}>
                   {#if status === "conflict"}
                     <span class="sym danger">▲</span>
                   {/if}
                 </span>
                 <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
-                <span class="row-mtime mono" title={fmtTimeAbs(e.mtime)}>{fmtTime(e.mtime)}</span>
+                <span class="row-mtime mono" use:tooltip={fmtTimeAbs(e.mtime)}>{fmtTime(e.mtime)}</span>
               </div>
             {/each}
           {/if}
