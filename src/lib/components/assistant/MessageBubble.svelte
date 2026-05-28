@@ -392,14 +392,21 @@
           <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
           {#if heartbeatLabel}<span class="heartbeat mono" use:tooltip={"Elapsed since turn started"}>{heartbeatLabel}</span>{/if}
         {/if}
-        {#if plainText.length > 0}
-          <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
-            {#if copied}
-              <Check size={11} />
-            {:else}
-              <Copy size={11} />
+        {#if plainText.length > 0 || (!streaming && costLabel)}
+          <div class="turn-actions">
+            {#if !streaming && costLabel}
+              <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>${costLabel}</span>
             {/if}
-          </button>
+            {#if plainText.length > 0}
+              <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
+                {#if copied}
+                  <Check size={11} />
+                {:else}
+                  <Copy size={11} />
+                {/if}
+              </button>
+            {/if}
+          </div>
         {/if}
       </div>
     {:else}
@@ -517,6 +524,7 @@
             data-kind={nodeKind(unit.block)}
             data-status={nodeStatus}
             data-group-cont={groupCont ? "true" : null}
+            data-quick={(unit.block.type === "thinking" && unit.block.status === "done" && unit.block.durationMs != null && unit.block.durationMs < 2000) ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
             {@render renderBlock(unit.block, ui)}
@@ -525,12 +533,6 @@
       {/each}
 
     </div>
-
-    {#if !isUser && !streaming && costLabel}
-      <div class="turn-footer" aria-hidden="true">
-        <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>${costLabel}</span>
-      </div>
-    {/if}
   </div>
 </div>
 {/if}
@@ -797,20 +799,8 @@
     .skl, .stage-dot, .stage-label, .skeleton-lines { animation: none; }
   }
 
-  /* End-of-turn footer — thin full-width rule + cost-pill on the right gives
-     the assistant turn a clear closing beat so mid-turn tool blocks aren't
-     mistaken for the final answer (#2). The rule is the visual divider;
-     the pill is the residue. */
-  /* End-of-turn footer — just a quiet right-aligned cost chip. The old
-     full-width rule above it chopped the flow between turns; the 28px
-     inter-turn gap + the rail already separate turns cleanly. */
-  .turn-footer {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    margin-top: 10px;
-    animation: enter 260ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
+  /* Cost chip — lives in the turn header's action cluster (see .turn-actions),
+     a quiet residue of the turn's spend next to the copy button. */
   .cost-pill {
     padding: 2px 8px;
     border-radius: 999px;
@@ -900,6 +890,21 @@
     50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 20%, transparent),
                           inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
   }
+  /* Short (<2s) done thinking blocks — visually recede so they don't create
+     a wall of "Thought for <1s" noise between tool calls. Still readable and
+     expandable on hover, just not competing with substantive content. */
+  .tl-node[data-quick="true"] .tn-think-head {
+    opacity: 0.42;
+  }
+  .tl-node[data-quick="true"]:hover .tn-think-head {
+    opacity: 0.78;
+  }
+  /* Tighter vertical margin for quick thinking nodes — 8px default leaves too
+     much gap when several appear between tool calls. */
+  .bubble[data-role="assistant"] .tl-node[data-quick="true"] {
+    margin-top: 1px;
+  }
+
   /* Hover lifts the bullet — small but signals interactivity on tool/edit rows. */
   .tl-node[data-kind="tool"]:hover::before,
   .tl-node[data-kind="edit"]:hover::before {
@@ -938,13 +943,22 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .tl-node, .tl-divider, .cost-pill, .turn-footer { animation: none; }
+    .tl-node, .tl-divider, .cost-pill { animation: none; }
     .tl-node[data-status="pending"]::before,
     .tl-node[data-kind="thinking"][data-status="pending"]::before { animation: none; }
   }
+  /* Copy + cost grouped inline right after the model label so they read as
+     one action cluster next to the header — not pinned to the far column edge
+     (which left them floating ~1000px from the content). Cost-first so the
+     hover-only copy button doesn't reserve a gap at rest. */
+  .turn-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 2px;
+  }
   .copybtn {
     opacity: 0;
-    margin-left: auto;
     background: transparent;
     border: 0;
     color: var(--fg-faint);

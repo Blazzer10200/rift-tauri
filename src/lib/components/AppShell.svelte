@@ -21,6 +21,7 @@
   import ActivityBar from "./shell/ActivityBar.svelte";
   import { WORKSPACES } from "./workspaces";
   import { workspace, type WorkspaceId } from "../state/workspace.svelte";
+  import { browserDock } from "../state/browserDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { syncPage } from "../state/sync-page.svelte";
   import { assistant } from "../state/assistant.svelte";
@@ -94,6 +95,7 @@
   // route-level HMR remounts otherwise stack stale closures on the singleton
   // and dispatch into dead $state. (#169)
   onMount(() => {
+    browserDock.init();
     updates.checkOnLaunch();
     dialogs.onAddServer = () => openAddServer(null);
     dialogs.onEditServer = (s) => openAddServer(s);

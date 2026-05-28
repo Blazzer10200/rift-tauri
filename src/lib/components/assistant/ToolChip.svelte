@@ -432,7 +432,7 @@
   });
 </script>
 
-<div class="chip" data-status={tool.status} data-category={category} data-variant={variant} class:as-card={isCard}>
+<div class="chip" data-status={tool.status} data-category={category} data-variant={variant} class:as-card={isCard} class:is-ask={isAskUser}>
   {#if isAgent}
     <!-- Agent card head — bigger, badge-led, no chevron toggle (always open). -->
     <div class="agent-head">
@@ -1054,7 +1054,7 @@
 
   /* ── Card variants (Agent + TodoWrite) ─────────────────────────────── */
   .chip.as-card {
-    max-width: min(100%, 78ch);
+    max-width: 100%;
     width: 100%;
     background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
     border-radius: 8px;
@@ -1220,31 +1220,40 @@
     color: var(--accent);
   }
 
-  /* ── AskUser card ────────────────────────────────────────────────────── */
-  .chip.as-card[data-category="meta"] .ask-head {
-    background: color-mix(in oklch, oklch(0.76 0.10 145) 7%, transparent);
+  /* ── AskUser card ──────────────────────────────────────────────────────
+     Themed to the turn's model aurora (--model-color: purple Opus / blue
+     Sonnet / teal Haiku), falling back to --accent. Ties the "Claude is
+     asking you" card to the same accent vocabulary as the avatar, rail, and
+     composer — the old green read as a success state, disconnected from the
+     rest of the chat. --ask resolves once on the root; descendants inherit. */
+  .chip.as-card.is-ask {
+    --ask: var(--model-color, var(--accent));
+    max-width: min(100%, 560px);
+    border-left-color: color-mix(in oklch, var(--ask) 55%, var(--border)) !important;
+  }
+  .chip.as-card.is-ask .ask-head {
+    background: color-mix(in oklch, var(--ask) 8%, transparent);
   }
   .ask-head {
     display: flex; align-items: center; gap: 9px;
-    padding: 8px 12px;
+    padding: 7px 12px;
     border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
   }
   .ask-icon {
     display: inline-flex;
-    color: oklch(0.78 0.13 145);
+    color: var(--ask);
     flex-shrink: 0;
   }
   .ask-pill {
     display: inline-flex; align-items: center;
     padding: 2px 9px;
     border-radius: 999px;
-    background: color-mix(in oklch, oklch(0.76 0.10 145) 22%, transparent);
-    border: 1px solid color-mix(in oklch, oklch(0.76 0.10 145) 40%, var(--border));
-    color: oklch(0.84 0.09 145);
+    background: color-mix(in oklch, var(--ask) 16%, transparent);
+    border: 1px solid color-mix(in oklch, var(--ask) 38%, var(--border));
+    color: color-mix(in oklch, var(--ask) 72%, var(--fg));
     font-size: 10.5px;
     font-weight: 600;
     letter-spacing: 0.02em;
-    font-family: var(--font-mono, monospace);
     flex-shrink: 0;
   }
   .ask-status-text {
@@ -1254,31 +1263,56 @@
     font-variant: small-caps;
     letter-spacing: 0.04em;
   }
-  .ask-status-text.answered { color: oklch(0.78 0.14 145); font-weight: 600; }
-  .ask-status-text.submitting { color: var(--accent); }
+  /* Answered = done = the one place green (success) is semantically right. */
+  .ask-status-text.answered { color: var(--ok, oklch(0.74 0.15 145)); font-weight: 600; }
+  .ask-status-text.submitting { color: var(--ask); }
   .ask-status-text.waiting { color: var(--fg-faint); font-style: italic; }
-  .ask-status-text.awaiting { color: oklch(0.78 0.10 145); }
+  .ask-status-text.awaiting { color: color-mix(in oklch, var(--ask) 70%, var(--fg-muted)); }
+
+  /* Pending — gentle model-tinted outer glow. Signals "needs your input"
+     using the assistant's own accent, not a semantic-green alarm. */
+  .chip.as-card.is-ask[data-status="pending"] {
+    animation: ask-card-pulse 2.4s ease-in-out infinite;
+    background: color-mix(in oklch, var(--ask) 7%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--ask) 40%, var(--border));
+    border-left-color: var(--ask) !important;
+  }
+  .chip.as-card.is-ask[data-status="pending"] .ask-head {
+    background: color-mix(in oklch, var(--ask) 12%, transparent);
+    border-bottom-color: color-mix(in oklch, var(--ask) 35%, var(--border));
+  }
+  .chip.as-card.is-ask[data-status="pending"] .ask-status-text.awaiting {
+    color: color-mix(in oklch, var(--ask) 85%, white);
+    font-weight: 600;
+  }
+  @keyframes ask-card-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ask) 0%, transparent); }
+    50%      { box-shadow: 0 0 16px -2px color-mix(in oklch, var(--ask) 22%, transparent),
+                          0 0 0 1px color-mix(in oklch, var(--ask) 16%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .chip.as-card.is-ask[data-status="pending"] { animation: none; }
+  }
 
   .ask-body {
-    padding: 12px 14px 14px;
+    padding: 11px 13px 13px;
     display: flex; flex-direction: column;
-    gap: 14px;
+    gap: 12px;
   }
   .ask-question {
     display: flex; flex-direction: column;
-    gap: 6px;
+    gap: 5px;
   }
   .ask-q-header {
     align-self: flex-start;
     padding: 1px 7px;
     border-radius: 4px;
-    background: color-mix(in oklch, oklch(0.76 0.10 145) 14%, transparent);
-    color: oklch(0.82 0.10 145);
+    background: color-mix(in oklch, var(--ask) 13%, transparent);
+    color: color-mix(in oklch, var(--ask) 65%, var(--fg));
     font-size: 9.5px;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    font-family: var(--font-mono, monospace);
   }
   .ask-q-text {
     color: var(--fg);
@@ -1293,13 +1327,13 @@
   }
   .ask-option {
     display: grid;
-    grid-template-columns: 18px 1fr;
+    grid-template-columns: 16px 1fr;
     align-items: start;
     gap: 9px;
-    padding: 7px 10px;
-    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: 6px;
+    padding: 6px 11px;
+    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+    border-radius: 7px;
     text-align: left;
     cursor: pointer;
     transition: background 120ms ease-out, border-color 120ms ease-out, transform 80ms ease-out;
@@ -1309,16 +1343,17 @@
   }
   .ask-option:hover:not(:disabled) {
     background: var(--surface-hover);
-    border-color: color-mix(in oklch, oklch(0.76 0.10 145) 35%, var(--border));
+    border-color: color-mix(in oklch, var(--ask) 35%, var(--border));
   }
   .ask-option:active:not(:disabled) { transform: translateY(1px); }
   .ask-option:disabled { opacity: 0.55; cursor: default; }
   .ask-option.selected {
-    background: color-mix(in oklch, oklch(0.76 0.10 145) 14%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, oklch(0.76 0.10 145) 55%, var(--border));
+    background: color-mix(in oklch, var(--ask) 13%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--ask) 55%, var(--border));
     color: var(--fg);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ask) 22%, transparent);
   }
-  .ask-option.selected .ask-opt-marker { color: oklch(0.78 0.14 145); }
+  .ask-option.selected .ask-opt-marker { color: var(--ask); }
   .ask-opt-marker {
     display: inline-flex; align-items: center; justify-content: center;
     color: var(--fg-faint);
@@ -1347,25 +1382,26 @@
     margin-top: 2px;
     padding: 6px 10px;
     background: var(--bg-elev-1);
-    border: 1px solid color-mix(in oklch, oklch(0.76 0.10 145) 40%, var(--border));
-    border-radius: 5px;
+    border: 1px solid color-mix(in oklch, var(--ask) 38%, var(--border));
+    border-radius: 6px;
     color: var(--fg);
     font: inherit;
     font-size: 12px;
     outline: none;
-    transition: border-color 120ms ease-out;
+    transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
   }
   .ask-other-input:focus {
-    border-color: color-mix(in oklch, oklch(0.76 0.13 145) 70%, transparent);
+    border-color: color-mix(in oklch, var(--ask) 65%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--ask) 14%, transparent);
   }
 
   .ask-actions {
     display: flex; gap: 8px; justify-content: flex-end;
-    margin-top: 4px;
+    margin-top: 2px;
   }
   .ask-btn {
     padding: 6px 14px;
-    border-radius: 6px;
+    border-radius: 7px;
     border: 1px solid var(--border);
     background: var(--bg-elev-1);
     color: var(--fg-2);
@@ -1382,14 +1418,14 @@
   }
   .ask-btn:disabled { opacity: 0.5; cursor: default; }
   .ask-btn.submit {
-    background: color-mix(in oklch, oklch(0.76 0.10 145) 22%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, oklch(0.76 0.10 145) 55%, var(--border));
-    color: oklch(0.86 0.08 145);
+    background: color-mix(in oklch, var(--ask) 20%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--ask) 50%, var(--border));
+    color: color-mix(in oklch, var(--ask) 82%, var(--fg));
   }
   .ask-btn.submit:hover:not(:disabled) {
-    background: color-mix(in oklch, oklch(0.76 0.13 145) 32%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, oklch(0.76 0.13 145) 70%, var(--border));
-    color: oklch(0.92 0.10 145);
+    background: color-mix(in oklch, var(--ask) 30%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--ask) 68%, var(--border));
+    color: var(--fg);
   }
   .ask-btn.submit :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
   .ask-hint {
@@ -1403,8 +1439,8 @@
     margin: 0;
     padding: 8px 10px;
     background: var(--bg-elev-1);
-    border: 1px solid color-mix(in oklch, oklch(0.76 0.10 145) 30%, var(--border));
-    border-radius: 5px;
+    border: 1px solid color-mix(in oklch, var(--ask) 25%, var(--border));
+    border-radius: 6px;
     font-family: var(--font-mono, monospace);
     font-size: 11px;
     line-height: 1.55;

@@ -107,7 +107,7 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 - Don't run `npm run build` or `npm run tauri build` unless told.
 - Don't use Playwright MCP (global ban — user verifies UI in browser).
 - Don't `EnterPlanMode` — use the `/plan` skill instead.
-- **Don't run `cargo check` while `npm run tauri dev` is alive.** Tauri dev watches Rust files and triggers incremental rebuilds; an external `cargo check` collides with its lock state and kills the running Rift Dev process w/o re-launching. Run `/check` before launching dev, or quit dev first. (S16 2026-05-09)
+- **Don't run `cargo check` while `npm run tauri dev` is alive.** Tauri dev watches Rust files and triggers incremental rebuilds; an external `cargo check` collides with its lock state and kills the running Rift Dev process w/o re-launching. Run `/check` before launching dev, or quit dev first. (S16 2026-05-09) — **The post-edit verify hook now auto-skips `cargo check` when `rift-tauri.exe` (the dev binary) is running, so per-edit Rust verification no longer nukes dev. During a dev session tauri dev's own console IS the Rust verifier — read errors there; don't manually `/check` backend until dev is quit.** (2026-05-27)
 
 ## Live state pointer
 

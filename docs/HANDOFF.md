@@ -2,22 +2,65 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-27 (night) — in-app web browser dock
+
+### Completed
+- **M0 transport spike** — `chromiumoxide` attach-mode to WebView2 CDP port proven: connect → `new_page` → navigate → screenshot. Spike at `%TEMP%/cdp-spike/` (disposable).
+- **Browser feature — native child webview** via Tauri `unstable` `Window::add_child`. No screenshot-stream, no CDP page, no separate taskbar window. Ships as part of the chat workspace.
+- **New files:** `src-tauri/src/browser/mod.rs` (native webview lifecycle), `src-tauri/src/commands/browser.rs` (7 async Tauri commands), `src/lib/components/webview/WebBrowserPage.svelte` (address bar + stage placeholder + bounds reporting), `src/lib/state/browserDock.svelte.ts` (open/width state, persisted).
+- **Wired into:** `lib.rs` (mod + command registry), `commands/mod.rs` (pub use), `AppShell.svelte` (dock.init()), `ChatTabsBar.svelte` (Browser toggle button), `AssistantPage.svelte` (workbench layout + dock divider + show/hide $effect).
+- `cargo check` 0 errors, `npm run check` 0/0. Dev running w/ feature live.
+
+### In Progress — RESUME HERE
+- **Native webview confirmed loading** (CDP target = `https://example.com/ | Example Domain`). NOT yet user-visually confirmed: (1) no taskbar window, (2) page visible + positioned inside panel. User was about to check when compaction triggered.
+- **Two bugs fixed during session:** (a) `about:blank` deadlock — sync commands deadlock `add_child` on Windows (Tauri known issue); fixed by making all `browser_*` commands `async`. (b) CDP-created page produced separate taskbar window — reason we switched from screenshot-stream to native child webview.
+
+### Key Decisions
+- Native child webview (`unstable`) over screenshot-stream CDP — no taskbar entry, native scroll/select/click, simpler.
+- Browser lives in the **assistant page** as a toggleable dock (not a separate workspace rail entry — reverted cleanly).
+- Commands **must be async** — sync + `add_child` deadlocks the Windows main thread.
+
+### Failed / Don't Retry
+- **Sync `#[tauri::command]` + `add_child`** — deadlocks. All browser commands are now `async`. Don't revert.
+- **CDP screenshot-stream approach** — `new_page` spawns a visible top-level WebView2 window (taskbar entry). Dropped.
+
+### Next Steps
+1. **User visual confirm** — check taskbar (single Rift icon?) and dock renders correctly. If positioning is off, `browser_set_bounds` / the ResizeObserver in WebBrowserPage are the fix points.
+2. **Agent MCP tools** — expose `browser_navigate` / `browser_eval` / screenshot to the in-app Claude assistant via `mcp_server.rs` so user can tell the assistant to drive the browser.
+3. **Prod CDP gating** — `unstable` multiwebview doesn't need CDP, but the `tauri = { features = ["unstable"] }` flag in `Cargo.toml` is now live; note before v0.4.33 ship.
+4. **Click/type proxying** — removed from native approach (native webview handles input directly); no Rust work needed.
+5. **M8/M9 assistant split** (pre-existing) — streaming pump + send/stop extract.
+
+### Files Modified
+- `src-tauri/Cargo.toml` — `tauri = { features = ["unstable"] }`, chromiumoxide removed
+- `src-tauri/src/lib.rs` — `pub mod browser`, command registry (7 browser_* commands)
+- `src-tauri/src/commands/mod.rs` — `pub mod browser; pub use browser::*`
+- `src-tauri/src/browser/mod.rs` (new)
+- `src-tauri/src/commands/browser.rs` (new)
+- `src/lib/state/browserDock.svelte.ts` (new)
+- `src/lib/components/webview/WebBrowserPage.svelte` (new)
+- `src/lib/components/AppShell.svelte` — `browserDock.init()` in onMount
+- `src/lib/components/shell/ChatTabsBar.svelte` — Browser toggle button
+- `src/lib/components/assistant/AssistantPage.svelte` — workbench/dock layout
+
+---
+
+## Session 2026-05-27 (evening) — dev-speed + assistant split M6/M7 [compressed]
+Hook fix (cargo-check-kills-dev), svelte-check bin path, M6 tabs, M7 compaction, Composer ctx-gauge + attach, MessageBubble turn-actions regroup, ChatTabsBar detail popover. All `npm run check` 0/0, CDP-verified. Detail → CHANGELOG + git.
+
+---
+
 ## v0.4.33 work — COMMITTED to `updater-migration` (2026-05-27), NOT released
 
-Big verified batch, gated on two-machine confirm (see Resume). Full detail → CHANGELOG.
-
-- **Permission modes (Piece 1+2).** All 5 modes functional via `--permission-prompt-tool stdio` + control channel (`PermissionRegistry` in permission.rs, `assistant_answer_permission`, `PermissionBar.svelte`; `--allowed-tools` mode-aware). **All 3 prompting modes VERIFIED 2026-05-27** (stdio-control probe, `%TEMP%/rift-perm-probe.cjs`): default gates Write+Bash; acceptEdits auto-allows edits + safe Bash, **gates risky Bash** (`curl`); plan redirects mutations to `.claude/plans/` + gates ExitPlanMode. Correction to earlier note: acceptEdits does NOT prompt for *all* Bash — only risky. Zero backend bugs.
-- **Enhancer streaming + actionable retune.** Streams token-by-token now — fix: text input (`-p`, null stdin) + `--output-format stream-json`; `--input-format stream-json` block-buffers the bundled exe's stdout (documented in code). Meta-prompt retuned to "add actionable detail" (no more no-op on clear drafts). CDP-verified streaming. ~6-8s TTFT = CLI cold-start, inherent.
-- **Ctx-pill fix.** Pill off last `assistant` envelope, not cumulative `result`. +1 test (39 pass). **Not yet live-verified vs a real long task — queue CDP multi-step run before ship.**
-- **THIS MACHINE manually patched (NOT a release):** `…\Rift\current\rift-tauri.exe` runs 0.4.33 code, reports v0.4.32. Rollback: restore `rift-tauri.exe.bak-pre-enhancer`. Other machine = genuine 0.4.32.
+Gated on two-machine confirm. Full detail → CHANGELOG. Summary: all 5 permission modes verified, enhancer streaming fixed, ctx-pill fix (39 tests pass — **not yet live-verified vs real long task**), chat UI polish (900px column, ask_user retheme, composer ghost fix). This machine running local `0.4.33-alpha` exe (manual swap, Velopack shell). **Other machine still on genuine 0.4.32.** GitHub release untouched.
 
 ---
 
 ## Branch in flight — `updater-migration` (Velopack → tauri-plugin-updater)
 
-**v0.4.32-alpha SHIPPED 2026-05-26** to `Blazzer10200/rift-releases` (bridge already ran — all assets live, `latest.json` polled 108×). Branch version files still read 0.4.32-alpha. Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key` — **backed up 2026-05-27 to OneDrive + iCloud** (`rift-signing-key-backup/`). `release.ps1` = Tauri-only path for v0.4.33+. `release-bridge.ps1` = the one-time v0.4.32 bridge, now spent (retire it).
+**v0.4.32-alpha SHIPPED 2026-05-26** to `Blazzer10200/rift-releases` (bridge already ran — all assets live, `latest.json` polled 108×). Branch version files now read **0.4.33-alpha** (bumped 2026-05-27 for the local build, uncommitted). Brief: [docs/design/updater-migration.md](design/updater-migration.md). Signing key `C:/Users/BLAZZER/.tauri/rift.key` — **backed up 2026-05-27 to OneDrive + iCloud** (`rift-signing-key-backup/`). `release.ps1` = Tauri-only path for v0.4.33+. `release-bridge.ps1` = the one-time v0.4.32 bridge, now spent (retire it).
 
-Audit 2026-05-27 RESOLVED (prior session) — [docs/audit-2026-05-27.md](audit-2026-05-27.md). Open queue: 10 issues (#4 #7 #14 #15 #17 #20-M6-M9 #21 #29 #89 #265) → ISSUES.md.
+Audit 2026-05-27 RESOLVED (prior session) — [docs/archive/audit-2026-05-27.md](archive/audit-2026-05-27.md). Open queue: 10 issues (#4 #7 #14 #15 #17 #20-M6-M9 #21 #29 #89 #265) → ISSUES.md.
 
 ---
 
