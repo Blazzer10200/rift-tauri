@@ -1,17 +1,10 @@
-# Rift release pipeline -- Tauri-only path (v0.4.33+).
+# Rift release pipeline -- GH-release-API path (v0.4.34+).
 #
-# Migrated from velopack 2026-05-26 (see docs/design/updater-migration.md).
-# Produces a single NSIS Setup.exe + .sig, generates latest.json, and uploads
-# all three to the public rift-releases GitHub repo. v0.4.32+ clients poll
-# latest.json via tauri-plugin-updater.
-#
-# For the ONE-TIME v0.4.32 bridge release (also produces velopack artifacts so
-# v0.4.31 clients can update), use scripts/release-bridge.ps1 instead.
-#
-# Prereqs on PATH: npm, gh (logged in). Tauri signing key env required --
-# TAURI_SIGNING_PRIVATE_KEY_PATH (loaded from .secrets/env.sh) must point at
-# C:/Users/BLAZZER/.tauri/rift.key. If unset, `tauri build` produces no .sig
-# file and clients will reject the update.
+# Produces a single NSIS Setup.exe and uploads it to the public rift-releases
+# GitHub repo. v0.4.34+ clients hit api.github.com/.../releases/latest, semver-
+# compare the tag, and open Setup.exe in the browser on user confirm.
+# No signing key, no latest.json, no *.sig -- the prior tauri-plugin-updater
+# path bricked all clients on key loss (see commands/update.rs header).
 #
 # Bump versions BEFORE running -- use `scripts/bump.ps1 <version>` to write the
 # three lockstep files (package.json + Cargo.toml + tauri.conf.json).
@@ -31,30 +24,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
 
-Write-Host '=== Rift release pipeline (Tauri-updater path) ===' -ForegroundColor Cyan
-
-# --- Auto-load signing creds (key file + secrets/env.ps1) ----------------
-# Tauri's `tauri build` reads $env:TAURI_SIGNING_PRIVATE_KEY (key content, not
-# a path) and $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD (if the key is encrypted).
-# Past failure mode: relying on the operator to set these per-shell — got the
-# wrong env name (_PATH vs no suffix) and missed the password entirely, hanging
-# the signer on an interactive prompt inside a non-interactive build (2026-05-27
-# v0.4.33 first attempt). Fix: auto-load both here so future ships don't need
-# any per-shell env juggling.
-$keyFile = 'C:/Users/BLAZZER/.tauri/rift.key'
-if (-not $env:TAURI_SIGNING_PRIVATE_KEY -and (Test-Path $keyFile)) {
-    $env:TAURI_SIGNING_PRIVATE_KEY = [System.IO.File]::ReadAllText($keyFile)
-    Write-Host "  Loaded signing key from $keyFile" -ForegroundColor DarkGray
-}
-$secretsScript = Join-Path $repoRoot '.secrets/env.ps1'
-if (Test-Path $secretsScript) {
-    . $secretsScript
-    Write-Host "  Sourced $secretsScript" -ForegroundColor DarkGray
-}
-if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-    Write-Host "  Note: TAURI_SIGNING_PRIVATE_KEY_PASSWORD is not set. If the signing key has a passphrase, the build will hang on the decrypt prompt." -ForegroundColor Yellow
-    Write-Host "        Set it in .secrets/env.ps1 (gitignored)." -ForegroundColor Yellow
-}
+Write-Host '=== Rift release pipeline (GH-release-API path) ===' -ForegroundColor Cyan
 
 # --- Preflight: version sync ---------------------------------------------
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
@@ -70,14 +40,6 @@ if ($pkg.version -ne $cargoVer -or $pkg.version -ne $tauriCfg.version) {
 $version = $pkg.version
 $tag = "v$version"
 Write-Host "Version: $version (tag $tag)" -ForegroundColor Green
-
-# --- Preflight: signing key ----------------------------------------------
-if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PATH -and -not $env:TAURI_SIGNING_PRIVATE_KEY) {
-    throw 'TAURI_SIGNING_PRIVATE_KEY[_PATH] not set. Source .secrets/env.sh or set TAURI_SIGNING_PRIVATE_KEY_PATH=C:/Users/BLAZZER/.tauri/rift.key before releasing.'
-}
-if ($env:TAURI_SIGNING_PRIVATE_KEY_PATH -and -not (Test-Path $env:TAURI_SIGNING_PRIVATE_KEY_PATH)) {
-    throw "TAURI_SIGNING_PRIVATE_KEY_PATH points at $($env:TAURI_SIGNING_PRIVATE_KEY_PATH) but no file there."
-}
 
 # --- Preflight: extract release notes from CHANGELOG ---------------------
 # ASCII-only source -- \uXXXX in -replace patterns resolves at .NET regex
@@ -170,20 +132,8 @@ try {
 }
 
 # --- Build ---------------------------------------------------------------
-Write-Host '=== tauri build (NSIS + .sig) ===' -ForegroundColor Cyan
-# Tauri 2.11.1's signer always emits "Decrypting updater signing key, expect a
-# prompt for password" and reads stdin for the passphrase — even when the key
-# is passwordless and the env var is set. In a non-interactive shell (script /
-# CI / Claude-driven session) that read blocks forever. PowerShell's native-
-# command pipe (`'' | npm ...`) does NOT reliably propagate through the npm.cmd
-# → node → tauri-cli → signer shim chain on Windows. cmd.exe's pipe DOES,
-# because each layer inherits the parent's stdin handle directly. So we invoke
-# `cmd /c "echo. | npm run tauri build"` — echo. emits a CRLF, the signer reads
-# it as an empty password, decryption succeeds (passwordless key), build
-# proceeds. The chosen redirect target is the empty string + newline, not NUL,
-# because the signer's prompt does a blocking line-read; NUL would close stdin
-# but the signer treats EOF the same as a missing key.
-& cmd /c "echo. | npm run tauri build"
+Write-Host '=== tauri build (NSIS) ===' -ForegroundColor Cyan
+& npm run tauri build
 if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
 # tauri build emits to either src-tauri/target/ or $env:CARGO_TARGET_DIR.
@@ -200,42 +150,12 @@ if ($setupCandidates.Count -ne 1) {
     throw "Expected exactly one $setupPattern in $nsisDir, found $($setupCandidates.Count)"
 }
 $setupPath = $setupCandidates[0].FullName
-$sigPath = "$setupPath.sig"
-if (-not (Test-Path $sigPath)) {
-    throw "Signature file missing: $sigPath. Check TAURI_SIGNING_PRIVATE_KEY_PATH and that createUpdaterArtifacts=true in tauri.conf.json."
-}
 Write-Host "  Setup: $setupPath" -ForegroundColor DarkGray
-Write-Host "  Sig:   $sigPath" -ForegroundColor DarkGray
-
-# --- Generate latest.json -----------------------------------------------
-Write-Host '=== latest.json ===' -ForegroundColor Cyan
-$sigContent = [System.IO.File]::ReadAllText($sigPath).Trim()
-$pubDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-$setupFileName = [System.IO.Path]::GetFileName($setupPath)
-$downloadUrl = "https://github.com/$releaseRepo/releases/download/$tag/$setupFileName"
-
-$latest = [ordered]@{
-    version    = $version
-    notes      = $notesBodyAscii
-    pub_date   = $pubDate
-    platforms  = [ordered]@{
-        "windows-x86_64" = [ordered]@{
-            signature = $sigContent
-            url       = $downloadUrl
-        }
-    }
-}
-$latestJson = $latest | ConvertTo-Json -Depth 6
-
-$releasesDir = Join-Path $repoRoot 'Releases'
-if (-not (Test-Path $releasesDir)) { New-Item -ItemType Directory -Path $releasesDir | Out-Null }
-$latestPath = Join-Path $releasesDir 'latest.json'
-# UTF-8 NO BOM -- Tauri's JSON parser barfs on the BOM signature byte (R5 in brief).
-[System.IO.File]::WriteAllText($latestPath, $latestJson, [System.Text.UTF8Encoding]::new($false))
-Write-Host "  Wrote: $latestPath" -ForegroundColor DarkGray
 
 # --- Create + upload to GitHub ------------------------------------------
 Write-Host '=== gh release create ===' -ForegroundColor Cyan
+$releasesDir = Join-Path $repoRoot 'Releases'
+if (-not (Test-Path $releasesDir)) { New-Item -ItemType Directory -Path $releasesDir | Out-Null }
 $ghArgs = @(
     'release', 'create', $tag,
     '--repo', $releaseRepo,
@@ -246,12 +166,11 @@ if ($releaseNotesFile) {
 } else {
     $ghArgs += @('--notes', '')
 }
-# DO NOT add --prerelease, even for alpha/beta/rc. GitHub's
-# releases/latest/download/<asset> redirect EXCLUDES prereleases, which
-# would 404 the tauri-updater endpoint baked into every shipped client
-# (https://github.com/.../releases/latest/download/latest.json). Alpha-ness
-# is communicated via the version suffix (`-alpha`), not the GH flag.
-$ghArgs += @($setupPath, $sigPath, $latestPath)
+# DO NOT add --prerelease. GitHub's releases/latest API endpoint EXCLUDES
+# prereleases — the GH-release-API updater path queries that exact endpoint,
+# so a prerelease ship would be invisible to all clients. Alpha-ness is
+# communicated via the version suffix (`-alpha`), not the GH flag.
+$ghArgs += @($setupPath)
 
 & gh @ghArgs
 if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
