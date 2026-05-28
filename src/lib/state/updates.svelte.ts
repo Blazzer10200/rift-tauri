@@ -1,19 +1,25 @@
-// Global update store. One instance per session: triggers a launch-time
-// check, caches the result, drives the popup dialog + StatusBar pill +
-// corner toast, and pumps download progress from the backend.
+// Update store — v0.4.34+ GH-release-API path.
+//
+// Replaced `tauri-plugin-updater` (2026-05-27 → 2026-05-27 brief lifetime;
+// signing-key loss bricks all clients permanently, see commands/update.rs).
+// Backend `check_for_updates` polls the latest GitHub release; on user
+// confirm we open the Setup.exe asset URL via `tauri-plugin-opener`. NSIS
+// handles install over the running binary (its template prompts to close
+// Rift if needed, then relaunches).
 //
 // State machine:
-//   idle → checking → available → downloading → ready → applying
+//   idle → checking → available → launched
 //                  ↘ uptodate
-//                  ↘ error (recoverable, retryable)
+//                  ↘ error
 //
-// `dismissedVersion` is persisted in localStorage so a snoozed update for
-// version X doesn't pop the toast again every relaunch. A NEWER version
-// supersedes — the toast will fire for the new tag even if the prior was
-// snoozed.
+// `launched` = user clicked Download, browser opened the asset URL. They run
+// Setup.exe externally; next launch is the new version.
+//
+// `dismissedVersion` is persisted in localStorage so a snoozed version
+// doesn't pop the toast again next launch; a NEWER version supersedes.
 
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 export type UpdateInfo = {
   version: string;
@@ -21,6 +27,7 @@ export type UpdateInfo = {
   sizeBytes: number;
   notesMarkdown: string;
   releaseUrl: string;
+  downloadUrl: string;
   publishedAt: string;
 };
 
@@ -28,9 +35,7 @@ export type UpdateState =
   | "idle"
   | "checking"
   | "available"
-  | "downloading"
-  | "ready"
-  | "applying"
+  | "launched"
   | "uptodate"
   | "error";
 
@@ -51,19 +56,16 @@ class UpdateStore {
   info = $state<UpdateInfo | null>(null);
   error = $state("");
   currentVersion = $state("?");
+  /** Retained for back-compat w/ UI bindings; always 0 in the GH-release path. */
   progress = $state(0);
   dialogOpen = $state(false);
   toastVisible = $state(false);
   dismissedVersion = $state<string | null>(loadDismissed());
 
-  private progressUnlisten: UnlistenFn | null = null;
-  private downloadedUnlisten: UnlistenFn | null = null;
-  private sizeUnlisten: UnlistenFn | null = null;
-
   /** True when there's an unsnoozed update waiting for user action. */
   get pillVisible(): boolean {
     return (
-      (this.state === "available" || this.state === "ready") &&
+      this.state === "available" &&
       !this.toastVisible &&
       !this.dialogOpen
     );
@@ -110,36 +112,22 @@ class UpdateStore {
     }
   }
 
-  /** Download the pending package. Tauri streams `update-progress` events. */
+  /** Open the Setup.exe URL in the user's default browser. NSIS wizard
+   *  prompts to close Rift if needed, installs, then relaunches. */
   async download() {
-    if (this.state !== "available") return;
-    this.state = "downloading";
-    this.progress = 0;
+    if (this.state !== "available" || !this.info?.downloadUrl) return;
     this.error = "";
     try {
-      await this.ensureListeners();
-      await invoke<void>("download_update");
-      // `update-downloaded` event flips us to `ready`; defensive set here in
-      // case the event fires before this await resolves.
-      if ((this.state as UpdateState) !== "ready") this.state = "ready";
+      await openUrl(this.info.downloadUrl);
+      this.state = "launched";
     } catch (e) {
       this.error = String(e);
       this.state = "error";
     }
   }
 
-  /** Apply the staged download + restart. Control never returns on success. */
-  async applyNow() {
-    if (this.state !== "ready") return;
-    this.state = "applying";
-    this.error = "";
-    try {
-      await invoke<void>("apply_pending_update");
-    } catch (e) {
-      this.error = String(e);
-      this.state = "error";
-    }
-  }
+  /** Back-compat alias — UpdateDialog's "Install" button calls this. */
+  async applyNow() { await this.download(); }
 
   /** Snooze the current available version — toast + pill stay quiet until a
    *  newer version ships. Closes the dialog if open. */
@@ -154,14 +142,8 @@ class UpdateStore {
 
   dismissToast() { this.toastVisible = false; }
 
-  /** Called once on app launch from AppShell.onMount.
-   *
-   *  When an unsnoozed update is detected, surface the toast AND start the
-   *  background download. By the time the user opens the dialog → Install,
-   *  the bytes are already on disk so the only wait is the NSIS apply
-   *  (sub-30s on the Tauri-updater path). Idempotent — `download_update`
-   *  on the backend short-circuits when the pending Update is already
-   *  resolved. */
+  /** Called once on app launch from AppShell.onMount. Pops the toast if a
+   *  newer release exists and the user hasn't snoozed that exact version. */
   async checkOnLaunch() {
     await this.refresh();
     if (
@@ -170,62 +152,19 @@ class UpdateStore {
       this.info.version !== this.dismissedVersion
     ) {
       this.toastVisible = true;
-      void this.download();
     }
   }
 
   open()  { this.dialogOpen = true; this.toastVisible = false; }
   close() { this.dialogOpen = false; }
 
-  private async ensureListeners() {
-    if (!this.progressUnlisten) {
-      this.progressUnlisten = await listen<number>("update-progress", (e) => {
-        const pct = typeof e.payload === "number" ? e.payload : Number(e.payload);
-        if (!Number.isFinite(pct)) return;
-        this.progress = Math.max(0, Math.min(100, Math.round(pct)));
-      });
-    }
-    if (!this.downloadedUnlisten) {
-      this.downloadedUnlisten = await listen<unknown>("update-downloaded", () => {
-        this.progress = 100;
-        this.state = "ready";
-      });
-    }
-    if (!this.sizeUnlisten) {
-      // tauri-plugin-updater doesn't expose Content-Length before the byte
-      // stream begins, so the backend emits `update-size` once on first
-      // chunk. Patch info.sizeBytes so the dialog's "X of Y MB" label resolves.
-      this.sizeUnlisten = await listen<number>("update-size", (e) => {
-        const bytes = typeof e.payload === "number" ? e.payload : Number(e.payload);
-        if (!Number.isFinite(bytes) || bytes <= 0) return;
-        if (this.info) this.info.sizeBytes = bytes;
-      });
-    }
-  }
-
-  /** #173: tear down Tauri event listeners. Wired via `import.meta.hot.dispose`
-   *  so HMR doesn't stack duplicates; AppShell may also call this on unmount
-   *  (separate milestone). Safe to call when listeners were never installed. */
-  dispose() {
-    if (this.progressUnlisten) {
-      try { this.progressUnlisten(); } catch (e) { console.warn("update-progress unlisten threw", e); }
-      this.progressUnlisten = null;
-    }
-    if (this.downloadedUnlisten) {
-      try { this.downloadedUnlisten(); } catch (e) { console.warn("update-downloaded unlisten threw", e); }
-      this.downloadedUnlisten = null;
-    }
-    if (this.sizeUnlisten) {
-      try { this.sizeUnlisten(); } catch (e) { console.warn("update-size unlisten threw", e); }
-      this.sizeUnlisten = null;
-    }
-  }
+  /** No-op in the GH-release path — kept so HMR teardown callers don't error. */
+  dispose() {}
 }
 
 export const updates = new UpdateStore();
 
-// #173: HMR teardown so a hot-reload doesn't leave the old listeners firing
-// into a stale store instance.
+// #173: HMR teardown so a hot-reload doesn't leave stale handlers wired.
 if (typeof import.meta !== "undefined" && (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot) {
   (import.meta as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => updates.dispose());
 }

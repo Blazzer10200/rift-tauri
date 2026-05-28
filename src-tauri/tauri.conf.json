@@ -46,15 +46,5 @@
       }
     }
   },
-  "plugins": {
-    "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyMEFBMDVCRjgxMDkwNTQKUldSVWtCRDRXNkFLSWhtYS9WYkVUYzJCajJrY1NITWdtcm4yaENHa215ck1NUkZzVTQwSnNGZVQK",
-      "endpoints": [
-        "https://github.com/Blazzer10200/rift-releases/releases/latest/download/latest.json"
-      ],
-      "windows": {
-        "installMode": "passive"
-      }
-    }
-  }
+  "plugins": {}
 }

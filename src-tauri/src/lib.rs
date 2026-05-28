@@ -1,9 +1,13 @@
 //! Rift v14 — Tauri + Svelte + russh backend.
 //!
-//! Auto-update via `tauri-plugin-updater` (migrated from velopack 2026-05-26;
-//! see docs/design/updater-migration.md). Polls latest.json on the public
-//! `Blazzer10200/rift-releases` repo, verifies an ed25519 signature, and hands
-//! off to the NSIS installer for the file swap (Tauri auto-exits before swap).
+//! Auto-update via the GH-release-API path (v0.4.34+, see
+//! `commands/update.rs`). Frontend polls the latest GitHub release on launch,
+//! offers a one-click "Download" that opens the Setup.exe asset URL via
+//! `tauri-plugin-opener`; NSIS handles install over the running binary.
+//! No signing key, no `latest.json`, no plugin runtime dependency — the
+//! prior `tauri-plugin-updater` path bricked all clients on key loss
+//! (2026-05-27 incident → v0.4.34 rebuild).
+//!
 //! Tauri command surface at the bottom of this file (`run()`'s
 //! `invoke_handler!`). Command fns live under `commands/` — one file per
 //! domain (#20).
@@ -60,10 +64,8 @@ pub struct DiagPumpCancel(pub CancellationToken);
 pub struct DiagPumpSubscribers(pub std::sync::atomic::AtomicU64);
 
 /// Application entry point. Registers managed state + Tauri commands and
-/// blocks on the event loop. Updater plugin handles install/update lifecycle
-/// natively — no pre-Tauri shim needed (was VelopackApp::build().run() before
-/// 2026-05-26 migration; tauri-plugin-updater's NSIS Setup.exe is a separate
-/// process and doesn't need cooperation from this entry point).
+/// blocks on the event loop. Update flow lives in `commands/update.rs` —
+/// frontend pulls GitHub release metadata, opens Setup.exe URL on confirm.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Logger init early so panic hook + plugin init events surface in stderr.
@@ -141,13 +143,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(AutoSyncState(AsyncMutex::new(None)))
         .manage(TunnelState(AsyncMutex::new(None)))
-        .manage(commands::update::PendingUpdate::default())
         .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
         .manage(DownloadState(AsyncMutex::new(None)))
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
@@ -219,8 +218,6 @@ pub fn run() {
             commands::rotate_bridge_token,
             commands::validate_ssh_key_file,
             commands::check_for_updates,
-            commands::download_update,
-            commands::apply_pending_update,
             commands::begin_edit_in_place,
             commands::save_edit_in_place,
             commands::close_edit_in_place,

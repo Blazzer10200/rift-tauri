@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Download, X, RefreshCw, AlertTriangle, CheckCircle2,
-    Sparkles, ArrowRight, ExternalLink, Rocket, Clock,
+    Sparkles, ArrowRight, ExternalLink, Clock,
   } from "lucide-svelte";
   import { fade, fly } from "svelte/transition";
   import { updates } from "../../state/updates.svelte";
@@ -9,23 +9,19 @@
   type Variant = "accent" | "ok" | "warn" | "danger" | "info";
 
   const variant = $derived<Variant>(
-    updates.state === "available"   ? "accent" :
-    updates.state === "downloading" ? "info"   :
-    updates.state === "ready"       ? "ok"     :
-    updates.state === "applying"    ? "info"   :
-    updates.state === "uptodate"    ? "ok"     :
-    updates.state === "error"       ? "danger" :
-                                      "info"
+    updates.state === "available" ? "accent" :
+    updates.state === "launched"  ? "ok"     :
+    updates.state === "uptodate"  ? "ok"     :
+    updates.state === "error"     ? "danger" :
+                                    "info"
   );
 
   const subTitle = $derived(
-    updates.state === "available"   ? "A new release is ready" :
-    updates.state === "downloading" ? "Downloading update" :
-    updates.state === "ready"       ? "Update ready to install" :
-    updates.state === "applying"    ? "Applying update" :
-    updates.state === "uptodate"    ? "You're up to date" :
-    updates.state === "error"       ? "Update check failed" :
-                                      "Checking for updates"
+    updates.state === "available" ? "A new release is ready" :
+    updates.state === "launched"  ? "Installer launched in your browser" :
+    updates.state === "uptodate"  ? "You're up to date" :
+    updates.state === "error"     ? "Update check failed" :
+                                    "Checking for updates"
   );
 
   function iconFor(v: Variant) {
@@ -43,17 +39,12 @@
   }
   function onKey(e: KeyboardEvent) {
     if (!updates.dialogOpen) return;
-    if (e.key === "Escape") {
-      // Don't let Escape kill a download mid-flight.
-      if (updates.state === "downloading" || updates.state === "applying") return;
-      updates.close();
-    }
+    if (e.key === "Escape") updates.close();
   }
 
-  // Render the markdown body as plain text w/ light formatting. Avoids
-  // pulling a markdown lib for a release-notes block — we control the source
-  // (our own CHANGELOG snippet) so HTML injection isn't a concern, but we
-  // still escape everything by mounting as text nodes.
+  // Render the markdown body as plain text w/ light formatting. We control
+  // the source (our own CHANGELOG snippet) so HTML injection isn't a concern;
+  // still mount as text nodes for defense-in-depth.
   function notesLines(md: string): { kind: "h" | "li" | "p" | "blank"; text: string }[] {
     if (!md) return [];
     return md.split(/\r?\n/).slice(0, 200).map((raw) => {
@@ -96,7 +87,7 @@
         <div class="head-glow"></div>
         <div class="head-row">
           <div class="head-icon" data-variant={variant}>
-            {#if updates.state === "checking" || updates.state === "downloading" || updates.state === "applying"}
+            {#if updates.state === "checking"}
               <RefreshCw size={16} class="spin"/>
             {:else}
               <Ico size={16}/>
@@ -111,14 +102,13 @@
             type="button"
             onclick={() => updates.close()}
             aria-label="Close"
-            disabled={updates.state === "downloading" || updates.state === "applying"}
           >
             <X size={14}/>
           </button>
         </div>
 
         <!-- Version diff strip (only when we know the target) -->
-        {#if updates.info && (updates.state === "available" || updates.state === "downloading" || updates.state === "ready" || updates.state === "applying")}
+        {#if updates.info && (updates.state === "available" || updates.state === "launched")}
           <div class="head-diff">
             <span class="diff-chip current mono">v{updates.currentVersion}</span>
             <ArrowRight size={12} class="diff-arrow"/>
@@ -138,35 +128,13 @@
         {#if updates.state === "checking"}
           <p class="lead">Talking to GitHub releases…</p>
 
-        {:else if updates.state === "available" || updates.state === "downloading" || updates.state === "ready" || updates.state === "applying"}
-          {#if updates.state === "downloading" || updates.state === "applying"}
-            <div class="progress-card">
-              <div class="progress-head">
-                <span class="progress-label">
-                  {updates.state === "applying" ? "Applying…" : "Downloading…"}
-                </span>
-                <span class="progress-pct mono">{updates.progress}%</span>
-              </div>
-              <div class="progress-track">
-                <div class="progress-fill" style="width: {updates.progress}%"></div>
-                <div class="progress-shimmer"></div>
-              </div>
-              <div class="progress-foot">
-                {#if updates.state === "applying"}
-                  Closing Rift, swapping the binary, relaunching.
-                {:else}
-                  {updates.sizeLabel
-                    ? `${(updates.info?.sizeBytes ? (updates.info.sizeBytes * updates.progress / 100 / (1024*1024)).toFixed(1) : "0.0")} of ${updates.sizeLabel}`
-                    : "Streaming from GitHub…"}
-                {/if}
-              </div>
-            </div>
-          {:else if updates.state === "ready"}
+        {:else if updates.state === "available" || updates.state === "launched"}
+          {#if updates.state === "launched"}
             <div class="ready-card">
-              <Rocket size={18}/>
+              <Download size={18}/>
               <div class="ready-text">
-                <div class="ready-title">Update downloaded — ready to install.</div>
-                <div class="ready-sub">Rift will close, swap the binary, and relaunch into v{updates.info?.version}.</div>
+                <div class="ready-title">Setup.exe is downloading in your browser.</div>
+                <div class="ready-sub">Run it when the download finishes — Windows will close Rift, install v{updates.info?.version}, and relaunch.</div>
               </div>
             </div>
           {/if}
@@ -215,7 +183,7 @@
             <div class="err-text">
               <div class="err-title">Couldn't reach the update feed.</div>
               <div class="err-detail mono">{updates.error}</div>
-              <div class="err-hint">GitHub unreachable, feed not published, or rate-limited. Try again shortly.</div>
+              <div class="err-hint">GitHub unreachable or rate-limited. Try again shortly.</div>
             </div>
           </div>
 
@@ -231,25 +199,14 @@
             <Clock size={11}/> Remind me later
           </button>
           <div class="foot-spacer"></div>
-          <button class="btn primary" type="button" onclick={() => updates.download()}>
-            <Download size={11}/> Download update
+          <button class="btn primary glow" type="button" onclick={() => updates.download()}>
+            <Download size={11}/> Download installer
           </button>
 
-        {:else if updates.state === "downloading"}
-          <span class="foot-status">Hang tight — keep Rift open.</span>
+        {:else if updates.state === "launched"}
+          <span class="foot-status">Run Setup.exe to finish.</span>
           <div class="foot-spacer"></div>
-          <button class="btn" type="button" onclick={() => updates.close()}>Hide</button>
-
-        {:else if updates.state === "ready"}
-          <button class="btn ghost" type="button" onclick={() => updates.close()}>Apply on next launch</button>
-          <div class="foot-spacer"></div>
-          <button class="btn primary glow" type="button" onclick={() => updates.applyNow()}>
-            <Rocket size={11}/> Restart & install
-          </button>
-
-        {:else if updates.state === "applying"}
-          <span class="foot-status">Rift is closing…</span>
-          <div class="foot-spacer"></div>
+          <button class="btn" type="button" onclick={() => updates.close()}>Close</button>
 
         {:else}
           <button class="btn ghost" type="button" onclick={() => updates.close()}>Close</button>
@@ -410,60 +367,7 @@
   }
   .lead { color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.5; margin: 0; }
 
-  /* Progress card */
-  .progress-card {
-    padding: 12px 14px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-  }
-  .progress-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    margin-bottom: 8px;
-  }
-  .progress-label { color: var(--fg-2); font-size: var(--fs-sm); }
-  .progress-pct   { color: var(--accent); font-size: var(--fs-md); font-weight: 600; }
-  .progress-track {
-    position: relative;
-    height: 6px;
-    background: var(--bg-elev-3);
-    border-radius: 999px;
-    overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg,
-      color-mix(in oklch, var(--accent) 70%, transparent),
-      var(--accent));
-    border-radius: 999px;
-    transition: width 240ms cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 0 0 8px color-mix(in oklch, var(--accent) 50%, transparent);
-  }
-  .progress-shimmer {
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(90deg,
-      transparent 0%,
-      color-mix(in oklch, white 12%, transparent) 50%,
-      transparent 100%);
-    background-size: 200% 100%;
-    animation: shimmer 1.4s linear infinite;
-    pointer-events: none;
-  }
-  @keyframes shimmer {
-    0% { background-position: 200% 0; }
-    100% { background-position: -200% 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .progress-shimmer { animation: none; opacity: 0; }
-  }
-  .progress-foot {
-    margin-top: 8px;
-    font-size: var(--fs-xs);
-    color: var(--fg-subtle);
-  }
-
-  /* Ready card */
+  /* Ready/launched card */
   .ready-card {
     display: grid; grid-template-columns: 24px 1fr; gap: 12px;
     align-items: start;
