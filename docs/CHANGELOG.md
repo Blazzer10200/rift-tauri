@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.36 — 2026-05-28 — fix opener-plugin scope blocking installer download + error reporting
+
+> **What broke in v0.4.35.** Clicking "Download installer" in the update dialog failed with `Not allowed to open url https://github.com/Blazzer10200/rift-releases/releases/download/v0.4.35/Rift_0.4.35_x64-setup.exe`. Two bugs, fixed together.
+
+**Capability scope (real cause).** `tauri-plugin-opener` 2.x requires explicit URL scope on the `opener:allow-open-url` permission — the bare permission allows zero URLs by default. [src-tauri/capabilities/default.json](src-tauri/capabilities/default.json) upgrades the bare `"opener:allow-open-url"` string to a permission-with-scope object that allow-lists `https://**`, `http://**`, and `mailto:**`. Worked silently on every other openUrl path in the app (release-page link, GitHub repo, etc.) until v0.4.34's updater rewrite started routing the installer download through the same plugin and it became the first hot path to hit a non-trivial URL post-bundle. Affects: update installer launch, "View release on GitHub" link, in-app web browser address bar opens.
+
+**Error reporting (the dialog mis-reported it).** [src/lib/state/updates.svelte.ts](src/lib/state/updates.svelte.ts) `download()` previously flipped `state` to `"error"` and wrote into `error` on openUrl failure, which made [UpdateDialog.svelte](src/lib/components/dialogs/UpdateDialog.svelte) render "Couldn't reach the update feed · GitHub unreachable or rate-limited" — both wrong; the feed had succeeded (the dialog had the release notes), only the opener call failed. New `downloadError` field separates the two paths: feed/check failures still go to `error` + `state="error"`; openUrl failures stay on `state="available"` and surface inline below the release notes with the actual error string + a hint pointing at the "View release on GitHub" fallback. Download button stays enabled for retry without re-querying GitHub.
+
+**Verify.** `npm run check` 0 / 0. NSIS bundler clean. SHA256 round-trip verified.
+
 ## v0.4.35 — 2026-05-28 — unified toast/notification host
 
 > **Why this release exists.** Two toast components — `ActivityToast` (sync events) + `UpdateToast` (update available) — both pinned to `bottom: ~32px; right: ~16px` with different z-indexes and zero awareness of each other. When an update notice and a sync event coincided they stacked on top of each other in the same corner; rapid sync events also blew the activity toast's 4.5s timer back to full every event with no animation between, producing flicker. The two components also drifted visually: UpdateToast carried a gradient + accent glow halo + 22px shadow stack that no other surface in the app uses, while ActivityToast used the standard blurred-surface palette. Unified into a single host with a real queue.

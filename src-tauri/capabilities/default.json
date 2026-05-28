@@ -12,7 +12,14 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
-    "opener:allow-open-url",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://**" },
+        { "url": "http://**" },
+        { "url": "mailto:**" }
+      ]
+    },
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",
     "dialog:default"
