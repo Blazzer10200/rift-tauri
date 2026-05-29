@@ -1,6 +1,6 @@
 # Plan — Rift git + RCON tooling for the Assistant
 
-Status: v2.2 draft 2026-05-20 · scope: design, not implementation
+Status: **ARCHIVED 2026-05-28** — git tools SHIPPED in v0.4.37 (`src-tauri/src/assistant/git_local.rs` + `mcp_server.rs` dispatch). RCON half (`rcon_resource`, `dev_cycle`, `rcon.rs`, `workspace_config.rs`) was never implemented — write a fresh focused brief if RCON work resumes. · original: v2.2 draft 2026-05-20 · scope: design, not implementation
 Reframe: **autonomy-first.** Goal is "Claude wields Rift productively w/ minimum ceremony." One-time setup, then no friction.
 
 ## 1. Summary

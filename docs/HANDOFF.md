@@ -2,13 +2,11 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-28b (ultracode) — integrated Claude's new ultracode mode + UI polish review (UNCOMMITTED, green)
-Integrated Claude's new **ultracode** mode as the 4th THINKING DEPTH tier (Composer popover) — mechanism + wiring in DON'T-TOUCH below. Verified: `npm run check` 0/0, Rust recompiled clean, headless smoke ✓ (opus 4.8, exit 0). Violet `Sparkles` glyph + animated pill marker, CDP-verified. **UI polish:** refined the composer model-pill in `bypassPermissions` mode — was flooding the whole pill in warn-amber (`--warn`, clashed w/ violet ultracode marker); now neutral label + refined amber-orange glowing dot `oklch(0.72 0.165 55)` (Composer CSS ~L2350/2415). svelte-check 0/0.
-
-**Prior (verify+fix):** git-rcon+onboarding+UI + 4 code-review fixes (detail in ISSUES.md). 6 OPEN (CR1-5+CR-UX), only CR1 a warning. Permission round-trip UNVERIFIED (needs in-app selector + throwaway repo).
+## Session 2026-05-28b (ultracode) — SHIPPED as v0.4.37 (4f9ca6e)
+ultracode mode (4th THINKING DEPTH tier, Composer popover — wiring in DON'T-TOUCH) + git-rcon git tools + onboarding + side-panel split + 4 code-review fixes. Verified: `npm run check` 0/0, Rust clean, headless smoke ✓ (opus 4.8, exit 0). 6 OPEN follow-ups (CR1-5 + CR-UX; only CR1 a warning) + permission round-trip UNVERIFIED — all detailed in ISSUES.md.
 
 ## RESUME HERE
-**NEXT:** whole batch (git-rcon + onboarding + 4 fixes + **ultracode**) is UNCOMMITTED + green, ready to ship. Run **/git-ship** to commit+push to origin — **plain commit, NOT a release** (no version/CHANGELOG bump). Push was deliberately held: project rule reserves commit+push for user-initiated /git-ship. Optional after: CR1 (dock anim no-op) + live permission round-trip (throwaway repo, in-app mode selector). Lane 0 perm code (permission.rs/PermissionBar) already COMMITTED, not in this batch. `~/.rift/assistant/config.json` restored.
+**v0.4.37 SHIPPED** (2026-05-28, commits 837408a + 4f9ca6e) — git-rcon git tools + onboarding flow + ultracode tier + side-panel split + 4 CR fixes. Working tree clean; all three version files + CHANGELOG in lockstep at 0.4.37. **Workspace docs/memory cleaned up 2026-05-28** — stale version/updater/Velopack refs corrected across CLAUDE.md, ISSUES.md, README, DEVELOPING, design briefs, and `~/.claude/memory/` rift files; `git-rcon-tools.md` brief archived (git half shipped). Optional follow-ups: CR1 (dock anim no-op) · CR2-5 + CR-UX (minor, see ISSUES.md) · live permission round-trip (throwaway repo, in-app mode selector).
 
 ## CRITICAL DON'T-TOUCH
 

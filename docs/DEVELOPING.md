@@ -35,12 +35,12 @@ Rift needs an OpenSSH ed25519 keypair to talk to your FXServer.
 
 - **Sync** tab (Ctrl+2). Drift auto-populates as soon as connection is ready.
 - **Sync** button does pull-then-push in one shot. Granular `Pull only` / `Push only` live under the `⋯` kebab.
-- Conflicts surface in **Conflicts** (Ctrl+4); resolve per-file.
+- Conflicts surface as a badge on the **Sync** tab — click through to the conflict list and resolve per-file.
 - Auto-rescan toggle (kebab → off / 30s / 1m / 2m / 5m / 10m) catches teammate pushes the watcher can't see.
 
 ### Updates
 
-Rift checks for updates on launch. New build → dialog auto-pops → **Install & restart** swaps the binary in place.
+Rift checks for updates on launch. New build → dialog auto-pops → **Download** opens the Setup.exe in your browser — run it to upgrade.
 
 ### Trouble?
 
@@ -217,4 +217,4 @@ Then update this table.
 
 ## 5. Releases
 
-Maintainers only. Versions bumped manually (or via `/git-ship`) across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch. `release.ps1` then drives `tauri build` → `vpk pack` → `vpk upload github` against the public `rift-releases` repo.
+Maintainers only. Versions bumped manually (or via `/git-ship`) across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch. `release.ps1` then drives `tauri build` → `gh release create` (NSIS Setup.exe only) → SHA256 round-trip verify against the public `rift-releases` repo.

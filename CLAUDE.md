@@ -17,40 +17,41 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Design briefs | `docs/design/` (2 active: `git-rcon-tools.md`, `assistant-svelte-split.md`) |
+| Design briefs | `docs/design/` (1 active: `assistant-svelte-split.md`; `git-rcon-tools.md` → `docs/archive/` after git tools shipped v0.4.37) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
 
-## Hot files (measured 2026-05-26)
+## Hot files (measured 2026-05-28)
 
 Files large enough to matter for agent scoping. Everything else is small enough for inline or `recon`.
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/sync/auto_sync.rs` | 1966 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/assistant/mod.rs` | 2309 | claude CLI integration + auth + workspace (lost kill_child_processes_on_exit in v0.4.34 updater cleanup) |
-| `src-tauri/src/lib.rs` | 292 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
-| `src-tauri/src/sync/auto_sync/flush.rs` | 653 | flush_batch pipeline (split out 2026-05-13) |
-| `src-tauri/src/assistant/mcp_server.rs` | 587 | stdio JSON-RPC MCP server |
-| `src-tauri/src/sync/drift_scanner.rs` | 555 | 3-way drift diff |
-| `src-tauri/src/sftp/list.rs` | 454 | exec-fast-path + worker fallback (split v0.2.49) |
-| `src-tauri/src/diagnostics/mod.rs` | 446 | DiagBus + LogForwarder + frontend pump |
-| `src-tauri/src/sync/ignore.rs` | 441 | full WPF ignore-rule parity + tests |
-| `src-tauri/src/sync/lock_presence.rs` | 386 | .rift-lock advisory presence |
-| `src-tauri/src/sync/drift_watcher.rs` | 380 | pull_one / delete_local_one / register_conflict (auto-poll loop removed v0.2.38) |
-| `src-tauri/src/state/sync_snapshot.rs` | 375 | snapshot persistence |
-| `src-tauri/src/sftp/transfer.rs` | 368 | atomic upload/download + `with_t` op timeouts |
-| `src-tauri/src/sync/auto_sync/watch.rs` | 349 | notify lifecycle + queue_path |
-| `src-tauri/src/sftp/mod.rs` | 307 | session core (split v0.2.49 from 1100L → 307L) |
+| `src-tauri/src/assistant/mod.rs` | 2795 | claude CLI integration + auth + workspace + git-rcon tools (grew from git_local additions v0.4.37; lost kill_child_processes_on_exit in v0.4.34 updater cleanup) |
+| `src-tauri/src/sync/auto_sync.rs` | 2232 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
+| `src-tauri/src/assistant/mcp_server.rs` | 1265 | stdio JSON-RPC MCP server (grew w/ git-tool dispatch v0.4.37) |
+| `src-tauri/src/sync/auto_sync/flush.rs` | 880 | flush_batch pipeline (split out 2026-05-13) |
+| `src-tauri/src/sync/drift_scanner.rs` | 757 | 3-way drift diff |
+| `src-tauri/src/state/sync_snapshot.rs` | 688 | snapshot persistence |
+| `src-tauri/src/sync/lock_presence.rs` | 508 | .rift-lock advisory presence |
+| `src-tauri/src/diagnostics/mod.rs` | 487 | DiagBus + LogForwarder + frontend pump |
+| `src-tauri/src/sync/auto_sync/watch.rs` | 474 | notify lifecycle + queue_path |
+| `src-tauri/src/sftp/list.rs` | 464 | exec-fast-path + worker fallback (split v0.2.49) |
+| `src-tauri/src/sync/ignore.rs` | 447 | full WPF ignore-rule parity + tests |
+| `src-tauri/src/sftp/transfer.rs` | 435 | atomic upload/download + `with_t` op timeouts |
+| `src-tauri/src/sync/drift_watcher.rs` | 419 | pull_one / delete_local_one / register_conflict (auto-poll loop removed v0.2.38) |
+| `src-tauri/src/assistant/git_local.rs` | 414 | local-git MCP tools (git_status/diff/log/pull/commit/push) — shipped v0.4.37 |
+| `src-tauri/src/sftp/mod.rs` | 359 | session core (split v0.2.49 from 1100L → 307L) |
+| `src-tauri/src/lib.rs` | 312 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
 
-Frontend hot files (2026-05-27): `assistant.svelte.ts` 2285L (down from 3356L; #20 M0-M5b carved `persistence.ts` 261L in v0.4.32, M6/M7 carved `tabs.ts` 468L + `compaction.ts` 237L in v0.4.33; M8/M9 still open), `Settings.svelte` 1541L, `SyncPage.svelte` 1343L, `ChatTabsBar.svelte` 1307L (grew w/ Browser toggle + portaled ctx popover v0.4.33), `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
+Frontend hot files (2026-05-28): `assistant.svelte.ts` 2314L (down from 3356L; #20 M0-M7 all carved into `src/lib/state/assistant/{types,helpers,telemetry,workspace,attachments,persistence,tabs,compaction}.ts`; M8 streaming + M9 send still open), `Settings.svelte` 1595L, `SyncPage.svelte` 1343L, `ChatTabsBar.svelte` 1268L, `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
 
-`auto_sync.rs` is approaching the 2000-line agent-split threshold (1966L); `assistant/mod.rs` crossed it (2336L) and is the next backend split candidate. `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
+`assistant/mod.rs` is the largest backend file (2795L, grew from git-rcon additions) and the next backend split candidate; `auto_sync.rs` has also crossed the 2000-line threshold (2232L). `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
 
 ## Agent routing
 
-Only `operator` + `recon` are defined as local subagents. `architect` / `scout` / `verifier` were archived 2026-05-02 — use built-ins of the same name if needed, else inline.
+Only `recon` + `scout` are defined as local subagents. `architect` / `operator` / `verifier` live in `.archive/` — use the built-in of the same name if needed, else inline.
 
 | Area / task | Default | Why |
 |---|---|---|

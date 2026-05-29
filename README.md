@@ -2,11 +2,11 @@
 
 A Tauri + SvelteKit + Rust dev workspace launcher for FiveM / RedM developers. SFTP-first sync, two-way drift detection, in-place remote edit, and a sidebar live-status pill — all running locally against your FXServer.
 
-Pure-Rust SSH/SFTP via `russh` (no libssh2 / OpenSSL deps). NSIS installer for Windows. Self-update via Velopack.
+Pure-Rust SSH/SFTP via `russh` (no libssh2 / OpenSSL deps). NSIS installer for Windows. Self-update via GitHub Releases API (browser-download Setup.exe flow, no signing key required).
 
 ## Status
 
-Pre-1.0 (`-alpha`). The core sync loop is verified end-to-end against a live FXServer. Distribution (auto-update, code signing) is the next milestone. See [`docs/HANDOFF.md`](docs/HANDOFF.md) for the current state.
+Pre-1.0 (`-alpha`). The core sync loop is verified end-to-end against a live FXServer. Auto-update is live (GH Releases API, no code signing — see CHANGELOG v0.4.34). See [`docs/HANDOFF.md`](docs/HANDOFF.md) for the current state.
 
 ## Quick links
 
