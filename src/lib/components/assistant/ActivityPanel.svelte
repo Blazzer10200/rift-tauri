@@ -11,6 +11,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
   import { liveActivity } from "../../state/assistant/helpers";
+  import { tooltip } from "$lib/actions/tooltip";
 
   let { tabId = null }: { tabId?: string | null } = $props();
 
@@ -40,8 +41,8 @@
   // ── Tool rollup — counts, errors, slowest — all per-tab, reactive ──────
   const toolStats = $derived.by(() => {
     const counts: Record<string, number> = {};
-    let total = 0, errors = 0;
-    let slowest: { name: string; ms: number } | null = null;
+    let total = 0, errors = 0, cancelled = 0;
+    let slowest: { name: string; ms: number; id: string } | null = null;
     let lastFail: string | null = null;
     let firstTs = 0, lastTs = 0;
     const stamps: number[] = [];
@@ -50,8 +51,13 @@
         if (b.type !== "tool") continue;
         counts[b.name] = (counts[b.name] ?? 0) + 1;
         total += 1;
-        if (b.isError || b.status === "error") { errors += 1; lastFail = b.name; }
-        if (b.durationMs != null && (!slowest || b.durationMs > slowest.ms)) slowest = { name: b.name, ms: b.durationMs };
+        // Parallel tool calls aborted by an earlier failure come back as
+        // `<tool_use_error>Cancelled: …` — those aren't real failures, so
+        // bucket them separately rather than inflating the error count.
+        const isCancelled = b.result != null && b.result.includes("Cancelled:");
+        if (isCancelled) cancelled += 1;
+        else if (b.isError || b.status === "error") { errors += 1; lastFail = b.name; }
+        if (b.durationMs != null && (!slowest || b.durationMs > slowest.ms)) slowest = { name: b.name, ms: b.durationMs, id: b.id };
         if (b.startedAt != null) {
           stamps.push(b.startedAt);
           if (firstTs === 0 || b.startedAt < firstTs) firstTs = b.startedAt;
@@ -61,8 +67,19 @@
     }
     const histo = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const max = histo.length ? histo[0][1] : 1;
-    return { counts, total, errors, slowest, lastFail, histo, max, stamps, firstTs, lastTs };
+    return { counts, total, errors, cancelled, slowest, lastFail, histo, max, stamps, firstTs, lastTs };
   });
+
+  // Scroll the transcript to a tool block + briefly flash it. Anchored on the
+  // `actnode-<id>` ids MessageBubble sets per tool node. No-op if the node is
+  // off-screen in a different tab / already unmounted.
+  function jumpTo(blockId: string) {
+    const el = document.getElementById(`actnode-${blockId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("act-flash");
+    setTimeout(() => el.classList.remove("act-flash"), 1100);
+  }
 
   // 12-bucket activity sparkline over the tool-call timespan.
   const spark = $derived.by(() => {
@@ -118,12 +135,19 @@
         </header>
         <ul class="rows">
           {#each running as r (r.id)}
-            <li class="run">
-              <span class="run-ic"><Loader2 size={13} class="mon-spin" /></span>
-              <span class="run-label" class:mono={r.kind === "shell"}>
-                {#if r.sub}<span class="agtype">{r.sub}</span>{/if}<span class="run-t">{r.label}</span>
-              </span>
-              <span class="run-el mono">{fmtElapsed(now - r.startedAt)}</span>
+            <li>
+              <button
+                type="button"
+                class="run"
+                onclick={() => jumpTo(r.id)}
+                use:tooltip={"Jump to this call in the transcript"}
+              >
+                <span class="run-ic"><Loader2 size={13} class="mon-spin" /></span>
+                <span class="run-label" class:mono={r.kind === "shell"}>
+                  {#if r.sub}<span class="agtype">{r.sub}</span>{/if}<span class="run-t">{r.label}</span>
+                </span>
+                <span class="run-el mono">{fmtElapsed(now - r.startedAt)}</span>
+              </button>
             </li>
           {/each}
         </ul>
@@ -153,29 +177,43 @@
         <header class="sect-head"><Wrench size={12} /><span class="sect-title">Tool mix</span></header>
         <div class="histo">
           {#each toolStats.histo.slice(0, 6) as [name, count] (name)}
-            <div class="hrow">
+            <div class="hrow" use:tooltip={name}>
               <span class="hname">{name}</span>
               <span class="hbar"><i style="width: {(count / toolStats.max) * 100}%"></i></span>
               <span class="hn mono">{count}</span>
             </div>
           {/each}
+          {#if toolStats.histo.length > 6}
+            <div class="hmore">+{toolStats.histo.length - 6} more tool{toolStats.histo.length - 6 === 1 ? "" : "s"}</div>
+          {/if}
         </div>
       </section>
     {/if}
 
     <!-- Insights ───────────────────────────────────────────────────────── -->
-    {#if toolStats.slowest || toolStats.errors > 0}
+    {#if toolStats.slowest || toolStats.errors > 0 || toolStats.cancelled > 0}
       <section class="sect insights">
         {#if toolStats.slowest}
-          <div class="insight warn">
+          <button
+            type="button"
+            class="insight warn jump"
+            onclick={() => { const s = toolStats.slowest; if (s) jumpTo(s.id); }}
+            use:tooltip={"Jump to this call in the transcript"}
+          >
             <span class="ic"><AlertCircle size={13} /></span>
             Slowest tool · <b>{toolStats.slowest.name}</b> <span class="mono">{fmtDur(toolStats.slowest.ms)}</span>
-          </div>
+          </button>
         {/if}
         {#if toolStats.errors > 0}
           <div class="insight err">
             <span class="ic"><AlertCircle size={13} /></span>
             {toolStats.errors} failed call{toolStats.errors === 1 ? "" : "s"}{#if toolStats.lastFail} · <span class="mono">{toolStats.lastFail}</span>{/if}
+          </div>
+        {/if}
+        {#if toolStats.cancelled > 0}
+          <div class="insight">
+            <span class="ic"><AlertCircle size={13} /></span>
+            {toolStats.cancelled} cancelled <span class="dim">· aborted parallel calls</span>
           </div>
         {/if}
       </section>
@@ -212,7 +250,15 @@
 
   /* Running rows */
   .rows { list-style: none; margin: 0; padding: 4px 8px 12px; display: flex; flex-direction: column; gap: 2px; }
-  .run { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 6px; font-size: var(--fs-sm); color: var(--fg-2); }
+  .run {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 7px 8px; border-radius: 6px;
+    background: none; border: 0; text-align: left; font: inherit; cursor: pointer;
+    font-size: var(--fs-sm); color: var(--fg-2);
+    transition: background 120ms ease;
+  }
+  .run:hover { background: var(--bg-elev-2); }
+  .run:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .run-ic { display: flex; align-items: center; color: var(--accent); flex-shrink: 0; }
   .run-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .run-label.mono .run-t { font-family: var(--font-mono); font-size: 12px; color: var(--fg); }
@@ -235,7 +281,8 @@
   /* Histogram */
   .histo { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
   .hrow { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); }
-  .hname { width: 44px; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hname { width: 62px; flex-shrink: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hmore { padding-top: 2px; font-size: var(--fs-xs); color: var(--fg-subtle); }
   .hbar { flex: 1; height: 7px; background: var(--bg-elev-2); border-radius: 4px; overflow: hidden; }
   .hbar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width 280ms cubic-bezier(0.22,1,0.36,1); }
   .hn { width: 18px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
@@ -247,6 +294,28 @@
   .insight b { color: var(--fg-2); font-weight: 600; }
   .insight.warn .ic { color: var(--warn); }
   .insight.err .ic { color: var(--danger); }
+  .insight .dim { color: var(--fg-subtle); }
+  /* Slowest-tool row doubles as a jump button. */
+  .insight.jump {
+    width: 100%; background: none; border: 0; font: inherit; text-align: left;
+    cursor: pointer; transition: background 120ms ease;
+  }
+  .insight.jump:hover { background: var(--bg-elev-2); }
+  .insight.jump:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* Transcript flash when a row jumps to its call. Global — the target node
+     (.tl-node) lives in MessageBubble's scope, not here. */
+  :global(.tl-node.act-flash) {
+    animation: act-flash 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+    border-radius: 8px;
+  }
+  @keyframes act-flash {
+    0%   { box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 70%, transparent); background: color-mix(in oklch, var(--accent) 14%, transparent); }
+    100% { box-shadow: 0 0 0 2px transparent; background: transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    :global(.tl-node.act-flash) { animation: none; }
+  }
 
   .empty-note { color: var(--fg-subtle); font-size: var(--fs-xs); line-height: 1.55; padding: 14px 16px; }
   .empty-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-2); margin-bottom: 4px; }

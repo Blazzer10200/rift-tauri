@@ -523,6 +523,7 @@
             prev.block.type !== "image"}
           <div
             class="tl-node"
+            id={unit.block.type === "tool" ? `actnode-${unit.block.id}` : undefined}
             data-kind={nodeKind(unit.block)}
             data-status={nodeStatus}
             data-group-cont={groupCont ? "true" : null}
