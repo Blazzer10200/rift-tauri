@@ -18,13 +18,13 @@ Clear before next ship cut. Each is a UI/live-build verification, not a code cha
 - **S133 Whisper FFI** — `winget install LLVM.LLVM` (admin) + `cargo build --release --features whisper-rs`; CPU first, then CUDA (`whisper-cuda` feature)
 
 ### Code review 2026-05-28 — OPEN items (git-rcon + onboarding + UI batch)
-From the adversarial review of the v0.4.37 batch. The 4 high-severity fixes shipped in v0.4.37; these remain:
-- **CR1 (warning)** `AssistantPage.svelte:15-21` — `dockSlide` width keyframe is a no-op; inline `style="width…"` (~line 232) overrides it (CSS specificity) so only opacity animates → the ResizeObserver→syncBounds intent for the native WebView is defeated. Animate a wrapper or drive width solely via the transition.
-- **CR2 (minor)** `FirstSync.svelte:9` — `serverKey` prop typed but never destructured in `$props()`; silently dropped (no current reader; would break any future use). `OnboardingFlow` passes it.
-- **CR3 (minor)** `AppShell.svelte` gate — `probeSshKey()` fires from onMount *after* SplashOverlay sets `serversLoaded`; on a slow fresh-install IPC the normal UI can flash before onboarding snaps in. Fix: probe inside SplashOverlay alongside `loadServers`. (`=== false` guard already prevents existing-user flash.)
-- **CR4 (minor)** `ActivityPanel.svelte:30` — passes the 1 s `now` ticker as `liveActivity` `fallbackTs`, forcing a re-sort/alloc every tick even with no pending legacy blocks. Use a constant fallback (mount time).
-- **CR5 (minor)** `assistant.svelte.ts:10` — `Info` (lucide-svelte component) imported into a `.ts` state module (layering smell; matches the established toast API, low impact).
-- **CR-UX** Trust segment is binary (Read-only/Standard) over a **ternary** backend enum (`readonly/standard/full`). Once clicked, `trust_level` pins and can never return to the derived `None`→"full" state via UI; "full" (rank 2) is functionally identical to "standard" (nothing checks `trust_at_least("full")`, `remote_bash` gates independently). Decide: collapse to a true 2-level enum, or surface "full".
+From the adversarial review of the v0.4.37 batch. The 4 high-severity fixes shipped in v0.4.37. **CR1–CR5 fixed 2026-05-29 (committed-pending-ship; `npm run check` 0/0/0; CR1 live-verified via CDP).** Remaining:
+- ~~**CR1**~~ FIXED — `AssistantPage.svelte`: dock now animates a `.dock-wrap` wrapper (no inline width) with the reactive width moved to inner `.dock-inner`, so the transition keyframe owns `width` and the stage's ResizeObserver→syncBounds fires. DOM-verified: `.dock-wrap` has no inline width, `.dock-inner` carries the 566px.
+- ~~**CR2**~~ FIXED — dead `serverKey` prop dropped from `FirstSync.svelte` Props + the `OnboardingFlow` call site (state still feeds `finish()` for auto-select).
+- ~~**CR3**~~ FIXED — `probeSshKey()` now runs in SplashOverlay's preload `Promise.all` (under the blur); AppShell's call kept as an idempotent safety-net for the splash-skipped dev-HMR path.
+- ~~**CR4**~~ FIXED — `ActivityPanel` passes a constant `mountTs` to `liveActivity` instead of the 1 s `now` ticker; `running` no longer re-sorts/re-allocs every second.
+- ~~**CR5**~~ FIXED — `icon` is now optional on `ToastItem`; ToastHost owns a per-severity default-icon map; `assistant.svelte.ts` dropped the `Info` lucide import.
+- **CR-UX (DECISION PENDING — user)** Trust segment is binary (Read-only/Standard) over a **ternary** backend enum (`readonly/standard/full`). Once clicked, `trust_level` pins and can never return to the derived `None`→"full" state via UI; "full" (rank 2) is functionally identical to "standard" (verified 2026-05-29: nothing calls `trust_at_least("full")` — only `"standard"` is gated; `remote_bash` gates independently). **Recommendation: collapse to a true 2-level enum** (drop dead "full"). Touches `mcp_server::trust_rank`/`trust_level`, `mod.rs::is_valid_trust_level`/`effective_trust_level`/git_write gate (`"standard" | "full"`), serde, + persisted `rift.json` migration (existing `trust_level:"full"` → falls back to derived, safe). Held for user sign-off — security-relevant + persisted-config change, not done unsupervised.
 - **Permission round-trip — code-complete, needs live-verify.** Wired end-to-end: `--permission-prompt-tool stdio` (mod.rs) → `can_use_tool` handler → `write_control_response` → `PermissionBar.svelte` Allow/Deny UI → `submitPermissionDecision()`. Remaining: live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar (Bash still auto-approves via the user's full-config allowlist).
 
 ### Code lanes (pick one)
@@ -44,21 +44,9 @@ Ordered by recommended attack sequence. Cross-reference detailed blocks below.
 - **Goal:** Every visible control is wired, every section is necessary, terminology + styling consistent. Navigation is intuitive — current state has "hard to navigate" hotspots per user feedback.
 - **Approach when actioned:** Per-page audit checklist (control → wired? necessary? consistent?). Hotspot list grows as specific pain points are flagged. [src/lib/components/settings/Settings.svelte](../src/lib/components/settings/Settings.svelte) ~1540L — audit still non-trivial.
 
-## 14. No CI — release path still local-only (PARTIAL)
+## 14. No CI — release path local-only (CLOSED — by choice)
 
-- **Status:** `.github/workflows/check.yml` SHIPPED (cargo + svelte-check on PR). No release workflow — old `release.yml` placeholder was deleted in the v0.4.34 cleanup since it referenced the dead vpk + signing path.
-- **Symptom (release path):** ~5 min wall time blocking the build machine per release. Only ships from Blazzer's box (needs `gh auth` + Node + Rust toolchain). Cross-machine reproducibility untested.
-- **Fix sketch:** New `release.yml` on tag-push: checkout → setup-node@v4 → dtolnay/rust-toolchain@stable → cargo cache (same key as check.yml) → `npm ci` → `pwsh scripts/release.ps1 -Force` w/ `${{ secrets.GITHUB_TOKEN }}`. Much smaller scope than the deleted placeholder b/c no signing secrets to inject anymore. Gated behind #15.
-
-## 15. Unsigned Windows builds (SmartScreen blocker)
-
-- **Where:** No code-signing step in `scripts/release.ps1`. Setup.exe ships raw.
-- **Symptom:** Every fresh install triggers Windows SmartScreen "Unknown publisher" dialog. Real adoption blocker for non-technical users.
-- **Fix sketch (options ranked by cost/value):**
-  1. **Azure Code Signing** (~$10/mo) — EV-equivalent reputation, no hardware token, CI-friendly.
-  2. **SignPath.io free OSS tier** — only viable if the repo goes public.
-  3. **DigiCert/Sectigo EV cert** (~$300-400/yr) — instant SmartScreen reputation, hardware token, less CI-friendly.
-- **Pipeline integration:** Sign the NSIS Setup.exe post-build, pre-`gh release create`. Authenticode is recoverable on key/cert loss (unlike the ed25519 path ripped out in v0.4.34) — buy a new cert, existing timestamped binaries still verify.
+- `.github/workflows/check.yml` SHIPPED (cargo + svelte-check on PR). Release CI (`release.yml`) is **not being pursued** — it only made sense bundled with code-signing, which was **declined 2026-05-29** (SmartScreen friction not worth a recurring fee for a self-distributed alpha). Releases stay local via `scripts/release.ps1`. Reopen only if signing is reconsidered.
 
 ## 17. Two-repo split — historic, low-priority collapse
 
@@ -113,10 +101,6 @@ Ordered by recommended attack sequence. Cross-reference detailed blocks below.
 
 **Tier 1 — ship blockers / data safety**
 - #21 Test coverage gaps — see #265 for plan; Wave A landed, B-D structurally blocked.
-- #15 Unsigned Windows builds (adoption blocker; $-gated on Azure Code Signing).
-
-**Tier 2 — recurring friction**
-- #14 No CI **PARTIAL** — `check.yml` shipped; `release.yml` skeleton awaits #15.
 
 **Tier 3 — strategic / longer-term**
 - #4 App-wide UX consistency sweep · #20 hot-file split M8-M9 (brief at `docs/design/assistant-svelte-split.md`) · #17 two-repo split debt.

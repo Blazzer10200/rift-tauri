@@ -1,15 +1,26 @@
 <script lang="ts">
   // Single-stack toast renderer. Mounted once in AppShell. Reads `toast.items`
   // and animates entry/exit/reflow. Replaces ActivityToast + UpdateToast.
-  import { X } from "lucide-svelte";
+  import { X, CheckCircle2, AlertTriangle, AlertCircle, Info, Bell } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { flip } from "svelte/animate";
-  import { toast } from "../state/toast.svelte";
+  import { toast, type ToastSeverity } from "../state/toast.svelte";
+
+  // Per-severity fallback icon. Callers may omit `icon` (e.g. info-severity
+  // toasts pushed from `.ts` state modules that shouldn't import UI components);
+  // the renderer owns the icon mapping so those imports stay out of state.
+  const SEVERITY_ICON: Record<ToastSeverity, typeof Info> = {
+    ok: CheckCircle2,
+    warn: AlertTriangle,
+    danger: AlertCircle,
+    info: Info,
+    muted: Bell,
+  };
 </script>
 
 <div class="host" aria-live="polite">
   {#each toast.items as item (item.id)}
-    {@const Icon = item.icon}
+    {@const Icon = item.icon ?? SEVERITY_ICON[item.severity]}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       class="toast"

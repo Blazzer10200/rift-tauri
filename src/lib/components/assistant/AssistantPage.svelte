@@ -227,27 +227,30 @@
   </div>
 
   {#if browserDock.open}
-    <div
-      class="dock-wrap"
-      style="width: {browserDock.width + 6}px"
-      transition:dockSlide
-    >
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-      <div
-        class="dock-divider"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize browser panel"
-        tabindex="0"
-        use:tooltip={"Drag to resize the browser panel"}
-        onpointerdown={onDockPointerDown}
-        onpointermove={onDockPointerMove}
-        onpointerup={onDockPointerUp}
-        onpointercancel={onDockPointerUp}
-      ><span class="divider-grip" aria-hidden="true"></span></div>
-      <div class="browser-dock">
-        <WebBrowserPage />
+    <!-- CR1: the transition animates .dock-wrap's width (no competing inline
+         style), while the reactive user-set width lives on the inner element.
+         Keeping the two on separate nodes lets the width keyframe actually
+         drive the stage's ResizeObserver → syncBounds so the native child
+         webview tracks the motion instead of only opacity animating. -->
+    <div class="dock-wrap" transition:dockSlide>
+      <div class="dock-inner" style="width: {browserDock.width + 6}px">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="dock-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize browser panel"
+          tabindex="0"
+          use:tooltip={"Drag to resize the browser panel"}
+          onpointerdown={onDockPointerDown}
+          onpointermove={onDockPointerMove}
+          onpointerup={onDockPointerUp}
+          onpointercancel={onDockPointerUp}
+        ><span class="divider-grip" aria-hidden="true"></span></div>
+        <div class="browser-dock">
+          <WebBrowserPage />
+        </div>
       </div>
     </div>
   {/if}
@@ -273,15 +276,24 @@
     overflow: hidden;
     position: relative;
   }
-  /* Animated reveal container — holds the resize divider + dock as one flex
-     item. Its width (set inline as dock width + 6px divider) is what the
-     dockSlide transition animates; overflow:hidden keeps the inner dock from
-     spilling while the width tweens. */
+  /* Animated reveal container. Width is content-derived at rest (it shrink-
+     wraps .dock-inner's fixed width) so the dockSlide transition is free to
+     own the `width` property outright while tweening — no inline width on this
+     node to lose the cascade fight. overflow:hidden clips the inner during the
+     tween. */
   .dock-wrap {
     flex: 0 0 auto;
     min-width: 0; min-height: 0;
     display: flex;
     overflow: hidden;
+  }
+  /* Carries the reactive, user-draggable width (dock width + 6px divider).
+     Kept off .dock-wrap so the transition keyframe and this inline style never
+     target the same node's width. */
+  .dock-inner {
+    flex: 0 0 auto;
+    min-width: 0; min-height: 0;
+    display: flex;
   }
   .browser-dock {
     flex: 1 1 auto;

@@ -24,10 +24,18 @@
   onMount(() => { ticker = setInterval(() => { now = Date.now(); }, 1000); });
   onDestroy(() => { if (ticker) clearInterval(ticker); });
 
+  // CR4: a constant mount-time stamp for liveActivity's `fallbackTs`. It only
+  // stands in for legacy shell blocks missing a `startedAt`, so it never needs
+  // to track the ticker — feeding `now` here re-ran liveActivity (a re-sort +
+  // fresh array alloc) every second even with nothing in flight. Pinning it to
+  // mount decouples `running` from the ticker; it now recomputes only when
+  // messages / agentSpawns actually change.
+  const mountTs = Date.now();
+
   // ── Running: live shells (pending Bash) + live agents (no completedAt) ──
   // Shared with the composer live pills via `liveActivity` so the two surfaces
   // can never disagree on what's in flight.
-  const running = $derived(liveActivity(messages, tab?.agentSpawns ?? [], now));
+  const running = $derived(liveActivity(messages, tab?.agentSpawns ?? [], mountTs));
 
   // ── Tool rollup — counts, errors, slowest — all per-tab, reactive ──────
   const toolStats = $derived.by(() => {

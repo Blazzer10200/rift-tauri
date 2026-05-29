@@ -1,7 +1,8 @@
 <script lang="ts">
   // #7 first-run flow router. Walks the six step components in order, threading
   // the two pieces of data that flow forward (local workspace root → ServerAdd,
-  // saved server key → FirstSync). Mounted by AppShell when the first-run gate
+  // and the saved server key, which `finish()` uses to auto-select the new
+  // server on completion). Mounted by AppShell when the first-run gate
   // is open; `onDone` fires on completion OR skip (AppShell persists dismissal).
   import Welcome from "./Welcome.svelte";
   import SSHKeySetup from "./SSHKeySetup.svelte";
@@ -71,7 +72,7 @@
   {:else if step === "auth"}
     <ClaudeAuth onNext={() => go("sync")} onBack={back} onSkip={() => go("sync")} />
   {:else if step === "sync"}
-    <FirstSync {serverKey} onDone={finish} onBack={back} />
+    <FirstSync onDone={finish} onBack={back} />
   {/if}
 </div>
 

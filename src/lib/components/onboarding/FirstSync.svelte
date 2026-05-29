@@ -2,7 +2,6 @@
   import { RefreshCw, ChevronLeft, CheckCircle2, Info } from "lucide-svelte";
 
   type Props = {
-    serverKey: string | null;
     onDone: () => void;
     onBack?: () => void;
   };

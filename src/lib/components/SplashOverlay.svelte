@@ -44,7 +44,16 @@
         const loadPromise = connection.loadServers().catch((e) => {
           console.error("splash: loadServers failed", e);
         });
-        await Promise.all([wirePromise, loadPromise]);
+        // CR3: probe the default SSH key here, under the blur, alongside
+        // loadServers. The first-run gate (AppShell `showOnboarding`) needs
+        // BOTH serversLoaded AND a resolved defaultSshKeyExists; probing here
+        // rather than in AppShell.onMount keeps the second signal from landing
+        // after the splash lifts, which on a slow fresh-install IPC would flash
+        // the normal UI before onboarding snaps in.
+        const probePromise = connection.probeSshKey().catch((e) => {
+          console.debug("splash: probeSshKey failed", e);
+        });
+        await Promise.all([wirePromise, loadPromise, probePromise]);
         await connection.refreshStatus().catch((e) => {
           console.error("splash: refreshStatus failed", e);
         });

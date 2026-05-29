@@ -7,7 +7,6 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Info } from "lucide-svelte";
 import { accessibility } from "./accessibility.svelte";
 import { toast } from "./toast.svelte";
 
@@ -1264,7 +1263,8 @@ class AssistantStore {
     // and stays out of the chat column.
     toast.push({
       severity: "info",
-      icon: Info,
+      // icon omitted — ToastHost supplies the info-severity default (CR5: keeps
+      // lucide-svelte UI imports out of this state module).
       title: kind === "effort" ? "Effort changed mid-conversation" : "Model switched mid-conversation",
       detail: kind === "effort"
         ? "May bust the prompt cache (esp. Sonnet) — next turn could pay full cache_create."
