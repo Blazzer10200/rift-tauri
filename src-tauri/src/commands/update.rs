@@ -52,43 +52,67 @@ pub fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Check GitHub for a newer release.
+///
+/// Return contract — the frontend distinguishes these three outcomes:
+///   * `Ok(Some(info))` — a newer release exists and has an installer asset.
+///   * `Ok(None)`       — genuinely nothing to offer: up to date, no published
+///                        release yet (404), or a newer release with no
+///                        `*-setup.exe` asset. Frontend shows "up to date".
+///   * `Err(msg)`       — the check itself FAILED (offline, timed out, rate-
+///                        limited, server error, unparseable). Frontend shows
+///                        the error card. Previously every one of these
+///                        returned `Ok(None)`, so a failed check looked
+///                        identical to "you're current" — the core reason
+///                        updates felt silently broken.
 #[tauri::command]
 pub async fn check_for_updates() -> Result<Option<UpdateInfoDto>, String> {
     let url = format!("https://api.github.com/repos/{RELEASES_REPO}/releases/latest");
-    let client = match reqwest::Client::builder()
+    let client = reqwest::Client::builder()
         .user_agent(USER_AGENT)
         .timeout(std::time::Duration::from_secs(15))
         .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
+        .map_err(|e| {
             log::warn!("update check (client): {e}");
-            return Ok(None);
-        }
-    };
-    let resp = match client
+            format!("Couldn't initialize the update client: {e}")
+        })?;
+    let resp = client
         .get(&url)
         .header("Accept", "application/vnd.github+json")
         .send()
         .await
-    {
-        Ok(r) => r,
-        Err(e) => {
+        .map_err(|e| {
             log::warn!("update check (network): {e}");
-            return Ok(None);
-        }
-    };
-    if !resp.status().is_success() {
-        log::warn!("update check: HTTP {}", resp.status());
+            // reqwest's Display is noisy — give the user a short, actionable reason.
+            if e.is_timeout() {
+                "Update check timed out — GitHub didn't respond in time.".to_string()
+            } else if e.is_connect() {
+                "Couldn't reach GitHub — check your internet connection.".to_string()
+            } else {
+                format!("Network error while checking for updates: {e}")
+            }
+        })?;
+    let status = resp.status();
+    // 404 = the releases repo has no published `latest` release. That's "nothing
+    // to update to", not a failure — treat as up to date.
+    if status == reqwest::StatusCode::NOT_FOUND {
+        log::info!("update check: no published release (404)");
         return Ok(None);
     }
-    let release: GhRelease = match resp.json().await {
-        Ok(r) => r,
-        Err(e) => {
-            log::warn!("update check (parse): {e}");
-            return Ok(None);
-        }
-    };
+    if !status.is_success() {
+        log::warn!("update check: HTTP {status}");
+        // 403 on the unauthenticated API is almost always the rate limit.
+        let hint = if status == reqwest::StatusCode::FORBIDDEN {
+            " — GitHub API rate limit, try again later"
+        } else {
+            ""
+        };
+        return Err(format!("GitHub returned HTTP {status}{hint}."));
+    }
+    let release: GhRelease = resp.json().await.map_err(|e| {
+        log::warn!("update check (parse): {e}");
+        format!("Couldn't read the release data from GitHub: {e}")
+    })?;
     let remote = release.tag_name.trim_start_matches('v').to_string();
     let local = env!("CARGO_PKG_VERSION");
     if !is_newer(&remote, local) {
