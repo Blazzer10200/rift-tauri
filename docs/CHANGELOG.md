@@ -2,6 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.38 — 2026-05-29 — fix the updater that broke every client + in-app installer download
+
+> **Why this release exists.** v0.4.36's "fix" for the installer-download failure never worked — it added an *invalid* opener scope that silently poisoned **every** `openUrl` in the app. This is the release that actually fixes it. ⚠️ Existing clients ≤0.4.37 have the broken capability baked into their binary and need ONE manual install of 0.4.38; after that, in-app updates work again.
+
+**The real bug — invalid `mailto:**` glob.** [src-tauri/capabilities/default.json](src-tauri/capabilities/default.json) flips `mailto:**` → `mailto:*`. v0.4.36 added the opener scope `https://** http://** mailto:**`, but `mailto:**` is an *invalid* glob (a recursive `**` wildcard must occupy its own path component). The opener plugin deserializes the entire allow-list on the first `openUrl` call, so that one malformed entry threw `error deserializing scope` and poisoned every openUrl path — including the installer Download — producing the "Couldn't open the installer link" crash. `https://**` / `http://**` are valid (verified against `glob` 0.3) and left as-is. This is why v0.4.36 shipped a download fix that still didn't download.
+
+**Check surfaces real failures.** `check_for_updates` ([commands/update.rs](src-tauri/src/commands/update.rs)) now returns `Err` on genuine failures (network, rate-limit, deserialize) instead of `Ok(None)` for everything — previously every failure looked identical to "you're up to date." `Ok(None)` is now reserved for the actually-current / 404 / no-asset cases.
+
+**In-app installer download with progress.** New `download_update` command streams the installer to `%TEMP%/rift-update`, emits `update://download-progress` events, and launches it via `openPath` on completion — **falling back to the browser `openUrl` path on any failure, so it never regresses** below v0.4.37 behavior. [UpdateDialog.svelte](src/lib/components/dialogs/UpdateDialog.svelte) gains a `downloading` state with a live progress bar.
+
+**Verify.** `cargo check` clean, `npm run check` 0 / 0 (both green pre-ship). NSIS bundle + SHA256 round-trip via `release.ps1` at ship. ⚠️ The in-app download path is compile/type-verified; live end-to-end (Download → NSIS → relaunch) tested post-publish against the real release.
+
 ## v0.4.37 — 2026-05-28 — git-rcon local-git tools + ultracode thinking tier + onboarding flow + side-panel split
 
 > **Why this release exists.** Ships the uncommitted git-rcon + onboarding + UI batch (commit `837408a`) plus the new ultracode thinking tier. The in-app assistant can now inspect and mutate the workspace repo (trust-gated); fresh installs get a guided onboarding flow instead of a bare empty state; the assistant side panel is restructured. An 18-agent adversarial review caught 4 bugs, all fixed pre-ship.
