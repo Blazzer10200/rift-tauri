@@ -2,11 +2,20 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-29 (b) — committed 07710e3 + pushed main (NOT shipped)
-CR1–CR5 from the v0.4.37 adversarial review landed (`npm run check` 0/0/0; CR1 CDP-verified). CR1: dock animates a `.dock-wrap` wrapper w/ reactive width on inner `.dock-inner`, so the transition owns `width` → native-webview syncBounds fires (was opacity-only). CR2: dropped dead `serverKey` prop. CR3: `probeSshKey` moved into SplashOverlay preload (under blur); AppShell call kept as idempotent safety-net for dev-HMR splash-skip. CR4: ActivityPanel uses constant `mountTs` (not 1s ticker) for `liveActivity` fallback. CR5: `ToastItem.icon` optional + ToastHost per-severity default map; `assistant.svelte.ts` dropped lucide `Info` import. ISSUES pruned: **#14/#15 CLOSED** (code-signing declined — not worth $10/mo, release CI not pursued); CR-UX held. Confirmed already-done: tool-chip duration badge IS generic (off `tool.durationMs`).
+## Session 2026-05-29 (c) — 830a851 + 3487dcb (NOT pushed)
+Assistant UX polish, all frontend, user-driven (check 0/0/0):
+- Composer streaming indicator: top-edge bar (squared line over input) → model-tinted **border-only ring** breathing around whole frame (`.composer.streaming::before` inset:0). No overlap.
+- Removed `.send-sweep` (2px bar streaking −72vh up chat on send — the "weird box"; never clipped). `fireKey` now drives only the send-btn ripple.
+- Activity pills toggle: `openActivity()` closes dock on 2nd click when already on Activity tab.
+- ActivityPanel: running rows + slowest-tool = buttons → `jumpTo()` scrolls transcript to the call + flashes it via new `actnode-<id>` anchor on `.tl-node` (MessageBubble:525). Shells AND agents resolve (`agentSpawns` id == Task tool-block id). Cancelled parallel calls split out of failed count. Tool-mix: full-name tooltip + widened label + **expandable "+N more"** (`toolsExpanded`).
+
+⚠️ **Uncommitted, NOT mine** — `commands/update.rs` (check_for_updates → `Err` on real failures, was silent `Ok(None)`) + `capabilities/default.json` (`mailto:**`→`mailto:*`) already dirty this session; left untouched. Review before next push.
+
+## Session 2026-05-29 (b) — 07710e3 (pushed)
+CR1–CR5 from v0.4.37 review landed (check 0/0/0). CR1: dock animates `.dock-wrap` reactive width → native syncBounds fires. CR4: ActivityPanel constant `mountTs` for `liveActivity` fallback. ISSUES **#14/#15 CLOSED** (code-signing declined). Full detail: `git log 07710e3`.
 
 ## RESUME HERE
-Clean @ 07710e3 (pushed main), still v0.4.37 ×3 — NOT released. **Next session = #20 hot-file splits** (user's chosen start). Order: `assistant.svelte.ts` 2314L — M8 (streaming pump) + M9 (send) open, brief `docs/design/assistant-svelte-split.md`; then `assistant/mod.rs` 2795L (worst backend); then `auto_sync.rs` 2232L. M8/M9 highest blast-radius — want a conversation-playback test harness first. Open decisions: **CR-UX** trust enum (rec: collapse to 2-level, drop dead `full` — nothing gates `trust_at_least("full")`); **#17** two-repo (only if going public). Also on board: #265 test `SftpOps`-trait unblock, code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep.
+main @ 3487dcb (2 commits ahead of origin, NOT pushed) + uncommitted backend (update.rs + default.json, not from this session — decide first). Still v0.4.37 ×3 — NOT released. **Next session = #20 hot-file splits** (user's chosen start). Order: `assistant.svelte.ts` 2314L — M8 (streaming pump) + M9 (send) open, brief `docs/design/assistant-svelte-split.md`; then `assistant/mod.rs` 2795L (worst backend); then `auto_sync.rs` 2232L. M8/M9 highest blast-radius — want a conversation-playback test harness first. Open decisions: **CR-UX** trust enum (rec: collapse to 2-level, drop dead `full` — nothing gates `trust_at_least("full")`); **#17** two-repo (only if going public). Also on board: #265 test `SftpOps`-trait unblock, code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep.
 
 ## CRITICAL DON'T-TOUCH
 
