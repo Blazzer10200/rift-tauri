@@ -2,11 +2,11 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-29 — committed b1083ea (NOT shipped)
-Assistant UX pass (7 files; `npm run check` 0/0/0; backend live-verified via CDP invoke). Full detail in commit b1083ea. Highlights: smart convo titles (`assistant_generate_title` headless Haiku → `persistence.ts::maybeGenerateTitle`, NEW convos only, `titleGenerated`-guarded); EmptyState RECENT filters <3-msg stubs + suggestion-style icon-box tiles + actionable workspace card (focuses composer); MessageBubble turn-rail now visible (was fg-faint 38%) + `bullet-pop` circles + 2-dec cost; ToolChip timeline lane (surface + left accent).
+## Session 2026-05-29 (b) — committed 07710e3 + pushed main (NOT shipped)
+CR1–CR5 from the v0.4.37 adversarial review landed (`npm run check` 0/0/0; CR1 CDP-verified). CR1: dock animates a `.dock-wrap` wrapper w/ reactive width on inner `.dock-inner`, so the transition owns `width` → native-webview syncBounds fires (was opacity-only). CR2: dropped dead `serverKey` prop. CR3: `probeSshKey` moved into SplashOverlay preload (under blur); AppShell call kept as idempotent safety-net for dev-HMR splash-skip. CR4: ActivityPanel uses constant `mountTs` (not 1s ticker) for `liveActivity` fallback. CR5: `ToastItem.icon` optional + ToastHost per-severity default map; `assistant.svelte.ts` dropped lucide `Info` import. ISSUES pruned: **#14/#15 CLOSED** (code-signing declined — not worth $10/mo, release CI not pursued); CR-UX held. Confirmed already-done: tool-chip duration badge IS generic (off `tool.durationMs`).
 
 ## RESUME HERE
-Clean @ b1083ea — committed, **not released** (still v0.4.37 ×3 files). Ship via `/git-ship`. Deferred this session: merge consecutive thinking fragments (`grouped` builder change); tool-chip duration badge on all tools (not just Bash). Older open in ISSUES.md: CR2-5 + CR-UX, permission round-trip live-verify, #20 M8/M9 splits.
+Clean @ 07710e3 (pushed main), still v0.4.37 ×3 — NOT released. **Next session = #20 hot-file splits** (user's chosen start). Order: `assistant.svelte.ts` 2314L — M8 (streaming pump) + M9 (send) open, brief `docs/design/assistant-svelte-split.md`; then `assistant/mod.rs` 2795L (worst backend); then `auto_sync.rs` 2232L. M8/M9 highest blast-radius — want a conversation-playback test harness first. Open decisions: **CR-UX** trust enum (rec: collapse to 2-level, drop dead `full` — nothing gates `trust_at_least("full")`); **#17** two-repo (only if going public). Also on board: #265 test `SftpOps`-trait unblock, code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep.
 
 ## CRITICAL DON'T-TOUCH
 
