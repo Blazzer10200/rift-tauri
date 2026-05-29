@@ -2,6 +2,29 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-29 (c) — updater FIXED + upgraded (committed, NOT released)
+
+**Done + verified (cargo check + npm run check both green, seen live):**
+- `5a3618c` fix(update): **`mailto:**` → `mailto:*`** in `capabilities/default.json`. THE bug behind the "Couldn't open the installer link / error deserializing scope" crash. v0.4.36 added scope `https://** http://** mailto:**` but `mailto:**` is an invalid glob (recursive wildcard must be its own path component); opener deserializes the whole allow-list on first `openUrl`, so that one entry poisoned EVERY openUrl incl. Download. v0.4.36's "fix" never worked. `https://**`/`http://**` are valid (verified vs glob 0.3) — left as-is. Same commit: `check_for_updates` now returns `Err` on real failures (was `Ok(None)` for everything → looked like "up to date"); `Ok(None)` reserved for current/404/no-asset.
+- `5a013dc` feat(update): in-app download. New `download_update` cmd streams installer to `%TEMP%/rift-update`, emits `update://download-progress`, frontend launches via `openPath`; **falls back to browser `openUrl` on any failure (never regresses)**. UpdateDialog gains `downloading` state + progress bar.
+
+**In progress — git-ship (user invoked, INTERRUPTED):**
+- Attempted 0.4.38 bump (package.json/Cargo.toml/tauri.conf.json) + CHANGELOG v0.4.38 entry, but the batch was CANCELLED (guard hook blocked a compound `grep` cmd). **VERIFY with `git status` — bump likely did NOT apply / is partial. Redo cleanly.**
+- Read `scripts/release.ps1`: preflight checks version lockstep, runs `npm run tauri build`, `gh release create` to `Blazzer10200/rift-releases`, SHA256 round-trip. Unattended. NO `--prerelease` (latest API excludes them).
+
+**RESUME HERE (do in fresh session):**
+1. `git status` — confirm tree state; redo 0.4.38 bump if needed (3 files + `Cargo.lock` via cargo check + CHANGELOG top entry must say v0.4.38).
+2. Commit the bump, then `pwsh ./scripts/release.ps1`.
+3. After release: do ONE real end-to-end update test (Download → NSIS → relaunch) — the in-app path is compile/type-verified only, not runtime-tested.
+4. ⚠️ Existing clients ≤0.4.37 stay broken (capability baked into binary) — they need ONE manual install of 0.4.38; after that in-app updates work.
+
+**Don't retry / gotchas:**
+- Severe bash tool-result delivery lag ALL session (results arrived in huge delayed bursts — ignore if it recurs, just wait). User had another session fixing the bash issue.
+- `guard-wrong-tool-bash.sh` BLOCKS compound bash containing `grep`/`cat`/`sed` and foreground `npm run tauri build`. Use Read/Grep tools; run builds via `run_in_background` or release.ps1.
+- Don't run `release.ps1`/`tauri build` in foreground or at high context — it's a 10-15min irreversible public release.
+
+---
+
 ## Session 2026-05-29 (c) — 830a851 + 3487dcb (NOT pushed)
 Assistant UX polish, all frontend, user-driven (check 0/0/0):
 - Composer streaming indicator: top-edge bar (squared line over input) → model-tinted **border-only ring** breathing around whole frame (`.composer.streaming::before` inset:0). No overlap.
