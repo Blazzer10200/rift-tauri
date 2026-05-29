@@ -154,6 +154,11 @@ class TabState {
    *  is active when the timer fires. */
   convoCreatedAt = $state<number | null>(null);
   convoTitle = $state<string | null>(null);
+  /** Guards the one-shot smart-title generation (assistant_generate_title).
+   *  False on a fresh tab → generated once after the first assistant turn;
+   *  set true on disk-load (record already has a title) + manual rename so
+   *  auto-gen never clobbers an existing/user-chosen title. In-memory only. */
+  titleGenerated = $state<boolean>(false);
   /** #145: per-tab save debounce timer — was store-level (single slot).
    *  Each tab tracking its own timer means flushNow() on beforeunload can
    *  iterate every unsaved tab instead of dropping background-tab edits. */

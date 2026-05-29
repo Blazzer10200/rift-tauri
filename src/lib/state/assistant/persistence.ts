@@ -30,6 +30,7 @@ export type SaveableTab = {
   convoCreatedAt: number | null;
   cliSessionId: string;
   compactionHistory: CompactionHistoryEntry[];
+  titleGenerated: boolean;
 };
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
@@ -153,12 +154,52 @@ export function scheduleSave(host: PersistenceHost, flush = false): void {
     try {
       await invoke("assistant_save_conversation", { convo: record });
       await refreshConversations(host);
+      // Fire-and-forget: once the first real exchange is on disk, replace the
+      // raw-first-message title with a model-generated one. Never blocks save.
+      void maybeGenerateTitle(host, convoId, tab);
     } catch (e) {
       console.warn("assistant_save_conversation failed", e);
     }
   };
   if (flush) void doSave();
   else tab.saveTimer = setTimeout(doSave, 700);
+}
+
+/** One-shot smart-title pass. Replaces the `deriveTitle` raw-first-message
+ *  title with a 3-6 word model-generated phrase after the first assistant
+ *  turn lands. Guarded by `tab.titleGenerated` so it runs at most once per
+ *  conversation; claims the flag up-front so the debounced save loop can't
+ *  fire a second concurrent call while the model request is in flight. */
+async function maybeGenerateTitle(
+  host: PersistenceHost,
+  convoId: string,
+  tab: SaveableTab,
+): Promise<void> {
+  if (tab.titleGenerated) return;
+  const firstUser = tab.messages.find((m) => m.role === "user");
+  const hasAssistant = tab.messages.some((m) => m.role === "assistant");
+  // Only title a real exchange — a lone user message isn't worth a model call.
+  if (!firstUser || !hasAssistant) return;
+  const text = firstUser.blocks
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("")
+    .trim();
+  if (!text) return;
+  // Claim the slot before awaiting so a save firing mid-flight no-ops here.
+  tab.titleGenerated = true;
+  try {
+    const title = (await invoke<string>("assistant_generate_title", { prompt: text })).trim();
+    if (!title) return;
+    tab.convoTitle = title;
+    // Re-persist with the new title + refresh so tiles/History pick it up.
+    const record = buildSaveRecord(host, convoId, tab);
+    await invoke("assistant_save_conversation", { convo: record });
+    await refreshConversations(host);
+  } catch (e) {
+    // A failed model call shouldn't retry-spam every subsequent save — the
+    // derived title stays as the fallback. Flag remains true on purpose.
+    console.warn("assistant_generate_title failed", e);
+  }
 }
 
 export async function renameConversation(
@@ -174,6 +215,9 @@ export async function renameConversation(
     convo.updatedAt = Date.now();
     await invoke("assistant_save_conversation", { convo });
     if (host.currentConvoId === id) host.convoTitle = convo.title;
+    // Manual title wins — block any pending auto-gen from clobbering it.
+    const renamedTab = host.tabs.get(id);
+    if (renamedTab) renamedTab.titleGenerated = true;
     await refreshConversations(host);
   } catch (e) {
     host.lastError = `Failed to rename conversation: ${String(e)}`;
@@ -204,6 +248,8 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
       .filter((s) => s.length > 0)
       .slice(-50);
     tab.dockAutoOpenedThisConvo = false;
+    // Disk record already carries a title — don't regenerate on every open.
+    tab.titleGenerated = true;
     host.currentConvoId = convo.id;
     host.currentCliSessionId = cliSid;
     host.convoCreatedAt = convo.createdAt;
