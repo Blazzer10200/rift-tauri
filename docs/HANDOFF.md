@@ -2,26 +2,29 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-29 (c) — updater FIXED + upgraded (committed, NOT released)
+## Session 2026-05-29 (d) — v0.4.38 SHIPPED (updater fix released)
 
-**Done + verified (cargo check + npm run check both green, seen live):**
-- `5a3618c` fix(update): **`mailto:**` → `mailto:*`** in `capabilities/default.json`. THE bug behind the "Couldn't open the installer link / error deserializing scope" crash. v0.4.36 added scope `https://** http://** mailto:**` but `mailto:**` is an invalid glob (recursive wildcard must be its own path component); opener deserializes the whole allow-list on first `openUrl`, so that one entry poisoned EVERY openUrl incl. Download. v0.4.36's "fix" never worked. `https://**`/`http://**` are valid (verified vs glob 0.3) — left as-is. Same commit: `check_for_updates` now returns `Err` on real failures (was `Ok(None)` for everything → looked like "up to date"); `Ok(None)` reserved for current/404/no-asset.
-- `5a013dc` feat(update): in-app download. New `download_update` cmd streams installer to `%TEMP%/rift-update`, emits `update://download-progress`, frontend launches via `openPath`; **falls back to browser `openUrl` on any failure (never regresses)**. UpdateDialog gains `downloading` state + progress bar.
+**Released + verified (objective):**
+- Bump committed `f71a3bb` (3 lockstep files + `Cargo.lock` + CHANGELOG v0.4.38). HANDOFF doc `b738be5`.
+- `release.ps1` via **powershell.exe (PS5.1 — pwsh 7 not installed; script is ASCII-safe for 5.1 by design)** → NSIS bundle + `gh release create` + SHA256 round-trip MATCH. Live: https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.38. `latest` API returns v0.4.38 (`prerelease:false`, asset `Rift_0.4.38_x64-setup.exe` 7.14 MB).
+- Ships last session's two fixes: `5a3618c` `mailto:**`→`mailto:*` (THE openUrl-poison bug) + `5a013dc` in-app `download_update` w/ progress + browser fallback.
 
-**In progress — git-ship (user invoked, INTERRUPTED):**
-- Attempted 0.4.38 bump (package.json/Cargo.toml/tauri.conf.json) + CHANGELOG v0.4.38 entry, but the batch was CANCELLED (guard hook blocked a compound `grep` cmd). **VERIFY with `git status` — bump likely did NOT apply / is partial. Redo cleanly.**
-- Read `scripts/release.ps1`: preflight checks version lockstep, runs `npm run tauri build`, `gh release create` to `Blazzer10200/rift-releases`, SHA256 round-trip. Unattended. NO `--prerelease` (latest API excludes them).
+**⚠️ Download path STILL runtime-untested — and can't be from THIS release (chicken-and-egg):**
+- 0.4.38 is newest → a fixed (0.4.38) client sees itself as latest → no Download button, nothing to fetch.
+- Only ≤0.4.37 clients see 0.4.38 as an update, and they have the bug baked in → Download fails (the known caveat, NOT a test).
+- **The in-app Download→progress→NSIS→relaunch flow first becomes testable on 0.4.38→0.4.39.** Verify it THEN.
+- No installed prod `Rift.exe` on this machine (only dev `rift-tauri.exe` runs). setup.exe at `C:\cargo-targets\release\bundle\nsis\Rift_0.4.38_x64-setup.exe`.
 
-**RESUME HERE (do in fresh session):**
-1. `git status` — confirm tree state; redo 0.4.38 bump if needed (3 files + `Cargo.lock` via cargo check + CHANGELOG top entry must say v0.4.38).
-2. Commit the bump, then `pwsh ./scripts/release.ps1`.
-3. After release: do ONE real end-to-end update test (Download → NSIS → relaunch) — the in-app path is compile/type-verified only, not runtime-tested.
-4. ⚠️ Existing clients ≤0.4.37 stay broken (capability baked into binary) — they need ONE manual install of 0.4.38; after that in-app updates work.
+**RESUME HERE:**
+1. (optional now) Install `Rift_0.4.38_x64-setup.exe` → confirm NSIS + relaunch; in 0.4.38, Check-for-updates should say up-to-date with NO "error deserializing scope" crash (confirms scope fix unpoisoned openUrl).
+2. On the NEXT release (0.4.39): a 0.4.38 client finally exercises the in-app Download flow end-to-end — verify progress bar + NSIS + relaunch there.
+3. ⚠️ Existing clients ≤0.4.37 need ONE manual install of 0.4.38; after that in-app updates work.
+4. Source repo NOT pushed (5 commits ahead of origin/main) — release.ps1 only publishes to the separate `rift-releases` repo. Push source when ready.
 
-**Don't retry / gotchas:**
-- Severe bash tool-result delivery lag ALL session (results arrived in huge delayed bursts — ignore if it recurs, just wait). User had another session fixing the bash issue.
-- `guard-wrong-tool-bash.sh` BLOCKS compound bash containing `grep`/`cat`/`sed` and foreground `npm run tauri build`. Use Read/Grep tools; run builds via `run_in_background` or release.ps1.
-- Don't run `release.ps1`/`tauri build` in foreground or at high context — it's a 10-15min irreversible public release.
+**Gotchas:**
+- `pwsh` (PS7) NOT on PATH — use `powershell.exe` (5.1) for `release.ps1`; it's written ASCII-safe for exactly this.
+- Release build used `C:\cargo-targets` (separate from dev target) so it didn't collide with the running dev binary.
+- `guard-wrong-tool-bash.sh` BLOCKS compound bash w/ `grep`/`cat`/`sed` + foreground `tauri build`. Use Read/Grep; builds via `run_in_background` or release.ps1.
 
 ---
 
