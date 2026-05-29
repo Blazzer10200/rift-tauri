@@ -106,6 +106,13 @@
 
   const isEmpty = $derived(running.length === 0 && toolStats.total === 0);
 
+  // Tool-mix is capped at 6 rows by default; the footer toggles the full list.
+  let toolsExpanded = $state(false);
+  const TOOL_CAP = 6;
+  const shownTools = $derived(
+    toolsExpanded ? toolStats.histo : toolStats.histo.slice(0, TOOL_CAP),
+  );
+
   function fmtElapsed(ms: number): string {
     const s = Math.max(0, Math.floor(ms / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -176,15 +183,21 @@
       <section class="sect">
         <header class="sect-head"><Wrench size={12} /><span class="sect-title">Tool mix</span></header>
         <div class="histo">
-          {#each toolStats.histo.slice(0, 6) as [name, count] (name)}
+          {#each shownTools as [name, count] (name)}
             <div class="hrow" use:tooltip={name}>
               <span class="hname">{name}</span>
               <span class="hbar"><i style="width: {(count / toolStats.max) * 100}%"></i></span>
               <span class="hn mono">{count}</span>
             </div>
           {/each}
-          {#if toolStats.histo.length > 6}
-            <div class="hmore">+{toolStats.histo.length - 6} more tool{toolStats.histo.length - 6 === 1 ? "" : "s"}</div>
+          {#if toolStats.histo.length > TOOL_CAP}
+            <button type="button" class="hmore" onclick={() => (toolsExpanded = !toolsExpanded)}>
+              {#if toolsExpanded}
+                Show less
+              {:else}
+                +{toolStats.histo.length - TOOL_CAP} more tool{toolStats.histo.length - TOOL_CAP === 1 ? "" : "s"}
+              {/if}
+            </button>
           {/if}
         </div>
       </section>
@@ -282,7 +295,15 @@
   .histo { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
   .hrow { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); }
   .hname { width: 62px; flex-shrink: 0; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hmore { padding-top: 2px; font-size: var(--fs-xs); color: var(--fg-subtle); }
+  .hmore {
+    align-self: flex-start;
+    margin-top: 2px; padding: 3px 6px;
+    background: none; border: 0; border-radius: 5px;
+    font: inherit; font-size: var(--fs-xs); color: var(--fg-subtle);
+    cursor: pointer; transition: background 120ms ease, color 120ms ease;
+  }
+  .hmore:hover { background: var(--bg-elev-2); color: var(--fg-2); }
+  .hmore:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .hbar { flex: 1; height: 7px; background: var(--bg-elev-2); border-radius: 4px; overflow: hidden; }
   .hbar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width 280ms cubic-bezier(0.22,1,0.36,1); }
   .hn { width: 18px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
