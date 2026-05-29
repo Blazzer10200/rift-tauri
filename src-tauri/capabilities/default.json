@@ -17,7 +17,7 @@
       "allow": [
         { "url": "https://**" },
         { "url": "http://**" },
-        { "url": "mailto:**" }
+        { "url": "mailto:*" }
       ]
     },
     "opener:allow-open-path",
