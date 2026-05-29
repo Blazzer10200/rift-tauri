@@ -43,8 +43,8 @@
 
   <p class="hint">
     <Info size={13} />
-    Stuck? See <code>docs/ONBOARDING.md</code> in the install dir for the full
-    walkthrough with screenshots and troubleshooting.
+    Stuck? Check the project README for the full walkthrough,
+    screenshots, and troubleshooting.
   </p>
 
   <footer class="onboarding-foot">
@@ -84,7 +84,6 @@
   .walkthrough strong { color: var(--fg); }
   .walkthrough code { font-family: var(--font-mono); font-size: 12px; padding: 1px 5px; background: var(--bg-elev-2); border-radius: var(--radius-xs); }
   .hint { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); margin: 0; }
-  .hint code { font-family: var(--font-mono); font-size: 11.5px; }
   .onboarding-foot {
     display: flex; justify-content: space-between; align-items: center;
     margin-top: 8px; padding-top: 16px;
