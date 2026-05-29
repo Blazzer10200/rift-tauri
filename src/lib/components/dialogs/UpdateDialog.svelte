@@ -10,6 +10,7 @@
 
   const variant = $derived<Variant>(
     updates.state === "available" ? "accent" :
+    updates.state === "downloading" ? "accent" :
     updates.state === "launched"  ? "ok"     :
     updates.state === "uptodate"  ? "ok"     :
     updates.state === "error"     ? "danger" :
@@ -18,7 +19,8 @@
 
   const subTitle = $derived(
     updates.state === "available" ? "A new release is ready" :
-    updates.state === "launched"  ? "Installer launched in your browser" :
+    updates.state === "downloading" ? "Downloading update…" :
+    updates.state === "launched"  ? "Installer launched" :
     updates.state === "uptodate"  ? "You're up to date" :
     updates.state === "error"     ? "Update check failed" :
                                     "Checking for updates"
@@ -108,7 +110,7 @@
         </div>
 
         <!-- Version diff strip (only when we know the target) -->
-        {#if updates.info && (updates.state === "available" || updates.state === "launched")}
+        {#if updates.info && (updates.state === "available" || updates.state === "downloading" || updates.state === "launched")}
           <div class="head-diff">
             <span class="diff-chip current mono">v{updates.currentVersion}</span>
             <ArrowRight size={12} class="diff-arrow"/>
@@ -128,13 +130,23 @@
         {#if updates.state === "checking"}
           <p class="lead">Talking to GitHub releases…</p>
 
+        {:else if updates.state === "downloading"}
+          <div class="dl-card">
+            <div class="dl-row">
+              <span>Downloading v{updates.info?.version}…</span>
+              <span class="mono">{updates.progress}%</span>
+            </div>
+            <div class="dl-track"><div class="dl-fill" style="width:{updates.progress}%"></div></div>
+            {#if updates.sizeLabel}<div class="dl-sub">{updates.sizeLabel}</div>{/if}
+          </div>
+
         {:else if updates.state === "available" || updates.state === "launched"}
           {#if updates.state === "launched"}
             <div class="ready-card">
               <Download size={18}/>
               <div class="ready-text">
-                <div class="ready-title">Setup.exe is downloading in your browser.</div>
-                <div class="ready-sub">Run it when the download finishes — Windows will close Rift, install v{updates.info?.version}, and relaunch.</div>
+                <div class="ready-title">Installer launched.</div>
+                <div class="ready-sub">Windows will close Rift, install v{updates.info?.version}, and relaunch. If nothing happened, use "View release on GitHub" below.</div>
               </div>
             </div>
           {/if}
@@ -212,6 +224,13 @@
           <div class="foot-spacer"></div>
           <button class="btn primary glow" type="button" onclick={() => updates.download()}>
             <Download size={11}/> Download installer
+          </button>
+
+        {:else if updates.state === "downloading"}
+          <span class="foot-status">Downloading… {updates.progress}%</span>
+          <div class="foot-spacer"></div>
+          <button class="btn" type="button" disabled>
+            <RefreshCw size={11} class="spin"/> Please wait
           </button>
 
         {:else if updates.state === "launched"}
@@ -489,6 +508,31 @@
       0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
       0 0 18px color-mix(in oklch, var(--accent) 35%, transparent);
   }
+
+  /* Download progress */
+  .dl-card {
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 14px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+  .dl-row {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: var(--fs-sm); color: var(--fg);
+  }
+  .dl-track {
+    height: 6px; border-radius: 999px;
+    background: var(--bg-elev-3);
+    overflow: hidden;
+  }
+  .dl-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 999px;
+    transition: width 160ms ease;
+  }
+  .dl-sub { font-size: var(--fs-xs); color: var(--fg-subtle); }
 
   :global(.spin) { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }

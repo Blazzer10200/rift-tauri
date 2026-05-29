@@ -218,6 +218,7 @@ pub fn run() {
             commands::rotate_bridge_token,
             commands::validate_ssh_key_file,
             commands::check_for_updates,
+            commands::download_update,
             commands::begin_edit_in_place,
             commands::save_edit_in_place,
             commands::close_edit_in_place,
