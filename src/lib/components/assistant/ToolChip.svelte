@@ -739,14 +739,22 @@
     margin: 0;
     animation: none;
   }
+  /* Persistent faint surface + left-accent so each tool row reads as its own
+     "action" lane, distinct from the plain narration prose above/below it.
+     Previously transparent-until-hover, which left tool calls visually flat
+     against the text. Hover brightens the lane + lifts the accent to the
+     model hue. */
   .chip[data-variant="timeline"]:not(.as-card) .chip-head {
-    padding: 2px 6px 2px 3px;
-    min-height: 20px;
-    border-radius: 4px;
-    transition: background 140ms ease-out, transform 140ms ease-out;
+    padding: 3px 8px;
+    min-height: 22px;
+    border-radius: 6px;
+    background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--fg-faint) 32%, transparent);
+    transition: background 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
   }
   .chip[data-variant="timeline"]:not(.as-card) .chip-head:hover {
-    background: color-mix(in oklch, var(--surface-hover) 70%, transparent);
+    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--model-color, var(--accent)) 55%, transparent);
     transform: translateX(1px);
   }
   /* Rail-bullet already shows status — kill the redundant right-edge pill

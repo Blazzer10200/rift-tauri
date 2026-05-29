@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Sparkles, FolderOpen, FolderTree, Search, FileText,
-    ExternalLink, X, Folder, ChevronRight,
+    ExternalLink, X, Folder, ChevronRight, MessageSquare,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { connection } from "../../state/connection.svelte";
@@ -83,6 +83,13 @@
     else assistant.composerDraft = prompt;
   }
 
+  // Clicking the open-workspace card drops focus into the composer so the
+  // user can start typing immediately — the literal "pick up where you left
+  // off" gesture for an already-open folder.
+  function focusComposer() {
+    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  }
+
   function leafName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
     const parts = norm.split("/");
@@ -108,9 +115,15 @@
   // Resume-tiles — top 4 recent conversations excluding the current empty
   // tab. The titlebar already exposes the synced-server label, so this slot
   // earns its keep by being actionable: one click resumes a real conversation.
+  // Curate, don't dump: a 1-turn convo (≤2 messages) is almost always a
+  // throwaway/test and isn't worth a resume tile. Surface only sessions with a
+  // real back-and-forth so the RECENT grid reads as "work in progress", not a
+  // scratchpad. ≥3 messages = the user engaged past the first answer.
+  const MIN_RESUMABLE_MESSAGES = 3;
   const recentChats = $derived(
     assistant.conversations
       .filter((c) => c.id !== assistant.currentConvoId)
+      .filter((c) => c.messageCount >= MIN_RESUMABLE_MESSAGES)
       .slice(0, 4),
   );
 
@@ -160,11 +173,20 @@
          goes to recent-chat tiles instead (see below). -->
     {#if hasRoot}
       <div class="ws-card active">
-        <div class="ws-icon"><Folder size={16}/></div>
-        <div class="ws-body">
-          <div class="ws-title">{leafName(assistant.workspace.current!)}</div>
-          <div class="ws-sub">{shortPath(assistant.workspace.current!)}</div>
-        </div>
+        <button
+          class="ws-main"
+          type="button"
+          use:tooltip={"Start a new message in this workspace"}
+          onclick={focusComposer}
+        >
+          <div class="ws-icon"><Folder size={16}/></div>
+          <div class="ws-body">
+            <div class="ws-eyebrow">Workspace</div>
+            <div class="ws-title">{leafName(assistant.workspace.current!)}</div>
+            <div class="ws-sub">{shortPath(assistant.workspace.current!)}</div>
+          </div>
+          <ChevronRight size={16} class="ws-chev"/>
+        </button>
         <button
           class="ws-action"
           type="button"
@@ -230,15 +252,16 @@
                 : c.model?.toLowerCase().includes("haiku") ? "haiku"
                 : "sonnet"}
               onclick={() => void assistant.openTab(c.id)}
-              use:tooltip={c.title}
+              use:tooltip={`${c.title} · ${c.model}`}
             >
-              <span class="tile-title">{c.title}</span>
-              <span class="tile-meta">
-                <span class="tile-model-dot" aria-hidden="true"></span>
-                <span class="tile-model">{c.model}</span>
-                <span class="tile-dot">·</span>
-                <span>{c.messageCount} msg</span>
-                <span class="tile-time">{fmtAgo(c.updatedAt)}</span>
+              <span class="tile-icon"><MessageSquare size={13}/></span>
+              <span class="tile-body">
+                <span class="tile-title">{c.title}</span>
+                <span class="tile-meta">
+                  <span class="tile-model-dot" aria-hidden="true"></span>
+                  <span>{c.messageCount} msg</span>
+                  <span class="tile-time">{fmtAgo(c.updatedAt)}</span>
+                </span>
               </span>
             </button>
           {/each}
@@ -272,14 +295,19 @@
     flex: 1;
     display: flex; flex-direction: column;
     align-items: center;
-    /* Anchor near the top instead of dead-center — the page felt half-loaded
-       with a huge void above the hero. clamp keeps it tight on short windows
-       and breathy on tall ones without going full top-aligned (which made the
-       hero feel like a header). */
-    justify-content: flex-start;
-    padding: clamp(28px, 7vh, 88px) 20px 24px;
+    /* Dense workspace state (hero + folder card + chat tiles + suggestions)
+       centers vertically — `safe` falls back to flex-start when content
+       exceeds the viewport so the top never clips on short windows. The sparse
+       no-workspace state stays top-anchored (see .no-ws) because centering a
+       lone CTA left a half-loaded void above the hero. */
+    justify-content: safe center;
+    padding: clamp(24px, 4vh, 48px) 20px 28px;
     min-height: 0;
     gap: 14px;
+  }
+  .empty.no-ws {
+    justify-content: flex-start;
+    padding-top: clamp(28px, 7vh, 88px);
   }
   /* Stagger child entrance so the empty state feels composed top-down,
      not slammed in as one block. Uses shared `enter` keyframe (app.css). */
@@ -389,9 +417,48 @@
     border-color: var(--accent);
   }
   .ws-card.active {
+    display: flex;
+    align-items: stretch;
+    padding: 0;
+    overflow: hidden;
     border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
     background: color-mix(in oklch, var(--accent) 6%, var(--surface));
   }
+  /* Clickable body of the open-workspace card — carries the inner grid so the
+     sibling close-× stays outside the button (no nested-button HTML). */
+  .ws-main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 36px 1fr auto;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding: 14px 8px 14px 16px;
+    background: transparent;
+    border: 0;
+    text-align: left;
+    font: inherit;
+    color: var(--fg);
+    cursor: pointer;
+    transition: background 140ms ease-out;
+  }
+  .ws-main:hover { background: color-mix(in oklch, var(--accent) 8%, transparent); }
+  .ws-main:active { transform: scale(0.995); }
+  .ws-eyebrow {
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    line-height: 1.2;
+    margin-bottom: 1px;
+  }
+  :global(.ws-card.active .ws-chev) {
+    color: var(--accent);
+    opacity: 0.55;
+    transition: transform 140ms, opacity 140ms;
+  }
+  .ws-main:hover :global(.ws-chev) { transform: translateX(2px); opacity: 1; }
   .ws-icon {
     width: 36px; height: 36px;
     border-radius: 10px;
@@ -433,6 +500,9 @@
     color: var(--danger);
     background: var(--surface-hover);
   }
+  /* In the active card the × is a flex sibling of .ws-main, not a grid cell —
+     pull it back to center and give it breathing room from the edge. */
+  .ws-card.active .ws-action { align-self: center; margin-right: 8px; }
   /* ── Recents — quiet, compact list under the primary CTA ───────────────── */
   .recents-block {
     width: 100%;
@@ -525,9 +595,11 @@
     gap: 6px;
   }
   .chat-tile {
-    display: flex; flex-direction: column;
-    gap: 4px;
-    padding: 9px 12px;
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -537,6 +609,21 @@
     font: inherit;
     min-width: 0;
     transition: background 140ms, border-color 140ms, transform 140ms, box-shadow 140ms;
+  }
+  /* Leading glyph box — same accent-tinted treatment as the suggestion cards
+     so RECENT and TRY ASKING share one visual grammar instead of two. */
+  .tile-icon {
+    width: 26px; height: 26px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 7px;
+    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .tile-body {
+    display: flex; flex-direction: column;
+    gap: 3px;
+    min-width: 0;
   }
   .chat-tile:hover {
     background: var(--surface-hover);
@@ -562,8 +649,6 @@
     color: var(--fg-faint);
     overflow: hidden;
   }
-  .tile-model { text-transform: capitalize; font-weight: 500; color: var(--fg-muted); }
-  .tile-dot { opacity: 0.6; }
   .tile-time {
     margin-left: auto;
     padding: 1px 6px;

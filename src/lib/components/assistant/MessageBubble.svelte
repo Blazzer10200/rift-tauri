@@ -285,7 +285,9 @@
     return m ? (m[1].toLowerCase() as "sonnet" | "opus" | "haiku") : null;
   });
   const costLabel = $derived(
-    typeof message.costUsd === "number" ? `${message.costUsd.toFixed(4)}` : null,
+    typeof message.costUsd === "number"
+      ? (message.costUsd > 0 && message.costUsd < 0.01 ? "<$0.01" : `$${message.costUsd.toFixed(2)}`)
+      : null,
   );
 
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
@@ -395,7 +397,7 @@
         {#if plainText.length > 0 || (!streaming && costLabel)}
           <div class="turn-actions">
             {#if !streaming && costLabel}
-              <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>${costLabel}</span>
+              <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>{costLabel}</span>
             {/if}
             {#if plainText.length > 0}
               <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
@@ -642,9 +644,12 @@
     grid-column: 1;
     grid-row: 1;
     align-self: stretch;
-    width: 1.5px;
+    width: 2px;
     border-radius: 2px;
-    background: color-mix(in oklch, var(--fg-faint) 38%, transparent);
+    /* Visible enough to actually read as the spine the dots hang off — the old
+       fg-faint @ 38% vanished against the dark bg, so the bullets looked
+       orphaned. Faint model tint ties it to the aurora identity. */
+    background: color-mix(in oklch, var(--model-color) 26%, var(--border));
     transition: background 200ms ease-out;
   }
   .bubble[data-streaming="true"] .turn-rail {
@@ -850,6 +855,21 @@
     border: 1.5px solid color-mix(in oklch, var(--fg-faint) 60%, transparent);
     z-index: 1;
     transition: background 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+    /* Each circle draws itself onto the rail as its node lands — staggered down
+       the spine so a multi-tool turn reads as a timeline assembling in real
+       time (live during streaming, and replays on load). Pending nodes override
+       this with the pulse below, so the active tool throbs instead of popping. */
+    transform-origin: center;
+    animation: bullet-pop 340ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation-delay: calc(var(--idx, 0) * 35ms);
+  }
+  @keyframes bullet-pop {
+    0%   { transform: scale(0);    opacity: 0; }
+    60%  { transform: scale(1.3);  opacity: 1; }
+    100% { transform: scale(1);    opacity: 1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tl-node::before { animation: none; }
   }
   .tl-node[data-kind="thinking"]::before {
     width: 8px; height: 8px;
