@@ -74,7 +74,14 @@
     const s = Math.max(0, Math.floor(ms / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
+  // Toggle the Activity dock: if it's already open ON the activity tab, a
+  // second click closes it; otherwise open + switch to activity (so clicking
+  // from another panel tab focuses activity rather than closing).
   function openActivity() {
+    if (assistant.ui.dockOpen && assistant.ui.panelTab === "activity") {
+      assistant.ui.dockOpen = false;
+      return;
+    }
     assistant.ui.panelTab = "activity";
     assistant.ui.dockOpen = true;
   }
@@ -378,9 +385,9 @@
     void tick().then(() => ta?.focus());
   }
 
-  // Bumps on every fire() — drives the send-button ripple + chat-column
-  // upward sweep keyed off `{#key}`. Both pulses are pure-CSS one-shots,
-  // mounted by the key flip and self-removed after their animation ends.
+  // Bumps on every fire() — drives the send-button ripple keyed off `{#key}`.
+  // A pure-CSS one-shot, mounted by the key flip and self-removed after its
+  // animation ends.
   let fireKey = $state(0);
 
   function fire() {
@@ -819,11 +826,6 @@
 </script>
 
 <div class="composer-wrap" data-model={modelFamily(assistant.model)}>
-  {#key fireKey}
-    {#if fireKey > 0}
-      <span class="send-sweep" aria-hidden="true"></span>
-    {/if}
-  {/key}
   {#if queue.length > 0}
     <div class="queue">
       <span class="queue-label">Queued ({queue.length}):</span>
@@ -1343,7 +1345,7 @@
   }
   /* Aurora hue follows the active model — sonnet=blue, opus=purple,
      haiku=teal. Resolved here so every accent inside (border, ripple,
-     send-sweep, model-pill pulse) reads from the same single source. */
+     streaming ring, model-pill pulse) reads from the same single source. */
   .composer-wrap[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
   .composer-wrap[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
   .composer-wrap[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
@@ -1433,27 +1435,26 @@
   .composer.streaming {
     border-color: color-mix(in oklch, var(--model-color) 42%, var(--border));
   }
-  /* Animated top-edge streaming bar — tinted to current model. */
+  /* Full-frame streaming ring — a model-tinted border that breathes around
+     the entire composer (synced 2.6s with the model-pill breathe). Sits as a
+     border-only overlay (transparent center, pointer-events none) so it traces
+     the frame without crossing the input text. */
   .composer.streaming::before {
     content: "";
     position: absolute;
-    top: 0; left: 14%; right: 14%;
-    height: 1.5px;
-    background: linear-gradient(90deg,
-      transparent,
-      var(--model-color),
-      color-mix(in oklch, var(--model-color) 70%, white 30%),
-      var(--model-color),
-      transparent);
-    background-size: 200% 100%;
+    inset: 0;
+    border-radius: 18px;
+    border: 1.5px solid color-mix(in oklch, var(--model-color) 65%, transparent);
+    box-shadow:
+      0 0 12px color-mix(in oklch, var(--model-color) 32%, transparent),
+      inset 0 0 8px color-mix(in oklch, var(--model-color) 16%, transparent);
+    pointer-events: none;
     animation: composer-stream 2.6s ease-in-out infinite;
     z-index: 2;
-    border-radius: 0 0 2px 2px;
   }
   @keyframes composer-stream {
-    0%   { background-position: 200% 0; opacity: 0.4; }
-    50%  { opacity: 0.95; }
-    100% { background-position: -100% 0; opacity: 0.4; }
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
   }
   @media (prefers-reduced-motion: reduce) {
     .composer.streaming::before { animation: none; opacity: 0.7; }
@@ -1812,36 +1813,6 @@
   @media (prefers-reduced-motion: reduce) {
     .send-ripple { animation: none; opacity: 0; }
   }
-  /* Upward chat-column sweep — a thin gradient bar shoots upward from the
-     composer into the chat scroller on every fire(). Anchored to
-     .composer-wrap (which is position: relative), travels 100vh up via
-     translateY animation; clipped invisibly by the scroller's overflow. */
-  .send-sweep {
-    position: absolute;
-    left: 18px; right: 18px;
-    top: 0;
-    height: 2px;
-    border-radius: 999px;
-    background: linear-gradient(90deg,
-      transparent 0%,
-      color-mix(in oklch, var(--model-color) 65%, transparent) 30%,
-      color-mix(in oklch, var(--model-color) 85%, white 10%) 50%,
-      color-mix(in oklch, var(--model-color) 65%, transparent) 70%,
-      transparent 100%);
-    box-shadow: 0 0 14px color-mix(in oklch, var(--model-color) 55%, transparent);
-    pointer-events: none;
-    z-index: 5;
-    animation: send-sweep 720ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  @keyframes send-sweep {
-    0%   { transform: translateY(0)     scaleX(0.3); opacity: 0; }
-    18%  { transform: translateY(-12px) scaleX(1);   opacity: 1; }
-    100% { transform: translateY(-72vh) scaleX(0.4); opacity: 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .send-sweep { animation: none; opacity: 0; }
-  }
-
   .icon-stack {
     position: relative;
     display: inline-flex;
