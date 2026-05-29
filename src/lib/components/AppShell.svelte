@@ -109,6 +109,12 @@
   onMount(() => {
     browserDock.init();
     updates.checkOnLaunch();
+    // CR3: the flash fix lives in SplashOverlay — it awaits probeSshKey under
+    // the blur so the first-run gate's second signal (defaultSshKeyExists)
+    // resolves before the overlay lifts. This call is a now-idempotent safety
+    // net for the splash-skipped path (dev HMR / same-window refresh, where
+    // +layout seeds splashDone from sessionStorage and never mounts the
+    // overlay). Re-setting the same value in the normal path is a no-op.
     void connection.probeSshKey();
     dialogs.onAddServer = () => openAddServer(null);
     dialogs.onEditServer = (s) => openAddServer(s);
