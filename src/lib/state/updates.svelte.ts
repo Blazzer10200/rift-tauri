@@ -19,7 +19,8 @@
 // doesn't pop the toast again next launch; a NEWER version supersedes.
 
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, openPath } from "@tauri-apps/plugin-opener";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Sparkles } from "lucide-svelte";
 import { toast } from "./toast.svelte";
 
@@ -37,6 +38,7 @@ export type UpdateState =
   | "idle"
   | "checking"
   | "available"
+  | "downloading"
   | "launched"
   | "uptodate"
   | "error";
@@ -120,18 +122,40 @@ class UpdateStore {
     }
   }
 
-  /** Open the Setup.exe URL in the user's default browser. NSIS wizard
-   *  prompts to close Rift if needed, installs, then relaunches. */
+  /** Download the installer in-app (with progress), then launch it via the
+   *  opener plugin — NSIS closes Rift, installs, and relaunches. Falls back to
+   *  opening the URL in the browser (the prior v0.4.36 behavior) on any
+   *  download/launch failure, so this never regresses. */
   async download() {
     if (this.state !== "available" || !this.info?.downloadUrl) return;
+    const url = this.info.downloadUrl;
     this.downloadError = "";
+    this.progress = 0;
+    this.state = "downloading";
+    let unlisten: UnlistenFn | null = null;
     try {
-      await openUrl(this.info.downloadUrl);
+      unlisten = await listen<{ downloaded: number; total: number }>(
+        "update://download-progress",
+        (e) => {
+          const { downloaded, total } = e.payload;
+          this.progress =
+            total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+        },
+      );
+      const path = await invoke<string>("download_update", { url });
+      await openPath(path);
       this.state = "launched";
     } catch (e) {
-      // Keep state "available" so the user sees the inline error AND can
-      // retry the Download button without re-querying GitHub.
-      this.downloadError = String(e);
+      // In-app path failed — fall back to the proven browser handoff.
+      try {
+        await openUrl(url);
+        this.state = "launched";
+      } catch (e2) {
+        this.state = "available";
+        this.downloadError = String(e2 ?? e);
+      }
+    } finally {
+      if (unlisten) unlisten();
     }
   }
 

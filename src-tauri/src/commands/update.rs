@@ -143,6 +143,82 @@ pub async fn check_for_updates() -> Result<Option<UpdateInfoDto>, String> {
     }))
 }
 
+/// Progress payload for the `update://download-progress` event.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadProgress {
+    downloaded: u64,
+    total: u64,
+}
+
+/// Stream the installer to a temp file, emitting `update://download-progress`
+/// as bytes arrive, then return the local path. The frontend launches it via
+/// the opener plugin — from that point the install is byte-identical to the
+/// user running the browser download (NSIS closes Rift, installs, relaunches).
+/// The frontend falls back to opening the URL in the browser on any failure,
+/// so this path never regresses below the v0.4.36 browser handoff.
+#[tauri::command]
+pub async fn download_update(app: tauri::AppHandle, url: String) -> Result<String, String> {
+    use futures::StreamExt;
+    use std::io::Write;
+    use tauri::Emitter;
+
+    // Only ever download from the release host we control.
+    if !(url.starts_with("https://github.com/")
+        || url.starts_with("https://objects.githubusercontent.com/"))
+    {
+        return Err(format!("Refusing to download from an unexpected host: {url}"));
+    }
+    // Derive a safe filename from the URL's last segment.
+    let fname = url.rsplit('/').next().unwrap_or("");
+    if !fname.ends_with(".exe") || fname.contains('\\') || fname.contains(':') {
+        return Err("Download URL does not end in a plain .exe filename.".to_string());
+    }
+
+    let client = reqwest::Client::builder()
+        .user_agent(USER_AGENT)
+        .timeout(std::time::Duration::from_secs(600))
+        .build()
+        .map_err(|e| format!("Couldn't initialize the download client: {e}"))?;
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed to start: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("Download failed: HTTP {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+
+    let dir = std::env::temp_dir().join("rift-update");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create temp dir: {e}"))?;
+    let path = dir.join(fname);
+    let mut file =
+        std::fs::File::create(&path).map_err(|e| format!("Couldn't create installer file: {e}"))?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| format!("Download interrupted: {e}"))?;
+        file.write_all(&chunk)
+            .map_err(|e| format!("Couldn't write installer: {e}"))?;
+        downloaded += chunk.len() as u64;
+        let _ = app.emit(
+            "update://download-progress",
+            DownloadProgress { downloaded, total },
+        );
+    }
+    file.flush().map_err(|e| format!("Couldn't finalize installer: {e}"))?;
+    drop(file);
+
+    if total > 0 && downloaded != total {
+        return Err(format!(
+            "Download incomplete: got {downloaded} of {total} bytes."
+        ));
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// Parse `"0.4.33"` / `"0.4.33-alpha"` / `"v0.4.33"` into a comparable tuple.
 fn parse_version(s: &str) -> Option<(u32, u32, u32, Option<String>)> {
     let s = s.trim().trim_start_matches('v');
