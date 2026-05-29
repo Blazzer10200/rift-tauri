@@ -2,11 +2,11 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-28b (ultracode) — SHIPPED as v0.4.37 (4f9ca6e)
-ultracode mode (4th THINKING DEPTH tier, Composer popover — wiring in DON'T-TOUCH) + git-rcon git tools + onboarding + side-panel split + 4 code-review fixes. Verified: `npm run check` 0/0, Rust clean, headless smoke ✓ (opus 4.8, exit 0). 6 OPEN follow-ups (CR1-5 + CR-UX; only CR1 a warning) + permission round-trip UNVERIFIED — all detailed in ISSUES.md.
+## Session 2026-05-29 — committed b1083ea (NOT shipped)
+Assistant UX pass (7 files; `npm run check` 0/0/0; backend live-verified via CDP invoke). Full detail in commit b1083ea. Highlights: smart convo titles (`assistant_generate_title` headless Haiku → `persistence.ts::maybeGenerateTitle`, NEW convos only, `titleGenerated`-guarded); EmptyState RECENT filters <3-msg stubs + suggestion-style icon-box tiles + actionable workspace card (focuses composer); MessageBubble turn-rail now visible (was fg-faint 38%) + `bullet-pop` circles + 2-dec cost; ToolChip timeline lane (surface + left accent).
 
 ## RESUME HERE
-**v0.4.37 SHIPPED** (2026-05-28, commits 837408a + 4f9ca6e) — git-rcon git tools + onboarding flow + ultracode tier + side-panel split + 4 CR fixes. Working tree clean; all three version files + CHANGELOG in lockstep at 0.4.37. **Workspace docs/memory cleaned up 2026-05-28** — stale version/updater/Velopack refs corrected across CLAUDE.md, ISSUES.md, README, DEVELOPING, design briefs, and `~/.claude/memory/` rift files; `git-rcon-tools.md` brief archived (git half shipped). Optional follow-ups: CR1 (dock anim no-op) · CR2-5 + CR-UX (minor, see ISSUES.md) · live permission round-trip (throwaway repo, in-app mode selector).
+Clean @ b1083ea — committed, **not released** (still v0.4.37 ×3 files). Ship via `/git-ship`. Deferred this session: merge consecutive thinking fragments (`grouped` builder change); tool-chip duration badge on all tools (not just Bash). Older open in ISSUES.md: CR2-5 + CR-UX, permission round-trip live-verify, #20 M8/M9 splits.
 
 ## CRITICAL DON'T-TOUCH
 
@@ -20,6 +20,7 @@ ultracode mode (4th THINKING DEPTH tier, Composer popover — wiring in DON'T-TO
 - `FileAttributes::default()` SETSTAT = data-loss — use `empty()`. `DriftBucket::ToDelete`=LOCAL; `ToDeleteRemote`=REMOTE.
 - Time displays MUST pass `[], { hour12: true }`. `spawn_frontend_pump` 200/s rate-limit.
 - MCP self-exec: `RIFT_MCP_SERVER=1` branch in `lib.rs::run()` BEFORE Tauri loop.
+- Smart-title `titleGenerated` (per-tab): true on disk-load + rename → auto-gen runs ONCE per new convo. Don't default-false on load (re-spams Haiku). `assistant_generate_title` = headless Haiku, no session/tools.
 - Chat tabs: `openTabs` filters vs `assistant_list_conversations`. `send()` keys `isFirstTurn` off `convoCreatedAt`. Keybinds gated on `workspace.activeId === "chat"`.
 - `assistant_send`: always `--input-format stream-json` + `--permission-prompt-tool stdio` + initialize handshake + stdin kept open. `--allowed-tools` mode-aware: bypass/auto = full BUILTINS+mcp; prompting modes = SAFE_BUILTINS + SAFE_MCP + GIT_READ only (git write + mutating MCP ride can_use_tool prompt).
 - TabState: per-tab field → add to TabState + getter on AssistantStore. Never back on the store.
