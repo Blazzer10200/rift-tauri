@@ -2,13 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-30 (c) — auth-clarity hardening (UNSHIPPED, on `main`, tree dirty)
-Closes the silent-401 class the Trey arc exposed. **Not shipped** — code-complete + verified, awaiting `/git-ship` (version bump + release deliberately deferred per project rules). `cargo check` 0 err, `svelte-check` 0/0 (4109).
+## Session 2026-05-30 (c) — v0.4.41 SHIPPED (auth-clarity + connection-error decode)
+Commit `a2cb0cd`, release `rift-releases` tag **v0.4.41**, SHA256 MATCH, non-prerelease. Closes the silent-401 class + cryptic-connect-error class the Trey arc exposed. `cargo check` 0/0, `svelte-check` 0/0 (4109), quick-review clean.
 - **Silent system `ANTHROPIC_API_KEY` trap (root cause of "green pill but 401"):** `current_api_key()` only reads keychain/config, so a system env key was invisible to the probe yet inherited by the spawned `claude` → 401 under a different identity. Fix (`assistant/mod.rs`): (1) `AuthStatus.env_api_key_present` (detect via `std::env::var`); (2) **`claude_command()` builder strips `ANTHROPIC_API_KEY` from EVERY spawn** (probe ×2, send, title-gen, enhancer, compaction) — single source of truth; the configured-key send branch (`use_api_key`) re-adds the sanctioned Rift key after. Env keys never silently win on ANY claude call; (3) probe summary warns when an env key is being ignored (green-but-noted if logged in; actionable red if no login/no Rift key).
 - **Bad-key 401 now actionable:** send error decoder gained a 401/`authentication_error`/`Invalid authentication`/`invalid x-api-key` branch → "configured key rejected, clear it in Settings" (if `current_api_key()`) vs "login expired, run `claude`" (else). Was falling through to the bare `claude exited with N — …`.
 - **Frontend:** `AuthStatus.envApiKeyPresent` in `types.ts`; Settings API-key section shows a ⚠ note when an env key is set but unconfigured in Rift.
 - **SSH connect-error decoder (`sftp/mod.rs::decode_connect_err`):** the raw `WSAEACCES`/errno from `client::connect` (the NordVPN-vs-Tailscale clash that cost Trey hours) now decodes to actionable hints — EACCES/10013→"VPN/firewall blocking, close NordVPN or split-tunnel"; refused/10061→"sshd down or wrong port"; timeout/10060/unreachable→"host offline or wrong Tailscale IP". Raw appended for logs. (`tunnel/mod.rs` connect left raw — secondary path.)
-- Touched: `src-tauri/src/assistant/mod.rs`, `src-tauri/src/sftp/mod.rs`, `src/lib/state/assistant/types.ts`, `src/lib/components/settings/Settings.svelte`. `cargo check` 0/0, `svelte-check` 0/0. RESUME: `/git-ship` when ready (bump 3 files + Cargo.lock).
+- Touched: `src-tauri/src/assistant/mod.rs`, `src-tauri/src/sftp/mod.rs`, `src/lib/state/assistant/types.ts`, `src/lib/components/settings/Settings.svelte`. Shipped in `a2cb0cd`. VALIDATE: Trey re-tests the real 401 (clear bad key → `/login`) + VPN-blocked connect paths against his machine — runtime-unverified this session.
 
 ## Session 2026-05-30 (b) — v0.4.40 SHIPPED (bg-process turn-end #242 + auth-aware send guards)
 Commit `7c8e17d`, release `rift-releases` tag **v0.4.40**, SHA256 MATCH, non-prerelease. Bundled:
