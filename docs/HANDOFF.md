@@ -2,6 +2,12 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-29 (f) — v0.4.39 SHIPPED (assistant /clear + queue fix)
+Two frontend-only assistant fixes, committed `95ab30c` + bump `b135262`, pushed (also flushed the 12 previously-unpushed commits incl. the v0.4.38 ship). `release.ps1` via **powershell.exe** → NSIS `Rift_0.4.39_x64-setup.exe` + `gh release create` + SHA256 MATCH. Live: rift-releases tag v0.4.39, non-prerelease (latest API serves it).
+- **Queue hang fixed:** `onDone` drained the outbound queue but `onError` didn't → partial-stream-then-error (looks "completed") stranded the queued msg in "Queued (N)" forever. `TabState.onError` now fires `onTurnComplete`; drain centralized into idempotent `drainQueue(tab)`; microtask re-checks `streaming` + re-queues vs strands; tab activation (`openTab`/`cycleTab`/`setFocusedPane`/`addPane`) re-drains backgrounded queues.
+- **`/clear` is real now:** was a hidden alias of `/new`. New `clearConversation()` (`state/assistant/tabs.ts`) re-keys the SAME tab/pane to a fresh session, flushing old convo to History first. Distinct from `/new` in picker + `/help`.
+- **⚠️ First live updater test available NOW:** a ≤0.4.38 client → 0.4.39 is the first time the in-app Download→NSIS→relaunch path is end-to-end testable (v0.4.38 was un-testable, chicken-and-egg). Verify it.
+
 ## Session 2026-05-29 (e) — SftpOps trait + DriftScanner offline tests (#265 Wave B Phase 1)
 
 **Done + verified (full `cargo test` 115 pass / 0 fail / 2 ignored; 0 rustc + 0 clippy warnings in touched files):**
@@ -20,22 +26,10 @@
 
 ---
 
-## Session 2026-05-29 (d) — v0.4.38 SHIPPED (updater fix released)
-Bump `f71a3bb` → `release.ps1` (via **powershell.exe** — pwsh 7 not on PATH; script is ASCII-safe for 5.1) → NSIS + `gh release create` + SHA256 MATCH. Live: rift-releases tag v0.4.38, `latest` API serves it. Ships `5a3618c` (`mailto:**`→`mailto:*` openUrl-poison fix) + `5a013dc` (in-app `download_update` + browser fallback).
-
-**⚠️ Download path STILL runtime-untested — un-testable from THIS release (chicken-and-egg):** 0.4.38 is newest → a 0.4.38 client sees no update; only ≤0.4.37 clients see it but have the bug baked in → Download fails (known caveat, not a test). **First testable on 0.4.38→0.4.39 — verify progress→NSIS→relaunch THEN.** setup.exe: `C:\cargo-targets\release\bundle\nsis\Rift_0.4.38_x64-setup.exe`. ⚠️ ≤0.4.37 clients need ONE manual install of 0.4.38 first.
-
----
-
-## Session 2026-05-29 (c) — 830a851 + 3487dcb (NOT pushed)
-Assistant UX polish, all frontend, user-driven (check 0/0/0):
-- Composer streaming indicator: top-edge bar (squared line over input) → model-tinted **border-only ring** breathing around whole frame (`.composer.streaming::before` inset:0). No overlap.
-- Removed `.send-sweep` (2px bar streaking −72vh up chat on send — the "weird box"; never clipped). `fireKey` now drives only the send-btn ripple.
-- Activity pills toggle: `openActivity()` closes dock on 2nd click when already on Activity tab.
-- ActivityPanel: running rows + slowest-tool = buttons → `jumpTo()` scrolls transcript to the call + flashes it via new `actnode-<id>` anchor on `.tl-node` (MessageBubble:525). Shells AND agents resolve (`agentSpawns` id == Task tool-block id). Cancelled parallel calls split out of failed count. Tool-mix: full-name tooltip + widened label + **expandable "+N more"** (`toolsExpanded`).
-
-## Session 2026-05-29 (b) — 07710e3 (pushed)
-CR1–CR5 from v0.4.37 review landed (check 0/0/0). ISSUES **#14/#15 CLOSED** (code-signing declined). Full detail: `git log 07710e3`.
+## Earlier 2026-05-29 sessions (all shipped/pushed — detail in git log)
+- **(d)** v0.4.38 SHIPPED — updater fix (`5a3618c` mailto-glob openUrl-poison + `5a013dc` in-app `download_update`). Now superseded by 0.4.39.
+- **(c)** `830a851`+`3487dcb` — assistant UX polish (streaming border-ring, removed `.send-sweep`, Activity `jumpTo()` anchors). Pushed in session (f).
+- **(b)** `07710e3` — v0.4.37 review CR1–CR5; ISSUES #14/#15 CLOSED (signing declined).
 
 ## Open work (not started)
 **#20 hot-file splits** — `assistant.svelte.ts` 2314L (M8 streaming + M9 send open, brief `docs/design/assistant-svelte-split.md`); `assistant/mod.rs` 2795L (worst backend); `auto_sync.rs` 2232L. M8/M9 want a conversation-playback test harness first. Decisions: **CR-UX** trust enum (collapse to 2-level, drop dead `full`); **#17** two-repo (if going public). Also: code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep. Full live queue: `docs/ISSUES.md`.
