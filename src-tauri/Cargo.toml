@@ -50,6 +50,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 # SSH + SFTP — pure Rust, no libssh2/C deps. Reference: T-Shell, Reach, Shell360.
 russh = { version = "~0.60", default-features = false, features = ["ring", "rsa", "flate2", "async-trait"] }
 russh-sftp = "2.1"
+# Object-safe async methods for the `SftpOps` trait (mockable SFTP surface for
+# sync-layer tests). Already in the tree transitively via russh.
+async-trait = "0.1"
 
 # L9: force `ring` crypto provider on rustls — drops aws-lc-rs from dep tree.
 # Declared for feature control only — never `use rustls::*` directly (cargo-machete
