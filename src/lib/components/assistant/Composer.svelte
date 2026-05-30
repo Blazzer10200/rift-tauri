@@ -97,10 +97,9 @@
 
   type SlashCmd = { name: string; desc: string };
   // Grouped: conversation lifecycle → model + composition → flow control → info.
-  // `/clear` is intentionally NOT listed — it's an alias of /new and surfacing
-  // both clutters the picker. runSlash() still accepts it.
   const SLASH_COMMANDS: SlashCmd[] = [
     { name: "new",       desc: "Start a new conversation (saves current)" },
+    { name: "clear",     desc: "Clear this chat in place (saves current to History)" },
     { name: "compact",   desc: "Summarize + remint the CLI session (optional focus)" },
     { name: "history",   desc: "Open conversation history" },
     { name: "model",     desc: "Switch model — opens picker" },

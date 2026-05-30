@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.39 — 2026-05-29 — assistant queue no longer hangs after a turn + real in-place `/clear`
+
+> **Why this release exists.** Two assistant-chat fixes. A queued message could hang in "Queued" mode forever after a turn finished; `/clear` was a hidden alias of `/new` instead of a real clear-in-place. Both are frontend-only.
+
+**Queue drains from every terminal path.** The outbound message queue (type a message while the assistant is still streaming → it queues, then fires when the turn ends) only drained from the success path. A turn that streamed some text and *then* errored — which looks "completed" to the user — took the error path, which never fired the drain hook, so the queued message sat in "Queued (1)" forever. [assistant.svelte.ts](src/lib/state/assistant.svelte.ts): `TabState.onError` now calls `onTurnComplete` (mirroring `onDone`); the drain logic is centralized into one idempotent `drainQueue(tab)` guarded on `active && idle && non-empty`. The drain microtask now re-checks `streaming` (not just the active convo) before firing and re-queues the head on mismatch instead of silently stranding it. Tab activation (`openTab` / `cycleTab` / `setFocusedPane` / `addPane`) re-drains, so a queue deferred while a tab was backgrounded flushes when you return to it. Net: a queued message sends after the turn ends regardless of how it ended (success, error, partial-then-error) and whether or not you were looking at the tab.
+
+**`/clear` is now a real in-place clear.** It was a thin alias of `/new` (both opened a brand-new tab, leaving the old conversation in its own tab) and was hidden from the slash picker. New `clearConversation()` ([tabs.ts](src/lib/state/assistant/tabs.ts)) matches Claude Code's `/clear`: flushes the current convo to disk first (stays in History — nothing lost), then re-keys the **same tab slot + pane** to a fresh empty session. No remint needed — the fresh convoId seeds a new `cliSessionId`, so the next send mints `--session-id`. `/clear` and `/new` are now distinct in the picker and `/help`.
+
+**Verify.** `npm run check` 0 / 0 (4109 files). No Rust touched. Quick-review clean (0 critical, 0 real bugs). NSIS bundle + SHA256 round-trip via `release.ps1` at ship. First live test of the v0.4.38→0.4.39 in-app updater Download→NSIS→relaunch path lands with this release.
+
 ## v0.4.38 — 2026-05-29 — fix the updater that broke every client + in-app installer download
 
 > **Why this release exists.** v0.4.36's "fix" for the installer-download failure never worked — it added an *invalid* opener scope that silently poisoned **every** `openUrl` in the app. This is the release that actually fixes it. ⚠️ Existing clients ≤0.4.37 have the broken capability baked into their binary and need ONE manual install of 0.4.38; after that, in-app updates work again.

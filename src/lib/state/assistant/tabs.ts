@@ -395,6 +395,52 @@ export async function newTab(host: TabsHost) {
   host.persistTabs();
 }
 
+/** Clear the active conversation IN PLACE (Claude Code `/clear` semantics).
+ *  The old convo is flushed to disk first so it stays in History (nothing
+ *  lost), then the SAME tab slot / pane is re-keyed to a fresh empty convo —
+ *  the chat view clears without spawning a second tab. No remint needed: the
+ *  fresh convoId seeds a new cliSessionId, so the next send mints
+ *  `--session-id`, not `--resume`. The old CLI session stays intact on the
+ *  archived convo (resumable from History via /openincli). Distinct from
+ *  newTab(), which appends a tab and leaves the old one open. */
+export async function clearConversation(host: TabsHost) {
+  const oldId = host.currentConvoId;
+  // No active convo to clear → just behave like a fresh tab.
+  if (!oldId) {
+    await newTab(host);
+    return;
+  }
+  // Stop any in-flight stream on this tab before swapping it out.
+  if (host.streaming) await host.stop();
+  // Flush the outgoing convo so it persists to History (nondestructive).
+  if (host.messages.length > 0 && host.convoCreatedAt) {
+    host.scheduleSave(true);
+  }
+  // Re-key the SAME tab slot + any pane showing it to a fresh convoId so the
+  // clear happens in place (no new tab appended).
+  const newId = crypto.randomUUID();
+  const idx = host.openTabs.indexOf(oldId);
+  const nextTabs = host.openTabs.slice();
+  if (idx === -1) nextTabs.push(newId);
+  else nextTabs[idx] = newId;
+  host.openTabs = nextTabs;
+  host.panes = host.panes.map((p) => (p.tabId === oldId ? { tabId: newId } : p));
+  // Fresh empty TabState; cliSessionId seeded to newId. #143: don't write the
+  // per-tab fields via store setters afterwards or ensureTab's seed is lost.
+  host.ensureTab(newId, newId);
+  host.telemetry.event("tab.clear", { from: oldId, to: newId });
+  host.currentConvoId = newId;
+  host.queue = [];
+  host.lastNotice = "Conversation cleared — previous chat saved to History.";
+  host.composerDraft = "";
+  host.composerAttachments = [];
+  // Retire the old tab's in-memory state; the disk record stays (still in
+  // History). #144: drop both the TabState and its UI scratch.
+  host.dropTab(oldId);
+  host.pruneTabUi(oldId);
+  host.persistTabs();
+}
+
 export function reorderTabs(host: TabsHost, fromIdx: number, toIdx: number) {
   if (fromIdx === toIdx) return;
   if (fromIdx < 0 || fromIdx >= host.openTabs.length) return;
