@@ -2,6 +2,14 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-30 (c) — auth-clarity hardening (UNSHIPPED, on `main`, tree dirty)
+Closes the silent-401 class the Trey arc exposed. **Not shipped** — code-complete + verified, awaiting `/git-ship` (version bump + release deliberately deferred per project rules). `cargo check` 0 err, `svelte-check` 0/0 (4109).
+- **Silent system `ANTHROPIC_API_KEY` trap (root cause of "green pill but 401"):** `current_api_key()` only reads keychain/config, so a system env key was invisible to the probe yet inherited by the spawned `claude` → 401 under a different identity. Fix (`assistant/mod.rs`): (1) `AuthStatus.env_api_key_present` (detect via `std::env::var`); (2) **`claude_command()` builder strips `ANTHROPIC_API_KEY` from EVERY spawn** (probe ×2, send, title-gen, enhancer, compaction) — single source of truth; the configured-key send branch (`use_api_key`) re-adds the sanctioned Rift key after. Env keys never silently win on ANY claude call; (3) probe summary warns when an env key is being ignored (green-but-noted if logged in; actionable red if no login/no Rift key).
+- **Bad-key 401 now actionable:** send error decoder gained a 401/`authentication_error`/`Invalid authentication`/`invalid x-api-key` branch → "configured key rejected, clear it in Settings" (if `current_api_key()`) vs "login expired, run `claude`" (else). Was falling through to the bare `claude exited with N — …`.
+- **Frontend:** `AuthStatus.envApiKeyPresent` in `types.ts`; Settings API-key section shows a ⚠ note when an env key is set but unconfigured in Rift.
+- **SSH connect-error decoder (`sftp/mod.rs::decode_connect_err`):** the raw `WSAEACCES`/errno from `client::connect` (the NordVPN-vs-Tailscale clash that cost Trey hours) now decodes to actionable hints — EACCES/10013→"VPN/firewall blocking, close NordVPN or split-tunnel"; refused/10061→"sshd down or wrong port"; timeout/10060/unreachable→"host offline or wrong Tailscale IP". Raw appended for logs. (`tunnel/mod.rs` connect left raw — secondary path.)
+- Touched: `src-tauri/src/assistant/mod.rs`, `src-tauri/src/sftp/mod.rs`, `src/lib/state/assistant/types.ts`, `src/lib/components/settings/Settings.svelte`. `cargo check` 0/0, `svelte-check` 0/0. RESUME: `/git-ship` when ready (bump 3 files + Cargo.lock).
+
 ## Session 2026-05-30 (b) — v0.4.40 SHIPPED (bg-process turn-end #242 + auth-aware send guards)
 Commit `7c8e17d`, release `rift-releases` tag **v0.4.40**, SHA256 MATCH, non-prerelease. Bundled:
 - **#242/#240/#241 (prior session (a) — now compile-verified + shipped):** turn-end was gated on claude *exit* (`child.wait()`), but a `run_in_background` child keeps claude alive → UI stuck "streaming" for minutes / queue stranded (reproduced: 1m43s on bg `sleep 300`). stdout reader emits DONE on the `result` frame (`Arc<AtomicBool> result_seen`); 5s grace then `start_kill` **claude's PID only** (NOT taskkill /T) so detached bg child survives. stdout/stderr drains bounded 500ms+abort (#240). TTFT instrumentation (#241, ~1.1s first-turn floor). **Open:** orphan-reaping (bg children survive app-exit; proper fix = Win Job Object KILL_ON_JOB_CLOSE).
@@ -16,7 +24,7 @@ Connection **WORKS** now. Root cause of the multi-hour SSH failure was **NordVPN
 `95ab30c`+`b135262`. `onError` now fires `onTurnComplete` (queue drained from every terminal path, not just success); real in-place `clearConversation()` (`state/assistant/tabs.ts`) re-keys the same tab/pane vs the old hidden `/new` alias. Frontend-only. Detail: git log.
 
 ## Session 2026-05-29 (e) — SftpOps trait + DriftScanner offline tests (#265 Wave B Phase 1)
-`64b79ef`+`c6bf279` — new `SftpOps` trait (`sftp/sftp_ops.rs`, object-safe `#[async_trait]`), `DriftScanner` now takes `&dyn SftpOps`; 6 fully-offline drift tests vs `MockSftp` (115 pass/0 fail). RESUME (cheap): add `ToDeleteRemote`/`RemoteMissing`/`SuspiciousEmptyAborted` (configurable `MockSftp.remote_exists`); hash-path trio (`MockSftp.get_remote_sha1` matching `compute_sha1`); **Phase 2** flip engine `sftp` field → `dyn` (7 consumers) → unblocks `flush_batch` tests (#21.1). Detail in git log.
+`64b79ef`+`c6bf279` — `SftpOps` trait (`sftp/sftp_ops.rs`); `DriftScanner` takes `&dyn SftpOps`; 6 offline drift tests vs `MockSftp` (115 pass). RESUME: **Phase 2** flip engine `sftp` field → `dyn` (7 consumers) → unblocks `flush_batch` tests (#21.1). Detail in git log.
 
 ---
 
