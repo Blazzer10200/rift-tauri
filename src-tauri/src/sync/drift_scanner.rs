@@ -895,4 +895,162 @@ mod tests {
         assert_eq!(e.rel_path, "bar.lua");
         assert!(e.local_exists && !e.remote_exists);
     }
+
+    // ── Baseline-aware cases (snapshot seeded via SyncSnapshot::for_path) ──
+    // All use `sha1: None` so the diff stays on the pure stat path — no
+    // `get_remote_sha1` / `compute_sha1` jitter-collapse branches fire, making
+    // every assertion deterministic without controlling file content hashes.
+
+    fn snap_for_test() -> SyncSnapshot {
+        SyncSnapshot::for_path(unique_tmp("snap").join("snapshot.json"))
+    }
+
+    /// Second-truncated mtime, matching `walk_local`'s `.as_secs()` rounding so
+    /// a seeded baseline can land exactly on the scanner's computed local mtime.
+    fn file_mtime(p: &Path) -> DateTime<Utc> {
+        let m = std::fs::metadata(p).unwrap().modified().unwrap();
+        let d = m.duration_since(std::time::UNIX_EPOCH).unwrap();
+        DateTime::<Utc>::from_timestamp(d.as_secs() as i64, 0).unwrap()
+    }
+
+    /// A bare dir row keeps a listing non-empty (skips the empty-remote guard)
+    /// while contributing no file entry — i.e. "this file is remote-absent".
+    fn dir_only_listing(remote_root: &str) -> HashMap<String, Vec<RemoteEntry>> {
+        let dir = RemoteEntry {
+            full_path: format!("{remote_root}/d"),
+            name: "d".into(),
+            is_dir: true,
+            size: 0,
+            last_modified: Utc::now(),
+        };
+        let mut m = HashMap::new();
+        m.insert(remote_root.to_string(), vec![dir]);
+        m
+    }
+
+    fn one_folder(local: &Path, remote_root: &str) -> Vec<FolderTarget> {
+        vec![FolderTarget {
+            resource_name: "res".into(),
+            local_root: local.to_string_lossy().to_string(),
+            remote_root: remote_root.to_string(),
+        }]
+    }
+
+    #[tokio::test]
+    async fn remote_deleted_with_baseline_is_to_delete() {
+        let local = unique_tmp("del");
+        std::fs::write(local.join("x.lua"), b"keep").unwrap();
+        let remote_root = "/remote/res";
+        let mock = MockSftp { listings: dir_only_listing(remote_root) };
+        let snap = snap_for_test();
+        // Baseline proves the file once existed remotely → tombstone semantics:
+        // remote-absent + baseline-present = a propagated delete, not a re-push.
+        snap.set(&format!("{remote_root}/x.lua"), 4, Utc::now(), 4, Utc::now(), None);
+
+        let scanner = DriftScanner::new(&mock, Some(&snap));
+        let result = scanner.scan(&one_folder(&local, remote_root)).await;
+
+        let _ = std::fs::remove_dir_all(&local);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].bucket, DriftBucket::ToDelete);
+    }
+
+    #[tokio::test]
+    async fn local_edited_remote_unchanged_is_to_push() {
+        let local = unique_tmp("edit");
+        let lpath = local.join("foo.lua");
+        std::fs::write(&lpath, b"edited content here").unwrap();
+        let lsize = std::fs::metadata(&lpath).unwrap().len() as i64;
+        let remote_root = "/remote/res";
+        let rmtime = Utc::now();
+        let mut listings = HashMap::new();
+        listings.insert(
+            remote_root.to_string(),
+            vec![RemoteEntry {
+                full_path: format!("{remote_root}/foo.lua"),
+                name: "foo.lua".into(),
+                is_dir: false,
+                size: 999,
+                last_modified: rmtime,
+            }],
+        );
+        let mock = MockSftp { listings };
+        let snap = snap_for_test();
+        // Baseline remote == current remote (size+mtime) → remote unchanged;
+        // baseline local size differs from disk → local changed → ToPush.
+        snap.set(&format!("{remote_root}/foo.lua"), lsize + 500, Utc::now(), 999, rmtime, None);
+
+        let scanner = DriftScanner::new(&mock, Some(&snap));
+        let result = scanner.scan(&one_folder(&local, remote_root)).await;
+
+        let _ = std::fs::remove_dir_all(&local);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].bucket, DriftBucket::ToPush);
+    }
+
+    #[tokio::test]
+    async fn both_changed_is_conflict() {
+        let local = unique_tmp("conf");
+        let lpath = local.join("foo.lua");
+        std::fs::write(&lpath, b"local side").unwrap();
+        let lsize = std::fs::metadata(&lpath).unwrap().len() as i64;
+        let remote_root = "/remote/res";
+        let mut listings = HashMap::new();
+        listings.insert(
+            remote_root.to_string(),
+            vec![RemoteEntry {
+                full_path: format!("{remote_root}/foo.lua"),
+                name: "foo.lua".into(),
+                is_dir: false,
+                size: 777, // != lsize → false-conflict collapse can't fire
+                last_modified: Utc::now(),
+            }],
+        );
+        let mock = MockSftp { listings };
+        let snap = snap_for_test();
+        // Baseline differs from BOTH sides by size → local_changed &&
+        // remote_changed; sizes differ so the same-size collapse is skipped →
+        // Conflict. (Size mismatch alone drives both flags, so the baseline
+        // mtimes are irrelevant here.)
+        snap.set(&format!("{remote_root}/foo.lua"), lsize + 500, Utc::now(), 123, Utc::now(), None);
+
+        let scanner = DriftScanner::new(&mock, Some(&snap));
+        let result = scanner.scan(&one_folder(&local, remote_root)).await;
+
+        let _ = std::fs::remove_dir_all(&local);
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(result.entries[0].bucket, DriftBucket::Conflict);
+    }
+
+    #[tokio::test]
+    async fn baseline_matches_both_is_synced_no_entry() {
+        let local = unique_tmp("sync");
+        let lpath = local.join("foo.lua");
+        std::fs::write(&lpath, b"stable").unwrap();
+        let lsize = std::fs::metadata(&lpath).unwrap().len() as i64;
+        let lmtime = file_mtime(&lpath);
+        let remote_root = "/remote/res";
+        let rmtime = Utc::now();
+        let mut listings = HashMap::new();
+        listings.insert(
+            remote_root.to_string(),
+            vec![RemoteEntry {
+                full_path: format!("{remote_root}/foo.lua"),
+                name: "foo.lua".into(),
+                is_dir: false,
+                size: 42,
+                last_modified: rmtime,
+            }],
+        );
+        let mock = MockSftp { listings };
+        let snap = snap_for_test();
+        // Baseline matches BOTH sides exactly → neither changed → entry skipped.
+        snap.set(&format!("{remote_root}/foo.lua"), lsize, lmtime, 42, rmtime, None);
+
+        let scanner = DriftScanner::new(&mock, Some(&snap));
+        let result = scanner.scan(&one_folder(&local, remote_root)).await;
+
+        let _ = std::fs::remove_dir_all(&local);
+        assert!(result.entries.is_empty(), "in-sync file should produce no drift entry");
+    }
 }
