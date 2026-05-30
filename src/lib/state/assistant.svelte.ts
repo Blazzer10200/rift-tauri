@@ -118,6 +118,7 @@ import {
   openTab as tabsOpenTab,
   closeTab as tabsCloseTab,
   newTab as tabsNewTab,
+  clearConversation as tabsClearConversation,
   reorderTabs as tabsReorder,
   cycleTab as tabsCycle,
   closeOtherTabs as tabsCloseOthers,
@@ -893,6 +894,11 @@ class TabState {
       this.currentTurnRecord.errorMsg = msg;
       this.currentTurnRecord = null;
     }
+    // Mirror onDone: a turn that ends in error (or partial-stream-then-error,
+    // which the user perceives as "completed") is still terminal — fire the
+    // completion hook so the store drains any queued message instead of
+    // leaving the chat stuck in queue mode.
+    this.onTurnComplete?.(this);
   }
 }
 
@@ -1015,7 +1021,7 @@ class AssistantStore {
    *  New pane is auto-filled with the next openTab not already in any pane,
    *  else stays empty (drop a tab in from the tabsbar). Focus moves to new
    *  pane. Persists. */
-  addPane() { tabsAddPane(this); }
+  addPane() { tabsAddPane(this); this.drainQueue(this.activeTab); }
 
   /** Close a pane (the pane container, not the tab inside it). Tabs stay in
    *  openTabs — closing a pane just unhooks it. Last pane never closes (always
@@ -1024,7 +1030,7 @@ class AssistantStore {
 
   /** Move focus to a pane. Stashes outgoing composer draft + restores incoming
    *  so each pane carries its own draft. No-op in single-pane mode. */
-  setFocusedPane(idx: number) { tabsSetFocusedPane(this, idx); }
+  setFocusedPane(idx: number) { tabsSetFocusedPane(this, idx); this.drainQueue(this.activeTab); }
 
   /** Drop a tab from the tabsbar into a specific pane. See tabs.ts for the
    *  single→split / sibling-swap / end-sentinel behavior. */
@@ -1672,7 +1678,7 @@ class AssistantStore {
    *  no send yet → no disk record) drop into a fresh in-memory state instead
    *  of disk-load. Singleton stream pipeline — mid-stream switch is handled
    *  by loadConversation() calling stop(). */
-  openTab(id: string) { return tabsOpenTab(this, id); }
+  async openTab(id: string) { await tabsOpenTab(this, id); this.drainQueue(this.activeTab); }
 
   /** Close a tab. Removes from openTabs; convo stays on disk → still in History.
    *  Active-tab close picks the right neighbor (or left if at end); last-tab
@@ -1684,9 +1690,14 @@ class AssistantStore {
    *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
   newTab() { return tabsNewTab(this); }
 
+  /** Clear the active conversation in place (Claude Code `/clear` semantics):
+   *  flush the old convo to History, re-key the same tab/pane to a fresh empty
+   *  session. Distinct from newTab() — does not append a second tab. */
+  clearConversation() { return tabsClearConversation(this); }
+
   reorderTabs(fromIdx: number, toIdx: number) { tabsReorder(this, fromIdx, toIdx); }
 
-  cycleTab(direction: 1 | -1) { return tabsCycle(this, direction); }
+  async cycleTab(direction: 1 | -1) { await tabsCycle(this, direction); this.drainQueue(this.activeTab); }
 
   closeOtherTabs(keepId: string) { return tabsCloseOthers(this, keepId); }
 
@@ -2000,21 +2011,30 @@ class AssistantStore {
    *  on close via flushNow). */
   private handleTurnComplete(tab: TabState) {
     this.scheduleSave();
-    if (tab === this.activeTab && tab.queue.length > 0 && !tab.streaming) {
-      const [next, ...rest] = tab.queue;
-      tab.queue = rest;
-      // #148: capture the active convo at queue-pop time; if the user switches
-      // tabs before the microtask fires, re-queue onto the original tab
-      // instead of dispatching against whichever tab is active now.
-      const capturedConvoId = this.currentConvoId;
-      queueMicrotask(() => {
-        if (this.currentConvoId !== capturedConvoId) {
-          tab.queue = [next, ...tab.queue];
-          return;
-        }
-        void this.send(next.text);
-      });
-    }
+    this.drainQueue(tab);
+  }
+
+  /** Fire the next queued message on `tab`, if any. Idempotent + guarded so
+   *  it's safe to call from every terminal turn path (onDone / onError /
+   *  session-lost) AND on tab activation — backgrounded completions defer the
+   *  drain (auto-sending into a tab the user isn't looking at is surprising),
+   *  so returning to the tab must re-trigger it or the queue strands forever.
+   *  Bails unless `tab` is the active tab and idle. */
+  private drainQueue(tab: TabState | null) {
+    if (!tab || tab !== this.activeTab || tab.streaming || tab.queue.length === 0) return;
+    const [next, ...rest] = tab.queue;
+    tab.queue = rest;
+    // #148: capture the active convo at pop time; if the user switches tabs OR
+    // a new turn starts before the microtask fires, re-queue the head and bail.
+    // The next completion or tab activation re-drains — never a silent strand.
+    const capturedConvoId = this.currentConvoId;
+    queueMicrotask(() => {
+      if (this.currentConvoId !== capturedConvoId || tab.streaming) {
+        tab.queue = [next, ...tab.queue];
+        return;
+      }
+      void this.send(next.text);
+    });
   }
 
   /** Stop a tab's in-flight stream. Defaults to the focused-pane tab when
@@ -2112,6 +2132,8 @@ class AssistantStore {
     const arg = rest.join(" ").trim();
     switch (cmd.toLowerCase()) {
       case "clear":
+        void this.clearConversation();
+        return true;
       case "new":
         void this.newTab();
         return true;
@@ -2224,8 +2246,8 @@ class AssistantStore {
       }
       case "help":
         this.lastNotice =
-          "Slash commands: /new · /history · /model · /retry · /copy · /stop · /tools · /cost · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
-          "Aliases: /clear → /new. /openincli copies a `claude --resume` command for the standalone CLI. " +
+          "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
+          "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
           "/compact summarizes the current session + remints the CLI session id; the next turn carries the summary forward. " +
           "/summarize dry-runs Phase-B compaction summarize (no state change). " +
           "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
