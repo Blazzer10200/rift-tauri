@@ -381,7 +381,7 @@ pub async fn scan_drift(
     if let Some(engine) = engine_match {
         let sftp = engine.sftp();
         let snap = engine.snapshot();
-        let scanner = sync::DriftScanner::new(&sftp, Some(&snap));
+        let scanner = sync::DriftScanner::new(&*sftp, Some(&snap));
         return Ok(scanner.scan(&targets).await);
     }
 

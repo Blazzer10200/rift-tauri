@@ -877,7 +877,7 @@ impl AutoSyncEngine {
                         .collect();
                     let snap = engine.snapshot();
                     let sftp = engine.sftp();
-                    let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap))
+                    let scanner = crate::sync::drift_scanner::DriftScanner::new(&*sftp, Some(&snap))
                         .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
                     let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
                     log::debug!("force_push_now: inline scan returned {} entries (cancelled={})",
@@ -1211,7 +1211,7 @@ impl AutoSyncEngine {
                 DiagLevel::Info,
                 format!("reconcile across {} folder(s)", folders.len()),
             );
-            let scanner = crate::sync::DriftScanner::new(&sftp, Some(&snapshot))
+            let scanner = crate::sync::DriftScanner::new(&*sftp, Some(&snapshot))
                 .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
             let targets: Vec<crate::sync::FolderTarget> = folders
                 .iter()
@@ -1781,7 +1781,7 @@ impl AutoSyncEngine {
                     .collect();
                 let snap = engine.snapshot();
                 let sftp = engine.sftp();
-                let scanner = crate::sync::drift_scanner::DriftScanner::new(&sftp, Some(&snap))
+                let scanner = crate::sync::drift_scanner::DriftScanner::new(&*sftp, Some(&snap))
                     .with_mirror(engine.mirror_mode.load(Ordering::Relaxed));
                 let result = scanner.scan_with_cancel(&targets, Some(&ct_for_task)).await;
                 if !result.cancelled {

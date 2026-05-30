@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio_util::sync::CancellationToken;
 
-use crate::sftp::{RemoteEntry, SftpClient};
+use crate::sftp::{RemoteEntry, SftpOps};
 use crate::state::sync_snapshot::{MTIME_TOLERANCE_SECS, SHA1_MAX_BYTES};
 use crate::state::SyncSnapshot;
 use crate::sync::ignore;
@@ -108,7 +108,7 @@ pub struct ScanResult {
 }
 
 pub struct DriftScanner<'a> {
-    sftp: &'a SftpClient,
+    sftp: &'a dyn SftpOps,
     snapshot: Option<&'a SyncSnapshot>,
     /// v0.2.53: Mirror mode toggle. When true, the `l.is_none() && r.is_some()
     /// && snap.is_some()` case buckets as `ToDeleteRemote` (propagate the
@@ -118,7 +118,7 @@ pub struct DriftScanner<'a> {
 }
 
 impl<'a> DriftScanner<'a> {
-    pub fn new(sftp: &'a SftpClient, snapshot: Option<&'a SyncSnapshot>) -> Self {
+    pub fn new(sftp: &'a dyn SftpOps, snapshot: Option<&'a SyncSnapshot>) -> Self {
         Self { sftp, snapshot, mirror: false }
     }
 
@@ -755,3 +755,144 @@ fn walk_local(root: &Path, dir: &Path, out: &mut HashMap<String, LocalStat>) {
 // (Phase 1f): local `should_ignore_basic` removed — full WPF ignore-rule parity
 // is provided by `crate::sync::ignore::should_ignore`. Tests for the rule set
 // live in `sync::ignore::tests`.
+
+#[cfg(test)]
+mod tests {
+    // #265 Wave B: first offline drift tests, enabled by the `SftpOps` trait.
+    // `MockSftp` substitutes for a live `SftpClient` so the 3-way diff runs
+    // without an SSH server. Both cases use `snapshot: None` (first-scan) so
+    // they exercise the bucket logic without seeding a baseline; baseline-aware
+    // cases come once these prove the harness.
+    use super::*;
+    use crate::sftp::{OpResult, RemoteFileInfo};
+    use async_trait::async_trait;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A canned `SftpOps` that returns a fixed `list_recursive_batch` result and
+    /// safe no-op defaults for everything else (the diff paths under test only
+    /// call `list_recursive_batch`).
+    struct MockSftp {
+        listings: HashMap<String, Vec<RemoteEntry>>,
+    }
+
+    #[async_trait]
+    impl SftpOps for MockSftp {
+        async fn remote_exists(&self, _path: &str) -> bool {
+            false
+        }
+        async fn remote_stat(&self, _path: &str) -> RemoteFileInfo {
+            RemoteFileInfo {
+                exists: false,
+                is_directory: false,
+                size: 0,
+                last_modified: Utc::now(),
+            }
+        }
+        async fn delete(&self, _path: &str) -> OpResult {
+            OpResult::ok()
+        }
+        async fn mkdir_p_strict(&self, _path: &str) -> Result<(), String> {
+            Ok(())
+        }
+        async fn get_remote_sha1(&self, _path: &str) -> Option<String> {
+            None
+        }
+        async fn upload_file_atomic(&self, _l: &Path, _r: &str) -> OpResult {
+            OpResult::ok()
+        }
+        async fn download_file_atomic(&self, _r: &str, _l: &Path) -> OpResult {
+            OpResult::ok()
+        }
+        async fn list_recursive_batch(
+            &self,
+            _roots: &[String],
+            _max_depth: usize,
+            _ext_filter: Option<&[&str]>,
+            _parallelism: usize,
+        ) -> Result<HashMap<String, Vec<RemoteEntry>>, String> {
+            Ok(self.listings.clone())
+        }
+    }
+
+    fn unique_tmp(tag: &str) -> PathBuf {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "rift-drift-{}-{}-{}",
+            tag,
+            std::process::id(),
+            n
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn remote_file(remote_root: &str, name: &str, size: u64) -> RemoteEntry {
+        RemoteEntry {
+            full_path: format!("{remote_root}/{name}"),
+            name: name.to_string(),
+            is_dir: false,
+            size,
+            last_modified: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn remote_only_no_baseline_is_to_pull() {
+        let local = unique_tmp("pull"); // empty local dir
+        let remote_root = "/remote/res";
+        let mut listings = HashMap::new();
+        listings.insert(remote_root.to_string(), vec![remote_file(remote_root, "foo.lua", 10)]);
+        let mock = MockSftp { listings };
+
+        let scanner = DriftScanner::new(&mock, None);
+        let folders = vec![FolderTarget {
+            resource_name: "res".into(),
+            local_root: local.to_string_lossy().to_string(),
+            remote_root: remote_root.to_string(),
+        }];
+        let result = scanner.scan(&folders).await;
+
+        let _ = std::fs::remove_dir_all(&local);
+        assert_eq!(result.entries.len(), 1, "exactly one drift entry expected");
+        let e = &result.entries[0];
+        assert_eq!(e.bucket, DriftBucket::ToPull);
+        assert_eq!(e.rel_path, "foo.lua");
+        assert!(!e.local_exists && e.remote_exists);
+    }
+
+    #[tokio::test]
+    async fn local_only_no_baseline_is_to_push() {
+        let local = unique_tmp("push");
+        std::fs::write(local.join("bar.lua"), b"hello world").unwrap();
+        let remote_root = "/remote/res";
+        // A bare dir entry keeps the listing non-empty (so the empty-remote
+        // data-safety guard is skipped) while contributing no file rows.
+        let dir_entry = RemoteEntry {
+            full_path: format!("{remote_root}/sub"),
+            name: "sub".into(),
+            is_dir: true,
+            size: 0,
+            last_modified: Utc::now(),
+        };
+        let mut listings = HashMap::new();
+        listings.insert(remote_root.to_string(), vec![dir_entry]);
+        let mock = MockSftp { listings };
+
+        let scanner = DriftScanner::new(&mock, None);
+        let folders = vec![FolderTarget {
+            resource_name: "res".into(),
+            local_root: local.to_string_lossy().to_string(),
+            remote_root: remote_root.to_string(),
+        }];
+        let result = scanner.scan(&folders).await;
+
+        let _ = std::fs::remove_dir_all(&local);
+        assert_eq!(result.entries.len(), 1, "exactly one drift entry expected");
+        let e = &result.entries[0];
+        assert_eq!(e.bucket, DriftBucket::ToPush);
+        assert_eq!(e.rel_path, "bar.lua");
+        assert!(e.local_exists && !e.remote_exists);
+    }
+}

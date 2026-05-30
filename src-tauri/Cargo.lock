@@ -4562,6 +4562,7 @@ dependencies = [
 name = "rift-tauri"
 version = "0.4.38"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "chrono",
  "cpal",
