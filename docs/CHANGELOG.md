@@ -2,6 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.41 — 2026-05-30 — stop silent auth failures + decode cryptic connection errors
+
+> **Why this release exists.** The collaborator-onboarding arc surfaced two dead-ends that cost hours each, both because Rift reported a *raw* failure the user couldn't act on. A stray system API key silently authenticated under a different identity than the green auth pill implied (then 401'd); and a VPN-blocked SSH connect surfaced as an opaque `WSAEACCES` errno. Both now explain themselves and point at the fix.
+
+**The silent `ANTHROPIC_API_KEY` trap.** `current_api_key()` only reads the OS keychain / config, so a stray *system* `ANTHROPIC_API_KEY` env var was invisible to the auth probe — the pill showed green "logged in" — yet the spawned `claude` child *inherited* it and authenticated under a different identity, 401-ing with no clue why. [`claude_command()`](src-tauri/src/assistant/mod.rs) now strips `ANTHROPIC_API_KEY` from **every** CLI spawn (auth probe, send, title-gen, prompt-enhancer, compaction) as the single source of truth; only the sanctioned Rift-configured key (keychain) is re-added, and only on the API-key send path. Env keys can never silently win on any call. The auth probe additionally detects the env key (`AuthStatus.envApiKeyPresent`) and warns when one is being ignored — green-but-noted if logged in, actionable red if there's no login and no Rift key.
+
+**401s are now actionable.** A rejected credential previously fell through to the bare `claude exited with 1 — API Error: 401`. The send error decoder now recognizes 401 / `authentication_error` / `Invalid authentication` and routes by active auth path: "your configured API key was rejected — clear it in Settings" (if a Rift key is set) vs "your `claude login` expired — run `claude` and sign in" (otherwise). Settings → CLI session shows a ⚠ note when a system env key is set but unconfigured in Rift.
+
+**Connection errors decode to fixes.** A failed SSH connect surfaced the raw russh/io error (`WSAEACCES`, errno) straight to the UI — the NordVPN-vs-Tailscale clash that stalled a collaborator for hours. [`decode_connect_err`](src-tauri/src/sftp/mod.rs) now maps the three common failures to hints: EACCES/10013 → "a VPN or firewall is blocking — close NordVPN or split-tunnel Tailscale + Rift"; refused/10061 → "SSH server isn't running or wrong port"; timeout/10060/unreachable → "host offline or wrong Tailscale IP — confirm the device is online in your tailnet". The raw error is appended so logs keep full detail.
+
+**Verify.** `cargo check` 0 errors / 0 warnings, `npm run check` 0 / 0 (4109 files), quick-review clean (0 critical, 0 bugs). NSIS bundle + SHA256 round-trip via `release.ps1` at ship. All changes are compile/type-verified; the auth + connection paths are not runtime-tested this session (a collaborator will validate the real 401 + VPN paths against their machine).
+
 ## v0.4.40 — 2026-05-30 — assistant no longer hangs on background processes + clear "Claude not set up" errors
 
 > **Why this release exists.** Two assistant-harness fixes. A turn that spawned a `run_in_background` child (dev server, `sleep`, localhost) hung the UI in "streaming" for minutes; and a machine without a logged-in `claude` CLI hit a dead-end "claude exited with 1 —" with no explanation. Both now behave.

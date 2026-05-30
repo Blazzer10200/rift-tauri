@@ -609,6 +609,11 @@ async function copyDiagnostic() {
             {#if asstApiKeyMsg}
               <div class="set-row set-row-note"><span class="set-note">{asstApiKeyMsg}</span></div>
             {/if}
+            {#if assistantStore.auth?.envApiKeyPresent && !assistantStore.auth?.apiKeyConfigured}
+              <div class="set-row set-row-note">
+                <span class="set-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it into the field above; otherwise remove it from your environment to avoid confusion.</span>
+              </div>
+            {/if}
           </section>
 
           <section class="set-group">

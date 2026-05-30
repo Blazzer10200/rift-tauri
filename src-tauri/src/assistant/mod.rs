@@ -231,6 +231,13 @@ pub(crate) fn claude_command() -> Option<Command> {
     // PID-tracker-based `assistant_stop` is the only kill path — which itself
     // depends on `set_session_pid` having completed.
     cmd.kill_on_drop(true);
+    // Single source of truth for auth identity: strip any inherited system
+    // `ANTHROPIC_API_KEY` from EVERY claude spawn. A stray env key would
+    // otherwise silently authenticate the CLI under a different identity than
+    // Rift's keychain/login model implies — green auth pill, then a 401 (the
+    // trap that cost a collaborator hours). The only sanctioned API-key path
+    // re-adds it explicitly on the configured-key send branch (`assistant_send`).
+    cmd.env_remove("ANTHROPIC_API_KEY");
     Some(cmd)
 }
 
@@ -265,6 +272,11 @@ pub struct AuthStatus {
     pub email: Option<String>,
     pub subscription_type: Option<String>,
     pub api_key_configured: bool,
+    /// A system `ANTHROPIC_API_KEY` env var is present in Rift's environment.
+    /// Rift deliberately ignores it (env keys are stripped from every spawn so
+    /// the keychain/login model stays authoritative) — surfaced only so the UI
+    /// can warn that an out-of-band key exists and is NOT being used.
+    pub env_api_key_present: bool,
     /// Pill color: "green" | "yellow" | "red".
     pub pill: String,
     /// One-line user-facing status.
@@ -955,6 +967,14 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     let mut out = AuthStatus::default();
     let _cfg = load_config(); // run keychain migration / surface any stale legacy field
     out.api_key_configured = current_api_key().is_some();
+    // A stray system `ANTHROPIC_API_KEY` is the classic silent-401 trap: it
+    // bypasses Rift's keychain/login model entirely and was inherited by the
+    // spawned CLI while staying invisible to the probe. `claude_command()` now
+    // strips it from every spawn (so `claude auth status` below reports the
+    // real OAuth/login state); we still detect it here purely to warn the user.
+    out.env_api_key_present = std::env::var("ANTHROPIC_API_KEY")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
 
     // #134: spawn `claude --version` and `claude auth status` in parallel
     // instead of back-to-back. The prior sequential layout opened a small
@@ -1021,6 +1041,19 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
         } else {
             format!("Using Claude Code session ({who} · {sub})")
         };
+        // Login works and is what we'll use — but flag the ignored env key so a
+        // user who *thinks* they're on a key isn't surprised by which identity
+        // (and bill) turns actually run under.
+        if out.env_api_key_present {
+            out.summary
+                .push_str(" · ignoring a system ANTHROPIC_API_KEY (Rift uses your login)");
+        }
+    } else if out.env_api_key_present {
+        // No login, no Rift key, but a system env key exists. Before the strip
+        // it silently authed the CLI; now Rift ignores it on purpose. Point the
+        // user at the supported path rather than leaving them with a bare "401".
+        out.pill = "red".into();
+        out.summary = "A system ANTHROPIC_API_KEY is set but Rift ignores env keys — paste it into the API-key field below (stored in the keychain) or run `claude login`.".into();
     } else {
         out.pill = "red".into();
         out.summary = "Claude CLI found but not logged in — run `claude login` or add an API key".into();
@@ -2541,7 +2574,10 @@ pub async fn assistant_send(
     }
 
     if use_api_key {
-        // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly.
+        // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly. The
+        // builder stripped any inherited env key; this re-adds the sanctioned
+        // Rift-configured one (the only API-key path). OAuth/login turns leave
+        // it stripped so a stray system env key can't shadow `claude login`.
         cmd.arg("--bare");
         if let Some(k) = api_key.as_deref() {
             cmd.env("ANTHROPIC_API_KEY", k);
@@ -2998,6 +3034,19 @@ pub async fn assistant_send(
                     "claude exited with {} (no error output) — run `claude` in a terminal to confirm it works, then retry.",
                     status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
                 ),
+            }
+        } else if raw.contains("401")
+            || raw.contains("authentication_error")
+            || raw.contains("Invalid authentication")
+            || raw.contains("invalid x-api-key")
+        {
+            // A rejected credential. The bare "claude exited with 1 — API Error:
+            // 401" leaves the user with nothing to do; route them to the exact
+            // field to fix based on which auth path is active.
+            if current_api_key().is_some() {
+                "Your configured API key was rejected (401). Clear it in Settings → CLI session to fall back to your `claude login`, or paste a valid key.".to_string()
+            } else {
+                "Authentication failed (401) — your `claude login` session was rejected or expired. Run `claude` in a terminal and sign in again, then retry.".to_string()
             }
         } else {
             format!(

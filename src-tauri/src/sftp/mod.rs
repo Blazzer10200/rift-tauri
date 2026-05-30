@@ -178,7 +178,7 @@ async fn open_session(
     };
     let mut handle = client::connect(config, addr.clone(), handler)
         .await
-        .map_err(|e| format!("connect {addr}: {e}"))?;
+        .map_err(|e| decode_connect_err(&addr, &e.to_string()))?;
 
     let hash = match handle.best_supported_rsa_hash().await {
         Ok(Some(Some(h))) => Some(h),
@@ -214,6 +214,48 @@ async fn open_session(
         .unwrap_or_default();
 
     Ok((handle, sftp, fingerprint))
+}
+
+/// Map a raw TCP/SSH connect failure into an actionable hint. russh::Error
+/// erases the underlying io `ErrorKind`, so we substring-match the formatted
+/// string (same approach as the `Permission denied` decode in
+/// `sftp/transfer.rs`). The raw detail is appended so logs keep full context —
+/// only the lead sentence changes from an opaque errno into a fix.
+fn decode_connect_err(addr: &str, raw: &str) -> String {
+    let low = raw.to_lowercase();
+    // WSAEACCES (Win 10013) / EACCES — a VPN or local firewall intercepting the
+    // socket before it reaches the tunnel. The NordVPN-vs-Tailscale clash that
+    // cost a collaborator hours surfaces here.
+    if low.contains("10013")
+        || low.contains("forbidden by its access permissions")
+        || low.contains("access permissions")
+        || low.contains("permission denied")
+    {
+        return format!(
+            "Can't open a socket to {addr} — a VPN or firewall is likely blocking it. \
+             If you run a full-tunnel VPN (e.g. NordVPN), close it or split-tunnel Tailscale + Rift, then retry. (raw: {raw})"
+        );
+    }
+    // Connection refused (Win 10061 / ECONNREFUSED) — reached the host, nothing
+    // listening on that port.
+    if low.contains("10061") || low.contains("refused") {
+        return format!(
+            "Connection refused by {addr} — the SSH server isn't running or the port is wrong. \
+             Confirm sshd is up and the port matches. (raw: {raw})"
+        );
+    }
+    // Timed out (Win 10060 / ETIMEDOUT) or unreachable — host not answering.
+    if low.contains("10060")
+        || low.contains("timed out")
+        || low.contains("timeout")
+        || low.contains("unreachable")
+    {
+        return format!(
+            "Timed out reaching {addr} — the host may be offline or the address wrong. \
+             If it's a Tailscale IP, confirm the device shows online in your tailnet. (raw: {raw})"
+        );
+    }
+    format!("connect {addr}: {raw}")
 }
 
 impl SftpClient {

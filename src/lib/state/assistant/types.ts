@@ -21,6 +21,9 @@ export type AuthStatus = {
   email: string | null;
   subscriptionType: string | null;
   apiKeyConfigured: boolean;
+  /** A system ANTHROPIC_API_KEY env var exists but Rift deliberately ignores
+   *  it (stripped from every CLI spawn). Surfaced so the UI can warn. */
+  envApiKeyPresent: boolean;
   pill: "green" | "yellow" | "red";
   summary: string;
 };
