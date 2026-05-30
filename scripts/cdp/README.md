@@ -28,6 +28,9 @@ bash scripts/cdp/c.sh eval "document.title"                    # arbitrary JS
 bash scripts/cdp/c.sh type ".assistant textarea" "hello" Enter # type + Enter
 bash scripts/cdp/c.sh click "button.sendbtn"                   # click
 bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
+bash scripts/cdp/c.sh console                                  # all buffered console/exception/log events
+bash scripts/cdp/c.sh console error                            # only errors
+bash scripts/cdp/c.sh console error 20 1                       # last 20 errors, then clear buffer
 bash scripts/cdp/c.sh shot                                     # jpeg q65 -> prints bare path
 bash scripts/cdp/c.sh shot png 0                               # png lossless
 bash scripts/cdp/c.sh shot jpeg 65 --json                      # {path,bytes} JSON instead of bare path
@@ -58,6 +61,18 @@ One call returns: which page is active, current model, textarea contents, bubble
 }
 ```
 
+## /console — the blind-spot closer (2026-05-30)
+
+CDP events (which carry a `method`, never an `id`) used to be dropped — only command *responses* were read. So `console.error`, uncaught exceptions, and browser-level log entries fired by the running UI were **invisible**. Now `serve.cjs` subscribes to `Runtime.enable` (console calls + `exceptionThrown`) and `Log.enable` (browser logs: failed fetches, CSP, deprecations) on every connect, funnelling events into a per-target ring buffer (200 entries, override `RIFT_CDP_LOG_KEEP`).
+
+```bash
+bash scripts/cdp/c.sh console              # peek everything
+bash scripts/cdp/c.sh console error        # filter by level (error/warning/info/log)
+bash scripts/cdp/c.sh console "" 50 1      # last 50 of any level, then clear
+```
+
+Each entry: `{ kind: console|exception|log, level, text, ts, url, line, source? }`. `console` is also a `/batch` op, so a single batched call can fire an action then read what it threw. **Workflow:** after any UI action that should mutate state but didn't, pull `console` before guessing — an async throw is the usual culprit, and it was previously unseeable.
+
 ## Cost discipline (Opus 4.7)
 
 Per-screenshot ~$0.07 + image input tokens. Image cost tripled vs Opus 4.6.
@@ -72,7 +87,8 @@ Per-screenshot ~$0.07 + image input tokens. Image cost tripled vs Opus 4.6.
 - **Auto-reconnect** — `connect()` retries the CDP `/json` lookup 3× w/ 500ms gap before throwing, so a cold Tauri boot races cleanly.
 - **In-flight cleanup** — when the WebView2 socket closes, all pending requests reject immediately w/ `ws closed before response` (no 30s timeout hangs).
 - **`/health`** — fires a real `Runtime.evaluate('1')` ping; reports `pingMs`. Half-broken socket (port open, no response) surfaces as `ok:false`.
-- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `key`, `screenshot`, `state`, `page`.
+- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `key`, `screenshot`, `state`, `page`, `console`.
+- **Screenshots** now pass `optimizeForSpeed:true` + `fromSurface:true`; clipped/selector shots add `captureBeyondViewport:true` so below-the-fold elements capture correctly.
 
 ## Limits
 

@@ -27,6 +27,7 @@
 //   POST /key      { key, modifiers? }          -> { ok, key }
 //   GET  /state                                 -> assistant-state snapshot
 //   GET  /page                                  -> generic page snapshot
+//   GET  /console  [?clear=1&level=&limit=]     -> { total, count, logs } console/exception/log ring buffer
 //   POST /batch    { ops, parallel? }           -> { results, elapsedMs }
 //   POST /shutdown                              -> { ok }
 //
@@ -42,6 +43,7 @@ const CDP_PORT = process.env.RIFT_CDP_PORT || '9222';
 const API_PORT = Number(process.env.RIFT_CDP_API_PORT || 9223);
 const TMP_DIR = path.join(__dirname, '.tmp');
 const TMP_KEEP = Number(process.env.RIFT_CDP_TMP_KEEP || 20);
+const LOG_KEEP = Number(process.env.RIFT_CDP_LOG_KEEP || 200);
 
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -104,6 +106,21 @@ async function getTarget(key = 'main') {
     throw lastErr;
 }
 
+// Flatten a CDP RemoteObject (console arg) to a readable string. Primitives use
+// .value; objects fall back to a preview ({a:1,b:2}) or .description (the class
+// name / stringified form) so a `console.log(obj)` isn't lost as "[object]".
+function fmtRemoteObject(a) {
+    if (!a || typeof a !== 'object') return String(a);
+    if ('value' in a) return typeof a.value === 'object' ? JSON.stringify(a.value) : String(a.value);
+    if (a.unserializableValue) return String(a.unserializableValue);
+    if (a.preview?.properties) {
+        // Quote string-valued props so {a:1, b:"two"} is unambiguous vs identifiers/numbers.
+        const props = a.preview.properties.map(pr => `${pr.name}:${pr.type === 'string' ? JSON.stringify(pr.value) : pr.value}`);
+        return `${a.preview.description || a.className || a.subtype || a.type}{${props.join(', ')}}`;
+    }
+    return a.description || a.className || a.subtype || a.type || '?';
+}
+
 // One ws connection per target key. Auto-heals: if the child webview navigates
 // or closes, the ws closes, _onClose nulls it, and the next command re-resolves
 // the target via getTarget() and reconnects.
@@ -115,6 +132,7 @@ class Conn {
         this.targetInfo = null;
         this.nextId = 1;
         this.pending = new Map(); // id -> { resolve, reject }
+        this.logs = [];           // ring buffer of console/exception/log events
     }
     _onMessage(ev) {
         let frame;
@@ -123,6 +141,42 @@ class Conn {
             const p = this.pending.get(frame.id);
             this.pending.delete(frame.id);
             p.resolve(frame);
+            return;
+        }
+        // Events carry a `method`, never an `id`. Previously dropped on the floor —
+        // now funnelled into the log ring buffer so Claude can read what the UI
+        // printed/threw between commands (otherwise invisible to eval/state/DOM).
+        if (frame.method) this._onEvent(frame.method, frame.params || {});
+    }
+    _pushLog(entry) {
+        this.logs.push(entry);
+        if (this.logs.length > LOG_KEEP) this.logs.splice(0, this.logs.length - LOG_KEEP);
+    }
+    _onEvent(method, p) {
+        if (method === 'Runtime.consoleAPICalled') {
+            this._pushLog({
+                kind: 'console', level: p.type || 'log',
+                text: (p.args || []).map(fmtRemoteObject).join(' '),
+                ts: p.timestamp || null,
+                url: p.stackTrace?.callFrames?.[0]?.url || null,
+                line: p.stackTrace?.callFrames?.[0]?.lineNumber ?? null,
+            });
+        } else if (method === 'Runtime.exceptionThrown') {
+            const d = p.exceptionDetails || {};
+            this._pushLog({
+                kind: 'exception', level: 'error',
+                text: d.exception?.description || d.text || 'uncaught exception',
+                ts: p.timestamp || null,
+                url: d.url || d.stackTrace?.callFrames?.[0]?.url || null,
+                line: d.lineNumber ?? d.stackTrace?.callFrames?.[0]?.lineNumber ?? null,
+            });
+        } else if (method === 'Log.entryAdded') {
+            const e = p.entry || {};
+            this._pushLog({
+                kind: 'log', level: e.level || 'info', source: e.source || null,
+                text: e.text || '', ts: e.timestamp || null,
+                url: e.url || null, line: e.lineNumber ?? null,
+            });
         }
     }
     _onClose() {
@@ -143,6 +197,13 @@ class Conn {
             sock.addEventListener('message', (e) => this._onMessage(e));
             sock.addEventListener('close', () => this._onClose());
             this.ws = sock;
+            // Subscribe to console + exception + browser-log event streams.
+            // Runtime.* catches console.* calls and uncaught JS exceptions; Log.*
+            // catches browser-level entries (failed fetches, CSP, deprecations).
+            // Fire-and-forget — responses carry ids not in `pending`, so ignored.
+            for (const m of ['Runtime.enable', 'Log.enable']) {
+                try { sock.send(JSON.stringify({ id: this.nextId++, method: m, params: {} })); } catch {}
+            }
         })();
         this.wsConnecting = attempt.finally(() => { this.wsConnecting = null; });
         return this.wsConnecting;
@@ -252,9 +313,15 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector } = {}
         if (!r.value) throw new Error(`selector not found or zero-size: ${selector}`);
         clip = r.value;
     }
-    const params = { format };
+    // optimizeForSpeed: we JPEG-downscale anyway, so faster encoding beats smaller
+    // bytes. captureBeyondViewport (with a clip) lets us shoot below-the-fold
+    // elements that getBoundingClientRect places outside the visible viewport.
+    const params = { format, optimizeForSpeed: true, fromSurface: true };
     if (format !== 'png') params.quality = quality;
-    if (clip) params.clip = { x: clip.x, y: clip.y, width: clip.width, height: clip.height, scale: clip.scale || 1 };
+    if (clip) {
+        params.clip = { x: clip.x, y: clip.y, width: clip.width, height: clip.height, scale: clip.scale || 1 };
+        params.captureBeyondViewport = true;
+    }
     const resp = await cdp('Page.captureScreenshot', params, 15000, target);
     if (!resp.result?.data) throw new Error('CDP returned no data');
     // ms precision + monotonic counter — parallel /batch screenshots must not collide.
@@ -316,6 +383,20 @@ async function pageState(target = 'main') {
     `, 30000, target);
 }
 
+// Drain/peek the per-target console ring buffer. `level` filters (error/warning/
+// info/log), `limit` caps to the newest N, `clear` empties after reading so the
+// next call only sees what fired since. This is the one thing eval/state can't
+// give — async errors that fire between commands.
+function consoleLogs({ clear, level, limit } = {}, target = 'main') {
+    const c = conn(target);
+    const total = c.logs.length;
+    let logs = level ? c.logs.filter(l => l.level === level) : c.logs.slice();
+    const n = Number(limit);
+    if (n > 0) logs = logs.slice(-n);
+    if (clear === '1' || clear === true || clear === 'true') c.logs = [];
+    return { target, total, count: logs.length, logs };
+}
+
 // Trusted key dispatch via CDP Input domain. Synthetic JS KeyboardEvent
 // fails some handlers (e.g. cmd palette Esc). Input.dispatchKeyEvent is
 // treated as a real OS key press by the webview.
@@ -370,6 +451,7 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'screenshot': return screenshot(params, t);
         case 'state': return assistantState(t);
         case 'page': return pageState(t);
+        case 'console': return consoleLogs(params, t);
         default: return { error: `unknown op: ${op}` };
     }
 }
@@ -411,6 +493,7 @@ const routes = {
     'POST /key': async (body, target) => pressKey(body, target),
     'GET /state': async (body, target) => assistantState(target),
     'GET /page': async (body, target) => pageState(target),
+    'GET /console': async (body, target, query) => consoleLogs(query, target),
     'POST /batch': async ({ ops = [], parallel = false }, target) => {
         const t0 = Date.now();
         let results;
@@ -440,7 +523,8 @@ const server = http.createServer(async (req, res) => {
         const body = req.method === 'POST' ? await readJson(req) : {};
         // target precedence: query string > body > 'main'.
         const target = urlObj.searchParams.get('target') || body.target || 'main';
-        const result = await handler(body, target);
+        const query = Object.fromEntries(urlObj.searchParams);
+        const result = await handler(body, target, query);
         res.statusCode = result?.error ? 500 : 200;
         res.end(JSON.stringify(result));
     } catch (e) {
