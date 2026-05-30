@@ -2,29 +2,28 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-29 (e) — SftpOps trait + DriftScanner offline tests (#265 Wave B Phase 1)
+
+**Done + verified (full `cargo test` 115 pass / 0 fail / 2 ignored; 0 rustc + 0 clippy warnings in touched files):**
+- `64b79ef` — new `SftpOps` trait (`src-tauri/src/sftp/sftp_ops.rs`): 8 sync-facing `SftpClient` methods, object-safe via `#[async_trait]` (now a direct dep). `impl SftpOps for SftpClient` delegates via inherent-method precedence (`self.method()` → inherent, no recursion). `DriftScanner` field + `new()` → `&dyn SftpOps`; 4 Arc call sites `&sftp`→`&*sftp` (`commands/sync.rs:384`, `auto_sync.rs:880/1214/1784`). Engine field stays `Arc<SftpClient>` (Phase 2). `MockSftp` + 2 first-scan tests.
+- `c6bf279` — 4 baseline-seeded tests (`SyncSnapshot::for_path`, all `sha1:None` → pure stat path): ToDelete / ToPush-edited / Conflict / Synced. **6 drift tests total, fully offline.**
+- `SyncSnapshot::for_path` already existed (Wave A) — free.
+
+**⚠️ Untested-but-language-guaranteed:** `impl SftpOps for SftpClient` delegation never runs at runtime (SftpClient needs live SSH); correctness rests on Rust inherent-precedence (solid). Real drift via prod DOES route SftpClient through `&dyn SftpOps` now.
+
+**RESUME HERE (next, cheap → fill against same `MockSftp`):**
+1. Easy adds: `ToDeleteRemote` (`.with_mirror(true)` + baseline); guard paths `RemoteMissing` (empty remote + `remote_exists`→false) + `SuspiciousEmptyAborted` (≥10 baseline, listing <half) — make `MockSftp.remote_exists` configurable.
+2. Fiddly: hash-path trio (false-conflict collapse, first-scan equality, remote-jitter) — need `MockSftp.get_remote_sha1` returning a digest matching `compute_sha1` of real local bytes.
+3. **Phase 2** (bigger, gated on `AppHandle` engine work): extend/split `SftpOps`+`SftpExec` so `remote_bridge` keeps non-trait methods, flip engine `sftp` field + `.sftp()` getter (7 consumers) to `dyn` → unblocks `flush_batch` tests (#21.1).
+
+**Gotcha:** no live `tauri dev` this session (the 2 running `rift-tauri.exe` are the INSTALLED app at `AppData\Local\Rift`, not `target/`) — so manual `cargo test` was safe. Build target = `C:\cargo-targets` (global env).
+
+---
+
 ## Session 2026-05-29 (d) — v0.4.38 SHIPPED (updater fix released)
+Bump `f71a3bb` → `release.ps1` (via **powershell.exe** — pwsh 7 not on PATH; script is ASCII-safe for 5.1) → NSIS + `gh release create` + SHA256 MATCH. Live: rift-releases tag v0.4.38, `latest` API serves it. Ships `5a3618c` (`mailto:**`→`mailto:*` openUrl-poison fix) + `5a013dc` (in-app `download_update` + browser fallback).
 
-**Released + verified (objective):**
-- Bump committed `f71a3bb` (3 lockstep files + `Cargo.lock` + CHANGELOG v0.4.38). HANDOFF doc `b738be5`.
-- `release.ps1` via **powershell.exe (PS5.1 — pwsh 7 not installed; script is ASCII-safe for 5.1 by design)** → NSIS bundle + `gh release create` + SHA256 round-trip MATCH. Live: https://github.com/Blazzer10200/rift-releases/releases/tag/v0.4.38. `latest` API returns v0.4.38 (`prerelease:false`, asset `Rift_0.4.38_x64-setup.exe` 7.14 MB).
-- Ships last session's two fixes: `5a3618c` `mailto:**`→`mailto:*` (THE openUrl-poison bug) + `5a013dc` in-app `download_update` w/ progress + browser fallback.
-
-**⚠️ Download path STILL runtime-untested — and can't be from THIS release (chicken-and-egg):**
-- 0.4.38 is newest → a fixed (0.4.38) client sees itself as latest → no Download button, nothing to fetch.
-- Only ≤0.4.37 clients see 0.4.38 as an update, and they have the bug baked in → Download fails (the known caveat, NOT a test).
-- **The in-app Download→progress→NSIS→relaunch flow first becomes testable on 0.4.38→0.4.39.** Verify it THEN.
-- No installed prod `Rift.exe` on this machine (only dev `rift-tauri.exe` runs). setup.exe at `C:\cargo-targets\release\bundle\nsis\Rift_0.4.38_x64-setup.exe`.
-
-**RESUME HERE:**
-1. (optional now) Install `Rift_0.4.38_x64-setup.exe` → confirm NSIS + relaunch; in 0.4.38, Check-for-updates should say up-to-date with NO "error deserializing scope" crash (confirms scope fix unpoisoned openUrl).
-2. On the NEXT release (0.4.39): a 0.4.38 client finally exercises the in-app Download flow end-to-end — verify progress bar + NSIS + relaunch there.
-3. ⚠️ Existing clients ≤0.4.37 need ONE manual install of 0.4.38; after that in-app updates work.
-4. Source repo NOT pushed (5 commits ahead of origin/main) — release.ps1 only publishes to the separate `rift-releases` repo. Push source when ready.
-
-**Gotchas:**
-- `pwsh` (PS7) NOT on PATH — use `powershell.exe` (5.1) for `release.ps1`; it's written ASCII-safe for exactly this.
-- Release build used `C:\cargo-targets` (separate from dev target) so it didn't collide with the running dev binary.
-- `guard-wrong-tool-bash.sh` BLOCKS compound bash w/ `grep`/`cat`/`sed` + foreground `tauri build`. Use Read/Grep; builds via `run_in_background` or release.ps1.
+**⚠️ Download path STILL runtime-untested — un-testable from THIS release (chicken-and-egg):** 0.4.38 is newest → a 0.4.38 client sees no update; only ≤0.4.37 clients see it but have the bug baked in → Download fails (known caveat, not a test). **First testable on 0.4.38→0.4.39 — verify progress→NSIS→relaunch THEN.** setup.exe: `C:\cargo-targets\release\bundle\nsis\Rift_0.4.38_x64-setup.exe`. ⚠️ ≤0.4.37 clients need ONE manual install of 0.4.38 first.
 
 ---
 
@@ -35,13 +34,11 @@ Assistant UX polish, all frontend, user-driven (check 0/0/0):
 - Activity pills toggle: `openActivity()` closes dock on 2nd click when already on Activity tab.
 - ActivityPanel: running rows + slowest-tool = buttons → `jumpTo()` scrolls transcript to the call + flashes it via new `actnode-<id>` anchor on `.tl-node` (MessageBubble:525). Shells AND agents resolve (`agentSpawns` id == Task tool-block id). Cancelled parallel calls split out of failed count. Tool-mix: full-name tooltip + widened label + **expandable "+N more"** (`toolsExpanded`).
 
-⚠️ **Uncommitted, NOT mine** — `commands/update.rs` (check_for_updates → `Err` on real failures, was silent `Ok(None)`) + `capabilities/default.json` (`mailto:**`→`mailto:*`) already dirty this session; left untouched. Review before next push.
-
 ## Session 2026-05-29 (b) — 07710e3 (pushed)
-CR1–CR5 from v0.4.37 review landed (check 0/0/0). CR1: dock animates `.dock-wrap` reactive width → native syncBounds fires. CR4: ActivityPanel constant `mountTs` for `liveActivity` fallback. ISSUES **#14/#15 CLOSED** (code-signing declined). Full detail: `git log 07710e3`.
+CR1–CR5 from v0.4.37 review landed (check 0/0/0). ISSUES **#14/#15 CLOSED** (code-signing declined). Full detail: `git log 07710e3`.
 
-## RESUME HERE
-main @ 3487dcb (2 commits ahead of origin, NOT pushed) + uncommitted backend (update.rs + default.json, not from this session — decide first). Still v0.4.37 ×3 — NOT released. **Next session = #20 hot-file splits** (user's chosen start). Order: `assistant.svelte.ts` 2314L — M8 (streaming pump) + M9 (send) open, brief `docs/design/assistant-svelte-split.md`; then `assistant/mod.rs` 2795L (worst backend); then `auto_sync.rs` 2232L. M8/M9 highest blast-radius — want a conversation-playback test harness first. Open decisions: **CR-UX** trust enum (rec: collapse to 2-level, drop dead `full` — nothing gates `trust_at_least("full")`); **#17** two-repo (only if going public). Also on board: #265 test `SftpOps`-trait unblock, code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep.
+## Open work (not started)
+**#20 hot-file splits** — `assistant.svelte.ts` 2314L (M8 streaming + M9 send open, brief `docs/design/assistant-svelte-split.md`); `assistant/mod.rs` 2795L (worst backend); `auto_sync.rs` 2232L. M8/M9 want a conversation-playback test harness first. Decisions: **CR-UX** trust enum (collapse to 2-level, drop dead `full`); **#17** two-repo (if going public). Also: code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep. Full live queue: `docs/ISSUES.md`.
 
 ## CRITICAL DON'T-TOUCH
 
