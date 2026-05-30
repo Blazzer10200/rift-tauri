@@ -1774,6 +1774,17 @@ class AssistantStore {
     if (!trimmed && this.composerAttachments.length === 0) return;
     // Try-handle as a slash command first; if it matched, we're done.
     if (trimmed.startsWith("/") && this.runSlash(trimmed)) return;
+    // Auth chokepoint — every send path funnels here (composer Enter/button,
+    // queue drains, programmatic retries). A turn with no usable Claude session
+    // dies as "claude exited with 1"; block it, re-probe (state may be stale),
+    // and surface the reason. Slash commands above are local, so they still run.
+    if (!(this.auth?.pill === "green" || this.auth?.pill === "yellow")) {
+      this.lastNotice =
+        this.auth?.summary ??
+        "Claude isn't set up on this machine — open Settings to sign in or add an API key.";
+      void this.refreshAuth();
+      return;
+    }
     // Already streaming on this tab → queue instead of dropping.
     if (this.streaming) {
       this.queue = [...this.queue, { id: crypto.randomUUID(), text: trimmed }];

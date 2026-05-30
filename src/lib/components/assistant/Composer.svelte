@@ -393,6 +393,18 @@
     const text = draft.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
     if (!text && attachments.length === 0) return;
+    // Auth gate — the button's `disabled={!canFire}` covers clicks, but Enter
+    // routes straight here, so without this a fresh/logged-out user can fire a
+    // turn that's doomed to "claude exited with 1". Guard BEFORE clearing the
+    // draft so their text survives; re-probe (state may be stale) and surface
+    // the actionable reason via the notice banner.
+    if (!(assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")) {
+      assistant.lastNotice =
+        assistant.auth?.summary ??
+        "Claude isn't set up on this machine — open Settings to sign in or add an API key.";
+      void assistant.refreshAuth();
+      return;
+    }
     setDraft("");
     stt.consume();
     fireKey++;

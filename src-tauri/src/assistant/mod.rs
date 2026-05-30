@@ -2633,6 +2633,13 @@ pub async fn assistant_send(
     // Clear any stale stop marker for this session (e.g. retry after a
     // previous stop) before we spawn.
     take_session_stopped(&session_id);
+    // #241: coarse turn-latency profile. spawn → first-stream-line (TTFT proxy:
+    // process spawn + handshake + SessionStart hooks + model prefill) and
+    // spawn → result are the two numbers that reveal whether per-turn cost is
+    // harness overhead vs model time. Logged at INFO so a dev session surfaces
+    // the breakdown without a debugger. `Instant` is Copy → safe to read in the
+    // stdout task and again after child.wait().
+    let turn_start = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     if let Some(pid) = child.id() {
         set_session_pid(&session_id, pid);
@@ -2702,8 +2709,19 @@ pub async fn assistant_send(
 
     let app_out = app.clone();
     let stream_sid = session_id.clone();
-    let stdout_task = tokio::spawn(async move {
+    // #242: turn-completion is signaled by the `result` frame, NOT process exit.
+    // A `run_in_background` child (e.g. a dev server / localhost) keeps `claude`
+    // alive for as long as it runs, so `child.wait()` below would block for
+    // minutes and the UI's DONE_EVENT (which drains the queue) would never fire.
+    // The reader sets this the instant `result` lands and emits DONE itself; the
+    // main task then reaps a lingering claude instead of waiting it out.
+    let result_seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let result_seen_task = result_seen.clone();
+    let done_sid = session_id.clone();
+    let done_app = app.clone();
+    let mut stdout_task = tokio::spawn(async move {
         use tokio::io::AsyncWriteExt;
+        use std::sync::atomic::Ordering;
         let mut stdin = stdin; // owned by the task; dropped → EOF on turn end
         let mut lines = BufReader::new(stdout).lines();
 
@@ -2720,6 +2738,7 @@ pub async fn assistant_send(
         let _ = stdin.flush().await;
 
         let mut user_sent = false;
+        let mut first_line_logged = false;
         loop {
             match lines.next_line().await {
                 Ok(Some(line)) => {
@@ -2754,15 +2773,30 @@ pub async fn assistant_send(
                             handle_permission_request(&app_out, &stream_sid, &mut stdin, &v).await;
                             continue;
                         }
-                        // `result` is the last frame — forward it, then break so
-                        // stdin drops (EOF) and the CLI exits even if it would
-                        // otherwise wait for more stream-json input.
+                        // `result` is the last frame — forward it, signal DONE
+                        // immediately (the turn is semantically over; don't wait
+                        // for process exit, which a background child can defer for
+                        // minutes), then break so stdin drops (EOF).
                         if ty == Some("result") {
                             let _ = app_out.emit(STREAM_EVENT, serde_json::json!({
                                 "session_id": stream_sid, "line": trimmed,
                             }));
+                            result_seen_task.store(true, Ordering::SeqCst);
+                            let _ = done_app.emit(DONE_EVENT, serde_json::json!({
+                                "session_id": done_sid, "exit_code": 0,
+                            }));
                             break;
                         }
+                    }
+                    // #241: first forwarded content line ≈ TTFT. Everything
+                    // before it (spawn, init handshake, SessionStart hooks,
+                    // model prefill) is fixed per-turn overhead.
+                    if !first_line_logged {
+                        first_line_logged = true;
+                        log::info!(
+                            "assistant_send: TTFT {} ms (spawn→first-stream-line) session={}",
+                            turn_start.elapsed().as_millis(), stream_sid
+                        );
                     }
                     // Forward raw NDJSON line, tagged with the CLI session_id
                     // so multi-tab UIs route the event to the right bubble.
@@ -2794,7 +2828,7 @@ pub async fn assistant_send(
     // stream (the panic / fatal-error line), not at the start.
     const STDERR_CAP: usize = 64 * 1024;
     const STDERR_TRIM: usize = 32 * 1024;
-    let stderr_task = tokio::spawn(async move {
+    let mut stderr_task = tokio::spawn(async move {
         let mut buf = String::new();
         let mut truncated = false;
         let mut lines = BufReader::new(stderr).lines();
@@ -2819,16 +2853,93 @@ pub async fn assistant_send(
         buf
     });
 
-    let status = child.wait().await.map_err(|e| format!("await claude: {e}"))?;
+    // #242: wait for claude to exit — but the `result` frame already ended the
+    // turn for the UI (the reader emitted DONE). If claude lingers past a short
+    // grace AFTER result (a run_in_background child is pinning it alive), kill
+    // its PID — NOT the tree, so the detached background process survives — and
+    // stop waiting. Without `result` we keep waiting: claude may legitimately be
+    // mid-turn on a long task and must not be killed out from under itself.
+    const REAP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
+    let mut reap_deadline: Option<std::time::Instant> = None;
+    let status: Option<std::process::ExitStatus> = loop {
+        match tokio::time::timeout(std::time::Duration::from_millis(150), child.wait()).await {
+            Ok(Ok(s)) => break Some(s),
+            Ok(Err(e)) => return Err(format!("await claude: {e}")),
+            Err(_) => {
+                if result_seen.load(std::sync::atomic::Ordering::SeqCst) {
+                    let dl = *reap_deadline
+                        .get_or_insert_with(|| std::time::Instant::now() + REAP_GRACE);
+                    if std::time::Instant::now() >= dl {
+                        log::info!(
+                            "assistant_send: claude lingering {} ms past result (background child pinning it) — killing PID, session={}",
+                            turn_start.elapsed().as_millis(), session_id
+                        );
+                        let _ = child.start_kill();
+                        let _ = child.wait().await;
+                        break None;
+                    }
+                }
+            }
+        }
+    };
     clear_session_pid(&session_id);
-    let _ = stdout_task.await;
+    // #241: total turn wall-clock (spawn → claude exit). Compare against the
+    // TTFT line above: large TTFT w/ small (total−TTFT) = harness/prefill bound;
+    // small TTFT w/ large remainder = model generation bound.
+    log::info!(
+        "assistant_send: turn total {} ms (spawn→exit) first_turn={} model={} session={}",
+        turn_start.elapsed().as_millis(), is_first_turn, model, session_id
+    );
+
+    // #240: both drain tasks read the child's piped stdout/stderr. A background
+    // process the turn spawned (e.g. a dev server / localhost) inherits those
+    // pipe write-ends on Windows, so the reader never sees EOF and a bare
+    // `.await` here blocks FOREVER — stranding the DONE_EVENT below and hanging
+    // the frontend queue in "Queued". claude itself has already exited (wait()
+    // returned above), so anything still pending is a leaked fd with nothing
+    // left to deliver: bound each await and abort the task on elapse. stdout has
+    // the `result`-frame break so it usually finishes instantly; stderr drains
+    // to EOF with no escape hatch, so it's the one that actually wedges.
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+    if tokio::time::timeout(DRAIN_TIMEOUT, &mut stdout_task).await.is_err() {
+        log::warn!("assistant_send: stdout drain timed out (inherited pipe held by a background process?) for {session_id}");
+        stdout_task.abort();
+    }
     // #222: surface stderr-drain JoinError so a panicked drain task doesn't
     // turn into a blank stderr at the call site (which then shows up as
     // "claude exited with 1 — " with no diagnosis).
-    let stderr_buf = stderr_task.await.unwrap_or_else(|e| {
-        log::error!("stderr drain task panicked: {e}");
-        format!("(stderr drain task panicked: {e})")
-    });
+    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
+        Ok(Ok(buf)) => buf,
+        Ok(Err(e)) => {
+            log::error!("stderr drain task panicked: {e}");
+            format!("(stderr drain task panicked: {e})")
+        }
+        Err(_) => {
+            log::warn!("assistant_send: stderr drain timed out (inherited pipe held by a background process?) for {session_id}");
+            stderr_task.abort();
+            String::new()
+        }
+    };
+
+    // #242: a `result` frame means the turn succeeded and the reader already
+    // emitted DONE — whether claude then exited cleanly or we killed a pinned
+    // process, there is nothing more to signal.
+    if result_seen.load(std::sync::atomic::Ordering::SeqCst) {
+        return Ok(());
+    }
+    // No `result` → claude ended without finishing the turn (crash, bad args,
+    // user Stop, or a lost --resume). `status` is always Some on this path: we
+    // only break the wait loop with None after observing result_seen above.
+    let status = match status {
+        Some(s) => s,
+        None => {
+            let _ = app.emit(ERROR_EVENT, serde_json::json!({
+                "session_id": session_id,
+                "message": "claude was killed before producing a result",
+            }));
+            return Err("claude killed before result".into());
+        }
+    };
 
     if status.success() {
         let _ = app.emit(
@@ -2872,11 +2983,29 @@ pub async fn assistant_send(
             );
             return Ok(());
         }
-        let msg = format!(
-            "claude exited with {} — {}",
-            status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
-            stderr_buf.trim()
-        );
+        // A non-zero exit with EMPTY stderr is almost always a startup failure —
+        // a missing CLI or an unauthenticated session — both of which claude
+        // reports on stdout/JSON, leaving the bare "claude exited with 1 — " with
+        // no diagnosis (the exact dead-end a fresh collaborator hits). Reuse the
+        // auth probe (already distinguishes not-installed vs not-logged-in) to
+        // turn it into something the user can act on.
+        let raw = stderr_buf.trim();
+        let msg = if raw.is_empty() {
+            match assistant_auth_probe().await {
+                Ok(s) if !s.cli_present => "Claude Code CLI not found on this machine — install it from claude.com/code (or add an API key in Settings), then try again.".to_string(),
+                Ok(s) if !s.logged_in && !s.api_key_configured => "Claude CLI is installed but not logged in on this machine — open a terminal, run `claude`, and sign in (or add an API key in Settings), then try again.".to_string(),
+                _ => format!(
+                    "claude exited with {} (no error output) — run `claude` in a terminal to confirm it works, then retry.",
+                    status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
+                ),
+            }
+        } else {
+            format!(
+                "claude exited with {} — {}",
+                status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
+                raw
+            )
+        };
         let _ = app.emit(
             ERROR_EVENT,
             serde_json::json!({ "session_id": session_id, "message": msg.clone() }),
