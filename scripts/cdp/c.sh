@@ -35,6 +35,18 @@ case "$cmd" in
   health|state|page|targets)
     curl -fsS "$API/$cmd$qs"
     ;;
+  console)
+    # console [level] [limit] [clear]  — drains nothing unless clear=1 given.
+    #   c.sh console               -> all buffered console/exception/log events
+    #   c.sh console error         -> only errors
+    #   c.sh console error 20 1    -> last 20 errors, then clear the buffer
+    lvl="${1:-}"; lim="${2:-}"; clr="${3:-}"
+    cq="$qs"; sep="?"; [ -n "$qs" ] && sep="&"
+    [ -n "$lvl" ] && { cq="$cq${sep}level=$lvl"; sep="&"; }
+    [ -n "$lim" ] && { cq="$cq${sep}limit=$lim"; sep="&"; }
+    [ -n "$clr" ] && { cq="$cq${sep}clear=$clr"; sep="&"; }
+    curl -fsS "$API/console$cq"
+    ;;
   eval)
     js="$1"
     curl -fsS -X POST "$API/eval$qs" -H 'Content-Type: application/json' \
@@ -89,7 +101,7 @@ case "$cmd" in
     curl -fsS -X POST "$API/shutdown"
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|state|page|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
     exit 2
     ;;
 esac
