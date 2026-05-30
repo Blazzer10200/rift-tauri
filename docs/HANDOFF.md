@@ -2,6 +2,14 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-30 (a) — assistant harness: background-process queue hang (#242) + latency profile
+**UNCOMMITTED in `src-tauri/src/assistant/mod.rs` — NOT compile-verified (dev was running, couldn't `cargo check`). Next session: quit dev → `cargo check --manifest-path src-tauri/Cargo.toml` → review `git diff` → test → ship.**
+- **#242 (the real fix):** turn-end was gated on `claude` process **exit** (`child.wait()`), but a `run_in_background` child (dev server / localhost / `sleep`) keeps claude alive for its whole lifetime → `child.wait()` blocks for minutes → DONE_EVENT never fires → UI stuck "streaming"/queue stranded. **Reproduced live** (UI hung 1m43s on a bg `sleep 300`, claude.exe still alive). Fix: the stdout reader sets an `Arc<AtomicBool> result_seen` + emits DONE the instant the `result` frame lands (turn is semantically over). Main loop then waits with a 5s grace; if claude lingers past it (bg child pinning), `start_kill()`s **claude's PID only (NOT taskkill /T)** so the detached bg process survives. Terminal-event block now early-returns when `result_seen`; `status` became `Option<ExitStatus>` (None = killed-before-result → ERROR).
+- **#240 (complementary):** bounded both `stdout_task.await`/`stderr_task.await` with 500ms `timeout`+`abort` — a surviving bg child holds the inherited stdout/stderr pipe write-ends so the drains never hit EOF. Kept; #242 is the primary.
+- **#241 (instrumentation, keep):** `log::info!` TTFT (spawn→first-stream-line) + turn total (spawn→exit) in `assistant_send`. **Measured:** fresh first-turn TTFT ~1.1s (fixed floor = spawn + MCP-child spawn + init handshake + hooks + prefill); resume +0.5–0.7s scaling w/ convo length. Floor is the harness, delta is context-prefill.
+- **Open (not done):** orphan-reaping — bg children survive app-exit (only `assistant_stop` does taskkill /T). Proper fix = Windows Job Object w/ KILL_ON_JOB_CLOSE. Separate change. Also: SessionStart-on-resume re-fire still unconfirmed (the ~1.1s floor didn't show an obvious 46K-token hook tax, but not isolated).
+- **Note:** repeated session crashes this session (context bloat from large dev-log reads + CDP). Left wedged `claude.exe`/`sleep.exe` from testing may need a kill; dev server may still be running.
+
 ## Session 2026-05-29 (f) — v0.4.39 SHIPPED (assistant /clear + queue fix)
 Two frontend-only assistant fixes, committed `95ab30c` + bump `b135262`, pushed (also flushed the 12 previously-unpushed commits incl. the v0.4.38 ship). `release.ps1` via **powershell.exe** → NSIS `Rift_0.4.39_x64-setup.exe` + `gh release create` + SHA256 MATCH. Live: rift-releases tag v0.4.39, non-prerelease (latest API serves it).
 - **Queue hang fixed:** `onDone` drained the outbound queue but `onError` didn't → partial-stream-then-error (looks "completed") stranded the queued msg in "Queued (N)" forever. `TabState.onError` now fires `onTurnComplete`; drain centralized into idempotent `drainQueue(tab)`; microtask re-checks `streaming` + re-queues vs strands; tab activation (`openTab`/`cycleTab`/`setFocusedPane`/`addPane`) re-drains backgrounded queues.
@@ -9,20 +17,7 @@ Two frontend-only assistant fixes, committed `95ab30c` + bump `b135262`, pushed 
 - **⚠️ First live updater test available NOW:** a ≤0.4.38 client → 0.4.39 is the first time the in-app Download→NSIS→relaunch path is end-to-end testable (v0.4.38 was un-testable, chicken-and-egg). Verify it.
 
 ## Session 2026-05-29 (e) — SftpOps trait + DriftScanner offline tests (#265 Wave B Phase 1)
-
-**Done + verified (full `cargo test` 115 pass / 0 fail / 2 ignored; 0 rustc + 0 clippy warnings in touched files):**
-- `64b79ef` — new `SftpOps` trait (`src-tauri/src/sftp/sftp_ops.rs`): 8 sync-facing `SftpClient` methods, object-safe via `#[async_trait]` (now a direct dep). `impl SftpOps for SftpClient` delegates via inherent-method precedence (`self.method()` → inherent, no recursion). `DriftScanner` field + `new()` → `&dyn SftpOps`; 4 Arc call sites `&sftp`→`&*sftp` (`commands/sync.rs:384`, `auto_sync.rs:880/1214/1784`). Engine field stays `Arc<SftpClient>` (Phase 2). `MockSftp` + 2 first-scan tests.
-- `c6bf279` — 4 baseline-seeded tests (`SyncSnapshot::for_path`, all `sha1:None` → pure stat path): ToDelete / ToPush-edited / Conflict / Synced. **6 drift tests total, fully offline.**
-- `SyncSnapshot::for_path` already existed (Wave A) — free.
-
-**⚠️ Untested-but-language-guaranteed:** `impl SftpOps for SftpClient` delegation never runs at runtime (SftpClient needs live SSH); correctness rests on Rust inherent-precedence (solid). Real drift via prod DOES route SftpClient through `&dyn SftpOps` now.
-
-**RESUME HERE (next, cheap → fill against same `MockSftp`):**
-1. Easy adds: `ToDeleteRemote` (`.with_mirror(true)` + baseline); guard paths `RemoteMissing` (empty remote + `remote_exists`→false) + `SuspiciousEmptyAborted` (≥10 baseline, listing <half) — make `MockSftp.remote_exists` configurable.
-2. Fiddly: hash-path trio (false-conflict collapse, first-scan equality, remote-jitter) — need `MockSftp.get_remote_sha1` returning a digest matching `compute_sha1` of real local bytes.
-3. **Phase 2** (bigger, gated on `AppHandle` engine work): extend/split `SftpOps`+`SftpExec` so `remote_bridge` keeps non-trait methods, flip engine `sftp` field + `.sftp()` getter (7 consumers) to `dyn` → unblocks `flush_batch` tests (#21.1).
-
-**Gotcha:** no live `tauri dev` this session (the 2 running `rift-tauri.exe` are the INSTALLED app at `AppData\Local\Rift`, not `target/`) — so manual `cargo test` was safe. Build target = `C:\cargo-targets` (global env).
+`64b79ef`+`c6bf279` — new `SftpOps` trait (`sftp/sftp_ops.rs`, object-safe `#[async_trait]`), `DriftScanner` now takes `&dyn SftpOps`; 6 fully-offline drift tests vs `MockSftp` (115 pass/0 fail). RESUME (cheap): add `ToDeleteRemote`/`RemoteMissing`/`SuspiciousEmptyAborted` (configurable `MockSftp.remote_exists`); hash-path trio (`MockSftp.get_remote_sha1` matching `compute_sha1`); **Phase 2** flip engine `sftp` field → `dyn` (7 consumers) → unblocks `flush_batch` tests (#21.1). Detail in git log.
 
 ---
 

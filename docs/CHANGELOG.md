@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.40 — 2026-05-30 — assistant no longer hangs on background processes + clear "Claude not set up" errors
+
+> **Why this release exists.** Two assistant-harness fixes. A turn that spawned a `run_in_background` child (dev server, `sleep`, localhost) hung the UI in "streaming" for minutes; and a machine without a logged-in `claude` CLI hit a dead-end "claude exited with 1 —" with no explanation. Both now behave.
+
+**Background-process turn-end (#242).** Turn completion was gated on the `claude` process *exiting* (`child.wait()`), but a backgrounded child keeps `claude` alive for its whole lifetime — so `child.wait()` blocked for minutes, the DONE event never fired, and the UI stuck in "streaming" with the queue stranded (reproduced: 1m43s hang on a bg `sleep 300`). The stdout reader now emits DONE the instant the `result` frame lands via an `Arc<AtomicBool> result_seen`; the main loop waits a 5s grace, then `start_kill()`s **only claude's PID** (not `taskkill /T`) so the detached bg process survives. Stdout/stderr drains are bounded with a 500ms timeout+abort (#240 — a surviving child holds the inherited pipe write-ends, so they never hit EOF). Plus TTFT/turn-total instrumentation (#241). [mod.rs](src-tauri/src/assistant/mod.rs)
+
+**"Claude not set up" is now self-explanatory.** A fresh/logged-out machine could fire a doomed turn — the action button was auth-gated but **Enter bypassed it**, producing a bare "claude exited with 1 —". `fire()` ([Composer.svelte](src/lib/components/assistant/Composer.svelte)) now checks auth before clearing the draft (text preserved); `send()` ([assistant.svelte.ts](src/lib/state/assistant.svelte.ts)) gates every send path at the chokepoint, surfacing the actionable reason ("not logged in — run `claude`"). And if a turn fails with empty stderr, the backend runs the auth probe and reports *not-installed* vs *not-logged-in* instead of the dead-end code.
+
+**Verify.** `cargo check` clean, `npm run check` 0 / 0 (4109 files). NSIS bundle + SHA256 round-trip via `release.ps1` at ship. ⚠️ #242 was reproduced+fixed live last session; the bundled diff is compile-verified this session. The auth guards are compile/type-verified, not runtime-tested.
+
 ## v0.4.39 — 2026-05-29 — assistant queue no longer hangs after a turn + real in-place `/clear`
 
 > **Why this release exists.** Two assistant-chat fixes. A queued message could hang in "Queued" mode forever after a turn finished; `/clear` was a hidden alias of `/new` instead of a real clear-in-place. Both are frontend-only.

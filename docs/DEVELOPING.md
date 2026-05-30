@@ -191,6 +191,25 @@ Pubkey ledger for the shared `blazzer` Linux user on the FXServer (CT 120, `192.
 | Blazzer | `blazzer@DESKTOP-GIT053H -> homelab` | 2026-04 (initial) | `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAFahpilpOZr0krma/ag1MQJaEccbmfLyzX1CWJQyoeW` |
 | Trey | `rift-TREYDAY@DESKTOP-N2AMAU5` | 2026-05-09 | `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKHaeCZR4xwBbLULdihAdkh5HrlYU89uoD2CMuZAm/Oc` |
 
+### Remote connection (Tailscale) — what collaborators point Rift at
+
+The FXServer is **LAN-only at `192.168.1.170`** (txAdmin + game). Remote collaborators do **NOT** use that IP. CT 120 runs its own `tailscaled`, so remote devs SSH straight to its tailnet address:
+
+| Field | Value |
+|---|---|
+| Host | `100.122.178.19` (or MagicDNS `fxserver.tail7ef60c.ts.net`) |
+| Port | `22` |
+| User | `blazzer` |
+| Auth | the dev's own ed25519 key (from the ledger above) |
+
+Prereq: the collaborator uses **their own** Tailscale account, and the owner **shares the `fxserver` node** to them (Tailscale node-sharing). Tailnet lock is OFF, so a reinstalled device needs no node-signing.
+
+**Reconnect runbook (collaborator lost Tailscale / reinstalled):**
+1. Dev reinstalls Tailscale, `tailscale up`, logs into **their own** account.
+2. Owner re-shares the `fxserver` node to that dev (admin console → fxserver → Share) if the share lapsed; dev accepts the share link.
+3. Verify from the dev box: `tailscale ping fxserver` then `ssh blazzer@100.122.178.19`. Key already in the ledger → no server-side change needed.
+4. In Rift: server profile Host = `100.122.178.19`, User = `blazzer`, same key. RCON env var still exported in the launching shell (see §8 parity checklist).
+
 ### Adding a new dev
 
 1. Dev runs `ssh-keygen -t ed25519 -C "rift-<handle>@$HOSTNAME"` (or via Rift's in-app keygen).
