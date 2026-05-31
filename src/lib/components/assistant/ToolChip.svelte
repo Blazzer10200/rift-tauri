@@ -14,10 +14,14 @@
     Circle,
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
+  import { slide } from "svelte/transition";
   import Markdown from "./Markdown.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
-  let { tool, variant = "card" }: { tool: ToolBlock; variant?: "card" | "timeline" } = $props();
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  let { tool, variant = "card", caption = null }: { tool: ToolBlock; variant?: "card" | "timeline"; caption?: string | null } = $props();
   // Agent + TodoWrite + AskUser are first-class card variants — default-expanded
   // since their body IS the message, not a debug detail. All other tools collapse.
   const isAgent = $derived(/^(mcp__rift__)?Agent$/.test(tool.name));
@@ -490,9 +494,13 @@
     <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
       <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
       <span class="chip-icon"><Icon size={12} /></span>
-      <span class="chip-tool">{toolLabel}</span>
-      <span class="chip-sep">·</span>
-      <span class="chip-sum mono">{summary}</span>
+      {#if variant === "timeline" && caption}
+        <span class="chip-cap">{caption}</span>
+      {:else}
+        <span class="chip-tool">{toolLabel}</span>
+        <span class="chip-sep">·</span>
+        <span class="chip-sum mono">{summary}</span>
+      {/if}
       {#if !expanded && inlinePreview}
         <span class="chip-arrow" aria-hidden="true">→</span>
         <span class="chip-preview mono" use:tooltip={tool.result ?? ""}>{inlinePreview}</span>
@@ -665,7 +673,7 @@
       {/if}
     </div>
   {:else if expanded}
-    <div class="chip-body">
+    <div class="chip-body" transition:slide={{ duration: reducedMotion ? 0 : 180 }}>
       {#if inputRows}
         {#if inputRows.length > 0}
           <dl class="kv">
@@ -849,6 +857,14 @@
     font-size: 10.5px;
     letter-spacing: 0.01em;
   }
+  .chip-cap {
+    flex: 1; min-width: 0;
+    color: var(--fg);
+    font-weight: 500;
+    font-size: 11px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .chip[data-status="error"] .chip-cap { color: oklch(0.85 0.10 22); }
   .chip-sep { color: var(--fg-faint); flex-shrink: 0; font-size: 10px; }
   .chip-sum {
     flex: 1; min-width: 0;
@@ -873,13 +889,16 @@
     max-width: 36ch;
     opacity: 0.85;
   }
+  /* Neutral duration residue — informational, not a warning. Was warn-orange,
+     which made a normal 1.2s Read look like an alert. Quiet muted pill now;
+     genuine slowness reads from the number itself, not an alarm color. */
   .chip-duration {
     font-size: 10px;
     padding: 1px 5px;
     border-radius: 999px;
-    background: color-mix(in oklch, var(--warn-soft) 55%, var(--bg-elev-1));
-    color: var(--warn);
-    border: 1px solid color-mix(in oklch, var(--warn) 25%, var(--border));
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    color: var(--fg-muted);
+    border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
     font-variant-numeric: tabular-nums;
     flex-shrink: 0;
     font-weight: 600;
@@ -899,13 +918,16 @@
     border-top: 1px solid var(--border);
     background: color-mix(in oklch, var(--surface) 96%, transparent);
   }
+  /* Section labels (input / result) — lowercase to match the kv keys below
+     them so the body reads as one consistent label family instead of mixing
+     lowercase keys with UPPERCASE section heads. */
   .field-label {
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
     color: var(--fg-muted);
     margin: 8px 0 4px;
     font-weight: 600;
+    text-transform: lowercase;
   }
   .field-label:first-child { margin-top: 0; }
 
@@ -925,8 +947,8 @@
     text-align: right;
     padding-top: 1px;
     text-transform: lowercase;
-    letter-spacing: 0.02em;
-    font-size: 10px;
+    letter-spacing: 0.04em;
+    font-size: 9.5px;
   }
   .kv dd {
     margin: 0;
@@ -1113,9 +1135,9 @@
     gap: 8px;
   }
   .agent-field-label {
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 9.5px;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
     color: var(--fg-muted);
     font-weight: 600;
   }

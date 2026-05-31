@@ -597,13 +597,19 @@
   }
   .messages {
     display: flex; flex-direction: column;
-    gap: 28px;
+    gap: 14px;
     max-width: var(--chat-col-max);
     width: 100%;
     margin: 0 auto;
   }
-  /* Inter-turn separation: rail + 28px gap does the work. No divider line
-     — the rail-spans-turn pattern reads cleaner without a horizontal cut. */
+  /* Asymmetric rhythm groups each exchange: a question sits tight against its
+     answer (14px base gap), while the break BEFORE a new user question opens
+     up (+16px) so separate exchanges read as distinct blocks. Replaces the old
+     uniform 28px that made every turn float equally. Rail-spans-turn still
+     carries assistant grouping; no divider line. */
+  .messages > :global(.bubble[data-role="user"]:not(:first-child)) {
+    margin-top: 16px;
+  }
 
   .pane-empty {
     flex: 1;

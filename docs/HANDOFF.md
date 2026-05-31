@@ -2,11 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-31 (b) — assistant chat UI: bubble alignment + tool-group collapse (committed, NOT shipped, NOT pixel-verified)
-Two UI fixes in `src/lib/components/assistant/MessageBubble.svelte` (svelte-check 0/0, but **no CDP/dev session was running → unverified visually**; user runs `scripts/run-dev.bat` to eyeball, currently on installed v0.4.43 which predates these). Also `scripts/run-sftp-it.ps1` from (a).
-- **User-bubble alignment:** user `.text` max-width `min(100%,72ch)` → `min(82%,72ch)`. The `100%` let a long message fill a narrow/docked pane edge-to-edge (read as left-aligned) while short ones hugged right → "two locations". 82% forces a permanent left gutter so all user turns read right-anchored.
-- **Tool-row collapse (user-requested "dropdown"):** runs of **GROUP_MIN=3+** consecutive groupable status chips fold into one collapsible `⚙ N tools · Read ×3 · Grep ▾` node. Prose/thinking/edits/cards/images break runs (narration order preserved); lone tools + pairs stay inline; Edit/MultiEdit (inline diff) + Agent/TodoWrite/ask_user/AskUserQuestion (cards) never group. Live/last group auto-opens while streaming then collapses. New: `coalesceToolGroups()`, `toolgroup` TimelineUnit, `isGroupableChip`/`isCardTool`/`summarizeGroup`, `expandedGroups` state, `.tg-*` styles. GROUP_MIN is a 1-line tweak if 2 or 4+ wanted.
-- **NEXT:** pixel-verify in dev (alignment in a narrow docked pane; a 3+ tool turn collapses + expands; live auto-open while streaming). Then fold into next release.
+## Session 2026-05-31 (d) — assistant turn UI: numbered step rail + AskUserQuestion fix (committed, NOT shipped)
+Committed the full 05-31 UI wave (b+c+d) to main, **no version bump** — ship deferred to tomorrow. `npm run check` 0/0/4110, `cargo check` exit 0. Live-verified via CDP.
+- **Numbered step rail (`MessageBubble.svelte`, `ToolChip.svelte`, NEW `toolCaption.ts`):** every action unit (chip / coalesced group / edit) gets a sequential number rendered AS the rail bullet (status-colored: done-green / pending-pulse / error-red) + a plain-language caption inline in the head row. Caption = model's "Step N —" divider title if narrated, else synthesized (`captionForTool`/`captionForGroup`). Numbering is ours — sequential even on silent turns. `numberActions()` post-pass after `coalesceToolGroups()` folds preceding dividers, keeps orphans. Tool-group fold now `slide` (200ms). Replaces the old detached `Step N —` divider + bare-chip look.
+- **AskUserQuestion fix (`mod.rs::handle_permission_request`, `MessageBubble.svelte`):** builtin AskUserQuestion was hitting the raw Allow/Deny permission bar (off the allowlist → `can_use_tool` prompt) and stalling (no headless surface). Now auto-denied at the permission layer with a steer to `mcp__rift__ask_user` (Rift's working card + answer injection); the dead AskUserQuestion chip is filtered from the timeline. Model re-asks via the rich card.
+- **Discipline (`CLAUDE.md` Don't-do):** added "code-only, not prose" (no multi-line WHY-comment blocks) + "read once" (no re-reads) — TTFT/efficiency.
+- **Earlier today (b+c, now committed):** vertical rhythm, quiet <3s thinking rows, trailing-activity row, tool-chip lowercase labels + neutral duration pill, edit-diff auto-expand, rail spine tint, user-bubble 82% right-anchor, GROUP_MIN=3 tool-group collapse, `scripts/cdp/send.sh`. Detail in git log.
+- **NEXT (tomorrow):** ship the wave as a release; richen heterogeneous group captions ("Read 2 files · 1 command" vs generic "Running 3 actions"); deferred wave items — expanded-Bash nested-box lightening, Agent/Todo/AskUser card chrome unification, typography heading-scale, composer-pills↔activity dedup.
 
 ## Session 2026-05-31 (a) — v0.4.43 SHIPPED (#265 live-SFTP transfer coverage — test-infra release)
 Closed the long-open #265 "real-SFTP vs mocks" gap on the transfer layer + shipped as v0.4.43. **Additive only** — 7 `#[ignore]` integration tests in `src-tauri/src/sftp/integration_tests.rs` (new module, wired `#[cfg(test)] mod integration_tests;` in `sftp/mod.rs`). No production code touched → binary behaviorally identical to v0.4.42; release exists purely to version the test-infra work.
@@ -38,9 +40,8 @@ Two tooling commits, no version bump (scripts/docs only). Dev session still live
 - **Proxmox SFTP test target (`c9ef1fb`):** stood up **LXC 121 `rift-sftp-test`** on `blazzer-labs` to attack #265/#21 (untested live-SFTP). Debian12, key-auth `rift`@**192.168.1.16**, FXServer-shaped seed tree, sshd hardened (MaxSessions 50, no-password), pristine `baseline` snapshot. Key: `.secrets/rift-sftp-test` (uncommittable — workspace not a git repo). Helper **`scripts/sftp-test-target.sh {health|ip|status|reset|env|ssh|tree}`** resolves DHCP IP live. Built via host SSH — **MCP stays read-only** (see `docs/design/proxmox-sftp-test-target.md`). Verified: atomic rename-overwrite, 25MiB integrity, 10 parallel conns, reset→pristine cycle.
 - **(transfer-layer #[ignore] tests DONE in session (a) above — `flush_batch`/`drift_watcher` still open.)** Infra reusable; `eval $(bash scripts/sftp-test-target.sh env)` for connection.
 
-## Sessions 2026-05-30 (b)+(c) — v0.4.40 + v0.4.41 SHIPPED (detail in git log + CHANGELOG)
-- **(c) v0.4.41** (`a2cb0cd`): silent-401 class fix — `claude_command()` strips `ANTHROPIC_API_KEY` from EVERY spawn (env keys never shadow OAuth); bad-key 401 decoder actionable; `sftp/mod.rs::decode_connect_err` maps WSAEACCES/refused/timeout → VPN/sshd/host hints.
-- **(b) v0.4.40** (`7c8e17d`): bg-process turn-end #242 (DONE on `result` frame, kill claude PID only not `/T` so bg child survives); auth-lockdown — `fire()`/`send()` gate every path at the chokepoint. **Open:** orphan-reaping (bg children survive app-exit; fix = Win Job Object KILL_ON_JOB_CLOSE).
+## Sessions 2026-05-30 (b)+(c) — v0.4.40 + v0.4.41 SHIPPED (detail in git log)
+v0.4.41 (`a2cb0cd`): silent-401 fix (strip `ANTHROPIC_API_KEY` from spawns) + sftp connect-err hints. v0.4.40 (`7c8e17d`): bg-process turn-end #242 + auth-lockdown. **Open:** orphan-reaping (bg children survive app-exit → Win Job Object KILL_ON_JOB_CLOSE).
 
 ### RESUME HERE — Trey (collaborator) onboarding, in flight
 Connection **WORKS** now. Root cause of the multi-hour SSH failure was **NordVPN** strangling the Tailscale tunnel → `WSAEACCES` "Permission denied" on connect (NOT keys/server — both server-side verified fine). Fix: close Nord OR split-tunnel `tailscaled`+Rift to bypass the VPN. Trey SSH user = `treyday` (uid 1001, key in `/home/treyday/.ssh/authorized_keys` on CT120); connects to fxserver tailnet IP `100.122.178.19` (NOT LAN `.170`).
@@ -48,10 +49,8 @@ Connection **WORKS** now. Root cause of the multi-hour SSH failure was **NordVPN
 
 ---
 
-## Earlier 2026-05-29 sessions (all shipped/pushed — detail in git log)
-- **(d)** v0.4.38 SHIPPED — updater fix (`5a3618c` mailto-glob openUrl-poison + `5a013dc` in-app `download_update`). Now superseded by 0.4.39.
-- **(c)** `830a851`+`3487dcb` — assistant UX polish (streaming border-ring, removed `.send-sweep`, Activity `jumpTo()` anchors). Pushed in session (f).
-- **(b)** `07710e3` — v0.4.37 review CR1–CR5; ISSUES #14/#15 CLOSED (signing declined).
+## Earlier 2026-05-29 (all shipped — detail in git log)
+v0.4.38 updater fix (`5a3618c`/`5a013dc`); assistant UX polish (`830a851`/`3487dcb`); v0.4.37 review CR1–CR5 + ISSUES #14/#15 closed (`07710e3`).
 
 ## Open work (not started)
 **#20 hot-file splits** — `assistant.svelte.ts` 2314L (M8 streaming + M9 send open, brief `docs/design/assistant-svelte-split.md`); `assistant/mod.rs` 2795L (worst backend); `auto_sync.rs` 2232L. M8/M9 want a conversation-playback test harness first. Decisions: **CR-UX** trust enum (collapse to 2-level, drop dead `full`); **#17** two-repo (if going public). Also: code lanes (Files diff-dot, RCON `rcon_resource`/`dev_cycle`), #4 UX sweep. Full live queue: `docs/ISSUES.md`.

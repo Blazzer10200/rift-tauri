@@ -5,8 +5,13 @@
   // and the parent can fall back to raw JSON.
 
   import { untrack } from "svelte";
+  import { slide } from "svelte/transition";
   import { diffArrays } from "diff";
   import { FilePen, ChevronDown } from "lucide-svelte";
+
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
   import { tooltip } from "$lib/actions/tooltip";
   let {
@@ -18,15 +23,6 @@
     compact?: boolean;
     defaultExpanded?: boolean;
   } = $props();
-
-  // Collapsed by default in the chat lane — large diffs would otherwise eat
-  // most of the message column for a turn that's already summarized in the
-  // header (+N -M). The compact (dock) variant stays expanded since the dock
-  // is purpose-built for ops review.
-  // Initial-seed only: prop reads are intentionally non-reactive — once the
-  // user clicks the chevron their choice is sticky and shouldn't snap back
-  // when a parent re-renders the same block w/ identical props.
-  let expanded = $state<boolean>(untrack(() => compact || defaultExpanded));
 
   type DiffPair =
     | { kind: "ctx";  left: string; right: string }
@@ -120,6 +116,30 @@
     return { adds, dels };
   });
 
+  // Small edits auto-expand so the change is visible at a glance — hiding a
+  // 1-line edit behind a chevron is worse than just showing it. Large diffs
+  // (>SMALL_DIFF changed lines) stay collapsed so they don't eat the column;
+  // the header's +N -M already summarizes them. Compact (dock) + explicit
+  // defaultExpanded always open.
+  // Initial-seed only: prop reads are intentionally non-reactive — once the
+  // user clicks the chevron their choice is sticky and shouldn't snap back
+  // when a parent re-renders the same block w/ identical props.
+  const SMALL_DIFF = 12;
+  let expanded = $state<boolean>(
+    untrack(() => {
+      if (compact || defaultExpanded) return true;
+      // Compute changed-line count directly from the raw strings (don't read
+      // the `counts` $derived here — reading a derived inside a $state
+      // initializer is order-fragile). Cheap line-set diff is enough to
+      // decide auto-expand; the precise +N/-M still comes from `counts`.
+      const oldStr = typeof input.old_string === "string" ? input.old_string : "";
+      const newStr = typeof input.new_string === "string" ? input.new_string : "";
+      const changed = Math.abs(oldStr.split("\n").length - newStr.split("\n").length)
+        + (oldStr === newStr ? 0 : 1);
+      return changed <= SMALL_DIFF;
+    }),
+  );
+
   // Unified layout when one side is empty — a +21/-0 edit (new file content)
   // or -N/+0 edit (deletion) doesn't need two columns. Drops the empty side
   // entirely, halving the horizontal footprint.
@@ -156,7 +176,7 @@
       </button>
     {/if}
     {#if expanded}
-      <div class="diff-body">
+      <div class="diff-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
         {#if !unified}
           <div class="diff-head">
             <span>before</span>
@@ -165,16 +185,16 @@
         {/if}
         {#each compactPairs as p, pi (pi)}
           {#if p.kind === "meta"}
-            <div class="diff-meta">{p.text}</div>
+            <div class="diff-meta" style="--ri: {Math.min(pi, 14)}">{p.text}</div>
           {:else if p.kind === "gap"}
-            <div class="diff-gap" data-multi={p.lines > 1} use:tooltip={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
+            <div class="diff-gap" style="--ri: {Math.min(pi, 14)}" data-multi={p.lines > 1} use:tooltip={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
               {#if p.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{p.lines} blank lines</span>{/if}
             </div>
           {:else if unified}
             {@const cellKind = unifiedSide === "left" ? (p.kind === "ctx" ? "ctx" : "del") : (p.kind === "ctx" ? "ctx" : "add")}
             {@const cellText = unifiedSide === "left" ? p.left : p.right}
             {#if cellText !== null}
-              <div class="diff-pair single" data-kind={cellKind}>
+              <div class="diff-pair single" data-kind={cellKind} style="--ri: {Math.min(pi, 14)}">
                 <span class="diff-cell side-{unifiedSide === 'left' ? 'l' : 'r'}">
                   <span class="diff-sigil">{cellKind === "ctx" ? " " : cellKind === "del" ? "-" : "+"}</span>
                   <span class="diff-text">{cellText}</span>
@@ -182,7 +202,7 @@
               </div>
             {/if}
           {:else}
-            <div class="diff-pair" data-kind={p.kind}>
+            <div class="diff-pair" data-kind={p.kind} style="--ri: {Math.min(pi, 14)}">
               <span class="diff-cell side-l">
                 <span class="diff-sigil">{p.left === null ? " " : p.kind === "ctx" ? " " : "-"}</span>
                 <span class="diff-text">{p.left ?? ""}</span>
@@ -301,6 +321,20 @@
     grid-template-columns: 1fr 1fr;
     column-gap: 1px;
     background: var(--border);
+  }
+  /* Staggered reveal — each row fades + slides in keyed off its --ri index
+     (capped at 14 so big diffs settle fast). Makes the change "land" instead
+     of popping in all at once. */
+  .diff-pair, .diff-meta, .diff-gap {
+    animation: diff-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(var(--ri, 0) * 16ms);
+  }
+  @keyframes diff-row-in {
+    from { opacity: 0; transform: translateX(-4px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .diff-pair, .diff-meta, .diff-gap { animation: none; }
   }
   .diff-pair.single {
     grid-template-columns: 1fr;
