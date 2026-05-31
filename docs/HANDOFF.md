@@ -2,6 +2,12 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-31 (b) — assistant chat UI: bubble alignment + tool-group collapse (committed, NOT shipped, NOT pixel-verified)
+Two UI fixes in `src/lib/components/assistant/MessageBubble.svelte` (svelte-check 0/0, but **no CDP/dev session was running → unverified visually**; user runs `scripts/run-dev.bat` to eyeball, currently on installed v0.4.43 which predates these). Also `scripts/run-sftp-it.ps1` from (a).
+- **User-bubble alignment:** user `.text` max-width `min(100%,72ch)` → `min(82%,72ch)`. The `100%` let a long message fill a narrow/docked pane edge-to-edge (read as left-aligned) while short ones hugged right → "two locations". 82% forces a permanent left gutter so all user turns read right-anchored.
+- **Tool-row collapse (user-requested "dropdown"):** runs of **GROUP_MIN=3+** consecutive groupable status chips fold into one collapsible `⚙ N tools · Read ×3 · Grep ▾` node. Prose/thinking/edits/cards/images break runs (narration order preserved); lone tools + pairs stay inline; Edit/MultiEdit (inline diff) + Agent/TodoWrite/ask_user/AskUserQuestion (cards) never group. Live/last group auto-opens while streaming then collapses. New: `coalesceToolGroups()`, `toolgroup` TimelineUnit, `isGroupableChip`/`isCardTool`/`summarizeGroup`, `expandedGroups` state, `.tg-*` styles. GROUP_MIN is a 1-line tweak if 2 or 4+ wanted.
+- **NEXT:** pixel-verify in dev (alignment in a narrow docked pane; a 3+ tool turn collapses + expands; live auto-open while streaming). Then fold into next release.
+
 ## Session 2026-05-31 (a) — v0.4.43 SHIPPED (#265 live-SFTP transfer coverage — test-infra release)
 Closed the long-open #265 "real-SFTP vs mocks" gap on the transfer layer + shipped as v0.4.43. **Additive only** — 7 `#[ignore]` integration tests in `src-tauri/src/sftp/integration_tests.rs` (new module, wired `#[cfg(test)] mod integration_tests;` in `sftp/mod.rs`). No production code touched → binary behaviorally identical to v0.4.42; release exists purely to version the test-infra work.
 - **SHIPPED:** commits `b4b5cf1` (tests) + `04e22bb` (PS runner `scripts/run-sftp-it.ps1`) + `2c08adf` (v0.4.43 bump+CHANGELOG), pushed to origin/main. Release `rift-releases` tag **v0.4.43**, SHA256 round-trip MATCH (`E7F3548B…`), non-prerelease. Build green (Rust release 1m07s, NSIS `Rift_0.4.43_x64-setup.exe`).
