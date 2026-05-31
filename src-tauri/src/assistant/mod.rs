@@ -501,6 +501,44 @@ fn delete_session_cwd(id: &str) {
     }
 }
 
+/// Sidecar that pins the MODEL a conversation was started with. Extended-thinking
+/// blocks carry a model-bound cryptographic signature; when an assistant turn
+/// emits `thinking` + `tool_use`, every later `--resume` replays that message to
+/// the API. If the resume goes out under a different model (picker switched
+/// mid-chat — Opus↔Sonnet, or worst-case →Haiku which drops `--effort` and flips
+/// thinking off), the API rejects the replayed blocks with `400 ... thinking ...
+/// blocks ... cannot be modified` and the conversation is permanently wedged.
+/// Pinning the model per session keeps resume aimed at the model that signed the
+/// blocks; switching models is a new conversation.
+fn session_model_path(id: &str) -> Result<PathBuf, String> {
+    Ok(session_cwd_path(id)?.with_extension("model"))
+}
+
+fn save_session_model(id: &str, model: &str) {
+    if let Ok(p) = session_model_path(id) {
+        if let Err(e) = std::fs::write(&p, model.as_bytes()) {
+            log::warn!("assistant: save session model {}: {e}", p.display());
+        }
+    }
+}
+
+fn load_session_model(id: &str) -> Option<String> {
+    let p = session_model_path(id).ok()?;
+    let s = std::fs::read_to_string(&p).ok()?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() || !is_valid_model_name(trimmed) {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn delete_session_model(id: &str) {
+    if let Ok(p) = session_model_path(id) {
+        let _ = std::fs::remove_file(&p);
+    }
+}
+
 /// Lexical common ancestor of a set of paths. Returns `None` if the paths
 /// share nothing beyond filesystem root, if the result has no parent (drive
 /// or fs root), or if the result is not a directory on disk.
@@ -643,9 +681,11 @@ pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
     // convo with intact sidecars is recoverable; a deleted sidecar with a
     // surviving convo would silently lose its pinned cwd.
     delete_session_cwd(&id);
+    delete_session_model(&id);
     if let Some(cli_id) = cli_session_id {
         if cli_id != id {
             delete_session_cwd(&cli_id);
+            delete_session_model(&cli_id);
         }
     }
     Ok(())
@@ -1875,6 +1915,11 @@ pub fn assistant_remint_session(
     if old_session_id == new_session_id {
         return Err("remint requires distinct old + new session ids".into());
     }
+    // Carry the model pin across compaction so the reminted session keeps
+    // resuming under the model its (replayed) thinking blocks were signed by.
+    if let Some(m) = load_session_model(&old_session_id) {
+        save_session_model(&new_session_id, &m);
+    }
     let Some(cwd) = load_session_cwd(&old_session_id) else {
         // Legacy convos lacked sidecars; nothing to copy is not an error.
         // The new session will get a sidecar on its first turn via the
@@ -2336,9 +2381,23 @@ pub async fn assistant_send(
     let cfg = load_config();
     let api_key = current_api_key();
     let use_api_key = api_key.is_some();
-    let model = model.unwrap_or_else(|| "sonnet".to_string());
+    let mut model = model.unwrap_or_else(|| "sonnet".to_string());
     if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
+    }
+    // Pin model per conversation: thinking-block signatures are model-bound, so
+    // resuming under a switched model 400s on the replayed prior turn (see
+    // session_model_path). On resume, the model the session was created with wins
+    // over a live picker change; the new model only takes effect in a new chat.
+    if !is_first_turn {
+        if let Some(pinned) = load_session_model(&session_id) {
+            if pinned != model {
+                log::info!(
+                    "assistant_send: session {session_id} pinned to model {pinned} (picker={model}) — preserving thinking-block signatures"
+                );
+                model = pinned;
+            }
+        }
     }
     // Effort tier: per-turn override wins, else stored default, else "quick".
     let effort = thinking_effort
@@ -2406,6 +2465,13 @@ pub async fn assistant_send(
         if is_first_turn || pinned_cwd.is_none() {
             save_session_cwd(&session_id, first);
         }
+    }
+    // Capture the model the first turn runs under so every later --resume targets
+    // the same model the thinking blocks were signed by (see session_model_path).
+    // Also back-fill legacy/pre-pin conversations on their first turn after
+    // upgrade so they stop wedging on a subsequent model switch.
+    if is_first_turn || load_session_model(&session_id).is_none() {
+        save_session_model(&session_id, &model);
     }
 
     // Remote-shell tool only fires when the user toggled it on AND the parent
