@@ -2,8 +2,8 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-31 (g) — backend thinking-block fix + dock UX (UNCOMMITTED, verified, NOT shipped)
-All on dev (`rift-tauri`), `npm run check` 0/0/0, live-verified via CDP. **Nothing committed/bumped** — `/git-ship` territory.
+## Session 2026-05-31 (g) — v0.4.45 SHIPPED (thinking-block mid-chat fix + resizable dock)
+Shipped as **v0.4.45** (`5fcf965`; tag `v0.4.45` on rift-releases, SHA256 round-trip OK). `npm run check` 0/0/0, `cargo check` 0/0, live-verified via CDP.
 - **`mod.rs` — model-pin per conversation (the "assistant stops mid-chat" 400):** thinking-block signatures are model-bound; switching the model/effort picker mid-chat made `--resume` replay prior `thinking`+`tool_use` under the wrong model → `400 ... thinking blocks ... cannot be modified` → chat permanently bricked (Haiku worst: drops `--effort`, flips thinking off). Fix = new `.model` sidecar (mirrors `.cwd`): `session_model_path`/`save`/`load`/`delete_session_model`; first turn saves, resume pins, legacy back-fills, carried across remint + cleaned on delete. `cargo check` clean (forced recompile).
 - **Dock UX (`AssistantPane.svelte`, `ActivityPanel.svelte`, `state/assistant/helpers.ts`, `assistant.svelte.ts`):** (1) **Resizable dock** — drag handle on the dock's left edge, `assistant.ui.dockWidth` (clamp 260–520, default 300), persisted `rift.assistant.dockWidth`, double-click resets. `.side-panel min-width` 300→0 so it can shrink. (2) **Live/review split** — Running+Tasks stay pinned; Outputs/Sources/Tool mix/Insights fold under one collapsible **SESSION REVIEW** header (`loadCollapsedSections`/`saveCollapsedSections`, key `"review"`, persisted). Skipped an idle-summary strip on purpose (would re-add the deliberately-removed "This session" card).
 - **`WebBrowserPage.svelte`** — address bar initialized to `""` not `"https://example.com"` (placeholder `Enter a URL…` already present); Go/Enter on empty is a no-op (HANDOFF (f) info-tier bug, fixed).
