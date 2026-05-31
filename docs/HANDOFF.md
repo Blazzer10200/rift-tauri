@@ -18,11 +18,6 @@ Drove the running app via CDP to confirm every workspace's UI is wired to backen
 - **FINE-TUNE (1 file, uncommitted):** `StatusBar.svelte:53-62` `isStale` — auto-poll removed v0.2.38 so scan-age alone falsely tripped "stale" on every idle server after 5min. Now gated: stale only when `queue>0||failed>0||conflicts>0` (undrained work). Idle+clean watching server stays green. `svelte-check` 0/0 (4109).
 - **DEV ARTIFACT (no data loss):** saving the .svelte → HMR + my `location.reload()` reset frontend to offline/"No servers". Confirmed intact: `rift.json` holds endure-rp profile (`lastSelected`), `list_servers`→`["endure-rp"]`. `loadServers()` is wired to app-launch/Tauri-ready, NOT webview reload → plain reload won't reconnect.
 
-### RESUME HERE (e) — restart dev app to reconnect + verify fix live
-1. Close Rift Dev window → re-run `scripts/run-dev.bat` → startup `loadServers()` auto-connects to `lastSelected`.
-2. Once connected on idle clean server, confirm footer stays **green "watching"** (not orange "stale") past 5min — that's the fix rendering.
-3. `StatusBar.svelte` change is **uncommitted** in working tree. Commit (no ship/version bump — UI-only polish) once verified, or revert if undesired.
-
 ## Session 2026-05-30 (d) — dev-tooling + test-infra (committed, no ship)
 Two tooling commits, no version bump (scripts/docs only). Dev session still live; CDP serve bg-running.
 - **CDP console capture (`14c84d2`):** `scripts/cdp/serve.cjs` was dropping all CDP *events* (no `id`) — console.*/uncaught exceptions/browser logs were invisible. Now subscribes `Runtime.enable`+`Log.enable`, per-target ring buffer (200), `GET /console` + batch op + `c.sh console [level] [limit] [clear]`. Screenshots gained `optimizeForSpeed`+`fromSurface`+`captureBeyondViewport`. Live-tested green.
