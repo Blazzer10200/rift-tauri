@@ -2,6 +2,27 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-30 (f) — v0.4.42 SHIPPED (subscription auth detection + conflict-resolution data-safety)
+39-agent adversarial swarm audit of the full front↔back surface (build green both sides). 31 raw findings → 12 refuted, 19 confirmed; fixed + shipped the critical/warning tier:
+- **Auth subscription detection (`mod.rs::assistant_auth_probe`):** green pill now distinguishes a claude.ai OAuth subscription (Pro/Max — `authMethod=="claude.ai"` + `subscriptionType`) from a logged-in Console/API account (per-token, no plan). Reads "Claude Max subscription · email" vs "Claude API account · … (per-token billing)". Real CLI shape: `{loggedIn,authMethod,apiProvider,email,orgId,orgName,subscriptionType}`.
+- **Conflict-resolution data-loss (3, `auto_sync.rs`):** AcceptRemote drops the dirty entry before overwrite; SaveLocalCopy restores the aside + re-queues the conflict on download-fail; mirror-delete keeps the snapshot row on failure (was resurrecting deleted files via ToPull on transient SFTP errors).
+- **Compaction 401 (`mod.rs::assistant_summarize_session`):** re-inject ANTHROPIC_API_KEY + `--bare` + MCP/slash fences for API-key users (was stripping like every spawn, never re-adding → every compaction 401'd).
+- **Smaller:** auto-compact serialized (no concurrent double-spend, `AssistantPage.svelte`); bg-tab turn persists immediately (`scheduleSave` threads convoId via Map reverse-lookup, `persistence.ts` + `assistant.svelte.ts`); SETSTAT chmod uses `with_t` + logs instead of `let _` (`transfer.rs`); StatusBar stale-pill gate folded in from (e).
+- **Verify:** cargo check + test 115/0, svelte-check 0/0 (4109), vitest 39/0, quick-review clean. Commit + rift-releases tag **v0.4.42** (see git log).
+- **OPEN — info tier (deferred, no code yet):** dead IPC surface (`scan_drift` + 5 registered-never-called cmds), `close_edit_in_place` never invoked, dead `serverKey` arg on local delete/rename, `ToDelete`→`ToDeleteLocal` rename, onboarding `dismissed` never resets on server delete, WebBrowser Go-button fires on `example.com` placeholder, `ctxPctBefore` reads active-not-target tab, `assistant_stop` `/T` comment-vs-code. Full detail in the swarm output.
+
+## Session 2026-05-30 (e) — live UI↔backend verification + stale-pill fine-tune (shipped in f)
+Drove the running app via CDP to confirm every workspace's UI is wired to backend. All green:
+- **Verified live IPC round-trips:** Re-probe→`assistant_auth_probe` (stamp reset); Rescan now→drift scan (footer ● Stale/15m → ● Watching/0s); Files REMOTE pane→russh SFTP `list` (real mtimes from `/opt/fxserver`); **chat send→full claude spawn+stream+turn-end** (#242 holds), smart-title rename, History 10→11, telemetry 24 t/s/$0.31. Auth: green, `rebelwarrior2004@gmail.com · max`.
+- **Ruled out (non-bugs):** API-key field `sk-ant-api03-…` = placeholder (empty); composer-not-clearing = CDP `.value` injection desync vs one-way `value={draft}` (real typing clears fine via `fire()` setDraft("") at Composer.svelte:408).
+- **FINE-TUNE (1 file, uncommitted):** `StatusBar.svelte:53-62` `isStale` — auto-poll removed v0.2.38 so scan-age alone falsely tripped "stale" on every idle server after 5min. Now gated: stale only when `queue>0||failed>0||conflicts>0` (undrained work). Idle+clean watching server stays green. `svelte-check` 0/0 (4109).
+- **DEV ARTIFACT (no data loss):** saving the .svelte → HMR + my `location.reload()` reset frontend to offline/"No servers". Confirmed intact: `rift.json` holds endure-rp profile (`lastSelected`), `list_servers`→`["endure-rp"]`. `loadServers()` is wired to app-launch/Tauri-ready, NOT webview reload → plain reload won't reconnect.
+
+### RESUME HERE (e) — restart dev app to reconnect + verify fix live
+1. Close Rift Dev window → re-run `scripts/run-dev.bat` → startup `loadServers()` auto-connects to `lastSelected`.
+2. Once connected on idle clean server, confirm footer stays **green "watching"** (not orange "stale") past 5min — that's the fix rendering.
+3. `StatusBar.svelte` change is **uncommitted** in working tree. Commit (no ship/version bump — UI-only polish) once verified, or revert if undesired.
+
 ## Session 2026-05-30 (d) — dev-tooling + test-infra (committed, no ship)
 Two tooling commits, no version bump (scripts/docs only). Dev session still live; CDP serve bg-running.
 - **CDP console capture (`14c84d2`):** `scripts/cdp/serve.cjs` was dropping all CDP *events* (no `id`) — console.*/uncaught exceptions/browser logs were invisible. Now subscribes `Runtime.enable`+`Log.enable`, per-target ring buffer (200), `GET /console` + batch op + `c.sh console [level] [limit] [clear]`. Screenshots gained `optimizeForSpeed`+`fromSurface`+`captureBeyondViewport`. Live-tested green.

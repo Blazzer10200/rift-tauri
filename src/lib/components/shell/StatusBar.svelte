@@ -55,7 +55,11 @@
     if (!watcherOn) return false;
     const t = connection.lastScanAt;
     if (!t) return false;
-    return now - t > STALE_THRESHOLD_MS;
+    if (now - t <= STALE_THRESHOLD_MS) return false;
+    // Auto-poll was removed (v0.2.38): scans are event/manual-driven, so an old
+    // last-scan on a healthy, caught-up watcher is normal on a quiet server —
+    // not stale. Only alarm when an aging scan could be masking undrained work.
+    return queue > 0 || failed > 0 || conflicts > 0;
   });
 
   const ledClass = $derived(

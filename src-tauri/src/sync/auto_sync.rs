@@ -1107,6 +1107,10 @@ impl AutoSyncEngine {
                 self.log_activity(&c.resource_name, file_name(local_path), "conflict skipped");
             }
             ConflictResolution::AcceptRemote => {
+                // Cancel any pending local push first — the user chose remote,
+                // so a queued upload of the about-to-be-overwritten local bytes
+                // must not fire after the download and clobber the remote copy.
+                self.dirty.remove(local_path);
                 self.mark_recently_written(local_path);
                 let r = self.sftp.download_file_atomic(&c.remote_path, local_path).await;
                 if r.success {
@@ -1157,6 +1161,20 @@ impl AutoSyncEngine {
                     self.log_activity(&c.resource_name, file_name(local_path),
                         &format!("conflict\u{2192}savecopy ({})", aside_name));
                 } else {
+                    // Download failed after the aside-rename moved the local
+                    // file away. Restore it to its original path so the user
+                    // isn't left with an empty slot (the next scan would
+                    // silently fill it via ToPull), and re-insert the conflict
+                    // row so the UI can retry. Mirrors AcceptRemote's #94 bail.
+                    if !local_path.exists() {
+                        if let Err(e) = std::fs::rename(&aside, local_path) {
+                            self.log(&format!(
+                                "CONFLICT savecopy restore failed {}: {e}; local copy at {}",
+                                local_path.display(), aside.display()
+                            ));
+                        }
+                    }
+                    self.conflicts.insert(local_path.to_path_buf(), c.clone());
                     self.log_activity(&c.resource_name, file_name(local_path),
                         &format!("conflict\u{2192}savecopy pull FAILED: {}", r.error));
                 }
@@ -1626,15 +1644,17 @@ impl AutoSyncEngine {
                             "mirror delete ok",
                         );
                     } else {
-                        // #52: forget the snapshot row on failure too. If the
-                        // remote file is still present, the next drift scan
-                        // repopulates the snapshot via fresh remote stat. If
-                        // the remote was already gone (idempotent-failure case),
-                        // forgetting prevents the next scan from seeing
-                        // remote-absent + snapshot-present and re-classifying
-                        // as ToDelete (local) — i.e. a spurious local-delete
-                        // would land in the next bucket otherwise.
-                        e.snapshot.forget(&entry.remote_path);
+                        // #52 revisited: do NOT forget the snapshot on a failed
+                        // delete. A transient failure (wedged session, perms
+                        // blip) leaves the remote file present — keeping the
+                        // baseline row means the next scan re-classifies it as
+                        // ToDeleteRemote (l=None, r=Some, snap=Some) and retries
+                        // the delete. Forgetting flipped snap→None so the scan
+                        // saw remote-only → ToPull and *resurrected* the file
+                        // the user just deleted — the worse failure, so we keep
+                        // the row. (Idempotent case — remote already gone —
+                        // lands at l=None+r=None, which falls through to synced;
+                        // ToDelete-local is unreachable since local is gone too.)
                         e.log_activity(
                             &entry.resource_name,
                             file_name(std::path::Path::new(&entry.local_path)),

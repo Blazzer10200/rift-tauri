@@ -1035,11 +1035,42 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     } else if out.logged_in {
         out.pill = "green".into();
         let who = out.email.as_deref().unwrap_or("Claude account");
-        let sub = out.subscription_type.as_deref().unwrap_or("");
-        out.summary = if sub.is_empty() {
-            format!("Using Claude Code session ({who})")
+        let sub = out.subscription_type.as_deref().unwrap_or("").trim();
+        // Positively distinguish a subscription session (claude.ai OAuth, Pro/
+        // Max) from a logged-in Console/API account — the latter still reports
+        // loggedIn:true but bills per-token against no plan. `authMethod` ==
+        // "claude.ai" is the subscription signal; `apiProvider` == "firstParty"
+        // rules out Bedrock/Vertex third-party routing. A Console login reports
+        // a different authMethod and no subscriptionType, so it must NOT read as
+        // a subscription. (Real shapes: subscription → authMethod "claude.ai",
+        // apiProvider "firstParty", subscriptionType "max"/"pro".)
+        let claude_ai = out
+            .auth_method
+            .as_deref()
+            .map(|m| m.eq_ignore_ascii_case("claude.ai"))
+            .unwrap_or(false);
+        let first_party = out
+            .api_provider
+            .as_deref()
+            .map(|p| p.eq_ignore_ascii_case("firstParty"))
+            .unwrap_or(false);
+        let is_subscription = claude_ai && !sub.is_empty();
+        out.summary = if is_subscription {
+            let plan: &str = match sub.to_ascii_lowercase().as_str() {
+                "max" => "Max",
+                "pro" => "Pro",
+                "team" => "Team",
+                "enterprise" => "Enterprise",
+                _ => sub, // unknown tier — surface the raw label rather than drop it
+            };
+            format!("Claude {plan} subscription · {who}")
+        } else if claude_ai || first_party {
+            // claude.ai login but no tier string yet — still a subscription
+            // session, just without a reported plan. Don't mislabel it API.
+            format!("Claude subscription · {who}")
         } else {
-            format!("Using Claude Code session ({who} · {sub})")
+            // Logged in via a Console/API account → per-token billing, no plan.
+            format!("Claude API account · {who} (per-token billing)")
         };
         // Login works and is what we'll use — but flag the ignored env key so a
         // user who *thinks* they're on a key isn't surprised by which identity
@@ -1604,6 +1635,11 @@ pub async fn assistant_summarize_session(
         // Headless mode has no interactive surface for ANY tool — and a
         // summarize call shouldn't be running tools regardless. The CLI's
         // `--tools ""` disables the built-in tool set wholesale.
+        // Fence off user MCP servers + slash commands (mirror enhance_prompt /
+        // generate_title): a one-shot summarize must not merge ~/.claude.json
+        // MCP entries onto an already-near-full-context call.
+        .arg("--strict-mcp-config")
+        .arg("--disable-slash-commands")
         .arg("--tools").arg("")
         .arg("--permission-mode").arg("bypassPermissions")
         // SessionStart hooks load ~46K tokens of memory/git context into
@@ -1614,6 +1650,14 @@ pub async fn assistant_summarize_session(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // API-key users: claude_command() stripped ANTHROPIC_API_KEY, so without
+    // re-adding it (+ `--bare`) this spawn has no credentials and every
+    // compaction 401s. Mirrors the assistant_send `use_api_key` branch.
+    if let Some(k) = current_api_key() {
+        cmd.arg("--bare");
+        cmd.env("ANTHROPIC_API_KEY", &k);
+    }
 
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude` (summarize): {e}"))?;
 

@@ -4560,7 +4560,7 @@ dependencies = [
 
 [[package]]
 name = "rift-tauri"
-version = "0.4.41"
+version = "0.4.42"
 dependencies = [
  "async-trait",
  "base64 0.22.1",

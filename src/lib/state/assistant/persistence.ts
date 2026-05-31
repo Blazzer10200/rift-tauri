@@ -138,9 +138,12 @@ export function flushNow(host: PersistenceHost): void {
  *  one disk write per ~700ms per tab. `flush=true` writes immediately. #145:
  *  snapshots (tab, convoId) at call time so a 700ms delay can't dispatch the
  *  save against whichever tab is active when the timer fires. */
-export function scheduleSave(host: PersistenceHost, flush = false): void {
-  const convoId = host.currentConvoId;
-  const tab = host.activeTab;
+export function scheduleSave(host: PersistenceHost, flush = false, forConvoId?: string): void {
+  // bg-tab fix: persist the tab named by `forConvoId` (the tab whose turn just
+  // completed), not whichever tab is active when the call or the 700ms debounce
+  // fires. Defaults to the active convo for the common foreground callers.
+  const convoId = forConvoId ?? host.currentConvoId;
+  const tab = convoId ? host.tabs.get(convoId) ?? null : null;
   if (!tab || !convoId || tab.messages.length === 0) return;
   if (tab.saveTimer) {
     clearTimeout(tab.saveTimer);
