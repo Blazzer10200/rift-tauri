@@ -2,6 +2,12 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-05-30 (d) — dev-tooling + test-infra (committed, no ship)
+Two tooling commits, no version bump (scripts/docs only). Dev session still live; CDP serve bg-running.
+- **CDP console capture (`14c84d2`):** `scripts/cdp/serve.cjs` was dropping all CDP *events* (no `id`) — console.*/uncaught exceptions/browser logs were invisible. Now subscribes `Runtime.enable`+`Log.enable`, per-target ring buffer (200), `GET /console` + batch op + `c.sh console [level] [limit] [clear]`. Screenshots gained `optimizeForSpeed`+`fromSurface`+`captureBeyondViewport`. Live-tested green.
+- **Proxmox SFTP test target (`c9ef1fb`):** stood up **LXC 121 `rift-sftp-test`** on `blazzer-labs` to attack #265/#21 (untested live-SFTP). Debian12, key-auth `rift`@**192.168.1.16**, FXServer-shaped seed tree, sshd hardened (MaxSessions 50, no-password), pristine `baseline` snapshot. Key: `.secrets/rift-sftp-test` (uncommittable — workspace not a git repo). Helper **`scripts/sftp-test-target.sh {health|ip|status|reset|env|ssh|tree}`** resolves DHCP IP live. Built via host SSH — **MCP stays read-only** (see `docs/design/proxmox-sftp-test-target.md`). Verified: atomic rename-overwrite, 25MiB integrity, 10 parallel conns, reset→pristine cycle.
+- **NEXT SESSION HEADLINE:** write the `#[ignore]` Rust integration tests against the target (`transfer.rs`/`flush_batch`/`drift_scanner`) — closes the #265 gap with real SFTP vs mocks. Infra ready; `eval $(bash scripts/sftp-test-target.sh env)` for connection.
+
 ## Session 2026-05-30 (c) — v0.4.41 SHIPPED (auth-clarity + connection-error decode)
 Commit `a2cb0cd`, release `rift-releases` tag **v0.4.41**, SHA256 MATCH, non-prerelease. Closes the silent-401 class + cryptic-connect-error class the Trey arc exposed. `cargo check` 0/0, `svelte-check` 0/0 (4109), quick-review clean.
 - **Silent system `ANTHROPIC_API_KEY` trap (root cause of "green pill but 401"):** `current_api_key()` only reads keychain/config, so a system env key was invisible to the probe yet inherited by the spawned `claude` → 401 under a different identity. Fix (`assistant/mod.rs`): (1) `AuthStatus.env_api_key_present` (detect via `std::env::var`); (2) **`claude_command()` builder strips `ANTHROPIC_API_KEY` from EVERY spawn** (probe ×2, send, title-gen, enhancer, compaction) — single source of truth; the configured-key send branch (`use_api_key`) re-adds the sanctioned Rift key after. Env keys never silently win on ANY claude call; (3) probe summary warns when an env key is being ignored (green-but-noted if logged in; actionable red if no login/no Rift key).
@@ -19,9 +25,6 @@ Commit `7c8e17d`, release `rift-releases` tag **v0.4.40**, SHA256 MATCH, non-pre
 ### RESUME HERE — Trey (collaborator) onboarding, in flight
 Connection **WORKS** now. Root cause of the multi-hour SSH failure was **NordVPN** strangling the Tailscale tunnel → `WSAEACCES` "Permission denied" on connect (NOT keys/server — both server-side verified fine). Fix: close Nord OR split-tunnel `tailscaled`+Rift to bypass the VPN. Trey SSH user = `treyday` (uid 1001, key in `/home/treyday/.ssh/authorized_keys` on CT120); connects to fxserver tailnet IP `100.122.178.19` (NOT LAN `.170`).
 **Current blocker:** Assistant shows **"401 Invalid authentication credentials"** (v0.4.40 detection working — surfaced a real error vs the old cryptic exit). Diagnosis: a bad API key configured in Rift **shadows** his claude login (`mod.rs:1011` — api key > OAuth precedence). FIX given to Trey: clear the API-key field in Rift Settings → `claude` + `/login` (Pro/Max) → pill flips green. Fallback: stale system `ANTHROPIC_API_KEY` env var (`echo $env:ANTHROPIC_API_KEY` → remove). **Awaiting Trey's result.**
-
-## Session 2026-05-29 (f) — v0.4.39 SHIPPED (assistant /clear + queue fix) — superseded by v0.4.40
-`95ab30c`+`b135262`. `onError` now fires `onTurnComplete` (queue drained from every terminal path, not just success); real in-place `clearConversation()` (`state/assistant/tabs.ts`) re-keys the same tab/pane vs the old hidden `/new` alias. Frontend-only. Detail: git log.
 
 ## Session 2026-05-29 (e) — SftpOps trait + DriftScanner offline tests (#265 Wave B Phase 1)
 `64b79ef`+`c6bf279` — `SftpOps` trait (`sftp/sftp_ops.rs`); `DriftScanner` takes `&dyn SftpOps`; 6 offline drift tests vs `MockSftp` (115 pass). RESUME: **Phase 2** flip engine `sftp` field → `dyn` (7 consumers) → unblocks `flush_batch` tests (#21.1). Detail in git log.

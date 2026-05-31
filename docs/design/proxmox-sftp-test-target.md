@@ -113,6 +113,19 @@ is now driven purely over SSH by the (future) test suite — no ongoing Proxmox 
 **Hardening follow-ups (optional):** promote the DHCP lease to a static IP / router
 reservation so `RIFT_TEST_SFTP_HOST` never drifts; currently DHCP + re-resolve helper.
 
+### MCP-read / SSH-write boundary (deliberate — don't flip)
+
+Two ways to touch Proxmox, kept separate on purpose:
+- **`proxmox` MCP = read-only** (`PROXMOX_ALLOW_ELEVATED=false`). Safe-by-default inventory/
+  status (`get_nodes`/`get_vms`/`get_storage`). Can't mutate — that's the point.
+- **Host root SSH (`blazzer-labs` alias) = the write path.** All `pct create/exec/snapshot/
+  rollback/destroy` go here, one deliberate command at a time.
+
+Do **not** set `PROXMOX_ALLOW_ELEVATED=true` for convenience: it grants standing write
+access to *every* session that loads the MCP, and the create tools are less flexible than
+raw `pct` anyway (provisioning still wants `pct exec`). SSH already covers writes cleanly
+with least standing privilege.
+
 ## Phase 2 (optional, later) — offload runner
 
 11 GB free RAM could also host a Debian LXC running `cargo check` + `svelte-check` +
