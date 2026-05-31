@@ -2246,6 +2246,18 @@ async fn handle_permission_request(
     let req = msg.get("request").cloned().unwrap_or(Value::Null);
     let tool_use_id = req.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
     let original_input = req.get("input").cloned().unwrap_or(Value::Null);
+    let tool_name = req.get("tool_name").and_then(|x| x.as_str()).unwrap_or_default();
+
+    // Builtin AskUserQuestion has no headless surface (it stalls in `-p` mode)
+    // and only reaches here because it's off the allowlist. Auto-deny with a
+    // steer to mcp__rift__ask_user — never surface the raw Allow/Deny bar.
+    if tool_name == "AskUserQuestion" {
+        let _ = write_control_response(stdin, &request_id, serde_json::json!({
+            "behavior": "deny",
+            "message": "AskUserQuestion is unavailable here. Call the mcp__rift__ask_user tool instead — it presents the question(s) in the Rift UI and returns the user's selection.",
+        })).await;
+        return;
+    }
 
     let registry = match app.try_state::<std::sync::Arc<PermissionRegistry>>() {
         Some(r) => r.inner().clone(),

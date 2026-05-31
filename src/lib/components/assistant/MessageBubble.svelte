@@ -1,12 +1,16 @@
 <script lang="ts">
   import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, User, Wrench, Loader2, CheckCircle2, AlertCircle } from "lucide-svelte";
   import { onDestroy } from "svelte";
-  import { fade } from "svelte/transition";
+  import { fade, slide } from "svelte/transition";
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
   import PermissionBar from "./PermissionBar.svelte";
+  import { captionForTool, captionForGroup } from "./toolCaption";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Tool blocks that render inline as a full side-by-side diff (vs the
@@ -124,8 +128,8 @@
   // block becomes its own node on the chain.
   type NodeStatus = "neutral" | "pending" | "done" | "error";
   type TimelineUnit =
-    | { kind: "block"; block: Block; key: string; status: NodeStatus }
-    | { kind: "toolgroup"; blocks: Block[]; key: string; status: NodeStatus }
+    | { kind: "block"; block: Block; key: string; status: NodeStatus; stepNum?: number; caption?: string }
+    | { kind: "toolgroup"; blocks: Block[]; key: string; status: NodeStatus; stepNum?: number; caption?: string }
     | { kind: "divider"; stepNum: number; title: string; key: string };
 
   function statusOf(b: Block): NodeStatus {
@@ -366,6 +370,37 @@
     return out;
   }
 
+  // Number each action unit (chip/group/edit) sequentially; caption = preceding
+  // "Step N" divider title if any, else synthesized. Orphan dividers kept.
+  function numberActions(units: TimelineUnit[]): TimelineUnit[] {
+    const out: TimelineUnit[] = [];
+    let step = 0;
+    let pending: { title: string; stepNum: number } | null = null;
+    for (const u of units) {
+      if (u.kind === "block" && u.block.type === "tool") {
+        step++;
+        const caption = pending?.title ?? captionForTool(u.block.name, u.block.input as Record<string, unknown>);
+        pending = null;
+        out.push({ ...u, stepNum: step, caption });
+      } else if (u.kind === "toolgroup") {
+        step++;
+        const caption = pending?.title ?? captionForGroup(u.blocks);
+        pending = null;
+        out.push({ ...u, stepNum: step, caption });
+      } else if (u.kind === "divider") {
+        pending = { title: u.title, stepNum: u.stepNum };
+      } else {
+        if (pending) {
+          out.push({ kind: "divider", stepNum: pending.stepNum, title: pending.title, key: `od_${u.key}` });
+          pending = null;
+        }
+        out.push(u);
+      }
+    }
+    if (pending) out.push({ kind: "divider", stepNum: pending.stepNum, title: pending.title, key: "od_tail" });
+    return out;
+  }
+
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
   // prose become dividers; everything else becomes a node on the chain.
   const grouped = $derived.by<TimelineUnit[]>(() => {
@@ -373,6 +408,9 @@
     const blocks = reconcileSplitHeaders(message.blocks);
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
+      // Builtin AskUserQuestion is always auto-denied + steered to ask_user (see
+      // mod.rs handle_permission_request) — never render its dead chip.
+      if (b.type === "tool" && shortToolName(b.name) === "AskUserQuestion") continue;
       if (b.type === "text") {
         const segments = parseTextBlock(b.text);
         for (let si = 0; si < segments.length; si++) {
@@ -398,8 +436,28 @@
       }
       units.push({ kind: "block", block: b, status: statusOf(b), key: `b_${i}` });
     }
-    return coalesceToolGroups(units);
+    return numberActions(coalesceToolGroups(units));
   });
+
+  // Trailing activity row — fills the "blank while working" gap the bare
+  // bubble had once text started streaming (the stage-strip only shows
+  // pre-first-block). Walk from the end of the block list: if the tail is a
+  // pending tool or active thinking, that node ALREADY pulses (its own bullet
+  // / spinner) — suppress the trailing row to avoid a double "working" signal.
+  // If the tail is prose (model composing more text / a code block), nothing
+  // else signals liveness down there → show the compact trailing pulse.
+  const tailIsPending = $derived.by<boolean>(() => {
+    for (let i = message.blocks.length - 1; i >= 0; i--) {
+      const b = message.blocks[i];
+      if (b.type === "tool") return b.status === "pending";
+      if (b.type === "thinking") return b.status === "active";
+      if (b.type === "text" && b.text.length > 0) return false;
+    }
+    return false;
+  });
+  const showTrailingActivity = $derived(
+    !isUser && streaming && grouped.length > 0 && !tailIsPending,
+  );
 
   // Key of the last in-flight or final node — drives the bullet pulse for
   // the streaming bubble (last node = "current activity").
@@ -467,8 +525,14 @@
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
         {/if}
         {#if streaming}
-          <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
-          {#if heartbeatLabel}<span class="heartbeat mono" use:tooltip={"Elapsed since turn started"}>{heartbeatLabel}</span>{/if}
+          {#if heartbeatLabel}
+            <!-- Timer carries liveness (it ticks) — no separate pulsing dot
+                 needed alongside it. The dot is a fallback only for the brief
+                 window before turnStartedAt resolves a heartbeat number. -->
+            <span class="heartbeat mono" use:tooltip={"Elapsed since turn started"}>{heartbeatLabel}</span>
+          {:else}
+            <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
+          {/if}
         {/if}
         {#if plainText.length > 0 || (!streaming && costLabel)}
           <div class="turn-actions">
@@ -516,7 +580,7 @@
     {/if}
 
     <div class="content">
-      {#snippet renderBlock(b: Block, bi: number)}
+      {#snippet renderBlock(b: Block, bi: number, caption: string | null = null)}
         {#if b.type === "image"}
           <button
             type="button"
@@ -576,7 +640,7 @@
           {/if}
           <PermissionBar toolUseId={b.id} toolName={b.name} />
         {:else if b.type === "tool"}
-          <ToolChip tool={b} variant={isUser ? "card" : "timeline"} />
+          <ToolChip tool={b} variant={isUser ? "card" : "timeline"} {caption} />
           <PermissionBar toolUseId={b.id} toolName={b.name} />
         {/if}
       {/snippet}
@@ -596,12 +660,14 @@
             data-kind="tool"
             data-status={nodeStatus}
             data-open={open ? "true" : null}
+            data-numbered={unit.stepNum ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
+            {#if unit.stepNum}<span class="tl-stepdot mono" aria-hidden="true">{unit.stepNum}</span>{/if}
             <button class="tg-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
               <span class="tg-chev" class:open><ChevronRight size={11} /></span>
               <Wrench size={12} class="tg-icon" />
-              <span class="tg-count">{unit.blocks.length} tools</span>
+              <span class="tg-cap">{unit.caption ?? `${unit.blocks.length} tools`}</span>
               <span class="tg-sep" aria-hidden="true">·</span>
               <span class="tg-sum mono">{summarizeGroup(unit.blocks)}</span>
               <span class="tg-status">
@@ -611,7 +677,7 @@
               </span>
             </button>
             {#if open}
-              <div class="tg-body">
+              <div class="tg-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
                 {#each unit.blocks as gb, gi (gb.type === "tool" ? gb.id : gi)}
                   {@render renderBlock(gb, 10000 + ui * 100 + gi)}
                 {/each}
@@ -635,13 +701,26 @@
             data-kind={nodeKind(unit.block)}
             data-status={nodeStatus}
             data-group-cont={groupCont ? "true" : null}
-            data-quick={(unit.block.type === "thinking" && unit.block.status === "done" && unit.block.durationMs != null && unit.block.durationMs < 2000) ? "true" : null}
+            data-quick={(unit.block.type === "thinking" && unit.block.status === "done" && (unit.block.text.length === 0 || (unit.block.durationMs != null && unit.block.durationMs < 3000))) ? "true" : null}
+            data-numbered={unit.stepNum ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
-            {@render renderBlock(unit.block, ui)}
+            {#if unit.stepNum}<span class="tl-stepdot mono" aria-hidden="true">{unit.stepNum}</span>{/if}
+            {@render renderBlock(unit.block, ui, unit.caption)}
           </div>
         {/if}
       {/each}
+
+      {#if showTrailingActivity}
+        <div class="trailing-activity" aria-live="polite" out:fade={{ duration: 160 }}>
+          <span class="ta-dots" aria-hidden="true">
+            <span class="ta-dot"></span><span class="ta-dot"></span><span class="ta-dot"></span>
+          </span>
+          {#key stageLabel}
+            <span class="ta-label">{stageLabel ?? "Working…"}</span>
+          {/key}
+        </div>
+      {/if}
 
     </div>
   </div>
@@ -758,7 +837,7 @@
     /* Visible enough to actually read as the spine the dots hang off — the old
        fg-faint @ 38% vanished against the dark bg, so the bullets looked
        orphaned. Faint model tint ties it to the aurora identity. */
-    background: color-mix(in oklch, var(--model-color) 26%, var(--border));
+    background: color-mix(in oklch, var(--model-color) 34%, var(--border));
     transition: background 200ms ease-out;
   }
   .bubble[data-streaming="true"] .turn-rail {
@@ -928,6 +1007,49 @@
   }
   .body { display: flex; flex-direction: column; }
 
+  /* Trailing activity row — the live "still working" cue that trails the last
+     emitted block while streaming (prose composing, between code blocks, etc).
+     Reuses the stage-strip's dot+label vocabulary at a smaller scale so the
+     body never reads as dead mid-turn. Suppressed when the tail node already
+     pulses (pending tool / active thinking) — see showTrailingActivity. Sits
+     on the rail like any node via the bullet below. */
+  .trailing-activity {
+    position: relative;
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 0.5rem;
+    color: var(--fg-muted);
+    font-size: var(--fs-xs);
+    min-height: 16px;
+  }
+  .trailing-activity::before {
+    content: "";
+    position: absolute;
+    left: -19px; top: 4px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--model-color, var(--accent));
+    box-shadow: 0 0 6px color-mix(in oklch, var(--model-color, var(--accent)) 45%, transparent);
+    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+  }
+  .ta-dots { display: inline-flex; gap: 4px; align-items: center; }
+  .ta-dot {
+    width: 4px; height: 4px;
+    border-radius: 50%;
+    background: var(--model-color, var(--accent));
+    animation: stage-bounce 1.1s ease-in-out infinite;
+  }
+  .ta-dot:nth-child(2) { animation-delay: 0.18s; }
+  .ta-dot:nth-child(3) { animation-delay: 0.36s; }
+  .ta-label {
+    color: color-mix(in oklch, var(--fg-2) 85%, var(--model-color, var(--accent)));
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    animation: stage-label-in 320ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .trailing-activity::before, .ta-dot, .ta-label { animation: none; }
+  }
+
   /* Timeline node — every block sits on the 2px turn-rail via an absolutely
      positioned bullet. Bullet color = status; thinking = hollow. The chain
      visual is the rail (already drawn by .turn-rail in grid-column 1); we
@@ -1019,14 +1141,25 @@
     50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 20%, transparent),
                           inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
   }
-  /* Short (<2s) done thinking blocks — visually recede so they don't create
-     a wall of "Thought for <1s" noise between tool calls. Still readable and
-     expandable on hover, just not competing with substantive content. */
+  /* Short (<3s) or text-less done thinking blocks — visually recede so they
+     don't create a wall of "Thought for <1s" noise between tool calls. Smaller
+     + dimmer so they read as a faint timestamp, not a content row. Still
+     readable and expandable on hover, just not competing for attention. */
   .tl-node[data-quick="true"] .tn-think-head {
-    opacity: 0.42;
+    opacity: 0.38;
+    font-size: 10px;
+    padding-top: 0; padding-bottom: 0;
   }
+  .tl-node[data-quick="true"] .tn-think-label { font-size: 10px; }
+  .tl-node[data-quick="true"] .tn-think-meta { font-size: 9.5px; }
+  .tl-node[data-quick="true"] .tn-think-head :global(svg) { width: 10px; height: 10px; }
   .tl-node[data-quick="true"]:hover .tn-think-head {
-    opacity: 0.78;
+    opacity: 0.72;
+  }
+  /* The hollow rail bullet on a quick thought is also noise — recede it. */
+  .tl-node[data-quick="true"][data-kind="thinking"]::before {
+    opacity: 0.4;
+    transform: scale(0.8);
   }
   /* Tighter vertical margin for quick thinking nodes — 8px default leaves too
      much gap when several appear between tool calls. */
@@ -1080,7 +1213,12 @@
   .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
   .tg-chev.open { transform: rotate(90deg); }
   .tg-head :global(.tg-icon) { color: var(--accent); opacity: 0.85; flex-shrink: 0; }
-  .tg-count { font-weight: 600; color: var(--fg); font-size: 10.5px; flex-shrink: 0; }
+  .tg-cap {
+    font-weight: 500; color: var(--fg); font-size: 11px;
+    flex: 0 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tl-toolgroup[data-status="error"] .tg-cap { color: oklch(0.85 0.10 22); }
   .tg-sep { color: var(--fg-faint); font-size: 10px; flex-shrink: 0; }
   .tg-sum {
     flex: 1; min-width: 0;
@@ -1105,6 +1243,54 @@
 
   /* Step divider — uppercased label flanked by a faint line, sitting on
      the rail. Quiet visual punctuation between turn sections. */
+  /* Step number as the rail bullet — replaces the ::before dot on numbered nodes; color tracks status. */
+  .tl-node[data-numbered="true"]::before { display: none; }
+  .tl-stepdot {
+    position: absolute;
+    left: -25px;
+    top: 3px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    z-index: 1;
+    background: var(--bg-elev-2);
+    border: 1.5px solid color-mix(in oklch, var(--fg-faint) 60%, transparent);
+    color: var(--fg-muted);
+    font-size: 9.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    transform-origin: center;
+    animation: bullet-pop 340ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation-delay: calc(var(--idx, 0) * 35ms);
+    transition: background 220ms ease-out, border-color 220ms ease-out, color 220ms ease-out, box-shadow 220ms ease-out;
+  }
+  @media (prefers-reduced-motion: reduce) { .tl-stepdot { animation: none; } }
+  .tl-node[data-status="done"] .tl-stepdot {
+    background: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 20%, var(--bg-elev-2));
+    border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 58%, transparent);
+    color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 90%, var(--fg));
+  }
+  .tl-node[data-status="pending"] .tl-stepdot {
+    background: color-mix(in oklch, var(--accent) 26%, var(--bg-elev-2));
+    border-color: color-mix(in oklch, var(--accent) 70%, transparent);
+    color: color-mix(in oklch, var(--accent) 92%, var(--fg));
+    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+  }
+  .tl-node[data-status="error"] .tl-stepdot {
+    background: color-mix(in oklch, var(--danger) 24%, var(--bg-elev-2));
+    border-color: color-mix(in oklch, var(--danger) 65%, transparent);
+    color: color-mix(in oklch, var(--danger) 90%, var(--fg));
+  }
+  .tl-node[data-numbered="true"]:hover .tl-stepdot {
+    transform: scale(1.12);
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease-out, border-color 220ms ease-out, color 220ms ease-out;
+  }
+
   .tl-divider {
     display: flex; align-items: center; gap: 8px;
     margin: 10px 0 4px;
