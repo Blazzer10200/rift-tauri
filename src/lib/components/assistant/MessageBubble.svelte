@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, User } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, User, Wrench, Loader2, CheckCircle2, AlertCircle } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade } from "svelte/transition";
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
@@ -14,6 +14,20 @@
   function isInlineDiffTool(name: string): boolean {
     const sn = name.replace(/^mcp__rift__/, "");
     return sn === "Edit" || sn === "MultiEdit";
+  }
+  function shortToolName(name: string): string { return name.replace(/^mcp__rift__/, ""); }
+  // Card-style tools render first-class chrome (their body IS the message) —
+  // never fold them into a collapsed tool group.
+  function isCardTool(name: string): boolean {
+    return /^(mcp__rift__)?Agent$/.test(name)
+      || /^(mcp__rift__)?TodoWrite$/.test(name)
+      || /^(mcp__rift__)?AskUserQuestion$/.test(name)
+      || /^mcp__rift__ask_user$/.test(name);
+  }
+  // Groupable = a plain status chip (Read/Grep/Bash/…): not an inline diff
+  // (Edit/MultiEdit) and not a first-class card. Runs of these collapse.
+  function isGroupableChip(name: string): boolean {
+    return !isInlineDiffTool(name) && !isCardTool(name);
   }
 
   // Detect every "Step N — title" header line in a text block. Returns an
@@ -111,6 +125,7 @@
   type NodeStatus = "neutral" | "pending" | "done" | "error";
   type TimelineUnit =
     | { kind: "block"; block: Block; key: string; status: NodeStatus }
+    | { kind: "toolgroup"; blocks: Block[]; key: string; status: NodeStatus }
     | { kind: "divider"; stepNum: number; title: string; key: string };
 
   function statusOf(b: Block): NodeStatus {
@@ -253,6 +268,27 @@
     expandedThinking = next;
   }
 
+  // Collapsed tool-group expand state, keyed by group key.
+  let expandedGroups = $state(new Set<string>());
+  function toggleGroup(key: string) {
+    const next = new Set(expandedGroups);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedGroups = next;
+  }
+  // Compact "Read ×3 · Grep · Bash" rollup for a collapsed tool-group head.
+  function summarizeGroup(blocks: Block[]): string {
+    const counts = new Map<string, number>();
+    for (const b of blocks) {
+      if (b.type !== "tool") continue;
+      const n = shortToolName(b.name);
+      counts.set(n, (counts.get(n) ?? 0) + 1);
+    }
+    const parts = [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n));
+    const shown = parts.slice(0, 4).join(" · ");
+    return parts.length > 4 ? `${shown} +${parts.length - 4}` : shown;
+  }
+
   async function copy() {
     if (!plainText) return;
     try {
@@ -290,6 +326,46 @@
       : null,
   );
 
+  // Fold a run of GROUP_MIN+ consecutive plain tool chips into a single
+  // collapsible "N tools" node so a multi-tool turn stops reading as a wall of
+  // rows. Prose / thinking / edits / cards / images all break a run, so the
+  // narration↔tool ordering is preserved — only back-to-back status chips
+  // collapse. Runs shorter than GROUP_MIN stay inline as before.
+  const GROUP_MIN = 3;
+  function coalesceToolGroups(units: TimelineUnit[]): TimelineUnit[] {
+    const out: TimelineUnit[] = [];
+    let run: Extract<TimelineUnit, { kind: "block" }>[] = [];
+    const flush = () => {
+      if (run.length === 0) return;
+      if (run.length < GROUP_MIN) {
+        out.push(...run);
+      } else {
+        const status: NodeStatus = run.some((u) => u.status === "error")
+          ? "error"
+          : run.some((u) => u.status === "pending")
+            ? "pending"
+            : "done";
+        out.push({
+          kind: "toolgroup",
+          blocks: run.map((u) => u.block),
+          key: `tg_${run[0].key}`,
+          status,
+        });
+      }
+      run = [];
+    };
+    for (const u of units) {
+      if (u.kind === "block" && u.block.type === "tool" && isGroupableChip(u.block.name)) {
+        run.push(u);
+      } else {
+        flush();
+        out.push(u);
+      }
+    }
+    flush();
+    return out;
+  }
+
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
   // prose become dividers; everything else becomes a node on the chain.
   const grouped = $derived.by<TimelineUnit[]>(() => {
@@ -322,7 +398,7 @@
       }
       units.push({ kind: "block", block: b, status: statusOf(b), key: `b_${i}` });
     }
-    return units;
+    return coalesceToolGroups(units);
   });
 
   // Key of the last in-flight or final node — drives the bullet pulse for
@@ -330,7 +406,7 @@
   const lastBlockKey = $derived.by<string | null>(() => {
     for (let i = grouped.length - 1; i >= 0; i--) {
       const u = grouped[i];
-      if (u.kind === "block") return u.key;
+      if (u.kind === "block" || u.kind === "toolgroup") return u.key;
     }
     return null;
   });
@@ -509,6 +585,38 @@
         {#if unit.kind === "divider"}
           <div class="tl-divider">
             <span class="tl-divider-label">Step {unit.stepNum} — {unit.title}</span>
+          </div>
+        {:else if unit.kind === "toolgroup"}
+          {@const isLastNode = !isUser && unit.key === lastBlockKey}
+          {@const nodeStatus =
+            streaming && isLastNode && unit.status === "done" ? "pending" : unit.status}
+          {@const open = expandedGroups.has(unit.key) || (streaming && isLastNode)}
+          <div
+            class="tl-node tl-toolgroup"
+            data-kind="tool"
+            data-status={nodeStatus}
+            data-open={open ? "true" : null}
+            style="--idx: {Math.min(ui, 6)}"
+          >
+            <button class="tg-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
+              <span class="tg-chev" class:open><ChevronRight size={11} /></span>
+              <Wrench size={12} class="tg-icon" />
+              <span class="tg-count">{unit.blocks.length} tools</span>
+              <span class="tg-sep" aria-hidden="true">·</span>
+              <span class="tg-sum mono">{summarizeGroup(unit.blocks)}</span>
+              <span class="tg-status">
+                {#if unit.status === "pending"}<Loader2 size={11} class="tg-spin" />
+                {:else if unit.status === "error"}<AlertCircle size={11} />
+                {:else}<CheckCircle2 size={11} />{/if}
+              </span>
+            </button>
+            {#if open}
+              <div class="tg-body">
+                {#each unit.blocks as gb, gi (gb.type === "tool" ? gb.id : gi)}
+                  {@render renderBlock(gb, 10000 + ui * 100 + gi)}
+                {/each}
+              </div>
+            {/if}
           </div>
         {:else}
           {@const isLastNode = !isUser && unit.key === lastBlockKey}
@@ -939,6 +1047,62 @@
      would float in space — kill them. */
   .bubble[data-role="user"] .tl-node::before { display: none; }
 
+  /* Collapsed tool group — a run of GROUP_MIN+ consecutive status chips folds
+     into one header row so multi-tool turns stop reading as a wall of rows.
+     Click to expand the chips; the live (last) node auto-opens while streaming
+     so tools are watchable as they land, then collapses when the turn moves on.
+     The group's rail bullet is drawn by .tl-node::before (data-kind="tool"). */
+  .tg-head {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%;
+    padding: 3px 8px;
+    min-height: 22px;
+    background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
+    border: 0;
+    border-radius: 6px;
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--fg-faint) 32%, transparent);
+    color: var(--fg-2);
+    font: inherit; font-size: 11px; text-align: left;
+    cursor: pointer;
+    transition: background 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
+  }
+  .tg-head:hover {
+    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--model-color, var(--accent)) 55%, transparent);
+    transform: translateX(1px);
+  }
+  .tl-toolgroup[data-status="pending"] .tg-head {
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 60%, transparent);
+  }
+  .tl-toolgroup[data-status="error"] .tg-head {
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--danger) 60%, transparent);
+  }
+  .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
+  .tg-chev.open { transform: rotate(90deg); }
+  .tg-head :global(.tg-icon) { color: var(--accent); opacity: 0.85; flex-shrink: 0; }
+  .tg-count { font-weight: 600; color: var(--fg); font-size: 10.5px; flex-shrink: 0; }
+  .tg-sep { color: var(--fg-faint); font-size: 10px; flex-shrink: 0; }
+  .tg-sum {
+    flex: 1; min-width: 0;
+    color: var(--fg-muted); font-size: 10.5px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tg-status { display: inline-flex; flex-shrink: 0; }
+  .tl-toolgroup[data-status="pending"] .tg-status { color: var(--accent); }
+  .tl-toolgroup[data-status="error"] .tg-status { color: var(--danger); }
+  .tl-toolgroup[data-status="done"] .tg-status { color: var(--ok); }
+  .tg-status :global(.tg-spin) { animation: tg-spin 1s linear infinite; }
+  @keyframes tg-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  .tg-body {
+    display: flex; flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+    padding-left: 6px;
+  }
+  /* No per-child rail bullet inside a group, so re-show each chip's own status
+     icon (the timeline variant hides it, assuming the rail bullet carries it). */
+  .tg-body :global(.chip[data-variant="timeline"] .chip-status) { display: inline-flex; }
+
   /* Step divider — uppercased label flanked by a faint line, sitting on
      the rail. Quiet visual punctuation between turn sections. */
   .tl-divider {
@@ -1015,7 +1179,11 @@
     border-radius: 12px;
     color: var(--fg);
     align-self: flex-end;
-    max-width: min(100%, 72ch);
+    /* Cap at 82% (not 100%) so a long message keeps a left gutter and still
+       reads as a right-anchored bubble in a narrow/docked pane — at 100% it
+       filled the column edge-to-edge and looked left-aligned, so short vs long
+       turns appeared to sit in "different locations". 72ch still caps wide panes. */
+    max-width: min(82%, 72ch);
     width: fit-content;
     white-space: pre-wrap;
   }
