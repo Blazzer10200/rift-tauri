@@ -2,6 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.44 — 2026-05-31 — assistant UI: merged activity panel, numbered step rail, tooltip hardening
+
+> **Why this release exists.** A pass over the assistant surface. The right-side panel was a two-tab Session/Activity split that left most of it empty; the turn timeline had detached "Step N —" dividers floating beside unlabeled tool chips; and tooltips popped back up after every click and drifted over the streaming panel. All reworked into one coherent surface. Frontend-only — no backend behavior changes versus v0.4.43.
+
+**The activity side-panel is now one live surface.** The old Session/Activity two-tab split (which left ~70% of the panel void) is gone — the right panel is a single scrolling surface that stacks top-to-bottom: a **Now** strip (live turn headline + elapsed), **Running** (every in-flight tool — Read/Edit/Grep/Write/WebFetch, not just Bash + agents — each with a plain-language caption like "Reading package.json"), **Tasks** (TodoWrite + progress), **Outputs** (files touched), **Sources** (web refs), a **Tool-mix** histogram, and **Insights**. Live in-flight work now has one source of truth (`liveActivity`) feeding both the panel and the composer pills. [ActivityPanel.svelte](src/lib/components/assistant/ActivityPanel.svelte)
+
+**Numbered step rail.** Every action unit — tool chip, coalesced group, or edit — gets a sequential number rendered as the rail bullet (green done / pulsing pending / red error) plus a plain-language caption inline, replacing the old detached "Step N —" divider sitting beside a bare chip. Consecutive tool runs collapse into one foldable group; user bubbles right-anchor. [MessageBubble.svelte](src/lib/components/assistant/MessageBubble.svelte)
+
+**AskUserQuestion no longer stalls.** The builtin AskUserQuestion tool hit the raw Allow/Deny permission bar (off the allowlist) with no headless surface and froze the turn. It's now auto-denied at the permission layer and steered to Rift's own ask-user card, which surfaces the question and injects the answer back. [mod.rs](src-tauri/src/assistant/mod.rs)
+
+**Tooltips behave.** Four fixes to the themed tooltip action ([tooltip.ts](src/lib/actions/tooltip.ts)): it no longer pops back up right after the click that dismissed it (focus-show now gates on `:focus-visible`, so only keyboard focus shows a tip); an open tip dismisses on scroll and repositions on resize instead of drifting over a reflowing panel; only one tooltip is ever on screen at once; and a trailing shortcut like "(Ctrl+W)" auto-renders as the styled key chip for consistency across every call site.
+
+**Verify.** `npm run check` 0 / 0 (4110 files); `cargo check` 0 / 0. Frontend live-verified via CDP across real turns. NSIS bundle + SHA256 round-trip via `release.ps1` at ship.
+
 ## v0.4.43 — 2026-05-31 — live-SFTP integration test coverage (no user-facing changes)
 
 > **Why this release exists.** This is a test-infrastructure release — there are **no behavioral or UI changes** versus v0.4.42, and the shipped binary is behaviorally identical. It closes the long-open #265 coverage gap on the SFTP transfer layer: the code that moves your files over the wire, atomically renames them into the server, and resolves drift now has real-server regression tests instead of mocks alone.

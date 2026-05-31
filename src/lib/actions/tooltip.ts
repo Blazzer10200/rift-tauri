@@ -8,7 +8,8 @@
 // On mount, the action strips the element's native `title` so the OS tooltip
 // never double-fires. A 400ms hover delay (configurable) keeps the popover
 // from flashing on incidental pointer transits. Multi-line `\n` text is
-// rendered via white-space: pre-line.
+// rendered via white-space: pre-line. A trailing shortcut parenthetical
+// (e.g. "Close (Ctrl+W)") is auto-promoted into the styled kbd chip.
 
 export type TooltipOpts =
   | string
@@ -26,19 +27,69 @@ type Resolved = {
   kbd: string | null;
 };
 
+// A single tooltip is ever alive at once — showing one dismisses any other.
+let activeHide: (() => void) | null = null;
+
+// Recognized shortcut tokens. A trailing "(…)" is treated as a keyboard hint
+// only when every "+"-separated part is one of these — so prose parentheticals
+// like "(click to copy)" stay inline text.
+const KEY_TOKEN =
+  /^(ctrl|cmd|alt|shift|win|meta|opt|option|enter|return|esc|escape|tab|space|del|delete|backspace|ins|insert|home|end|pageup|pagedown|up|down|left|right|f\d{1,2}|[a-z0-9]|[,./;'`\[\]\\=-]|↑|↓|←|→|⌘|⌥|⇧|⌫)$/i;
+
+// Split a trailing shortcut parenthetical off the text. Returns the original
+// text + null kbd when there's no qualifying parenthetical.
+function splitKbd(text: string): { text: string; kbd: string | null } {
+  const m = text.match(/^([^\n]*?)\s*\(([^()\n]+)\)\s*$/);
+  if (!m) return { text, kbd: null };
+  const inner = m[2].trim();
+  const parts = inner.split(/\s*\+\s*/);
+  const allTokens = parts.length > 0 && parts.every((p) => KEY_TOKEN.test(p));
+  // Require at least one modifier or a named key — guards against single-letter
+  // false positives like "(a)" reading as a chip.
+  const hasAnchor = /ctrl|cmd|alt|shift|win|meta|enter|return|esc|tab|del|space|page|home|end|↑|↓|←|→|f\d|[A-Z]/.test(
+    inner,
+  );
+  if (allTokens && hasAnchor) return { text: m[1].trim(), kbd: inner };
+  return { text, kbd: null };
+}
+
 function normalize(opts: TooltipOpts | undefined | null): Resolved | null {
   if (opts == null) return null;
   if (typeof opts === "string") {
     if (opts.length === 0) return null;
-    return { text: opts, placement: "top", delay: 400, kbd: null };
+    const { text, kbd } = splitKbd(opts);
+    return { text, placement: "top", delay: 400, kbd };
   }
   if (!opts.text) return null;
+  // Explicit kbd wins; otherwise try to lift one off the text.
+  const lifted = opts.kbd ? { text: opts.text, kbd: opts.kbd } : splitKbd(opts.text);
   return {
-    text: opts.text,
+    text: lifted.text,
     placement: opts.placement ?? "top",
     delay: opts.delay ?? 400,
-    kbd: opts.kbd ?? null,
+    kbd: lifted.kbd,
   };
+}
+
+// (Re)build the tooltip's inner content for a given config.
+function renderContent(tip: HTMLDivElement, cfg: Resolved) {
+  tip.textContent = "";
+  if (cfg.kbd) {
+    const txt = document.createElement("span");
+    txt.textContent = cfg.text;
+    tip.appendChild(txt);
+    const kbd = document.createElement("kbd");
+    kbd.className = "tip-kbd";
+    kbd.textContent = cfg.kbd;
+    tip.appendChild(kbd);
+  } else {
+    tip.textContent = cfg.text;
+  }
+  const arrow = document.createElement("span");
+  arrow.className = "tip-arrow";
+  arrow.setAttribute("aria-hidden", "true");
+  tip.appendChild(arrow);
+  tip.classList.toggle("multiline", cfg.text.includes("\n"));
 }
 
 export function tooltip(node: HTMLElement, opts: TooltipOpts) {
@@ -75,8 +126,7 @@ export function tooltip(node: HTMLElement, opts: TooltipOpts) {
     if (placement === "top" && r.top - th - GAP < 4) placement = "bottom";
     if (placement === "bottom" && r.bottom + th + GAP > vh - 4) placement = "top";
 
-    const top =
-      placement === "top" ? r.top - th - GAP : r.bottom + GAP;
+    const top = placement === "top" ? r.top - th - GAP : r.bottom + GAP;
     let left = r.left + r.width / 2 - tw / 2;
     left = Math.max(6, Math.min(vw - tw - 6, left));
 
@@ -91,29 +141,28 @@ export function tooltip(node: HTMLElement, opts: TooltipOpts) {
     tip.style.setProperty("--arrow-x", `${arrowX}px`);
   }
 
+  // Any scroll under an open tip would leave it floating in a stale spot
+  // (live panels stream + reflow). Cheapest robust fix: dismiss on scroll,
+  // reposition on resize.
+  function onScroll() {
+    hide();
+  }
+  function onResize() {
+    position();
+  }
+
   function show() {
     if (!cfg || tip) return;
+    // Enforce the single-active-tooltip invariant.
+    if (activeHide && activeHide !== hide) activeHide();
     tip = document.createElement("div");
     tip.className = "tip";
     tip.setAttribute("role", "tooltip");
-    if (cfg.text.includes("\n")) tip.classList.add("multiline");
-    if (cfg.kbd) {
-      // Text + trailing kbd chip — composer uses this for "Send (Enter)" etc.
-      const txt = document.createElement("span");
-      txt.textContent = cfg.text;
-      tip.appendChild(txt);
-      const kbd = document.createElement("kbd");
-      kbd.className = "tip-kbd";
-      kbd.textContent = cfg.kbd;
-      tip.appendChild(kbd);
-    } else {
-      tip.textContent = cfg.text;
-    }
-    const arrow = document.createElement("span");
-    arrow.className = "tip-arrow";
-    arrow.setAttribute("aria-hidden", "true");
-    tip.appendChild(arrow);
+    renderContent(tip, cfg);
     document.body.appendChild(tip);
+    activeHide = hide;
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
     // First paint sets dimensions; position after it lands in the DOM.
     requestAnimationFrame(position);
   }
@@ -121,9 +170,12 @@ export function tooltip(node: HTMLElement, opts: TooltipOpts) {
   function hide() {
     clearTimer();
     if (tip) {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
       tip.remove();
       tip = null;
     }
+    if (activeHide === hide) activeHide = null;
   }
 
   function scheduleShow() {
@@ -139,8 +191,15 @@ export function tooltip(node: HTMLElement, opts: TooltipOpts) {
     hide();
   }
   function onFocus() {
-    // Keyboard focus skips the delay — assistive users want immediate feedback.
+    // Only keyboard focus shows a tip. Mouse-click focus (focus that follows a
+    // pointer press) must NOT — otherwise the tip pops back up right after the
+    // click that just dismissed it. `:focus-visible` is exactly that distinction.
     if (!cfg || tip) return;
+    try {
+      if (!node.matches(":focus-visible")) return;
+    } catch {
+      // Older engines w/o :focus-visible — fall through and show.
+    }
     show();
   }
   function onBlur() {
@@ -160,25 +219,8 @@ export function tooltip(node: HTMLElement, opts: TooltipOpts) {
   return {
     update(next: TooltipOpts) {
       cfg = normalize(next);
-      // If the tip is currently shown, refresh its content in-place.
       if (tip && cfg) {
-        tip.textContent = "";
-        if (cfg.kbd) {
-          const txt = document.createElement("span");
-          txt.textContent = cfg.text;
-          tip.appendChild(txt);
-          const kbd = document.createElement("kbd");
-          kbd.className = "tip-kbd";
-          kbd.textContent = cfg.kbd;
-          tip.appendChild(kbd);
-        } else {
-          tip.textContent = cfg.text;
-        }
-        const arrow = document.createElement("span");
-        arrow.className = "tip-arrow";
-        arrow.setAttribute("aria-hidden", "true");
-        tip.appendChild(arrow);
-        tip.classList.toggle("multiline", cfg.text.includes("\n"));
+        renderContent(tip, cfg);
         requestAnimationFrame(position);
       } else if (!cfg) {
         hide();
