@@ -67,6 +67,8 @@ mod transfer;
 pub(crate) use transfer::is_dead_session_error;
 mod sftp_ops;
 pub use sftp_ops::SftpOps;
+#[cfg(test)]
+mod integration_tests;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RemoteEntry {
