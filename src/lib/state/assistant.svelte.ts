@@ -1647,7 +1647,7 @@ class AssistantStore {
   flushNow() { persistFlushNow(this); }
 
   // M6: relaxed from `private` so the tabs module calls it through the host ref.
-  scheduleSave(flush = false) { persistSchedule(this, flush); }
+  scheduleSave(flush = false, convoId?: string) { persistSchedule(this, flush, convoId); }
 
   /** Start a fresh conversation. Flushes the current one first so nothing
    *  is lost when the user clicks `+ New`. */
@@ -2017,11 +2017,21 @@ class AssistantStore {
    *  the turn that finished was on the active tab. Bg-tab queue drain is
    *  deferred until the user returns to that tab — auto-sending into a
    *  background tab while the user is composing in the foreground would be
-   *  surprising. Known follow-up: scheduleSave still scoped to active tab,
-   *  so a bg-tab turn waits until tab activation for persistence (covered
-   *  on close via flushNow). */
+   *  surprising. The save itself is scoped to the completed tab (its convoId
+   *  is threaded through scheduleSave) so a bg-tab turn persists immediately
+   *  even while another tab is focused — no longer deferred to re-activation. */
   private handleTurnComplete(tab: TabState) {
-    this.scheduleSave();
+    // Resolve this tab's convoId (its Map key) so the save targets the
+    // completed tab, not whichever tab is active. cliSessionId can diverge from
+    // convoId post-compaction, so reverse-look-up the key rather than trust it.
+    let convoId: string | undefined;
+    for (const [cid, t] of this.tabs) {
+      if (t === tab) {
+        convoId = cid;
+        break;
+      }
+    }
+    this.scheduleSave(false, convoId);
     this.drainQueue(tab);
   }
 

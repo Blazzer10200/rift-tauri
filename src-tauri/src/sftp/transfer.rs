@@ -388,10 +388,20 @@ async fn upload_atomic_via(
     // SFTP spec semantics are "update only present fields".
     let mut attrs = russh_sftp::protocol::FileAttributes::empty();
     attrs.permissions = Some(0o664);
-    let _ = tokio::time::timeout(
-        Duration::from_secs(T_QUICK),
-        sftp.set_metadata(remote_path, attrs),
-    ).await;
+    // Best-effort chmod: the upload + atomic rename already succeeded, so a
+    // chmod failure must not fail the op — it only governs whether shared-group
+    // peers can overwrite-rename this file later. Use `with_t` (not a raw
+    // timeout) so a wedged session here still emits the ConnectionWedged signal,
+    // and surface the failure instead of swallowing it via `let _`.
+    if let Err(msg) = with_t(T_QUICK, "chmod 0664", remote_path, sftp.set_metadata(remote_path, attrs)).await {
+        crate::diagnostics::emit_for(
+            crate::diagnostics::DiagStage::UploadDone,
+            crate::diagnostics::DiagLevel::Warn,
+            None,
+            Some(remote_path),
+            &format!("chmod 0664 failed (file left at default perms): {msg}"),
+        );
+    }
     OpResult::ok()
 }
 

@@ -2,6 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.42 — 2026-05-30 — subscription-aware auth detection + conflict-resolution data-safety fixes
+
+> **Why this release exists.** A full front-to-back audit (39-agent adversarial swarm, every finding refuted before it counted) turned up three real data-loss paths in conflict resolution and a compaction call that 401'd for API-key users — all fixed here, alongside clearer subscription-vs-API auth detection.
+
+**The auth pill now names your plan.** The probe parsed `claude auth status` but labeled every logged-in session a generic "Using Claude Code session." It now positively distinguishes a **subscription** (claude.ai OAuth — Pro/Max) from a logged-in **Console/API account** — the latter still reports `loggedIn:true` but bills per-token against no plan. `authMethod == "claude.ai"` + a `subscriptionType` is the subscription signal; `apiProvider == "firstParty"` rules out Bedrock/Vertex routing. The green pill reads "Claude Max subscription · you@email" (or Pro/Team/Enterprise); a Console login reads "Claude API account · … (per-token billing)" instead of being mislabeled a session. [mod.rs](src-tauri/src/assistant/mod.rs)
+
+**Conflict resolution no longer loses local edits.** Three paths fixed in [auto_sync.rs](src-tauri/src/sync/auto_sync.rs): (1) **Accept-Remote** didn't cancel a pending local upload before overwriting, so a queued push could clobber the remote you just accepted — it now drops the dirty-queue entry first. (2) **Save-Local-Copy** renamed your file aside, and if the remote download then failed it only logged, leaving an empty slot the next scan silently filled via pull — it now restores your file and re-queues the conflict for retry. (3) **Mirror-mode remote delete** forgot its snapshot row on a *failed* delete, so a transient SFTP error (wedged session, perms blip) made the next scan resurrect the file you deleted via a pull — it now keeps the row so the delete retries instead.
+
+**Compaction no longer 401s for API-key users.** `assistant_summarize_session` (the auto-compaction call) stripped `ANTHROPIC_API_KEY` like every spawn but never re-added it — so a user whose only auth is a Rift-configured key had every compaction fail 401. It now re-injects the key + `--bare` and fences off user MCP servers / slash commands like the sibling one-shot calls. [mod.rs](src-tauri/src/assistant/mod.rs)
+
+**Smaller fixes.** Auto-compaction is now serialized — a split-pane session with two hot tabs no longer spins up two concurrent summarize calls (double spend). A background-tab turn now persists immediately instead of waiting for you to switch back to it (was lost on a hard crash). The shared-group `chmod 0664` after upload now surfaces failures + emits the wedged-connection signal instead of swallowing them ([transfer.rs](src-tauri/src/sftp/transfer.rs)). The footer status pill no longer falsely flips "stale" on an idle-but-clean watching server ([StatusBar.svelte](src/lib/components/shell/StatusBar.svelte)).
+
+**Verify.** `cargo check` 0/0 + `cargo test` 115 pass / 0 fail, `npm run check` 0/0 (4109 files) + `npm test` 39 pass. NSIS bundle + SHA256 round-trip via `release.ps1` at ship. Conflict-resolution + subscription-detection logic is compile/test-verified; the live conflict UI paths and a real Console-account auth string are not runtime-tested this session.
+
 ## v0.4.41 — 2026-05-30 — stop silent auth failures + decode cryptic connection errors
 
 > **Why this release exists.** The collaborator-onboarding arc surfaced two dead-ends that cost hours each, both because Rift reported a *raw* failure the user couldn't act on. A stray system API key silently authenticated under a different identity than the green auth pill implied (then 401'd); and a VPN-blocked SSH connect surfaced as an opaque `WSAEACCES` errno. Both now explain themselves and point at the fix.

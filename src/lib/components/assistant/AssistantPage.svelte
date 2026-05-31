@@ -37,6 +37,17 @@
   $effect(() => {
     const threshold = assistant.autoCompactThreshold;
     if (!threshold) return;
+    // Serialize auto-compaction: never launch two at once. The original loop
+    // fired for every over-threshold pane in one synchronous pass before any
+    // `compactingNow` flag was observed cross-tab, so a split-pane session with
+    // two hot tabs spun up two concurrent Haiku summarize calls (double spend /
+    // rate-limit spike). Bail if any tab is already compacting, and `break`
+    // after launching one — the next over-threshold tab fires on the re-run
+    // once this one clears.
+    if (
+      assistant.panes.some((p) => p.tabId && assistant.tabFor(p.tabId)?.compactingNow)
+    )
+      return;
     const threshPct = threshold * 100;
     const now = Date.now();
     for (const p of assistant.panes) {
@@ -47,6 +58,7 @@
       if (now - tab.lastCompactionAt < 5 * 60_000) continue;
       if (assistant.ctxPctFor(tab) < threshPct) continue;
       void assistant.compactConversation(undefined, p.tabId);
+      break;
     }
   });
 
