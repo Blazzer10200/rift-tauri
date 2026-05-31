@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
     Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal,
-    Bot, Terminal, ListPlus, Sparkles } from "lucide-svelte";
+    Bot, Terminal, Wrench, ListPlus, Sparkles } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { ModelSel, PermissionMode } from "../../state/assistant/types";
   import { modelFamily, liveActivity } from "../../state/assistant/helpers";
@@ -60,6 +60,7 @@
   const liveItems = $derived(liveActivity(tab?.messages ?? [], tab?.agentSpawns ?? [], now));
   const agentCount = $derived(liveItems.filter((i) => i.kind === "agent").length);
   const shellCount = $derived(liveItems.filter((i) => i.kind === "shell").length);
+  const toolCount = $derived(liveItems.filter((i) => i.kind === "tool").length);
   const turnStartedAt = $derived(tab?.activity.turnStartedAt ?? null);
   const turnElapsed = $derived(
     streaming && turnStartedAt != null ? fmtClock(now - turnStartedAt) : null,
@@ -69,7 +70,7 @@
     void now;
     return streaming ? assistant.telemetry.snapshot().summary.outputTokensPerSec : null;
   });
-  const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || queue.length > 0);
+  const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
   function fmtClock(ms: number): string {
     const s = Math.max(0, Math.floor(ms / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -1278,6 +1279,17 @@
               >
                 <Terminal size={12} />
                 <span class="mono">{shellCount}</span>
+              </button>
+            {/if}
+            {#if toolCount > 0}
+              <button
+                type="button"
+                class="live-pill"
+                onclick={openActivity}
+                use:tooltip={`${toolCount} tool${toolCount === 1 ? "" : "s"} running. Click to open Activity.`}
+              >
+                <Wrench size={12} />
+                <span class="mono">{toolCount}</span>
               </button>
             {/if}
             {#if queue.length > 0}

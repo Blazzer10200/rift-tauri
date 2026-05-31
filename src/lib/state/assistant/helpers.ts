@@ -3,6 +3,7 @@
 // localStorage prefs + pure transforms. Safe to import anywhere.
 
 import type { ChatMessage, ModelFamily, ModelSel, PermissionMode, ThinkingEffort } from "./types";
+import { captionForTool } from "$lib/components/assistant/toolCaption";
 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku",
@@ -123,12 +124,16 @@ export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
  *  agent spawn that hasn't reported a result yet. */
 export type LiveActivityItem = {
   id: string;
-  kind: "shell" | "agent";
+  kind: "shell" | "agent" | "tool" | "thinking";
   label: string;
-  /** Sub-label (agent subagentType) or null for shells. */
+  /** Sub-label: agent subagentType, the tool name for generic tools, or null. */
   sub: string | null;
   startedAt: number;
 };
+
+/** Agent-launching tool names — surfaced via agentSpawns, so the generic
+ *  pending-tool branch skips them to avoid double-listing. */
+const AGENT_TOOL_NAMES = new Set(["Task", "Agent"]);
 
 /** First line of a shell command, trimmed + capped at 60 chars for compact
  *  display. Shared by the Activity panel rows and the composer live pills. */
@@ -150,9 +155,23 @@ export function liveActivity(
   const out: LiveActivityItem[] = [];
   for (const m of messages) {
     for (const b of m.blocks) {
-      if (b.type !== "tool" || b.name !== "Bash" || b.status !== "pending") continue;
-      const cmd = typeof b.input.command === "string" ? b.input.command : "";
-      out.push({ id: b.id, kind: "shell", label: firstLine(cmd) || "shell", sub: null, startedAt: b.startedAt ?? fallbackTs });
+      // Active reasoning → a single "Thinking…" row so the panel isn't blank
+      // during the (often long) pre-tool think.
+      if (b.type === "thinking" && b.status === "active") {
+        out.push({ id: `${m.id}:think`, kind: "thinking", label: "Thinking…", sub: null, startedAt: b.startedAt });
+        continue;
+      }
+      if (b.type !== "tool" || b.status !== "pending") continue;
+      // Agent launches ride agentSpawns below — skip here to avoid double-list.
+      if (AGENT_TOOL_NAMES.has(b.name)) continue;
+      if (b.name === "Bash") {
+        const cmd = typeof b.input.command === "string" ? b.input.command : "";
+        out.push({ id: b.id, kind: "shell", label: firstLine(cmd) || "shell", sub: null, startedAt: b.startedAt ?? fallbackTs });
+      } else {
+        // Read/Edit/Grep/Glob/Write/WebFetch/… — the previously invisible
+        // majority. Friendly caption matching the transcript rail.
+        out.push({ id: b.id, kind: "tool", label: captionForTool(b.name, b.input), sub: null, startedAt: b.startedAt ?? fallbackTs });
+      }
     }
   }
   for (const a of agentSpawns) {
