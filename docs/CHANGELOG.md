@@ -2,6 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.43 — 2026-05-31 — live-SFTP integration test coverage (no user-facing changes)
+
+> **Why this release exists.** This is a test-infrastructure release — there are **no behavioral or UI changes** versus v0.4.42, and the shipped binary is behaviorally identical. It closes the long-open #265 coverage gap on the SFTP transfer layer: the code that moves your files over the wire, atomically renames them into the server, and resolves drift now has real-server regression tests instead of mocks alone.
+
+**Real-SFTP transfer coverage.** Seven `#[ignore]` integration tests ([sftp/integration_tests.rs](src-tauri/src/sftp/integration_tests.rs)) exercise the actual russh / russh-sftp stack against a live SSH server: atomic upload/download roundtrip (byte-exact, binary payloads included), the **SETSTAT zero-byte-truncation guard** (the v0.2.26 `FileAttributes::default()` bug that once zeroed every uploaded file), atomic-overwrite truncation, `mkdir_p_strict` + recursive / missing-path `delete`, `get_remote_sha1`, recursive listing, and the parallel worker-pool batch fan-out (`upload_files_batch` / `download_files_batch`). They are env-gated (`RIFT_TEST_SFTP_*`) and skipped by a default `cargo test`, so CI and contributors without the target are unaffected. A PowerShell runner ([scripts/run-sftp-it.ps1](scripts/run-sftp-it.ps1)) wraps the env setup into one command.
+
+**Verify.** All 7 integration tests green against the live target (2026-05-31); default `cargo test --lib` 115 pass / 9 ignored, `npm run check` 0/0. NSIS bundle + SHA256 round-trip via `release.ps1` at ship. No production code changed.
+
 ## v0.4.42 — 2026-05-30 — subscription-aware auth detection + conflict-resolution data-safety fixes
 
 > **Why this release exists.** A full front-to-back audit (39-agent adversarial swarm, every finding refuted before it counted) turned up three real data-loss paths in conflict resolution and a compaction call that 401'd for API-key users — all fixed here, alongside clearer subscription-vs-API auth detection.
