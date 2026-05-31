@@ -14,12 +14,12 @@
   import { onMount, onDestroy } from "svelte";
   import {
     Loader2, Terminal, Bot, AlertCircle, Wrench, Activity, Sparkles,
-    FileText, Globe, Search, ExternalLink,
+    FileText, Globe, Search, ExternalLink, ChevronDown,
     ListChecks, Circle, CircleDot, CheckCircle2,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
-  import { liveActivity } from "../../state/assistant/helpers";
+  import { liveActivity, loadCollapsedSections, saveCollapsedSections } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
   import { scrubUser } from "$lib/util/redact";
 
@@ -123,6 +123,24 @@
     !streaming && running.length === 0 && toolStats.total === 0 &&
     tasks.length === 0 && outputs.length === 0 && sources.length === 0,
   );
+
+  // ── Live / review split ────────────────────────────────────────────────
+  // Running + Tasks are "happening now" (always shown). Outputs / Sources /
+  // Tool mix / Insights are "session review" — grouped under one collapsible
+  // header so a long session doesn't push the live state off-screen.
+  const hasReview = $derived(
+    outputs.length > 0 || sources.length > 0 || toolStats.histo.length > 0 ||
+    !!toolStats.slowest || toolStats.errors > 0 || toolStats.cancelled > 0,
+  );
+  let collapsed = $state(loadCollapsedSections());
+  const reviewCollapsed = $derived(collapsed.has("review"));
+  function toggleReview() {
+    const next = new Set(collapsed);
+    if (next.has("review")) next.delete("review");
+    else next.add("review");
+    collapsed = next;
+    saveCollapsedSections(next);
+  }
 
   // Tool-mix is capped at 6 rows; the footer toggles the full list.
   let toolsExpanded = $state(false);
@@ -264,6 +282,15 @@
       </section>
     {/if}
 
+    <!-- Session review zone — folds Outputs / Sources / Tool mix / Insights ── -->
+    {#if hasReview}
+      <button type="button" class="zone-head" onclick={toggleReview} aria-expanded={!reviewCollapsed}>
+        <span class="zone-line" aria-hidden="true"></span>
+        <span class="zone-label">Session review</span>
+        <ChevronDown size={13} class="zone-chev {reviewCollapsed ? '' : 'open'}" />
+      </button>
+    {/if}
+    {#if hasReview && !reviewCollapsed}
     <!-- Outputs — files touched ──────────────────────────────────────────── -->
     {#if outputs.length > 0}
       <section class="sect">
@@ -357,6 +384,7 @@
         {/if}
       </section>
     {/if}
+    {/if}
   {/if}
 </div>
 
@@ -384,6 +412,29 @@
     font-size: var(--fs-sm); font-weight: 600; color: var(--fg);
   }
   .now-el { flex-shrink: 0; font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+  /* Session-review zone header — divider + collapse toggle */
+  .zone-head {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 9px 14px;
+    background: none; border: 0; border-top: 1px solid var(--border);
+    text-align: left; font: inherit; cursor: pointer;
+    color: var(--fg-faint);
+    transition: color 120ms ease;
+  }
+  .zone-head:hover { color: var(--fg-2); }
+  /* No stray divider line when the review zone is the panel's first content. */
+  .zone-head:first-child { border-top: none; }
+  .zone-label {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .zone-line { flex: 1; height: 1px; background: var(--border); }
+  .zone-head :global(.zone-chev) {
+    flex-shrink: 0; transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform: rotate(-90deg);
+  }
+  .zone-head :global(.zone-chev.open) { transform: rotate(0deg); }
 
   .sect { display: flex; flex-direction: column; border-bottom: 1px solid var(--border); }
   .sect:last-of-type { border-bottom: none; }

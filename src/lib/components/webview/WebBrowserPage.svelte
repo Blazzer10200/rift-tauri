@@ -10,7 +10,7 @@
   import { workspace } from "../../state/workspace.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
 
-  let address = $state("https://example.com");
+  let address = $state("");
   let opened = $state(false);
   let loading = $state(false);
   let error = $state<string | null>(null);

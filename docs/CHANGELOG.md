@@ -2,6 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.45 — 2026-05-31 — fix: chats no longer wedge on mid-chat model switch; resizable activity dock
+
+> **Why this release exists.** A real correctness fix plus dock UX. Switching the model (or effort) mid-conversation could permanently brick that chat with `API Error: 400 ... thinking blocks ... cannot be modified` — it just stopped working and never recovered. Root-caused and fixed. On top of that, the activity dock is now resizable and its session-review data folds away.
+
+**Chats stop wedging mid-conversation.** Extended-thinking blocks carry a cryptographic signature bound to the model that produced them. When the model thinks and then runs a tool in one turn, every subsequent message replays that turn to the API — so switching the model picker mid-chat (Opus↔Sonnet, or worst-case →Haiku, which drops extended thinking entirely) made the replay fail validation and the conversation could never continue. The model is now **pinned per conversation** (a `.model` sidecar mirroring the existing cwd pin): a resume always runs under the model that signed the thinking blocks. Switching models starts a new conversation rather than breaking the current one; legacy chats back-fill on their next turn. [mod.rs](src-tauri/src/assistant/mod.rs)
+
+**The activity dock is resizable.** Drag the handle on the dock's left edge to set its width (260–520px, persisted across launches; double-click resets to default). [AssistantPane.svelte](src/lib/components/assistant/AssistantPane.svelte)
+
+**Live vs. review, separated.** Running + Tasks stay pinned at the top of the dock; Outputs / Sources / Tool-mix / Insights now fold together under one collapsible **Session review** header (state persisted), so a long session's review data never pushes live turn state off-screen. [ActivityPanel.svelte](src/lib/components/assistant/ActivityPanel.svelte)
+
+**Web-browser address bar fix.** The in-app browser opened pre-filled with `https://example.com`, so Go navigated straight there; it now starts empty with an `Enter a URL…` placeholder. [WebBrowserPage.svelte](src/lib/components/webview/WebBrowserPage.svelte)
+
+**Verify.** `npm run check` 0 / 0 (4110 files); `cargo check` 0 / 0. Dock resize / collapse / persistence + browser fix live-verified via CDP. NSIS bundle + SHA256 round-trip via `release.ps1` at ship.
+
 ## v0.4.44 — 2026-05-31 — assistant UI: merged activity panel, numbered step rail, tooltip hardening
 
 > **Why this release exists.** A pass over the assistant surface. The right-side panel was a two-tab Session/Activity split that left most of it empty; the turn timeline had detached "Step N —" dividers floating beside unlabeled tool chips; and tooltips popped back up after every click and drifted over the streaming panel. All reworked into one coherent surface. Frontend-only — no backend behavior changes versus v0.4.43.

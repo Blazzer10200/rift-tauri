@@ -68,6 +68,7 @@ import {
   saveEffort,
   loadPermissionMode,
   savePermissionMode,
+  loadDockWidth,
   flattenToolResult,
   previewToolInput,
   messagesHaveContextSignals,
@@ -1162,7 +1163,7 @@ class AssistantStore {
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
   // is retained as a no-op flag for back-compat w/ any remaining slash
   // command — History is now its own workspace, not an overlay.
-  ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity" });
+  ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth() });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first

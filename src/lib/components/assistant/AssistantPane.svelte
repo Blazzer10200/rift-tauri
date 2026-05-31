@@ -9,6 +9,7 @@
   import SyncActivityBanner from "./SyncActivityBanner.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
+  import { DOCK_MIN, DOCK_MAX, saveDockWidth } from "../../state/assistant/helpers";
   let {
     tabId,
     focused,
@@ -59,6 +60,33 @@
   let stickToBottom = $state(true);
   let scrolledTop = $state(false);
   let lastTabId: string | null = null;
+
+  // Dock resize — drag the handle on the dock's left edge. Dragging left widens
+  // (the dock is right-anchored). Width is app-global (assistant.ui.dockWidth),
+  // clamped + persisted on release.
+  let resizing = $state(false);
+  function startResize(e: PointerEvent) {
+    e.preventDefault();
+    resizing = true;
+    const startX = e.clientX;
+    const startW = assistant.ui.dockWidth;
+    const onMove = (ev: PointerEvent) => {
+      const next = startW + (startX - ev.clientX);
+      assistant.ui.dockWidth = Math.min(DOCK_MAX, Math.max(DOCK_MIN, next));
+    };
+    const onUp = () => {
+      resizing = false;
+      saveDockWidth(assistant.ui.dockWidth);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
+  function resetDockWidth() {
+    assistant.ui.dockWidth = 300;
+    saveDockWidth(300);
+  }
 
   function onScroll() {
     if (!scrollEl) return;
@@ -379,7 +407,25 @@
   {/if}
 </div>
 
-  <aside class="pane-dock-slot" class:open={dockOpen} aria-hidden={!dockOpen}>
+  {#if dockOpen}
+    <div
+      class="dock-resize"
+      class:active={resizing}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize panel"
+      onpointerdown={startResize}
+      ondblclick={resetDockWidth}
+      use:tooltip={"Drag to resize · double-click to reset"}
+    ></div>
+  {/if}
+  <aside
+    class="pane-dock-slot"
+    class:open={dockOpen}
+    class:resizing
+    aria-hidden={!dockOpen}
+    style={dockOpen ? `width:${assistant.ui.dockWidth}px` : ""}
+  >
     <SidePanel {tabId} />
   </aside>
 </div>
@@ -401,7 +447,29 @@
     border-left: 1px solid var(--border);
   }
   .pane-dock-slot.open { width: 300px; opacity: 1; }
-  .pane-dock-slot :global(.side-panel) { flex: 1; min-width: 300px; }
+  /* While dragging, kill the width transition so the panel tracks the cursor. */
+  .pane-dock-slot.resizing { transition: opacity 180ms ease-out; }
+  .pane-dock-slot :global(.side-panel) { flex: 1; min-width: 0; }
+
+  /* Resize grabber on the dock's left edge — a thin hit-area with a hover line. */
+  .dock-resize {
+    flex-shrink: 0;
+    width: 6px;
+    margin-right: -6px; /* overlap the dock border so it sits on the seam */
+    z-index: 2;
+    cursor: col-resize;
+    position: relative;
+  }
+  .dock-resize::after {
+    content: "";
+    position: absolute;
+    inset: 0 2px;
+    border-radius: 2px;
+    background: transparent;
+    transition: background 120ms ease;
+  }
+  .dock-resize:hover::after,
+  .dock-resize.active::after { background: var(--accent); }
 
   .pane {
     flex: 1 1 0;
