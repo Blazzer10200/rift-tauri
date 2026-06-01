@@ -2,6 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-01 (c) — frontend file-structure clean + pushed to GitHub source repo
+Pre-design cleanup. 1 commit `18206c0` (frontend-only, NOT a release — no version bump/CHANGELOG). `npm run check` 0/0/0 (4106 files). **Pushed to `Blazzer10200/rift-tauri` main** (`6a098f7..18206c0`, fast-forward — this is the SOURCE repo, separate from `rift-releases` update feed). Pre-push secret scan clean (only key-detection code + `sk-ant-…` placeholders; `.gitignore` covers `.secrets/`/`target/`/`node_modules/`/`Releases/`).
+- **Deleted 4 dead components** (verified zero live refs, only stale comment-mentions): `assistant/StatusHub.svelte` (replaced by MessageBubble in-flight strip), `assistant/TasksDock.svelte`, `onboarding/EmptyStateBanner.svelte`, `workspaces/DisabledWorkspace.svelte` (not in WORKSPACES registry).
+- **Merged `src/lib/util/` → `src/lib/utils/`** — `diag.ts`+`redact.ts` moved (git mv, history kept); rewrote 4 import sites (ActivityPanel, Settings → `$lib/utils/redact`; SyncActivityBanner, connection.svelte.ts → `utils/diag`). `util/` dir gone — one helpers dir now.
+- **Renamed `assistant/EmptyState.svelte` → `AssistantWelcome.svelte`** (756L rich chat welcome) to end name-collision w/ generic 121L `shell/EmptyState.svelte` primitive. AssistantPane import+tag updated.
+- **NEXT:** user moving to overall frontend *design* work via claude.ai. Structure now clean baseline: `components/` domain-grouped, `state/` (+ `assistant/` sub-split), `utils/`, `actions/`. Every remaining ~90 file is live/imported.
+
 ## Session 2026-06-01 (b) — shell layout + View dropdown + backdrop calm (frontend-only, committed, NOT shipped)
 4 commits: `8c92037` rail+actions · `9916fd3` pane fix · `bdbb4ef` View dropdown · `a3cc3d9` backdrop. `npm run check` 0/0/0 throughout; CDP-verified live. Files: `AppShell.svelte`, `ChatTabsBar.svelte`, `AssistantPane.svelte`.
 - **Activity rail raised full-height** (`8c92037`) — was stacked `tabs-rail` (full-width) **over** `[ActivityBar | pane]`, rail started *below* the tab. Restructured `.middle`: `ActivityBar` is now the full-height left column of `.body` (top-aligned w/ tab strip); tabs-rail + pane nest in a new `.content` flex-column right of the rail. Tab strip + bottom-border stop at the rail edge. Collapse anim preserved.
@@ -14,31 +21,13 @@
 Cohesive transcript + dock pass (`MessageBubble` major, `ActivityPanel`, `AssistantPane`, `ToolChip`). Transcript LEFT-aligned both roles (reverses 05-31(f) right-anchor); content-first headers (model+cost recede, brighten on hover); both chain rails → faded gradient threads w/ step-circle as sole marker; motion language extended to transcript + Now-strip crossfade + error-aware Tool-mix histogram. `npm run check` 0/0/0.
 - **NEXT (flagged, not done):** transcript scrollbar styling (currently hidden). (Header simplification + atmosphere-grain/backdrop both DONE in (b).)
 
-## Session 2026-05-31 (h) — v0.4.46 SHIPPED (permanent activity dock + quick-actions + live motion) — detail in git log
-Shipped **v0.4.46** (`16db171`, bump `fd74a0f`; tag on rift-releases, SHA256 OK). Frontend-only dock UX: `ui.dockOpen` default true (force-closes removed), quick-actions capsule `[Copy·Compact·Latest]` + streaming Stop, Outputs diff-stats (`+/−` per file), completion-ack motion pass (finished tool lingers ✓+dur then eases out; flip on Running/Outputs/Sources; turn-end "Done·{dur}" cap). All reduced-motion-guarded. `npm run check`/`cargo check` 0.
-
-## Session 2026-05-31 (g) — v0.4.45 SHIPPED (thinking-block mid-chat fix + resizable dock)
-Shipped **v0.4.45** (`5fcf965`; tag on rift-releases). `npm run check` 0/0/0, `cargo check` 0/0, CDP-verified.
-- **`mod.rs` model-pin per conversation** — thinking-block signatures are model-bound; switching model/effort mid-chat made `--resume` replay prior thinking under the wrong model → `400 thinking blocks cannot be modified` → chat bricked. Fix = `.model` sidecar (mirrors `.cwd`): `session_model_path`/`save`/`load`/`delete_session_model`; first turn saves, resume pins, legacy back-fills, cleaned on delete.
-- **Resizable dock** — drag handle on dock's left edge, `ui.dockWidth` (clamp 260–520, default 300, persisted `rift.assistant.dockWidth`, dbl-click resets). `.side-panel min-width` 300→0. Live/review split: Running+Tasks pinned, rest folds under collapsible SESSION REVIEW.
-- **`WebBrowserPage`** address bar init `""` (was `example.com`); empty Go/Enter no-op.
-- **NEXT:** optional picker↔pinned-model display sync; recovery for already-bricked chats (on-disk damage predates fix → new chat needed).
-
-## Session 2026-05-31 (f) — v0.4.44 SHIPPED (assistant UI wave: merged panel + step rail + tooltip hardening)
-Shipped the whole 05-31 UI wave as **v0.4.44** (frontend-only, no backend behavior change). Bundles: **(d, was committed)** numbered step rail + captions, AskUserQuestion permission fix, right-anchor user bubbles, tool-run collapse; **(e, was uncommitted)** side panel merged into ONE scrolling surface (`ActivityPanel` rewrite, `SidePanel` thin wrapper, `liveActivity` surfaces all pending tools w/ friendly captions); **(f, today)** `tooltip.ts` hardening — `:focus-visible` gate (no reappear-after-click), hide-on-scroll + reposition-on-resize (no drift in streaming panel), single active tooltip, auto-kbd chip lifting trailing "(Ctrl+W)" shortcuts into the styled chip. `npm run check` 0/0/4110; NSIS + SHA256 round-trip via `release.ps1`. Tag `v0.4.44` on rift-releases. **NEXT:** (1) richen heterogeneous group captions ("Read 2 files · 1 command" vs generic "Running 3 actions"). (2) Optional lane: move giant help-paragraph tooltips (SyncPage "Mirror mode…", ChatTabsBar compaction ~250 chars) out of hover popovers into an info affordance — flagged, not a mechanism bug.
-
-## Sessions 2026-05-31 (d)+(e) — assistant-turn UI wave (shipped in v0.4.44 — detail in git log)
-(e) Side panel merged into ONE scrolling surface (`ActivityPanel` rewrite, `SidePanel` thin wrapper): Now→Running→Tasks→Outputs→Sources→Tool mix→Insights; `liveActivity` surfaces all pending tools. (d) Numbered step rail + captions (`MessageBubble`/`ToolChip`/`toolCaption.ts`), AskUserQuestion auto-deny→`mcp__rift__ask_user` steer, tool-group `slide` fold.
-
-## Session 2026-05-31 (a) — v0.4.43 SHIPPED (#265 live-SFTP transfer coverage — detail in git log)
-Additive test-infra release: 7 `#[ignore]` integration tests in `src-tauri/src/sftp/integration_tests.rs` (transfer/ops/remote_exec/list + worker-pool batch). No prod code touched. Env-gated `RIFT_TEST_SFTP_{HOST,PORT,USER,KEY}`; all 7 GREEN vs Proxmox LXC 121 (`192.168.1.16`). Commits `b4b5cf1`/`04e22bb`/`2c08adf`. **NEXT:** `flush_batch` = last HIGH-risk reconcile path uncovered → Wave B Phase 2 (engine `sftp` → `&dyn SftpOps`, 7 consumers).
-
-## Session 2026-05-30 (f) — v0.4.42 SHIPPED (auth detection + conflict data-safety — detail in git log)
-39-agent swarm audit → fixed crit/warn tier: auth subscription detection (claude.ai Pro/Max vs Console/API in `mod.rs::assistant_auth_probe`); 3 conflict-resolution data-loss fixes (`auto_sync.rs`); compaction 401 (re-inject key for API-key users). cargo+vitest+svelte all green. rift-releases tag **v0.4.42**.
-- **OPEN — info tier (deferred, no code yet):** dead IPC surface (`scan_drift` + 5 registered-never-called cmds), `close_edit_in_place` never invoked, dead `serverKey` arg on local delete/rename, `ToDelete`→`ToDeleteLocal` rename, onboarding `dismissed` never resets on server delete, WebBrowser Go-button fires on `example.com` placeholder, `ctxPctBefore` reads active-not-target tab. Full detail in (f) swarm output.
-
-## Sessions 2026-05-30 (b)+(c) — v0.4.40 + v0.4.41 SHIPPED (detail in git log)
-v0.4.41 (`a2cb0cd`): silent-401 fix (strip `ANTHROPIC_API_KEY` from spawns) + sftp connect-err hints. v0.4.40 (`7c8e17d`): bg-process turn-end #242 + auth-lockdown. **Open:** orphan-reaping (bg children survive app-exit → Win Job Object KILL_ON_JOB_CLOSE).
+## Shipped 2026-05-30 → 05-31 (v0.4.40–v0.4.46, all SHIPPED — detail in git log)
+- **v0.4.46** (`16db171`) permanent activity dock + quick-actions capsule + completion-ack motion (frontend-only).
+- **v0.4.45** (`5fcf965`) mod.rs model-pin per conversation (`.model` sidecar — fixes `400 thinking blocks` brick on mid-chat model switch); resizable dock (`ui.dockWidth` 260–520).
+- **v0.4.44** (`07710e3`-era) assistant UI wave: side panel → ONE scrolling surface (`ActivityPanel`/`SidePanel` thin wrapper), numbered step rail + captions, AskUserQuestion permission fix, `tooltip.ts` hardening. **NEXT (open):** richen heterogeneous group captions; move giant help-paragraph tooltips out of hover popovers.
+- **v0.4.43** (`b4b5cf1`) 7 `#[ignore]` live-SFTP integration tests (`sftp/integration_tests.rs`), env-gated. **NEXT:** `flush_batch` coverage (engine `sftp`→`&dyn SftpOps`).
+- **v0.4.42** (`7c8e17d`-era) 39-agent swarm audit: auth subscription detection, 3 conflict data-loss fixes, compaction 401. **OPEN info-tier:** dead IPC (`scan_drift`+5 cmds), `close_edit_in_place` unused, `ToDelete`→`ToDeleteLocal` rename — detail in 05-30(f) swarm output.
+- **v0.4.40/41** (`7c8e17d`/`a2cb0cd`) silent-401 fix + bg-process turn-end #242 + auth-lockdown. **Open:** orphan-reaping (Win Job Object KILL_ON_JOB_CLOSE).
 
 ### RESUME HERE — Trey (collaborator) onboarding, in flight
 Connection **WORKS** now. Root cause of the multi-hour SSH failure was **NordVPN** strangling the Tailscale tunnel → `WSAEACCES` "Permission denied" on connect (NOT keys/server — both server-side verified fine). Fix: close Nord OR split-tunnel `tailscaled`+Rift to bypass the VPN. Trey SSH user = `treyday` (uid 1001, key in `/home/treyday/.ssh/authorized_keys` on CT120); connects to fxserver tailnet IP `100.122.178.19` (NOT LAN `.170`).
