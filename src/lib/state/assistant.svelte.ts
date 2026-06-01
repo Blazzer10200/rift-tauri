@@ -1163,7 +1163,10 @@ class AssistantStore {
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
   // is retained as a no-op flag for back-compat w/ any remaining slash
   // command — History is now its own workspace, not an overlay.
-  ui = $state({ dockOpen: false, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth() });
+  // dockOpen defaults true — the activity dock is a permanent surface now (not a
+  // toggle-to-peek panel). New/clear no longer force it shut; the Composer
+  // affordance still hides it on demand.
+  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth() });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
@@ -1658,7 +1661,6 @@ class AssistantStore {
     if (this.currentConvoId) this.dropTab(this.currentConvoId);
     this.queue = [];
     this.lastNotice = null;
-    this.ui.dockOpen = false;
     this.currentConvoId = null;
     this.currentCliSessionId = null;
     this.convoCreatedAt = null;
@@ -2356,7 +2358,6 @@ class AssistantStore {
     }
     this.lastNotice = null;
     this.queue = [];
-    this.ui.dockOpen = false;
   }
 }
 
