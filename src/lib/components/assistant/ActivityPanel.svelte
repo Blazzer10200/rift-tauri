@@ -12,10 +12,14 @@
   // The redundant "This session" stat card was dropped — tok/s · tools · cost
   // already live in the status bar. Everything here is per-tab reactive state.
   import { onMount, onDestroy } from "svelte";
+  import { fly, fade, slide } from "svelte/transition";
+  import { flip } from "svelte/animate";
+  import { cubicOut } from "svelte/easing";
   import {
     Loader2, Terminal, Bot, AlertCircle, Wrench, Activity, Sparkles,
     FileText, Globe, Search, ExternalLink, ChevronDown,
-    ListChecks, Circle, CircleDot, CheckCircle2,
+    ListChecks, Circle, CircleDot, CheckCircle2, XCircle,
+    StopCircle, Minimize2, Copy, ArrowDownToLine, Check,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
@@ -41,6 +45,15 @@
   // tick (see CR4 history).
   const mountTs = Date.now();
 
+  // Motion — reuse the app's spring-out curve (≈ cubic-bezier(0.22,1,0.36,1)).
+  // Every transition collapses to 0ms under prefers-reduced-motion.
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const flipOpts = () => ({ duration: reducedMotion ? 0 : 240, easing: cubicOut });
+  const rowIn = () => (reducedMotion ? { duration: 0 } : { y: 6, opacity: 0, duration: 200, easing: cubicOut });
+  const rowOut = () => ({ duration: reducedMotion ? 0 : 240 });
+
   // ── Now: canonical live turn state (tab.activity) ──────────────────────
   const turnStartedAt = $derived(tab?.activity.turnStartedAt ?? null);
   const liveItems = $derived(liveActivity(messages, tab?.agentSpawns ?? [], mountTs));
@@ -55,6 +68,104 @@
     if (isThinking) return "Thinking…";
     return "Responding…";
   });
+
+  // ── Completion acknowledgment ──────────────────────────────────────────
+  // liveActivity returns only PENDING units, so a finished tool would vanish
+  // with no feedback. We retain a just-finished row for ~1.2s showing its
+  // outcome (✓ + duration, or ✕ on error) before easing it out — so the panel
+  // visibly reacts to each call LANDING instead of silently dropping it.
+  type RunRow = {
+    id: string; kind: string; label: string; sub: string | null;
+    startedAt: number; state: "live" | "done" | "error"; durationMs: number | null;
+  };
+  // Final outcome for an id once it leaves the pending set.
+  const finalState = $derived.by(() => {
+    const m = new Map<string, { status: "done" | "error"; durationMs: number | null }>();
+    for (const msg of messages) {
+      for (const b of msg.blocks as Block[]) {
+        if (b.type !== "tool") continue;
+        if (b.status === "done") m.set(b.id, { status: "done", durationMs: b.durationMs ?? null });
+        else if (b.status === "error" || b.isError) m.set(b.id, { status: "error", durationMs: b.durationMs ?? null });
+      }
+    }
+    for (const a of tab?.agentSpawns ?? []) {
+      if (a.completedAt != null) m.set(a.id, { status: a.isError ? "error" : "done", durationMs: a.completedAt - a.startedAt });
+    }
+    return m;
+  });
+
+  let doneRows = $state<RunRow[]>([]);
+  const doneTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  let prevRunIds = new Set<string>();
+  let prevRunItems = new Map<string, RunRow>();
+  let trackedTab: unknown = null;
+
+  // Reset the buffer when the panel switches tabs so a prior conversation's
+  // lingering rows don't bleed onto the new one.
+  $effect(() => {
+    if (tab === trackedTab) return;
+    trackedTab = tab;
+    for (const t of doneTimers.values()) clearTimeout(t);
+    doneTimers.clear();
+    doneRows = [];
+    prevRunIds = new Set();
+    prevRunItems = new Map();
+  });
+
+  // Detect departures from the pending set → spawn a lingering outcome row.
+  $effect(() => {
+    const cur = new Set(running.map((r) => r.id));
+    for (const id of prevRunIds) {
+      if (cur.has(id) || doneTimers.has(id)) continue;
+      const snap = prevRunItems.get(id);
+      const fin = finalState.get(id);
+      if (!snap || !fin) continue; // cancelled / unknown → just drop, no flash
+      doneRows = [...doneRows, { ...snap, state: fin.status, durationMs: fin.durationMs }];
+      const t = setTimeout(() => {
+        doneRows = doneRows.filter((d) => d.id !== id);
+        doneTimers.delete(id);
+      }, reducedMotion ? 0 : 1200);
+      doneTimers.set(id, t);
+    }
+    prevRunIds = cur;
+    prevRunItems = new Map(running.map((r) => [r.id, { ...r, state: "live" as const, durationMs: null }]));
+  });
+  onDestroy(() => { for (const t of doneTimers.values()) clearTimeout(t); });
+
+  // Live rows + lingering completed rows (a live id always wins), by start time.
+  const displayRunning = $derived.by(() => {
+    const live: RunRow[] = running.map((r) => ({ ...r, state: "live", durationMs: null }));
+    const liveIds = new Set(live.map((r) => r.id));
+    return [...live, ...doneRows.filter((d) => !liveIds.has(d.id))].sort((a, b) => a.startedAt - b.startedAt);
+  });
+  const hasRunning = $derived(displayRunning.length > 0);
+
+  // ── Turn-end confirmation ──────────────────────────────────────────────
+  // A clean completion currently just makes the Now strip vanish. Hold a brief
+  // "Done · {dur}" success cap so a finished turn reads as closure, not a drop.
+  let finishedAt = $state<number | null>(null);
+  let finishedMs = $state<number | null>(null);
+  let finishTimer: ReturnType<typeof setTimeout> | null = null;
+  let wasStreaming = false;
+  let lastTurnStart = 0;
+  $effect(() => {
+    if (streaming) {
+      wasStreaming = true;
+      if (turnStartedAt != null) lastTurnStart = turnStartedAt;
+      return;
+    }
+    if (!wasStreaming) return;
+    wasStreaming = false;
+    // Only celebrate a real completion (had a start, no trailing error).
+    if (lastTurnStart > 0 && !tab?.lastError) {
+      finishedMs = Date.now() - lastTurnStart;
+      finishedAt = Date.now();
+      if (finishTimer) clearTimeout(finishTimer);
+      finishTimer = setTimeout(() => { finishedAt = null; }, reducedMotion ? 0 : 2600);
+    }
+  });
+  const showFinished = $derived(finishedAt != null && !streaming);
+  onDestroy(() => { if (finishTimer) clearTimeout(finishTimer); });
 
   // ── Tool rollup — counts, errors, slowest — per-tab, reactive ──────────
   const toolStats = $derived.by(() => {
@@ -79,19 +190,42 @@
   });
 
   // ── Session context — outputs (files touched) + sources (web) ──────────
+  // Outputs carry per-file churn (+added / −removed lines) accumulated across
+  // every Edit/Write/MultiEdit to that path. The churn model counts new-string
+  // lines as added and old-string lines as removed — a magnitude, not a precise
+  // git diff, but enough to see at a glance which files changed and how much.
+  type OutEntry = { path: string; tool: string; added: number; removed: number; edits: number };
   const sessionContext = $derived.by(() => {
-    const outMap = new Map<string, { path: string; tool: string }>();
+    const outMap = new Map<string, OutEntry>();
     const srcMap = new Map<string, { kind: "url" | "query"; value: string }>();
+    const bump = (fp: string, tool: string, added: number, removed: number) => {
+      const prev = outMap.get(fp);
+      if (prev) { prev.added += added; prev.removed += removed; prev.edits += 1; prev.tool = tool; }
+      else outMap.set(fp, { path: fp, tool, added, removed, edits: 1 });
+    };
     for (const m of messages) {
       for (const b of m.blocks as Block[]) {
         if (b.type !== "tool") continue;
         const input = b.input ?? {};
-        if (b.name === "Edit" || b.name === "Write" || b.name === "MultiEdit") {
+        if (b.name === "Edit") {
           const fp = input.file_path;
-          if (typeof fp === "string" && fp.length > 0) outMap.set(fp, { path: fp, tool: b.name });
+          if (typeof fp === "string" && fp.length > 0) bump(fp, b.name, lineCount(input.new_string), lineCount(input.old_string));
+        } else if (b.name === "Write") {
+          const fp = input.file_path;
+          if (typeof fp === "string" && fp.length > 0) bump(fp, b.name, lineCount(input.content), 0);
+        } else if (b.name === "MultiEdit") {
+          const fp = input.file_path;
+          if (typeof fp === "string" && fp.length > 0) {
+            let added = 0, removed = 0;
+            if (Array.isArray(input.edits)) for (const e of input.edits) {
+              added += lineCount((e as Record<string, unknown>)?.new_string);
+              removed += lineCount((e as Record<string, unknown>)?.old_string);
+            }
+            bump(fp, b.name, added, removed);
+          }
         } else if (b.name === "NotebookEdit") {
           const fp = input.notebook_path;
-          if (typeof fp === "string" && fp.length > 0) outMap.set(fp, { path: fp, tool: b.name });
+          if (typeof fp === "string" && fp.length > 0) bump(fp, b.name, 0, 0);
         } else if (b.name === "WebFetch") {
           const url = input.url;
           if (typeof url === "string" && url.length > 0) srcMap.set(url, { kind: "url", value: url });
@@ -165,6 +299,10 @@
     setTimeout(() => el.classList.remove("act-flash"), 1100);
   }
 
+  function lineCount(s: unknown): number {
+    if (typeof s !== "string" || s.length === 0) return 0;
+    return s.split("\n").length;
+  }
   function basename(p: string): string {
     const m = p.match(/[^\\/]+$/);
     return m ? m[0] : p;
@@ -186,6 +324,39 @@
     } catch (e) { console.warn("[ActivityPanel] open source failed", item, e); }
   }
 
+  // ── Quick actions ──────────────────────────────────────────────────────
+  // The dock is permanent now, so the common turn controls live here at the
+  // top instead of being keyboard-only / buried. Interrupt shows only while a
+  // turn streams; the rest act on the whole conversation.
+  let rootEl = $state<HTMLDivElement | undefined>();
+  let copied = $state(false);
+  const canCompact = $derived(!streaming && messages.length >= 4);
+
+  function interrupt() { void assistant.stop(tabId); }
+  function doCompact() { if (canCompact) void assistant.compactConversation(undefined, tabId); }
+  function jumpLatest() {
+    const scroll = rootEl?.closest(".pane-shell")?.querySelector<HTMLElement>(".scroll");
+    if (scroll) scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
+  }
+  async function copyTranscript() {
+    const lines: string[] = [];
+    for (const m of messages) {
+      if (m.role === "system") continue;
+      const text = (m.blocks as Block[])
+        .filter((b): b is Extract<Block, { type: "text" }> => b.type === "text")
+        .map((b) => b.text.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      if (!text) continue;
+      lines.push(`### ${m.role === "user" ? "User" : "Claude"}\n\n${text}`);
+    }
+    try {
+      await navigator.clipboard?.writeText(lines.join("\n\n"));
+      copied = true;
+      setTimeout(() => { copied = false; }, 1400);
+    } catch (e) { console.warn("[ActivityPanel] copy transcript failed", e); }
+  }
+
   function fmtElapsed(ms: number): string {
     const s = Math.max(0, Math.floor(ms / 1000));
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -197,18 +368,49 @@
   }
 </script>
 
-<div class="activity">
-  <!-- Now strip — live turn headline + elapsed ───────────────────────────── -->
-  {#if streaming}
-    <div class="now" class:think={isThinking && running.length === 0}>
-      {#if isThinking && running.length === 0}
+<div class="activity" bind:this={rootEl}>
+  <!-- Quick actions — turn controls, surfaced now that the dock is permanent ── -->
+  {#if !isEmpty}
+    <div class="quickbar">
+      <div class="qb-group">
+        {#if streaming}
+          <button type="button" class="qb-seg stop" onclick={interrupt} use:tooltip={"Stop this turn"}>
+            <StopCircle size={13} /><span>Stop</span>
+          </button>
+        {/if}
+        <button type="button" class="qb-seg" onclick={copyTranscript} use:tooltip={"Copy the transcript as Markdown"}>
+          {#if copied}<Check size={13} class="qb-ok" /><span>Copied</span>
+          {:else}<Copy size={13} /><span>Copy</span>{/if}
+        </button>
+        <button type="button" class="qb-seg" onclick={doCompact} disabled={!canCompact}
+          use:tooltip={canCompact ? "Compact — summarize history into a fresh, smaller context" : "Compact needs ≥4 messages and an idle turn"}>
+          <Minimize2 size={13} /><span>Compact</span>
+        </button>
+        <button type="button" class="qb-seg" onclick={jumpLatest} use:tooltip={"Jump to the latest message"}>
+          <ArrowDownToLine size={13} /><span>Latest</span>
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Now strip — live turn headline + elapsed, capped by a brief Done state ── -->
+  {#if streaming || showFinished}
+    <div class="now"
+      class:think={streaming && isThinking && running.length === 0}
+      class:done={!streaming}
+      transition:slide={{ duration: reducedMotion ? 0 : 180, easing: cubicOut }}>
+      {#if !streaming}
+        <CheckCircle2 size={14} class="now-done-ic" />
+      {:else if isThinking && running.length === 0}
         <Sparkles size={14} class="mon-pulse" />
       {:else}
         <Loader2 size={14} class="mon-spin" />
       {/if}
-      <span class="now-label">{nowLabel}</span>
-      {#if turnStartedAt != null}
+      <span class="now-label">{streaming ? nowLabel : "Done"}</span>
+      {#if streaming && turnStartedAt != null}
         <span class="now-el mono">{fmtElapsed(now - turnStartedAt)}</span>
+      {:else if !streaming && finishedMs != null}
+        <span class="now-el mono">{fmtDur(finishedMs)}</span>
       {/if}
     </div>
   {/if}
@@ -220,32 +422,41 @@
       the conversation runs.
     </div>
   {:else}
-    <!-- Running — every in-flight unit ───────────────────────────────────── -->
-    {#if running.length > 0}
+    <!-- Running — in-flight units + a brief outcome cap as each one lands ──── -->
+    {#if hasRunning}
       <section class="sect">
         <header class="sect-head">
           <Activity size={12} />
           <span class="sect-title">Running</span>
-          <span class="badge live"><span class="live-dot"></span>{running.length}</span>
+          {#if running.length > 0}
+            <span class="badge live"><span class="live-dot"></span>{running.length}</span>
+          {/if}
         </header>
         <ul class="rows">
-          {#each running as r (r.id)}
-            <li>
+          {#each displayRunning as r (r.id)}
+            <li in:fly={rowIn()} out:fade={rowOut()} animate:flip={flipOpts()}>
               <button
                 type="button"
                 class="run"
+                data-state={r.state}
                 onclick={() => jumpTo(r.id)}
                 use:tooltip={"Jump to this call in the transcript"}
               >
                 <span class="run-ic">
-                  {#if r.kind === "agent"}<Bot size={13} class="mon-pulse" />
-                  {:else if r.kind === "shell"}<Terminal size={13} class="mon-pulse" />
-                  {:else}<Wrench size={13} class="mon-pulse" />{/if}
+                  {#if r.state === "done"}<CheckCircle2 size={13} />
+                  {:else if r.state === "error"}<XCircle size={13} />
+                  {:else if r.kind === "agent"}<Bot size={13} />
+                  {:else if r.kind === "shell"}<Terminal size={13} />
+                  {:else}<Wrench size={13} />{/if}
                 </span>
                 <span class="run-label" class:mono={r.kind === "shell"}>
                   {#if r.sub}<span class="agtype">{r.sub}</span>{/if}<span class="run-t">{r.label}</span>
                 </span>
-                <span class="run-el mono">{fmtElapsed(now - r.startedAt)}</span>
+                {#if r.state === "live"}
+                  <span class="run-el mono">{fmtElapsed(now - r.startedAt)}</span>
+                {:else if r.durationMs != null}
+                  <span class="run-el fin mono">{fmtDur(r.durationMs)}</span>
+                {/if}
               </button>
             </li>
           {/each}
@@ -301,10 +512,17 @@
         </header>
         <ul class="rows">
           {#each outputs as o (o.path)}
-            <li class="row file">
-              <button type="button" class="row-btn" onclick={() => openOutput(o.path)} use:tooltip={o.path}>
+            <li class="row file" in:fly={rowIn()} animate:flip={flipOpts()}>
+              <button type="button" class="row-btn" onclick={() => openOutput(o.path)}
+                use:tooltip={o.edits > 1 ? `${o.path}\n${o.edits} edits` : o.path}>
                 <span class="row-icon"><FileText size={12} /></span>
                 <span class="row-text">{basename(o.path)}</span>
+                {#if o.added > 0 || o.removed > 0}
+                  <span class="diffstat" aria-hidden="true">
+                    {#if o.added > 0}<span class="add">+{o.added}</span>{/if}
+                    {#if o.removed > 0}<span class="del">−{o.removed}</span>{/if}
+                  </span>
+                {/if}
                 <span class="row-aft" aria-hidden="true"><ExternalLink size={10} /></span>
               </button>
             </li>
@@ -323,7 +541,7 @@
         </header>
         <ul class="rows">
           {#each sources as s, i (s.kind + ':' + s.value + ':' + i)}
-            <li class="row source">
+            <li class="row source" in:fly={rowIn()} animate:flip={flipOpts()}>
               <button type="button" class="row-btn" onclick={() => openSource(s)}
                 use:tooltip={s.kind === "url" ? s.value : `Search: ${s.value}\n(click to copy)`}>
                 <span class="row-icon">
@@ -399,6 +617,41 @@
   .activity::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
   .activity::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); }
 
+  /* Quick-actions — one segmented capsule at the dock's top edge. Reads as a
+     single deliberate control, not three stray buttons. */
+  .quickbar {
+    padding: 9px 12px; flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .qb-group {
+    display: flex; align-items: stretch;
+    border: 1px solid var(--border); border-radius: 9px; overflow: hidden;
+    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, var(--fg) 4%, transparent);
+  }
+  .qb-seg {
+    flex: 1; min-width: 0;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 30px; padding: 0 6px;
+    background: none; border: 0; border-left: 1px solid var(--border);
+    color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600;
+    white-space: nowrap; cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .qb-seg:first-child { border-left: 0; }
+  .qb-seg :global(svg) { flex-shrink: 0; color: var(--fg-muted); transition: color 120ms ease; }
+  .qb-seg:hover:not(:disabled) { background: var(--bg-elev-2); color: var(--fg); }
+  .qb-seg:hover:not(:disabled) :global(svg) { color: var(--accent); }
+  .qb-seg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .qb-seg:disabled { opacity: 0.4; cursor: default; }
+  .qb-seg.stop { color: var(--danger); }
+  .qb-seg.stop :global(svg) { color: var(--danger); }
+  .qb-seg.stop:hover:not(:disabled) { background: color-mix(in oklch, var(--danger) 14%, transparent); }
+  /* Streaming adds a 4th (Stop) segment — go icon-only so labels never clip at
+     the dock's 260px floor. Idle (3 segments) keeps the labels. */
+  .qb-group:has(.qb-seg.stop) .qb-seg span { display: none; }
+  .quickbar :global(.qb-ok) { color: var(--ok) !important; }
+
   /* Now strip */
   .now {
     display: flex; align-items: center; gap: 9px;
@@ -412,6 +665,10 @@
     font-size: var(--fs-sm); font-weight: 600; color: var(--fg);
   }
   .now-el { flex-shrink: 0; font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  /* Turn-end confirmation — a calm green cap, not another alert. */
+  .now.done { background: color-mix(in oklch, var(--ok) 11%, transparent); }
+  .now.done :global(svg) { color: var(--ok); }
+  .now.done .now-label, .now.done .now-el { color: var(--ok); }
 
   /* Session-review zone header — divider + collapse toggle */
   .zone-head {
@@ -469,11 +726,27 @@
   }
   .run:hover { background: var(--bg-elev-2); }
   .run:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .run-ic { display: flex; align-items: center; color: var(--accent); flex-shrink: 0; }
-  .run-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-ic { display: flex; align-items: center; color: var(--accent); flex-shrink: 0; transition: color 160ms ease; }
+  .run-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 160ms ease; }
   .run-label.mono .run-t { font-family: var(--font-mono); font-size: 12px; color: var(--fg); }
   .agtype { color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-xs); margin-right: 6px; }
   .run-el { flex-shrink: 0; font-size: 10px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+  /* Outcome states — the completed call ticks ✓ / ✕ + final duration, holds,
+     then eases out. One settle-flash on arrival; no looping pulse. */
+  .run[data-state="done"] .run-ic { color: var(--ok); }
+  .run[data-state="error"] .run-ic { color: var(--danger); }
+  .run[data-state="done"] .run-label, .run[data-state="error"] .run-label { color: var(--fg-muted); }
+  .run-el.fin { color: var(--fg-faint); }
+  .run[data-state="done"] { animation: run-settle 1100ms ease-out; }
+  .run[data-state="error"] { animation: run-settle-err 1100ms ease-out; }
+  @keyframes run-settle {
+    0%   { background: color-mix(in oklch, var(--ok) 16%, transparent); }
+    45%, 100% { background: transparent; }
+  }
+  @keyframes run-settle-err {
+    0%   { background: color-mix(in oklch, var(--danger) 16%, transparent); }
+    45%, 100% { background: transparent; }
+  }
 
   /* Tasks progress bar */
   .progress { position: relative; height: 2px; background: var(--bg-elev-2); overflow: hidden; flex-shrink: 0; }
@@ -514,6 +787,17 @@
   .row-btn .row-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-aft { display: inline-flex; align-items: center; color: var(--fg-faint); opacity: 0; transition: opacity 120ms ease-out; flex-shrink: 0; }
   .row-btn:hover .row-aft, .row-btn:focus-visible .row-aft { opacity: 0.7; }
+
+  /* Diff-stat — per-file churn on output rows. Lets row-text take the slack so
+     the +/− sits right-aligned against the open-affordance. */
+  .row.file .row-text { flex: 1; min-width: 0; }
+  .diffstat {
+    display: inline-flex; gap: 5px; flex-shrink: 0;
+    font-family: var(--font-mono); font-size: 10px;
+    font-variant-numeric: tabular-nums; line-height: 1;
+  }
+  .diffstat .add { color: var(--ok); }
+  .diffstat .del { color: var(--danger); }
 
   /* Histogram */
   .histo { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 7px; }
@@ -564,5 +848,6 @@
   @media (prefers-reduced-motion: reduce) {
     .live-dot, .activity :global(.mon-spin), .activity :global(.mon-pulse), .progress-active { animation: none; }
     :global(.tl-node.act-flash) { animation: none; }
+    .run[data-state="done"], .run[data-state="error"] { animation: none; }
   }
 </style>
