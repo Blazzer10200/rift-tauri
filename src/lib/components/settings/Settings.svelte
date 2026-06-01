@@ -12,7 +12,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { scrubUser } from "$lib/util/redact";
+  import { scrubUser } from "$lib/utils/redact";
 
   import { tooltip } from "$lib/actions/tooltip";
   // SSH keys merged into Network section as a header action — one fewer nav row,

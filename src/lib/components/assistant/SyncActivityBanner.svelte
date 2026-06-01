@@ -1,6 +1,6 @@
 <script lang="ts">
   import { connection } from "../../state/connection.svelte";
-  import { reportFrontendError } from "../../util/diag";
+  import { reportFrontendError } from "../../utils/diag";
   import { RefreshCw, AlertTriangle, CheckCircle2 } from "lucide-svelte";
   import { slide } from "svelte/transition";
 
