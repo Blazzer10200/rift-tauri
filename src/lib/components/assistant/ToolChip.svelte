@@ -755,9 +755,11 @@
   .chip[data-variant="timeline"]:not(.as-card) .chip-head {
     padding: 3px 8px;
     min-height: 22px;
-    border-radius: 6px;
+    border-radius: 8px;
     background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--fg-faint) 32%, transparent);
+    /* No resting left-bar — the node circle on the rail is the spine now, so
+       the chip's own inset accent only competes with it. Hover still lifts the
+       model-hue bar to signal interactivity. */
     transition: background 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
   }
   .chip[data-variant="timeline"]:not(.as-card) .chip-head:hover {
@@ -778,7 +780,7 @@
   .chip[data-variant="timeline"]:not(.as-card) .chip-body {
     margin-top: 4px;
     border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: 5px;
+    border-radius: 8px;
     background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
   }
   .chip[data-variant="timeline"]:not(.as-card)[data-status="pending"] {

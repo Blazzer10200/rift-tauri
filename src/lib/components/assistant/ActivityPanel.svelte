@@ -51,7 +51,7 @@
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const flipOpts = () => ({ duration: reducedMotion ? 0 : 240, easing: cubicOut });
-  const rowIn = () => (reducedMotion ? { duration: 0 } : { y: 6, opacity: 0, duration: 200, easing: cubicOut });
+  const rowIn = (i = 0) => (reducedMotion ? { duration: 0 } : { y: 6, opacity: 0, duration: 200, delay: Math.min(i, 4) * 35, easing: cubicOut });
   const rowOut = () => ({ duration: reducedMotion ? 0 : 240 });
 
   // ── Now: canonical live turn state (tab.activity) ──────────────────────
@@ -170,6 +170,7 @@
   // ── Tool rollup — counts, errors, slowest — per-tab, reactive ──────────
   const toolStats = $derived.by(() => {
     const counts: Record<string, number> = {};
+    const errCounts: Record<string, number> = {};
     let total = 0, errors = 0, cancelled = 0;
     let slowest: { name: string; ms: number; id: string } | null = null;
     let lastFail: string | null = null;
@@ -180,13 +181,13 @@
         total += 1;
         const isCancelled = b.result != null && b.result.includes("Cancelled:");
         if (isCancelled) cancelled += 1;
-        else if (b.isError || b.status === "error") { errors += 1; lastFail = b.name; }
+        else if (b.isError || b.status === "error") { errors += 1; lastFail = b.name; errCounts[b.name] = (errCounts[b.name] ?? 0) + 1; }
         if (b.durationMs != null && (!slowest || b.durationMs > slowest.ms)) slowest = { name: b.name, ms: b.durationMs, id: b.id };
       }
     }
     const histo = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const max = histo.length ? histo[0][1] : 1;
-    return { counts, total, errors, cancelled, slowest, lastFail, histo, max };
+    return { counts, errCounts, total, errors, cancelled, slowest, lastFail, histo, max };
   });
 
   // ── Session context — outputs (files touched) + sources (web) ──────────
@@ -406,7 +407,9 @@
       {:else}
         <Loader2 size={14} class="mon-spin" />
       {/if}
-      <span class="now-label">{streaming ? nowLabel : "Done"}</span>
+      {#key streaming ? nowLabel : "Done"}
+        <span class="now-label">{streaming ? nowLabel : "Done"}</span>
+      {/key}
       {#if streaming && turnStartedAt != null}
         <span class="now-el mono">{fmtElapsed(now - turnStartedAt)}</span>
       {:else if !streaming && finishedMs != null}
@@ -433,8 +436,8 @@
           {/if}
         </header>
         <ul class="rows">
-          {#each displayRunning as r (r.id)}
-            <li in:fly={rowIn()} out:fade={rowOut()} animate:flip={flipOpts()}>
+          {#each displayRunning as r, i (r.id)}
+            <li in:fly={rowIn(i)} out:fade={rowOut()} animate:flip={flipOpts()}>
               <button
                 type="button"
                 class="run"
@@ -562,10 +565,14 @@
         <header class="sect-head"><Wrench size={12} /><span class="sect-title">Tool mix</span></header>
         <div class="histo">
           {#each shownTools as [name, count] (name)}
-            <div class="hrow" use:tooltip={name}>
+            {@const err = toolStats.errCounts[name] ?? 0}
+            <div class="hrow" use:tooltip={err > 0 ? `${name} · ${err} failed` : name}>
               <span class="hname">{name}</span>
-              <span class="hbar"><i style="width: {(count / toolStats.max) * 100}%"></i></span>
-              <span class="hn mono">{count}</span>
+              <span class="hbar">
+                <i class="ok" style="width: {((count - err) / toolStats.max) * 100}%"></i>
+                {#if err > 0}<i class="err" style="width: {(err / toolStats.max) * 100}%"></i>{/if}
+              </span>
+              <span class="hn mono" class:has-err={err > 0}>{count}</span>
             </div>
           {/each}
           {#if toolStats.histo.length > TOOL_CAP}
@@ -663,6 +670,13 @@
   .now-label {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     font-size: var(--fs-sm); font-weight: 600; color: var(--fg);
+    /* Crossfade when the headline changes (Thinking → Running 2 actions → Done),
+       keyed via {#key} in the template — mirrors the transcript stage-label. */
+    animation: now-label-in 280ms ease-out;
+  }
+  @keyframes now-label-in {
+    from { opacity: 0; transform: translateY(-1px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
   .now-el { flex-shrink: 0; font-size: 11px; color: var(--accent); font-variant-numeric: tabular-nums; }
   /* Turn-end confirmation — a calm green cap, not another alert. */
@@ -811,8 +825,10 @@
   }
   .hmore:hover { background: var(--bg-elev-2); color: var(--fg-2); }
   .hmore:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .hbar { flex: 1; height: 7px; background: var(--bg-elev-2); border-radius: 4px; overflow: hidden; }
-  .hbar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; transition: width 280ms cubic-bezier(0.22,1,0.36,1); }
+  .hbar { flex: 1; height: 7px; background: var(--bg-elev-2); border-radius: 4px; overflow: hidden; display: flex; }
+  .hbar i { display: block; height: 100%; background: var(--accent); transition: width 280ms cubic-bezier(0.22,1,0.36,1); }
+  .hbar i.err { background: var(--danger); }
+  .hn.has-err { color: var(--danger); }
   .hn { width: 18px; text-align: right; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
 
   /* Insights */
@@ -847,6 +863,7 @@
   @keyframes mon-live-pulse { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
   @media (prefers-reduced-motion: reduce) {
     .live-dot, .activity :global(.mon-spin), .activity :global(.mon-pulse), .progress-active { animation: none; }
+    .now-label { animation: none; }
     :global(.tl-node.act-flash) { animation: none; }
     .run[data-state="done"], .run[data-state="error"] { animation: none; }
   }

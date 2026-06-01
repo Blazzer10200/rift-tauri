@@ -2,6 +2,15 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-01 (b) — shell layout: full-height rail + actions zone-grouping (frontend-only, committed, NOT shipped)
+`npm run check` 0/0/0; CDP-verified on live dev. Files: `AppShell.svelte`, `ChatTabsBar.svelte`.
+- **Activity rail raised full-height** — was stacked `tabs-rail` (full-width) **over** `[ActivityBar | pane]`, so the rail started *below* the tab. Restructured `.middle`: `ActivityBar` is now the full-height left column of `.body` (top-aligned w/ the tab strip), and tabs-rail + pane nest in a new `.content` flex-column right of the rail. Tab strip + its bottom-border now stop at the rail edge (threads into the rail's inset divider). Collapse animation on `.tabs-rail` preserved.
+- **Top-right `.actions` zone-grouping** (closes (a)'s PAUSED item via grouped-zones) — History + workspace chip wrapped in `.grp` (hug @5px); inter-zone `.actions` gap 6→9px; new `.vdiv` hairline before the view-toggle `.seg` so the cluster parses `[context · status │ view]`. Transient pills (auth/agents/ctx/compact) flow the middle status zone; divider keeps view segment pinned right.
+
+## Session 2026-06-01 (a) — assistant UI polish wave (frontend-only, committed, NOT shipped) — detail in git log
+Cohesive transcript + dock pass (`MessageBubble` major, `ActivityPanel`, `AssistantPane`, `ToolChip`). Transcript LEFT-aligned both roles (reverses 05-31(f) right-anchor); content-first headers (model+cost recede, brighten on hover); both chain rails → faded gradient threads w/ step-circle as sole marker; motion language extended to transcript + Now-strip crossfade + error-aware Tool-mix histogram. `npm run check` 0/0/0.
+- **NEXT (flagged, not done):** transcript scrollbar styling (currently hidden), atmosphere-grain dial-back. (Top-right header simplification DONE in (b).)
+
 ## Session 2026-05-31 (h) — v0.4.46 SHIPPED (permanent activity dock + quick-actions + live motion pass)
 Shipped **v0.4.46** (code `16db171`, bump `fd74a0f`; tag `v0.4.46` on rift-releases, SHA256 round-trip OK). Frontend-only UX wave on the assistant activity dock. `npm run check` 0/0/0, `cargo check` 0/0; CDP-verified on live dev turns. Files: `ActivityPanel.svelte` (major), `assistant.svelte.ts` (dockOpen default + 2 force-close removals).
 - **Permanent dock** — `ui.dockOpen` defaults **true**; removed the force-closes in `newConversation()`/`clearConversation()`. Stays open across new/clear/switch (still gated `&& !!tab`). Composer activity button still hides on demand.
@@ -30,13 +39,6 @@ Additive test-infra release: 7 `#[ignore]` integration tests in `src-tauri/src/s
 ## Session 2026-05-30 (f) — v0.4.42 SHIPPED (auth detection + conflict data-safety — detail in git log)
 39-agent swarm audit → fixed crit/warn tier: auth subscription detection (claude.ai Pro/Max vs Console/API in `mod.rs::assistant_auth_probe`); 3 conflict-resolution data-loss fixes (`auto_sync.rs`); compaction 401 (re-inject key for API-key users). cargo+vitest+svelte all green. rift-releases tag **v0.4.42**.
 - **OPEN — info tier (deferred, no code yet):** dead IPC surface (`scan_drift` + 5 registered-never-called cmds), `close_edit_in_place` never invoked, dead `serverKey` arg on local delete/rename, `ToDelete`→`ToDeleteLocal` rename, onboarding `dismissed` never resets on server delete, WebBrowser Go-button fires on `example.com` placeholder, `ctxPctBefore` reads active-not-target tab. Full detail in (f) swarm output.
-
-## Session 2026-05-30 (e) — live UI↔backend CDP verification + stale-pill fine-tune (shipped in f, git log)
-Drove app via CDP, confirmed every workspace wired to backend (auth probe, drift scan, SFTP list, chat spawn+stream+turn-end #242, smart-title, telemetry). StatusBar `isStale` gated on `queue>0||failed>0||conflicts>0` so idle+clean watching server stays green.
-- **DEV ARTIFACT (no data loss):** saving the .svelte → HMR + my `location.reload()` reset frontend to offline/"No servers". Confirmed intact: `rift.json` holds endure-rp profile (`lastSelected`), `list_servers`→`["endure-rp"]`. `loadServers()` is wired to app-launch/Tauri-ready, NOT webview reload → plain reload won't reconnect.
-
-## Session 2026-05-30 (d) — dev-tooling + test-infra (committed, no ship — git log)
-CDP console capture (`14c84d2`: serve.cjs now subscribes `Runtime.enable`+`Log.enable`, ring buffer, `c.sh console`). Proxmox SFTP test target (`c9ef1fb`: LXC 121 `rift-sftp-test`@`192.168.1.16`, key `.secrets/rift-sftp-test`, helper `scripts/sftp-test-target.sh`; MCP stays read-only — see `docs/design/proxmox-sftp-test-target.md`).
 
 ## Sessions 2026-05-30 (b)+(c) — v0.4.40 + v0.4.41 SHIPPED (detail in git log)
 v0.4.41 (`a2cb0cd`): silent-401 fix (strip `ANTHROPIC_API_KEY` from spawns) + sftp connect-err hints. v0.4.40 (`7c8e17d`): bg-process turn-end #242 + auth-lockdown. **Open:** orphan-reaping (bg children survive app-exit → Win Job Object KILL_ON_JOB_CLOSE).

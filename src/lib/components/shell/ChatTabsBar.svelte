@@ -381,6 +381,7 @@
   </div>
 
   <div class="actions">
+    <div class="grp grp-nav">
     <button
       class="hdr-btn history-btn"
       class:open={historyOpen}
@@ -421,6 +422,7 @@
         <span class="hdr-btn-label">Open folder</span>
       </button>
     {/if}
+    </div>
 
     {#if authWarn}
       <span
@@ -501,6 +503,8 @@
         <span>Compact</span>
       </button>
     {/if}
+
+    <span class="vdiv" aria-hidden="true"></span>
 
     <div class="seg" role="group" aria-label="View">
       <button
@@ -844,7 +848,9 @@
   .actions {
     display: flex;
     align-items: center;
-    gap: 6px;
+    /* Inter-zone gap. Items inside a .grp sit tighter (gap:5) so each zone
+       reads as one unit; zones breathe apart at 9px. */
+    gap: 9px;
     padding: 0 8px 0 10px;
     flex-shrink: 0;
     align-self: center;
@@ -864,6 +870,27 @@
       transparent,
       color-mix(in oklch, var(--border) 90%, transparent) 30%,
       color-mix(in oklch, var(--border) 90%, transparent) 70%,
+      transparent);
+  }
+
+  /* Semantic zones inside .actions. Members hug each other at 5px so the
+     zone reads as one unit; zones split apart via .actions gap (9px). */
+  .grp {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  /* Hairline between the transient/nav zone and the persistent view-toggle
+     segment — mirrors .actions::before so the cluster parses left-to-right
+     as [context · status │ view]. */
+  .vdiv {
+    width: 1px;
+    align-self: stretch;
+    margin: 6px 0;
+    background: linear-gradient(180deg,
+      transparent,
+      color-mix(in oklch, var(--border) 80%, transparent) 30%,
+      color-mix(in oklch, var(--border) 80%, transparent) 70%,
       transparent);
   }
 
