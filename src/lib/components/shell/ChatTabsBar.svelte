@@ -4,7 +4,7 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown, Globe } from "lucide-svelte";
+  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown, Globe, Check } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
@@ -94,6 +94,40 @@
     e.preventDefault();
     ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
   }
+
+  // View dropdown — consolidates the panel/layout toggles (browser, activity
+  // dock, split pane) into one clean menu, à la Claude Code desktop's
+  // top-right options popover. Anchored to its trigger, portaled to <body>
+  // to escape the .tabs-rail overflow clip.
+  let viewMenuOpen = $state(false);
+  let viewAnchor = $state<HTMLButtonElement | undefined>();
+  let viewMenu = $state<HTMLDivElement | undefined>();
+  let viewPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
+
+  function openViewMenu() {
+    if (!viewAnchor) return;
+    const r = viewAnchor.getBoundingClientRect();
+    viewPos = { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) };
+    viewMenuOpen = true;
+  }
+  $effect(() => {
+    if (!viewMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (viewAnchor?.contains(t)) return;
+      if (viewMenu?.contains(t)) return;
+      viewMenuOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { viewMenuOpen = false; viewAnchor?.focus(); }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  });
 
   let dragFromIdx = $state<number | null>(null);
   let dragOverIdx = $state<number | null>(null);
@@ -506,50 +540,23 @@
 
     <span class="vdiv" aria-hidden="true"></span>
 
-    <div class="seg" role="group" aria-label="View">
-      <button
-        class="seg-btn"
-        class:on={browserDock.open}
-        type="button"
-        use:tooltip={"Web browser panel"}
-        onclick={() => browserDock.toggle()}
-        aria-pressed={browserDock.open}
-      >
-        <Globe size={13}/>
-      </button>
-      <button
-        class="seg-btn"
-        class:on={tasksOpen}
-        class:pulse
-        type="button"
-        onclick={toggleTasks}
-        aria-pressed={tasksOpen}
-        use:tooltip={taskCount > 0
-          ? `Side panel — Session · Activity (${taskDone}/${taskCount} tasks done)`
-          : "Side panel — Session · Activity"}
-      >
-        <PanelRight size={13} />
-        {#if taskCount > 0}
-          <span class="seg-chip">{taskDone}/{taskCount}</span>
-        {/if}
-      </button>
-      <button
-        class="seg-btn"
-        class:on={splitActive}
-        type="button"
-        onclick={() => assistant.addPane()}
-        disabled={!canAddPane}
-        use:tooltip={canAddPane
-          ? `Add pane (Ctrl+\\) — ${paneCount} of 4`
-          : `Max panes reached (${paneCount}/4)`}
-        aria-label="Add pane"
-      >
-        <SplitSquareHorizontal size={13} />
-        {#if splitActive}
-          <span class="seg-chip">{paneCount}</span>
-        {/if}
-      </button>
-    </div>
+    <button
+      class="hdr-btn view-btn"
+      class:open={viewMenuOpen}
+      class:pulse
+      type="button"
+      bind:this={viewAnchor}
+      onclick={() => { viewMenuOpen ? (viewMenuOpen = false) : openViewMenu(); }}
+      aria-haspopup="menu"
+      aria-expanded={viewMenuOpen}
+      use:tooltip={"View — panels & layout"}
+    >
+      <PanelRight size={13} />
+      {#if browserDock.open || tasksOpen || splitActive}
+        <span class="view-dot" aria-hidden="true"></span>
+      {/if}
+      <ChevronDown size={10} class={viewMenuOpen ? "chev-open" : ""} />
+    </button>
   </div>
 </div>
 
@@ -638,6 +645,59 @@
         <Layers size={11} /> Compact now
       </button>
     </div>
+  </div>
+{/if}
+
+{#if viewMenuOpen}
+  <div
+    class="view-menu"
+    role="menu"
+    aria-label="View — panels & layout"
+    bind:this={viewMenu}
+    use:portal
+    style="top: {viewPos.top}px; right: {viewPos.right}px;"
+  >
+    <button
+      class="vm-item"
+      class:on={browserDock.open}
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={browserDock.open}
+      onclick={() => { browserDock.toggle(); viewMenuOpen = false; }}
+    >
+      <Globe size={14} class="vm-icon" />
+      <span class="vm-label">Web browser</span>
+      <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;B</kbd>
+      <Check size={13} class="vm-check" />
+    </button>
+    <button
+      class="vm-item"
+      class:on={tasksOpen}
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={tasksOpen}
+      onclick={() => { toggleTasks(); viewMenuOpen = false; }}
+    >
+      <PanelRight size={14} class="vm-icon" />
+      <span class="vm-label">Activity panel</span>
+      {#if taskCount > 0}<span class="vm-count">{taskDone}/{taskCount}</span>{/if}
+      <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;E</kbd>
+      <Check size={13} class="vm-check" />
+    </button>
+    <div class="vm-sep" role="separator"></div>
+    <button
+      class="vm-item"
+      type="button"
+      role="menuitem"
+      disabled={!canAddPane}
+      onclick={() => { assistant.addPane(); viewMenuOpen = false; }}
+    >
+      <SplitSquareHorizontal size={14} class="vm-icon" />
+      <span class="vm-label">{canAddPane ? "Split pane" : "Max panes"}</span>
+      {#if splitActive}<span class="vm-count">{paneCount}/4</span>{/if}
+      <kbd class="vm-kbd">Ctrl&nbsp;\</kbd>
+      <Check size={13} class="vm-check" aria-hidden="true" />
+    </button>
   </div>
 {/if}
 
@@ -1227,38 +1287,105 @@
   /* Segmented view control — Browser · Panel · Split grouped into one unit so
      the action cluster reads as a single block instead of three loose chips.
      Icon-only; tooltips carry the names. */
-  .seg {
-    display: inline-flex; align-items: center;
-    gap: 2px;
-    padding: 2px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 7px;
+  /* View dropdown trigger — one panel button + chevron replaces the old
+     3-icon segmented control. A small accent dot signals "some panel open"
+     without opening the menu. */
+  .view-btn {
+    gap: 4px;
+    padding: 3px 7px;
   }
-  .seg-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    height: 22px; padding: 0 7px;
-    background: transparent; border: 0; border-radius: 5px;
-    color: var(--fg-muted); cursor: pointer;
-    font: inherit; font-size: var(--fs-xs); line-height: 1;
-    transition: background 120ms ease, color 120ms ease;
+  .view-btn.open {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
   }
-  .seg-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
-  .seg-btn.on { background: var(--accent-soft); color: var(--accent); }
-  .seg-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  .seg-btn.pulse { animation: dock-pulse 700ms ease-out; }
+  .view-btn :global(svg) { transition: transform 140ms ease; }
+  .view-btn :global(.chev-open) { transform: rotate(180deg); }
+  .view-btn.pulse { animation: dock-pulse 700ms ease-out; }
+  .view-dot {
+    width: 5px; height: 5px;
+    border-radius: 999px;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 60%, transparent);
+  }
 
   @keyframes dock-pulse {
     0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
     60%  { box-shadow: 0 0 0 6px transparent; }
     100% { box-shadow: 0 0 0 0 transparent; }
   }
-  .seg-chip {
+
+  /* View popover — Rift-styled take on the Claude Code desktop options menu:
+     icon · label · right-aligned shortcut · trailing check for active toggles. */
+  .view-menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 230px;
+    padding: 5px;
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.45),
+      0 4px 12px rgba(0, 0, 0, 0.25);
+    display: flex; flex-direction: column; gap: 1px;
+    animation: history-pop-in 150ms cubic-bezier(.2,.7,.2,1);
+    transform-origin: top right;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .view-menu { animation: none; }
+  }
+  .vm-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 9px;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--fg);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    transition: background 110ms ease, color 110ms ease;
+  }
+  .vm-item:hover:not(:disabled) { background: var(--surface-hover); }
+  .vm-item:disabled { color: var(--fg-subtle); cursor: not-allowed; }
+  .vm-item.on { color: var(--accent); }
+  .vm-item :global(.vm-icon) { color: var(--fg-muted); flex-shrink: 0; }
+  .vm-item.on :global(.vm-icon) { color: var(--accent); }
+  .vm-label { flex: 1; white-space: nowrap; }
+  .vm-count {
     font-size: 10px; font-weight: 700; line-height: 1;
     font-variant-numeric: tabular-nums;
-    padding: 1px 4px; border-radius: 999px;
-    background: color-mix(in oklch, var(--accent) 20%, transparent);
+    padding: 1px 5px; border-radius: 999px;
+    background: color-mix(in oklch, var(--accent) 18%, transparent);
     color: var(--accent);
+  }
+  .vm-kbd {
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-faint);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 5px;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  /* The check column always reserves space (auto) so rows align; the glyph
+     only paints for active toggles. menuitem rows (Split) have no check. */
+  .vm-item :global(.vm-check) {
+    color: var(--accent);
+    opacity: 0;
+    transition: opacity 110ms ease;
+  }
+  .vm-item.on :global(.vm-check) { opacity: 1; }
+  .vm-sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: color-mix(in oklch, var(--border) 70%, transparent);
   }
 
   /* New-chat affordance sits flush after the last tab — browser convention

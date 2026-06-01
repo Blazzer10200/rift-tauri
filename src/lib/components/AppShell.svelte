@@ -232,6 +232,11 @@
       }
     }
     const k = e.key.toLowerCase();
+    // View toggles, mirrored in the ChatTabsBar View dropdown. Ctrl+Shift+B →
+    // web browser dock, Ctrl+Shift+E → activity panel. Both live in the
+    // otherwise-unhandled Ctrl+Shift letter space.
+    if (e.shiftKey && k === "b") { e.preventDefault(); browserDock.toggle(); return; }
+    if (e.shiftKey && k === "e") { e.preventDefault(); assistant.ui.dockOpen = !assistant.ui.dockOpen; return; }
     // Ctrl+0 → return to Chat workspace (was "close right pane" in v0.4.1;
     // closing has no meaning under the workspace shell).
     if (!e.shiftKey && e.key === "0") {
