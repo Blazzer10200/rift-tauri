@@ -2,14 +2,14 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-05-31 (h) — activity dock: permanent + quick-actions + live motion pass (committed `a71cc8a`, NOT shipped)
-Frontend-only UX wave on the assistant activity dock. `npm run check` 0/0/0; CDP-verified on live dev turns. Files: `ActivityPanel.svelte` (major), `assistant.svelte.ts` (dockOpen default + 2 force-close removals).
+## Session 2026-05-31 (h) — v0.4.46 SHIPPED (permanent activity dock + quick-actions + live motion pass)
+Shipped **v0.4.46** (code `16db171`, bump `fd74a0f`; tag `v0.4.46` on rift-releases, SHA256 round-trip OK). Frontend-only UX wave on the assistant activity dock. `npm run check` 0/0/0, `cargo check` 0/0; CDP-verified on live dev turns. Files: `ActivityPanel.svelte` (major), `assistant.svelte.ts` (dockOpen default + 2 force-close removals).
 - **Permanent dock** — `ui.dockOpen` defaults **true**; removed the force-closes in `newConversation()`/`clearConversation()`. Stays open across new/clear/switch (still gated `&& !!tab`). Composer activity button still hides on demand.
 - **Quick-actions capsule** (ActivityPanel `.quickbar`) — segmented `[Copy · Compact · Latest]`; **Stop** prepends red while streaming. `:has(.qb-seg.stop)` → icon-only when 4-up so labels never clip at the 260px dock floor (verified 0px clip). Copy = Markdown transcript w/ ✓ confirm; Compact disabled <4 msg/idle.
 - **Outputs diff-stats** — `+added / −removed` per file (churn model: new-string lines added, old-string removed; accumulated across repeat edits; `o.edits` folds into tooltip). Green `--ok` / red `--danger`, right-aligned.
 - **Live motion pass (quality-over-quantity)** — (1) **completion acknowledgment**: a finished tool lingers ~1.2s as ✓+duration (✕ on error) then eases out — `RunRow` buffer + `finalState` lookup + per-id `setTimeout`, since `liveActivity()` only returns *pending*. (2) eased enter/exit (`fly`/`fade`) + `animate:flip` on Running/Outputs/Sources. (3) **killed per-row icon `mon-pulse`** → one focal indicator (badge live-dot). (4) turn-end **"Done · {dur}"** green cap (2.6s, gated `!lastError`). All reduced-motion-guarded (`cubicOut`, durations→0).
 - **Verified-unnecessary (no edit):** transcript "triple-pulse" the inventory flagged — `chip-pulse` is already suppressed on timeline chips by a higher-specificity `animation:none` rule (`ToolChip.svelte:784`). Agent-hint ≠ truth.
-- **NEXT:** ship (h) as a release (bump 3 files + Cargo.lock + CHANGELOG) OR extend motion to the transcript (Now-strip text crossfade, parallel-start stagger, trailing-row `in:` to match its `out:fade`) — all deferred, optional.
+- **NEXT (optional):** extend the motion language to the transcript — Now-strip text crossfade, parallel-start stagger, trailing-row `in:` to match its `out:fade`; also the error-aware Tool mix (fold failures into histogram bars) deferred from this lane.
 
 ## Session 2026-05-31 (g) — v0.4.45 SHIPPED (thinking-block mid-chat fix + resizable dock)
 Shipped **v0.4.45** (`5fcf965`; tag on rift-releases). `npm run check` 0/0/0, `cargo check` 0/0, CDP-verified.
