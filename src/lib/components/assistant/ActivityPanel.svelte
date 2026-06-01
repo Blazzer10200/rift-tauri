@@ -25,7 +25,7 @@
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
   import { liveActivity, loadCollapsedSections, saveCollapsedSections } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
-  import { scrubUser } from "$lib/util/redact";
+  import { scrubUser } from "$lib/utils/redact";
 
   let { tabId = null }: { tabId?: string | null } = $props();
 

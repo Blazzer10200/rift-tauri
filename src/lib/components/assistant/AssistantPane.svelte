@@ -3,7 +3,7 @@
   import { ChevronDown, Plus, X } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import MessageBubble from "./MessageBubble.svelte";
-  import EmptyState from "./EmptyState.svelte";
+  import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
   import SidePanel from "./SidePanel.svelte";
   import SyncActivityBanner from "./SyncActivityBanner.svelte";
@@ -322,7 +322,7 @@
         </div>
       </div>
     {:else if showEmpty}
-      <EmptyState {needsAuth} {tabId} />
+      <AssistantWelcome {needsAuth} {tabId} />
     {:else}
       <div class="messages" bind:this={messagesEl}>
         {#each messages as m, mi (m.id)}

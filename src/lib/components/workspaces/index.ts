@@ -17,10 +17,8 @@ import { connection } from "$lib/state/connection.svelte";
 // them. Same pattern right-pane/index.ts used (PanelIcon).
 export type WorkspaceIcon = typeof Activity;
 
-// Components in the registry have heterogeneous prop shapes — most take no
-// props, DisabledWorkspace takes { title, icon }. Widening to Component lets
-// WorkspaceShell pick the right shape per-entry. The shell already branches
-// on `disabled` to decide which props to pass.
+// Registry components have heterogeneous prop shapes; widening to Component
+// lets WorkspaceShell pick the right shape per-entry.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WorkspaceComponent = Component<any, any, string>;
 

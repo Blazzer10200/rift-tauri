@@ -4,7 +4,7 @@ import {
   RefreshCw, Download, Trash2, AlertTriangle, Check,
   GitBranch, Network, Lock, XCircle, Info,
 } from "lucide-svelte";
-import { reportFrontendError } from "../util/diag";
+import { reportFrontendError } from "../utils/diag";
 import { toast, type ToastSeverity } from "./toast.svelte";
 
 function activityIcon(k: ActivityKind) {
