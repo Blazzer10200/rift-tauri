@@ -406,14 +406,16 @@
         </div>
       {/if}
 
-      <div class="tabs-rail" data-show={workspace.activeId === "chat"} aria-hidden={workspace.activeId !== "chat"}>
-        <ChatTabsBar />
-      </div>
       <div class="body">
         <ActivityBar />
-        <main class="pane">
-          <WorkspaceShell />
-        </main>
+        <div class="content">
+          <div class="tabs-rail" data-show={workspace.activeId === "chat"} aria-hidden={workspace.activeId !== "chat"}>
+            <ChatTabsBar />
+          </div>
+          <main class="pane">
+            <WorkspaceShell />
+          </main>
+        </div>
       </div>
     {/if}
   </div>
@@ -549,15 +551,25 @@
   @media (prefers-reduced-motion: reduce) {
     .tabs-rail { transition: none; transform: none; }
   }
-  /* Workspace shell: [44px activity bar | main pane]. WorkspaceShell mounts
-     each workspace once-and-keeps-it via the everOpened latch — no width to
-     animate, so no grid-template-columns transition. */
+  /* Workspace shell: [44px activity bar | content column]. The activity bar
+     now spans the full height of the body — top-aligned with the tabs strip —
+     and the tabs-rail lives inside the right content column, offset past the
+     rail. WorkspaceShell mounts each workspace once-and-keeps-it via the
+     everOpened latch — no width to animate, so no column transition. */
   .body {
     flex: 1;
     display: grid;
     grid-template-columns: 44px minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
+    overflow: visible;
+    position: relative;
+  }
+  /* Right column: tabs strip stacked above the workspace pane. */
+  .content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0; min-width: 0;
     overflow: visible;
     position: relative;
   }

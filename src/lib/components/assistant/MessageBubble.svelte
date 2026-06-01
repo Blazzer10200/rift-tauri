@@ -509,9 +509,7 @@
   </div>
 {:else}
 <div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null}>
-  {#if !isUser}
-    <div class="turn-rail" aria-hidden="true"></div>
-  {/if}
+  <div class="turn-rail" aria-hidden="true"></div>
 
   <div class="body">
     {#if !isUser}
@@ -553,10 +551,10 @@
       </div>
     {:else}
       <div class="turn-head">
-        <span class="role-name">You</span>
         <div class="avatar avatar-user" aria-hidden="true">
           <User size={13} />
         </div>
+        <span class="role-name">You</span>
       </div>
     {/if}
 
@@ -712,7 +710,7 @@
       {/each}
 
       {#if showTrailingActivity}
-        <div class="trailing-activity" aria-live="polite" out:fade={{ duration: 160 }}>
+        <div class="trailing-activity" aria-live="polite" in:fade={{ duration: reducedMotion ? 0 : 160 }} out:fade={{ duration: reducedMotion ? 0 : 160 }}>
           <span class="ta-dots" aria-hidden="true">
             <span class="ta-dot"></span><span class="ta-dot"></span><span class="ta-dot"></span>
           </span>
@@ -816,12 +814,12 @@
   /* User bubbles drop the rail entirely + right-align — the bubble shape
      already signals "you", and the position differentiates from Claude
      without forcing a rail on user messages. */
-  .bubble[data-role="user"] {
-    grid-template-columns: 1fr;
-    column-gap: 0;
-  }
+  /* User turns share Claude's grid + left edge so the thread reads as one calm
+     left-aligned column instead of ping-ponging left↔right. The 2px rail column
+     stays empty for user (no rail element), so user content lands at the same x
+     as Claude's content. */
   .bubble[data-role="user"] .body {
-    align-items: flex-end;
+    align-items: flex-start;
     display: flex; flex-direction: column;
   }
 
@@ -834,11 +832,31 @@
     align-self: stretch;
     width: 2px;
     border-radius: 2px;
-    /* Visible enough to actually read as the spine the dots hang off — the old
-       fg-faint @ 38% vanished against the dark bg, so the bullets looked
-       orphaned. Faint model tint ties it to the aurora identity. */
-    background: color-mix(in oklch, var(--model-color) 34%, var(--border));
-    transition: background 200ms ease-out;
+    /* Quiet hairline spine that fades at both ends so each turn's segment reads
+       as a soft thread, not a hard-cut colored bar. Color lives in the node
+       markers now; the rail just connects them. Faint model tint keeps the
+       aurora identity without shouting. */
+    background: linear-gradient(to bottom,
+      transparent 0,
+      color-mix(in oklch, var(--model-color) 20%, var(--border)) 10px,
+      color-mix(in oklch, var(--model-color) 20%, var(--border)) calc(100% - 10px),
+      transparent 100%);
+    transition: opacity 200ms ease-out, box-shadow 200ms ease-out;
+  }
+  /* Hovering a turn lights its spine — a faint model-hue glow ties the pointer
+     to the thread it's reading. */
+  .bubble[data-role="assistant"]:hover .turn-rail {
+    box-shadow: 0 0 6px 0 color-mix(in oklch, var(--model-color) 22%, transparent);
+  }
+  /* User turns share the spine but in a quiet neutral grey — so both roles read
+     as "rail + content," differentiated by hue (your neutral vs Claude's model
+     tint), not by box-vs-no-box. */
+  .bubble[data-role="user"] .turn-rail {
+    background: linear-gradient(to bottom,
+      transparent 0,
+      color-mix(in oklch, var(--fg-faint) 42%, var(--border)) 10px,
+      color-mix(in oklch, var(--fg-faint) 42%, var(--border)) calc(100% - 10px),
+      transparent 100%);
   }
   .bubble[data-streaming="true"] .turn-rail {
     background: color-mix(in oklch, var(--model-color) 55%, transparent);
@@ -875,7 +893,6 @@
   }
 
   .body { min-width: 0; grid-column: 2; }
-  .bubble[data-role="user"] .body { grid-column: 1; }
   /* Body fills the centered reading column (no 78ch cap). The cap used to
      left-align the text inside a wider column, so even though the column was
      centered the *text* read as shoved-left. The column width itself
@@ -893,20 +910,26 @@
     margin-bottom: 6px;
     min-height: 22px;
   }
-  .bubble[data-role="user"] .turn-head { justify-content: flex-end; }
+  .bubble[data-role="user"] .turn-head { justify-content: flex-start; }
   .role-name {
     font-size: var(--fs-xs);
     font-weight: 600;
     color: var(--fg-2);
   }
-  .head-sep { color: var(--fg-faint); font-size: 11px; opacity: 0.6; }
+  /* Model + cost recede so the turn reads "Claude → content" first; the
+     metadata brightens on hover when you actually want it. */
+  .head-sep { color: var(--fg-faint); font-size: 11px; opacity: 0.4; transition: opacity 140ms ease-out; }
   .head-model {
     font-size: 10.5px;
     color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.01em;
     white-space: nowrap;
+    opacity: 0.6;
+    transition: opacity 140ms ease-out;
   }
+  .bubble:hover .head-sep { opacity: 0.7; }
+  .bubble:hover .head-model { opacity: 1; }
 
   /* Stage strip — fills the void between turn-head and first content block
      while Claude is "thinking" but hasn't emitted any blocks yet. Pre-block
@@ -1004,7 +1027,10 @@
     line-height: 1.4;
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
+    opacity: 0.6;
+    transition: opacity 140ms ease-out;
   }
+  .bubble:hover .cost-pill { opacity: 1; }
   .body { display: flex; flex-direction: column; }
 
   /* Trailing activity row — the live "still working" cue that trails the last
@@ -1117,6 +1143,10 @@
      rail already groups the turn. Bullets remain for tool/edit/thinking nodes
      where they carry real status (done/pending/error). */
   .tl-node[data-kind="prose"]::before { display: none; }
+  /* Numbered nodes (tools / tool-groups) carry the step circle as their sole
+     rail marker — drop the small status bullet so the spine threads through ONE
+     clean node, not a dot stacked beside a circle. */
+  .tl-node[data-numbered="true"]::before { display: none; }
   .tl-node[data-kind="tool"][data-status="done"]::before,
   .tl-node[data-kind="edit"][data-status="done"]::before {
     background: var(--ok, oklch(0.74 0.15 145));
@@ -1192,8 +1222,7 @@
     min-height: 22px;
     background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
     border: 0;
-    border-radius: 6px;
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--fg-faint) 32%, transparent);
+    border-radius: 8px;
     color: var(--fg-2);
     font: inherit; font-size: 11px; text-align: left;
     cursor: pointer;
@@ -1257,9 +1286,12 @@
     justify-content: center;
     border-radius: 999px;
     z-index: 1;
-    background: var(--bg-elev-2);
-    border: 1.5px solid color-mix(in oklch, var(--fg-faint) 60%, transparent);
+    background: var(--bg);
+    border: 1.5px solid color-mix(in oklch, var(--fg-faint) 55%, transparent);
     color: var(--fg-muted);
+    /* bg halo masks the rail in a clean ring around the node so the spine
+       appears to thread through it — the timeline "node on a wire" look. */
+    box-shadow: 0 0 0 3px var(--bg);
     font-size: 9.5px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
@@ -1271,18 +1303,18 @@
   }
   @media (prefers-reduced-motion: reduce) { .tl-stepdot { animation: none; } }
   .tl-node[data-status="done"] .tl-stepdot {
-    background: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 20%, var(--bg-elev-2));
+    background: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 18%, var(--bg));
     border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 58%, transparent);
     color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 90%, var(--fg));
   }
   .tl-node[data-status="pending"] .tl-stepdot {
-    background: color-mix(in oklch, var(--accent) 26%, var(--bg-elev-2));
+    background: color-mix(in oklch, var(--accent) 26%, var(--bg));
     border-color: color-mix(in oklch, var(--accent) 70%, transparent);
     color: color-mix(in oklch, var(--accent) 92%, var(--fg));
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
   .tl-node[data-status="error"] .tl-stepdot {
-    background: color-mix(in oklch, var(--danger) 24%, var(--bg-elev-2));
+    background: color-mix(in oklch, var(--danger) 24%, var(--bg));
     border-color: color-mix(in oklch, var(--danger) 65%, transparent);
     color: color-mix(in oklch, var(--danger) 90%, var(--fg));
   }
@@ -1359,17 +1391,13 @@
      between `</li>` and `<li>` in the marked output as a full line of
      empty space, stacking ~20px under every list item. */
   .bubble[data-role="user"] .text {
-    padding: 9px 13px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    color: var(--fg);
-    align-self: flex-end;
-    /* Cap at 82% (not 100%) so a long message keeps a left gutter and still
-       reads as a right-anchored bubble in a narrow/docked pane — at 100% it
-       filled the column edge-to-edge and looked left-aligned, so short vs long
-       turns appeared to sit in "different locations". 72ch still caps wide panes. */
-    max-width: min(82%, 72ch);
+    padding: 8px 12px;
+    background: color-mix(in oklch, var(--fg) 4%, transparent);
+    border: 0;
+    border-radius: 10px;
+    color: var(--fg-2);
+    align-self: flex-start;
+    max-width: min(100%, 72ch);
     width: fit-content;
     white-space: pre-wrap;
   }
@@ -1379,7 +1407,7 @@
      on the user message and render here above the text bubble. Click opens
      the data URL in a new window for full-size view. */
   .user-image-thumb {
-    align-self: flex-end;
+    align-self: flex-start;
     display: inline-flex;
     padding: 0;
     background: none;
