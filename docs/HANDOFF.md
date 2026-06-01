@@ -2,14 +2,17 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-01 (b) — shell layout: full-height rail + actions zone-grouping (frontend-only, committed, NOT shipped)
-`npm run check` 0/0/0; CDP-verified on live dev. Files: `AppShell.svelte`, `ChatTabsBar.svelte`.
-- **Activity rail raised full-height** — was stacked `tabs-rail` (full-width) **over** `[ActivityBar | pane]`, so the rail started *below* the tab. Restructured `.middle`: `ActivityBar` is now the full-height left column of `.body` (top-aligned w/ the tab strip), and tabs-rail + pane nest in a new `.content` flex-column right of the rail. Tab strip + its bottom-border now stop at the rail edge (threads into the rail's inset divider). Collapse animation on `.tabs-rail` preserved.
-- **Top-right `.actions` zone-grouping** (closes (a)'s PAUSED item via grouped-zones) — History + workspace chip wrapped in `.grp` (hug @5px); inter-zone `.actions` gap 6→9px; new `.vdiv` hairline before the view-toggle `.seg` so the cluster parses `[context · status │ view]`. Transient pills (auth/agents/ctx/compact) flow the middle status zone; divider keeps view segment pinned right.
+## Session 2026-06-01 (b) — shell layout + View dropdown + backdrop calm (frontend-only, committed, NOT shipped)
+4 commits: `8c92037` rail+actions · `9916fd3` pane fix · `bdbb4ef` View dropdown · `a3cc3d9` backdrop. `npm run check` 0/0/0 throughout; CDP-verified live. Files: `AppShell.svelte`, `ChatTabsBar.svelte`, `AssistantPane.svelte`.
+- **Activity rail raised full-height** (`8c92037`) — was stacked `tabs-rail` (full-width) **over** `[ActivityBar | pane]`, rail started *below* the tab. Restructured `.middle`: `ActivityBar` is now the full-height left column of `.body` (top-aligned w/ tab strip); tabs-rail + pane nest in a new `.content` flex-column right of the rail. Tab strip + bottom-border stop at the rail edge. Collapse anim preserved.
+- **Top-right `.actions` zone-grouping** (`8c92037`, closes (a)'s PAUSED item) — History + ws chip in `.grp` (hug @5px); inter-zone gap 6→9px; `.vdiv` hairline before the view control so cluster parses `[context · status │ view]`.
+- **Pane-height regression FIXED** (`9916fd3`) — the rail restructure moved `.pane` from a grid cell (auto-stretch) into the `.content` flex column w/o grow → WorkspaceShell `height:100%` panes collapsed to zero. Fix: `.pane { flex: 1 1 0 }`. (Watch for this on any future flex/grid swaps of `.pane`.)
+- **View dropdown** (`bdbb4ef`) — replaced the 3-icon `.seg` w/ one `.view-btn` (panel icon + chevron + accent `.view-dot` when any panel open) opening a portaled `.view-menu`, à la Claude Code desktop options: rows **Web browser** (Ctrl+Shift+B), **Activity panel** (Ctrl+Shift+E), │ **Split pane** (Ctrl+\) — icon·label·kbd-chip·trailing check on active toggles. The two B/E shortcuts are NEW, wired in `AppShell.onGlobalKey` (Ctrl+Shift letter space, prev unbound).
+- **Pane backdrop calmed** (`a3cc3d9`) — `.atmos-glow` breathed 9s (0.70↔0.95) → too busy for a terminal. Now static: accent 12%→6%/4%→2%, band 55%→42%, opacity 0.7; dropped breathe keyframes + reduced-motion rule. Grain unchanged.
 
 ## Session 2026-06-01 (a) — assistant UI polish wave (frontend-only, committed, NOT shipped) — detail in git log
 Cohesive transcript + dock pass (`MessageBubble` major, `ActivityPanel`, `AssistantPane`, `ToolChip`). Transcript LEFT-aligned both roles (reverses 05-31(f) right-anchor); content-first headers (model+cost recede, brighten on hover); both chain rails → faded gradient threads w/ step-circle as sole marker; motion language extended to transcript + Now-strip crossfade + error-aware Tool-mix histogram. `npm run check` 0/0/0.
-- **NEXT (flagged, not done):** transcript scrollbar styling (currently hidden), atmosphere-grain dial-back. (Top-right header simplification DONE in (b).)
+- **NEXT (flagged, not done):** transcript scrollbar styling (currently hidden). (Header simplification + atmosphere-grain/backdrop both DONE in (b).)
 
 ## Session 2026-05-31 (h) — v0.4.46 SHIPPED (permanent activity dock + quick-actions + live motion pass)
 Shipped **v0.4.46** (code `16db171`, bump `fd74a0f`; tag `v0.4.46` on rift-releases, SHA256 round-trip OK). Frontend-only UX wave on the assistant activity dock. `npm run check` 0/0/0, `cargo check` 0/0; CDP-verified on live dev turns. Files: `ActivityPanel.svelte` (major), `assistant.svelte.ts` (dockOpen default + 2 force-close removals).
