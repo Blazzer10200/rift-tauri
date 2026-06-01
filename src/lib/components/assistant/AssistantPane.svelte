@@ -251,10 +251,9 @@
   ondrop={onPaneDrop}
   tabindex={focused ? -1 : 0}
 >
-  <!-- Atmosphere layer — single accent-only top-spotlight + faint film grain.
-       Pure CSS, no colors outside the existing accent vocabulary, no garish
-       drift. Replaces the v1 3-blob aurora which clashed by introducing
-       info/ok semantic colors not used anywhere else in the UI. -->
+  <!-- Atmosphere layer — faint static accent top-glow + film grain. Calmed
+       (no breathing) so the backdrop stays quiet behind an assistant terminal;
+       accent-only vocabulary, no drift, no motion. -->
   <div class="atmos" aria-hidden="true">
     <span class="atmos-glow"></span>
     <span class="atmos-grain"></span>
@@ -600,14 +599,13 @@
   .atmos-glow {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 55%;
+    height: 42%;
     background:
-      radial-gradient(70% 100% at 50% 0%,
-        color-mix(in oklch, var(--accent) 12%, transparent) 0%,
-        color-mix(in oklch, var(--accent) 4%, transparent) 35%,
-        transparent 75%);
-    opacity: 0.8;
-    animation: atmos-breathe 9s ease-in-out infinite;
+      radial-gradient(85% 100% at 50% 0%,
+        color-mix(in oklch, var(--accent) 6%, transparent) 0%,
+        color-mix(in oklch, var(--accent) 2%, transparent) 42%,
+        transparent 78%);
+    opacity: 0.7;
   }
   /* Tiny film grain via inline SVG turbulence — adds organic texture so
      the dark surface doesn't read as a flat void. ~3% opacity, no anim. */
@@ -618,13 +616,6 @@
     background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
     background-size: 200px 200px;
     mix-blend-mode: overlay;
-  }
-  @keyframes atmos-breathe {
-    0%, 100% { opacity: 0.70; }
-    50%      { opacity: 0.95; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .atmos-glow { animation: none; opacity: 0.80; }
   }
   .composer-slot {
     position: relative;
