@@ -72,6 +72,22 @@
     (totals.del > 0 ? 1 : 0) + (totals.conf > 0 ? 1 : 0)
   );
 
+  // Redesign hero — state-driven mission-control headline. `heroNow` ticks
+  // every 5s so the "last scan Ns ago" label stays fresh w/o a render storm.
+  let heroNow = $state(Date.now());
+  $effect(() => {
+    const id = setInterval(() => { heroNow = Date.now(); }, 5000);
+    return () => clearInterval(id);
+  });
+  const lastScanLabel = $derived.by(() => {
+    const t = connection.lastScanAt;
+    if (!t) return "not scanned yet";
+    const s = Math.max(0, Math.floor((heroNow - t) / 1000));
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    return `${Math.floor(s / 3600)}h ago`;
+  });
+
   $effect(() => {
     window.addEventListener("mousedown", onDocMouseDown);
     window.addEventListener("keydown", onDocKey);
@@ -377,6 +393,27 @@
       {@render toolbarActions()}
     {/snippet}
   </PageHeader>
+
+  {#if connection.selected}
+    <section class="sync-hero" data-state={isEmpty && watcherOn ? "clear" : "attention"} in:fade={{ duration: 160 }}>
+      <div class="sync-hero-eyebrow">
+        <span class="led" class:on={watcherOn}></span>
+        {watcherOn ? "WATCHING" : (connection.status?.state ?? "offline").toUpperCase()} · <span class="mono">{connection.selected.name}</span>
+      </div>
+      {#if isEmpty && watcherOn}
+        <h1 class="sync-hero-title"><span class="mono">{connection.selected.name}</span> is <span class="emer">fully in sync</span></h1>
+        <p class="sync-hero-sub"><span class="mono">0 drift</span> · watching · last scan {lastScanLabel}</p>
+      {:else if isEmpty}
+        <h1 class="sync-hero-title">Sync paused</h1>
+        <p class="sync-hero-sub">Watcher {connection.status?.state ?? "offline"} · last scan {lastScanLabel}</p>
+      {:else}
+        <h1 class="sync-hero-title">{totals.total} change{totals.total === 1 ? "" : "s"} <span class="amber">need a sync</span></h1>
+        <p class="sync-hero-sub">
+          {#if totals.conf > 0}<span class="mono">{totals.conf} conflict{totals.conf === 1 ? "" : "s"}</span> · {/if}{totals.push}↑ {totals.pull}↓{totals.del > 0 ? ` · ${totals.del} delete` : ""} · last scan {lastScanLabel}
+        </p>
+      {/if}
+    </section>
+  {/if}
 
   {#if connection.conflictCount > 0}
     <details class="conflicts-inline" open>
@@ -735,6 +772,33 @@
     background: var(--bg);
     color: var(--fg);
   }
+
+  /* Redesign mission-control hero — state-driven headline below the toolbar. */
+  .sync-hero {
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 16px 22px 18px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(160deg, var(--surface), color-mix(in oklch, var(--accent) 4%, var(--bg)));
+  }
+  .sync-hero[data-state="attention"] {
+    background: linear-gradient(160deg, var(--surface), color-mix(in oklch, var(--warn) 5%, var(--bg)));
+  }
+  .sync-hero-eyebrow {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--fg-subtle);
+  }
+  .sync-hero-eyebrow .mono { font-family: var(--font-mono); color: var(--fg-muted); letter-spacing: 0; text-transform: none; }
+  .sync-hero-eyebrow .led { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); flex: none; }
+  .sync-hero-eyebrow .led.on { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+  .sync-hero-title {
+    margin: 0; font-size: 25px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.1; color: var(--fg);
+  }
+  .sync-hero-title .mono { font-family: var(--font-mono); font-size: 0.84em; font-weight: 700; }
+  .sync-hero-title .emer { color: var(--accent); }
+  .sync-hero-title .amber { color: var(--warn); }
+  .sync-hero-sub { margin: 0; font-size: var(--fs-sm); color: var(--fg-muted); }
+  .sync-hero-sub .mono { font-family: var(--font-mono); color: var(--fg-2); }
 
   /* v0.2.53 Mirror confirm modal (toggle moved into kebab v0.2.55) */
   .modal-backdrop {
