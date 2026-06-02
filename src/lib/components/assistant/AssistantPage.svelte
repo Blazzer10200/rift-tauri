@@ -4,6 +4,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
+  import ChatRail from "./ChatRail.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -193,6 +194,7 @@
 <div class="assistant">
   <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging}>
   <div class="layout">
+    <ChatRail />
     {#if assistant.splitActive}
       <div
         class="split"

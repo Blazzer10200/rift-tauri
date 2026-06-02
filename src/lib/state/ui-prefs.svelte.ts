@@ -11,6 +11,7 @@ const LAUNCH_AT_LOGIN_KEY = "rift.ui.launch-at-login.v1";
 const RESTORE_SESSION_KEY = "rift.ui.restore-session.v1";
 const CONFIRM_ON_QUIT_KEY = "rift.ui.confirm-on-quit.v1";
 const RCON_AUTO_RECONNECT_KEY = "rift.ui.rcon-auto-reconnect.v1";
+const CHAT_RAIL_COLLAPSED_KEY = "rift.ui.chat-rail-collapsed.v1";
 
 // 8 curated accent hues — one hue drives the whole accent ramp via --accent-h.
 export type AccentSwatch = { id: string; label: string; hue: number };
@@ -38,6 +39,7 @@ class UiPrefs {
   restoreSession = $state(false);
   confirmOnQuit = $state(false);
   rconAutoReconnect = $state(false);
+  chatRailCollapsed = $state(false);
 
   init() {
     if (typeof window === "undefined") return;
@@ -67,6 +69,7 @@ class UiPrefs {
     this.restoreSession = localStorage.getItem(RESTORE_SESSION_KEY) === "1";
     this.confirmOnQuit = localStorage.getItem(CONFIRM_ON_QUIT_KEY) === "1";
     this.rconAutoReconnect = localStorage.getItem(RCON_AUTO_RECONNECT_KEY) === "1";
+    this.chatRailCollapsed = localStorage.getItem(CHAT_RAIL_COLLAPSED_KEY) === "1";
 
     this.apply();
   }
