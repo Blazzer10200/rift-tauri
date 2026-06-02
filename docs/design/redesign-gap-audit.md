@@ -12,6 +12,13 @@
 - **UPDATE 2026-06-02 (cont. 2): Phase 4 (`bb3fb10`) + Phase 5 (`c5963f5`) now DONE + CDP-verified. Full P1–P5 arc complete on `main`. Only Phase 6 (ship) remains — see HANDOFF "RESUME HERE."**
 - One scope correction since this doc was written: **P4 Files is metadata-only** (status pill + size/modified + status-LED pips + filter chips); the **Lua code-preview is DEFERRED** (no file-read path; user declined a 2nd backend exception).
 
+## Deferred / didn't-make-the-cut (for the next design pass)
+Conscious scope cuts during P1–P5 — surfaced here so nothing is silently dropped. None block P6 ship.
+1. **Lua code-preview** in the Files detail pane (`FbDetail.svelte`) — mockup `files.css` `.fb-code-*` has no Svelte counterpart. **Needs a backend file-read command** (no path exists; a 2nd backend exception was declined). The detail pane currently shows metadata only.
+2. **RCON live round-trip** (Settings → Server, from P2) — UDP backend (`rcon/mod.rs`, `commands/rcon.rs`) + console UI built and **render**-verified, but never exercised against a real FXServer + password. Untested-by-design.
+3. **Files populated detail + status-LED pips — live state unverified** — chips/empty-state/chip-toggle CDP-verified, but populated rows + the synced/modified/conflict pips need a connected server with files (not exercised to avoid touching a live FiveM box). Worth a real-server pass.
+4. **Minor cosmetic PARTIALs** from the per-surface tables below, left as-is (low priority): `OpenInPaneMenu` not in mockup; `PathBreadcrumbs`/`LockBadge` class-namespace differs from spec; Sync banner / titlebar motion-var polish folded into P1 — re-check against mockup if pixel-exact parity is wanted.
+
 ## Token nuance (read before trusting "missing `--accent-h`" flags)
 Agents flagged many components for "no `var(--accent-h)`." **That is a FALSE signal.** Per the foundation, only the `:root` ramp in `app.css` consumes `--accent-h`; components correctly use the hue-derived `var(--accent)`/`--accent-soft`/etc., which already retheme. Do **not** churn components to add `--accent-h`. The real signals are *structural* (missing layout/feature) and *motion-var adoption* (`--ease-page`/`--dur-*`), not token names.
 
