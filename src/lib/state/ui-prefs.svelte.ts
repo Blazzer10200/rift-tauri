@@ -7,6 +7,10 @@ const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
 const PRESENCE_KEY = "rift.ui.presence.v1";
 const CODE_KEY = "rift.ui.code.v1";
+const LAUNCH_AT_LOGIN_KEY = "rift.ui.launch-at-login.v1";
+const RESTORE_SESSION_KEY = "rift.ui.restore-session.v1";
+const CONFIRM_ON_QUIT_KEY = "rift.ui.confirm-on-quit.v1";
+const RCON_AUTO_RECONNECT_KEY = "rift.ui.rcon-auto-reconnect.v1";
 
 // 8 curated accent hues — one hue drives the whole accent ramp via --accent-h.
 export type AccentSwatch = { id: string; label: string; hue: number };
@@ -29,6 +33,11 @@ class UiPrefs {
   accentHue = $state(163);
   presence = $state<Presence>("calm");
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
+  // On-machine intent flags — no OS-level enforcement; stored as user intent.
+  launchAtLogin = $state(false);
+  restoreSession = $state(false);
+  confirmOnQuit = $state(false);
+  rconAutoReconnect = $state(false);
 
   init() {
     if (typeof window === "undefined") return;
@@ -53,6 +62,11 @@ class UiPrefs {
     } catch {
       /* malformed code prefs — fall back to defaults */
     }
+
+    this.launchAtLogin = localStorage.getItem(LAUNCH_AT_LOGIN_KEY) === "1";
+    this.restoreSession = localStorage.getItem(RESTORE_SESSION_KEY) === "1";
+    this.confirmOnQuit = localStorage.getItem(CONFIRM_ON_QUIT_KEY) === "1";
+    this.rconAutoReconnect = localStorage.getItem(RCON_AUTO_RECONNECT_KEY) === "1";
 
     this.apply();
   }
@@ -85,6 +99,26 @@ class UiPrefs {
     this.code = { ...this.code, ...patch };
     localStorage.setItem(CODE_KEY, JSON.stringify(this.code));
     this.applyCode();
+  }
+
+  toggleLaunchAtLogin() {
+    this.launchAtLogin = !this.launchAtLogin;
+    localStorage.setItem(LAUNCH_AT_LOGIN_KEY, this.launchAtLogin ? "1" : "0");
+  }
+
+  toggleRestoreSession() {
+    this.restoreSession = !this.restoreSession;
+    localStorage.setItem(RESTORE_SESSION_KEY, this.restoreSession ? "1" : "0");
+  }
+
+  toggleConfirmOnQuit() {
+    this.confirmOnQuit = !this.confirmOnQuit;
+    localStorage.setItem(CONFIRM_ON_QUIT_KEY, this.confirmOnQuit ? "1" : "0");
+  }
+
+  toggleRconAutoReconnect() {
+    this.rconAutoReconnect = !this.rconAutoReconnect;
+    localStorage.setItem(RCON_AUTO_RECONNECT_KEY, this.rconAutoReconnect ? "1" : "0");
   }
 
   private apply() {

@@ -22,6 +22,7 @@ pub mod edit;
 pub mod local_fs;
 pub mod path_guard;
 pub mod profile;
+pub mod rcon;
 pub mod secrets;
 pub mod sftp;
 pub mod state;
@@ -216,6 +217,9 @@ pub fn run() {
             commands::set_server_fingerprint,
             commands::clear_server_fingerprint,
             commands::rotate_bridge_token,
+            commands::rcon_has_password,
+            commands::rcon_set_password,
+            commands::rcon_send,
             commands::validate_ssh_key_file,
             commands::check_for_updates,
             commands::download_update,
