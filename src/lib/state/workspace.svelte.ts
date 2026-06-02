@@ -3,11 +3,11 @@
 // Chat is the default workspace.
 
 export type WorkspaceId =
-  | "chat" | "sync" | "files" | "activity"
+  | "home" | "chat" | "sync" | "files" | "activity"
   | "settings";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
-  "chat", "sync", "files", "activity",
+  "home", "chat", "sync", "files", "activity",
   "settings",
 ] as const;
 
