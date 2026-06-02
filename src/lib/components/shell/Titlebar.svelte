@@ -1,7 +1,8 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable } from "lucide-svelte";
+  import { Minus, Square, X, ChevronDown, Check, Plus, Pencil, Cable, Search } from "lucide-svelte";
   import { connection, type ServerProfile } from "../../state/connection.svelte";
+  import { commandPalette } from "../../state/command-palette.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   let { onAddServer, onEditCurrent }: {
@@ -123,7 +124,19 @@
 
   </div>
 
-  <div class="drag-fill" data-tauri-drag-region></div>
+  <div class="center" data-tauri-drag-region>
+    <button
+      class="cmdk"
+      type="button"
+      onclick={() => commandPalette.show()}
+      use:tooltip={"Search commands, servers & chats — Ctrl+K"}
+      aria-label="Open command palette"
+    >
+      <Search size={13} aria-hidden="true" />
+      <span class="cmdk-label">Search or jump to…</span>
+      <span class="cmdk-kbd"><kbd>Ctrl</kbd><kbd>K</kbd></span>
+    </button>
+  </div>
 
   <div class="right">
     {#if sel?.bridgePort}
@@ -163,11 +176,49 @@
   }
   /* Layout priority:
      - .right (window controls) stays flex-shrink:0 — always clickable.
-     - .drag-fill takes ALL leftover space — that's the window-drag handle.
+     - .center takes ALL leftover space — its empty margins are the window-drag
+       handle; the centered ⌘K search pill inside is interactive (not draggable).
      - .left can shrink (server picker truncates) but doesn't grow past content. */
   .left      { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 0 1 auto; height: 100%; }
-  .drag-fill { flex: 1 1 auto; min-width: 24px; height: 100%; }
+  .center    { flex: 1 1 auto; min-width: 24px; height: 100%; display: flex; align-items: center; justify-content: center; padding: 0 12px; }
   .right     { display: flex; align-items: center; gap: 6px; flex-shrink: 0; height: 100%; }
+
+  /* Centered ⌘K command-palette search — mockup `.l2-cmd`. */
+  .cmdk {
+    display: inline-flex; align-items: center; gap: 8px;
+    width: 100%; max-width: 360px; height: 28px;
+    padding: 0 8px 0 10px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--fg-subtle);
+    font: inherit; font-size: var(--fs-xs);
+    cursor: text;
+    transition: border-color 140ms var(--ease-soft), background 140ms var(--ease-soft), box-shadow 140ms var(--ease-soft);
+  }
+  .cmdk:hover {
+    background: var(--surface);
+    border-color: var(--border-strong);
+  }
+  .cmdk:focus-visible {
+    outline: none;
+    border-color: color-mix(in oklch, var(--accent) 45%, var(--border-strong));
+    box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+  .cmdk :global(svg) { color: var(--fg-muted); flex-shrink: 0; }
+  .cmdk-label {
+    flex: 1; text-align: left;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .cmdk-kbd { margin-left: auto; display: inline-flex; gap: 3px; flex-shrink: 0; }
+  .cmdk-kbd kbd {
+    font-family: var(--font-mono); font-size: 10px; line-height: 1.4;
+    color: var(--fg-muted);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: 4px;
+    padding: 1px 5px;
+  }
 
   .brand {
     display: inline-flex; align-items: center; gap: 8px;
