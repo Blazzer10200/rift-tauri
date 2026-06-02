@@ -8,7 +8,6 @@ import HomePage from "../home/HomePage.svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SyncPage from "../sync/SyncPage.svelte";
 import TwoPane from "../browser/TwoPane.svelte";
-import ActivityFeed from "../activity/ActivityFeed.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
 import { connection } from "$lib/state/connection.svelte";
 
@@ -39,6 +38,5 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   sync:        { component: SyncPage,          title: "Sync",        icon: RefreshCcw,    kbd: "3",
                  getCount: () => connection.conflictCount, getTone: "danger" },
   files:       { component: TwoPane,           title: "Files",       icon: FolderOpen,    kbd: "4" },
-  activity:    { component: ActivityFeed,      title: "Activity",    icon: Activity,      kbd: "5" },
-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "6" },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "5" },
 };

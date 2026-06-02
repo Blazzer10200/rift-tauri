@@ -41,6 +41,11 @@ export type ResourceGroup = {
 };
 
 class SyncPageStore {
+  // Tabbed hub (06-02): Drift / Conflicts / Activity. Lives on the store (not
+  // local to SyncPage) so deeplinks elsewhere — RecentActivityCard "Open
+  // Activity", WatchedFoldersTable row-click, command palette — can target a
+  // tab before navigating to the Sync workspace.
+  tab = $state<"drift" | "conflicts" | "activity">("drift");
   loading = $state(false);
   busy = $state(false);
   errorMsg = $state<string | null>(null);

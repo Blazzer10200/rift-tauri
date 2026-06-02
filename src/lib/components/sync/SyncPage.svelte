@@ -7,9 +7,10 @@
     RefreshCw, DownloadCloud, UploadCloud, AlertTriangle,
     ChevronRight, CheckCircle2, CircleAlert, History,
     Wrench, Trash2, Eye, EyeOff, MoreHorizontal, Check, RefreshCcw, Timer,
-    Plug, ServerCog,
+    Plug, ServerCog, GitBranch, GitMerge, Activity,
   } from "lucide-svelte";
   import ConflictsPage from "../conflicts/ConflictsPage.svelte";
+  import ActivityFeed from "../activity/ActivityFeed.svelte";
   import PageHeader from "../shell/PageHeader.svelte";
   import WatchedFoldersTable from "./WatchedFoldersTable.svelte";
   import RecentActivityCard from "./RecentActivityCard.svelte";
@@ -45,6 +46,7 @@
   // (Mirror toggle, Sweep stale locks, Preview). Click-outside closes.
   let overflowOpen = $state(false);
   let overflowRef = $state<HTMLDivElement | null>(null);
+
 
   function onDocMouseDown(ev: MouseEvent) {
     if (!overflowOpen) return;
@@ -238,6 +240,7 @@
 </script>
 
 {#snippet toolbarActions()}
+      {#if syncPage.tab === "drift"}
       <div class="kebab-wrap" bind:this={overflowRef}>
         <button
           class="btn ghost icon"
@@ -380,6 +383,7 @@
           {/if}
         {/if}
       </button>
+      {/if}
 {/snippet}
 
 <section class="page">
@@ -415,19 +419,53 @@
     </section>
   {/if}
 
+  {#if connection.selected}
+    <div class="sync-tabs" role="tablist" aria-label="Sync views">
+      <button
+        class="sync-tab" class:on={syncPage.tab === "drift"}
+        type="button" role="tab" aria-selected={syncPage.tab === "drift"}
+        onclick={() => (syncPage.tab = "drift")}
+      >
+        <GitBranch size={14}/><span>Drift</span>
+      </button>
+      <button
+        class="sync-tab" class:on={syncPage.tab === "conflicts"}
+        type="button" role="tab" aria-selected={syncPage.tab === "conflicts"}
+        onclick={() => (syncPage.tab = "conflicts")}
+      >
+        <GitMerge size={14}/><span>Conflicts</span>
+        {#if connection.conflictCount > 0}
+          <span class="sync-tab-badge">{connection.conflictCount}</span>
+        {/if}
+      </button>
+      <button
+        class="sync-tab" class:on={syncPage.tab === "activity"}
+        type="button" role="tab" aria-selected={syncPage.tab === "activity"}
+        onclick={() => (syncPage.tab = "activity")}
+      >
+        <Activity size={14}/><span>Activity</span>
+      </button>
+    </div>
+  {/if}
+
+  {#if syncPage.tab === "drift"}
+  <div class="sync-tabpane">
   {#if connection.conflictCount > 0}
-    <details class="conflicts-inline" open>
-      <summary class="conflicts-inline-summary">
+    <div class="conflicts-inline">
+      <button
+        class="conflicts-inline-summary"
+        type="button"
+        onclick={() => (syncPage.tab = "conflicts")}
+        use:tooltip={"Open the full conflict resolver"}
+      >
         <AlertTriangle size={12}/>
         <span class="conflicts-inline-label">
-          {connection.conflictCount} conflict{connection.conflictCount === 1 ? "" : "s"}
+          {connection.conflictCount} conflict{connection.conflictCount === 1 ? "" : "s"} need manual resolution
         </span>
+        <span class="conflicts-inline-hint">can't sync until resolved</span>
         <ChevronRight class="conflicts-inline-chev" size={12}/>
-      </summary>
-      <div class="conflicts-inline-body">
-        <ConflictsPage />
-      </div>
-    </details>
+      </button>
+    </div>
   {/if}
 
   {#if syncPage.previewMode}
@@ -703,6 +741,12 @@
       {/if}
     </div>
   </footer>
+  {/if}
+  </div>
+  {:else if syncPage.tab === "conflicts"}
+    <div class="sync-tabpane embed"><ConflictsPage /></div>
+  {:else if syncPage.tab === "activity"}
+    <div class="sync-tabpane embed"><ActivityFeed /></div>
   {/if}
 
   {#if syncPage.mirrorConfirm}
@@ -1377,31 +1421,58 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 10px;
+    width: 100%;
+    padding: 8px 12px;
     cursor: pointer;
-    list-style: none;
+    background: transparent;
+    border: 0;
+    text-align: left;
     color: var(--warn);
+    font: inherit;
     font-size: var(--fs-sm);
+    font-weight: 600;
     user-select: none;
   }
-  .conflicts-inline-summary::-webkit-details-marker { display: none; }
-  .conflicts-inline-label { font-weight: 500; }
+  .conflicts-inline-summary:hover { background: color-mix(in oklch, var(--warn) 12%, transparent); }
+  .conflicts-inline-label { font-weight: 600; color: var(--fg); }
+  .conflicts-inline-hint { color: var(--fg-subtle); font-weight: 400; font-size: var(--fs-xs); }
   .conflicts-inline-summary :global(.conflicts-inline-chev) {
     margin-left: auto;
-    transition: transform 140ms cubic-bezier(0.4, 0, 0.2, 1);
+    color: var(--warn);
   }
-  .conflicts-inline[open] .conflicts-inline-summary :global(.conflicts-inline-chev) {
-    transform: rotate(90deg);
+
+  /* ── Tabbed hub (06-02): Drift / Conflicts / Activity ─────────────────── */
+  .sync-tabs {
+    display: flex; gap: 2px; flex: none;
+    border-bottom: 1px solid var(--border);
+    padding: 0 12px;
   }
-  .conflicts-inline-body {
-    border-top: 1px solid color-mix(in oklch, var(--warn) 24%, transparent);
-    background: var(--bg);
-    /* ConflictsPage owns flex column + scroll — cap height so nested
-       scroll doesn't push the rest of the sync body off-screen. */
-    max-height: 320px;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
+  .sync-tab {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 9px 14px; margin-bottom: -1px;
+    background: transparent; border: 0; border-bottom: 2px solid transparent;
+    color: var(--fg-muted); font: inherit; font-size: var(--fs-sm); font-weight: 600;
+    cursor: pointer;
   }
+  .sync-tab :global(svg) { color: var(--fg-subtle); }
+  .sync-tab:hover { color: var(--fg); }
+  .sync-tab:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--ring); border-radius: var(--radius-xs); }
+  .sync-tab.on { color: var(--fg); border-bottom-color: var(--accent); }
+  .sync-tab.on :global(svg) { color: var(--accent); }
+  .sync-tab-badge {
+    padding: 1px 7px; border-radius: 999px;
+    background: var(--warn-soft); color: var(--warn);
+    border: 1px solid color-mix(in oklch, var(--warn) 30%, transparent);
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Tab content fills the remaining height. Drift keeps its own banners/body/
+     footer flow; embed tabs drop a full standalone page (.page / .feed). */
+  .sync-tabpane {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  .sync-tabpane.embed > :global(*) { flex: 1; min-height: 0; }
 
 </style>

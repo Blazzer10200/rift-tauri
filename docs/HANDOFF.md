@@ -2,6 +2,12 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. History via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-02 (cont'd) — Sync tabbed-hub + Activity demotion (deferred #1 DONE; frontend-only, on main, NOT pushed/shipped)
+Knocked out deferred item #1. `npm run check` + `cargo check` 0/0; all 3 tabs CDP-verified live (Drift dashboard / ConflictsPage / ActivityFeed).
+- **Sync = tabbed hub** — `SyncPage.svelte`: persistent hero + a **Drift/Conflicts/Activity** tab strip (`.sync-tabs`). Drift = existing totals/resources/dashboard/sticky-apply flow, **logic untouched** (wrapped in `{#if syncPage.tab === "drift"}`). Conflicts = full `<ConflictsPage/>` (replaced the old capped inline embed; drift now shows a lightweight "N conflicts need resolution" banner → switches to the tab). Activity = full `<ActivityFeed/>`. Sync toolbar (Sync now/kebab) gated to Drift. **Tab state on the `syncPage` store (`syncPage.tab`)**, not local — so deeplinks target it.
+- **Activity demoted from top-level** — removed `activity` from `workspaces/index.ts` + `WorkspaceId` union/`WORKSPACE_IDS` (`workspace.svelte.ts`). Kbds renumbered: home·1 chat·2 sync·3 files·4 settings·5 (settings 6→5). 3 `setActive("activity")` deeplinks (`WatchedFoldersTable`, `RecentActivityCard`, `CommandPalette`) → `syncPage.tab = "activity"`.
+- **Redesign is now essentially complete** on main. Only deferred #2 (Files detail pane — skipped) + #3 (Onboarding restyle — unverifiable w/o new-user path) remain. Ship the whole arc via /git-ship when ready.
+
 ## Session 2026-06-02 (overnight, autonomous) — redesign cont'd: Settings rebuild + Sync hero + calm rail (frontend-only, on main, NOT pushed/shipped)
 User said "do the entire redesign, full autonomy, go til you can't." 4 commits, all `npm run check` 0/0, all CDP-verified live.
 - **`d95f4f9` Settings single-scroll** — `SettingsPage.svelte` fully rebuilt into the Graphite-Ink layout: sticky left **scroll-spy index** (getBoundingClientRect + smooth jump), ghost section-head icon tiles, `.st-card/.st-row/.st-switch/.st-seg` primitives, body-portal `Select` (no native `<select>`), 8-swatch accent grid. **Preserves EVERY real feature** (mockup only showed a subset): full Speech/Whisper, SSH servers + fingerprint/bridge-token rotation, accessibility, assistant CLI/budget/compaction, real connection hero, SSH key path, diagnostics. Section id `network` kept internally (label "Server") so command-palette deep-links still work. **Legacy `Settings.svelte` now orphaned (no importers) — left in place per deletion-safety, flag for later removal.**
@@ -12,7 +18,7 @@ User said "do the entire redesign, full autonomy, go til you can't." 4 commits, 
 Token foundation + prior sessions already made Sync/Files/Chat/Activity cohesive emerald-graphite. **Chat is already a flat-timeline** (numbered tool steps, collapsible thinking, session-review dock — the v0.4.44-46 wave). **Activity** already matches the redesign's engine-parity table (filter chips+counts, Pause/Clear). So most "remaining screens" needed no work.
 
 ### RESUME HERE — deliberately DEFERRED (judged too risky/low-value for unsupervised overnight)
-1. **Sync full tabbed-hub + Activity demotion** — hero is done; remaining = a Drift/Conflicts/Activity tab strip wrapping the existing surfaces + removing `activity` from `WORKSPACES` (`workspaces/index.ts`, renumber kbds 1-5). HIGH RISK: 1343L data-loss-critical file w/ sticky footer + banners + preview + rebaseline; ActivityFeed already redesign-ready to drop in. Conflicts already embedded inline in SyncPage. Do this awake.
+1. ~~Sync full tabbed-hub + Activity demotion~~ — **DONE 2026-06-02 (cont'd), see top block.**
 2. **Files detail pane** — SKIPPED: mockup's tree+detail would replace the app's local|remote two-pane, which is MORE capable. Don't regress it; at most add a code-preview detail without losing local/remote.
 3. **Onboarding restyle** — unverifiable overnight (4-cond gate needs servers=0 + no ssh key; can't fake w/o disrupting real server). Do when a new-user path can be exercised.
 - **Env note:** during dev, an HMR full-reload transiently empties `connection.servers` on views that don't re-fetch (Sync/Activity); navigating to Settings (`loadServers()`) repopulates from disk. NOT data loss. I reselected Endure RP → reconnected fine.
@@ -72,7 +78,7 @@ v0.4.38 updater fix (`5a3618c`/`5a013dc`); assistant UX polish (`830a851`/`3487d
 - Image paste: `assistant_send` flips `--input-format text→stream-json` w/ attachments. 20MiB cap.
 - Settings is workspace (kbd **6** since 06-02 Home add; was 5), `Ctrl+,` flips; no slideover scrim.
 - **Redesign accent is themeable via `--accent-h`** (app.css `:root`): never hard-code an accent oklch hue — write `oklch(L C var(--accent-h))`. `ui-prefs.setAccentHue()` persists + applies. Parse from localStorage MUST null-guard before `Number()` (null→0→pink). Status LEDs (`--ok/warn/danger/info`) stay fixed, NOT hue-derived.
-- **IA: `home` is top-level kbd 1; Activity still top-level (kbd 5) ON PURPOSE** — don't remove `activity` from WORKSPACES until the Sync→Activity tab exists, or the feature is stripped. Home wiring is real-data only (no fabricated sync counts).
+- **IA:** `home` top-level kbd 1; **Activity is now a Sync tab (`syncPage.tab`), NOT a workspace** — removed from `WORKSPACES`/`WorkspaceId`/`WORKSPACE_IDS`. Kbds: home·1 chat·2 sync·3 files·4 settings·5. Deeplinks to Activity set `syncPage.tab = "activity"` (+ `setActive("sync")` if off-page). Home wiring real-data only (no fabricated counts).
 - `tauri.conf.json` `dragDropEnabled: false` — required for HTML5 DnD.
 - AssistantPane drop handlers on `.pane` outer only — inner overlays break preventDefault chain.
 - `compactionHistory[]` is camelCase in persisted JSON. Don't rename.

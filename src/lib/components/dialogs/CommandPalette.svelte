@@ -10,6 +10,7 @@
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
   import { connection } from "../../state/connection.svelte";
+  import { syncPage } from "../../state/sync-page.svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { diagnostics } from "../../state/diagnostics.svelte";
 
@@ -44,7 +45,6 @@
       { id: "chat",     label: "Chat",     icon: MessageSquare, sub: "Ctrl+1" },
       { id: "sync",     label: "Sync",     icon: RefreshCcw,    sub: "Ctrl+2" },
       { id: "files",    label: "Files",    icon: FolderOpen,    sub: "Ctrl+3" },
-      { id: "activity", label: "Activity", icon: ActivityIcon,  sub: "Ctrl+4" },
       { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+5" },
     ];
     for (const n of navs) {
@@ -58,6 +58,17 @@
         run: () => workspace.setActive(n.id),
       });
     }
+
+    // Activity is a tab within Sync (no standalone workspace) — deeplink to it.
+    out.push({
+      id: "nav:activity",
+      label: "Go to Activity",
+      sub: "Sync ▸ Activity",
+      group: "Go to",
+      icon: ActivityIcon,
+      keywords: "workspace pane activity feed log events",
+      run: () => { syncPage.tab = "activity"; workspace.setActive("sync"); },
+    });
 
     // Settings sections (deep-link)
     const sects: { id: SettingsSection; label: string; icon: Icon }[] = [
