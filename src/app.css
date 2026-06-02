@@ -7,55 +7,69 @@
 
 :root,
 [data-direction="linear"][data-mode="dark"] {
-  /* surface stack */
-  --bg:            oklch(0.142 0.008 270);
-  --bg-elev-1:     oklch(0.178 0.010 270);
-  --bg-elev-2:     oklch(0.212 0.012 270);
-  --bg-elev-3:     oklch(0.252 0.013 270);
-  --surface:       oklch(0.205 0.011 270);
-  --surface-hover: oklch(0.248 0.013 270);
-  --surface-active:oklch(0.288 0.014 270);
+  /* surface stack — Graphite Ink, true-neutral graphite */
+  --bg:            oklch(0.142 0.003 250);   /* window  #0C0D0E */
+  --bg-inset:      oklch(0.118 0.003 250);   /* wells   #08090A (composer, code) */
+  --bg-elev-1:     oklch(0.215 0.004 250);   /* cards   #17191B */
+  --bg-elev-2:     oklch(0.262 0.005 250);   /* raised  #1F2225 */
+  --bg-elev-3:     oklch(0.300 0.006 255);   /* highest #26292D */
+  --surface:       oklch(0.215 0.004 250);
+  --surface-hover: oklch(0.262 0.005 250);
+  --surface-active:oklch(0.300 0.006 255);
 
   /* lines */
-  --border:        oklch(1 0 0 / 0.07);
-  --border-strong: oklch(1 0 0 / 0.13);
-  --border-focus:  oklch(0.66 0.17 275);
+  --border:        oklch(0.300 0.006 255);   /* hairline #26292D */
+  --border-strong: oklch(0.365 0.007 255);   /* standard #33373C */
+  --border-focus:  oklch(0.78 0.15 var(--accent-h));
 
   /* type */
-  --fg:            oklch(0.972 0.004 270);
-  --fg-2:          oklch(0.86 0.006 270);
-  --fg-muted:      oklch(0.68 0.012 270);
-  --fg-subtle:     oklch(0.52 0.012 270);
-  --fg-faint:      oklch(0.40 0.010 270);
+  --fg:            oklch(0.925 0.004 250);   /* #E5E7EB */
+  --fg-2:          oklch(0.825 0.008 255);   /* #C3C8CF */
+  --fg-muted:      oklch(0.700 0.013 258);   /* #9CA3AF */
+  --fg-subtle:     oklch(0.545 0.016 262);   /* #6B7280 */
+  --fg-faint:      oklch(0.430 0.010 260);   /* #4B5056 */
 
-  /* brand / accent */
-  --accent:        oklch(0.66 0.18 275);
-  --accent-hover:  oklch(0.72 0.18 275);
-  --accent-soft:   oklch(0.66 0.18 275 / 0.14);
-  --accent-fg:     oklch(0.98 0.01 275);
-  --ring:          oklch(0.66 0.18 275 / 0.45);
+  /* brand / accent — themeable: one hue (--accent-h) drives the whole ramp.
+     Solid accent is RARE (Send + one CTA/screen); everything else is ghost. */
+  --accent-h:      163;                                      /* emerald default */
+  --accent:        oklch(0.78 0.15 var(--accent-h));
+  --accent-hover:  oklch(0.86 0.13 var(--accent-h));
+  --accent-active: oklch(0.70 0.15 var(--accent-h));
+  --accent-fg:     oklch(0.25 0.05 var(--accent-h));         /* text/icon ON solid accent */
+  --accent-soft:   oklch(0.78 0.15 var(--accent-h) / 0.12);  /* ghost fill (default treatment) */
+  --ghost-border:  oklch(0.78 0.15 var(--accent-h) / 0.35);
+  --ring:          oklch(0.78 0.15 var(--accent-h) / 0.45);
 
-  /* status semantics */
-  --ok:            oklch(0.74 0.14 150);
-  --ok-soft:       oklch(0.74 0.14 150 / 0.14);
-  --warn:          oklch(0.80 0.14 78);
-  --warn-soft:     oklch(0.80 0.14 78 / 0.14);
-  --danger:        oklch(0.68 0.20 22);
-  --danger-soft:   oklch(0.68 0.20 22 / 0.14);
-  --info:          oklch(0.72 0.13 230);
-  --info-soft:     oklch(0.72 0.13 230 / 0.14);
+  /* status semantics — accent-INDEPENDENT (theme never recolors these) */
+  --ok:            oklch(0.73 0.18 150);
+  --ok-soft:       oklch(0.73 0.18 150 / 0.14);
+  --warn:          oklch(0.78 0.16 70);
+  --warn-soft:     oklch(0.78 0.16 70 / 0.14);
+  --danger:        oklch(0.71 0.17 22);
+  --danger-soft:   oklch(0.71 0.17 22 / 0.14);
+  --info:          oklch(0.76 0.13 230);
+  --info-soft:     oklch(0.76 0.13 230 / 0.14);
 
-  /* shape */
-  --radius-xs: 3px;
-  --radius-sm: 5px;
-  --radius:    6px;
-  --radius-lg: 8px;
+  /* shape — softened (Graphite Ink) */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius:    8px;
+  --radius-lg: 10px;
   --radius-xl: 12px;
+  --r-card:    12px;   /* cards; some surfaces go up to 18px */
 
   /* shadow */
-  --shadow-sm: 0 1px 0 oklch(1 0 0 / 0.04) inset, 0 1px 2px oklch(0 0 0 / 0.4);
-  --shadow:    0 1px 0 oklch(1 0 0 / 0.04) inset, 0 8px 24px oklch(0 0 0 / 0.5);
-  --shadow-lg: 0 1px 0 oklch(1 0 0 / 0.06) inset, 0 24px 64px oklch(0 0 0 / 0.6);
+  --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
+  --shadow:    0 4px 14px oklch(0 0 0 / 0.45);
+  --shadow-lg: 0 24px 64px oklch(0 0 0 / 0.60);
+
+  /* motion — one shared vocabulary (reuse, don't hand-roll curves) */
+  --ease-page:    cubic-bezier(0.22, 1, 0.36, 1);   /* decelerate — entrances */
+  --ease-soft:    cubic-bezier(0.4, 0, 0.2, 1);      /* standard — layout shifts */
+  --dur-page:     400ms;   /* a screen enters */
+  --dur-page-out: 240ms;   /* a screen leaves */
+  --dur-rise:     460ms;   /* a content block rises */
+  --stagger:      62ms;    /* gap between staggered blocks */
 
   /* density (compact default; overridden below by data-density) */
   --row-h: 28px;
@@ -106,7 +120,9 @@ body {
   font-size: var(--fs-md);
   font-feature-settings: "cv02","cv03","cv04","cv11","ss01";
   font-variant-ligatures: none;
-  background: var(--bg);
+  background:
+    radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%),
+    var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
