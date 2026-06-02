@@ -5,7 +5,7 @@
   import {
     Cog, Server, Key, Info, Plus, Pencil, Trash2, RefreshCw, Sparkles, Palette,
     FolderOpen, Copy, Check, Eye, EyeOff, X, Mic, Accessibility as A11yIcon,
-    CircleCheck,
+    CircleCheck, IdCard, Terminal, RotateCcw,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
@@ -16,6 +16,8 @@
   import { commandPalette } from "../../state/command-palette.svelte";
   import { uiPrefs, ACCENTS } from "../../state/ui-prefs.svelte";
   import { dialogs } from "../../state/dialogs.svelte";
+  import { onboarding } from "../../state/onboarding.svelte";
+  import { syncPage } from "../../state/sync-page.svelte";
   import { scrubUser } from "$lib/utils/redact";
   import { tooltip } from "$lib/actions/tooltip";
   import Select from "../Select.svelte";
@@ -25,8 +27,9 @@
 
   // Scroll-spy section ids. `network` kept (not "server") so the command-palette
   // deep-link channel (requestSettingsSection) keeps working untouched.
-  type Section = "appearance" | "accessibility" | "assistant" | "speech" | "network" | "about";
+  type Section = "general" | "appearance" | "accessibility" | "assistant" | "speech" | "network" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
+    { id: "general",       label: "General",       icon: IdCard,   sub: "Workspace identity, on-machine behavior, and first-run." },
     { id: "appearance",    label: "Appearance",    icon: Palette,  sub: "Theme color, density, code preview, and keyboard shortcuts — applied instantly across Rift." },
     { id: "accessibility", label: "Accessibility", icon: A11yIcon, sub: "Reading-comfort options for the Assistant chat." },
     { id: "assistant",     label: "Assistant",     icon: Sparkles, sub: "Your Claude session, per-turn cost guard, and conversation compaction." },
@@ -35,7 +38,7 @@
     { id: "about",         label: "About",         icon: Info,     sub: "Build info, file paths, and support diagnostics." },
   ];
 
-  let activeSec = $state<Section>("appearance");
+  let activeSec = $state<Section>("general");
   let scrollEl = $state<HTMLDivElement>();
   // Per-section anchor elements for scroll-spy + jump().
   let secEls = $state<Partial<Record<Section, HTMLElement>>>({});
@@ -187,6 +190,83 @@
   let rotatedToken = $state<{ key: string; token: string } | null>(null);
   let rotatedTokenCopied = $state(false);
 
+  // ── RCON console state ──
+  type RconKind = "cmd" | "ok" | "warn" | "sys";
+  type RconLine = { time: string; msg: string; kind: RconKind };
+  let rconConfigured = $state(false);
+  let rconStatus = $state<"idle" | "checking" | "online" | "offline">("idle");
+  let rconPassword = $state("");
+  let rconShowPw = $state(false);
+  let rconLog = $state<RconLine[]>([]);
+  let rconInput = $state("");
+  let rconBusy = $state(false);
+  const rconServerKey = $derived(connection.selected?.key ?? null);
+
+  function rconTime(): string {
+    return new Date().toLocaleTimeString([], { hour12: true });
+  }
+  function rconPushLine(msg: string, kind: RconKind) {
+    rconLog = [...rconLog, { time: rconTime(), msg, kind }].slice(-200);
+  }
+
+  async function rconSavePassword() {
+    if (!rconServerKey) return;
+    try {
+      await invoke("rcon_set_password", { serverKey: rconServerKey, password: rconPassword });
+      rconConfigured = true;
+      rconPushLine("Password saved.", "sys");
+    } catch (e) {
+      rconPushLine(`Save failed: ${String(e)}`, "warn");
+    }
+  }
+  async function rconClearPassword() {
+    if (!rconServerKey) return;
+    try {
+      await invoke("rcon_set_password", { serverKey: rconServerKey, password: "" });
+      rconConfigured = false;
+      rconPassword = "";
+      rconPushLine("Password cleared.", "sys");
+    } catch (e) {
+      rconPushLine(`Clear failed: ${String(e)}`, "warn");
+    }
+  }
+
+  async function runRcon(cmd: string) {
+    if (!rconServerKey || !cmd.trim()) return;
+    rconPushLine("❯ " + cmd, "cmd");
+    rconBusy = true;
+    rconStatus = "checking";
+    try {
+      const out = await invoke<string>("rcon_send", { serverKey: rconServerKey, command: cmd });
+      rconPushLine(out || "(no output)", "ok");
+      rconStatus = "online";
+    } catch (e) {
+      rconPushLine(String(e), "warn");
+      rconStatus = "offline";
+    } finally {
+      rconBusy = false;
+    }
+    rconInput = "";
+  }
+
+  // $effect: probe rcon_has_password when selected server changes
+  $effect(() => {
+    const key = rconServerKey;
+    if (!key) { rconConfigured = false; rconStatus = "idle"; return; }
+    invoke<boolean>("rcon_has_password", { serverKey: key }).then((has) => {
+      rconConfigured = has;
+    }).catch(() => { rconConfigured = false; });
+  });
+
+  // $effect: auto-reconnect ping (15s interval, leak-free)
+  $effect(() => {
+    if (!uiPrefs.rconAutoReconnect || !rconConfigured || !rconServerKey) return;
+    const iv = setInterval(() => {
+      if (!rconBusy) void invoke<string>("rcon_send", { serverKey: rconServerKey!, command: "version" }).then(() => { rconStatus = "online"; }).catch(() => { rconStatus = "offline"; });
+    }, 15000);
+    return () => clearInterval(iv);
+  });
+
   async function onUnpinFingerprint(s: ServerProfile) {
     if (!s.fingerprint) return;
     const ok = confirm(
@@ -313,11 +393,91 @@
     <div class="st-scroll" bind:this={scrollEl} onscroll={onScroll}>
       <div class="st-doc">
 
+        <!-- ── GENERAL ── -->
+        <section class="st-sec" bind:this={secEls.general}>
+          <div class="st-sec-head">
+            <div class="st-sec-ic"><IdCard size={19} strokeWidth={1.75} /></div>
+            <div><div class="st-sec-tt">General</div><div class="st-sec-sub">{ST_SECTIONS[0].sub}</div></div>
+          </div>
+
+          <!-- Workspace identity -->
+          <div class="st-block">
+            <div class="st-block-label">Workspace</div>
+            <div class="st-card">
+              <div class="st-account">
+                <div class="st-avatar">{(connection.selected?.name?.[0] ?? "R").toUpperCase()}</div>
+                <div class="st-account-body">
+                  <div class="st-account-name">{connection.selected?.name ?? "No workspace"}</div>
+                  <div class="st-account-mail">{connection.selected?.remoteRoot ?? "—"}</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:9px; flex:none;">
+                  {#if watcherOn}
+                    <span class="st-conn-pill up"><span class="dot"></span>Connected</span>
+                  {:else}
+                    <span class="st-conn-pill down"><span class="dot"></span>Offline</span>
+                  {/if}
+                  <button class="st-btn" type="button" onclick={() => jump("network")}><Server size={14} /> Switch</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- On-machine behavior toggles -->
+          <div class="st-block">
+            <div class="st-block-label">On-machine behavior</div>
+            <div class="st-card">
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Launch at login</div>
+                  <div class="st-row-desc">Records your intent to launch Rift at login. No OS-level startup entry is created — enable your OS's startup mechanism separately.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={uiPrefs.launchAtLogin} role="switch" aria-checked={uiPrefs.launchAtLogin} aria-label="Launch at login" type="button" onclick={() => uiPrefs.toggleLaunchAtLogin()}></button>
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Restore last session</div>
+                  <div class="st-row-desc">Stores your preference to reopen the last-used workspace on next launch. Honoured when the stored server profile is still present.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={uiPrefs.restoreSession} role="switch" aria-checked={uiPrefs.restoreSession} aria-label="Restore last session" type="button" onclick={() => uiPrefs.toggleRestoreSession()}></button>
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Confirm before quitting</div>
+                  <div class="st-row-desc">Stores your preference for a quit-confirmation prompt. The actual prompt requires Tauri window-close handling wired to this flag.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={uiPrefs.confirmOnQuit} role="switch" aria-checked={uiPrefs.confirmOnQuit} aria-label="Confirm before quitting" type="button" onclick={() => uiPrefs.toggleConfirmOnQuit()}></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- First-run replay -->
+          <div class="st-block">
+            <div class="st-block-label">First run</div>
+            <div class="st-card">
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Replay first-run walkthrough</div>
+                  <div class="st-row-desc">Re-arms the onboarding gate. The walkthrough re-shows on next launch if its other conditions are met (no connected server, no SSH key).</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-btn" type="button" onclick={() => onboarding.reset()}><RotateCcw size={14} /> Replay first-run</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- ── APPEARANCE ── -->
         <section class="st-sec" bind:this={secEls.appearance}>
           <div class="st-sec-head">
             <div class="st-sec-ic"><Palette size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Appearance</div><div class="st-sec-sub">{ST_SECTIONS[0].sub}</div></div>
+            <div><div class="st-sec-tt">Appearance</div><div class="st-sec-sub">{ST_SECTIONS[1].sub}</div></div>
           </div>
 
           <div class="st-block">
@@ -454,7 +614,7 @@
         <section class="st-sec" bind:this={secEls.accessibility}>
           <div class="st-sec-head">
             <div class="st-sec-ic"><A11yIcon size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Accessibility</div><div class="st-sec-sub">{ST_SECTIONS[1].sub}</div></div>
+            <div><div class="st-sec-tt">Accessibility</div><div class="st-sec-sub">{ST_SECTIONS[2].sub}</div></div>
           </div>
           <div class="st-block">
             <div class="st-block-label">Reading comfort</div>
@@ -506,7 +666,7 @@
         <section class="st-sec" bind:this={secEls.assistant}>
           <div class="st-sec-head">
             <div class="st-sec-ic"><Sparkles size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Assistant</div><div class="st-sec-sub">{ST_SECTIONS[2].sub}</div></div>
+            <div><div class="st-sec-tt">Assistant</div><div class="st-sec-sub">{ST_SECTIONS[3].sub}</div></div>
           </div>
 
           <div class="st-block">
@@ -652,7 +812,7 @@
         <section class="st-sec" bind:this={secEls.speech}>
           <div class="st-sec-head">
             <div class="st-sec-ic"><Mic size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Speech</div><div class="st-sec-sub">{ST_SECTIONS[3].sub}</div></div>
+            <div><div class="st-sec-tt">Speech</div><div class="st-sec-sub">{ST_SECTIONS[4].sub}</div></div>
           </div>
 
           <div class="st-block">
@@ -850,7 +1010,7 @@
         <section class="st-sec" bind:this={secEls.network}>
           <div class="st-sec-head">
             <div class="st-sec-ic"><Server size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Server</div><div class="st-sec-sub">{ST_SECTIONS[4].sub}</div></div>
+            <div><div class="st-sec-tt">Server</div><div class="st-sec-sub">{ST_SECTIONS[5].sub}</div></div>
           </div>
 
           {#if connection.selected}
@@ -951,13 +1111,143 @@
               </div>
             </div>
           {/if}
+
+          <!-- ── Drift detection ── -->
+          <div class="st-block">
+            <div class="st-block-label">Drift detection</div>
+            <div class="st-card">
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Periodic rescan</div>
+                  <div class="st-row-desc">Catch remote-side drift (teammates pushing, out-of-band edits) that the local watcher can't see.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={syncPage.autoRescanEnabled} role="switch" aria-checked={syncPage.autoRescanEnabled} aria-label="Periodic rescan" type="button" onclick={() => { syncPage.autoRescanEnabled = !syncPage.autoRescanEnabled; if (typeof localStorage !== "undefined") localStorage.setItem("rift.sync.autoRescan.enabled", syncPage.autoRescanEnabled ? "1" : "0"); }}></button>
+                </div>
+              </div>
+              <div class="st-row" data-disabled={!syncPage.autoRescanEnabled}>
+                <div class="st-row-body">
+                  <div class="st-row-label">Rescan interval</div>
+                  <div class="st-row-desc">How often Rift re-checks for remote drift while the watcher is running.</div>
+                </div>
+                <div class="st-row-ctl" style="min-width:160px;">
+                  <Select
+                    value={String(syncPage.autoRescanIntervalSec)}
+                    options={[30,60,120,300,600].map(s => ({ value: String(s), label: s < 60 ? `${s}s` : `${Math.round(s/60)}m` }))}
+                    onChange={(v) => { syncPage.autoRescanIntervalSec = Number(v); if (typeof localStorage !== "undefined") localStorage.setItem("rift.sync.autoRescan.intervalSec", v); }}
+                    disabled={!syncPage.autoRescanEnabled}
+                    ariaLabel="Rescan interval"
+                  />
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Mirror mode</div>
+                  <div class="st-row-desc">Buckets local-missing + remote-has files as remote-delete instead of pull. Destructive — use with care.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={syncPage.mirrorEnabled} role="switch" aria-checked={syncPage.mirrorEnabled} aria-label="Mirror mode" type="button" onclick={() => void syncPage.toggleMirror(!syncPage.mirrorEnabled)}></button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Danger zone ── -->
+          {#if connection.selected}
+            <div class="st-block">
+              <div class="st-block-label">Danger zone</div>
+              <div class="st-card danger st-danger">
+                <div class="st-row">
+                  <div class="st-row-body">
+                    <div class="st-row-label">Forget server</div>
+                    <div class="st-row-desc">Permanently removes this server profile. Local files are not deleted.</div>
+                  </div>
+                  <div class="st-row-ctl">
+                    <button class="st-btn danger-btn" type="button" onclick={() => dialogs.onDeleteServer(connection.selected!)}><Trash2 size={14} /> Forget server</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          {/if}
+
+          <!-- ── RCON live console ── -->
+          <div class="st-block">
+            <div class="st-block-label">RCON console</div>
+            <!-- Password config row -->
+            <div class="st-card">
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">RCON password</div>
+                  <div class="st-row-desc">Set the RCON password for the selected server. Leave blank to clear.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <span class="st-secret">
+                    <input class="st-input mono" type={rconShowPw ? "text" : "password"} placeholder="password…" style="width:160px;" bind:value={rconPassword} autocomplete="off" spellcheck="false" disabled={!connection.selected} />
+                    <button class="st-eye" type="button" onclick={() => (rconShowPw = !rconShowPw)} aria-label={rconShowPw ? "Hide password" : "Show password"}>{#if rconShowPw}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
+                  </span>
+                  <button class="st-btn primary" type="button" onclick={rconSavePassword} disabled={!connection.selected || !rconPassword}><Check size={14} /> Save</button>
+                  {#if rconConfigured}
+                    <button class="st-btn" type="button" onclick={rconClearPassword} disabled={!connection.selected}><X size={14} /> Clear</button>
+                  {/if}
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Auto-reconnect ping</div>
+                  <div class="st-row-desc">Send a <code>version</code> command every 15s to keep the RCON status fresh.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={uiPrefs.rconAutoReconnect} role="switch" aria-checked={uiPrefs.rconAutoReconnect} aria-label="RCON auto-reconnect ping" type="button" onclick={() => uiPrefs.toggleRconAutoReconnect()}></button>
+                </div>
+              </div>
+            </div>
+            <!-- Console terminal -->
+            <div class="st-console">
+              {#if !connection.selected || !rconConfigured}
+                <div class="st-console-offline">
+                  <Terminal size={24} strokeWidth={1.5} />
+                  <span class="t">RCON not configured</span>
+                  <span class="s">Set a password above, then save it to connect.</span>
+                </div>
+              {:else}
+                <div class="st-console-bar">
+                  <Terminal size={14} strokeWidth={1.5} />
+                  <span class="st-console-title">RCON · {connection.selected.name}</span>
+                  <div class="st-console-quick">
+                    <button class="st-quick" type="button" disabled={rconBusy} onclick={() => runRcon("status")}>status</button>
+                    <button class="st-quick" type="button" disabled={rconBusy} onclick={() => runRcon("version")}>version</button>
+                    <button class="st-quick" type="button" disabled={rconBusy} onclick={() => runRcon("resources")}>resources</button>
+                  </div>
+                  <span class="st-pill" class:ok={rconStatus === "online"} class:warn={rconStatus === "offline" || rconStatus === "checking"}>
+                    <span class="dot"></span>{rconStatus}
+                  </span>
+                </div>
+                <div class="st-console-log">
+                  {#each rconLog as line (line.time + line.msg)}
+                    <div class="st-log-line">
+                      <span class="st-log-time">{line.time}</span>
+                      <span class="st-log-msg {line.kind}">{line.msg}</span>
+                    </div>
+                  {/each}
+                  {#if rconLog.length === 0}
+                    <span style="color:var(--fg-faint); font-family:var(--font-mono); font-size:11px;">No output yet — run a command.</span>
+                  {/if}
+                </div>
+                <div class="st-console-input">
+                  <span class="prompt">❯</span>
+                  <input bind:value={rconInput} disabled={rconBusy} placeholder="enter command…" onkeydown={(e) => { if (e.key === "Enter" && rconInput.trim()) { e.preventDefault(); void runRcon(rconInput.trim()); } }} />
+                  <button class="st-console-send" type="button" disabled={rconBusy || !rconInput.trim()} onclick={() => runRcon(rconInput.trim())}><Terminal size={13} /></button>
+                </div>
+              {/if}
+            </div>
+          </div>
         </section>
 
         <!-- ── ABOUT ── -->
         <section class="st-sec" bind:this={secEls.about}>
           <div class="st-sec-head">
             <div class="st-sec-ic"><Info size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">About</div><div class="st-sec-sub">{ST_SECTIONS[5].sub}</div></div>
+            <div><div class="st-sec-tt">About</div><div class="st-sec-sub">{ST_SECTIONS[6].sub}</div></div>
           </div>
 
           <div class="st-block">
@@ -1208,4 +1498,46 @@
   .set-empty { padding: 28px 16px; display: flex; flex-direction: column; gap: 4px; align-items: center; text-align: center; }
   .set-empty-title { color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
   .set-empty-hint { color: var(--fg-muted); font-size: var(--fs-xs); max-width: 280px; line-height: 1.45; }
+
+  /* ── General: workspace identity card ── */
+  .st-account { display: flex; align-items: center; gap: 14px; padding: 17px; }
+  .st-avatar { width: 50px; height: 50px; border-radius: 13px; display: grid; place-items: center; background: linear-gradient(150deg, var(--accent), color-mix(in oklch, var(--accent) 70%, oklch(0.3 0.05 0))); color: var(--accent-fg); font-weight: 700; font-size: 21px; flex: none; box-shadow: 0 4px 16px -4px color-mix(in oklch, var(--accent) 50%, transparent); }
+  .st-account-body { flex: 1; min-width: 0; }
+  .st-account-name { font-size: var(--fs-lg); font-weight: 650; }
+  .st-account-mail { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Danger zone ── */
+  .st-card.danger { border-color: color-mix(in oklch, var(--danger) 30%, var(--border)); }
+  .st-danger { background: color-mix(in oklch, var(--danger) 5%, var(--surface)); }
+  .st-danger .st-row-label { color: var(--danger); }
+
+  /* ── RCON live console ── */
+  .st-console { background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--r-card); overflow: hidden; }
+  .st-console-bar { display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  .st-console-bar :global(svg) { color: var(--fg-subtle); }
+  .st-console-title { font-size: var(--fs-xs); font-weight: 650; color: var(--fg-2); flex: 1; }
+  .st-console-quick { display: flex; gap: 6px; }
+  .st-quick { display: inline-flex; align-items: center; gap: 5px; height: 23px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--fg-muted); font: inherit; font-family: var(--font-mono); font-size: 10px; font-weight: 600; cursor: pointer; }
+  .st-quick:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
+  .st-quick:disabled { opacity: 0.4; cursor: not-allowed; }
+  .st-console-log { height: 172px; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+  .st-log-line { display: flex; gap: 9px; font-family: var(--font-mono); font-size: 11px; line-height: 1.55; }
+  .st-log-time { color: var(--fg-faint); flex: none; }
+  .st-log-msg { color: var(--fg-2); }
+  .st-log-msg.cmd { color: var(--accent); }
+  .st-log-msg.ok { color: var(--ok); }
+  .st-log-msg.warn { color: var(--warn); }
+  .st-log-msg.sys { color: var(--fg-subtle); }
+  .st-console-input { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-top: 1px solid var(--border); background: var(--surface); }
+  .st-console-input .prompt { color: var(--accent); font-family: var(--font-mono); font-weight: 700; }
+  .st-console-input input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--fg); font: inherit; font-family: var(--font-mono); font-size: 12px; }
+  .st-console-input input::placeholder { color: var(--fg-faint); }
+  .st-console-input input:disabled { color: var(--fg-faint); }
+  .st-console-send { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 7px; border: 0; background: var(--accent-soft); color: var(--accent); cursor: pointer; }
+  .st-console-send:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 20%, var(--surface)); }
+  .st-console-send:disabled { opacity: 0.35; cursor: not-allowed; }
+  .st-console-offline { height: 172px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--fg-muted); text-align: center; padding: 24px; }
+  .st-console-offline :global(svg) { color: var(--fg-subtle); }
+  .st-console-offline .t { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-2); }
+  .st-console-offline .s { font-size: var(--fs-xs); max-width: 260px; line-height: 1.5; }
 </style>

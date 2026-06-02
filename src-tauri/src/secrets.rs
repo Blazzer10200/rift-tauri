@@ -55,5 +55,10 @@ pub fn bridge_token_key(server_key: &str) -> String {
     format!("bridge.{server_key}")
 }
 
+/// Namespaced key for a per-server FXServer RCON password.
+pub fn rcon_password_key(server_key: &str) -> String {
+    format!("rcon.{server_key}")
+}
+
 /// Single-tenant key for the Anthropic API key.
 pub const ASSISTANT_API_KEY: &str = "assistant.api_key";

@@ -7,6 +7,7 @@
 pub mod assistant;
 pub mod browser;
 pub mod profile;
+pub mod rcon;
 pub mod sftp;
 pub mod sync;
 pub mod update;
@@ -14,6 +15,7 @@ pub mod update;
 pub use assistant::*;
 pub use browser::*;
 pub use profile::*;
+pub use rcon::*;
 pub use sftp::*;
 pub use sync::*;
 pub use update::*;

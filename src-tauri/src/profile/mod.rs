@@ -190,6 +190,21 @@ pub fn set_server_bridge_token(server_key: &str, value: Option<&str>) -> Result<
     }
 }
 
+/// Read the per-server FXServer RCON password from the OS keychain.
+pub fn server_rcon_password(server_key: &str) -> Option<String> {
+    crate::secrets::get(&crate::secrets::rcon_password_key(server_key))
+}
+
+/// Persist or clear the per-server FXServer RCON password in the OS keychain.
+/// Some → set, None/empty → delete.
+pub fn set_server_rcon_password(server_key: &str, value: Option<&str>) -> Result<(), String> {
+    let key = crate::secrets::rcon_password_key(server_key);
+    match value {
+        Some(v) if !v.is_empty() => crate::secrets::set(&key, v),
+        _ => crate::secrets::delete(&key),
+    }
+}
+
 pub fn config_path() -> std::io::Result<PathBuf> {
     Ok(rift_dir()?.join("rift.json"))
 }
