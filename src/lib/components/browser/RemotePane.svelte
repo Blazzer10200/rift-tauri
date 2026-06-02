@@ -7,7 +7,8 @@
   import { quintOut } from "svelte/easing";
   import { connection } from "../../state/connection.svelte";
   import { fmtRelative, fmtAbsolute } from "../../utils/time";
-  import { fmtSize, pickIcon, isEditableTarget, clampMenuPos } from "../../utils/file-display";
+  import { fmtSize, pickIcon, isEditableTarget, clampMenuPos, type FileFilter } from "../../utils/file-display";
+  import type { DetailEntry } from "./FbDetail.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   type RemoteEntry = {
@@ -27,9 +28,11 @@
     onDropPathsToFolder?: (localPaths: string[], targetRemoteDir: string) => void;
     onDownloadPaths?: (remotePaths: string[]) => void;
     onSelectionChange?: (paths: string[]) => void;
+    onActiveEntry?: (entry: DetailEntry | null) => void;
+    fileFilter?: FileFilter;
     refreshKey?: number;
   };
-  let { serverKey, path, onPathChange, onOpenInNewTab, onDropPaths, onDropPathsToFolder, onDownloadPaths, onSelectionChange, refreshKey = 0 }: Props = $props();
+  let { serverKey, path, onPathChange, onOpenInNewTab, onDropPaths, onDropPathsToFolder, onDownloadPaths, onSelectionChange, onActiveEntry, fileFilter = "all", refreshKey = 0 }: Props = $props();
 
   let entries = $state<RemoteEntry[]>([]);
   let filter = $state("");
@@ -41,11 +44,22 @@
 
   const posixSep: "/" = "/";
 
-  const filtered = $derived(
-    filter.trim() === ""
-      ? entries
-      : entries.filter((e) => e.name.toLowerCase().includes(filter.toLowerCase())),
-  );
+  const filtered = $derived.by(() => {
+    let list = entries;
+    const q = filter.trim().toLowerCase();
+    if (q !== "") list = list.filter((e) => e.name.toLowerCase().includes(q));
+    if (fileFilter !== "all") {
+      // Keep directories visible regardless of mode so navigation still works.
+      list = list.filter((e) => {
+        if (e.is_dir) return true;
+        if (fileFilter === "lua") return e.name.toLowerCase().endsWith(".lua");
+        if (fileFilter === "conflicts") return fileStatus(e) === "conflict";
+        if (fileFilter === "modified") return fileStatus(e) === "modified";
+        return true;
+      });
+    }
+    return list;
+  });
 
   let loadToken = 0;
 
@@ -103,6 +117,35 @@
     const inConflict = connection.conflicts.some((c) => c.remote_path === e.full_path);
     return inConflict ? "conflict" : "synced";
   }
+
+  function fileStatus(e: RemoteEntry): "synced" | "modified" | "conflict" {
+    if (e.is_dir) return "synced";
+    if (rowStatus(e) === "conflict") return "conflict";
+    if (connection.dirtyEdits.has(e.full_path)) return "modified";
+    return "synced";
+  }
+
+  // Report the single active selection up to the detail pane. Multi-select or
+  // empty → null (detail clears for this side in TwoPane).
+  $effect(() => {
+    if (selected.size !== 1) { onActiveEntry?.(null); return; }
+    const [p] = selected;
+    const e = entries.find((x) => x.full_path === p);
+    if (!e) { onActiveEntry?.(null); return; }
+    const lk = !e.is_dir ? connection.lockForRemotePath(e.full_path) : null;
+    onActiveEntry?.({
+      side: "remote",
+      name: e.name,
+      path: e.full_path,
+      is_dir: e.is_dir,
+      size: e.size,
+      modifiedLabel: fmtTime(e.last_modified),
+      modifiedAbs: fmtTimeAbs(e.last_modified),
+      status: fileStatus(e),
+      locked: !!lk,
+      lockedBy: lk ? `${lk.user}@${lk.host}` : null,
+    });
+  });
 
   function onRowClick(e: MouseEvent, entry: RemoteEntry) {
     if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -351,7 +394,7 @@
             </div>
           {:else}
             {#each filtered as e (e.full_path)}
-              {@const status = rowStatus(e)}
+              {@const status = fileStatus(e)}
               {@const lk = !e.is_dir ? connection.lockForRemotePath(e.full_path) : null}
               {@const Icon = pickIcon(e.name, e.is_dir)}
               <div
@@ -384,8 +427,8 @@
                   {/if}
                 </span>
                 <span class="row-status" use:tooltip={status}>
-                  {#if status === "conflict"}
-                    <span class="sym danger">▲</span>
+                  {#if !e.is_dir}
+                    <span class="led led-{status}"></span>
                   {/if}
                 </span>
                 <span class="row-size mono">{fmtSize(e.size, e.is_dir)}</span>
@@ -521,9 +564,11 @@
   .row-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; overflow: hidden; }
   .row-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .up-name { color: var(--fg-muted); padding-left: 2px; letter-spacing: 0.04em; }
-  .row-status { text-align: center; }
-  .sym { font-size: 11px; }
-  .sym.danger { color: var(--danger); }
+  .row-status { display: flex; align-items: center; justify-content: center; }
+  .led { width: 7px; height: 7px; border-radius: 999px; flex: none; }
+  .led-synced { background: var(--fg-faint); }
+  .led-modified { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .led-conflict { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in oklch, var(--warn) 16%, transparent); }
   .row-size, .row-mtime { color: var(--fg-subtle); font-size: var(--fs-xs); white-space: nowrap; }
 
   .empty {

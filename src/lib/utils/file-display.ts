@@ -6,6 +6,9 @@ import { Folder, FileCode, File } from "lucide-svelte";
  *  backslash vs POSIX forward-slash) and conflict matching differs
  *  (local_path vs remote_path). */
 
+/** Shared filter-chip mode for the Files browser panes. */
+export type FileFilter = "all" | "lua" | "conflicts" | "modified";
+
 export function fmtSize(n: number, isDir: boolean): string {
   if (isDir) return "";
   if (n < 1024) return `${n} B`;
