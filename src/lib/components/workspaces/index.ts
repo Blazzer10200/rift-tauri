@@ -1,9 +1,10 @@
 import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
-  MessageSquare, RefreshCcw, FolderOpen,
+  Home as HomeIcon, MessageSquare, RefreshCcw, FolderOpen,
   Activity, Settings as SettingsIcon,
 } from "lucide-svelte";
+import HomePage from "../home/HomePage.svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SyncPage from "../sync/SyncPage.svelte";
 import TwoPane from "../browser/TwoPane.svelte";
@@ -33,10 +34,11 @@ export type WorkspaceDef = {
 };
 
 export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
-  chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "1" },
-  sync:        { component: SyncPage,          title: "Sync",        icon: RefreshCcw,    kbd: "2",
+  home:        { component: HomePage,          title: "Home",        icon: HomeIcon,      kbd: "1" },
+  chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "2" },
+  sync:        { component: SyncPage,          title: "Sync",        icon: RefreshCcw,    kbd: "3",
                  getCount: () => connection.conflictCount, getTone: "danger" },
-  files:       { component: TwoPane,           title: "Files",       icon: FolderOpen,    kbd: "3" },
-  activity:    { component: ActivityFeed,      title: "Activity",    icon: Activity,      kbd: "4" },
-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "5" },
+  files:       { component: TwoPane,           title: "Files",       icon: FolderOpen,    kbd: "4" },
+  activity:    { component: ActivityFeed,      title: "Activity",    icon: Activity,      kbd: "5" },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "6" },
 };
