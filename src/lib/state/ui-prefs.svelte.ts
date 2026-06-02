@@ -38,8 +38,11 @@ class UiPrefs {
     }
     this.railPinned = localStorage.getItem(RAIL_PINNED_KEY) === "1";
 
-    const hue = Number(localStorage.getItem(ACCENT_KEY));
-    if (Number.isFinite(hue) && hue >= 0 && hue <= 360) this.accentHue = hue;
+    const accentRaw = localStorage.getItem(ACCENT_KEY);
+    if (accentRaw !== null) {
+      const hue = Number(accentRaw);
+      if (Number.isFinite(hue) && hue >= 0 && hue <= 360) this.accentHue = hue;
+    }
 
     const pres = localStorage.getItem(PRESENCE_KEY);
     if (pres === "calm" || pres === "bold") this.presence = pres;
