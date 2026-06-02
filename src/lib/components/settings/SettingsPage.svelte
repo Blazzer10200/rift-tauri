@@ -771,10 +771,15 @@
                     <div class="st-row-desc">Microphone used by Whisper capture. System default is usually correct.</div>
                   </div>
                   <div class="st-row-ctl set-mic-r">
-                    <select class="st-input set-mic-select" disabled={!stt.config.enabled} value={stt.config.input_device ?? ""} onchange={(e) => { const v = (e.currentTarget as HTMLSelectElement).value; void stt.setConfig({ input_device: v === "" ? null : v }); }}>
-                      <option value="">System default</option>
-                      {#each stt.inputDevices as d (d)}<option value={d}>{d}</option>{/each}
-                    </select>
+                    <div class="set-mic-select">
+                      <Select
+                        value={stt.config.input_device ?? ""}
+                        options={[{ value: "", label: "System default" }, ...stt.inputDevices.map((d) => ({ value: d, label: d }))]}
+                        onChange={(v) => void stt.setConfig({ input_device: v === "" ? null : v })}
+                        disabled={!stt.config.enabled}
+                        ariaLabel="Whisper input device"
+                      />
+                    </div>
                     <button type="button" class="st-btn" onclick={() => void stt.refreshInputDevices()} use:tooltip={"Refresh device list"} aria-label="Refresh"><RefreshCw size={14} /></button>
                   </div>
                 </div>
