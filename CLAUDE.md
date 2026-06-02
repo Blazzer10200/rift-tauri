@@ -17,7 +17,7 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Design briefs | `docs/design/` (1 active: `assistant-svelte-split.md`; `git-rcon-tools.md` → `docs/archive/` after git tools shipped v0.4.37) |
+| Design briefs | `docs/design/` (active: `assistant-svelte-split.md` + `proxmox-sftp-test-target.md` live infra; `git-rcon-tools.md` + `redesign-gap-audit.md` → `docs/archive/` after their arcs completed) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.

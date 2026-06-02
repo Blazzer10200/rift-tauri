@@ -12,6 +12,19 @@
 - **UPDATE 2026-06-02 (cont. 2): Phase 4 (`bb3fb10`) + Phase 5 (`c5963f5`) now DONE + CDP-verified. Full P1–P5 arc complete on `main`. Only Phase 6 (ship) remains — see HANDOFF "RESUME HERE."**
 - One scope correction since this doc was written: **P4 Files is metadata-only** (status pill + size/modified + status-LED pips + filter chips); the **Lua code-preview is DEFERRED** (no file-read path; user declined a 2nd backend exception).
 
+## ⚠️ Reconciliation vs external `GAP_REMEDIATION.md` (designer audit, 2026-06-02)
+A 2nd design-handoff bundle (`Rift App (1).zip` → `design_handoff_rift_redesign/GAP_REMEDIATION.md`) lists 5 "implementation misses." **All 5 were re-verified ALREADY PRESENT on `main` this session.** The designer audited the *mockup* (which omitted these surfaces) and assumed the implementation followed it blindly — it did not; the P1–P5 arc correctly kept the real features. **Do NOT re-implement these — re-adding existing surfaces is the real regression risk here.**
+
+| External claim | Verdict | Evidence (verified 2026-06-02) |
+|---|---|---|
+| #3 Settings dropped Accessibility + Speech (only 5 sections) | ALREADY PRESENT | `settings/SettingsPage.svelte:30` = **7** sections; a11y wired :614, speech :812; `state/{accessibility,stt}.svelte.ts` both exist |
+| #1 Persistent Status Bar dropped | ALREADY PRESENT | `shell/StatusBar.svelte` mounted in `AppShell.svelte` |
+| #2 Chat single-thread / no tabs / no split-pane | ALREADY PRESENT | `shell/ChatTabsBar.svelte` + `state/assistant/tabs.ts` (`openTabs`, `panes`, `addPane`, `MAX_PANES=4`, `focusedPaneIdx`) |
+| #4 First-connect fingerprint-trust (TOFU) dialog | ALREADY PRESENT | `pendingFingerprint`/`confirmFingerprint` in `AppShell.svelte` + `connection.svelte.ts` |
+| #5 Auto-update flow | ALREADY PRESENT | `updates.svelte.ts` `checkOnLaunch()` + `dialogs/UpdateDialog.svelte`; pill rides StatusBar |
+
+**The ONE genuine straggler this reconciliation surfaces:** ⌘K **inline centered top-bar search field**. README spec puts a command-palette search in the 44px top bar; today it is modal-only (`dialogs/CommandPalette.svelte`) and `shell/Titlebar.svelte` has no inline search field. Frontend-only, minor, never scheduled in P1–P6. Confirmed independently by the internal Shell table below ("⌘K centered top-bar search — MISSING"). Everything else the external audit raises under ⚪ deferrals (web-browser dock `state/browserDock.svelte.ts`, Reupload, Bootstrap, dictate wiring) already exists and is a conscious keep/cut, not a miss.
+
 ## Deferred / didn't-make-the-cut (for the next design pass)
 Conscious scope cuts during P1–P5 — surfaced here so nothing is silently dropped. None block P6 ship.
 1. **Lua code-preview** in the Files detail pane (`FbDetail.svelte`) — mockup `files.css` `.fb-code-*` has no Svelte counterpart. **Needs a backend file-read command** (no path exists; a 2nd backend exception was declined). The detail pane currently shows metadata only.
