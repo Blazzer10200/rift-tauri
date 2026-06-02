@@ -173,8 +173,8 @@ class ConnectionStore {
    *  until the first scan lands. Surfaced by StatusBar as "last scan Xs ago". */
   lastScanAt = $state<number | null>(null);
   /** Phase 2 sync→activity deeplink. SyncPage WatchedFoldersTable row click sets
-   *  this to the resource name + flips workspace to "activity"; ActivityFeed reads
-   *  it once on mount and clears. Null between handoffs. */
+   *  this to the resource name + switches to the Sync Activity tab (syncPage.tab);
+   *  ActivityFeed reads it once on mount and clears. Null between handoffs. */
   activityFilter = $state<string | null>(null);
   /** #7 onboarding gate: whether Rift's default SSH key exists on disk. `null`
    *  until probed — the first-run gate treats null as "unknown → don't show",

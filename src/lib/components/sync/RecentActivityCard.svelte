@@ -8,7 +8,7 @@
   } from "lucide-svelte";
   import EmptyState from "../shell/EmptyState.svelte";
   import { connection, type ActivityKind } from "../../state/connection.svelte";
-  import { workspace } from "../../state/workspace.svelte";
+  import { syncPage } from "../../state/sync-page.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   const tail = $derived(connection.activityFeed.slice(0, 5));
@@ -58,7 +58,8 @@
   }
 
   function openActivity() {
-    workspace.setActive("activity");
+    // Activity is now a tab within Sync — switch in place.
+    syncPage.tab = "activity";
   }
 </script>
 

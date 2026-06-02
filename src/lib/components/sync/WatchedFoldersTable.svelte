@@ -7,7 +7,7 @@
   import { Folder, Lock as LockIcon } from "lucide-svelte";
   import EmptyState from "../shell/EmptyState.svelte";
   import { connection } from "../../state/connection.svelte";
-  import { workspace } from "../../state/workspace.svelte";
+  import { syncPage } from "../../state/sync-page.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   type WatchedFolderInfo = {
@@ -86,7 +86,9 @@
 
   function deeplink(name: string) {
     connection.activityFilter = name;
-    workspace.setActive("activity");
+    // Activity is now a tab within Sync (no standalone workspace) — switch to
+    // it in place; ActivityFeed consumes activityFilter on mount.
+    syncPage.tab = "activity";
   }
 
   // Column visibility — empty columns proudly displaying `0 / — / —` made
