@@ -192,7 +192,7 @@
     border-radius: 8px;
     cursor: pointer;
     font: inherit; font-size: var(--fs-xs);
-    transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+    transition: background 140ms var(--ease-soft), border-color 140ms var(--ease-soft), box-shadow 140ms var(--ease-soft);
     min-width: 0; max-width: 100%;
   }
   .svr-btn:hover {
@@ -210,7 +210,7 @@
     background: var(--fg-faint);
     box-shadow: 0 0 0 2px color-mix(in oklch, var(--fg-faint) 22%, transparent);
     flex-shrink: 0;
-    transition: background 120ms ease, box-shadow 120ms ease;
+    transition: background 120ms var(--ease-soft), box-shadow 120ms var(--ease-soft);
   }
   .svr-dot[data-state="ok"]     { background: var(--ok);     box-shadow: 0 0 0 2px color-mix(in oklch, var(--ok)     22%, transparent); }
   .svr-dot[data-state="info"]   { background: var(--info);   box-shadow: 0 0 0 2px color-mix(in oklch, var(--info)   22%, transparent); }
@@ -240,7 +240,7 @@
       0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     z-index: 1000;
-    animation: svr-menu-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: svr-menu-in 160ms var(--ease-page);
     transform-origin: top left;
   }
   @keyframes svr-menu-in {
@@ -271,7 +271,7 @@
     background: transparent; border: 0; color: var(--fg);
     text-align: left; font: inherit; font-size: var(--fs-sm);
     border-radius: 8px; cursor: pointer;
-    transition: background 140ms ease-out;
+    transition: background 140ms var(--ease-soft);
   }
   .menu-item:hover { background: color-mix(in oklch, var(--accent) 10%, transparent); }
   .menu-item[data-active="true"] {
@@ -292,7 +292,7 @@
     border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
     border-radius: 999px;
     font-size: var(--fs-xs); color: var(--fg-2);
-    transition: background 140ms ease, border-color 140ms ease;
+    transition: background 140ms var(--ease-soft), border-color 140ms var(--ease-soft);
   }
   .bridge:hover {
     background: var(--bg-elev-2);
@@ -326,7 +326,7 @@
     background: transparent; border: none;
     color: var(--fg-muted); cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 100ms var(--ease-soft), color 100ms var(--ease-soft);
   }
   .wb:hover { background: var(--bg-elev-2); color: var(--fg); }
   .wb.close:hover { background: var(--danger); color: oklch(0.99 0 0); }

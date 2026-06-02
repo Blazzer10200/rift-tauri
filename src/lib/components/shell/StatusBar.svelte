@@ -244,7 +244,7 @@
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--fg-faint);
     box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 16%, transparent);
-    transition: background 120ms ease;
+    transition: background 120ms var(--ease-soft);
   }
   .led[data-state="ok"] {
     animation: led-breathe 2.6s ease-in-out infinite;
@@ -305,7 +305,7 @@
     padding: 0 6px; margin: 0 -6px;
     border-radius: var(--radius-xs);
     text-transform: capitalize;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 100ms var(--ease-soft), color 100ms var(--ease-soft);
   }
   .state-toggle:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
   .state-toggle:disabled { cursor: not-allowed; opacity: 0.6; }
@@ -326,7 +326,7 @@
     font: inherit;
     font-size: var(--fs-xs);
     display: inline-flex; align-items: center; gap: 6px;
-    transition: background 100ms ease, color 100ms ease;
+    transition: background 100ms var(--ease-soft), color 100ms var(--ease-soft);
   }
   .update-pill:hover { background: color-mix(in oklch, var(--accent) 14%, transparent); }
   .update-pill .lbl { color: inherit; }

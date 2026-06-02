@@ -747,9 +747,9 @@
     cursor: pointer;
     font-size: var(--fs-sm);
     user-select: none;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+    transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
     position: relative;
-    animation: tab-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: tab-in 220ms var(--ease-page);
   }
   @keyframes tab-in {
     from { opacity: 0; transform: translateY(-4px); }
@@ -890,7 +890,7 @@
     padding: 0;
     flex-shrink: 0;
     opacity: 0;
-    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    transition: opacity 120ms var(--ease-soft), background 120ms var(--ease-soft), color 120ms var(--ease-soft);
   }
   .tab:hover .close, .tab.active .close, .tab:focus-within .close { opacity: 1; }
   .close:hover { background: var(--surface-hover); color: var(--fg); }
@@ -965,7 +965,7 @@
     font: inherit;
     font-size: var(--fs-xs);
     line-height: 1;
-    transition: background 120ms, color 120ms, border-color 120ms;
+    transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
   }
   .hdr-btn:hover { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
   .hdr-btn-label { font-size: var(--fs-xs); }
@@ -1009,7 +1009,7 @@
     z-index: 50;
     display: flex; flex-direction: column;
     overflow: hidden;
-    animation: history-pop-in 160ms cubic-bezier(.2,.7,.2,1);
+    animation: history-pop-in 160ms var(--ease-page);
     transform-origin: top right;
   }
   @keyframes history-pop-in {
@@ -1047,7 +1047,7 @@
     cursor: pointer;
     display: inline-flex;
     opacity: 0.65;
-    transition: opacity 120ms, background 120ms, color 120ms;
+    transition: opacity 120ms var(--ease-soft), background 120ms var(--ease-soft), color 120ms var(--ease-soft);
   }
   .ws-x:hover { opacity: 1; color: var(--fg); background: var(--surface-hover); }
 
@@ -1100,7 +1100,7 @@
     border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
     cursor: pointer;
     font-variant-numeric: tabular-nums;
-    transition: background 120ms, border-color 120ms;
+    transition: background 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
   }
   .agents-pill:hover {
     background: color-mix(in oklch, var(--accent) 22%, var(--surface));
@@ -1147,7 +1147,7 @@
     font-size: var(--fs-xs);
     line-height: 1;
     cursor: pointer;
-    transition: background 120ms, color 120ms, border-color 120ms;
+    transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
   }
   .compact-btn:hover { background: var(--surface-hover); color: var(--fg); }
   .compact-btn[data-tone="yellow"] {
@@ -1173,7 +1173,7 @@
     cursor: pointer;
     font-family: inherit;
     font-variant-numeric: tabular-nums;
-    transition: border-color 120ms ease-out, background 120ms ease-out;
+    transition: border-color 120ms var(--ease-soft), background 120ms var(--ease-soft);
   }
   .ctx-pill:hover { border-color: var(--border-strong); }
   .ctx-pill.open { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
@@ -1221,7 +1221,7 @@
     padding: 14px;
     display: flex; flex-direction: column; gap: 10px;
     font-size: var(--fs-xs);
-    animation: ctx-panel-in 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: ctx-panel-in 140ms var(--ease-page);
   }
   @keyframes ctx-panel-in {
     from { opacity: 0; transform: translateY(-6px); }
@@ -1278,7 +1278,7 @@
     background: var(--bg-elev-2); border: 1px solid var(--border);
     color: var(--fg-2); cursor: pointer; font: inherit; font-size: var(--fs-xs);
     white-space: nowrap;
-    transition: border-color 120ms ease-out, color 120ms ease-out, background 120ms ease-out;
+    transition: border-color 120ms var(--ease-soft), color 120ms var(--ease-soft), background 120ms var(--ease-soft);
   }
   .ctx-panel-compact:hover { border-color: var(--border-strong); color: var(--fg); }
   .ctx-panel-compact[data-tone="yellow"] { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, var(--border)); }
@@ -1329,7 +1329,7 @@
       0 24px 60px rgba(0, 0, 0, 0.45),
       0 4px 12px rgba(0, 0, 0, 0.25);
     display: flex; flex-direction: column; gap: 1px;
-    animation: history-pop-in 150ms cubic-bezier(.2,.7,.2,1);
+    animation: history-pop-in 150ms var(--ease-page);
     transform-origin: top right;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -1348,7 +1348,7 @@
     font-size: var(--fs-sm);
     text-align: left;
     cursor: pointer;
-    transition: background 110ms ease, color 110ms ease;
+    transition: background 110ms var(--ease-soft), color 110ms var(--ease-soft);
   }
   .vm-item:hover:not(:disabled) { background: var(--surface-hover); }
   .vm-item:disabled { color: var(--fg-subtle); cursor: not-allowed; }
@@ -1407,7 +1407,7 @@
     padding: 0;
     flex-shrink: 0;
     align-self: center;
-    transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+    transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft), transform 120ms var(--ease-soft);
   }
   .new-tab:hover {
     background: color-mix(in oklch, var(--accent) 18%, var(--bg-elev-2));

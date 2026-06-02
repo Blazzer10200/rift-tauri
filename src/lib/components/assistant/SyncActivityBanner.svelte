@@ -154,20 +154,22 @@
     padding: 6px 10px 6px 12px;
     font-size: 12px;
     line-height: 1.4;
-    border-bottom: 1px solid var(--border-strong, rgba(255, 255, 255, 0.08));
-    background: var(--bg-elev-2, #1a1a1a);
-    color: var(--fg-default, #ddd);
+    border-bottom: 1px solid var(--border-strong);
+    background: var(--bg-elev-2);
+    color: var(--fg);
+    transition: background var(--dur-page-out, 240ms) var(--ease-soft, cubic-bezier(0.4,0,0.2,1)),
+                color var(--dur-page-out, 240ms) var(--ease-soft, cubic-bezier(0.4,0,0.2,1));
   }
   .banner.phase-active {
-    background: color-mix(in srgb, var(--accent, #4a9eff) 12%, var(--bg-elev-2, #1a1a1a));
+    background: color-mix(in oklch, var(--accent) 12%, var(--bg-elev-2));
   }
   .banner.phase-error,
   .banner.wedged {
-    background: color-mix(in srgb, var(--danger, #e5484d) 14%, var(--bg-elev-2, #1a1a1a));
-    color: var(--fg-strong, #fff);
+    background: color-mix(in oklch, var(--danger) 14%, var(--bg-elev-2));
+    color: var(--fg);
   }
   .banner.phase-just-finished {
-    background: color-mix(in srgb, var(--success, #30a46c) 14%, var(--bg-elev-2, #1a1a1a));
+    background: color-mix(in oklch, var(--ok) 14%, var(--bg-elev-2));
   }
   .icon {
     display: inline-flex;
@@ -196,7 +198,7 @@
   }
   .secondary,
   .detail {
-    color: var(--fg-muted, #999);
+    color: var(--fg-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -205,11 +207,11 @@
   .banner.phase-error .detail,
   .banner.wedged .secondary,
   .banner.wedged .detail {
-    color: color-mix(in srgb, var(--fg-strong, #fff) 80%, transparent);
+    color: color-mix(in oklch, var(--fg) 80%, transparent);
   }
   .action {
-    border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
-    background: color-mix(in srgb, currentColor 8%, transparent);
+    border: 1px solid color-mix(in oklch, currentColor 35%, transparent);
+    background: color-mix(in oklch, currentColor 8%, transparent);
     color: currentColor;
     border-radius: 4px;
     padding: 2px 8px;
@@ -219,7 +221,7 @@
     flex-shrink: 0;
   }
   .action:hover:not(:disabled) {
-    background: color-mix(in srgb, currentColor 16%, transparent);
+    background: color-mix(in oklch, currentColor 16%, transparent);
   }
   .action:disabled {
     opacity: 0.5;
@@ -228,7 +230,7 @@
   .dismiss {
     background: none;
     border: none;
-    color: var(--fg-muted, #999);
+    color: var(--fg-muted);
     cursor: pointer;
     padding: 0 4px;
     font-size: 16px;
@@ -236,7 +238,7 @@
     flex-shrink: 0;
   }
   .dismiss:hover {
-    color: var(--fg-strong, #fff);
+    color: var(--fg);
   }
   @media (prefers-reduced-motion: reduce) {
     :global(.banner .spin) {

@@ -48,15 +48,13 @@
     position: relative;
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px;
-    padding: 11px 18px;
+    padding: 10px 18px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
-    min-height: 46px;
+    min-height: 44px;
   }
-  /* Tone accent line — 2px stripe along the header's bottom edge in the
-     page's tone color. Ties each tab visually to its tone, picks up the
-     same accent the activity-bar indicator uses on the active workspace. */
+  /* Tone accent stripe — 2px along the bottom edge, ties each tab to its tone. */
   .page-head::after {
     content: "";
     position: absolute;
@@ -65,6 +63,8 @@
     background: var(--tone-color, var(--accent));
     opacity: 0.55;
     pointer-events: none;
+    transition: background var(--dur-page-out) var(--ease-soft),
+                opacity   var(--dur-page-out) var(--ease-soft);
   }
   .page-head[data-tone="info"]    { --tone-color: var(--info); }
   .page-head[data-tone="warn"]    { --tone-color: var(--warn); }
@@ -72,46 +72,62 @@
   .page-head[data-tone="ok"]      { --tone-color: var(--ok); }
   .page-head[data-tone="neutral"] { --tone-color: var(--fg-muted); }
   .page-head[data-tone="neutral"]::after { opacity: 0.2; }
+
   .left, .right {
     display: flex; align-items: center; gap: 8px;
     min-width: 0;
   }
   .left { flex: 1; min-width: 0; }
+
   .head-icon {
     display: inline-flex; align-items: center; justify-content: center;
     color: var(--accent);
+    transition: color var(--dur-page-out) var(--ease-soft);
+    flex-shrink: 0;
   }
   .head-icon[data-tone="info"]    { color: var(--info); }
   .head-icon[data-tone="warn"]    { color: var(--warn); }
   .head-icon[data-tone="danger"]  { color: var(--danger); }
   .head-icon[data-tone="ok"]      { color: var(--ok); }
   .head-icon[data-tone="neutral"] { color: var(--fg-muted); }
+
   .head-title {
     font-size: var(--fs-lg);
-    font-weight: 600;
+    font-weight: 650;
     color: var(--fg);
     white-space: nowrap;
-    letter-spacing: -0.01em;
+    letter-spacing: -0.012em;
   }
+
+  /* Badge: eyebrow/label spec — 11px, 600, uppercase, ls 0.07em */
   .head-badge {
-    font-size: 9px;
-    font-weight: 700;
-    padding: 2px 6px;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 7px;
     background: var(--warn-soft);
     color: var(--warn);
-    border-radius: 4px;
-    letter-spacing: 0.06em;
+    border-radius: var(--radius-xs);
+    letter-spacing: 0.07em;
     text-transform: uppercase;
+    line-height: 1.4;
   }
   .head-badge[data-tone="accent"] { background: var(--accent-soft); color: var(--accent); }
   .head-badge[data-tone="info"]   { background: var(--info-soft);   color: var(--info); }
   .head-badge[data-tone="danger"] { background: var(--danger-soft); color: var(--danger); }
   .head-badge[data-tone="ok"]     { background: var(--ok-soft);     color: var(--ok); }
+
   .head-sub {
     font-size: var(--fs-xs);
-    color: var(--fg-muted);
+    color: var(--fg-subtle);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    letter-spacing: 0.01em;
+  }
+
+  /* Right-slot: action buttons land here — ghost treatment by default.
+     Consumers pass <button class="btn"> or the .btn global class handles it. */
+  .right {
+    flex-shrink: 0;
   }
 </style>
