@@ -15,6 +15,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
   let historyOpen = $state(false);
+  let historyFull = $state(false);
   let historyAnchor = $state<HTMLButtonElement | undefined>();
   let historyPopover = $state<HTMLDivElement | undefined>();
   let historyPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
@@ -578,7 +579,16 @@
     use:portal
     style="top: {historyPos.top}px; right: {historyPos.right}px;"
   >
-    <HistoryDrawer compact onSelected={() => (historyOpen = false)} />
+    <HistoryDrawer compact onSelected={() => (historyOpen = false)} onExpand={() => { historyOpen = false; historyFull = true; }} />
+  </div>
+{/if}
+
+{#if historyFull}
+  <div class="history-full-scrim" use:portal>
+    <button class="history-full-backdrop" type="button" aria-label="Close history" onclick={() => (historyFull = false)}></button>
+    <div class="history-full-panel">
+      <HistoryDrawer onSelected={() => (historyFull = false)} />
+    </div>
   </div>
 {/if}
 
@@ -992,6 +1002,45 @@
   .history-btn.open .history-count {
     background: color-mix(in oklch, var(--accent) 18%, transparent);
     color: var(--accent);
+  }
+
+  .history-full-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+    display: grid;
+    place-items: center;
+    padding: 5vh 4vw;
+    background: color-mix(in oklch, black 55%, transparent);
+    animation: history-full-in var(--dur-page) var(--ease-page);
+  }
+  .history-full-backdrop {
+    position: absolute;
+    inset: 0;
+    border: 0;
+    background: transparent;
+    cursor: default;
+  }
+  .history-full-panel {
+    position: relative;
+    z-index: 1;
+    width: min(1100px, 100%);
+    height: min(740px, 100%);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    display: flex;
+  }
+  .history-full-panel :global(.drawer) {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  @keyframes history-full-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .history-popover {

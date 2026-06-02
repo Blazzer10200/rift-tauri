@@ -2,7 +2,7 @@
   import {
     History, Plus, Trash2, Pencil, Check, MessagesSquare, Search, X,
     Calendar, Clock, Bot, MessageSquare, GitBranch, Download, ExternalLink,
-    FileText, Sparkles, ChevronRight,
+    FileText, Sparkles, ChevronRight, Maximize2,
   } from "lucide-svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
@@ -15,9 +15,10 @@
   // so this same component can serve both the workspace surface (removed
   // 2026-05-21) and the in-chat history popover. `onSelected` lets a popover
   // host close itself after the user picks/creates a conversation.
-  let { compact = false, onSelected = () => {} }: {
+  let { compact = false, onSelected = () => {}, onExpand = undefined }: {
     compact?: boolean;
     onSelected?: () => void;
+    onExpand?: () => void;
   } = $props();
 
   let renameId = $state<string | null>(null);
@@ -198,6 +199,17 @@
       >
         <Plus size={12} /> New
       </button>
+      {#if onExpand}
+        <button
+          class="cmp-expand"
+          type="button"
+          use:tooltip={"Open full history"}
+          onclick={onExpand}
+          aria-label="Open full history"
+        >
+          <Maximize2 size={13} />
+        </button>
+      {/if}
     </div>
   {:else}
     <PageHeader
@@ -555,6 +567,23 @@
     transition: filter 120ms;
   }
   .cmp-new:hover { filter: brightness(1.08); }
+
+  .cmp-expand {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 26px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--fg-muted);
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+    flex-shrink: 0;
+  }
+  .cmp-expand:hover {
+    background: oklch(from var(--accent) l c h / 0.12);
+    border-color: oklch(from var(--accent) l c h / 0.4);
+    color: var(--accent);
+  }
 
   .iconbtn {
     display: inline-flex; align-items: center; gap: 4px;
