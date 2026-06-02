@@ -65,6 +65,16 @@
     };
   });
 
+  // Close the full-screen history modal on Escape (backdrop click already handled).
+  $effect(() => {
+    if (!historyFull) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") historyFull = false;
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  });
+
   function toggleCtxPanel() {
     if (ctxPanelOpen) { ctxPanelOpen = false; return; }
     if (!ctxAnchor) return;
