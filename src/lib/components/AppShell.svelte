@@ -564,7 +564,7 @@
   .body {
     flex: 1;
     display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: var(--rail-w, 44px) minmax(0, 1fr);
     min-height: 0;
     min-width: 0;
     overflow: visible;

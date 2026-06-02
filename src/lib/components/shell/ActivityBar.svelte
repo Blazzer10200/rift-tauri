@@ -2,6 +2,8 @@
   import { onDestroy } from "svelte";
   import { WORKSPACES } from "../workspaces";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
+  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
+  import { PanelLeftClose, PanelLeft } from "lucide-svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Pointer-event drag-to-reorder. The previous HTML5 DnD path didn't fire
@@ -140,7 +142,7 @@
   }
 </script>
 
-<nav class="activitybar" aria-label="Workspaces">
+<nav class="activitybar" data-expanded={uiPrefs.railPinned} aria-label="Workspaces">
   <div class="ab-group ab-top" bind:this={topRowEl}>
     {#each topOrder as id, v (id)}
       {@const idx = workspace.order.indexOf(id)}
@@ -158,7 +160,7 @@
         data-disabled={def.disabled ? "true" : "false"}
         data-drag-src={isSrc}
         disabled={def.disabled}
-        use:tooltip={def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${def.kbd} · drag to reorder`}
+        use:tooltip={uiPrefs.railPinned ? "" : (def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${def.kbd} · drag to reorder`)}
         aria-label={isActive ? `${def.title} (active)` : def.title}
         aria-pressed={isActive}
         onpointerdown={(e) => { if (!def.disabled) onPointerDown(idx, e); }}
@@ -180,6 +182,9 @@
             <span class="ab-count count-pip" data-tone={tone}>{count > 99 ? "99+" : count}</span>
           {/if}
         </span>
+        {#if uiPrefs.railPinned}
+          <span class="ab-label">{def.title}</span>
+        {/if}
       </button>
     {/each}
   </div>
@@ -193,7 +198,7 @@
         type="button"
         data-active={isActive}
         data-disabled="false"
-        use:tooltip={`${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
+        use:tooltip={uiPrefs.railPinned ? "" : `${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
         aria-label={isActive ? `${def.title} (active)` : def.title}
         aria-pressed={isActive}
         onclick={() => workspace.setActive("settings")}
@@ -201,14 +206,40 @@
         <span class="ab-hit">
           <span class="ab-icon"><def.icon size={17}/></span>
         </span>
+        {#if uiPrefs.railPinned}
+          <span class="ab-label">{def.title}</span>
+        {/if}
       </button>
     {/if}
+
+    <!-- Pin / collapse toggle -->
+    <button
+      class="ab-btn ab-pin-btn"
+      type="button"
+      data-disabled="false"
+      use:tooltip={uiPrefs.railPinned ? "Collapse sidebar" : "Pin sidebar"}
+      aria-label={uiPrefs.railPinned ? "Collapse sidebar" : "Pin sidebar"}
+      onclick={() => uiPrefs.toggleRailPinned()}
+    >
+      <span class="ab-hit">
+        <span class="ab-icon">
+          {#if uiPrefs.railPinned}
+            <PanelLeftClose size={17} />
+          {:else}
+            <PanelLeft size={17} />
+          {/if}
+        </span>
+      </span>
+      {#if uiPrefs.railPinned}
+        <span class="ab-label">Collapse</span>
+      {/if}
+    </button>
   </div>
 </nav>
 
 <style>
   .activitybar {
-    width: 44px;
+    width: var(--rail-w, 44px);
     height: 100%;
     display: flex;
     flex-direction: column;
@@ -246,11 +277,11 @@
 
   .ab-btn {
     position: relative;
-    display: flex; align-items: center; justify-content: center;
-    width: 44px; height: 40px;
+    display: flex; align-items: center; justify-content: flex-start;
+    width: 100%; height: 40px;
     background: transparent;
     border: 0;
-    padding: 0;
+    padding: 0 4px 0 2px;
     color: var(--fg-muted);
     cursor: pointer;
     flex-shrink: 0;
@@ -261,14 +292,55 @@
        Drag/drop reorders are rare; the transition's transform alone GPU-
        composites for the brief animation. */
   }
+
+  /* Collapsed mode: center the hit target (matches original 44px icon-only look). */
+  .activitybar:not([data-expanded="true"]) .ab-btn {
+    justify-content: center;
+    padding: 0;
+  }
   /* Inset pill — the actual hover/active target. Gives a modern rounded
      affordance instead of a full-width slab. */
   .ab-hit {
     position: relative;
     display: inline-flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
     width: 32px; height: 32px;
     border-radius: 8px;
     transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+  }
+
+  /* Expanded mode: hit target + label together form the full row affordance. */
+  .activitybar[data-expanded="true"] .ab-btn {
+    border-radius: var(--radius-sm);
+    padding: 0 8px 0 6px;
+    gap: 10px;
+    height: 32px;
+    margin: 0 4px;
+    width: calc(100% - 8px);
+  }
+  .activitybar[data-expanded="true"] .ab-hit {
+    width: 20px; height: 20px;
+    border-radius: 4px;
+    background: transparent !important;
+    box-shadow: none !important;
+    transition: none;
+  }
+  .activitybar[data-expanded="true"] .ab-btn:hover {
+    background: color-mix(in oklch, var(--fg) 8%, transparent);
+    color: var(--fg);
+  }
+  .activitybar[data-expanded="true"] .ab-btn[data-active="true"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  /* Suppress the absolute ::before left-bar in expanded mode (box-shadow inset replaces it). */
+  .activitybar[data-expanded="true"] .ab-btn[data-active="true"]::before {
+    display: none;
+  }
+  /* Suppress hover halo on hit-target in expanded mode (the whole row is the target). */
+  .activitybar[data-expanded="true"] .ab-btn:not([data-active="true"]):not([data-disabled="true"]):hover .ab-hit {
+    box-shadow: none;
   }
   .ab-btn:hover .ab-hit {
     background: color-mix(in oklch, var(--fg) 8%, transparent);
@@ -363,5 +435,42 @@
   .ab-count[data-tone="info"]   {
     background: color-mix(in oklch, var(--info) 85%, transparent);
     color: #fff;
+  }
+
+  /* Workspace label — only rendered when expanded. Fades in so the text
+     doesn't snap during the CSS var transition driven by applyRail(). */
+  .ab-label {
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .ab-label {
+      transition: opacity var(--dur-page-out) var(--ease-soft);
+    }
+  }
+  .activitybar[data-expanded="true"] .ab-label {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Pin toggle — calm, non-draggable, sits at the very bottom. */
+  .ab-pin-btn {
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 140ms ease, transform 180ms cubic-bezier(.2,.7,.2,1);
+  }
+  .ab-pin-btn:hover {
+    opacity: 1;
+  }
+  /* Collapsed: center it like the other icon buttons. */
+  .activitybar:not([data-expanded="true"]) .ab-pin-btn {
+    justify-content: center;
+    padding: 0;
   }
 </style>

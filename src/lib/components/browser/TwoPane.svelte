@@ -15,6 +15,15 @@
   import PageHeader from "../shell/PageHeader.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
+  import { syncPage } from "$lib/state/sync-page.svelte";
+  import { workspace } from "$lib/state/workspace.svelte";
+  import { AlertTriangle } from "lucide-svelte";
+
+  function goToConflicts() {
+    syncPage.tab = "conflicts";
+    workspace.setActive("sync");
+  }
+
   const filesSubtitle = $derived(
     connection.selected ? `${connection.selected.name} · resources` : "No server selected",
   );
@@ -354,6 +363,16 @@
     </div>
   </div>
 
+  {#if connection.conflictCount > 0}
+    <button type="button" class="conflict-banner" onclick={goToConflicts}>
+      <AlertTriangle size={13} class="conflict-banner-icon" />
+      <span class="conflict-banner-text">
+        {connection.conflictCount} conflict{connection.conflictCount === 1 ? "" : "s"} — Resolve in Sync
+      </span>
+      <span class="conflict-banner-hint">↗</span>
+    </button>
+  {/if}
+
   {#if browserTabs.active}
     {@const t = browserTabs.active}
     {@const idx = browserTabs.activeIdx}
@@ -584,5 +603,35 @@
     position: absolute;
     bottom: 16px; left: 50%; transform: translateX(-50%);
     z-index: 50;
+  }
+
+  .conflict-banner {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%;
+    padding: 5px 12px;
+    background: var(--warn-soft);
+    border: 0;
+    border-bottom: 1px solid color-mix(in oklch, var(--warn) 28%, transparent);
+    color: var(--warn);
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+    transition: background 120ms var(--ease-soft);
+  }
+  .conflict-banner:hover {
+    background: color-mix(in oklch, var(--warn) 18%, transparent);
+  }
+  .conflict-banner :global(.conflict-banner-icon) {
+    flex-shrink: 0;
+  }
+  .conflict-banner-text {
+    flex: 1;
+  }
+  .conflict-banner-hint {
+    font-size: var(--fs-xs);
+    opacity: 0.7;
+    flex-shrink: 0;
   }
 </style>
