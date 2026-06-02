@@ -100,6 +100,12 @@
   color-scheme: dark;
 }
 
+/* presence — bold strengthens ghost accent fills (calm is the :root default) */
+[data-presence="bold"] {
+  --accent-soft:  oklch(0.78 0.15 var(--accent-h) / 0.20);
+  --ghost-border: oklch(0.78 0.15 var(--accent-h) / 0.48);
+}
+
 /* density override */
 [data-density="compact"] { --row-h: 26px; --gap: 6px; --fs-md: 12.5px; }
 [data-density="regular"] { --row-h: 30px; --gap: 9px; }

@@ -12,7 +12,11 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
+  import { uiPrefs, ACCENTS } from "../../state/ui-prefs.svelte";
   import { scrubUser } from "$lib/utils/redact";
+
+  const DENSITIES = ["compact", "regular", "comfy"] as const;
+  const PRESENCES = ["calm", "bold"] as const;
 
   import { tooltip } from "$lib/actions/tooltip";
   // SSH keys merged into Network section as a header action — one fewer nav row,
@@ -350,10 +354,58 @@ async function copyDiagnostic() {
           <section class="set-group theme-slim">
             <header class="set-group-head">
               <span>Theme</span>
-              <span class="theme-pill pill muted"><span class="dot"></span>Dark · Linear-precise</span>
+              <span class="theme-pill pill muted"><span class="dot"></span>Dark · Graphite Ink</span>
             </header>
-            <div class="set-row-note">
-              <span class="set-note">Rift is dark-only — density, accent tint, and light-mode tokens land in a future build.</span>
+
+            <div class="set-row">
+              <div class="set-row-l">
+                <span class="set-label">Accent</span>
+                <span class="set-hint">One hue drives the whole UI — buttons, highlights, focus rings, links. Status colors stay independent.</span>
+              </div>
+              <div class="set-row-r">
+                <div class="swatches">
+                  {#each ACCENTS as a (a.id)}
+                    <button
+                      class="swatch"
+                      class:sel={uiPrefs.accentHue === a.hue}
+                      style="--sw: oklch(0.78 0.15 {a.hue})"
+                      type="button"
+                      onclick={() => uiPrefs.setAccentHue(a.hue)}
+                      use:tooltip={a.label}
+                      aria-label={a.label}
+                      aria-pressed={uiPrefs.accentHue === a.hue}
+                    >{#if uiPrefs.accentHue === a.hue}<Check size={13} />{/if}</button>
+                  {/each}
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="set-row-l">
+                <span class="set-label">Density</span>
+                <span class="set-hint">Row height and spacing across the whole app.</span>
+              </div>
+              <div class="set-row-r">
+                <div class="seg">
+                  {#each DENSITIES as d (d)}
+                    <button class="seg-btn" class:sel={uiPrefs.density === d} type="button" onclick={() => uiPrefs.setDensity(d)}>{d}</button>
+                  {/each}
+                </div>
+              </div>
+            </div>
+
+            <div class="set-row">
+              <div class="set-row-l">
+                <span class="set-label">Presence</span>
+                <span class="set-hint">How boldly the accent shows up — calm keeps ghost fills subtle, bold strengthens them.</span>
+              </div>
+              <div class="set-row-r">
+                <div class="seg">
+                  {#each PRESENCES as p (p)}
+                    <button class="seg-btn" class:sel={uiPrefs.presence === p} type="button" onclick={() => uiPrefs.setPresence(p)}>{p}</button>
+                  {/each}
+                </div>
+              </div>
             </div>
           </section>
 
@@ -1597,4 +1649,31 @@ async function copyDiagnostic() {
     letter-spacing: 0;
     font-weight: 500;
   }
+
+  /* Accent swatch picker — selected = ringed + check (per redesign spec). */
+  .swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+  .swatch {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--sw); border: 0; cursor: pointer;
+    display: grid; place-items: center; color: var(--accent-fg);
+    transition: transform 100ms ease, box-shadow 140ms ease;
+  }
+  .swatch:hover { transform: scale(1.08); }
+  .swatch.sel { box-shadow: 0 0 0 2px var(--bg-elev-1), 0 0 0 4px var(--sw); }
+  .swatch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--bg-elev-1), 0 0 0 4px var(--sw); }
+
+  /* Segmented control (density / presence). */
+  .seg {
+    display: inline-flex; gap: 2px; padding: 2px;
+    background: var(--bg-inset); border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .seg-btn {
+    text-transform: capitalize; height: 26px; padding: 0 12px;
+    border: 0; background: transparent; color: var(--fg-muted);
+    font: inherit; font-size: var(--fs-sm); border-radius: var(--radius-sm);
+    cursor: pointer; transition: background 120ms ease, color 120ms ease;
+  }
+  .seg-btn:hover { color: var(--fg); }
+  .seg-btn.sel { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 </style>
