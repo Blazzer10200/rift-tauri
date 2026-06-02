@@ -4,6 +4,14 @@
 >
 > **Why this exists:** the rift HANDOFF narrative over-claimed "done." This is the corrected, verified baseline. The redesign is **NOT** as complete as previously stated — Settings is missing a whole section + the RCON console, Chat History is half-built, Files detail pane + Onboarding restyle are unstarted.
 
+---
+
+## ✅ STATUS UPDATE — 2026-06-02 (cont.)
+**Phases 1–3 + the P3 follow-up are now DONE, committed (`fff86a2`/`d34fe7f`/`cb0384c`/`d5e3eef`), and CDP-verified end-to-end this session.** Escape-to-close on the history modal also fixed (`77c8aab`). `npm run check` 0/0/4108.
+- The **per-surface tables below are the ORIGINAL session-start baseline** (the pre-P1–3 snapshot) — left intact on purpose as the historical "before." Do **not** trust their MISSING/NOT-STARTED/PARTIAL markers as current; the verified-done detail lives in `docs/HANDOFF.md` + `git log`.
+- **Remaining: Phase 4 (Files detail pane — metadata-only) + Phase 5 (Onboarding restyle), then Phase 6 ship.** See the Plan section (items 12–14) and HANDOFF "RESUME HERE."
+- One scope correction since this doc was written: **P4 Files is metadata-only** (status pill + size/modified + status-LED pips + filter chips); the **Lua code-preview is DEFERRED** (no file-read path; user declined a 2nd backend exception).
+
 ## Token nuance (read before trusting "missing `--accent-h`" flags)
 Agents flagged many components for "no `var(--accent-h)`." **That is a FALSE signal.** Per the foundation, only the `:root` ramp in `app.css` consumes `--accent-h`; components correctly use the hue-derived `var(--accent)`/`--accent-soft`/etc., which already retheme. Do **not** churn components to add `--accent-h`. The real signals are *structural* (missing layout/feature) and *motion-var adoption* (`--ease-page`/`--dur-*`), not token names.
 
@@ -84,7 +92,7 @@ Agents flagged many components for "no `var(--accent-h)`." **That is a FALSE sig
 
 Realistically **multi-session** — RCON console, Chat History, Files detail, and Onboarding are each large. Suggested order:
 
-### Phase 1 — quick structural wins (frontend-only, low-risk, high-visibility) — ~1 session
+### ✅ Phase 1 — quick structural wins (frontend-only, low-risk, high-visibility) — DONE `fff86a2`, CDP-verified
 1. **Rail expand 44→220** — make `ActivityBar.svelte` CSS consume `--rail-w`; add expanded label state. (`railPinned`/`--rail-w` already wired in `ui-prefs`.)
 2. **Files conflict banner + deeplink** — small banner in `TwoPane`/pane → `syncPage.tab = "conflicts"`. (deeplink is 1 line; tab state shipped this session.)
 3. **SyncActivityBanner restyle** — sRGB→oklch, drop hex, adopt `var(--ok)`/`--danger`/`--bg-elev-2`.
@@ -92,17 +100,17 @@ Realistically **multi-session** — RCON console, Chat History, Files detail, an
 5. **Delete orphaned `settings/Settings.svelte`** (confirm zero importers first — verified, but re-grep).
 6. Motion-var polish pass: Titlebar/StatusBar/WorkspaceShell/ChatTabsBar adopt `--ease-page`/`--dur-*`; add staggered-rise in WorkspaceShell.
 
-### Phase 2 — Settings completion — ~1 session
+### ✅ Phase 2 — Settings completion — DONE `d34fe7f`, CDP-verified (RCON live round-trip untested-by-design)
 7. **General section** — new `general` entry in `ST_SECTIONS` + workspace-identity card + on-machine toggles + Replay-first-run button.
 8. **Server danger zone** + **drift-detection card** (auto-rescan/interval/strategy/lock — data already in `sync-page`/`connection`).
 9. **RCON live console** ⚠️ **LARGEST backend-touching item** — needs bridge/RCON Tauri command wiring (the terminal was stripped, no successor) + a console UI in Settings→Server. **Likely its own session.** Scope the backend commands first (grep `bridge`/`rcon` in `src-tauri/`).
 
-### Phase 3 — Chat History — ~1 session (frontend)
+### ✅ Phase 3 — Chat History — DONE `cb0384c`+`d5e3eef`, CDP-verified (master-detail modal + ChatRail)
 10. **HistoryDrawer detail pane** — master-detail split: detail pane + per-convo stats + AI recap + changed-files diff-stat + resource chips + Preview transcript + Open/Branch/Export CTAs.
 11. **ChatRail** — net-new collapsible left-of-chat archive (push/overlay modes).
 
-### Phase 4 — Files detail pane — ~1 session (frontend)
-12. **FbDetail** — right-side detail + Lua code-preview (keep local\|remote two-pane; add detail without regressing it). Plus status-LED pips + filter chips on the panes.
+### ⏭️ Phase 4 — Files detail pane — NEXT (frontend, metadata-only)
+12. **FbDetail** — right-side detail pane (keep local\|remote two-pane; add detail without regressing it): status pill + size/modified meta + status-LED pips (replace text `▲`) + filter chips (All/Lua/Conflicts/Modified) on the panes. **Lua code-preview DEFERRED** (no file-read path; user declined a 2nd backend exception). Files: `src/lib/components/browser/{TwoPane,LocalPane,RemotePane}.svelte`.
 
 ### Phase 5 — Onboarding restyle — verification-blocked
 13. Full restyle to `ob-*` left-rail stepper + `ObStage` animations + Welcome accent picker + FirstSync animated scan + fold ProfileSetup→ServerAdd (6→5 steps). **Do when a new-user path can be exercised** (temporarily force the gate or use a clean profile). Remove stale Welcome comment.
