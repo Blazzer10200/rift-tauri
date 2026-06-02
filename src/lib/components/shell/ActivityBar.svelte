@@ -285,10 +285,8 @@
     background: color-mix(in oklch, var(--accent) 14%, transparent);
     color: var(--accent);
   }
-  /* Soft capsule indicator on the outer edge — replaces the hard 2px stripe.
-     Centered vertically at 55% of the button height. Accent glow makes the
-     active workspace pick out of the rail at a glance. Now breathes gently
-     so the rail feels alive — matches the prompter's pulse cadence. */
+  /* Thin static accent left-bar — the redesign's "active = accent + thin left
+     bar, calm not blocky". No infinite decorative loops on resting content. */
   .ab-btn[data-active="true"]::before {
     content: "";
     position: absolute;
@@ -299,33 +297,7 @@
     width: 3px;
     background: var(--accent);
     border-radius: 0 3px 3px 0;
-    box-shadow: 0 0 10px color-mix(in oklch, var(--accent) 55%, transparent);
-    animation: ab-stripe-breathe 3.4s ease-in-out infinite;
-  }
-  /* Faint outward halo on the active hit — a subtle scaling ring that
-     decays in opacity. Loops slowly so it reads as ambient, not urgent. */
-  .ab-btn[data-active="true"] .ab-hit::after {
-    content: "";
-    position: absolute;
-    inset: -3px;
-    border-radius: 11px;
-    border: 1px solid color-mix(in oklch, var(--accent) 35%, transparent);
-    opacity: 0;
-    pointer-events: none;
-    animation: ab-halo 3.4s ease-in-out infinite;
-  }
-  @keyframes ab-stripe-breathe {
-    0%, 100% { box-shadow: 0 0 6px  color-mix(in oklch, var(--accent) 40%, transparent); }
-    50%      { box-shadow: 0 0 14px color-mix(in oklch, var(--accent) 75%, transparent); }
-  }
-  @keyframes ab-halo {
-    0%   { transform: scale(0.85); opacity: 0; }
-    50%  { transform: scale(1);    opacity: 0.55; }
-    100% { transform: scale(1.15); opacity: 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .ab-btn[data-active="true"]::before { animation: none; }
-    .ab-btn[data-active="true"] .ab-hit::after { animation: none; opacity: 0; }
+    box-shadow: 0 0 8px color-mix(in oklch, var(--accent) 40%, transparent);
   }
   /* Hover halo on the hit-target — subtle accent ring on hover so non-active
      workspaces feel reactive, not just bg-tinted. */
