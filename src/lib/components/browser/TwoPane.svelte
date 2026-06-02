@@ -9,6 +9,7 @@
   import { browserTabs } from "../../state/browser-tabs.svelte";
   import LocalPane from "./LocalPane.svelte";
   import RemotePane from "./RemotePane.svelte";
+  import FbDetail, { type DetailEntry } from "./FbDetail.svelte";
   import FlashToast from "../FlashToast.svelte";
   import SyncModal from "../sync/SyncModal.svelte";
   import EmptyState from "../shell/EmptyState.svelte";
@@ -18,6 +19,14 @@
   import { syncPage } from "$lib/state/sync-page.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { AlertTriangle } from "lucide-svelte";
+  import type { FileFilter } from "$lib/utils/file-display";
+
+  const FILTER_CHIPS: { id: FileFilter; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "lua", label: "Lua" },
+    { id: "conflicts", label: "Conflicts" },
+    { id: "modified", label: "Modified" },
+  ];
 
   function goToConflicts() {
     syncPage.tab = "conflicts";
@@ -38,6 +47,16 @@
   let { onAddServer = () => {} }: { onAddServer?: () => void } = $props();
 
   let toast = $state<{ msg: string; kind: "ok" | "err" | "info" } | null>(null);
+
+  // Right detail pane: most-recently single-selected file across both panes.
+  // A pane reporting null only clears the detail if it currently belongs to
+  // that side, so clearing one pane never clobbers the other's selection.
+  let detail = $state<DetailEntry | null>(null);
+  let fileFilter = $state<FileFilter>("all");
+  function setDetail(side: "local" | "remote", entry: DetailEntry | null) {
+    if (entry) detail = entry;
+    else if (detail?.side === side) detail = null;
+  }
 
   const SPLIT_KEY = "rift.browser.splitFrac";
   const SPLIT_MIN = 0.15;
@@ -376,48 +395,66 @@
   {#if browserTabs.active}
     {@const t = browserTabs.active}
     {@const idx = browserTabs.activeIdx}
-    <div
-      class="split"
-      bind:this={splitEl}
-      data-dragging={dragging}
-      style="grid-template-columns: {splitFrac}fr 6px {1 - splitFrac}fr;"
-    >
-      <LocalPane
-        path={t.localPath}
-        onPathChange={(p: string) => setLocalPath(idx, p)}
-        onOpenInNewTab={(e: LocalEntry) => openLocalNewTab(e)}
-        onDropPaths={(remotePaths: string[]) => downloadRemotesToLocal(remotePaths)}
-        onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
-        onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
-      />
-      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <div class="fb-filters" role="group" aria-label="Filter files">
+      {#each FILTER_CHIPS as chip (chip.id)}
+        <button
+          type="button"
+          class="fb-filter"
+          class:on={fileFilter === chip.id}
+          aria-pressed={fileFilter === chip.id}
+          onclick={() => (fileFilter = chip.id)}
+        >{chip.label}</button>
+      {/each}
+    </div>
+    <div class="files-body">
       <div
-        class="divider"
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize panes (drag, or use arrow keys; double-click or Home to reset)"
-        aria-valuenow={Math.round(splitFrac * 100)}
-        aria-valuemin={Math.round(SPLIT_MIN * 100)}
-        aria-valuemax={Math.round(SPLIT_MAX * 100)}
-        tabindex="0"
-        use:tooltip={"Drag to resize · double-click to reset"}
-        onpointerdown={onDividerPointerDown}
-        onpointermove={onDividerPointerMove}
-        onpointerup={onDividerPointerUp}
-        onpointercancel={onDividerPointerUp}
-        ondblclick={resetSplit}
-        onkeydown={onDividerKey}
-      ><span class="divider-grip" aria-hidden="true"></span></div>
-      <RemotePane
-        serverKey={connection.selectedKey}
-        path={t.remotePath}
-        onPathChange={(p: string) => setRemotePath(idx, p)}
-        onOpenInNewTab={(e: RemoteEntry) => openRemoteNewTab(e)}
-        onDropPaths={(localPaths: string[]) => uploadLocalsToRemote(localPaths)}
-        onDropPathsToFolder={(localPaths, targetDir) => uploadLocalsToRemoteDir(localPaths, targetDir)}
-        onDownloadPaths={(remotePaths) => downloadRemotesToLocal(remotePaths)}
-      />
+        class="split"
+        bind:this={splitEl}
+        data-dragging={dragging}
+        style="grid-template-columns: {splitFrac}fr 6px {1 - splitFrac}fr;"
+      >
+        <LocalPane
+          path={t.localPath}
+          {fileFilter}
+          onPathChange={(p: string) => setLocalPath(idx, p)}
+          onOpenInNewTab={(e: LocalEntry) => openLocalNewTab(e)}
+          onActiveEntry={(e) => setDetail("local", e)}
+          onDropPaths={(remotePaths: string[]) => downloadRemotesToLocal(remotePaths)}
+          onDropPathsToFolder={(remotePaths, targetDir) => downloadRemotesToLocalDir(remotePaths, targetDir)}
+          onUploadPaths={(localPaths) => uploadLocalsToRemote(localPaths)}
+        />
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize panes (drag, or use arrow keys; double-click or Home to reset)"
+          aria-valuenow={Math.round(splitFrac * 100)}
+          aria-valuemin={Math.round(SPLIT_MIN * 100)}
+          aria-valuemax={Math.round(SPLIT_MAX * 100)}
+          tabindex="0"
+          use:tooltip={"Drag to resize · double-click to reset"}
+          onpointerdown={onDividerPointerDown}
+          onpointermove={onDividerPointerMove}
+          onpointerup={onDividerPointerUp}
+          onpointercancel={onDividerPointerUp}
+          ondblclick={resetSplit}
+          onkeydown={onDividerKey}
+        ><span class="divider-grip" aria-hidden="true"></span></div>
+        <RemotePane
+          serverKey={connection.selectedKey}
+          path={t.remotePath}
+          {fileFilter}
+          onPathChange={(p: string) => setRemotePath(idx, p)}
+          onOpenInNewTab={(e: RemoteEntry) => openRemoteNewTab(e)}
+          onActiveEntry={(e) => setDetail("remote", e)}
+          onDropPaths={(localPaths: string[]) => uploadLocalsToRemote(localPaths)}
+          onDropPathsToFolder={(localPaths, targetDir) => uploadLocalsToRemoteDir(localPaths, targetDir)}
+          onDownloadPaths={(remotePaths) => downloadRemotesToLocal(remotePaths)}
+        />
+      </div>
+      <FbDetail entry={detail} onGoToConflicts={goToConflicts} />
     </div>
   {:else}
     <EmptyState
@@ -543,6 +580,34 @@
     transition: background 100ms ease, color 100ms ease;
   }
   .tab-x:hover { background: var(--danger); color: oklch(0.99 0 0); }
+
+  .fb-filters {
+    display: flex; align-items: center; gap: 4px;
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-elev-1);
+  }
+  .fb-filter {
+    display: inline-flex; align-items: center;
+    height: 24px; padding: 0 11px;
+    border: 1px solid transparent; border-radius: var(--radius-sm);
+    background: transparent; color: var(--fg-muted);
+    font: inherit; font-size: var(--fs-xs); font-weight: 600;
+    cursor: pointer; white-space: nowrap;
+    transition: background 100ms var(--ease-soft), color 100ms var(--ease-soft), border-color 100ms var(--ease-soft);
+  }
+  .fb-filter:hover { color: var(--fg); background: var(--surface-hover); }
+  .fb-filter.on {
+    background: var(--accent-soft);
+    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+    color: var(--accent);
+  }
+
+  .files-body {
+    flex: 1;
+    display: flex;
+    min-height: 0; min-width: 0;
+  }
 
   .split {
     flex: 1;
