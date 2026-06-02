@@ -9,7 +9,7 @@
 ## ✅ STATUS UPDATE — 2026-06-02 (cont.)
 **Phases 1–3 + the P3 follow-up are now DONE, committed (`fff86a2`/`d34fe7f`/`cb0384c`/`d5e3eef`), and CDP-verified end-to-end this session.** Escape-to-close on the history modal also fixed (`77c8aab`). `npm run check` 0/0/4108.
 - The **per-surface tables below are the ORIGINAL session-start baseline** (the pre-P1–3 snapshot) — left intact on purpose as the historical "before." Do **not** trust their MISSING/NOT-STARTED/PARTIAL markers as current; the verified-done detail lives in `docs/HANDOFF.md` + `git log`.
-- **Remaining: Phase 4 (Files detail pane — metadata-only) + Phase 5 (Onboarding restyle), then Phase 6 ship.** See the Plan section (items 12–14) and HANDOFF "RESUME HERE."
+- **UPDATE 2026-06-02 (cont. 2): Phase 4 (`bb3fb10`) + Phase 5 (`c5963f5`) now DONE + CDP-verified. Full P1–P5 arc complete on `main`. Only Phase 6 (ship) remains — see HANDOFF "RESUME HERE."**
 - One scope correction since this doc was written: **P4 Files is metadata-only** (status pill + size/modified + status-LED pips + filter chips); the **Lua code-preview is DEFERRED** (no file-read path; user declined a 2nd backend exception).
 
 ## Token nuance (read before trusting "missing `--accent-h`" flags)
