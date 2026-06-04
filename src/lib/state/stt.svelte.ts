@@ -182,17 +182,26 @@ class SttStore {
 
     // Subscribe to backend events. Always subscribe — engine can be flipped
     // at runtime so we want listeners ready before the first start().
-    try {
-      this.unlisten.push(
-        await listen<{ text: string }>("stt://partial", (ev) => this.onBackendPartial(ev.payload.text)),
+    // Per-channel guard: one channel failing must not skip the rest, and a
+    // failure surfaces via lastError instead of silently degrading.
+    const sub = async (channel: string, fn: () => Promise<UnlistenFn>) => {
+      try {
+        this.unlisten.push(await fn());
+      } catch (e) {
+        this.lastError = `STT channel ${channel} unavailable: ${String(e)}`;
+      }
+    };
+    {
+      await sub("stt://partial", () =>
+        listen<{ text: string }>("stt://partial", (ev) => this.onBackendPartial(ev.payload.text)),
       );
-      this.unlisten.push(
-        await listen<{ text: string; raw: string; cleaned: boolean }>("stt://final", (ev) =>
+      await sub("stt://final", () =>
+        listen<{ text: string; raw: string; cleaned: boolean }>("stt://final", (ev) =>
           this.onBackendFinal(ev.payload.text),
         ),
       );
-      this.unlisten.push(
-        await listen<{ state: SttState; message: string | null }>("stt://state", (ev) => {
+      await sub("stt://state", () =>
+        listen<{ state: SttState; message: string | null }>("stt://state", (ev) => {
           this.currentState = ev.payload.state;
           if (ev.payload.state === "transcribing") this.transcribing = true;
           if (ev.payload.state === "recording") {
@@ -205,13 +214,13 @@ class SttStore {
           }
         }),
       );
-      this.unlisten.push(
-        await listen<{ code: string; message: string }>("stt://error", (ev) => {
+      await sub("stt://error", () =>
+        listen<{ code: string; message: string }>("stt://error", (ev) => {
           this.lastError = ev.payload.message;
         }),
       );
-      this.unlisten.push(
-        await listen<DownloadProgress>("stt://download_progress", (ev) => {
+      await sub("stt://download_progress", () =>
+        listen<DownloadProgress>("stt://download_progress", (ev) => {
           if (!ev.payload?.model) return;
           this.modelDownloads = { ...this.modelDownloads, [ev.payload.model]: ev.payload };
           if (ev.payload.phase === "done") {
@@ -219,8 +228,7 @@ class SttStore {
           }
         }),
       );
-    } catch {
-      // Non-fatal — backend events won't arrive, but Web Speech path stays functional.
+      // Non-fatal — any failed channel is recorded above; Web Speech path stays functional.
     }
 
     // Best-effort initial loads for the Settings panel — failures are non-fatal.
