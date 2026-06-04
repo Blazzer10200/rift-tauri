@@ -33,6 +33,7 @@
       case "danger": return AlertTriangle;
       case "info":   return Download;
       case "warn":   return Download;
+      default:       return Download;
     }
   }
 

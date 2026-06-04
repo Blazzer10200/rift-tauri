@@ -662,6 +662,7 @@
           <button
             type="button"
             class="user-image-thumb"
+            aria-label="View full size image"
             use:tooltip={"Click to view full size"}
             onclick={() => window.open(`data:${b.mime};base64,${b.dataBase64}`, "_blank")}
           >

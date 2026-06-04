@@ -1733,36 +1733,66 @@ class AssistantStore {
 
   async setApiKey(key: string | null) {
     const v = key && key.trim().length > 0 ? key.trim() : null;
-    await invoke("assistant_set_api_key", { apiKey: v });
-    this.hasApiKey = v !== null;
-    await this.refreshAuth();
+    try {
+      await invoke("assistant_set_api_key", { apiKey: v });
+      this.hasApiKey = v !== null;
+      await this.refreshAuth();
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
   }
 
   async setUseFullConfig(value: boolean) {
-    await invoke("assistant_set_use_full_config", { value });
-    this.useFullConfig = value;
+    try {
+      await invoke("assistant_set_use_full_config", { value });
+      this.useFullConfig = value;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
   }
 
   async setMaxBudgetUsd(value: number | null) {
     const v = value !== null && Number.isFinite(value) && value > 0 ? value : null;
-    await invoke("assistant_set_max_budget_usd", { value: v });
-    this.maxBudgetUsd = v;
+    try {
+      await invoke("assistant_set_max_budget_usd", { value: v });
+      this.maxBudgetUsd = v;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
   }
 
   async setTrustLevel(value: TrustLevel) {
-    await invoke("assistant_set_trust_level", { value });
-    this.trustLevel = value;
+    try {
+      await invoke("assistant_set_trust_level", { value });
+      this.trustLevel = value;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
   }
 
   async setAutoCompactThreshold(value: number | null) {
     const v = value !== null && Number.isFinite(value) && value > 0 && value <= 1 ? value : null;
-    await invoke("assistant_set_auto_compact_threshold", { value: v });
-    this.autoCompactThreshold = v;
+    try {
+      await invoke("assistant_set_auto_compact_threshold", { value: v });
+      this.autoCompactThreshold = v;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
   }
 
   async setCompactModel(value: "haiku" | "sonnet") {
-    await invoke("assistant_set_compact_model", { value });
-    this.compactModel = value;
+    try {
+      await invoke("assistant_set_compact_model", { value });
+      this.compactModel = value;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
   }
 
   async send(prompt: string) {
@@ -2054,7 +2084,7 @@ class AssistantStore {
         tab.queue = [next, ...tab.queue];
         return;
       }
-      void this.send(next.text);
+      this.send(next.text).catch(e => tab.onError(String(e)));
     });
   }
 
@@ -2088,8 +2118,9 @@ class AssistantStore {
     }
   }
 
-  removeQueued(id: string) {
-    this.queue = this.queue.filter((q) => q.id !== id);
+  removeQueued(id: string, tabId?: string) {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (tab) tab.queue = tab.queue.filter((q) => q.id !== id);
   }
 
   /** Composer wand: one-shot rewrite of a rough draft into a clearer prompt.

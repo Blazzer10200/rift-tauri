@@ -69,6 +69,7 @@
   });
   // Submission state — flips on submit, reset by tool_result via parent.
   let askSubmitting = $state(false);
+  let askError = $state<string | null>(null);
   const askRequestId = $derived(isAskUser ? assistant.askUserRequestIdFor(tool.id) : null);
   // Answered iff the tool_result has landed (status === "done").
   const askAnswered = $derived(isAskUser && tool.status === "done");
@@ -106,10 +107,12 @@
       return { question: q.question, answer: label };
     });
     askSubmitting = true;
+    askError = null;
     try {
       await assistant.submitAskUserAnswer(tool.id, { answers });
     } catch (e) {
       console.warn("submitAskUserAnswer failed", e);
+      askError = e instanceof Error ? e.message : "Submit failed — please retry.";
       askSubmitting = false; // let the user retry
     }
   }
@@ -117,10 +120,12 @@
   async function cancelAskUser() {
     if (askSubmitting || !askRequestId) return;
     askSubmitting = true;
+    askError = null;
     try {
       await assistant.submitAskUserAnswer(tool.id, { cancelled: true });
     } catch (e) {
       console.warn("cancelAskUser failed", e);
+      askError = e instanceof Error ? e.message : "Dismiss failed — please retry.";
       askSubmitting = false;
     }
   }
@@ -605,7 +610,6 @@
                   class="ask-option"
                   class:selected
                   disabled={askSubmitting || askAnswered}
-                  aria-pressed={q.multiSelect ? selected : undefined}
                   role={q.multiSelect ? "checkbox" : "radio"}
                   aria-checked={selected}
                   onclick={() => {
@@ -642,6 +646,9 @@
                   class="ask-option ask-option-other"
                   class:selected={otherSelected}
                   disabled={askSubmitting || askAnswered}
+                  role={q.multiSelect ? "checkbox" : "radio"}
+                  aria-checked={otherSelected}
+                  aria-pressed={q.multiSelect ? otherSelected : undefined}
                   onclick={() => {
                     if (q.multiSelect) {
                       toggleAskMulti(qi, OTHER_IDX);
@@ -691,7 +698,9 @@
             {:else}Submit{/if}
           </button>
         </div>
-        {#if !askRequestId}
+        {#if askError}
+          <div class="ask-hint" style="color:var(--color-error,#f87171)">{askError}</div>
+        {:else if !askRequestId}
           <div class="ask-hint">Connecting to the chat session…</div>
         {/if}
       {/if}

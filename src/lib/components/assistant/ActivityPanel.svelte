@@ -25,6 +25,7 @@
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
   import { liveActivity, firstLine } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
+  import { openUrl } from "@tauri-apps/plugin-opener";
 
   let { tabId = null }: { tabId?: string | null } = $props();
 
@@ -266,11 +267,8 @@
     catch { return u; }
   }
   async function openSource(item: { kind: "url" | "query"; value: string }) {
-    if (!opener) return;
-    try {
-      if (item.kind === "url") await opener.openUrl(item.value);
-      else if (item.kind === "query") await navigator.clipboard?.writeText(item.value);
-    } catch (e) { console.warn("[ActivityPanel] open source failed", item, e); }
+    if (item.kind === "url") await openUrl(item.value);
+    else if (item.kind === "query") await navigator.clipboard?.writeText(item.value);
   }
 
   // ── Quick actions ──────────────────────────────────────────────────────

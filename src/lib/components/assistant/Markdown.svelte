@@ -13,7 +13,7 @@
   // Markdown's `processed` $derived depends on this so all code blocks
   // re-render w/ syntax highlighting on first warmup.
   let shikiReady = $state(false);
-  whenReady().then(() => { shikiReady = true; });
+  whenReady().then(() => { shikiReady = true; }).catch(() => {});
 
   // Diff code blocks: when fenced as ```diff, color +/- lines inline.
   function esc(s: string) {
