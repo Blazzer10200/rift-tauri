@@ -33,12 +33,16 @@
   const messages = $derived<ChatMessage[]>(tab?.messages ?? []);
   const streaming = $derived(tab?.streaming ?? false);
 
-  // 1s ticker — drives live elapsed readouts. Mounts only while the panel is
-  // open, so it costs nothing when hidden.
+  // Ticker — drives live elapsed readouts. Mounts only while the panel is open.
+  // #166: adaptive cadence — 1s while streaming (the live elapsed counter needs
+  // it), 10s when idle so the settled Steps list isn't re-rendered every second
+  // just to age relative "Nm ago" labels that only change once a minute.
   let now = $state(Date.now());
-  let ticker: ReturnType<typeof setInterval> | null = null;
-  onMount(() => { ticker = setInterval(() => { now = Date.now(); }, 1000); });
-  onDestroy(() => { if (ticker) clearInterval(ticker); });
+  $effect(() => {
+    const period = streaming ? 1000 : 10000;
+    const t = setInterval(() => { now = Date.now(); }, period);
+    return () => clearInterval(t);
+  });
 
   // Mount-time stamp standing in for legacy blocks missing a startedAt — pinned
   // so `running` recomputes only when messages / agentSpawns change, not every
