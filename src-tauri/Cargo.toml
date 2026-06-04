@@ -55,9 +55,6 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # M13: structured cancellation tokens for in-flight downloads.
 tokio-util = { version = "0.7", features = ["rt"] }
 
-# File system watcher — replaces .NET FileSystemWatcher
-notify = "8"
-
 # Auto-updater: Velopack (v0.4.47+). Background download + apply-on-exit +
 # relaunch via Velopack's Update.exe — one-click then unattended. v1.x ships a
 # native GithubSource so no custom REST source is needed. See update_service.rs
@@ -73,10 +70,9 @@ env_logger = "0.11"
 # Misc
 chrono = { version = "0.4", features = ["serde"] }
 
-dashmap = "6.1.0"
 walkdir = "2.5.0"
 # Assistant α2 — Rift MCP server uses regex for the `rift__grep` tool. Pure-Rust
-# regex impl already transitively pulled in by env_logger/notify; declaring it
+# regex impl already transitively pulled in by env_logger; declaring it
 # directly lets us import w/o relying on transitive paths.
 regex = "1"
 futures = "0.3.32"
