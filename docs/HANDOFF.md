@@ -2,6 +2,32 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-04 (cont. 34) — SWARM AUDIT + EDIT-SWARM (in progress)
+
+Built two multi-agent Workflow pipelines. **Read `docs/audit-2026-06-04/README.md` first.**
+
+### Completed
+- **Audit swarm** (`scripts/audit-swarm.workflow.js`): 217 finders → adversarial verify → synth. 554 agents, ~18M tok, ~24min. **247 confirmed findings** → `docs/audit-2026-06-04/` (README index, `00-priority-triage.md`, 11 area files, `_full-report.md`).
+- **Edit swarm** (`scripts/edit-swarm.workflow.js`): per-finding read-only patch propose → adversarial diff-verify. Returns patches; **never writes** (writes caller-side via `scripts/edit-apply.py`, exact-match + uniqueness, `--apply` to write, dry by default).
+- **20/247 fixed, all svelte-check green, committed:** canary 4 + batch 1 (16 a11y/error fixes, 12 files). Commits: `e1a616f` (baseline = pure-assistant conversion + tooling), `abf2899` (batch 1).
+
+### RESUME HERE — remaining ~224 findings
+1. Full worklist (244 swarmable, excl 3 highs) at `.tmp/edit-worklist.json`. Regen: `python scripts/edit-worklist.py <audit.output> --out .tmp/edit-worklist.json`.
+2. Process in **batches by area** (~20-40). Pass batch as Workflow `args.findings` (slim: id/file/line/severity/title/suggested_fix). Then `edit-apply.py <out> --apply` → `npm run check` → commit. Watch via `scripts/edit-watch.sh`.
+3. Audit result cached at `…/tasks/wi86g1oy9.output` (rawConfirmed = all 247).
+
+### Key Decisions / Invariants
+- **Hybrid by design:** swarm only FRONTEND mechanical (a11y, swallowed-err, null-guards, keying). **Hold for MANUAL:** the **3 highs** (mod.rs:2143 stdout deadlock, mcp_server.rs:302 UTF-8 slice panic, AssistantPage.svelte:205 pane keying), all **Rust** (cargo-check collides w/ tauri dev — quit dev first), and **security** findings (git_local.rs:72 traversal etc.).
+- Applier **normalizes paths before grouping** (planners return mixed abs/rel → same file = one group).
+- Baseline committed → `git checkout <file>` is now a SAFE per-file revert for a bad batch.
+- `docs/IDEAS.md` = edit-swarm concept notes.
+
+### Files / scripts added
+- `scripts/`: audit-swarm.workflow.js, audit-watch.sh, audit-assemble.py, audit-split.py, edit-swarm.workflow.js, edit-apply.py, edit-worklist.py, edit-watch.sh
+- `docs/audit-2026-06-04/`, `docs/IDEAS.md`
+
+---
+
 ## Session 2026-06-04 (cont. 33) — ACTIVITY PANEL REORG + SESSION DIFF (UNSHIPPED v0.4.46)
 
 Frontend-only. `npm run check` 4081/0/0. **Verified live against a REAL assistant turn (CDP)** — not just preview.
