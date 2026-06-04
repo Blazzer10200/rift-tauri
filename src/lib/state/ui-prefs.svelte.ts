@@ -8,12 +8,6 @@ const ACCENT_KEY = "rift.ui.accent.v1";
 const PRESENCE_KEY = "rift.ui.presence.v1";
 const CODE_KEY = "rift.ui.code.v1";
 const FAST_MODE_KEY = "rift.ui.fast-mode.v1";
-const CHAT_RAIL_COLLAPSED_KEY = "rift.ui.chat-rail-collapsed.v1";
-const CHAT_RAIL_WIDTH_KEY = "rift.ui.chat-rail-width.v1";
-
-export const CHAT_RAIL_MIN = 180;
-export const CHAT_RAIL_MAX = 420;
-const CHAT_RAIL_DEFAULT = 220;
 
 // 8 curated accent hues — one hue drives the whole accent ramp via --accent-h.
 export type AccentSwatch = { id: string; label: string; hue: number };
@@ -36,8 +30,6 @@ class UiPrefs {
   accentHue = $state(163);
   presence = $state<Presence>("calm");
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
-  chatRailCollapsed = $state(false);
-  chatRailWidth = $state(CHAT_RAIL_DEFAULT);
   // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
   // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
   fastMode = $state(false);
@@ -66,13 +58,7 @@ class UiPrefs {
       /* malformed code prefs — fall back to defaults */
     }
 
-    this.chatRailCollapsed = localStorage.getItem(CHAT_RAIL_COLLAPSED_KEY) === "1";
     this.fastMode = localStorage.getItem(FAST_MODE_KEY) === "1";
-
-    const railW = Number(localStorage.getItem(CHAT_RAIL_WIDTH_KEY));
-    if (Number.isFinite(railW) && railW > 0) {
-      this.chatRailWidth = Math.min(CHAT_RAIL_MAX, Math.max(CHAT_RAIL_MIN, railW));
-    }
 
     this.apply();
   }
@@ -105,17 +91,6 @@ class UiPrefs {
     this.code = { ...this.code, ...patch };
     localStorage.setItem(CODE_KEY, JSON.stringify(this.code));
     this.applyCode();
-  }
-
-  setChatRailWidth(px: number) {
-    const clamped = Math.min(CHAT_RAIL_MAX, Math.max(CHAT_RAIL_MIN, Math.round(px)));
-    this.chatRailWidth = clamped;
-    localStorage.setItem(CHAT_RAIL_WIDTH_KEY, String(clamped));
-  }
-
-  toggleChatRail() {
-    this.chatRailCollapsed = !this.chatRailCollapsed;
-    localStorage.setItem(CHAT_RAIL_COLLAPSED_KEY, this.chatRailCollapsed ? "1" : "0");
   }
 
   toggleFastMode() {

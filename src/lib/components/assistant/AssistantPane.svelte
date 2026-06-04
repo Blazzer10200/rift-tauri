@@ -584,19 +584,22 @@
     overflow: hidden;
     pointer-events: none;
   }
-  /* Single soft accent glow at the top edge — same shape as the
-     UpdateDialog .head-glow (60% 100% at 50% 0%). Gives the chat surface
-     a subtle "lit-from-above" feel without competing w/ content. */
+  /* Ambient lift — a soft, hue-neutral pool of light behind the hero plus a
+     faint floor vignette. No colored top band; the surface reads as gently
+     lit rather than washed with accent, so it blends into --bg. The center
+     pool borrows a whisper of accent (~3%) only so it isn't a grey smudge. */
   .atmos-glow {
     position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 42%;
+    inset: 0;
     background:
-      radial-gradient(85% 100% at 50% 0%,
-        color-mix(in oklab, var(--accent) 6%, transparent) 0%,
-        color-mix(in oklab, var(--accent) 2%, transparent) 42%,
-        transparent 78%);
-    opacity: 0.7;
+      radial-gradient(120% 80% at 50% 34%,
+        color-mix(in oklab, var(--accent) 3%, transparent) 0%,
+        color-mix(in oklab, var(--fg) 1.5%, transparent) 34%,
+        transparent 66%),
+      radial-gradient(140% 60% at 50% 118%,
+        color-mix(in oklab, #000 26%, transparent) 0%,
+        transparent 60%);
+    opacity: 0.85;
   }
   /* Tiny film grain via inline SVG turbulence — adds organic texture so
      the dark surface doesn't read as a flat void. ~3% opacity, no anim. */
