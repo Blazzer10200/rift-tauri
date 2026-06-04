@@ -156,8 +156,8 @@
         class:hl={i === highlight}
         role="option"
         aria-selected={o.value === value}
-        disabled={o.disabled}
-        onclick={() => pick(o)}
+        aria-disabled={o.disabled}
+        onclick={() => { if (o.disabled) return; pick(o); }}
         onmousemove={() => (highlight = i)}
       >
         <span class="sel-opt-label">{o.label}</span>
@@ -223,9 +223,9 @@
     font: inherit; font-size: var(--fs-md);
     text-align: left; cursor: pointer;
   }
-  .sel-opt.hl:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+  .sel-opt.hl:not([aria-disabled="true"]) { background: var(--surface-hover); color: var(--fg); }
   .sel-opt.selected { background: var(--accent-soft); color: var(--accent); }
-  .sel-opt:disabled { color: var(--fg-faint); cursor: not-allowed; }
+  .sel-opt[aria-disabled="true"] { color: var(--fg-faint); cursor: not-allowed; }
   .sel-opt-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sel-opt-hint { color: var(--fg-subtle); font-size: var(--fs-xs); }
   .sel-opt :global(.sel-check) { color: var(--accent); flex-shrink: 0; }
