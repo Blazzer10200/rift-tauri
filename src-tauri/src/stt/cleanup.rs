@@ -4,7 +4,7 @@
 //! key plumbing on Rift's side. Reference pattern: dev.to/auratech MumbleFlow
 //! (Feb 2026) which uses the same `claude -p` shell-out for OCR cleanup.
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::{timeout, Duration};
 
 const CLEANUP_PROMPT: &str = "You are a dictation cleanup tool. Clean this \
@@ -55,8 +55,13 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
     cmd.arg("-p")
         .arg("--model")
         .arg(HAIKU_MODEL)
-        .arg("--permission-mode")
-        .arg("bypassPermissions")
+        // Pure text task: hand it an EMPTY tool allowlist so it can invoke
+        // nothing. This is what makes the untrusted transcript (piped on stdin)
+        // and the workspace-context system prompt safe — a prompt injection has
+        // no tool to reach (F7/F79/F113). With no tools there's also nothing to
+        // approve, so `--permission-mode bypassPermissions` is gone.
+        .arg("--allowed-tools")
+        .arg("")
         .arg("--append-system-prompt")
         .arg(&system_prompt)
         .stdin(std::process::Stdio::piped())
@@ -73,32 +78,64 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
 
     if let Some(mut stdin) = child.stdin.take() {
         let raw_owned = raw.to_string();
-        let _ = stdin.write_all(raw_owned.as_bytes()).await;
+        if let Err(e) = stdin.write_all(raw_owned.as_bytes()).await {
+            log::warn!("[stt] cleanup stdin write failed: {e}");
+        }
         let _ = stdin.shutdown().await;
     }
 
-    let output = match timeout(CLEANUP_TIMEOUT, child.wait_with_output()).await {
-        Ok(Ok(o)) => o,
-        Ok(Err(e)) => {
-            log::warn!("[stt] cleanup wait failed: {e}");
-            return Ok(raw.to_string());
-        }
+    // Read stdout/stderr concurrently while waiting, all under one timeout, so we
+    // keep ownership of `child` and can kill it on timeout instead of leaking a
+    // stalled subprocess (F16/F116 — `wait_with_output` consumed the child, so
+    // the old code had no handle to kill).
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let drain = async {
+        let read_out = async {
+            let mut b = Vec::new();
+            if let Some(s) = &mut stdout {
+                let _ = s.read_to_end(&mut b).await;
+            }
+            b
+        };
+        let read_err = async {
+            let mut b = Vec::new();
+            if let Some(s) = &mut stderr {
+                let _ = s.read_to_end(&mut b).await;
+            }
+            b
+        };
+        let (out, err) = tokio::join!(read_out, read_err);
+        (child.wait().await, out, err)
+    };
+
+    let (status_res, out_buf, err_buf) = match timeout(CLEANUP_TIMEOUT, drain).await {
+        Ok(t) => t,
         Err(_) => {
-            log::warn!("[stt] cleanup timed out after {}s", CLEANUP_TIMEOUT.as_secs());
+            log::warn!("[stt] cleanup timed out after {}s — killing subprocess", CLEANUP_TIMEOUT.as_secs());
+            let _ = child.start_kill();
             return Ok(raw.to_string());
         }
     };
 
-    if !output.status.success() {
+    let status = match status_res {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("[stt] cleanup wait failed: {e}");
+            return Ok(raw.to_string());
+        }
+    };
+
+    if !status.success() {
         log::warn!(
             "[stt] cleanup exited non-zero: status={:?} stderr={}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr).trim()
+            status.code(),
+            String::from_utf8_lossy(&err_buf).trim()
         );
         return Ok(raw.to_string());
     }
 
-    let cleaned = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let cleaned = String::from_utf8_lossy(&out_buf).trim().to_string();
     if cleaned.is_empty() {
         Ok(raw.to_string())
     } else {

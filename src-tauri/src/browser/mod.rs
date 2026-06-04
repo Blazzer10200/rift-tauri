@@ -19,7 +19,14 @@ const LABEL: &str = "rift-browser";
 const HOST_WINDOW: &str = "main";
 
 fn parse_url(raw: &str) -> Result<Url, String> {
-    Url::parse(raw).map_err(|e| format!("invalid URL '{raw}': {e}"))
+    let u = Url::parse(raw).map_err(|e| format!("invalid URL '{raw}': {e}"))?;
+    // Scheme allowlist: only real web navigation. `file://` would expose the
+    // local disk, `javascript:`/`data:` would execute attacker-controlled script
+    // in the embedded webview — both reachable from AI-generated links.
+    match u.scheme() {
+        "http" | "https" | "about" => Ok(u),
+        other => Err(format!("blocked URL scheme '{other}:' — only http/https are allowed")),
+    }
 }
 
 /// Create the child webview at the given window-relative rect (or, if it
