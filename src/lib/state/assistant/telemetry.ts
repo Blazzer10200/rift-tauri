@@ -60,6 +60,9 @@ export class SessionTelemetry {
     let staleCacheTurns = 0;
     const ttfps: number[] = [];
     const doneTimes: number[] = [];
+    // #204: per-model timing accumulators, filled in the single pass below so
+    // the per-model averages don't re-filter this.turns once per model key.
+    const byModelTimings: Record<string, { ttfp: number[]; done: number[] }> = {};
     for (let i = 0; i < this.turns.length; i++) {
       const t = this.turns[i];
       // Cold-start surfacing: the first turn typically pays the SessionStart
@@ -82,6 +85,7 @@ export class SessionTelemetry {
         thinkingTurns: 0, blankTurns: 0, envelopeFallbacks: 0,
         avgTtfpMs: null, avgDoneMs: null,
       };
+      const tm = (byModelTimings[key] ||= { ttfp: [], done: [] });
       bucket.turns += 1;
       bucket.costUsd += t.costUsd ?? 0;
       const u = t.resultUsage || t.envelopeUsage;
@@ -95,10 +99,11 @@ export class SessionTelemetry {
       if (t.blankTurn) { bucket.blankTurns += 1; blank += 1; }
       if (t.envelopeFallback) { bucket.envelopeFallbacks += 1; envFallback += 1; }
       totalCost += t.costUsd ?? 0;
-      if (t.firstPaintAt != null) ttfps.push(t.firstPaintAt - t.ts);
+      if (t.firstPaintAt != null) { const v = t.firstPaintAt - t.ts; ttfps.push(v); tm.ttfp.push(v); }
       if (t.doneAt != null) {
         const dur = t.doneAt - t.ts;
         doneTimes.push(dur);
+        tm.done.push(dur);
         if (!slowestTurn || dur > slowestTurn.durationMs) slowestTurn = { idx: i, durationMs: dur };
       }
       if (t.costUsd != null && (!costliestTurn || t.costUsd > costliestTurn.costUsd)) {
@@ -148,14 +153,13 @@ export class SessionTelemetry {
         }
       }
     }
-    // Per-model timing averages
+    // Per-model timing averages — single O(N) pass already accumulated the
+    // arrays in #204; here we only reduce the pre-bucketed values.
     for (const key of Object.keys(byModel)) {
       const bucket = byModel[key];
-      const tns = this.turns.filter((t) => (t.modelId || t.model) === key);
-      const t1 = tns.map((t) => (t.firstPaintAt != null ? t.firstPaintAt - t.ts : null)).filter((n): n is number => n != null);
-      const t2 = tns.map((t) => (t.doneAt != null ? t.doneAt - t.ts : null)).filter((n): n is number => n != null);
-      bucket.avgTtfpMs = t1.length ? Math.round(t1.reduce((a, b) => a + b, 0) / t1.length) : null;
-      bucket.avgDoneMs = t2.length ? Math.round(t2.reduce((a, b) => a + b, 0) / t2.length) : null;
+      const tm = byModelTimings[key] ?? { ttfp: [], done: [] };
+      bucket.avgTtfpMs = tm.ttfp.length ? Math.round(tm.ttfp.reduce((a, b) => a + b, 0) / tm.ttfp.length) : null;
+      bucket.avgDoneMs = tm.done.length ? Math.round(tm.done.reduce((a, b) => a + b, 0) / tm.done.length) : null;
     }
     return {
       totalTurns: this.turns.length,
