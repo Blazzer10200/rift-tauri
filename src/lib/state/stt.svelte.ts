@@ -155,6 +155,12 @@ class SttStore {
   private restartToken = 0;
   private unlisten: UnlistenFn[] = [];
 
+  destroy() {
+    for (const fn of this.unlisten) fn();
+    this.unlisten = [];
+    this.initStarted = false;
+  }
+
   async init() {
     if (this.initStarted) return;
     this.initStarted = true;
