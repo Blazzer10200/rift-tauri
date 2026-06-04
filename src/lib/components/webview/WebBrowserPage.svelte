@@ -22,7 +22,10 @@
   function normalizeUrl(raw: string): string {
     const t = raw.trim();
     if (!t) return t;
-    if (/^[a-z]+:\/\//i.test(t) || t.startsWith("data:")) return t;
+    // F199: don't forward `data:` (or other non-web schemes) to the native
+    // webview — the backend `parse_url` allowlist rejects them anyway. Only
+    // pass through an explicit http(s):// URL; everything else gets https://.
+    if (/^https?:\/\//i.test(t)) return t;
     return `https://${t}`;
   }
 
