@@ -1157,8 +1157,9 @@
             class:ultra={currentEffort.id === "ultra"}
             class:dragging={draggingEffort}
             role="slider"
-            tabindex="-1"
+            tabindex="0"
             aria-label="Effort"
+            onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setEffortByIdx(effortIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setEffortByIdx(effortIdx - 1); } }}
             aria-valuemin={1}
             aria-valuemax={stops}
             aria-valuenow={effortIdx + 1}
