@@ -350,10 +350,15 @@
       // highlighter output we generated ourselves.
       ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open", "style", "tabindex", "role", "aria-label", "data-lang"],
     });
-    if (streaming) everStreamed = true;
     const extracted = extractAndStripChecklists(clean);
     return { html: annotateCodeBlocks(tagFlatShortLists(extracted.html)), items: extracted.items };
   });
+
+  // #165: latch everStreamed in an effect, not inside the parsed derived —
+  // a derived must stay pure (Svelte may re-run it speculatively). revealActive
+  // below also accepts a live `streaming` so the first streaming frame still
+  // reveals before this effect has latched.
+  $effect(() => { if (streaming) everStreamed = true; });
 
   const processed = $derived.by(() => {
     const baseHtml = parsed.html;
@@ -361,7 +366,7 @@
     // up to the full word count yet — the tail keeps draining after the backend
     // finishes so the cascade plays out instead of snapping.
     const revealActive =
-      everStreamed && !prefersReducedMotion && (streaming || shownCount < totalWords + REVEAL_WINDOW);
+      (everStreamed || streaming) && !prefersReducedMotion && (streaming || shownCount < totalWords + REVEAL_WINDOW);
     if (!revealActive) return { html: baseHtml, items: parsed.items };
     const r = revealWords(baseHtml, shownCount);
     totalWords = r.count;
