@@ -19,11 +19,14 @@ Worked the cont.37 flagged list manually (no swarm — these needed judgment). `
 - **F187** — DEFER w/ rationale: ActivityBar pointer-capture edge only bites if `setPointerCapture` throws AND user drags fast past a button; the robust fix (window-listener drag model) is a real refactor with regression risk on a working drag-reorder. Low value vs risk.
 - **F48 / F51 → RUST PHASE** (below): both need a Rust-side change. F48 = remove the dead `assistant_set/get_thinking_effort`/`permission_mode` commands (frontend uses localStorage; no observable live bug). F51 = persist `forceNextFirstTurn` — needs a field on the `Conversation` struct (`mod.rs:388`; `created_at` is non-optional `i64`, no extra-field capture). ⚠️ Also noticed `compactionHistory` doesn't round-trip through that struct either (latent).
 
-### RESUME HERE — RUST + SECURITY PHASE (frontend done)
-All actionable frontend work is committed. What's left is the **HELD set**, which needs `tauri dev` (`rift-tauri.exe`) quit first so `cargo check` won't collide:
-- **3 highs:** `mod.rs:2143` stdout deadlock · `mcp_server.rs:302` UTF-8 slice panic · F39 `AssistantPage:205` pane keying (the only FE high — re-verify, may already be handled).
-- **All Rust** findings + **all security** (e.g. `git_local.rs:72` traversal) · **F48/F51** (above) · vitest **F237** (`npm i -D vitest@^4.1.8`) · dead-CSS **F233/F234** (flag-not-delete).
-- Quit dev targeting **`rift-tauri.exe` EXACTLY** (never a `rift*` glob — `rift.exe` is the user's prod app). Then `cargo check --manifest-path src-tauri/Cargo.toml`.
+### RESUME HERE — PHASE 2: clear the remaining 140 (backend + held frontend)
+Frontend **swarmable/mechanical** work is done, but the audit has **140 findings still open** (worklist 244 − done 104). ⚠️ "frontend done" earlier was scoped to the swarm buckets — 25 non-Rust findings were HELD (security/dead-code/deps) or missed, incl. genuine bugs (**F34/F35** undeclared `opener` → runtime ReferenceError; **F39** pane each-block keyed by index).
+
+**→ Full grouped worklist: `docs/audit-2026-06-04/PHASE2-backend.md`** (regenerate anytime: `python scripts/phase2-list.py`). Breakdown:
+- security (rust) 30 · security (frontend) 18 · frontend held/missed 7 · rust 74 · deps 2 · dead-code 9.
+- Notable: `git_local.rs:72` traversal (F13/F50), `commands/mod.rs:27` `cmd /C code` injection (F19), `browser` file://+javascript: (F17/F18), `stt/cleanup.rs` bypassPermissions (F7/F79), API-key plaintext fallback (F49). **F48/F51** confirmed Rust-side (dead commands; `Conversation` struct field at `mod.rs:388`).
+
+**Procedure (in PHASE2 doc):** quit dev targeting **`rift-tauri.exe` EXACTLY** (never a `rift*` glob — `rift.exe` is prod) → `cargo check --manifest-path src-tauri/Cargo.toml` baseline → fix in file-clusters → re-`cargo check` + `npm run check` → scoped commit → append IDs to `.tmp/edit-done.json` → re-run `phase2-list.py`. Audit baseline is STALE — verify before editing; many will be already-fixed (record those as done too). Deferred-with-rationale (don't silently drop): **F33** (blur-reveal perf, invariant-protected), **F187** (drag pointer-capture edge), **F209** (toast icon `any`, by-design), **F230** (EmptyState dead component).
 
 Tracking: `.tmp/edit-done.json` (104 IDs).
 
