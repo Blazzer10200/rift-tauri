@@ -297,7 +297,15 @@ async function waitFor({ js, timeoutMs = 60000, intervalMs = 200 }, target = 'ma
     return { error: 'timeout', polls, elapsedMs: Date.now() - start };
 }
 
-async function screenshot({ format = 'jpeg', quality = 65, clip, selector } = {}, target = 'main') {
+async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, vh } = {}, target = 'main') {
+    // Optional layout-viewport override (vw/vh): forces the page to lay out + render
+    // at the given CSS size regardless of the real OS window size, so shots stay
+    // faithful even when the window is parked tiny. Cleared after capture.
+    const overrideViewport = vw && vh;
+    if (overrideViewport) {
+        await cdp('Emulation.setDeviceMetricsOverride',
+            { width: vw, height: vh, deviceScaleFactor: 1, mobile: false }, 8000, target);
+    }
     // Selector → CSS-pixel rect via getBoundingClientRect, then clip. CDP spec:
     // Page.Viewport requires {x,y,width,height,scale}; coords are CSS pixels
     // (Page.getLayoutMetrics — cssLayoutViewport is "in CSS pixels", clip uses
@@ -323,6 +331,9 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector } = {}
         params.captureBeyondViewport = true;
     }
     const resp = await cdp('Page.captureScreenshot', params, 15000, target);
+    if (overrideViewport) {
+        await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+    }
     if (!resp.result?.data) throw new Error('CDP returned no data');
     // ms precision + monotonic counter — parallel /batch screenshots must not collide.
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23);

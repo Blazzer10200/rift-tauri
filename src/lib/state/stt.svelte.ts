@@ -36,6 +36,7 @@ export type SttConfig = {
   initial_prompt: string;
   vocab_text: string;
   cleanup_enabled: boolean;
+  beam_size: number | null;
 };
 
 export type ModelInfo = {
@@ -114,6 +115,7 @@ class SttStore {
     initial_prompt: "",
     vocab_text: "",
     cleanup_enabled: true,
+    beam_size: null,
   });
   configLoaded = $state(false);
 

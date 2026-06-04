@@ -9,6 +9,8 @@
   // Per-severity fallback icon. Callers may omit `icon` (e.g. info-severity
   // toasts pushed from `.ts` state modules that shouldn't import UI components);
   // the renderer owns the icon mapping so those imports stay out of state.
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   const SEVERITY_ICON: Record<ToastSeverity, typeof Info> = {
     ok: CheckCircle2,
     warn: AlertTriangle,
@@ -38,8 +40,8 @@
       onmouseenter={() => toast.pause(item.id)}
       onmouseleave={() => toast.resume(item.id)}
       animate:flip={{ duration: 180 }}
-      in:fly={{ y: 10, duration: 200 }}
-      out:fly={{ y: 6, duration: 140 }}
+      in:fly={{ y: reducedMotion ? 0 : 10, duration: reducedMotion ? 0 : 200 }}
+      out:fly={{ y: reducedMotion ? 0 : 6, duration: reducedMotion ? 0 : 140 }}
     >
       <span class="kind" data-severity={item.severity}>
         <Icon size={12}/>
@@ -148,12 +150,12 @@
     font-weight: 600;
     padding: 3px 7px;
     border-radius: var(--radius-xs);
-    background: color-mix(in oklch, var(--accent) 12%, transparent);
-    border: 1px solid color-mix(in oklch, var(--accent) 24%, transparent);
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 24%, transparent);
     flex-shrink: 0;
   }
   .toast.clickable:hover .action {
-    background: color-mix(in oklch, var(--accent) 20%, transparent);
+    background: color-mix(in oklab, var(--accent) 20%, transparent);
   }
 
   .close {

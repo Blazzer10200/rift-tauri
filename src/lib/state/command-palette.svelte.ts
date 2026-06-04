@@ -4,7 +4,7 @@
 
 import type { WorkspaceId } from "./workspace.svelte";
 
-type Section = "appearance" | "accessibility" | "assistant" | "speech" | "network" | "about";
+type Section = "appearance" | "accessibility" | "assistant" | "speech" | "about";
 
 class CommandPaletteState {
   open = $state(false);

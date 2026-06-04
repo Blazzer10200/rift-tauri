@@ -225,7 +225,7 @@
     if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
     if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
     if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand") return "agent";
-    if (n === "TodoWrite" || n === "AskUserQuestion" || n === "ExitPlanMode") return "meta";
+    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ExitPlanMode") return "meta";
     return "read";
   });
 
@@ -284,7 +284,7 @@
     if (sn === "ExitPlanMode") return FlagOff;
     if (sn === "SlashCommand") return Slash;
     if (sn === "Skill") return Sparkles;
-    if (sn === "TodoWrite") return ListChecks;
+    if (sn === "TodoWrite" || sn === "TaskCreate" || sn === "TaskUpdate") return ListChecks;
     return Wrench;
   });
 
@@ -301,7 +301,7 @@
     const num = (k: string) => typeof inp[k] === "number" ? (inp[k] as number) : null;
     const rows: InputRow[] = [];
     if (n === "Bash" || n === "remote_bash") {
-      const cmd = s("command"); if (cmd) rows.push({ label: "command", value: cmd, mono: true });
+      // command moves to the terminal head (badge + $/PS> prefix) below.
       const desc = s("description"); if (desc) rows.push({ label: "purpose", value: desc });
       const to = num("timeout"); if (to) rows.push({ label: "timeout", value: `${to} ms`, mono: true });
       return rows;
@@ -393,6 +393,31 @@
     const lines = tool.result.split("\n");
     if (lines.length <= 60) return { shown: lines, more: 0 };
     return { shown: lines.slice(0, 60), more: lines.length - 60 };
+  });
+
+  // ── Shell terminal — badge + prompt prefix + per-line tone ──────────────
+  // Default bash; flip to pwsh only on strong PowerShell signals so a normal
+  // bash line is never mislabeled. The prompt prefix ($ / PS>) is drawn in CSS.
+  const shellCommand = $derived(typeof tool.input?.command === "string" ? (tool.input.command as string) : null);
+  const shellKind = $derived.by<"bash" | "pwsh">(() => {
+    const c = shellCommand ?? "";
+    if (/(^|[\s|;(])(Get|Set|New|Start|Stop|Invoke|Remove|Add|Out|Where|ForEach|Select|Write|Import|Export)-[A-Z]/.test(c)
+        || /\$env:|\$PSVersionTable|-ErrorAction|\bOut-Null\b|\bWrite-Host\b/.test(c)) return "pwsh";
+    return "bash";
+  });
+  // Conservative tone classifier — only strong, unambiguous signals get a
+  // color; everything else stays neutral `out`. Runs only on terminal-style
+  // results (Bash family), never on grep/list output.
+  function classifyShellLine(line: string): "out" | "ok" | "err" | "warn" {
+    if (/^\s*(✓|✔)/.test(line) || /\b0 (errors?|warnings?|issues?|problems?)\b/i.test(line)
+        || /\b(passed|succeeded|success)\b/i.test(line)) return "ok";
+    if (/^\s*(✗|✖|×)/.test(line) || /\b(error|errors|failed|fatal|panic|exception|traceback)\b/i.test(line)) return "err";
+    if (/\b(warn|warning|warnings|deprecated)\b/i.test(line)) return "warn";
+    return "out";
+  }
+  const termLines = $derived.by(() => {
+    if (!resultLines) return [];
+    return resultLines.shown.map((c, i) => ({ i, c, t: classifyShellLine(c) }));
   });
 
   // ── Agent card data ──────────────────────────────────────────────────
@@ -502,7 +527,6 @@
         <span class="chip-sum mono">{summary}</span>
       {/if}
       {#if !expanded && inlinePreview}
-        <span class="chip-arrow" aria-hidden="true">→</span>
         <span class="chip-preview mono" use:tooltip={tool.result ?? ""}>{inlinePreview}</span>
       {/if}
       {#if durationLabel}
@@ -698,8 +722,19 @@
         <pre class="result error">{resultLines.shown.join("\n")}{#if resultLines.more}
 … +{resultLines.more} more lines{/if}</pre>
       {:else if resultStyle === "terminal"}
-        <div class="terminal">
-          <pre class="terminal-out">{resultLines.shown.join("\n") || "(no output)"}</pre>
+        <div class="terminal" data-shell={shellKind}>
+          {#if shellCommand}
+            <div class="terminal-cmd">
+              <span class="term-badge" data-shell={shellKind}>{shellKind === "pwsh" ? "PowerShell" : "bash"}</span>
+              <span class="term-cmd-text mono">{shellCommand}</span>
+            </div>
+          {/if}
+          <div class="terminal-out">
+            {#if termLines.length === 0}<div class="term-line out">(no output)</div>{/if}
+            {#each termLines as tl (tl.i)}
+              <div class="term-line {tl.t}">{tl.c}</div>
+            {/each}
+          </div>
           {#if resultLines.more}<div class="more">+{resultLines.more} more lines</div>{/if}
         </div>
       {:else if resultStyle === "code"}
@@ -764,7 +799,7 @@
   }
   .chip[data-variant="timeline"]:not(.as-card) .chip-head:hover {
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--model-color, var(--accent)) 55%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
     transform: translateX(1px);
   }
   /* Rail-bullet already shows status — kill the redundant right-edge pill
@@ -792,12 +827,12 @@
   }
   .chip[data-status="pending"] {
     background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, var(--accent) 28%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
     opacity: 1;
   }
   .chip[data-status="error"] {
     background: color-mix(in oklch, var(--danger-soft) 45%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, var(--danger) 38%, var(--border));
+    border-color: color-mix(in oklab, var(--danger) 38%, var(--border));
     opacity: 1;
   }
   .chip-head {
@@ -830,18 +865,18 @@
   /* Category coloring — distinguishes read-only/mutation/side-effect/agentic
    * at a glance. Tones picked from the existing palette + slight hue shifts
    * so the chips read as a family rather than 5 unrelated colors. */
-  .chip[data-category="read"]  .chip-icon { color: oklch(0.74 0.10 230); }
+  .chip[data-category="read"]  .chip-icon { color: var(--accent); }
   .chip[data-category="write"] .chip-icon { color: var(--accent); }
-  .chip[data-category="shell"] .chip-icon { color: oklch(0.78 0.12 60); }
-  .chip[data-category="agent"] .chip-icon { color: oklch(0.74 0.13 310); }
-  .chip[data-category="meta"]  .chip-icon { color: oklch(0.76 0.10 145); }
+  .chip[data-category="shell"] .chip-icon { color: var(--accent); }
+  .chip[data-category="agent"] .chip-icon { color: var(--accent); }
+  .chip[data-category="meta"]  .chip-icon { color: var(--accent); }
   /* Subtle left-edge accent so a wall of chips has visual scannability. */
   .chip { border-left-width: 2px; }
-  .chip[data-category="read"]  { border-left-color: color-mix(in oklch, oklch(0.74 0.10 230) 45%, var(--border)); }
-  .chip[data-category="write"] { border-left-color: color-mix(in oklch, var(--accent) 50%, var(--border)); }
-  .chip[data-category="shell"] { border-left-color: color-mix(in oklch, oklch(0.78 0.12 60) 50%, var(--border)); }
-  .chip[data-category="agent"] { border-left-color: color-mix(in oklch, oklch(0.74 0.13 310) 50%, var(--border)); }
-  .chip[data-category="meta"]  { border-left-color: color-mix(in oklch, oklch(0.76 0.10 145) 45%, var(--border)); }
+  .chip[data-category="read"]  { border-left-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+  .chip[data-category="write"] { border-left-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .chip[data-category="shell"] { border-left-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .chip[data-category="agent"] { border-left-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .chip[data-category="meta"]  { border-left-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
   .chip[data-status="error"] .chip-icon { color: var(--danger); opacity: 1; }
   .chip[data-status="error"] { border-left-color: var(--danger) !important; }
   .chip[data-status="pending"] {
@@ -874,22 +909,15 @@
     font-size: 10.5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .chip-arrow {
-    color: var(--fg-faint);
-    font-size: 10px;
-    flex-shrink: 0;
-    margin: 0 1px;
-  }
   .chip-preview {
-    color: var(--fg-2);
+    color: var(--fg-subtle);
     font-size: 10.5px;
     flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    max-width: 36ch;
-    opacity: 0.85;
+    max-width: 28ch;
   }
   /* Neutral duration residue — informational, not a warning. Was warn-orange,
      which made a normal 1.2s Read look like an alert. Quiet muted pill now;
@@ -1001,18 +1029,45 @@
     border-radius: 5px;
     overflow: hidden;
   }
+  /* Command head — shell badge + the $/PS>-prefixed command. */
+  .terminal-cmd {
+    display: flex; align-items: center; gap: 9px;
+    padding: 6px 10px;
+    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+  }
+  .term-badge {
+    font-family: var(--font-mono, monospace);
+    font-size: 9.5px; font-weight: 600;
+    padding: 2px 7px; border-radius: 5px; flex-shrink: 0;
+  }
+  .term-badge[data-shell="bash"] { background: rgba(255, 255, 255, 0.06); color: var(--fg-muted); }
+  .term-badge[data-shell="pwsh"] { background: var(--info-soft); color: var(--info); }
+  .term-cmd-text {
+    flex: 1; min-width: 0;
+    font-size: 11px; color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .terminal[data-shell="bash"] .term-cmd-text::before { content: "$ "; color: var(--fg-faint); }
+  .terminal[data-shell="pwsh"] .term-cmd-text::before { content: "PS> "; color: var(--info); }
   .terminal-out {
     margin: 0;
     padding: 8px 10px;
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
-    line-height: 1.55;
+    line-height: 1.6;
     color: oklch(0.88 0.025 130);
-    white-space: pre-wrap;
-    word-wrap: break-word;
     max-height: 320px;
     overflow: auto;
   }
+  .term-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .term-line.out  { color: oklch(0.88 0.025 130); }
+  .term-line.ok   { color: var(--ok); }
+  .term-line.err  { color: var(--danger); }
+  .term-line.warn { color: var(--warn); }
   .terminal .more {
     padding: 4px 10px;
     font-size: 10px;
@@ -1025,7 +1080,7 @@
   /* Result — code style (Read). */
   .result.code {
     background: var(--bg-elev-1);
-    border-left: 2px solid color-mix(in oklch, var(--accent) 35%, transparent);
+    border-left: 2px solid color-mix(in oklab, var(--accent) 35%, transparent);
     padding: 6px 10px;
     max-height: 320px;
   }
@@ -1077,7 +1132,7 @@
     color: var(--fg-2);
   }
   .result.error {
-    border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
     color: oklch(0.88 0.07 22);
     background: color-mix(in oklch, var(--danger-soft) 25%, var(--bg-elev-1));
   }
@@ -1094,10 +1149,10 @@
     border-left-width: 3px;
   }
   .chip.as-card[data-category="agent"] {
-    border-left-color: color-mix(in oklch, oklch(0.74 0.13 310) 65%, var(--border));
+    border-left-color: color-mix(in oklab, var(--accent) 65%, var(--border));
   }
   .chip.as-card[data-category="meta"] {
-    border-left-color: color-mix(in oklch, oklch(0.76 0.10 145) 55%, var(--border));
+    border-left-color: color-mix(in oklab, var(--accent) 55%, var(--border));
   }
 
   /* Agent head */
@@ -1105,20 +1160,20 @@
     display: flex; align-items: center; gap: 9px;
     padding: 8px 12px;
     border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    background: color-mix(in oklch, oklch(0.74 0.13 310) 8%, transparent);
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
   }
   .agent-icon {
     display: inline-flex;
-    color: oklch(0.78 0.14 310);
+    color: var(--accent-hover);
     flex-shrink: 0;
   }
   .agent-pill {
     display: inline-flex; align-items: center;
     padding: 2px 9px;
     border-radius: 999px;
-    background: color-mix(in oklch, oklch(0.74 0.13 310) 22%, transparent);
-    border: 1px solid color-mix(in oklch, oklch(0.74 0.13 310) 40%, var(--border));
-    color: oklch(0.84 0.10 310);
+    background: color-mix(in oklab, var(--accent) 22%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
+    color: var(--accent-hover);
     font-size: 10.5px;
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -1147,7 +1202,7 @@
   .agent-prompt {
     margin: 0;
     padding: 8px 12px;
-    border-left: 2px solid color-mix(in oklch, oklch(0.74 0.13 310) 50%, transparent);
+    border-left: 2px solid color-mix(in oklab, var(--accent) 50%, transparent);
     background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
     color: var(--fg-2);
     font-size: 11.5px;
@@ -1174,7 +1229,7 @@
   .agent-pending .dot {
     width: 5px; height: 5px;
     border-radius: 50%;
-    background: oklch(0.74 0.13 310);
+    background: var(--accent);
     animation: agent-dot 1.1s ease-in-out infinite;
   }
   .agent-pending .dot:nth-child(2) { animation-delay: 0.15s; }
@@ -1189,9 +1244,9 @@
     display: flex; align-items: center; gap: 8px;
     padding: 6px 11px;
     border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    background: color-mix(in oklch, oklch(0.76 0.10 145) 6%, transparent);
+    background: color-mix(in oklab, var(--accent) 6%, transparent);
   }
-  .todo-head .agent-icon { color: oklch(0.76 0.13 145); }
+  .todo-head .agent-icon { color: var(--accent); }
   .todo-title {
     color: var(--fg-2);
     font-weight: 600;
@@ -1205,7 +1260,7 @@
     font-size: 10.5px;
     font-variant-numeric: tabular-nums;
   }
-  .todo-count.done { color: oklch(0.78 0.14 145); font-weight: 600; }
+  .todo-count.done { color: var(--accent-hover); font-weight: 600; }
   .todo-count.total { color: var(--fg-muted); }
   .todo-sep { color: var(--fg-faint); }
   .todo-body { padding: 8px 12px 10px; }
@@ -1238,7 +1293,7 @@
     word-wrap: break-word;
     transition: color 200ms ease-out, text-decoration-color 200ms ease-out;
   }
-  .todo-item[data-status="completed"] .todo-box { color: oklch(0.78 0.14 145); }
+  .todo-item[data-status="completed"] .todo-box { color: var(--accent-hover); }
   .todo-item[data-status="completed"] .todo-content {
     color: var(--fg-muted);
     text-decoration: line-through;
@@ -1253,13 +1308,11 @@
   }
 
   /* ── AskUser card ──────────────────────────────────────────────────────
-     Themed to the turn's model aurora (--model-color: purple Opus / blue
-     Sonnet / teal Haiku), falling back to --accent. Ties the "Claude is
-     asking you" card to the same accent vocabulary as the avatar, rail, and
-     composer — the old green read as a success state, disconnected from the
-     rest of the chat. --ask resolves once on the root; descendants inherit. */
+     Emerald-only — ties the "Claude is asking you" card to the same --accent
+     vocabulary as the avatar, rail, and composer. --ask resolves once on the
+     root; descendants inherit. */
   .chip.as-card.is-ask {
-    --ask: var(--model-color, var(--accent));
+    --ask: var(--accent);
     max-width: min(100%, 560px);
     border-left-color: color-mix(in oklch, var(--ask) 55%, var(--border)) !important;
   }

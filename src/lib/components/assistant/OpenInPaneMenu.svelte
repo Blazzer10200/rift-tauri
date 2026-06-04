@@ -57,55 +57,40 @@
 
 <div
   bind:this={menuEl}
-  class="menu"
+  class="rift-menu menu"
   role="menu"
   style="left: {pos.x}px; top: {pos.y}px;"
 >
   {#each panes as _p, i (i)}
     <button
       type="button"
-      class="item"
+      class="rift-menu-row"
       role="menuitem"
       onclick={() => pickPane(i)}
       disabled={panes[i].tabId === tabId}
       use:tooltip={panes[i].tabId === tabId ? "Already in this pane" : `Open in pane ${i + 1}`}
     >
-      <Columns2 size={12} />
-      <span>Open in pane {i + 1}</span>
+      <Columns2 size={14} class="rift-menu-row-ic" />
+      <span class="rift-menu-row-t">Open in pane {i + 1}</span>
     </button>
   {/each}
   {#if canAddPane}
-    <button type="button" class="item" role="menuitem" onclick={newPane}>
-      <Plus size={12} />
-      <span>Open in new pane</span>
+    <button type="button" class="rift-menu-row" role="menuitem" onclick={newPane}>
+      <Plus size={14} class="rift-menu-row-ic" />
+      <span class="rift-menu-row-t">Open in new pane</span>
     </button>
   {/if}
 </div>
 
 <style>
+  /* Inherits .rift-menu / .rift-menu-row chrome (app.css); only positioning here. */
   .menu {
     position: fixed;
     z-index: 1000;
     min-width: 180px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong, var(--border));
-    border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
-    padding: 4px;
-    display: flex; flex-direction: column;
+    display: flex; flex-direction: column; gap: 1px;
   }
-  .item {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 6px 10px;
-    background: transparent;
-    border: 0;
-    border-radius: 4px;
-    color: var(--fg);
-    font-size: var(--fs-sm);
-    text-align: left;
-    cursor: pointer;
-  }
-  .item:hover:not(:disabled) { background: var(--surface-hover); }
-  .item:disabled { color: var(--fg-subtle); cursor: not-allowed; }
-  .item :global(svg) { color: var(--fg-muted); flex-shrink: 0; }
+  .menu :global(.rift-menu-row) { align-items: center; }
+  .menu :global(.rift-menu-row:disabled) { color: var(--fg-subtle); cursor: not-allowed; }
+  .menu :global(.rift-menu-row:disabled:hover) { background: transparent; }
 </style>

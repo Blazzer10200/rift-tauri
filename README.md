@@ -1,32 +1,31 @@
 # Rift
 
-A Tauri + SvelteKit + Rust dev workspace launcher for FiveM / RedM developers. SFTP-first sync, two-way drift detection, in-place remote edit, and a sidebar live-status pill — all running locally against your FXServer.
+A local-workspace coding assistant for Windows. Rift wraps the Claude CLI in a native Tauri shell: pick a workspace folder, chat with Claude, and let it read, search, edit, and run git against that folder — all on your machine, no remote connections.
 
-Pure-Rust SSH/SFTP via `russh` (no libssh2 / OpenSSL deps). NSIS installer for Windows. Self-update via GitHub Releases API (browser-download Setup.exe flow, no signing key required).
+Tauri 2 (Rust backend) + SvelteKit 2 / Svelte 5 (runes) + Tailwind 4. The backend spawns the Claude CLI as a subprocess and hosts a local stdio MCP server exposing workspace-scoped `read_file` / `list_dir` / `grep` plus local-git tools. NSIS installer (perUser). Self-update via the GitHub Releases API (browser-download Setup.exe flow, no signing key required).
 
 ## Status
 
-Pre-1.0 (`-alpha`). The core sync loop is verified end-to-end against a live FXServer. Auto-update is live (GH Releases API, no code signing — see CHANGELOG v0.4.34). See [`docs/HANDOFF.md`](docs/HANDOFF.md) for the current state.
+Pre-1.0 (`-alpha`). Pure-assistant — the former SFTP/sync/server/RCON half was fully removed (2026-06-03). See [`docs/HANDOFF.md`](docs/HANDOFF.md) for the current in-flight state.
 
 ## Quick links
 
 - **Install, build, contribute:** [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
-- **Profile config example:** [`docs/rift.json.example`](docs/rift.json.example)
 - **Release history:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
 - **Issue tracker:** [`docs/ISSUES.md`](docs/ISSUES.md)
 - **Accepted security advisories:** [`docs/SECURITY.md`](docs/SECURITY.md)
 
 ## What it does
 
-- Watches a local folder, mirrors changes to a remote SFTP path, debounced + batched.
-- Atomic uploads via `.rift-tmp` + rename so the running server never sees a half-written file.
-- Drift scanner highlights local↔remote divergence before you start syncing.
-- Edit-in-place: open a remote file, edit locally, save → uploads back. No manual SCP.
-- Optional bridge token + SSH-tunneled HTTP probe for `txAdmin` / `rift_bridge` integration.
+- **Workspace chat** — point Rift at a folder; Claude works scoped to it via a local MCP server (`read_file` / `list_dir` / `grep`).
+- **Local git** — `git_status` / `diff` / `log` / `pull` / `commit` / `push` exposed as assistant tools.
+- **Per-tab sessions** — multiple concurrent chats/panes, each with its own model, permission mode, and thinking-effort.
+- **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass — switchable per turn.
+- **Self-update** — polls GitHub Releases, semver-compares, opens the new Setup.exe on confirm.
 
 ## Platforms
 
-Windows 11 (primary). macOS / Linux builds are technically buildable from source but are not packaged or tested.
+Windows 11 (primary). macOS / Linux are buildable from source but not packaged or tested.
 
 ## License
 

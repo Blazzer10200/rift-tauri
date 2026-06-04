@@ -7,7 +7,9 @@
   import { untrack } from "svelte";
   import { slide } from "svelte/transition";
   import { diffArrays } from "diff";
-  import { FilePen, ChevronDown } from "lucide-svelte";
+  import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
+  import { highlightSync, whenReady } from "../../state/highlighter.svelte";
+  import FilePathMenu from "./FilePathMenu.svelte";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -18,10 +20,14 @@
     input,
     compact = false,
     defaultExpanded = false,
+    hideHead = false,
   }: {
     input: Record<string, unknown>;
     compact?: boolean;
     defaultExpanded?: boolean;
+    // Suppress the breadcrumb header + chrome and force the body open. Used by
+    // SessionDiff, which renders its own per-file header above stacked bodies.
+    hideHead?: boolean;
   } = $props();
 
   type DiffPair =
@@ -99,10 +105,49 @@
 
   const filePath = $derived(typeof input.file_path === "string" ? input.file_path : null);
 
-  function shortPath(p: string): string {
-    const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
-    if (parts.length <= 3) return p;
-    return ".../" + parts.slice(-3).join("/");
+  // Breadcrumb header — dir/name split + language badge. Long dirs collapse to
+  // their last two segments so the filename stays visible; full path goes in
+  // the tooltip.
+  const baseName = $derived.by(() => {
+    if (!filePath) return "";
+    const norm = filePath.replace(/\\/g, "/").replace(/\/$/, "");
+    return norm.split("/").pop() ?? norm;
+  });
+  const dirLabel = $derived.by(() => {
+    if (!filePath) return "";
+    const norm = filePath.replace(/\\/g, "/");
+    const idx = norm.lastIndexOf("/");
+    if (idx < 0) return "";
+    const segs = norm.slice(0, idx).split("/").filter(Boolean);
+    if (segs.length <= 2) return segs.length ? segs.join("/") + "/" : "";
+    return "…/" + segs.slice(-2).join("/") + "/";
+  });
+  const lang = $derived.by(() => {
+    const dot = baseName.lastIndexOf(".");
+    if (dot < 0) return "";
+    const ext = baseName.slice(dot + 1).toUpperCase();
+    return ext.length > 0 && ext.length <= 8 ? ext : "";
+  });
+
+  // Per-line syntax highlighting — reuse the shared shiki core (same themes as
+  // fenced code blocks) so diff code is colorized instead of monochrome. Falls
+  // back to plain text for unsupported langs or until shiki finishes loading.
+  let shikiReady = $state(false);
+  whenReady().then(() => { shikiReady = true; }).catch(() => {});
+  const EXT_LANG: Record<string, string> = {
+    rs: "rust", ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+    js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+    svelte: "svelte", sh: "bash", bash: "bash", zsh: "bash",
+    json: "json", jsonc: "json", toml: "toml", lua: "lua", py: "python", pyi: "python",
+  };
+  const langId = $derived(EXT_LANG[lang.toLowerCase()] ?? null);
+  function hl(text: string): string | null {
+    if (!shikiReady || !langId || text.length === 0) return null;
+    const html = highlightSync(text, langId);
+    if (!html) return null;
+    // Extract just the inner tokens of shiki's single `.line` span.
+    const m = html.match(/<span class="line">([\s\S]*?)<\/span><\/code>/);
+    return m ? m[1] : null;
   }
 
   const counts = $derived.by(() => {
@@ -127,7 +172,7 @@
   const SMALL_DIFF = 12;
   let expanded = $state<boolean>(
     untrack(() => {
-      if (compact || defaultExpanded) return true;
+      if (compact || defaultExpanded || hideHead) return true;
       // Compute changed-line count directly from the raw strings (don't read
       // the `counts` $derived here — reading a derived inside a $state
       // initializer is order-fragile). Cheap line-set diff is enough to
@@ -140,77 +185,109 @@
     }),
   );
 
-  // Unified layout when one side is empty — a +21/-0 edit (new file content)
-  // or -N/+0 edit (deletion) doesn't need two columns. Drops the empty side
-  // entirely, halving the horizontal footprint.
-  const unified = $derived(counts.adds === 0 || counts.dels === 0);
-  const unifiedSide = $derived<"left" | "right">(counts.adds === 0 ? "left" : "right");
+  // Unified diff — flatten the side-by-side pairs into one chronological line
+  // list. A `mod` pair expands to its del line then its add line. Line numbers
+  // track the NEW file (relative, 1-based — the Edit tool gives no absolute
+  // offset); del lines carry no number. Blank-context runs (`gap`) still count
+  // toward the line tally so subsequent numbers stay consistent.
+  type UnifiedLine =
+    | { kind: "ctx" | "add"; num: number; text: string }
+    | { kind: "del"; num: null; text: string }
+    | { kind: "meta"; text: string }
+    | { kind: "gap"; lines: number };
+  const unifiedLines = $derived.by<UnifiedLine[]>(() => {
+    const out: UnifiedLine[] = [];
+    let ln = 0;
+    for (const p of compactPairs) {
+      if (p.kind === "meta") { out.push({ kind: "meta", text: p.text }); continue; }
+      if (p.kind === "gap") { out.push({ kind: "gap", lines: p.lines }); ln += p.lines; continue; }
+      if (p.kind === "ctx") { ln++; out.push({ kind: "ctx", num: ln, text: p.left }); continue; }
+      if (p.kind === "del") { out.push({ kind: "del", num: null, text: p.left }); continue; }
+      if (p.kind === "add") { ln++; out.push({ kind: "add", num: ln, text: p.right }); continue; }
+      // mod — del then add.
+      out.push({ kind: "del", num: null, text: p.left });
+      ln++; out.push({ kind: "add", num: ln, text: p.right });
+    }
+    return out;
+  });
 
   function toggleExpanded(e: MouseEvent) {
     if (compact) return;
     e.stopPropagation();
     expanded = !expanded;
   }
+
+  // Copy the resulting (new) content to the clipboard — the most useful payload
+  // when reusing an edit. Briefly flips to a "Copied" confirmation.
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  function copyDiff(e: MouseEvent) {
+    e.stopPropagation();
+    const text = typeof input.new_string === "string" ? input.new_string : "";
+    navigator.clipboard?.writeText(text).catch(() => {});
+    copied = true;
+    if (copyTimer) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => { copied = false; }, 1400);
+  }
+  // Open the file-actions menu (open in VS Code / default app, reveal, copy)
+  // anchored to the crumb button.
+  let menuPos = $state<{ x: number; y: number } | null>(null);
+  function openFile(e: MouseEvent) {
+    e.stopPropagation();
+    if (!filePath) return;
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    menuPos = { x: r.left, y: r.bottom + 4 };
+  }
 </script>
 
 {#if pairs}
-  <div class="edit-diff" class:compact class:collapsed={!expanded} class:unified>
-    {#if !compact && filePath}
-      <button
-        type="button"
-        class="edit-head"
-        class:clickable={!compact}
-        onclick={toggleExpanded}
-        use:tooltip={expanded ? "Collapse diff" : "Show diff"}
-      >
-        <span class="edit-icon"><FilePen size={12} /></span>
-        <span class="edit-tool">Edit</span>
-        <span class="edit-path mono" use:tooltip={filePath}>{shortPath(filePath)}</span>
-        <span class="edit-counts mono">
-          <span class="ct-add">+{counts.adds}</span>
-          <span class="ct-del">−{counts.dels}</span>
+  <div class="edit-diff" class:compact class:collapsed={!expanded} class:embedded={hideHead}>
+    {#if !compact && !hideHead && filePath}
+      <div class="edit-head">
+        <button
+          type="button"
+          class="edit-chev"
+          class:open={expanded}
+          onclick={toggleExpanded}
+          use:tooltip={expanded ? "Collapse diff" : "Show diff"}
+          aria-label={expanded ? "Collapse diff" : "Show diff"}
+        >
+          <ChevronRight size={12} />
+        </button>
+        <button type="button" class="edit-crumb mono" onclick={openFile} use:tooltip={{ text: "File actions — open, reveal, copy path", placement: "bottom" }}>
+          <FileText size={12} class="crumb-file" />
+          {#if dirLabel}<span class="dir">{dirLabel}</span>{/if}<span class="name">{baseName}</span>
+          <CornerDownLeft size={11} class="edit-open" />
+        </button>
+        {#if lang}<span class="edit-lang mono">{lang}</span>{/if}
+        <span class="edit-head-right">
+          <span class="edit-counts mono">
+            <span class="ct-add">+{counts.adds}</span>
+            {#if counts.dels}<span class="ct-del">−{counts.dels}</span>{/if}
+          </span>
+          {#if copied}
+            <span class="edit-copied mono"><Check size={12} />Copied</span>
+          {:else}
+            <button type="button" class="edit-copy" onclick={copyDiff} use:tooltip={"Copy new content"} aria-label="Copy new content"><Copy size={12} /></button>
+          {/if}
         </span>
-        <span class="edit-chev" class:open={expanded} aria-hidden="true">
-          <ChevronDown size={12} />
-        </span>
-      </button>
+      </div>
     {/if}
     {#if expanded}
       <div class="diff-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
-        {#if !unified}
-          <div class="diff-head">
-            <span>before</span>
-            <span>after</span>
-          </div>
-        {/if}
-        {#each compactPairs as p, pi (pi)}
-          {#if p.kind === "meta"}
-            <div class="diff-meta" style="--ri: {Math.min(pi, 14)}">{p.text}</div>
-          {:else if p.kind === "gap"}
-            <div class="diff-gap" style="--ri: {Math.min(pi, 14)}" data-multi={p.lines > 1} use:tooltip={p.lines === 1 ? "1 blank line" : `${p.lines} blank lines`}>
-              {#if p.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{p.lines} blank lines</span>{/if}
+        {#each unifiedLines as l, li (li)}
+          {#if l.kind === "meta"}
+            <div class="diff-meta" style="--ri: {Math.min(li, 14)}">{l.text}</div>
+          {:else if l.kind === "gap"}
+            <div class="diff-gap" style="--ri: {Math.min(li, 14)}" data-multi={l.lines > 1} use:tooltip={l.lines === 1 ? "1 blank line" : `${l.lines} blank lines`}>
+              {#if l.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{l.lines} blank lines</span>{/if}
             </div>
-          {:else if unified}
-            {@const cellKind = unifiedSide === "left" ? (p.kind === "ctx" ? "ctx" : "del") : (p.kind === "ctx" ? "ctx" : "add")}
-            {@const cellText = unifiedSide === "left" ? p.left : p.right}
-            {#if cellText !== null}
-              <div class="diff-pair single" data-kind={cellKind} style="--ri: {Math.min(pi, 14)}">
-                <span class="diff-cell side-{unifiedSide === 'left' ? 'l' : 'r'}">
-                  <span class="diff-sigil">{cellKind === "ctx" ? " " : cellKind === "del" ? "-" : "+"}</span>
-                  <span class="diff-text">{cellText}</span>
-                </span>
-              </div>
-            {/if}
           {:else}
-            <div class="diff-pair" data-kind={p.kind} style="--ri: {Math.min(pi, 14)}">
-              <span class="diff-cell side-l">
-                <span class="diff-sigil">{p.left === null ? " " : p.kind === "ctx" ? " " : "-"}</span>
-                <span class="diff-text">{p.left ?? ""}</span>
-              </span>
-              <span class="diff-cell side-r">
-                <span class="diff-sigil">{p.right === null ? " " : p.kind === "ctx" ? " " : "+"}</span>
-                <span class="diff-text">{p.right ?? ""}</span>
-              </span>
+            {@const ch = hl(l.text)}
+            <div class="diff-line" data-kind={l.kind} style="--ri: {Math.min(li, 14)}">
+              <span class="diff-num mono">{l.num ?? ""}</span>
+              <span class="diff-gutter mono">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}</span>
+              {#if ch !== null}<span class="diff-code mono">{@html ch}</span>{:else}<span class="diff-code mono">{l.text}</span>{/if}
             </div>
           {/if}
         {/each}
@@ -219,113 +296,149 @@
   </div>
 {/if}
 
+{#if menuPos && filePath}
+  <FilePathMenu path={filePath} x={menuPos.x} y={menuPos.y} onClose={() => (menuPos = null)} />
+{/if}
+
 <style>
   .edit-diff {
     --diff-fs: 12px;
     margin: 8px 0;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 10px;
     overflow: hidden;
-    background: var(--surface);
+    background: var(--bg-inset);
   }
   .edit-diff.compact {
     --diff-fs: 10px;
     margin: 0;
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: 8px;
   }
+  /* Embedded in a SessionDiff file group — no card chrome, the group owns it. */
+  .edit-diff.embedded {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .edit-diff.embedded .diff-body { max-height: none; }
+
+  /* ── Breadcrumb header ─────────────────────────────────────────────────── */
   .edit-head {
     display: flex; align-items: center; gap: 8px;
     width: 100%;
-    padding: 6px 10px;
-    background: var(--bg-elev-2);
+    padding: 8px 11px;
+    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
     border: 0;
     border-bottom: 1px solid var(--border);
     font: inherit;
-    font-size: var(--fs-xs);
-    color: var(--fg-2);
     text-align: left;
-  }
-  .edit-head.clickable {
-    cursor: pointer;
-    transition: background 140ms ease-out, border-color 140ms ease-out;
-  }
-  .edit-head.clickable:hover {
-    background: color-mix(in oklch, var(--bg-elev-2) 80%, var(--accent));
-    border-bottom-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  }
-  .edit-head.clickable:focus-visible {
-    outline: 2px solid color-mix(in oklch, var(--accent) 60%, transparent);
-    outline-offset: -2px;
   }
   .edit-diff.collapsed .edit-head { border-bottom-color: transparent; }
   .edit-chev {
     display: inline-flex;
-    color: var(--fg-muted);
-    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    padding: 0; border: 0; background: transparent;
+    color: var(--fg-faint);
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 140ms ease, color 140ms ease;
   }
-  .edit-chev.open { transform: rotate(180deg); }
-  @media (prefers-reduced-motion: reduce) {
-    .edit-chev { transition: none; }
+  .edit-chev:hover { color: var(--fg-muted); }
+  .edit-chev.open { transform: rotate(90deg); }
+  .edit-chev:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
+    outline-offset: 2px; border-radius: 4px;
   }
-  .edit-icon { display: inline-flex; color: var(--accent); }
-  .edit-tool {
-    font-weight: 600;
-    color: var(--fg);
-    font-size: var(--fs-sm);
+  @media (prefers-reduced-motion: reduce) { .edit-chev { transition: color 140ms ease; } }
+
+  .edit-crumb {
+    display: inline-flex; align-items: center; gap: 6px;
+    flex: 1; min-width: 0;
+    padding: 3px 7px; margin-left: -2px;
+    border: 0; background: transparent;
+    border-radius: 7px;
+    font: inherit;
+    font-size: 11.5px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 140ms ease;
   }
-  .edit-path {
-    flex: 1;
-    min-width: 0;
-    color: var(--fg-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: var(--fs-xs);
+  .edit-crumb:hover { background: var(--surface-hover); }
+  .edit-crumb:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
+    outline-offset: -2px;
+  }
+  :global(.edit-crumb .crumb-file) { color: var(--fg-faint); flex-shrink: 0; }
+  .edit-crumb .dir {
+    color: var(--fg-subtle);
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .edit-crumb .name { color: var(--fg); font-weight: 600; flex-shrink: 0; }
+  .edit-crumb:hover .name { color: var(--accent); }
+  /* Open-file affordance — corner-down-left icon, hidden until hover. */
+  :global(.edit-crumb .edit-open) {
+    color: var(--fg-faint); flex-shrink: 0;
+    opacity: 0; transition: opacity 140ms ease;
+  }
+  .edit-crumb:hover :global(.edit-open) { opacity: 0.75; }
+
+  .edit-head-right { display: inline-flex; align-items: center; gap: 9px; flex-shrink: 0; }
+  .edit-copy {
+    display: inline-flex; padding: 3px;
+    border: 0; background: transparent;
+    color: var(--fg-faint);
+    border-radius: 6px; cursor: pointer;
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .edit-copy:hover { background: var(--surface-hover); color: var(--fg-2); }
+  .edit-copy:focus-visible {
+    outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
+    outline-offset: -1px;
+  }
+  .edit-copied {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 10px; color: var(--ok);
+  }
+
+  .edit-lang {
+    flex-shrink: 0;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    padding: 2px 6px;
+    border-radius: 5px;
   }
   .edit-counts {
-    display: inline-flex; gap: 6px;
-    font-size: var(--fs-xs);
+    display: inline-flex; gap: 8px;
+    flex-shrink: 0;
+    font-size: 10.5px;
     font-variant-numeric: tabular-nums;
   }
-  .ct-add { color: oklch(0.78 0.14 152); }
-  .ct-del { color: oklch(0.76 0.16 22); }
+  /* Mockup `.ct-diff-stat`: counts as soft pills, not bare text. */
+  .ct-add, .ct-del { padding: 1px 6px; border-radius: 5px; font-weight: 600; }
+  .ct-add { color: var(--ok); background: color-mix(in oklch, var(--ok) 15%, transparent); }
+  .ct-del { color: var(--danger); background: color-mix(in oklab, var(--danger) 15%, transparent); }
 
+  /* ── Unified body ──────────────────────────────────────────────────────── */
   .diff-body {
+    padding: 6px 0;
     font-family: var(--font-mono, monospace);
     font-size: var(--diff-fs);
-    line-height: 1.5;
+    line-height: 1.65;
     max-height: 480px;
     overflow: auto;
   }
   .edit-diff.compact .diff-body { max-height: 280px; }
 
-  .diff-head {
+  .diff-line {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 1px;
-    background: var(--bg-elev-2);
-    color: var(--fg-subtle);
-    font-size: 9px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    border-bottom: 1px solid var(--border);
-    position: sticky; top: 0; z-index: 1;
-  }
-  .diff-head span {
-    padding: 3px 10px;
-    background: var(--bg-elev-2);
-  }
-  .diff-pair {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 1px;
-    background: var(--border);
+    grid-template-columns: 34px 14px 1fr;
+    align-items: baseline;
   }
   /* Staggered reveal — each row fades + slides in keyed off its --ri index
-     (capped at 14 so big diffs settle fast). Makes the change "land" instead
-     of popping in all at once. */
-  .diff-pair, .diff-meta, .diff-gap {
+     (capped at 14 so big diffs settle fast). */
+  .diff-line, .diff-meta, .diff-gap {
     animation: diff-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--ri, 0) * 16ms);
   }
@@ -334,81 +447,56 @@
     to   { opacity: 1; transform: translateX(0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .diff-pair, .diff-meta, .diff-gap { animation: none; }
+    .diff-line, .diff-meta, .diff-gap { animation: none; }
   }
-  .diff-pair.single {
-    grid-template-columns: 1fr;
-    background: transparent;
+  .diff-num {
+    text-align: right;
+    padding-right: 10px;
+    font-size: 10px;
+    color: var(--fg-faint);
+    opacity: 0.5;
+    user-select: none;
   }
-  .diff-pair.single[data-kind="del"] .side-l {
-    background: oklch(0.68 0.20 22 / 0.13);
-    box-shadow: inset 2px 0 oklch(0.68 0.20 22 / 0.55);
-  }
-  .diff-pair.single[data-kind="del"] .side-l .diff-sigil { color: oklch(0.78 0.16 22); }
-  .diff-pair.single[data-kind="del"] .side-l .diff-text { color: oklch(0.88 0.10 22); }
-  .diff-pair.single[data-kind="add"] .side-r {
-    background: oklch(0.76 0.18 152 / 0.13);
-    box-shadow: inset 2px 0 oklch(0.76 0.18 152 / 0.55);
-  }
-  .diff-pair.single[data-kind="add"] .side-r .diff-sigil { color: oklch(0.80 0.14 152); }
-  .diff-pair.single[data-kind="add"] .side-r .diff-text { color: oklch(0.90 0.09 152); }
-  .diff-cell {
-    display: grid;
-    grid-template-columns: 16px 1fr;
-    padding: 0 6px;
-    background: var(--surface);
-    min-width: 0;
-  }
-  .diff-sigil {
+  .diff-gutter {
     text-align: center;
+    font-size: 10.5px;
     color: var(--fg-faint);
     user-select: none;
-    font-weight: 600;
   }
-  .diff-text {
+  .diff-code {
     white-space: pre-wrap;
     word-break: break-word;
-    color: var(--fg-2);
+    color: var(--fg-muted);
+    padding-right: 10px;
     min-height: 1.5em;
   }
-  .diff-pair[data-kind="del"] .side-l,
-  .diff-pair[data-kind="mod"] .side-l {
-    background: oklch(0.68 0.20 22 / 0.13);
-    box-shadow: inset 2px 0 oklch(0.68 0.20 22 / 0.55);
+  /* Mockup `.ct-diff-line`: softer fill + a left change-bar so add/del read at a
+     glance without the heavier full-row tint. */
+  .diff-line[data-kind="add"] {
+    background: color-mix(in oklch, var(--ok) 9%, transparent);
+    box-shadow: inset 2px 0 0 var(--ok);
   }
-  .diff-pair[data-kind="del"] .side-l .diff-sigil,
-  .diff-pair[data-kind="mod"] .side-l .diff-sigil { color: oklch(0.78 0.16 22); }
-  .diff-pair[data-kind="del"] .side-l .diff-text,
-  .diff-pair[data-kind="mod"] .side-l .diff-text { color: oklch(0.88 0.10 22); }
-  .diff-pair[data-kind="del"] .side-r {
-    background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+  .diff-line[data-kind="add"] .diff-num { color: var(--ok); opacity: 0.75; }
+  .diff-line[data-kind="add"] .diff-gutter { color: var(--ok); }
+  .diff-line[data-kind="add"] .diff-code { color: var(--fg); }
+  .diff-line[data-kind="del"] {
+    background: color-mix(in oklab, var(--danger) 9%, transparent);
+    box-shadow: inset 2px 0 0 var(--danger);
   }
-  .diff-pair[data-kind="add"] .side-r,
-  .diff-pair[data-kind="mod"] .side-r {
-    background: oklch(0.76 0.18 152 / 0.13);
-    box-shadow: inset 2px 0 oklch(0.76 0.18 152 / 0.55);
-  }
-  .diff-pair[data-kind="add"] .side-r .diff-sigil,
-  .diff-pair[data-kind="mod"] .side-r .diff-sigil { color: oklch(0.80 0.14 152); }
-  .diff-pair[data-kind="add"] .side-r .diff-text,
-  .diff-pair[data-kind="mod"] .side-r .diff-text { color: oklch(0.90 0.09 152); }
-  .diff-pair[data-kind="add"] .side-l {
-    background: color-mix(in oklch, var(--surface) 88%, var(--bg));
-  }
+  .diff-line[data-kind="del"] .diff-gutter,
+  .diff-line[data-kind="del"] .diff-code { color: oklch(0.86 0.06 22); }
+
   .diff-meta {
-    grid-column: 1 / -1;
     color: var(--fg-muted);
     font-style: italic;
-    padding: 2px 10px 3px;
+    padding: 2px 12px 3px;
     background: var(--bg-elev-2);
     font-size: var(--fs-xs);
   }
-  /* Blank-context elision. Single blank ctx → thin spacer (preserves the
-     intentional visual gap the source had, but at ~6px instead of ~18px).
-     Multiple consecutive blanks → labeled `··· N blank lines` strip. */
+  /* Blank-context elision. Single blank ctx → thin spacer; runs → labeled
+     `··· N blank lines` strip. */
   .diff-gap {
-    grid-column: 1 / -1;
-    background: var(--surface);
+    background: var(--bg-inset);
     border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
     border-bottom: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
     height: 6px;
@@ -434,4 +522,5 @@
   .gap-count {
     font-variant-numeric: tabular-nums;
   }
+  .mono { font-family: var(--font-mono, monospace); }
 </style>

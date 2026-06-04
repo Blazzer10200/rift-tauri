@@ -4,9 +4,11 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, TerminalSquare, SplitSquareHorizontal, Layers, History, ChevronDown, Globe, Check } from "lucide-svelte";
-  import { onDestroy } from "svelte";
+  import { MessageSquare, Plus, X, PanelLeft, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, Layers, History, ChevronDown, ChevronRight, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff } from "lucide-svelte";
+  import { onDestroy, onMount } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
+  import { cliUpdate } from "../../state/cliUpdate.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
   import { browserDock } from "../../state/browserDock.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
@@ -16,7 +18,6 @@
   let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
   let historyOpen = $state(false);
   let historyFull = $state(false);
-  let historyAnchor = $state<HTMLButtonElement | undefined>();
   let historyPopover = $state<HTMLDivElement | undefined>();
   let historyPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
 
@@ -35,9 +36,11 @@
     return { destroy() { node.remove(); } };
   }
 
+  // History opens from the Panels menu now → anchor its popover off the
+  // Panels button (viewAnchor).
   function openHistory() {
-    if (!historyAnchor) return;
-    const r = historyAnchor.getBoundingClientRect();
+    if (!viewAnchor) return;
+    const r = viewAnchor.getBoundingClientRect();
     historyPos = {
       top: r.bottom + 6,
       right: Math.max(8, window.innerWidth - r.right),
@@ -50,12 +53,12 @@
     if (!historyOpen) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
-      if (historyAnchor?.contains(t)) return;
+      if (viewAnchor?.contains(t)) return;
       if (historyPopover?.contains(t)) return;
       historyOpen = false;
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { historyOpen = false; historyAnchor?.focus(); }
+      if (e.key === "Escape") { historyOpen = false; viewAnchor?.focus(); }
     };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
@@ -82,6 +85,44 @@
     ctxPos = { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) };
     ctxPanelOpen = true;
   }
+
+  // ── Claude Code CLI update notice ──────────────────────────────────────
+  // Glanceable badge in the right cluster, shown only when npm has a newer
+  // `claude` than the one Rift is spawning (and the user hasn't dismissed it).
+  // Click opens a small popover with the version delta + copy-command + dismiss.
+  let cliBadgeAnchor = $state<HTMLButtonElement | undefined>();
+  let cliPanel = $state<HTMLDivElement | undefined>();
+  let cliPanelOpen = $state(false);
+  let cliHowOpen = $state(false);
+  let cliPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
+  const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
+  const cliUpdateReady = $derived(cliUpdate.available(cliInstalled));
+  onMount(() => { void cliUpdate.maybeCheck(); });
+  function toggleCliPanel() {
+    if (cliPanelOpen) { cliPanelOpen = false; return; }
+    if (!cliBadgeAnchor) return;
+    const r = cliBadgeAnchor.getBoundingClientRect();
+    cliPos = { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) };
+    cliPanelOpen = true;
+  }
+  $effect(() => {
+    if (!cliPanelOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (cliBadgeAnchor?.contains(t)) return;
+      if (cliPanel?.contains(t)) return;
+      cliPanelOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { cliPanelOpen = false; cliBadgeAnchor?.focus(); }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  });
   $effect(() => {
     if (!ctxPanelOpen) return;
     const onDown = (e: MouseEvent) => {
@@ -138,6 +179,46 @@
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
     };
+  });
+
+  // Project pill — replaces the old folder-chip / "Open folder" button. Shows
+  // the active workspace folder; the dropdown switches between recent roots,
+  // opens a new folder, or closes the current one. Portaled to escape the
+  // .tabs-rail overflow clip, same as the other popovers.
+  let projMenuOpen = $state(false);
+  let projAnchor = $state<HTMLButtonElement | undefined>();
+  let projMenu = $state<HTMLDivElement | undefined>();
+  let projPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
+
+  function openProjMenu() {
+    if (!projAnchor) return;
+    const r = projAnchor.getBoundingClientRect();
+    projPos = { top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) };
+    projMenuOpen = true;
+  }
+  $effect(() => {
+    if (!projMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (projAnchor?.contains(t)) return;
+      if (projMenu?.contains(t)) return;
+      projMenuOpen = false;
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { projMenuOpen = false; projAnchor?.focus(); }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  });
+  // recent roots, current first removed (it's shown as the active row inline).
+  const recentRoots = $derived(assistant.workspace.recent ?? []);
+  // Resolve the active workspace's git branch for the tab-bar chip (null = not a repo).
+  $effect(() => {
+    if (assistant.workspace.current) void assistant.loadWorkspaceBranch();
   });
 
   let dragFromIdx = $state<number | null>(null);
@@ -251,15 +332,10 @@
     const parts = norm.split("/");
     return parts[parts.length - 1] || norm;
   }
-
-  function shortAgo(sinceMs: number): string {
-    const sec = Math.max(0, Math.floor((Date.now() - sinceMs) / 1000));
-    if (sec < 60) return `${sec}s`;
-    if (sec < 3600) return `${Math.floor(sec / 60)}m`;
-    return `${Math.floor(sec / 3600)}h`;
+  // Cleaned path for tooltips — drops Windows extended-length `\\?\` noise.
+  function prettyPath(p: string): string {
+    return p.replace(/^\\\\\?\\/, "").replace(/^\/\/\?\//, "");
   }
-
-  const foreignShell = $derived(assistant.remoteShellLockedByOther);
 
   const authWarn = $derived.by(() => {
     const a = assistant.auth;
@@ -360,6 +436,17 @@
 </script>
 
 <div class="tabsbar" data-model={modelFamily(assistant.model)} role="tablist" aria-label="Chat tabs">
+  <button
+    class="rail-toggle"
+    type="button"
+    data-active={!uiPrefs.chatRailCollapsed}
+    onclick={() => uiPrefs.toggleChatRail()}
+    use:tooltip={uiPrefs.chatRailCollapsed ? "Show chat history" : "Hide chat history"}
+    aria-label="Toggle chat history"
+    aria-pressed={!uiPrefs.chatRailCollapsed}
+  >
+    <PanelLeft size={15}/>
+  </button>
   <div class="strip">
     {#each tabs as id, idx (id)}
       <div
@@ -426,48 +513,29 @@
   </div>
 
   <div class="actions">
-    <div class="grp grp-nav">
-    <button
-      class="hdr-btn history-btn"
-      class:open={historyOpen}
-      type="button"
-      use:tooltip={"Conversation history"}
-      onclick={() => { historyOpen ? (historyOpen = false) : openHistory(); }}
-      aria-haspopup="dialog"
-      aria-expanded={historyOpen}
-      bind:this={historyAnchor}
-    >
-      <History size={12}/>
-      <span class="hdr-btn-label">History</span>
-      {#if assistant.conversations.length > 0}
-        <span class="history-count">{assistant.conversations.length}</span>
-      {/if}
-      <ChevronDown size={10} class={historyOpen ? "chev-open" : ""}/>
-    </button>
-
-    {#if assistant.workspace.current}
-      <span class="ws-chip" use:tooltip={assistant.workspace.current}>
-        <Folder size={11}/>
-        <span class="ws-name">{leafName(assistant.workspace.current)}</span>
-        <button
-          class="ws-x"
-          type="button"
-          use:tooltip={"Close folder"}
-          onclick={() => void assistant.clearRoot()}
-        ><X size={10}/></button>
-      </span>
-    {:else}
+    <div class="top-pop">
       <button
-        class="hdr-btn"
+        class="proj-pill"
+        class:open={projMenuOpen}
         type="button"
-        use:tooltip={"Open project folder"}
-        onclick={() => void assistant.pickFolder()}
+        bind:this={projAnchor}
+        onclick={() => { projMenuOpen ? (projMenuOpen = false) : openProjMenu(); }}
+        aria-haspopup="menu"
+        aria-expanded={projMenuOpen}
+        use:tooltip={assistant.workspace.current ? prettyPath(assistant.workspace.current) : "Open a project folder"}
       >
-        <FolderOpen size={12}/>
-        <span class="hdr-btn-label">Open folder</span>
+        <FolderGit2 size={14} class="proj-ico"/>
+        <span class="proj-name">{assistant.workspace.current ? leafName(assistant.workspace.current) : "Open project"}</span>
+        <ChevronDown size={13} class={projMenuOpen ? "proj-chev chev-open" : "proj-chev"}/>
       </button>
-    {/if}
     </div>
+
+    {#if assistant.workspaceBranch}
+      <span class="branch-chip mono" use:tooltip={`On branch ${assistant.workspaceBranch}`}>
+        <GitBranch size={12} />
+        <span class="branch-name">{assistant.workspaceBranch}</span>
+      </span>
+    {/if}
 
     {#if authWarn}
       <span
@@ -480,15 +548,6 @@
       </span>
     {/if}
 
-    {#if foreignShell}
-      <span
-        class="shell-lock"
-        use:tooltip={`${foreignShell.user}@${foreignShell.host} is running a remote command`}
-      >
-        <TerminalSquare size={11}/>
-        <span>{foreignShell.user} ({shortAgo(foreignShell.sinceMs)})</span>
-      </span>
-    {/if}
 
     {#if activeAgents.length > 0}
       <button
@@ -514,7 +573,7 @@
         >{autoCompactDisabledNudge}</span>
     {/if}
 
-    {#if ctxTokens > 0}
+    {#if ctxTokens > 0 && !assistant.ui.dockOpen}
       <button
         type="button"
         class="ctx-pill"
@@ -549,10 +608,26 @@
       </button>
     {/if}
 
+    {#if cliUpdateReady}
+      <button
+        type="button"
+        class="cli-badge"
+        class:open={cliPanelOpen}
+        bind:this={cliBadgeAnchor}
+        onclick={toggleCliPanel}
+        aria-haspopup="dialog"
+        aria-expanded={cliPanelOpen}
+        use:tooltip={"Claude Code CLI update available — click for details"}
+      >
+        <ArrowUpCircle size={12} />
+        <span class="cli-badge-t">CLI update</span>
+      </button>
+    {/if}
+
     <span class="vdiv" aria-hidden="true"></span>
 
     <button
-      class="hdr-btn view-btn"
+      class="hdr-btn panels-btn"
       class:open={viewMenuOpen}
       class:pulse
       type="button"
@@ -560,7 +635,7 @@
       onclick={() => { viewMenuOpen ? (viewMenuOpen = false) : openViewMenu(); }}
       aria-haspopup="menu"
       aria-expanded={viewMenuOpen}
-      use:tooltip={"View — panels & layout"}
+      use:tooltip={"Panels & layout"}
     >
       <PanelRight size={13} />
       {#if browserDock.open || tasksOpen || splitActive}
@@ -668,15 +743,123 @@
   </div>
 {/if}
 
+{#if cliPanelOpen}
+  <div
+    class="cli-panel"
+    role="dialog"
+    aria-label="Claude Code CLI update"
+    bind:this={cliPanel}
+    use:portal
+    style="top: {cliPos.top}px; right: {cliPos.right}px;"
+  >
+    <div class="cli-panel-head">
+      <span class="cli-panel-ic"><ArrowUpCircle size={15} /></span>
+      <span class="cli-panel-title">Claude Code update</span>
+    </div>
+    <div class="cli-panel-vers">
+      <span class="cli-vchip old">{cliInstalled ?? "?"}</span>
+      <span class="cli-varrow">→</span>
+      <span class="cli-vchip new">{cliUpdate.latest ?? "?"}</span>
+    </div>
+    <div class="cli-panel-sub">
+      A newer <code>claude</code> CLI is on npm. Rift uses your local install — update it from a terminal:
+    </div>
+    <div class="cli-cmd">
+      <code>{cliUpdate.updateCommand}</code>
+      <button
+        type="button"
+        class="cli-cmd-copy"
+        class:done={cliUpdate.copied}
+        onclick={() => void cliUpdate.copyCommand()}
+        use:tooltip={"Copy update command"}
+        aria-label="Copy update command"
+      >
+        {#if cliUpdate.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
+      </button>
+    </div>
+    <button type="button" class="cli-how-toggle" class:open={cliHowOpen} onclick={() => (cliHowOpen = !cliHowOpen)} aria-expanded={cliHowOpen}>
+      <ChevronRight size={12} class="cli-how-chev" />
+      How do I update?
+    </button>
+    {#if cliHowOpen}
+      <ol class="cli-how-steps">
+        <li>Open a terminal — on Windows press <kbd>Win</kbd>+<kbd>R</kbd>, type <code>cmd</code>, hit Enter.</li>
+        <li>Paste the command above and press Enter. Let it finish (a few seconds).</li>
+        <li>Restart Rift — it'll pick up the new <code>claude</code> automatically.</li>
+      </ol>
+    {/if}
+    <div class="cli-panel-foot">
+      <a class="cli-panel-link" href={cliUpdate.changelogUrl} target="_blank" rel="noreferrer">
+        <ExternalLink size={11} /> What's new
+      </a>
+      <button type="button" class="cli-panel-dismiss" onclick={() => { cliUpdate.dismiss(); cliPanelOpen = false; }}>
+        Dismiss
+      </button>
+    </div>
+  </div>
+{/if}
+
+{#if projMenuOpen}
+  <div
+    class="rift-menu proj-menu"
+    role="menu"
+    aria-label="Switch project folder"
+    bind:this={projMenu}
+    use:portal
+    style="top: {projPos.top}px; right: {projPos.right}px;"
+  >
+    <div class="rift-menu-head">Project folder</div>
+    {#each recentRoots as path (path)}
+      <button
+        class="rift-menu-row"
+        class:current={path === assistant.workspace.current}
+        type="button"
+        role="menuitem"
+        use:tooltip={prettyPath(path)}
+        onclick={() => { projMenuOpen = false; if (path !== assistant.workspace.current) void assistant.setRoot(path); }}
+      >
+        <Folder size={15} class="rift-menu-row-ic" />
+        <span class="rift-menu-row-body">
+          <span class="rift-menu-row-t">{leafName(path)}</span>
+        </span>
+        {#if path === assistant.workspace.current}<Check size={14} class="rift-menu-row-chk" />{/if}
+      </button>
+    {/each}
+    {#if recentRoots.length > 0}<div class="rift-menu-divider" role="separator"></div>{/if}
+    <button class="rift-menu-row" type="button" role="menuitem" onclick={() => { projMenuOpen = false; void assistant.pickFolder(); }}>
+      <FolderOpen size={15} class="rift-menu-row-ic" />
+      <span class="rift-menu-row-body"><span class="rift-menu-row-t">Open folder…</span></span>
+    </button>
+    {#if assistant.workspace.current}
+      <button class="rift-menu-row" type="button" role="menuitem" onclick={() => { projMenuOpen = false; void assistant.clearRoot(); }}>
+        <X size={15} class="rift-menu-row-ic" />
+        <span class="rift-menu-row-body"><span class="rift-menu-row-t">Close folder</span></span>
+      </button>
+    {/if}
+  </div>
+{/if}
+
 {#if viewMenuOpen}
   <div
-    class="view-menu"
+    class="rift-menu view-menu"
     role="menu"
-    aria-label="View — panels & layout"
+    aria-label="Panels &amp; layout"
     bind:this={viewMenu}
     use:portal
     style="top: {viewPos.top}px; right: {viewPos.right}px;"
   >
+    <button
+      class="vm-item"
+      type="button"
+      role="menuitem"
+      onclick={() => { viewMenuOpen = false; openHistory(); }}
+    >
+      <History size={14} class="vm-icon" />
+      <span class="vm-label">History</span>
+      {#if assistant.conversations.length > 0}<span class="vm-count">{assistant.conversations.length}</span>{/if}
+      <Check size={13} class="vm-check" aria-hidden="true" />
+    </button>
+    <div class="vm-sep" role="separator"></div>
     <button
       class="vm-item"
       class:on={browserDock.open}
@@ -704,6 +887,19 @@
       <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;E</kbd>
       <Check size={13} class="vm-check" />
     </button>
+    <button
+      class="vm-item"
+      class:on={assistant.ui.diffOpen}
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={assistant.ui.diffOpen}
+      onclick={() => { assistant.ui.diffTarget = null; assistant.ui.diffOpen = !assistant.ui.diffOpen; viewMenuOpen = false; }}
+    >
+      <FileDiff size={14} class="vm-icon" />
+      <span class="vm-label">Session diff</span>
+      <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;D</kbd>
+      <Check size={13} class="vm-check" />
+    </button>
     <div class="vm-sep" role="separator"></div>
     <button
       class="vm-item"
@@ -724,7 +920,7 @@
 <style>
   .tabsbar {
     position: relative;
-    height: 34px;
+    height: 36px;
     flex-shrink: 0;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
@@ -732,17 +928,33 @@
     align-items: stretch;
     overflow: hidden;
   }
-  /* Aurora hue follows the active model, matching the composer ring. */
-  .tabsbar[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .tabsbar[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .tabsbar[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  /* Emerald-only — the tabs bar no longer tints by model, matching the
+     composer ring. Model identity lives on the picker model-card swatch. */
   .tabsbar                      { --model-color: var(--accent); }
+  /* History-rail toggle — pinned at the bar's left edge (replaced the floating
+     `>` sliver). Active = rail open. Only mounted on the Chat workspace. */
+  .rail-toggle {
+    flex-shrink: 0;
+    display: grid; place-items: center;
+    width: 30px; align-self: center; height: 26px;
+    margin-left: 6px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--fg-subtle);
+    cursor: pointer;
+    transition: background 130ms var(--ease-soft), color 130ms var(--ease-soft), border-color 130ms var(--ease-soft);
+  }
+  .rail-toggle:hover { background: var(--surface-hover); color: var(--fg); border-color: var(--border); }
+  .rail-toggle[data-active="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .rail-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+
   .strip {
     flex: 1; min-width: 0;
     display: flex;
-    align-items: stretch;
-    gap: 0;
-    padding: 0 4px;
+    align-items: center;
+    gap: 3px;
+    padding: 0 8px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
@@ -751,21 +963,22 @@
   .strip::-webkit-scrollbar-button { display: none; }
 
   .tab {
-    flex: 0 1 220px;
-    min-width: 120px;
+    flex: 0 1 210px;
+    min-width: 130px;
     max-width: 220px;
+    height: 26px;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     padding: 0 8px;
-    margin: 4px 1px 0;
-    background: color-mix(in oklch, var(--bg-elev-1) 30%, transparent);
+    margin: 0;
+    background: transparent;
     border: 1px solid transparent;
-    border-bottom: 0;
-    border-radius: 7px 7px 0 0;
+    border-radius: 7px;
     color: var(--fg-muted);
     cursor: pointer;
     font-size: var(--fs-sm);
+    font-weight: 500;
     user-select: none;
     transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
     position: relative;
@@ -787,24 +1000,10 @@
     color: var(--fg);
     font-weight: 600;
     border-color: var(--border);
-    /* Top-edge accent — picks the active tab out of the row at a glance.
-       Inset box-shadow vs ::before because ::before is reserved for the
-       in-pane indicator. Tinted by current model + soft underglow that
-       washes the lower edge of the tab in model color. */
-    box-shadow:
-      inset 0 2px 0 0 var(--model-color),
-      inset 0 -28px 28px -24px color-mix(in oklch, var(--model-color) 28%, transparent);
     z-index: 1;
   }
   .tab.active .icon { color: var(--model-color); }
   .tab.active .dot { background: var(--model-color); box-shadow: 0 0 8px color-mix(in oklch, var(--model-color) 60%, transparent); }
-  .tab.active::after {
-    content: "";
-    position: absolute;
-    left: 0; right: 0; bottom: -1px;
-    height: 1px;
-    background: var(--bg-elev-1);
-  }
   .tab.drop-target {
     box-shadow: -2px 0 0 var(--accent);
   }
@@ -813,7 +1012,7 @@
      to scan the strip and see "Tab 2 is busy in background" without it
      stealing attention from whatever they're typing in the active tab. */
   .tab.bg-streaming {
-    background: color-mix(in oklch, var(--accent) 8%, var(--bg));
+    background: color-mix(in oklab, var(--accent) 8%, var(--bg));
     color: var(--fg);
   }
   .tab.bg-streaming::after {
@@ -849,7 +1048,7 @@
     bottom: 2px;
     height: 2px;
     border-radius: 2px;
-    background: color-mix(in oklch, var(--accent) 45%, transparent);
+    background: color-mix(in oklab, var(--accent) 45%, transparent);
     opacity: 0.7;
   }
   .pane-badge {
@@ -857,8 +1056,8 @@
     min-width: 14px; height: 14px;
     padding: 0 4px;
     border-radius: 999px;
-    background: color-mix(in oklch, var(--accent) 18%, var(--bg-elev-2));
-    color: color-mix(in oklch, var(--accent) 80%, var(--fg));
+    background: color-mix(in oklab, var(--accent) 18%, var(--bg-elev-2));
+    color: color-mix(in oklab, var(--accent) 80%, var(--fg));
     font-size: 9px;
     font-weight: 700;
     font-variant-numeric: tabular-nums;
@@ -953,13 +1152,6 @@
       transparent);
   }
 
-  /* Semantic zones inside .actions. Members hug each other at 5px so the
-     zone reads as one unit; zones split apart via .actions gap (9px). */
-  .grp {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
   /* Hairline between the transient/nav zone and the persistent view-toggle
      segment — mirrors .actions::before so the cluster parses left-to-right
      as [context · status │ view]. */
@@ -988,31 +1180,56 @@
     transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
   }
   .hdr-btn:hover { color: var(--fg); border-color: var(--border-strong); background: var(--surface-hover); }
-  .hdr-btn-label { font-size: var(--fs-xs); }
 
-  .history-btn {
-    position: relative;
+  /* ── Project pill — folder-git icon · name · chevron (mockup `.proj-pill`).
+     Replaces the old folder-chip + Open-folder + History trio. The dropdown
+     switches between recent roots. */
+  .top-pop { position: relative; display: inline-flex; }
+  .proj-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    height: 26px; padding: 0 9px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    color: var(--fg);
+    cursor: pointer;
+    font: inherit; font-size: var(--fs-xs);
+    max-width: 240px;
+    transition: background 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
   }
-  .history-btn.open {
-    background: var(--accent-soft);
-    color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+  .proj-pill:hover, .proj-pill.open {
+    background: var(--surface-hover);
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
   }
-  .history-btn :global(svg) { transition: transform 140ms ease; }
-  .history-btn :global(.chev-open) { transform: rotate(180deg); }
-  .history-count {
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    padding: 1px 5px;
-    background: var(--bg-elev-2);
-    color: var(--fg-faint);
-    border-radius: 999px;
-    line-height: 1;
+  .proj-pill :global(.proj-ico) { color: var(--accent); flex-shrink: 0; }
+  .proj-name {
+    font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .history-btn.open .history-count {
-    background: color-mix(in oklch, var(--accent) 18%, transparent);
-    color: var(--accent);
+  .proj-pill :global(.proj-chev) { color: var(--fg-faint); flex-shrink: 0; transition: transform 180ms var(--ease-page), color 140ms ease; }
+  .proj-pill :global(.chev-open) { transform: rotate(180deg); color: var(--fg-muted); }
+
+  /* ── Branch chip — read-only git branch beside the project pill (mockup `⎇ main`). */
+  .branch-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 26px; padding: 0 8px;
+    font-size: 11px; color: var(--fg-muted);
+    max-width: 160px;
   }
+  .branch-chip :global(svg) { color: var(--fg-faint); flex-shrink: 0; }
+  .branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Project dropdown — recent roots + open/close. Inherits .rift-menu chrome
+     + .rift-menu-row rows (app.css); this only carries positioning + sizing. */
+  .proj-menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 208px; max-width: 280px;
+    display: flex; flex-direction: column; gap: 1px;
+    animation: history-pop-in 150ms var(--ease-page);
+    transform-origin: top right;
+  }
+  @media (prefers-reduced-motion: reduce) { .proj-menu { animation: none; } }
 
   .history-full-scrim {
     position: fixed;
@@ -1079,37 +1296,6 @@
     .history-popover { animation: none; }
   }
 
-  .ws-chip {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 4px 2px 8px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    color: var(--fg-2);
-    font-size: var(--fs-xs);
-    line-height: 1;
-    max-width: 220px;
-  }
-  .ws-chip :global(svg) { color: var(--fg-muted); }
-  .ws-chip .ws-name {
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .ws-x {
-    background: transparent;
-    border: 0;
-    border-radius: 999px;
-    padding: 1px;
-    color: var(--fg-muted);
-    cursor: pointer;
-    display: inline-flex;
-    opacity: 0.65;
-    transition: opacity 120ms var(--ease-soft), background 120ms var(--ease-soft), color 120ms var(--ease-soft);
-  }
-  .ws-x:hover { opacity: 1; color: var(--fg); background: var(--surface-hover); }
-
   .auth-warn {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 2px 8px;
@@ -1123,28 +1309,16 @@
   .auth-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-muted); }
   .auth-warn[data-tone="yellow"] {
     color: var(--warn);
-    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
     background: var(--warn-soft);
   }
   .auth-warn[data-tone="yellow"] .auth-dot { background: var(--warn); }
   .auth-warn[data-tone="red"] {
     color: var(--danger);
-    border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
-    background: color-mix(in oklch, var(--danger) 10%, transparent);
+    border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+    background: color-mix(in oklab, var(--danger) 10%, transparent);
   }
   .auth-warn[data-tone="red"] .auth-dot { background: var(--danger); }
-
-  .shell-lock {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    line-height: 1;
-    color: var(--warn);
-    background: var(--warn-soft);
-    border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
-  }
 
   .agents-pill {
     display: inline-flex; align-items: center; gap: 6px;
@@ -1156,14 +1330,14 @@
     line-height: 1;
     background: var(--accent-soft);
     color: var(--accent);
-    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
     cursor: pointer;
     font-variant-numeric: tabular-nums;
     transition: background 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
   }
   .agents-pill:hover {
-    background: color-mix(in oklch, var(--accent) 22%, var(--surface));
-    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+    background: color-mix(in oklab, var(--accent) 22%, var(--surface));
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
   }
   .agents-pill :global(svg) {
     opacity: 0.7;
@@ -1187,13 +1361,13 @@
     line-height: 1;
     background: var(--warn-soft);
     color: var(--warn);
-    border: 1px solid color-mix(in oklch, var(--warn) 35%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--warn) 35%, var(--border));
     cursor: help;
   }
   .compact-warn[data-tone="red"] {
-    background: var(--danger-soft, color-mix(in oklch, var(--danger) 12%, transparent));
+    background: var(--danger-soft, color-mix(in oklab, var(--danger) 12%, transparent));
     color: var(--danger);
-    border-color: color-mix(in oklch, var(--danger) 40%, var(--border));
+    border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
   }
 
   .compact-btn {
@@ -1210,12 +1384,12 @@
   }
   .compact-btn:hover { background: var(--surface-hover); color: var(--fg); }
   .compact-btn[data-tone="yellow"] {
-    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
     color: var(--warn);
   }
   .compact-btn[data-tone="red"] {
-    border-color: color-mix(in oklch, var(--danger) 45%, var(--border));
-    background: color-mix(in oklch, var(--danger) 8%, transparent);
+    border-color: color-mix(in oklab, var(--danger) 45%, var(--border));
+    background: color-mix(in oklab, var(--danger) 8%, transparent);
     color: var(--danger);
   }
 
@@ -1235,7 +1409,7 @@
     transition: border-color 120ms var(--ease-soft), background 120ms var(--ease-soft);
   }
   .ctx-pill:hover { border-color: var(--border-strong); }
-  .ctx-pill.open { border-color: color-mix(in oklch, var(--accent) 55%, var(--border)); }
+  .ctx-pill.open { border-color: color-mix(in oklab, var(--accent) 55%, var(--border)); }
   .ctx-pill .ctx-bar {
     position: relative;
     width: 38px;
@@ -1254,14 +1428,14 @@
   .ctx-pill .ctx-sep { color: var(--fg-muted); margin: 0 2px; }
   .ctx-pill .ctx-pct { color: var(--fg-muted); font-size: 10px; }
   .ctx-pill[data-tone="yellow"] {
-    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
     background: var(--warn-soft); color: var(--warn);
   }
   .ctx-pill[data-tone="yellow"] .ctx-text { color: var(--warn); }
   .ctx-pill[data-tone="yellow"] .ctx-fill { background: var(--warn); }
   .ctx-pill[data-tone="red"] {
-    border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
-    background: color-mix(in oklch, var(--danger) 10%, transparent);
+    border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+    background: color-mix(in oklab, var(--danger) 10%, transparent);
     color: var(--danger);
   }
   .ctx-pill[data-tone="red"] .ctx-text { color: var(--danger); }
@@ -1340,8 +1514,131 @@
     transition: border-color 120ms var(--ease-soft), color 120ms var(--ease-soft), background 120ms var(--ease-soft);
   }
   .ctx-panel-compact:hover { border-color: var(--border-strong); color: var(--fg); }
-  .ctx-panel-compact[data-tone="yellow"] { color: var(--warn); border-color: color-mix(in oklch, var(--warn) 35%, var(--border)); }
-  .ctx-panel-compact[data-tone="red"] { color: var(--danger); border-color: color-mix(in oklch, var(--danger) 40%, var(--border)); }
+  .ctx-panel-compact[data-tone="yellow"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--border)); }
+  .ctx-panel-compact[data-tone="red"] { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 40%, var(--border)); }
+
+  /* Claude Code CLI update — accent-tinted notice pill + detail popover. */
+  .cli-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 9px; border-radius: 999px;
+    font-size: var(--fs-xs); font-weight: 600; line-height: 1;
+    color: var(--accent); cursor: pointer; font-family: inherit;
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 38%, var(--border));
+    transition: background 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
+    animation: cli-badge-in 220ms var(--ease-page);
+  }
+  .cli-badge:hover, .cli-badge.open {
+    background: color-mix(in oklab, var(--accent) 20%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 60%, var(--border));
+  }
+  .cli-badge :global(svg) { flex-shrink: 0; }
+  @keyframes cli-badge-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) { .cli-badge { animation: none; } }
+
+  .cli-panel {
+    position: fixed;
+    width: 300px;
+    max-width: calc(100vw - 24px);
+    background: var(--bg-elev-1);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 4px 12px rgba(0, 0, 0, 0.25);
+    z-index: 50;
+    padding: 14px;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: var(--fs-xs);
+    animation: ctx-panel-in 140ms var(--ease-page);
+  }
+  @media (prefers-reduced-motion: reduce) { .cli-panel { animation: none; } }
+  .cli-panel-head { display: flex; align-items: center; gap: 8px; }
+  .cli-panel-ic { display: inline-flex; color: var(--accent); }
+  .cli-panel-title { font-weight: 600; color: var(--fg); font-size: var(--fs-sm); }
+  .cli-panel-vers {
+    display: flex; align-items: center; gap: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cli-vchip {
+    padding: 2px 8px; border-radius: 6px; font-family: var(--font-mono);
+    font-size: 11px; border: 1px solid var(--border);
+  }
+  .cli-vchip.old { color: var(--fg-muted); background: var(--bg-inset); }
+  .cli-vchip.new {
+    color: var(--accent); font-weight: 600;
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+  }
+  .cli-varrow { color: var(--fg-faint); }
+  .cli-panel-sub { color: var(--fg-muted); line-height: 1.45; }
+  .cli-panel-sub code {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--fg-2); background: var(--bg-inset);
+    padding: 0 4px; border-radius: 4px;
+  }
+  .cli-cmd {
+    display: flex; align-items: center; gap: 8px;
+    background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 7px 8px 7px 10px;
+  }
+  .cli-cmd code {
+    flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px;
+    color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .cli-cmd-copy {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    width: 26px; height: 24px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--fg-muted); cursor: pointer;
+    transition: color 120ms var(--ease-soft), border-color 120ms var(--ease-soft), background 120ms var(--ease-soft);
+  }
+  .cli-cmd-copy:hover { color: var(--fg); border-color: var(--border-strong); }
+  .cli-cmd-copy.done { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .cli-how-toggle {
+    display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+    padding: 2px 2px; margin: -2px 0; border: 0; background: transparent;
+    color: var(--fg-muted); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: color 120ms var(--ease-soft);
+  }
+  .cli-how-toggle:hover { color: var(--fg); }
+  .cli-how-toggle :global(.cli-how-chev) { transition: transform 140ms var(--ease-soft); }
+  .cli-how-toggle.open :global(.cli-how-chev) { transform: rotate(90deg); }
+  .cli-how-steps {
+    margin: 0; padding: 2px 0 0 18px;
+    display: flex; flex-direction: column; gap: 5px;
+    color: var(--fg-2); font-size: 11px; line-height: 1.45;
+    list-style: decimal;
+  }
+  .cli-how-steps li::marker { color: var(--fg-faint); font-weight: 700; }
+  .cli-how-steps code {
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--fg);
+    background: var(--bg-inset); padding: 0 4px; border-radius: 4px;
+  }
+  .cli-how-steps kbd {
+    font-family: var(--font-mono); font-size: 10px; color: var(--fg-2);
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 0 4px;
+  }
+  .cli-panel-foot {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    padding-top: 10px;
+  }
+  .cli-panel-link {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--fg-muted); text-decoration: none; font-size: 11px;
+    transition: color 120ms var(--ease-soft);
+  }
+  .cli-panel-link:hover { color: var(--accent); }
+  .cli-panel-dismiss {
+    padding: 4px 10px; border-radius: 8px;
+    background: var(--bg-elev-2); border: 1px solid var(--border);
+    color: var(--fg-2); cursor: pointer; font: inherit; font-size: var(--fs-xs);
+    transition: border-color 120ms var(--ease-soft), color 120ms var(--ease-soft);
+  }
+  .cli-panel-dismiss:hover { border-color: var(--border-strong); color: var(--fg); }
 
   /* Segmented view control — Browser · Panel · Split grouped into one unit so
      the action cluster reads as a single block instead of three loose chips.
@@ -1349,23 +1646,24 @@
   /* View dropdown trigger — one panel button + chevron replaces the old
      3-icon segmented control. A small accent dot signals "some panel open"
      without opening the menu. */
-  .view-btn {
+  .panels-btn {
     gap: 4px;
     padding: 3px 7px;
+    border-radius: 7px;
   }
-  .view-btn.open {
+  .panels-btn.open {
     background: var(--accent-soft);
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
   }
-  .view-btn :global(svg) { transition: transform 140ms ease; }
-  .view-btn :global(.chev-open) { transform: rotate(180deg); }
-  .view-btn.pulse { animation: dock-pulse 700ms ease-out; }
+  .panels-btn :global(svg) { transition: transform 140ms ease; }
+  .panels-btn :global(.chev-open) { transform: rotate(180deg); }
+  .panels-btn.pulse { animation: dock-pulse 700ms ease-out; }
   .view-dot {
     width: 5px; height: 5px;
     border-radius: 999px;
     background: var(--accent);
-    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 60%, transparent);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 60%, transparent);
   }
 
   @keyframes dock-pulse {
@@ -1380,13 +1678,6 @@
     position: fixed;
     z-index: 50;
     min-width: 230px;
-    padding: 5px;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border-strong);
-    border-radius: 10px;
-    box-shadow:
-      0 24px 60px rgba(0, 0, 0, 0.45),
-      0 4px 12px rgba(0, 0, 0, 0.25);
     display: flex; flex-direction: column; gap: 1px;
     animation: history-pop-in 150ms var(--ease-page);
     transform-origin: top right;
@@ -1395,6 +1686,7 @@
     .view-menu { animation: none; }
   }
   .vm-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 9px;
@@ -1412,6 +1704,12 @@
   .vm-item:hover:not(:disabled) { background: var(--surface-hover); }
   .vm-item:disabled { color: var(--fg-subtle); cursor: not-allowed; }
   .vm-item.on { color: var(--accent); }
+  /* Signature left emerald bar on the active/current row (design-system motif). */
+  .vm-item.on::before {
+    content: ""; position: absolute; left: 1px; top: 6px; bottom: 6px; width: 2.5px;
+    border-radius: 0 3px 3px 0; background: var(--accent);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 45%, transparent);
+  }
   .vm-item :global(.vm-icon) { color: var(--fg-muted); flex-shrink: 0; }
   .vm-item.on :global(.vm-icon) { color: var(--accent); }
   .vm-label { flex: 1; white-space: nowrap; }
@@ -1419,7 +1717,7 @@
     font-size: 10px; font-weight: 700; line-height: 1;
     font-variant-numeric: tabular-nums;
     padding: 1px 5px; border-radius: 999px;
-    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    background: color-mix(in oklab, var(--accent) 18%, transparent);
     color: var(--accent);
   }
   .vm-kbd {
@@ -1456,8 +1754,8 @@
     align-items: center;
     justify-content: center;
     width: 26px;
-    height: 24px;
-    margin: 4px 4px 0 6px;
+    height: 26px;
+    margin: 0 2px 0 3px;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -1469,9 +1767,9 @@
     transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft), transform 120ms var(--ease-soft);
   }
   .new-tab:hover {
-    background: color-mix(in oklch, var(--accent) 18%, var(--bg-elev-2));
+    background: color-mix(in oklab, var(--accent) 18%, var(--bg-elev-2));
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
   }
   .new-tab:active { transform: scale(0.94); }
   .new-tab:focus-visible {

@@ -46,8 +46,6 @@ import type {
   StreamDelta,
   StreamEvent,
   StreamEnvelope,
-  RemoteLockEvt,
-  RemoteShellEvt,
   ThinkingEffort,
   ModelSel,
   PermissionMode,
@@ -92,6 +90,7 @@ import {
   clearRoot as wsClearRoot,
   removeRecentRoot as wsRemoveRecentRoot,
   loadWorkspaceFiles as wsLoadFiles,
+  loadWorkspaceBranch as wsLoadBranch,
 } from "./assistant/workspace";
 // M5 split (2026-05-26): conversation persistence + tab-list save in
 // `./assistant/persistence`. loadConversation + deleteConversation stay on
@@ -105,6 +104,7 @@ import {
   persistTabs as persistTabsImpl,
   loadConversation as persistLoad,
   deleteConversation as persistDelete,
+  deleteAllConversations as persistDeleteAll,
 } from "./assistant/persistence";
 // M6 split (2026-05-27): tab lifecycle + split-pane management in
 // `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
@@ -541,6 +541,32 @@ class TabState {
     return false;
   }
 
+  // Newer Claude CLI task API: TaskCreate adds one task at a time (subject +
+  // description + activeForm); TaskUpdate flips status by 1-based creation index
+  // (taskId "1".."N"). Both feed the same dock Plan card as TodoWrite.
+  private applyTaskCreate(input: Record<string, unknown> | undefined): boolean {
+    const subject = typeof input?.subject === "string" ? (input.subject as string) : null;
+    if (!subject) return false;
+    const id = String(this.tasks.length + 1);
+    this.tasks = [...this.tasks, { id, content: subject, status: "pending" }];
+    if (!this.dockAutoOpenedThisConvo) {
+      this.dockAutoOpenedThisConvo = true;
+      return true;
+    }
+    return false;
+  }
+
+  private applyTaskUpdate(input: Record<string, unknown> | undefined): void {
+    const taskId = input?.taskId != null ? String(input.taskId) : null;
+    if (!taskId) return;
+    const raw = input?.status;
+    const status = (raw === "in_progress" || raw === "completed" ? raw : "pending") as
+      | "pending"
+      | "in_progress"
+      | "completed";
+    this.tasks = this.tasks.map((t) => (t.id === taskId ? { ...t, status } : t));
+  }
+
   private appendToolUse(block: { id: string; name: string; input?: Record<string, unknown> }) {
     if (this.seenToolUseIds.has(block.id)) return;
     this.seenToolUseIds.add(block.id);
@@ -558,6 +584,16 @@ class TabState {
     if (block.name === "TodoWrite") {
       const opensDock = this.applyTodoWrite(block.input);
       this.onTodoApplied?.(this, opensDock);
+      return;
+    }
+    if (block.name === "TaskCreate") {
+      const opensDock = this.applyTaskCreate(block.input);
+      this.onTodoApplied?.(this, opensDock);
+      return;
+    }
+    if (block.name === "TaskUpdate") {
+      this.applyTaskUpdate(block.input);
+      this.onTodoApplied?.(this, false);
       return;
     }
     if (block.name === "Task" || block.name === "Agent") {
@@ -1101,12 +1137,13 @@ class AssistantStore {
 
   /** Phase 6 (#37): the value never crosses IPC — only whether one is set. */
   hasApiKey = $state<boolean>(false);
+  /** True once the api-key presence probe has resolved. Gates the first-run
+   *  onboarding so it never flashes before we know whether a key is set. */
+  configLoaded = $state<boolean>(false);
   useFullConfig = $state<boolean>(true);
   maxBudgetUsd = $state<number | null>(null);
-  allowRemoteShell = $state<boolean>(false);
   // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
-  // backend, which derives it from allowRemoteShell when unset. "full" appears
-  // when remote-shell is on; the Settings seg treats full as ⊇ standard.
+  // backend; defaults to "readonly" when unset. Settings seg treats full ⊇ standard.
   trustLevel = $state<TrustLevel>("readonly");
   // Phase D: fraction (0-1] of ctx window that auto-fires compactConversation.
   // Null = manual only (matches the user's DISABLE_AUTO_COMPACT=1 stance).
@@ -1114,9 +1151,6 @@ class AssistantStore {
   // Phase D: model alias used by summarize call. "haiku" default ($0.91 vs
   // $2.73 on sonnet for a 900K-token summarize).
   compactModel = $state<"haiku" | "sonnet">("haiku");
-  remoteShellLockedByOther = $state<{ user: string; host: string; sinceMs: number } | null>(null);
-  remoteShellBannerSeen = $state<boolean>(false);
-  remoteShellLastEvent = $state<{ command: string; remoteRoot: string; at: string } | null>(null);
 
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
@@ -1131,6 +1165,7 @@ class AssistantStore {
   // a watcher.
   workspaceFiles = $state<string[]>([]);
   workspaceFilesLoadingFor = $state<string | null>(null);
+  workspaceBranch = $state<string | null>(null);
 
   // composerDraft + composerAttachments live on TabState in v2.1 split-pane.
   // These getter/setter shims delegate to the focused-pane's tab so non-pane
@@ -1166,7 +1201,7 @@ class AssistantStore {
   // dockOpen defaults true — the activity dock is a permanent surface now (not a
   // toggle-to-peek panel). New/clear no longer force it shut; the Composer
   // affordance still hides it on demand.
-  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth() });
+  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth(), diffOpen: false, diffTarget: null as string | null });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
@@ -1359,6 +1394,8 @@ class AssistantStore {
       this.hasApiKey = await invoke<boolean>("assistant_get_api_key_present");
     } catch (e) {
       console.warn("assistant_get_api_key_present failed", e);
+    } finally {
+      this.configLoaded = true;
     }
     try {
       this.useFullConfig = await invoke<boolean>("assistant_get_use_full_config");
@@ -1369,11 +1406,6 @@ class AssistantStore {
       this.maxBudgetUsd = await invoke<number | null>("assistant_get_max_budget_usd");
     } catch (e) {
       console.warn("assistant_get_max_budget_usd failed", e);
-    }
-    try {
-      this.allowRemoteShell = await invoke<boolean>("assistant_get_allow_remote_shell");
-    } catch (e) {
-      console.warn("assistant_get_allow_remote_shell failed", e);
     }
     try {
       this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
@@ -1391,13 +1423,7 @@ class AssistantStore {
     } catch (e) {
       console.warn("assistant_get_compact_model failed", e);
     }
-    try {
-      this.remoteShellBannerSeen = localStorage.getItem("rift.assistant.remoteShellBannerSeen") === "1";
-    } catch { /* localStorage unavailable in some test contexts */ }
-
     this.unlistens.push(
-      await listen<RemoteLockEvt[]>("autosync://locks", (e) => this.onLocksUpdate(e.payload)),
-      await listen<RemoteShellEvt>("assistant://remote-shell-fired", (e) => this.onRemoteShellFired(e.payload)),
       await listen<{ session_id: string; prompt: string }>(
         "assistant://session-lost",
         (e) => this.onSessionLost(e.payload),
@@ -1490,28 +1516,6 @@ class AssistantStore {
       this.convoTitle = null;
       void this.send(payload.prompt);
     }
-  }
-
-  private onLocksUpdate(locks: RemoteLockEvt[]) {
-    const shell = locks.find((l) => l.file_path.endsWith("/.rift-shell"));
-    if (shell) {
-      const sinceMs = Date.parse(shell.since);
-      this.remoteShellLockedByOther = {
-        user: shell.user,
-        host: shell.host,
-        sinceMs: Number.isFinite(sinceMs) ? sinceMs : Date.now(),
-      };
-    } else {
-      this.remoteShellLockedByOther = null;
-    }
-  }
-
-  private onRemoteShellFired(evt: RemoteShellEvt) {
-    this.remoteShellLastEvent = {
-      command: evt.command,
-      remoteRoot: evt.remote_root,
-      at: evt.at,
-    };
   }
 
   /** `assistant://ask-user` arrived from the bridge — pair the request_id
@@ -1624,12 +1628,6 @@ class AssistantStore {
     }
   }
 
-  ackRemoteShellBanner() {
-    this.remoteShellBannerSeen = true;
-    try {
-      localStorage.setItem("rift.assistant.remoteShellBannerSeen", "1");
-    } catch { /* same as above */ }
-  }
 
   // M3 split (2026-05-26): workspace IPC ops in `./assistant/workspace`.
   // Fields stay on Store; methods become thunks routing to free fns.
@@ -1639,6 +1637,7 @@ class AssistantStore {
   clearRoot() { return wsClearRoot(this); }
   removeRecentRoot(path: string) { return wsRemoveRecentRoot(this, path); }
   loadWorkspaceFiles() { return wsLoadFiles(this); }
+  loadWorkspaceBranch() { return wsLoadBranch(this); }
 
   refreshConversations() { return persistRefresh(this); }
 
@@ -1669,6 +1668,11 @@ class AssistantStore {
 
   loadConversation(id: string) { return persistLoad(this, id); }
   deleteConversation(id: string) { return persistDelete(this, id); }
+  async deleteAllConversations() {
+    if (this.streaming) await this.stop();
+    await persistDeleteAll(this);
+    await this.newTab();
+  }
 
   // ── v0.4 tabs ────────────────────────────────────────────────────────
   // M6: relaxed from `private` so the tabs module calls it through the host ref.
@@ -1743,15 +1747,6 @@ class AssistantStore {
     const v = value !== null && Number.isFinite(value) && value > 0 ? value : null;
     await invoke("assistant_set_max_budget_usd", { value: v });
     this.maxBudgetUsd = v;
-  }
-
-  async setAllowRemoteShell(value: boolean) {
-    await invoke("assistant_set_allow_remote_shell", { value });
-    this.allowRemoteShell = value;
-    // Remote-shell toggles the *derived* trust level when no explicit
-    // trust_level is persisted (backend effective_trust_level), so re-pull it
-    // or the Settings Git-tools segment shows a stale state until reload.
-    this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
   }
 
   async setTrustLevel(value: TrustLevel) {
@@ -2008,6 +2003,8 @@ class AssistantStore {
       const n = Array.isArray(inp.todos) ? (inp.todos as unknown[]).length : 0;
       return `todos · ${n}`;
     }
+    if (base === "TaskCreate" && typeof inp.subject === "string") return `plan: ${trim(inp.subject as string, 40)}`;
+    if (base === "TaskUpdate") return `task ${inp.taskId ?? ""} · ${inp.status ?? ""}`.trim();
     return base;
   }
 
@@ -2196,8 +2193,8 @@ class AssistantStore {
           "Glob (filename patterns); Grep (content search); " +
           "WebFetch / WebSearch (open web); " +
           "TodoWrite (multi-step plans → Tasks dock). " +
-          "Rift MCP: read_file / list_dir / grep (workspace-scoped helpers)" +
-          (this.allowRemoteShell ? "; remote_bash (russh exec on the active SSH session)." : ".");
+          "Rift MCP: read_file / list_dir / grep (workspace-scoped helpers); " +
+          "git_status / git_diff / git_log (and pull/commit/push when trust permits).";
         return true;
       case "diag": {
         const snap = this.telemetry.snapshot();

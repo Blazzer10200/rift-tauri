@@ -6,6 +6,8 @@
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
+  import { diffArrays } from "diff";
+  import { GitCommit, Clock, FileText, RotateCcw } from "lucide-svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
@@ -149,7 +151,7 @@
     return "prose";
   }
 
-  let { message, streaming = false }: { message: ChatMessage; streaming?: boolean } = $props();
+  let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -329,6 +331,69 @@
       ? (message.costUsd > 0 && message.costUsd < 0.01 ? "<$0.01" : `$${message.costUsd.toFixed(2)}`)
       : null,
   );
+
+  // ── TurnSummary — caps a completed assistant turn that touched files.
+  // Stats derive from the turn's own Edit/Write/MultiEdit blocks (same line
+  // diff as EditDiff), duration from summed block work-time, cost from the
+  // message. Edits are ALREADY applied (per-tool, via PermissionBar) — so this
+  // is an honest recap + mode consequence, not a fake turn-level Apply/Undo.
+  function lineDelta(oldS: unknown, newS: unknown): { adds: number; dels: number } {
+    if (typeof oldS !== "string" || typeof newS !== "string") return { adds: 0, dels: 0 };
+    let adds = 0, dels = 0;
+    for (const c of diffArrays(oldS.split("\n"), newS.split("\n"))) {
+      if (c.added) adds += c.count ?? c.value.length;
+      else if (c.removed) dels += c.count ?? c.value.length;
+    }
+    return { adds, dels };
+  }
+  const turnStats = $derived.by(() => {
+    if (isUser) return { files: 0, adds: 0, dels: 0, firstEditId: null as string | null, firstEditFile: null as string | null };
+    const files = new Set<string>();
+    let adds = 0, dels = 0, firstEditId: string | null = null, firstEditFile: string | null = null;
+    for (const b of message.blocks) {
+      if (b.type !== "tool") continue;
+      const name = b.name.replace(/^mcp__rift__/, "");
+      const inp = (b.input ?? {}) as Record<string, unknown>;
+      const fp = typeof inp.file_path === "string" ? inp.file_path
+        : typeof inp.notebook_path === "string" ? inp.notebook_path : null;
+      if (name === "Edit" || name === "NotebookEdit") {
+        const d = lineDelta(inp.old_string, inp.new_string); adds += d.adds; dels += d.dels;
+        if (fp) { files.add(fp); firstEditId ??= b.id; firstEditFile ??= fp; }
+      } else if (name === "MultiEdit" && Array.isArray(inp.edits)) {
+        for (const e of inp.edits as Array<Record<string, unknown>>) {
+          const d = lineDelta(e?.old_string, e?.new_string); adds += d.adds; dels += d.dels;
+        }
+        if (fp) { files.add(fp); firstEditId ??= b.id; firstEditFile ??= fp; }
+      } else if (name === "Write") {
+        const c = inp.content; adds += typeof c === "string" && c.length > 0 ? c.split("\n").length : 0;
+        if (fp) { files.add(fp); firstEditId ??= b.id; firstEditFile ??= fp; }
+      }
+    }
+    return { files: files.size, adds, dels, firstEditId, firstEditFile };
+  });
+  const turnDurationMs = $derived.by(() => {
+    let ms = 0;
+    for (const b of message.blocks) {
+      if ((b.type === "thinking" || b.type === "tool") && b.durationMs != null) ms += b.durationMs;
+    }
+    return ms;
+  });
+  const autoApplied = $derived(
+    assistant.permissionMode === "acceptEdits" ||
+    assistant.permissionMode === "bypassPermissions" ||
+    assistant.permissionMode === "auto",
+  );
+  const bypassApplied = $derived(assistant.permissionMode === "bypassPermissions");
+  const showSummary = $derived(!isUser && !streaming && turnStats.files > 0);
+  // Open the Session Diff overlay, deep-linked to this turn's first edited file
+  // (matched by basename). Replaces the old transcript-scroll that pointed at a
+  // removed `actnode-*` anchor and silently no-op'd.
+  function reviewDiff() {
+    if (turnStats.files === 0) return;
+    const fp = turnStats.firstEditFile;
+    assistant.ui.diffTarget = fp ? (fp.replace(/\\/g, "/").split("/").pop() ?? null) : null;
+    assistant.ui.diffOpen = true;
+  }
 
   // Fold a run of GROUP_MIN+ consecutive plain tool chips into a single
   // collapsible "N tools" node so a multi-tool turn stops reading as a wall of
@@ -510,13 +575,13 @@
 {:else}
 <div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null}>
   <div class="turn-rail" aria-hidden="true"></div>
+  <div class="avatar" class:avatar-user={isUser} aria-hidden="true">
+    {#if isUser}<User size={13} />{:else}<Sparkles size={13} />{/if}
+  </div>
 
   <div class="body">
     {#if !isUser}
       <div class="turn-head">
-        <div class="avatar" aria-hidden="true">
-          <Sparkles size={13} />
-        </div>
         <span class="role-name">Claude</span>
         {#if modelLabel}
           <span class="head-sep" aria-hidden="true">·</span>
@@ -532,7 +597,7 @@
             <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
           {/if}
         {/if}
-        {#if plainText.length > 0 || (!streaming && costLabel)}
+        {#if plainText.length > 0 || (!streaming && (costLabel || isLast))}
           <div class="turn-actions">
             {#if !streaming && costLabel}
               <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>{costLabel}</span>
@@ -546,15 +611,33 @@
                 {/if}
               </button>
             {/if}
+            {#if isLast && !streaming}
+              <button
+                class="copybtn"
+                type="button"
+                onclick={() => assistant.retryLast()}
+                use:tooltip={"Retry this turn — re-runs your last prompt"}
+              >
+                <RotateCcw size={11} />
+              </button>
+            {/if}
           </div>
         {/if}
       </div>
     {:else}
       <div class="turn-head">
-        <div class="avatar avatar-user" aria-hidden="true">
-          <User size={13} />
-        </div>
         <span class="role-name">You</span>
+        {#if plainText.length > 0}
+          <div class="turn-actions">
+            <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
+              {#if copied}
+                <Check size={11} />
+              {:else}
+                <Copy size={11} />
+              {/if}
+            </button>
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -570,15 +653,11 @@
             <span class="stage-label">{stageLabel ?? "Thinking…"}</span>
           {/key}
         </div>
-        <div class="skeleton-lines" aria-hidden="true">
-          <span class="skl skl-1"></span>
-          <span class="skl skl-2"></span>
-        </div>
       </div>
     {/if}
 
     <div class="content">
-      {#snippet renderBlock(b: Block, bi: number, caption: string | null = null)}
+      {#snippet renderBlock(b: Block, bi: number, caption: string | null = null, revealing: boolean = false)}
         {#if b.type === "image"}
           <button
             type="button"
@@ -596,7 +675,7 @@
           {#if isUser}
             <div class="text">{b.text}</div>
           {:else}
-            <div class="text"><Markdown text={b.text} /></div>
+            <div class="text"><Markdown text={b.text} streaming={revealing} /></div>
           {/if}
         {:else if b.type === "thinking"}
           {@const isActive = b.status === "active"}
@@ -704,7 +783,7 @@
             style="--idx: {Math.min(ui, 6)}"
           >
             {#if unit.stepNum}<span class="tl-stepdot mono" aria-hidden="true">{unit.stepNum}</span>{/if}
-            {@render renderBlock(unit.block, ui, unit.caption)}
+            {@render renderBlock(unit.block, ui, unit.caption, streaming && !isUser && unit.block.type === "text" && unit.key === lastBlockKey)}
           </div>
         {/if}
       {/each}
@@ -717,6 +796,30 @@
           {#key stageLabel}
             <span class="ta-label">{stageLabel ?? "Working…"}</span>
           {/key}
+        </div>
+      {/if}
+
+      {#if showSummary}
+        <div class="turn-summary" data-auto={autoApplied ? "true" : null} class:mode-bypass={bypassApplied} in:fade={{ duration: reducedMotion ? 0 : 160 }}>
+          <div class="ts-stats">
+            {#if autoApplied}
+              <span class="ts-applied" class:danger={bypassApplied}><Check size={13} />Applied automatically</span>
+            {:else}
+              <span class="ts-item"><GitCommit size={13} />{turnStats.files} file{turnStats.files === 1 ? "" : "s"} changed</span>
+            {/if}
+            <span class="ts-stat mono"><span class="ts-add">+{turnStats.adds}</span>{#if turnStats.dels > 0}<span class="ts-del">−{turnStats.dels}</span>{/if}</span>
+            {#if turnDurationMs > 0}
+              <span class="ts-dot" aria-hidden="true"></span>
+              <span class="ts-item mono"><Clock size={12} />{formatDuration(turnDurationMs)}</span>
+            {/if}
+            {#if costLabel}<span class="ts-item mono">{costLabel}</span>{/if}
+          </div>
+          <div class="ts-actions">
+            <button type="button" class="ts-btn" onclick={reviewDiff}><FileText size={13} />Review diff</button>
+            {#if autoApplied}
+              <span class="ts-mode" class:mode-bypass={bypassApplied} use:tooltip={bypassApplied ? "All tools ran without prompting (bypass permissions)" : "Edits were applied without prompting (permission mode)"}><RotateCcw size={12} />{bypassApplied ? "bypass" : "auto"}</span>
+            {/if}
+          </div>
         </div>
       {/if}
 
@@ -750,7 +853,7 @@
     background: linear-gradient(to right,
       transparent,
       color-mix(in oklch, var(--border) 80%, transparent),
-      color-mix(in oklch, var(--accent) 30%, transparent) 50%,
+      color-mix(in oklab, var(--accent) 30%, transparent) 50%,
       color-mix(in oklch, var(--border) 80%, transparent),
       transparent);
   }
@@ -763,8 +866,8 @@
     background: color-mix(in oklch, var(--bg-elev-1) 86%, transparent);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border: 1px solid color-mix(in oklch, var(--accent) 25%, var(--border));
-    box-shadow: 0 4px 14px -4px color-mix(in oklch, var(--accent) 25%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 25%, var(--border));
+    box-shadow: 0 4px 14px -4px color-mix(in oklab, var(--accent) 25%, transparent);
     font-size: 11px;
     color: var(--fg-muted);
     white-space: nowrap;
@@ -772,7 +875,7 @@
   }
   .boundary-head:not(:disabled):hover .boundary-pill {
     background: color-mix(in oklch, var(--bg-elev-1) 95%, transparent);
-    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
     transform: translateY(-1px);
   }
   .boundary-pill :global(svg) { color: var(--accent); }
@@ -799,18 +902,14 @@
   }
   .bubble {
     display: grid;
-    grid-template-columns: 2px 1fr;
-    column-gap: 14px;
+    grid-template-columns: 26px 1fr;
+    column-gap: 12px;
     padding: 2px 0;
     position: relative;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* Per-bubble aurora color — sonnet=blue, opus=purple, haiku=teal. Falls
-     back to --accent for system/user turns without a model. */
-  .bubble[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .bubble[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .bubble[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
-  .bubble                      { --model-color: var(--accent); }
+  /* Thread is emerald-only — rail/avatar/hover-glow/halo all use --accent.
+     Model identity lives on the Composer model-card, not the thread. */
   /* User bubbles drop the rail entirely + right-align — the bubble shape
      already signals "you", and the position differentiates from Claude
      without forcing a rail on user messages. */
@@ -830,7 +929,9 @@
     grid-column: 1;
     grid-row: 1;
     align-self: stretch;
+    justify-self: center;
     width: 2px;
+    margin-top: 18px;
     border-radius: 2px;
     /* Quiet hairline spine that fades at both ends so each turn's segment reads
        as a soft thread, not a hard-cut colored bar. Color lives in the node
@@ -838,15 +939,15 @@
        aurora identity without shouting. */
     background: linear-gradient(to bottom,
       transparent 0,
-      color-mix(in oklch, var(--model-color) 20%, var(--border)) 10px,
-      color-mix(in oklch, var(--model-color) 20%, var(--border)) calc(100% - 10px),
+      color-mix(in oklab, var(--accent) 20%, var(--border)) 10px,
+      color-mix(in oklab, var(--accent) 20%, var(--border)) calc(100% - 10px),
       transparent 100%);
     transition: opacity 200ms ease-out, box-shadow 200ms ease-out;
   }
   /* Hovering a turn lights its spine — a faint model-hue glow ties the pointer
      to the thread it's reading. */
   .bubble[data-role="assistant"]:hover .turn-rail {
-    box-shadow: 0 0 6px 0 color-mix(in oklch, var(--model-color) 22%, transparent);
+    box-shadow: 0 0 6px 0 color-mix(in oklab, var(--accent) 22%, transparent);
   }
   /* User turns share the spine but in a quiet neutral grey — so both roles read
      as "rail + content," differentiated by hue (your neutral vs Claude's model
@@ -859,12 +960,12 @@
       transparent 100%);
   }
   .bubble[data-streaming="true"] .turn-rail {
-    background: color-mix(in oklch, var(--model-color) 55%, transparent);
+    background: color-mix(in oklab, var(--accent) 55%, transparent);
     animation: rail-stream 2.4s ease-in-out infinite;
   }
   @keyframes rail-stream {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
-    50%      { box-shadow: 0 0 6px 0 color-mix(in oklch, var(--model-color) 32%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
+    50%      { box-shadow: 0 0 6px 0 color-mix(in oklab, var(--accent) 32%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bubble[data-streaming="true"] .turn-rail { animation: none; }
@@ -873,20 +974,31 @@
   /* Avatar lives INSIDE the turn-head row now (not a separate grid column).
      Reads as the "head node" sitting on the rail. */
   .avatar {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: start;
+    justify-self: center;
+    z-index: 1;
     width: 22px; height: 22px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    background: color-mix(in oklch, var(--model-color) 14%, transparent);
-    color: var(--model-color);
+    background: color-mix(in oklab, var(--accent) 14%, var(--bg));
+    color: var(--accent);
     flex-shrink: 0;
+    /* bg ring masks the rail so the avatar reads as the head node on the wire. */
+    box-shadow: 0 0 0 3px var(--bg);
     transition: box-shadow 240ms ease-out, background 240ms ease-out, color 240ms ease-out;
+  }
+  .avatar.avatar-user {
+    background: color-mix(in oklch, var(--bg-elev-2) 90%, var(--fg-faint));
+    color: var(--fg-muted);
   }
   .bubble[data-streaming="true"] .avatar {
     animation: avatar-halo 1.8s ease-in-out infinite;
   }
   @keyframes avatar-halo {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 0%, transparent); }
-    50%      { box-shadow: 0 0 0 3px color-mix(in oklch, var(--model-color) 28%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent); }
+    50%      { box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 28%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) {
     .bubble[data-streaming="true"] .avatar { animation: none; }
@@ -957,7 +1069,7 @@
     width: 5px; height: 5px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 45%, transparent);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 45%, transparent);
     animation: stage-bounce 1.1s ease-in-out infinite;
   }
   .stage-dot:nth-child(2) { animation-delay: 0.18s; }
@@ -978,41 +1090,8 @@
     from { opacity: 0; transform: translateY(-1px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  .skeleton-lines {
-    display: flex; flex-direction: column;
-    gap: 8px;
-    max-width: 56ch;
-    /* Subtle entrance offset so the lines feel like they're materializing
-       under the stage label rather than appearing simultaneously. */
-    animation: skl-rise 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: 60ms;
-  }
-  @keyframes skl-rise {
-    from { opacity: 0; transform: translateY(2px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  .skl {
-    display: block;
-    height: 8px;
-    border-radius: 4px;
-    background: linear-gradient(
-      90deg,
-      color-mix(in oklch, var(--bg-elev-2) 50%, transparent) 0%,
-      color-mix(in oklch, var(--surface-hover) 85%, transparent) 50%,
-      color-mix(in oklch, var(--bg-elev-2) 50%, transparent) 100%
-    );
-    background-size: 220% 100%;
-    animation: skl-shimmer 1.8s ease-in-out infinite;
-  }
-  .skl-1 { width: 92%; animation-delay: 0ms; }
-  .skl-2 { width: 68%; animation-delay: 220ms; }
-  @keyframes skl-shimmer {
-    0%   { background-position: 100% 0; opacity: 0.75; }
-    50%  { opacity: 1; }
-    100% { background-position: -100% 0; opacity: 0.75; }
-  }
   @media (prefers-reduced-motion: reduce) {
-    .skl, .stage-dot, .stage-label, .skeleton-lines { animation: none; }
+    .stage-dot, .stage-label { animation: none; }
   }
 
   /* Cost chip — lives in the turn header's action cluster (see .turn-actions),
@@ -1053,21 +1132,21 @@
     left: -19px; top: 4px;
     width: 8px; height: 8px;
     border-radius: 50%;
-    background: var(--model-color, var(--accent));
-    box-shadow: 0 0 6px color-mix(in oklch, var(--model-color, var(--accent)) 45%, transparent);
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 45%, transparent);
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
   .ta-dots { display: inline-flex; gap: 4px; align-items: center; }
   .ta-dot {
     width: 4px; height: 4px;
     border-radius: 50%;
-    background: var(--model-color, var(--accent));
+    background: var(--accent);
     animation: stage-bounce 1.1s ease-in-out infinite;
   }
   .ta-dot:nth-child(2) { animation-delay: 0.18s; }
   .ta-dot:nth-child(3) { animation-delay: 0.36s; }
   .ta-label {
-    color: color-mix(in oklch, var(--fg-2) 85%, var(--model-color, var(--accent)));
+    color: color-mix(in oklch, var(--fg-2) 85%, var(--accent));
     font-weight: 500;
     letter-spacing: 0.01em;
     animation: stage-label-in 320ms ease-out;
@@ -1085,6 +1164,20 @@
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--idx, 0) * 35ms);
   }
+  /* Streaming cell entrance (mock ct-enter) — each node blur-ins as it streams.
+     Scoped to streaming so resting/loaded turns keep the calm plain entrance and
+     captures render solid. Prose is excluded: its per-word reveal IS its entrance
+     (mock skips the block blur-in on .ct-r-prose). */
+  .bubble[data-streaming="true"] .tl-node:not([data-kind="text"]) {
+    animation: node-stream-enter 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes node-stream-enter {
+    from { opacity: 0; transform: translateY(3px); filter: blur(4px); }
+    to   { opacity: 1; transform: none; filter: blur(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bubble[data-streaming="true"] .tl-node:not([data-kind="text"]) { animation: none; }
+  }
   /* #2 Option A — narration-grouping spacing. A tool/edit/thinking node that
      follows a prose or tool block in the same turn sits tight (4px) so it
      visually belongs to the preceding narration. A tool/edit/thinking that
@@ -1100,10 +1193,10 @@
   .tl-node::before {
     content: "";
     position: absolute;
-    /* The .body sits at grid-column 2 with a 14px column-gap from the 2px rail.
-       The rail center is at x = -(14 + 2/2) = -15px from .body's left edge.
-       A 9px bullet centered on the rail wants left = -15 - 4.5 = -19.5px. */
-    left: -19px;
+    /* Lane is 26px wide + 12px column-gap → .body left edge is 38px from the
+       bubble; the rail centers at 13px → -25px from .body. A 9px bullet centered
+       on the rail wants left = -25 - 4.5 = -29.5px. */
+    left: -30px;
     top: 8px;
     width: 9px;
     height: 9px;
@@ -1135,7 +1228,7 @@
   }
   .tl-node[data-kind="thinking"][data-status="pending"]::before {
     background: transparent;
-    border-color: color-mix(in oklch, var(--accent) 70%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 70%, transparent);
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
   /* Prose paragraphs no longer hang a bullet off the rail. One faint dot per
@@ -1156,19 +1249,19 @@
   }
   .tl-node[data-status="error"]::before {
     background: var(--danger);
-    border-color: color-mix(in oklch, var(--danger) 80%, transparent);
+    border-color: color-mix(in oklab, var(--danger) 80%, transparent);
     box-shadow: inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-                0 1px 2px color-mix(in oklch, var(--danger) 30%, transparent);
+                0 1px 2px color-mix(in oklab, var(--danger) 30%, transparent);
   }
   .tl-node[data-status="pending"]:not([data-kind="thinking"])::before {
     background: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 75%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 75%, transparent);
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
   @keyframes tl-bullet-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 0%, transparent),
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent),
                           inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
-    50%      { box-shadow: 0 0 0 5px color-mix(in oklch, var(--accent) 20%, transparent),
+    50%      { box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 20%, transparent),
                           inset 0 1px 0 color-mix(in oklch, white 25%, transparent); }
   }
   /* Short (<3s) or text-less done thinking blocks — visually recede so they
@@ -1230,14 +1323,14 @@
   }
   .tg-head:hover {
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--model-color, var(--accent)) 55%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
     transform: translateX(1px);
   }
   .tl-toolgroup[data-status="pending"] .tg-head {
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 60%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 60%, transparent);
   }
   .tl-toolgroup[data-status="error"] .tg-head {
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--danger) 60%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--danger) 60%, transparent);
   }
   .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
   .tg-chev.open { transform: rotate(90deg); }
@@ -1276,7 +1369,7 @@
   .tl-node[data-numbered="true"]::before { display: none; }
   .tl-stepdot {
     position: absolute;
-    left: -25px;
+    left: -33px;
     top: 3px;
     min-width: 16px;
     height: 16px;
@@ -1308,40 +1401,40 @@
     color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 90%, var(--fg));
   }
   .tl-node[data-status="pending"] .tl-stepdot {
-    background: color-mix(in oklch, var(--accent) 26%, var(--bg));
-    border-color: color-mix(in oklch, var(--accent) 70%, transparent);
-    color: color-mix(in oklch, var(--accent) 92%, var(--fg));
+    background: color-mix(in oklab, var(--accent) 26%, var(--bg));
+    border-color: color-mix(in oklab, var(--accent) 70%, transparent);
+    color: color-mix(in oklab, var(--accent) 92%, var(--fg));
     animation: tl-bullet-pulse 1.6s ease-in-out infinite;
   }
   .tl-node[data-status="error"] .tl-stepdot {
-    background: color-mix(in oklch, var(--danger) 24%, var(--bg));
-    border-color: color-mix(in oklch, var(--danger) 65%, transparent);
-    color: color-mix(in oklch, var(--danger) 90%, var(--fg));
+    background: color-mix(in oklab, var(--danger) 24%, var(--bg));
+    border-color: color-mix(in oklab, var(--danger) 65%, transparent);
+    color: color-mix(in oklab, var(--danger) 90%, var(--fg));
   }
   .tl-node[data-numbered="true"]:hover .tl-stepdot {
     transform: scale(1.12);
     transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease-out, border-color 220ms ease-out, color 220ms ease-out;
   }
 
+  /* Mockup `.ct-divider`: a quiet small-caps label, not a heavy condensed bar —
+     lighter weight, tighter tracking, fading rule. */
   .tl-divider {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: center; gap: 10px;
     margin: 10px 0 4px;
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.12em;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
     text-transform: uppercase;
-    color: var(--fg-muted);
+    color: var(--fg-subtle);
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .tl-divider::after {
     content: "";
     flex: 1;
     height: 1px;
-    background: color-mix(in oklch, var(--border) 70%, transparent);
-    opacity: 0.55;
+    background: linear-gradient(to right, var(--border), transparent);
   }
   .tl-divider-label {
-    opacity: 0.9;
     padding-right: 2px;
   }
 
@@ -1390,12 +1483,14 @@
      whitespace mode applies — `pre-wrap` here would render every `\n`
      between `</li>` and `<li>` in the marked output as a full line of
      empty space, stacking ~20px under every list item. */
+  /* De-boxed user prose (mock `.ct-usertext`): plain text in the same column as
+     Claude's prose, brighter ink, no bg/padding/border. */
   .bubble[data-role="user"] .text {
-    padding: 8px 12px;
-    background: color-mix(in oklch, var(--fg) 4%, transparent);
+    padding: 0;
+    background: transparent;
     border: 0;
-    border-radius: 10px;
-    color: var(--fg-2);
+    color: var(--fg);
+    line-height: 1.6;
     align-self: flex-start;
     max-width: min(100%, 72ch);
     width: fit-content;
@@ -1420,9 +1515,9 @@
     transition: border-color 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
   }
   .user-image-thumb:hover {
-    border-color: color-mix(in oklch, var(--accent) 45%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
     transform: translateY(-1px);
-    box-shadow: 0 6px 18px color-mix(in oklch, var(--accent) 14%, transparent);
+    box-shadow: 0 6px 18px color-mix(in oklab, var(--accent) 14%, transparent);
   }
   .user-image-thumb img {
     display: block;
@@ -1473,7 +1568,7 @@
     font-size: 10.5px;
     opacity: 0.85;
   }
-  .tn-think.active .tn-think-meta { color: color-mix(in oklch, var(--accent) 80%, var(--fg-muted)); }
+  .tn-think.active .tn-think-meta { color: color-mix(in oklab, var(--accent) 80%, var(--fg-muted)); }
   .chev {
     display: inline-flex;
     color: var(--fg-faint);
@@ -1491,7 +1586,7 @@
   .tn-think-body {
     margin-top: 4px;
     padding: 6px 10px;
-    border-left: 2px solid color-mix(in oklch, var(--accent) 28%, var(--border));
+    border-left: 2px solid color-mix(in oklab, var(--accent) 28%, var(--border));
     background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
     border-radius: 0 5px 5px 0;
     font-size: var(--fs-sm);
@@ -1505,13 +1600,13 @@
     width: 7px; height: 7px;
     border-radius: 50%;
     background: var(--accent);
-    box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent);
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 50%, transparent);
     animation: live-pulse 1.4s ease-in-out infinite;
     flex-shrink: 0;
   }
   @keyframes live-pulse {
-    0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 color-mix(in oklch, var(--accent) 50%, transparent); }
-    50%      { opacity: 1;    box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 0%, transparent); }
+    0%, 100% { opacity: 0.55; box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 50%, transparent); }
+    50%      { opacity: 1;    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 0%, transparent); }
   }
   .heartbeat {
     font-size: 10px;
@@ -1534,4 +1629,67 @@
     -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.55) 100%);
     mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.55) 100%);
   }
+
+  /* ── TurnSummary — caps a file-touching assistant turn ─────────────────── */
+  .turn-summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 10px; padding: 9px 13px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: var(--fs-sm);
+  }
+  .turn-summary[data-auto="true"] {
+    background: var(--accent-soft);
+    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
+  }
+  /* bypass permissions = dangerous → amber, matching the composer bypass pill */
+  .turn-summary.mode-bypass {
+    background: color-mix(in srgb, var(--warn) 9%, transparent);
+    border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+  }
+  .ts-stats { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--fg-muted); }
+  .ts-item { display: inline-flex; align-items: center; gap: 6px; }
+  .ts-item :global(svg) { color: var(--fg-subtle); }
+  .ts-applied { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; }
+  .ts-applied :global(svg) { color: var(--accent); }
+  .ts-applied.danger, .ts-applied.danger :global(svg) { color: var(--warn); }
+  .ts-stat { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
+  .ts-add { color: var(--ok); }
+  .ts-del { color: var(--danger); }
+  .ts-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-faint); }
+  .ts-actions { display: flex; align-items: center; gap: 8px; }
+  .ts-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 11px;
+    background: transparent; border: 1px solid var(--ghost-border); border-radius: 8px;
+    color: var(--fg-2); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+    transition: background 130ms var(--ease-soft), border-color 130ms var(--ease-soft), color 130ms var(--ease-soft);
+  }
+  .ts-btn:hover { background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 45%, var(--ghost-border)); color: var(--fg); }
+  .ts-btn :global(svg) { color: var(--accent); }
+  .ts-mode {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 8px; border-radius: 999px;
+    font-size: 10px; font-weight: 600; font-family: var(--font-mono);
+    color: var(--accent);
+    border: 1px solid var(--ghost-border);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    white-space: nowrap;
+  }
+  .ts-mode :global(svg) { color: inherit; }
+  .ts-mode.mode-bypass {
+    color: var(--warn);
+    border-color: color-mix(in oklab, var(--warn) 42%, transparent);
+    background: color-mix(in srgb, var(--warn) 12%, transparent);
+  }
+
+  /* Cross-link flash — pinged by Review-diff + the dock Steps stream. */
+  :global(.tid-flash) { animation: tid-flash 1.4s var(--ease-soft); }
+  @keyframes tid-flash {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    12%      { box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 55%, transparent), 0 0 14px color-mix(in oklab, var(--accent) 35%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) { :global(.tid-flash) { animation: none; } }
 </style>

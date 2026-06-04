@@ -6,7 +6,7 @@
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
   import SidePanel from "./SidePanel.svelte";
-  import SyncActivityBanner from "./SyncActivityBanner.svelte";
+  import SessionDiff from "./SessionDiff.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   import { DOCK_MIN, DOCK_MAX, saveDockWidth } from "../../state/assistant/helpers";
@@ -22,12 +22,8 @@
   const lastError = $derived(tab?.lastError ?? null);
   const showEmpty = $derived(messages.length === 0);
   const needsAuth = $derived(assistant.auth?.pill === "red");
-  const showRemoteShellBanner = $derived(
-    !assistant.remoteShellBannerSeen && assistant.remoteShellLastEvent !== null,
-  );
   // Notices are session-global; only show on the focused pane to avoid dup banners.
   const showNotice = $derived(focused && !!assistant.lastNotice);
-  const showShellBanner = $derived(focused && showRemoteShellBanner);
   // Per-tab error renders in whichever pane owns the erroring tab, focused or
   // not — otherwise a background-pane send-failure is silent until refocus.
   const showError = $derived(!!lastError);
@@ -258,9 +254,6 @@
     <span class="atmos-glow"></span>
     <span class="atmos-grain"></span>
   </div>
-  {#if focused}
-    <SyncActivityBanner />
-  {/if}
   {#if assistant.splitActive}
     <div class="pane-chrome" aria-hidden="true">
       <span class="pane-label" use:tooltip={"Pane {paneIdx + 1} of {assistant.panes.length}"}>{paneIdx + 1}</span>
@@ -328,6 +321,7 @@
         {#each messages as m, mi (m.id)}
           <MessageBubble
             message={m}
+            isLast={mi === messages.length - 1}
             streaming={streaming
               && mi === messages.length - 1
               && m.role === "assistant"}
@@ -343,22 +337,13 @@
 
   {#if tabId && !showEmpty && !stickToBottom}
     <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"}>
-      <ChevronDown size={12}/>
-      <span>Latest</span>
+      <span class="jl-ic" aria-hidden="true"><ChevronDown size={13}/></span>
+      <span class="jl-label">Latest</span>
     </button>
   {/if}
 
-  {#if showError || showNotice || showShellBanner}
+  {#if showError || showNotice}
     <div class="alerts">
-      {#if showShellBanner}
-        <button class="alert notice notice-shell" type="button" onclick={() => assistant.ackRemoteShellBanner()} use:tooltip={"Got it — don't show again"}>
-          <span class="notice-icon">⚡</span>
-          <span class="notice-text">
-            Claude just ran a remote shell command on your server. Gated by Settings → Assistant → Allow remote shell + a workspace-scoped lock. Click to dismiss.
-          </span>
-          <span class="alert-x" aria-hidden="true"><ChevronDown size={11} style="transform: rotate(-90deg)"/></span>
-        </button>
-      {/if}
       {#if showNotice}
         <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} use:tooltip={"Click to dismiss"}>
           <span class="notice-icon">ℹ</span>
@@ -403,6 +388,12 @@
         <span class="drop-label">Split → right</span>
       </div>
     {/if}
+  {/if}
+
+  <!-- Session Diff — full-pane review of every edit. Focused pane only so it
+       doesn't render twice in split mode. -->
+  {#if focused && assistant.ui.diffOpen}
+    <SessionDiff {tabId} onClose={() => (assistant.ui.diffOpen = false)} />
   {/if}
 </div>
 
@@ -455,7 +446,7 @@
     flex-shrink: 0;
     width: 6px;
     margin-right: -6px; /* overlap the dock border so it sits on the seam */
-    z-index: 2;
+    z-index: 6; /* above the dock-head (z5) so the bar reaches the top, not cut at the header */
     cursor: col-resize;
     position: relative;
   }
@@ -535,19 +526,19 @@
   .pane-ctx-pct { color: var(--fg); font-weight: 600; }
   .pane-cost { color: var(--fg-muted); }
   .pane-ctx-chip[data-tone="yellow"] {
-    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
   }
   .pane-ctx-chip[data-tone="yellow"] .pane-ctx-fill { background: var(--warn); }
   .pane-ctx-chip[data-tone="yellow"] .pane-ctx-pct { color: var(--warn); }
   .pane-ctx-chip[data-tone="red"] {
-    border-color: color-mix(in oklch, var(--danger) 40%, var(--border));
+    border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
   }
   .pane-ctx-chip[data-tone="red"] .pane-ctx-fill { background: var(--danger); }
   .pane-ctx-chip[data-tone="red"] .pane-ctx-pct { color: var(--danger); }
 
   .pane.focused .pane-label {
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
     background: var(--accent-soft);
   }
   .pane-close {
@@ -564,14 +555,14 @@
   }
   .pane-close:hover {
     color: var(--danger);
-    border-color: color-mix(in oklch, var(--danger) 35%, var(--border));
-    background: color-mix(in oklch, var(--danger) 10%, transparent);
+    border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
+    background: color-mix(in oklab, var(--danger) 10%, transparent);
   }
   /* Focused pane — visible accent rail along the top edge plus a stronger
      border. Subtle in single-pane mode (no split visible); pronounced in
      split mode where multiple panes compete for attention. */
   .pane.split.focused {
-    border-color: color-mix(in oklch, var(--accent) 60%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 60%, transparent);
     box-shadow: inset 0 2px 0 0 var(--accent);
   }
   .pane.split:not(.focused) {
@@ -580,7 +571,7 @@
   }
   .pane.split:not(.focused):hover {
     background: var(--bg);
-    border-color: color-mix(in oklch, var(--accent) 22%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 22%, transparent);
   }
   /* ── Atmosphere ─────────────────────────────────────────────────────
      Pure accent + grain. Matches the existing UpdateDialog head-glow +
@@ -602,8 +593,8 @@
     height: 42%;
     background:
       radial-gradient(85% 100% at 50% 0%,
-        color-mix(in oklch, var(--accent) 6%, transparent) 0%,
-        color-mix(in oklch, var(--accent) 2%, transparent) 42%,
+        color-mix(in oklab, var(--accent) 6%, transparent) 0%,
+        color-mix(in oklab, var(--accent) 2%, transparent) 42%,
         transparent 78%);
     opacity: 0.7;
   }
@@ -656,7 +647,7 @@
   }
   .messages {
     display: flex; flex-direction: column;
-    gap: 14px;
+    gap: 18px;
     max-width: var(--chat-col-max);
     width: 100%;
     margin: 0 auto;
@@ -667,7 +658,7 @@
      uniform 28px that made every turn float equally. Rail-spans-turn still
      carries assistant grouping; no divider line. */
   .messages > :global(.bubble[data-role="user"]:not(:first-child)) {
-    margin-top: 22px;
+    margin-top: 12px;
   }
 
   .pane-empty {
@@ -747,37 +738,63 @@
     color: var(--fg-subtle);
   }
 
+  /* Glass affordance that floats above the composer — same emerald-tinted glass
+     language as the chat menus, lifted clear of the composer's top edge. The
+     chevron sits in an accent disc that gently bobs to signal "new below". */
   .jump-latest {
     position: absolute;
     left: 50%;
-    bottom: 84px;
+    bottom: 96px;
     transform: translateX(-50%);
-    display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 12px 5px 10px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border-strong);
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 4px 13px 4px 5px;
+    background: color-mix(in oklch, var(--surface) 84%, transparent);
+    backdrop-filter: blur(14px) saturate(140%);
+    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--border));
     border-radius: 999px;
     color: var(--fg-2);
     font: inherit;
     font-size: var(--fs-xs);
-    font-weight: 500;
+    font-weight: 550;
+    letter-spacing: 0.01em;
     cursor: pointer;
-    box-shadow: 0 6px 18px oklch(0 0 0 / 0.32);
+    box-shadow:
+      0 8px 22px -6px oklch(0 0 0 / 0.5),
+      0 0 0 1px color-mix(in oklab, var(--accent) 9%, transparent),
+      0 0 16px -2px color-mix(in oklab, var(--accent) 20%, transparent);
     z-index: 3;
-    animation: jump-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
-    transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+    animation: jump-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: color 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease;
   }
   .jump-latest:hover {
-    background: var(--surface-hover);
     color: var(--fg);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border-strong));
+    border-color: color-mix(in oklab, var(--accent) 52%, var(--border));
+    box-shadow:
+      0 10px 26px -6px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent),
+      0 0 22px -2px color-mix(in oklab, var(--accent) 32%, transparent);
+    transform: translateX(-50%) translateY(-1px);
   }
+  .jl-ic {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 19px; height: 19px; border-radius: 999px;
+    background: color-mix(in oklab, var(--accent) 18%, transparent);
+    color: var(--accent);
+    animation: jl-bob 1.9s ease-in-out infinite;
+  }
+  .jump-latest:hover .jl-ic { background: color-mix(in oklab, var(--accent) 28%, transparent); }
+  .jl-label { padding-right: 1px; }
   @keyframes jump-in {
-    from { opacity: 0; transform: translate(-50%, 6px); }
-    to   { opacity: 1; transform: translate(-50%, 0); }
+    from { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
+    to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  }
+  @keyframes jl-bob {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(1.5px); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .jump-latest { animation: none; }
+    .jump-latest, .jl-ic { animation: none; }
   }
 
   .alerts {
@@ -804,20 +821,20 @@
   }
   .alert.error {
     background: var(--danger-soft);
-    border: 1px solid color-mix(in oklch, var(--danger) 35%, transparent);
+    border: 1px solid color-mix(in oklab, var(--danger) 35%, transparent);
     color: oklch(0.92 0.05 22);
   }
   .alert.error .notice-icon { color: var(--danger); }
   .alert.notice {
-    background: color-mix(in oklch, var(--accent) 10%, var(--surface));
-    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    background: color-mix(in oklab, var(--accent) 10%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
     color: var(--fg-2);
     cursor: pointer;
     transition: background 140ms ease-out, border-color 140ms ease-out;
   }
   .alert.notice:hover {
-    background: color-mix(in oklch, var(--accent) 14%, var(--surface));
-    border-color: color-mix(in oklch, var(--accent) 50%, var(--border));
+    background: color-mix(in oklab, var(--accent) 14%, var(--surface));
+    border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
   }
   .notice-icon {
     color: var(--accent);
@@ -826,7 +843,6 @@
     flex-shrink: 0;
   }
   .notice-text { flex: 1; line-height: 1.45; }
-  .alert-x { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; opacity: 0.7; }
   @media (prefers-reduced-motion: reduce) {
     .alert { animation: none; }
   }
@@ -843,9 +859,9 @@
     /* Visual only — drop handling lives on the .pane parent so dragover is
        continuously preventDefault'd across all child crossings. */
     pointer-events: none;
-    background: color-mix(in oklch, var(--accent) 8%, transparent);
-    border: 1px dashed color-mix(in oklch, var(--accent) 40%, transparent);
-    color: color-mix(in oklch, var(--accent) 80%, var(--fg));
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
+    border: 1px dashed color-mix(in oklab, var(--accent) 40%, transparent);
+    color: color-mix(in oklab, var(--accent) 80%, var(--fg));
     font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -856,7 +872,7 @@
   .drop-zone.half.left { left: 0; right: 50%; }
   .drop-zone.half.right { left: 50%; right: 0; }
   .drop-zone.hover {
-    background: color-mix(in oklch, var(--accent) 20%, transparent);
+    background: color-mix(in oklab, var(--accent) 20%, transparent);
     border-color: var(--accent);
     color: var(--accent);
   }

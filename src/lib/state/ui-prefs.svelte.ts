@@ -7,11 +7,13 @@ const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
 const PRESENCE_KEY = "rift.ui.presence.v1";
 const CODE_KEY = "rift.ui.code.v1";
-const LAUNCH_AT_LOGIN_KEY = "rift.ui.launch-at-login.v1";
-const RESTORE_SESSION_KEY = "rift.ui.restore-session.v1";
-const CONFIRM_ON_QUIT_KEY = "rift.ui.confirm-on-quit.v1";
-const RCON_AUTO_RECONNECT_KEY = "rift.ui.rcon-auto-reconnect.v1";
+const FAST_MODE_KEY = "rift.ui.fast-mode.v1";
 const CHAT_RAIL_COLLAPSED_KEY = "rift.ui.chat-rail-collapsed.v1";
+const CHAT_RAIL_WIDTH_KEY = "rift.ui.chat-rail-width.v1";
+
+export const CHAT_RAIL_MIN = 180;
+export const CHAT_RAIL_MAX = 420;
+const CHAT_RAIL_DEFAULT = 220;
 
 // 8 curated accent hues — one hue drives the whole accent ramp via --accent-h.
 export type AccentSwatch = { id: string; label: string; hue: number };
@@ -26,7 +28,7 @@ export const ACCENTS: AccentSwatch[] = [
   { id: "lime", label: "Lime", hue: 130 },
 ];
 
-const DEFAULT_CODE: CodePrefs = { fontSize: 13, tabWidth: 2, ligatures: false };
+const DEFAULT_CODE: CodePrefs = { fontSize: 12, tabWidth: 2, ligatures: false };
 
 class UiPrefs {
   density = $state<Density>("compact");
@@ -34,12 +36,11 @@ class UiPrefs {
   accentHue = $state(163);
   presence = $state<Presence>("calm");
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
-  // On-machine intent flags — no OS-level enforcement; stored as user intent.
-  launchAtLogin = $state(false);
-  restoreSession = $state(false);
-  confirmOnQuit = $state(false);
-  rconAutoReconnect = $state(false);
   chatRailCollapsed = $state(false);
+  chatRailWidth = $state(CHAT_RAIL_DEFAULT);
+  // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
+  // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
+  fastMode = $state(false);
 
   init() {
     if (typeof window === "undefined") return;
@@ -65,11 +66,13 @@ class UiPrefs {
       /* malformed code prefs — fall back to defaults */
     }
 
-    this.launchAtLogin = localStorage.getItem(LAUNCH_AT_LOGIN_KEY) === "1";
-    this.restoreSession = localStorage.getItem(RESTORE_SESSION_KEY) === "1";
-    this.confirmOnQuit = localStorage.getItem(CONFIRM_ON_QUIT_KEY) === "1";
-    this.rconAutoReconnect = localStorage.getItem(RCON_AUTO_RECONNECT_KEY) === "1";
     this.chatRailCollapsed = localStorage.getItem(CHAT_RAIL_COLLAPSED_KEY) === "1";
+    this.fastMode = localStorage.getItem(FAST_MODE_KEY) === "1";
+
+    const railW = Number(localStorage.getItem(CHAT_RAIL_WIDTH_KEY));
+    if (Number.isFinite(railW) && railW > 0) {
+      this.chatRailWidth = Math.min(CHAT_RAIL_MAX, Math.max(CHAT_RAIL_MIN, railW));
+    }
 
     this.apply();
   }
@@ -104,25 +107,22 @@ class UiPrefs {
     this.applyCode();
   }
 
-  toggleLaunchAtLogin() {
-    this.launchAtLogin = !this.launchAtLogin;
-    localStorage.setItem(LAUNCH_AT_LOGIN_KEY, this.launchAtLogin ? "1" : "0");
+  setChatRailWidth(px: number) {
+    const clamped = Math.min(CHAT_RAIL_MAX, Math.max(CHAT_RAIL_MIN, Math.round(px)));
+    this.chatRailWidth = clamped;
+    localStorage.setItem(CHAT_RAIL_WIDTH_KEY, String(clamped));
   }
 
-  toggleRestoreSession() {
-    this.restoreSession = !this.restoreSession;
-    localStorage.setItem(RESTORE_SESSION_KEY, this.restoreSession ? "1" : "0");
+  toggleChatRail() {
+    this.chatRailCollapsed = !this.chatRailCollapsed;
+    localStorage.setItem(CHAT_RAIL_COLLAPSED_KEY, this.chatRailCollapsed ? "1" : "0");
   }
 
-  toggleConfirmOnQuit() {
-    this.confirmOnQuit = !this.confirmOnQuit;
-    localStorage.setItem(CONFIRM_ON_QUIT_KEY, this.confirmOnQuit ? "1" : "0");
+  toggleFastMode() {
+    this.fastMode = !this.fastMode;
+    localStorage.setItem(FAST_MODE_KEY, this.fastMode ? "1" : "0");
   }
 
-  toggleRconAutoReconnect() {
-    this.rconAutoReconnect = !this.rconAutoReconnect;
-    localStorage.setItem(RCON_AUTO_RECONNECT_KEY, this.rconAutoReconnect ? "1" : "0");
-  }
 
   private apply() {
     if (typeof document === "undefined") return;
@@ -156,6 +156,7 @@ class UiPrefs {
     const r = document.documentElement;
     r.style.setProperty("--code-fs", `${this.code.fontSize}px`);
     r.style.setProperty("--code-tab", String(this.code.tabWidth));
+    r.style.setProperty("--code-liga", this.code.ligatures ? "normal" : "none");
     r.dataset.ligatures = this.code.ligatures ? "on" : "off";
   }
 }

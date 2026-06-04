@@ -41,15 +41,29 @@ fn catalogue() -> Vec<ModelEntry> {
             id: "large-v3-turbo-q5_0",
             display_name: "Large v3 Turbo (Q5, ~574 MB) — recommended for RTX GPUs",
             filename: "ggml-large-v3-turbo-q5_0.bin",
-            approx_size_bytes: 574_041_600,
-            sha256: None,
+            approx_size_bytes: 574_041_195,
+            sha256: Some("394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2"),
+        },
+        ModelEntry {
+            id: "large-v3-turbo-q8_0",
+            display_name: "Large v3 Turbo (Q8, ~874 MB) — sharper vocab, RTX 8 GB+",
+            filename: "ggml-large-v3-turbo-q8_0.bin",
+            approx_size_bytes: 874_188_075,
+            sha256: Some("317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1"),
+        },
+        ModelEntry {
+            id: "large-v3-turbo-f16",
+            display_name: "Large v3 Turbo (f16, ~1.6 GB) — reference quality, RTX 8 GB+ GPU",
+            filename: "ggml-large-v3-turbo.bin",
+            approx_size_bytes: 1_624_555_275,
+            sha256: Some("1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69"),
         },
         ModelEntry {
             id: "medium-q5_0",
             display_name: "Medium (Q5, ~514 MB) — CPU fallback",
             filename: "ggml-medium-q5_0.bin",
-            approx_size_bytes: 514_201_344,
-            sha256: None,
+            approx_size_bytes: 539_212_467,
+            sha256: Some("19fea4b380c3a618ec4723c3eef2eb785ffba0d0538cf43f8f235e7b3b34220f"),
         },
     ]
 }

@@ -10,9 +10,10 @@ use tokio::time::{timeout, Duration};
 const CLEANUP_PROMPT: &str = "You are a dictation cleanup tool. Clean this \
 transcribed speech from a Southern US English speaker. Fix obvious slur-to-word \
 substitutions, add punctuation and proper capitalisation, normalise spacing, \
-and preserve the speaker's intent, tone, and word choice. Do NOT rephrase, \
-summarise, or add content. Do NOT add quotes or markdown. Output only the \
-cleaned transcript text, nothing else.";
+and preserve the speaker's intent, tone, and word choice. Preserve profanity and \
+swear words EXACTLY as spoken — never censor, mask, asterisk out, bleep, or \
+soften them. Do NOT rephrase, summarise, or add content. Do NOT add quotes or \
+markdown. Output only the cleaned transcript text, nothing else.";
 
 const HAIKU_MODEL: &str = "claude-haiku-4-5";
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
@@ -22,6 +23,13 @@ const CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 /// the raw input unchanged so a transient cleanup outage never costs the user
 /// their transcript.
 pub async fn polish(raw: &str) -> Result<String, String> {
+    polish_with_ctx(raw, "").await
+}
+
+/// Like [`polish`], but injects a short workspace-context string (project,
+/// branch, filenames) into the system prompt so Haiku keeps the speaker's
+/// project terms verbatim instead of "correcting" symbols it doesn't know.
+pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
     let raw = raw.trim();
     if raw.is_empty() {
         return Ok(String::new());
@@ -43,13 +51,14 @@ pub async fn polish(raw: &str) -> Result<String, String> {
     // Note: `--bare` would cut ~500ms startup but skips OAuth + keychain
     // auth, which requires ANTHROPIC_API_KEY. Subscription Claude Code users
     // don't have one, so we eat the regular-startup cost.
+    let system_prompt = build_system_prompt(ctx);
     cmd.arg("-p")
         .arg("--model")
         .arg(HAIKU_MODEL)
         .arg("--permission-mode")
         .arg("bypassPermissions")
         .arg("--append-system-prompt")
-        .arg(CLEANUP_PROMPT)
+        .arg(&system_prompt)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
@@ -95,4 +104,18 @@ pub async fn polish(raw: &str) -> Result<String, String> {
     } else {
         Ok(cleaned)
     }
+}
+
+/// Append the workspace context (capped) to the cleanup instruction so Haiku
+/// preserves project-specific terms. Empty context → the bare prompt.
+fn build_system_prompt(ctx: &str) -> String {
+    let ctx = ctx.trim();
+    if ctx.is_empty() {
+        return CLEANUP_PROMPT.to_string();
+    }
+    let capped: String = ctx.chars().take(300).collect();
+    format!(
+        "{CLEANUP_PROMPT} The speaker is working in this codebase; preserve \
+         these project terms verbatim if they appear: {capped}"
+    )
 }

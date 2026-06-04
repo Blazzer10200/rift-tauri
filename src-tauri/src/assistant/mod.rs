@@ -14,7 +14,6 @@ pub mod ask_user;
 pub mod git_local;
 pub mod mcp_server;
 pub mod permission;
-pub mod remote_bridge;
 
 pub use ask_user::AskUserRegistry;
 pub use permission::PermissionRegistry;
@@ -316,12 +315,6 @@ struct AssistantConfig {
     /// notice. `None` or `<= 0` = no cap.
     #[serde(default)]
     max_budget_usd: Option<f64>,
-    /// Gate for the `mcp__rift__remote_bash` tool. Off by default; flipping on
-    /// exposes a single remote-shell tool to the model, scoped to the active
-    /// AutoSync engine's russh session and workspace-locked against concurrent
-    /// users. `None` = default (false).
-    #[serde(default)]
-    allow_remote_shell: Option<bool>,
     /// Effort tier for extended thinking on non-Haiku models. Mirrors Claude
     /// Code's own effort ladder. `"none"` skips extended thinking entirely
     /// (fastest TTFT); `"quick"` ~2K thinking tokens (default — balanced);
@@ -336,8 +329,7 @@ struct AssistantConfig {
     #[serde(default)]
     permission_mode: Option<String>,
     /// Assistant trust level gating the local git tools. One of `readonly` /
-    /// `standard` / `full`. `None` derives from `allow_remote_shell` (true →
-    /// full, else → readonly) so upgrades don't silently grant git-write.
+    /// `standard` / `full`. `None` = `readonly`.
     #[serde(default)]
     trust_level: Option<String>,
     /// Auto-compact threshold as fraction of context window (0.0-1.0). `None` =
@@ -539,52 +531,6 @@ fn delete_session_model(id: &str) {
     }
 }
 
-/// Lexical common ancestor of a set of paths. Returns `None` if the paths
-/// share nothing beyond filesystem root, if the result has no parent (drive
-/// or fs root), or if the result is not a directory on disk.
-///
-/// Motivation: when AutoSync watches a FiveM server, each resource directory
-/// (e.g. `[voice]/`, `[ox]/`, `qbx_core/`) becomes its own FolderWatch with
-/// its own `local_root`. `roots[0]` ends up at whichever sorts first — for
-/// FiveM that's an `[bracket]` resource (`[` = 0x5B, before letters) — and
-/// the Assistant's cwd lands inside that single resource rather than at
-/// `resources/` where every resource is visible. Substituting the common
-/// ancestor in as `roots[0]` fixes the "workspace is just `[voice]`" gripe.
-fn common_ancestor(paths: &[PathBuf]) -> Option<PathBuf> {
-    let mut iter = paths.iter();
-    let first = iter.next()?;
-    let mut common: Vec<std::path::Component> = first.components().collect();
-    for p in iter {
-        let other: Vec<_> = p.components().collect();
-        let new_len = common
-            .iter()
-            .zip(other.iter())
-            .take_while(|(a, b)| a == b)
-            .count();
-        common.truncate(new_len);
-        if common.is_empty() {
-            return None;
-        }
-    }
-    let mut result = PathBuf::new();
-    for c in &common {
-        result.push(c.as_os_str());
-    }
-    if result.as_os_str().is_empty() || result.parent().is_none() {
-        return None;
-    }
-    if !result.is_dir() {
-        // #133: silent None fell through to caller's `roots[0]` fallback. A
-        // brand-new resource folder that doesn't yet exist on disk would
-        // narrow cwd unexpectedly. Surface so DiagBus shows the regression.
-        log::warn!(
-            "common_ancestor: '{}' is not a directory; caller will fall back to roots[0]",
-            result.display()
-        );
-        return None;
-    }
-    Some(result)
-}
 
 #[tauri::command]
 pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
@@ -776,8 +722,6 @@ impl Drop for McpConfigGuard {
 fn write_mcp_config(
     session_id: &str,
     roots: &[PathBuf],
-    bridge: Option<&remote_bridge::BridgeInfo>,
-    remote_shell_enabled: bool,
     trust_level: &str,
 ) -> Result<PathBuf, String> {
     let home = dirs_home()?;
@@ -806,22 +750,6 @@ fn write_mcp_config(
     // Trust level gates the local git tools in the MCP child. Always injected —
     // git is a local op, no bridge needed. See `mcp_server::trust_level`.
     env_map.insert("RIFT_TRUST_LEVEL".into(), Value::from(trust_level.to_string()));
-    // #62: always pass the read-only token so sync_status / shell_lock_status
-    // are available; only inject the write-scoped RIFT_BRIDGE_TOKEN when the
-    // user has explicitly opted into remote-shell. A compromised MCP tool with
-    // only the readonly token can't call `remote_bash` even if it tries —
-    // the bridge server-side dispatch (remote_bridge::dispatch) rejects it.
-    if let Some(b) = bridge {
-        env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(b.port.to_string()));
-        env_map.insert(
-            "RIFT_BRIDGE_READONLY_TOKEN".into(),
-            Value::from(b.readonly_token.clone()),
-        );
-        if remote_shell_enabled {
-            env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(b.token.clone()));
-            env_map.insert("RIFT_REMOTE_SHELL_ENABLED".into(), Value::from("1"));
-        }
-    }
 
     let payload = serde_json::json!({
         "mcpServers": {
@@ -1214,22 +1142,18 @@ fn is_valid_trust_level(v: &str) -> bool {
     matches!(v, "readonly" | "standard" | "full")
 }
 
-/// Resolve the effective trust level. Explicit setting wins; when unset, derive
-/// from the legacy `allow_remote_shell` toggle so upgrades don't silently grant
-/// git-write: remote-shell on → `full`, off → `readonly`.
-fn effective_trust_level(trust_level: &Option<String>, allow_remote_shell: Option<bool>) -> String {
+/// Resolve the effective trust level. Explicit setting wins; when unset → `readonly`.
+fn effective_trust_level(trust_level: &Option<String>) -> String {
     trust_level
         .clone()
         .filter(|v| is_valid_trust_level(v))
-        .unwrap_or_else(|| {
-            if allow_remote_shell == Some(true) { "full".into() } else { "readonly".into() }
-        })
+        .unwrap_or_else(|| "readonly".into())
 }
 
 #[tauri::command]
 pub fn assistant_get_trust_level() -> Result<String, String> {
     let cfg = load_config();
-    Ok(effective_trust_level(&cfg.trust_level, cfg.allow_remote_shell))
+    Ok(effective_trust_level(&cfg.trust_level))
 }
 
 #[tauri::command]
@@ -1931,18 +1855,6 @@ pub fn assistant_remint_session(
 }
 
 #[tauri::command]
-pub fn assistant_get_allow_remote_shell() -> Result<bool, String> {
-    Ok(load_config().allow_remote_shell.unwrap_or(false))
-}
-
-#[tauri::command]
-pub fn assistant_set_allow_remote_shell(value: bool) -> Result<(), String> {
-    let mut cfg = load_config();
-    cfg.allow_remote_shell = Some(value);
-    save_config(&cfg)
-}
-
-#[tauri::command]
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
     // Phase 6 (#37): write the API key to the OS keychain, not config.json.
     // Empty/None → delete the keychain entry. Also clears any lingering
@@ -2062,6 +1974,12 @@ pub async fn assistant_answer_permission(
 
 /// Enumerate file paths under the active workspace root, relative to the root,
 /// forward-slash normalized. Drives the composer's `@`-file mention picker.
+/// The active workspace root, if the user has opened a folder. Exposed for
+/// the STT engine's workspace-context prompt injection.
+pub(crate) fn current_root() -> Option<PathBuf> {
+    load_config().current_root
+}
+
 /// Skip set mirrors `mcp_server::SKIP_DIRS`. Capped at `MENTION_LIMIT` files.
 #[tauri::command]
 pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
@@ -2103,148 +2021,43 @@ pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// Current git branch of the active workspace root, or `None` when the folder
+/// isn't a git repo, is in detached-HEAD, or git isn't available. Surfaced in
+/// the assistant Welcome's context strip; never fabricated.
+#[tauri::command]
+pub fn assistant_workspace_branch() -> Option<String> {
+    let root = load_config().current_root?;
+    let mut cmd = std::process::Command::new("git");
+    cmd.current_dir(&root)
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "")
+        .env_remove("GIT_DIR");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = cmd.output().ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        None
+    } else {
+        Some(branch)
+    }
+}
+
 /// Rift's system-prompt addendum. Appended to the CLI's default system prompt
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
 /// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped helpers, sync_status to get a live reading of the sync queue (pending uploads, failed, conflicts) at any point mid-conversation — call it when the user asks whether files are synced or a push completed, rather than relying on the stale per-turn snapshot in the system-reminder — and ask_user for interactive multiple-choice questions. The standard Anthropic `AskUserQuestion` tool is NOT available in this environment; use `mcp__rift__ask_user` instead when you need a quick choice from the user (e.g. picking between approaches, confirming a destructive operation, narrowing scope). The answer comes back as the tool result and resumes the turn. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters or when you need user input. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
+const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped, workspace-rooted helpers, plus git_status / git_diff / git_log (and git_pull / git_commit / git_push when trust permits). The standard Anthropic `AskUserQuestion` tool is NOT available in this environment; if you need a decision from the user, ask in plain text and proceed with the most reasonable default. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
-
-/// Build a per-turn snapshot of the live AutoSync / LockPresence state —
-/// foreign locks held by other users, sync queue depth, recent DiagBus stage
-/// events. Wrapped in a `<system-reminder>` on the USER turn (not the system
-/// prompt) so the cached system prefix stays stable across turns. Returns
-/// an empty string when no AutoSync engine is active.
-async fn gather_workspace_context(state: &crate::AutoSyncState) -> String {
-    let engine = { state.0.lock().await.clone() };
-    let Some(engine) = engine else { return String::new(); };
-    let folders = engine.folders_clone();
-    if folders.is_empty() {
-        return String::new();
-    }
-    let status = engine.status().await;
-    let foreign: Vec<crate::sync::lock_presence::RemoteLock> = engine
-        .locks()
-        .map(|l| l.active_locks())
-        .unwrap_or_default();
-
-    let mut parts: Vec<String> = Vec::new();
-    parts.push("Workspace is multi-writer (concurrent collaborators may be editing the same files over SFTP).".into());
-
-    if foreign.is_empty() {
-        parts.push("No foreign edits currently in progress.".into());
-    } else {
-        let preview: Vec<String> = foreign
-            .iter()
-            .take(4)
-            .map(|l| {
-                let file = l
-                    .file_path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&l.file_path)
-                    .to_string();
-                format!("{} on {} ({} ago)", l.user, file, rel_age(l.since))
-            })
-            .collect();
-        let more = if foreign.len() > preview.len() {
-            format!(" +{} more", foreign.len() - preview.len())
-        } else {
-            String::new()
-        };
-        parts.push(format!("Foreign edits in progress: {}{}.", preview.join(", "), more));
-    }
-
-    parts.push(format!(
-        "Sync queue: {} pending, {} failed, {} conflicts.",
-        status.pending, status.failed, status.conflicts
-    ));
-
-    let events = crate::diagnostics::bus().recent_events(20);
-    let event_summary = summarize_events(&events);
-    if !event_summary.is_empty() {
-        parts.push(format!("Recent sync activity: {}.", event_summary));
-    }
-
-    parts.push("If you read a file more than ~30 s ago, re-read before editing — another writer may have changed it.".into());
-
-    // Newline-separated for readability inside the <system-reminder> block.
-    // No argv constraint here (rides stdin, not process args).
-    parts.join("\n")
-}
-
-fn rel_age(when: chrono::DateTime<chrono::Utc>) -> String {
-    let secs = (chrono::Utc::now() - when).num_seconds().max(0);
-    if secs < 60 {
-        format!("{secs}s")
-    } else if secs < 3600 {
-        format!("{}m", secs / 60)
-    } else {
-        format!("{}h", secs / 3600)
-    }
-}
-
-fn summarize_events(events: &[crate::diagnostics::DiagEvent]) -> String {
-    use crate::diagnostics::{DiagLevel, DiagStage};
-    let mut uploads_ok = 0usize;
-    let mut uploads_fail = 0usize;
-    let mut drift_scans = 0usize;
-    let mut conflicts = 0usize;
-    let mut pulls = 0usize;
-    let mut wedged = 0usize;
-    let mut last_log_err: Option<String> = None;
-    for ev in events {
-        match ev.stage {
-            DiagStage::UploadDone => uploads_ok += 1,
-            DiagStage::UploadFail => uploads_fail += 1,
-            DiagStage::DriftScanResult => drift_scans += 1,
-            DiagStage::RemotePullDone => pulls += 1,
-            DiagStage::ConnectionWedged => wedged += 1,
-            DiagStage::Log if matches!(ev.level, DiagLevel::Error | DiagLevel::Warn) => {
-                if last_log_err.is_none() {
-                    last_log_err = Some(ev.message.clone());
-                }
-            }
-            _ => {}
-        }
-        if matches!(
-            ev.stage,
-            DiagStage::DriftScanResult
-        ) && ev.message.to_lowercase().contains("conflict")
-        {
-            conflicts += 1;
-        }
-    }
-    let mut tokens: Vec<String> = Vec::new();
-    if uploads_ok > 0 {
-        tokens.push(format!("{uploads_ok} uploads ok"));
-    }
-    if uploads_fail > 0 {
-        tokens.push(format!("{uploads_fail} uploads failed"));
-    }
-    if pulls > 0 {
-        tokens.push(format!("{pulls} pulls ok"));
-    }
-    if drift_scans > 0 {
-        tokens.push(format!("{drift_scans} drift scans"));
-    }
-    if conflicts > 0 {
-        tokens.push(format!("{conflicts} conflicts"));
-    }
-    if wedged > 0 {
-        tokens.push(format!("{wedged} connection wedges"));
-    }
-    if let Some(msg) = last_log_err {
-        let trimmed = if msg.len() > 80 {
-            format!("{}\u{2026}", &msg[..80])
-        } else {
-            msg
-        };
-        tokens.push(format!("recent warn: {}", trimmed.replace('\n', " ")));
-    }
-    tokens.join(", ")
-}
 
 /// One image (or other future binary) attached to a single user-message turn.
 /// Carried inline from the frontend as base64 to avoid an extra disk round-trip.
@@ -2359,7 +2172,6 @@ async fn handle_permission_request(
 #[tauri::command]
 pub async fn assistant_send(
     app: AppHandle,
-    state: tauri::State<'_, crate::AutoSyncState>,
     prompt: String,
     session_id: String,
     is_first_turn: bool,
@@ -2426,36 +2238,13 @@ pub async fn assistant_send(
     } else {
         load_session_cwd(&session_id).filter(|p| p.is_dir())
     };
-    let mut roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
+    let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
         vec![p]
     } else if let Some(root) = cfg.current_root.as_ref().filter(|p| p.is_dir()) {
         vec![root.clone()]
     } else {
-        let guard = state.0.lock().await;
-        guard
-            .as_ref()
-            .map(|eng| {
-                eng.folders_clone()
-                    .into_iter()
-                    .map(|f| f.local_root)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
+        Vec::new()
     };
-    // When AutoSync surfaces N folders (one per FiveM resource), the
-    // alphabetically-first wins as cwd — typically a `[bracket]` resource
-    // ('[' = 0x5B). Prepend the lexical common ancestor so the model's cwd
-    // lands at the parent (e.g. `<server>/resources/`) and every resource is
-    // visible. Only applies to the AutoSync path (multiple roots, no pin,
-    // no explicit current_root) — existing pinned conversations keep their
-    // captured cwd to preserve session continuity even if it's narrower.
-    if pinned_cwd.is_none() && cfg.current_root.is_none() && roots.len() > 1 {
-        if let Some(anc) = common_ancestor(&roots) {
-            if !roots.iter().any(|r| r == &anc) {
-                roots.insert(0, anc);
-            }
-        }
-    }
     // Pin the cwd on first turn so every subsequent --resume aims at the same
     // session JSONL even if the user later switches workspace folders. Also
     // covers the legacy-migration path: existing pre-pin conversations have
@@ -2474,33 +2263,18 @@ pub async fn assistant_send(
         save_session_model(&session_id, &model);
     }
 
-    // Remote-shell tool only fires when the user toggled it on AND the parent
-    // can stand up the loopback bridge. Bridge `start` is idempotent — first
-    // call binds the listener; later calls return the cached info.
-    // Start bridge unconditionally — sync_status uses it even when remote_bash is off.
-    // Bridge is a read-only loopback IPC channel; remote_bash is gated separately.
-    let bridge_info = match remote_bridge::start(app.clone()).await {
-        Ok(info) => Some(info),
-        Err(e) => {
-            log::warn!("assistant: bridge start failed, sync_status + remote_bash disabled: {e}");
-            None
-        }
-    };
-    let allow_remote_shell = cfg.allow_remote_shell.unwrap_or(false);
-    let remote_shell_enabled = allow_remote_shell && bridge_info.is_some();
-    // Trust level for the local git tools — explicit setting wins, else derived
-    // from the remote-shell toggle so upgrades don't silently grant git-write.
-    let trust_level = effective_trust_level(&cfg.trust_level, cfg.allow_remote_shell);
+    // Trust level for the local git tools — explicit setting wins, else readonly.
+    let trust_level = effective_trust_level(&cfg.trust_level);
 
     // Provision a temp MCP config when we have at least one root. Addendum
     // stays cache-stable — only the two static strings ever land in
-    // `--append-system-prompt`. Per-session/per-turn toggles (remote_shell,
-    // dyslexia) ride the user-turn <system-reminder> path below so toggling
-    // them mid-session never invalidates the cached system-prompt prefix.
+    // `--append-system-prompt`. The per-turn dyslexia toggle rides the
+    // user-turn <system-reminder> path below so toggling it mid-session never
+    // invalidates the cached system-prompt prefix.
     let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
         (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(&session_id, &roots, bridge_info.as_ref(), remote_shell_enabled, &trust_level) {
+        match write_mcp_config(&session_id, &roots, &trust_level) {
             Ok(p) => {
                 let guard = McpConfigGuard(p.clone());
                 (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
@@ -2677,10 +2451,8 @@ pub async fn assistant_send(
             // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
             // via the explicit-name entries.
             format!("{BUILTINS},mcp__*")
-        } else if remote_shell_enabled {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__remote_bash,mcp__rift__push_pending,mcp__rift__pull_pending,mcp__rift__reconcile_apply,mcp__rift__ask_user,{GIT_READ_MCP}{git_write}")
         } else {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user,{GIT_READ_MCP}{git_write}")
+            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,{GIT_READ_MCP}{git_write}")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);
@@ -2740,8 +2512,8 @@ pub async fn assistant_send(
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={} remote_shell={}",
-        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, remote_shell_enabled
+        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={}",
+        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
@@ -2754,13 +2526,6 @@ pub async fn assistant_send(
     // user turn keeps the prefix cache-stable. Multi-line is fine here
     // (rides stdin, no argv constraint).
     let mut reminder_parts: Vec<String> = Vec::new();
-    let ws_ctx = gather_workspace_context(&state).await;
-    if !ws_ctx.is_empty() {
-        reminder_parts.push(ws_ctx);
-    }
-    if remote_shell_enabled {
-        reminder_parts.push("Remote-shell tool `mcp__rift__remote_bash` is available — runs over the auto-sync engine's russh session against the active SFTP server. Use sparingly for ops work (status checks, pm2 restart, etc.); a workspace-scoped advisory lock serializes calls between users.".into());
-    }
     // S93 dyslexia-friendly mode: hint Claude to interpret phonetic typos +
     // voice-to-text artifacts charitably instead of asking pedantic
     // clarifying questions.
