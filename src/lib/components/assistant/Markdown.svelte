@@ -9,6 +9,24 @@
   marked.setOptions({ gfm: true, breaks: true });
   marked.use(markedAlert());
 
+  // F32: `style` is allow-listed below for Shiki's inline colors, but `text` is
+  // LLM-controlled and can smuggle raw HTML with a hostile style (a fixed-
+  // position overlay, or `background:url(...)` beacon). Restrict every surviving
+  // style attribute to Shiki's own color/font declarations. Hook is a DOMPurify
+  // singleton — guard so per-instance script re-runs don't stack duplicates.
+  if (!(DOMPurify as unknown as { _riftStyleHook?: boolean })._riftStyleHook) {
+    (DOMPurify as unknown as { _riftStyleHook?: boolean })._riftStyleHook = true;
+    DOMPurify.addHook("uponSanitizeAttribute", (_node, data) => {
+      if (data.attrName === "style") {
+        data.attrValue = data.attrValue
+          .split(";")
+          .map((d) => d.trim())
+          .filter((d) => /^(color|background-color|font-weight|font-style|text-decoration)\s*:/i.test(d))
+          .join("; ");
+      }
+    });
+  }
+
   // Reactive flag — flips to true once Shiki's singleton has warmed up.
   // Markdown's `processed` $derived depends on this so all code blocks
   // re-render w/ syntax highlighting on first warmup.
