@@ -231,6 +231,5 @@ class UpdateStore {
 export const updates = new UpdateStore();
 
 // #173: HMR teardown so a hot-reload doesn't leave stale handlers wired.
-if (typeof import.meta !== "undefined" && (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot) {
-  (import.meta as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => updates.dispose());
-}
+const _hmrHot = (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot;
+if (_hmrHot) _hmrHot.dispose(() => updates.dispose());

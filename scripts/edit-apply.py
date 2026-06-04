@@ -31,10 +31,20 @@ def main():
     do_apply = "--apply" in sys.argv[2:]
     accepted = load_accepted(src)
 
-    # group by file
+    # normalize any absolute / backslash path to a repo-relative one BEFORE grouping,
+    # so all edits to one file land in a single read-modify-write cycle
+    def norm(p):
+        p = p.replace("\\", "/")
+        for anchor in ("src-tauri/", "src/"):
+            i = p.find(anchor)
+            if i != -1:
+                return p[i:]
+        return p
+
+    # group by normalized file
     by_file = {}
     for a in accepted:
-        by_file.setdefault(a["file"], []).extend(a.get("edits", []))
+        by_file.setdefault(norm(a["file"]), []).extend(a.get("edits", []))
 
     applied = miss = ambiguous = 0
     touched = []

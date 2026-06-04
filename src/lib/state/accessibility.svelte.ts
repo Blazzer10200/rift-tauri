@@ -24,11 +24,15 @@ class Accessibility {
 
   init() {
     if (typeof window === "undefined") return;
-    this.dyslexiaMode = localStorage.getItem(DYSLEXIA_KEY) === "1";
-    const f = localStorage.getItem(FONT_KEY);
-    if (f === "lexend" || f === "system") this.font = f;
-    this.lineHeightBoost = localStorage.getItem(LINE_HEIGHT_KEY) === "1";
-    this.warmTint = localStorage.getItem(WARM_TINT_KEY) === "1";
+    try {
+      this.dyslexiaMode = localStorage.getItem(DYSLEXIA_KEY) === "1";
+      const f = localStorage.getItem(FONT_KEY);
+      if (f === "lexend" || f === "system") this.font = f;
+      this.lineHeightBoost = localStorage.getItem(LINE_HEIGHT_KEY) === "1";
+      this.warmTint = localStorage.getItem(WARM_TINT_KEY) === "1";
+    } catch {
+      // localStorage unavailable (private-browsing restriction etc.) — keep defaults
+    }
     this.apply();
   }
 
@@ -42,28 +46,28 @@ class Accessibility {
     if (firstTimeOn) {
       this.font = "lexend";
       this.lineHeightBoost = true;
-      localStorage.setItem(FONT_KEY, "lexend");
-      localStorage.setItem(LINE_HEIGHT_KEY, "1");
+      try { localStorage.setItem(FONT_KEY, "lexend"); } catch { /* ignore */ }
+      try { localStorage.setItem(LINE_HEIGHT_KEY, "1"); } catch { /* ignore */ }
     }
-    localStorage.setItem(DYSLEXIA_KEY, on ? "1" : "0");
+    try { localStorage.setItem(DYSLEXIA_KEY, on ? "1" : "0"); } catch { /* ignore */ }
     this.apply();
   }
 
   setFont(f: DyslexicFont) {
     this.font = f;
-    localStorage.setItem(FONT_KEY, f);
+    try { localStorage.setItem(FONT_KEY, f); } catch { /* ignore */ }
     this.apply();
   }
 
   setLineHeightBoost(on: boolean) {
     this.lineHeightBoost = on;
-    localStorage.setItem(LINE_HEIGHT_KEY, on ? "1" : "0");
+    try { localStorage.setItem(LINE_HEIGHT_KEY, on ? "1" : "0"); } catch { /* ignore */ }
     this.apply();
   }
 
   setWarmTint(on: boolean) {
     this.warmTint = on;
-    localStorage.setItem(WARM_TINT_KEY, on ? "1" : "0");
+    try { localStorage.setItem(WARM_TINT_KEY, on ? "1" : "0"); } catch { /* ignore */ }
     this.apply();
   }
 

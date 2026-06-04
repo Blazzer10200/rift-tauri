@@ -58,13 +58,13 @@
   role="status"
   aria-live="polite"
   aria-label="Loading Rift"
-  aria-hidden={exiting ? "true" : "false"}
   inert={exiting}
 >
   <div class="content">
     <div class="wordmark">RIFT</div>
     <div class="bar"><div class="bar-fill"></div></div>
   </div>
+  {#if exiting}<span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap">Ready</span>{/if}
 </div>
 
 <style>

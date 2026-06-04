@@ -17,20 +17,8 @@ Frontend-only. `npm run check` 4081/0/0. **Verified live against a REAL assistan
 - `classifyTool` + SessionDiff don't strip `mcp__rift__` prefix (MessageBubble does, ln 355). CLI built-in Read/Write render fine; rift MCP `read_file/list_dir/grep` would show as generic `meta` rows — map+strip next pass.
 - Scratch `.tmp/activity-test.md` left in dev workspace from live test — deletable.
 
-## Session 2026-06-04 (cont. 32) — SHELL NAV REDESIGN (titlebar nav, UNSHIPPED v0.4.46)
-
-Frontend-only. `npm run check` 4080/0/0; CDP-verified live (titlebar + chat both shotted).
-
-**Left activity column removed.** 3-destination vertical rail read as wasted space → nav moved into the titlebar. `Titlebar.svelte`: horizontal Home/Chat nav (`.navitem`, accent-soft active pill @ 0.12α, Ctrl+1/2) + brand↔nav hairline `.nav-sep`; Settings → gear in `.right` group; ⌘K placeholder "Search or run a command…", max-width 360→300. `AppShell.svelte`: `<ActivityBar/>` removed, `.body` grid → single `1fr`.
-
-**Chat-history rail toggle relocated.** Floating `>` sliver killed (`ChatRail.svelte`: collapsed = `width:0;border:0`; removed `.cr-expand-btn`, `ChevronRight`, local `RAIL_KEY`). New `.rail-toggle` PanelLeft at left edge of `ChatTabsBar.svelte` — contextual to Chat, mirrors the right-side Activity PanelRight. Collapse state centralized → `uiPrefs.toggleChatRail()` (key `rift.ui.chat-rail-collapsed.v1`).
-
-**Two earlier-this-session fixes.** (1) Model dropdown opacity (`app.css .rift-menu`): translucent `color-mix(surface 86%,transparent)`+`backdrop-filter blur` → solid `var(--surface)`+`var(--border)`; shared chrome so slash/mention/file-path menus go opaque too. (2) Activity dock resize bar (`AssistantPane.svelte .dock-resize`): z-index 2→6 so the green seam clears the sticky `.dock-head` (z5) instead of being clipped at the header.
-
-### 🟡 Flags / next
-- **Orphaned (cleanup candidate):** `ActivityBar.svelte` no longer mounted (left in place, NOT deleted per safety); `railPinned`/`applyRail`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts` now dead. Workspace **drag-to-reorder** lost with the bar (3 fixed dests → likely fine). Remove the lot in one pass if confirmed.
-- `HomePage` "Still up" eyebrow = intentional time-greeting (`hr<5`), left as-is.
-- CHANGELOG/version bump deferred to /git-ship per policy — cont.13–32 ships as ONE commit.
+## cont. 32 — SHELL NAV REDESIGN (UNSHIPPED v0.4.46)
+Titlebar nav: left activity column removed → Home/Chat `.navitem`s + Settings gear in `Titlebar.svelte` (Ctrl+1/2); chat-rail toggle → `.rail-toggle` in `ChatTabsBar` (`uiPrefs.toggleChatRail()`); model/slash/mention menus → opaque (`app.css .rift-menu`); dock-resize z 2→6. **Orphans (cleanup):** `ActivityBar.svelte` unmounted (kept per safety) + dead `railPinned`/`applyRail`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts`. Detail: `git log`.
 
 ## Earlier this arc (cont. 13–31) — detail in `git log`
 - **31/30:** logo on platform icons; theming `--bg-inset` 0.178 + `--field`/`--track`/`--code-*`; body hue 270→250; tint mixes oklch→**oklab** (13 files).

@@ -1380,6 +1380,7 @@
                 type="button"
                 class="live-pill turn"
                 onclick={openActivity}
+                aria-label="Current turn — elapsed · output speed. Click to open Activity."
                 use:tooltip={"Current turn — elapsed · output speed. Click to open Activity."}
               >
                 <span class="lp-dot" aria-hidden="true"></span>
@@ -1395,6 +1396,7 @@
                 type="button"
                 class="live-pill"
                 onclick={openActivity}
+                aria-label={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running. Click to open Activity.`}
                 use:tooltip={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running. Click to open Activity.`}
               >
                 <Bot size={12} />
@@ -1406,6 +1408,7 @@
                 type="button"
                 class="live-pill"
                 onclick={openActivity}
+                aria-label={`${shellCount} shell${shellCount === 1 ? "" : "s"} running. Click to open Activity.`}
                 use:tooltip={`${shellCount} shell${shellCount === 1 ? "" : "s"} running. Click to open Activity.`}
               >
                 <Terminal size={12} />
@@ -1417,6 +1420,7 @@
                 type="button"
                 class="live-pill"
                 onclick={openActivity}
+                aria-label={`${toolCount} tool${toolCount === 1 ? "" : "s"} running. Click to open Activity.`}
                 use:tooltip={`${toolCount} tool${toolCount === 1 ? "" : "s"} running. Click to open Activity.`}
               >
                 <Wrench size={12} />
@@ -1517,6 +1521,7 @@
             type="button"
             onclick={onBtnClick}
             disabled={!canFire}
+            aria-label={mode === 'stop' ? 'Stop current turn' : mode === 'queue' ? 'Queue message' : 'Send message'}
             use:tooltip={mode === "stop"
               ? { text: "Halt the current turn", kbd: "Esc" }
               : mode === "queue"

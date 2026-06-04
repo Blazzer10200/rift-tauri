@@ -41,8 +41,7 @@
   });
 
   async function run(fn: () => Promise<unknown>) {
-    try { await fn(); } catch (e) { console.warn("[FilePathMenu] action failed", e); }
-    onClose();
+    try { await fn(); onClose(); } catch (e) { console.warn("[FilePathMenu] action failed", e); }
   }
 
   const openInVscode = () => run(() => invoke("open_in_vscode", { path }));
