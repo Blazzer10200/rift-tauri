@@ -170,7 +170,7 @@
                 <span>What's new</span>
               </div>
               <div class="notes-body">
-                {#each notes as ln, i (i)}
+                {#each notes as ln (ln.kind + '|' + ln.text)}
                   {#if ln.kind === "h"}
                     <div class="notes-h">{ln.text}</div>
                   {:else if ln.kind === "li"}

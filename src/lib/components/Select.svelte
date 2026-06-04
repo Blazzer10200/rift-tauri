@@ -51,6 +51,7 @@
 
   function openMenu() {
     if (disabled) return;
+    if (!options.length) return;
     open = true;
     highlight = Math.max(0, options.findIndex((o) => o.value === value));
     place();

@@ -348,7 +348,7 @@
   const taskDone = $derived(assistant.tasks.filter((t) => t.status === "completed").length);
 
   let pulse = $state(false);
-  let lastSeenUpdate = 0;
+  let lastSeenUpdate = $state(0);
   $effect(() => {
     const t = assistant.ui.tasksUpdatedAt;
     if (t > lastSeenUpdate) {
@@ -469,7 +469,7 @@
         </span>
         <span class="title">{titleFor(id)}</span>
         {#if paneIndexFor(id) !== null}
-          <span class="pane-badge" use:tooltip={"Open in pane {paneIndexFor(id)}"}>{paneIndexFor(id)}</span>
+          <span class="pane-badge" use:tooltip={`Open in pane ${paneIndexFor(id)}`}>{paneIndexFor(id)}</span>
         {/if}
         <button
           class="close"

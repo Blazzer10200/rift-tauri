@@ -13,7 +13,7 @@
   src={logoUrl}
   width={size}
   height={size}
-  alt="Rift"
+  alt=""
   draggable="false"
   aria-hidden="true"
 />

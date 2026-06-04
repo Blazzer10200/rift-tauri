@@ -13,7 +13,7 @@
   // Horizontal workspace nav lives in the titlebar (replaced the left activity
   // column). Settings is pinned to the right as a gear; the rest render inline.
   const navItems = $derived(
-    workspace.order.filter((id) => id !== "settings") as WorkspaceId[],
+    workspace.order.filter((id) => id !== "settings"),
   );
 </script>
 
@@ -73,13 +73,13 @@
       <SettingsIcon size={15}/>
     </button>
     <div class="winctl">
-      <button class="wb" onclick={() => win.minimize()} use:tooltip={"Minimize"} type="button" aria-label="Minimize">
+      <button class="wb" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} type="button" aria-label="Minimize">
         <Minus size={10}/>
       </button>
-      <button class="wb" onclick={() => win.toggleMaximize()} use:tooltip={"Maximize"} type="button" aria-label="Maximize">
+      <button class="wb" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={"Maximize"} type="button" aria-label="Maximize">
         <Square size={9}/>
       </button>
-      <button class="wb close" onclick={() => win.close()} use:tooltip={"Close"} type="button" aria-label="Close">
+      <button class="wb close" onclick={() => win.close().catch(console.error)} use:tooltip={"Close"} type="button" aria-label="Close">
         <X size={10}/>
       </button>
     </div>

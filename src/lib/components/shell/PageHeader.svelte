@@ -29,7 +29,7 @@
       {@const Icon = icon}
       <span class="head-icon" data-tone={tone}><Icon size={14} /></span>
     {/if}
-    <span class="head-title">{title}</span>
+    <h2 class="head-title">{title}</h2>
     {#if badge}
       <span class="head-badge" data-tone={tone}>{badge}</span>
     {/if}

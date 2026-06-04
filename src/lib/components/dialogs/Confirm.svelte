@@ -24,6 +24,7 @@
   }: Props = $props();
 
   let dontAsk = $state(false);
+  let confirmBtn = $state<HTMLButtonElement>();
 
   function decide(confirmed: boolean) {
     onClose({ confirmed, dontAsk });
@@ -37,7 +38,10 @@
   function onKey(e: KeyboardEvent) {
     if (!open) return;
     if (e.key === "Escape") decide(false);
-    if (e.key === "Enter") decide(true);
+    if (e.key === "Enter") {
+      const active = document.activeElement;
+      if (!active || active === document.body || active === confirmBtn) decide(true);
+    }
   }
 </script>
 
@@ -77,6 +81,7 @@
           class:primary={!isDanger}
           class:danger={isDanger}
           type="button"
+          bind:this={confirmBtn}
           onclick={() => decide(true)}
         >
           {confirmLabel}
