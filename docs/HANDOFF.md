@@ -2,7 +2,17 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-04 (cont. 50) — Steer feature + dead-code/dead-file cleanup + docs destale (UNSHIPPED)
+## Session 2026-06-04 (cont. 51) — SHIPPED v0.5.0 (Velopack)
+
+Bundled the cont.46b–50 unshipped work into a release. Bumped 3 lockstep files + `Cargo.lock` → `0.5.0`; CHANGELOG v0.5.0 entry (Harness + Steer + cleanup), trimmed v0.4.46 to cap. `cargo check` 0/0 · `npm run check` 4061 0/0. Commit `62dae27` pushed to `origin/main`. `release.ps1` (Velopack) built + packed + published **stable** v0.5.0 to `Blazzer10200/rift-releases` (Setup.exe + Portable.zip + full/delta nupkg + releases.win.json; `prerelease:false`). Release notes auto-pulled from CHANGELOG top. No Rift running at build → no file-lock.
+
+### RESUME HERE (cont.51)
+- v0.5.0 is the **second auto-update proof point** after v0.4.48: an installed v0.4.47/0.4.48 client should now auto-detect v0.5.0 → download → apply-on-exit → relaunch (design §6 R1). Awaits USER live-confirm on a real machine.
+- Steer: still want a *visible* mid-turn redirect on a multi-step tool turn via the UI (ISSUES → Active).
+
+---
+
+## Session 2026-06-04 (cont. 50) — Steer feature + dead-code/dead-file cleanup + docs destale (shipped in v0.5.0)
 
 3 commits on `main`, no version bump: checkpoint `ad4694d`, cleanup `371d885`, docs `6147301`. cargo 0/0, `npm run check` 4061 0/0.
 
@@ -16,29 +26,10 @@
 
 ---
 
-## Session 2026-06-04 (cont. 49) — Harness: real-data verified + 2 accuracy bugs fixed (UNSHIPPED)
-
-Stress-tested HarnessPage live telemetry vs on-disk JSON (ground truth) via CDP — cont.48's real-data check **DONE**, every cumulative cell matches. Fixed 2 real accuracy bugs + polish. `npm run check` **0/0/0**.
-
-- Fixed 2 Live accuracy bugs (detail in git): memoized folds never recomputed (`$derived(source.turns)` returned a mutated-in-place ref → `$derived([...source.turns])`); last-turn `doneAt` stale (`void assistant.streaming` added to `liveSnap` trigger). Polish: hero glow centered, `.nodata` dimmed dashes, 1s uptime tick. (Now committed in `ad4694d` — see cont.50 RESUME.)
-
----
-
-## Session 2026-06-04 (cont. 48) — Harness: multi-session telemetry logging (UNSHIPPED)
-
-Persistent per-session logging end-to-end (`assistant/session_log.rs` save/list/load/delete/prune → `~/.rift/assistant/session-logs/<id>.json`; `sessionLog.ts` IPC; debounced from `handleTurnComplete`, prune 40). HarnessPage reads a Live/past/empty `source` snapshot. Detail in git.
-- **Open carry-over:** Velopack auto-apply e2e proof awaits USER (design §6 R1); `check.yml` per-push email spam; prod app is now ALSO `rift-tauri.exe` → revisit "never blanket-kill rift" rule. (`notify` RUSTSEC removal DONE in cont.50.)
-
----
-
-## Session 2026-06-04 (cont. 47) — CI green: russh dead-dep removal (SHIPPED `da159fc`)
-
-Removed dead russh cluster (russh/russh-sftp/async-trait/rand/base64/sha1; kept `sha2`=STT) → cleared `cargo audit` RUSTSEC-2026-0154 CI spam. `Cargo.lock` −~1240 lines; checks exit 0; no version bump.
-
----
-
-## Prior arcs — detail in `git log`
+## Prior arcs — detail in `git log` (all shipped in v0.5.0 unless noted)
+- **48–49 Harness telemetry:** per-session logging (`session_log.rs` → `~/.rift/assistant/session-logs/<id>.json`, prune 40; `sessionLog.ts` IPC); HarnessPage Live/past/empty `source`; fixed 2 Live accuracy bugs (memoized-fold alias, stale `doneAt`).
 - **46b Harness REBUILT:** accuracy-first bento dashboard; cumulative folds from session-wide `assistant.telemetry`; themeable `--accent-h`; Ctrl+3.
+- **Open carry-over:** `check.yml` per-push email spam; prod app is now ALSO `rift-tauri.exe` → revisit "never blanket-kill rift" rule.
 - **44–45 Velopack auto-update:** `velopack::UpdateManager` over native `GithubSource`; shipped v0.4.47/0.4.48; vpk CLI=crate `=1.2.0`. Design: `docs/design/velopack-auto-update.md`.
 - **40–43:** Composer/Improve-prompt; Claude-update automation; onboarding rebuild; History v2 (export).
 - **20/21 PURE-ASSISTANT:** SFTP/sync/server/RCON ripped; MCP→read/list/grep+`git_*`.
@@ -51,4 +42,4 @@ Removed dead russh cluster (russh/russh-sftp/async-trait/rand/base64/sha1; kept 
 - **AssistantPane drop handlers on `.pane` outer only**; `tauri.conf.json dragDropEnabled:false`; `.shell` `position:fixed; inset:0`.
 - **Blur-reveal** (`Markdown.svelte`): `shownCount` is the ONLY `$state`, written ONLY by the rAF loop — never inside a derived.
 - **Activity panel split:** Steps = settled ACTIONS only (`logSteps` drops `cat==="write"`); Outputs owns writes/edits → opens Session Diff. `SessionDiff.svelte` reads `tab.messages` via `EditDiff` `hideHead`; open via `assistant.ui.diffOpen/diffTarget`.
-- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at `/git-ship`. v0.4.46 stands.
+- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at `/git-ship`. **v0.5.0 stands** (shipped 2026-06-04, cont.51).
