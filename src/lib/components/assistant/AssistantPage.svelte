@@ -200,7 +200,7 @@
         data-dragging={dragging}
         style="grid-template-columns: {gridTemplate};"
       >
-        {#each assistant.panes as p, i (i)}
+        {#each assistant.panes as p, i (p.tabId)}
           <AssistantPane
             tabId={p.tabId}
             focused={assistant.focusedPaneIdx === i}
