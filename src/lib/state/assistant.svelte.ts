@@ -787,7 +787,7 @@ class TabState {
       }
       case "assistant": {
         if (this.currentTurnRecord) this.currentTurnRecord.assistantEnvCount += 1;
-        const msgUsage = (env.message as { usage?: Record<string, unknown> } | undefined)?.usage;
+        const msgUsage = env.message?.usage;
         if (msgUsage) this.recordTurnUsage(msgUsage, false);
         for (const block of env.message?.content ?? []) {
           if (block.type === "tool_use") {

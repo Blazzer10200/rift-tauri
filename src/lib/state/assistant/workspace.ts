@@ -93,11 +93,17 @@ export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
 /** Lazy-load the active workspace's git branch (or null if not a git repo).
  *  Cheap (`git rev-parse`); surfaced in the Welcome context strip. */
 export async function loadWorkspaceBranch(host: WorkspaceHost): Promise<void> {
-  if (!host.workspace.current) { host.workspaceBranch = null; return; }
+  const root = host.workspace.current;
+  if (!root) { host.workspaceBranch = null; return; }
   try {
-    host.workspaceBranch = await invoke<string | null>("assistant_workspace_branch");
+    const branch = await invoke<string | null>("assistant_workspace_branch");
+    // #190: discard a stale result if the root changed during the await.
+    if (host.workspace.current === root) host.workspaceBranch = branch;
   } catch (e) {
-    console.warn("assistant_workspace_branch failed", e);
-    host.workspaceBranch = null;
+    // #191: surface the failure instead of silently blanking the branch.
+    if (host.workspace.current === root) {
+      host.workspaceBranch = null;
+      host.lastError = `Branch read failed: ${String(e)}`;
+    }
   }
 }

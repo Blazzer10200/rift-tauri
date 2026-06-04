@@ -171,7 +171,7 @@ export type StreamEvent = {
 export type StreamEnvelope =
   | { type: "system"; subtype?: string; [k: string]: unknown }
   | { type: "stream_event"; event?: StreamEvent; [k: string]: unknown }
-  | { type: "assistant"; message: { content: ContentBlock[] } }
+  | { type: "assistant"; message: { content: ContentBlock[]; usage?: Record<string, unknown> } }
   | { type: "user"; message: { content: ContentBlock[] } }
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
 
