@@ -9,8 +9,8 @@
 .ob-overlay {
   /* mockup --gi-ghost-* → app accent ramp */
   --gi-ghost-bg: var(--accent-soft);
-  --gi-ghost-border: color-mix(in oklch, var(--accent) 28%, transparent);
-  --gi-ghost-bg-hover: color-mix(in oklch, var(--accent) 16%, transparent);
+  --gi-ghost-border: color-mix(in oklab, var(--accent) 28%, transparent);
+  --gi-ghost-bg-hover: color-mix(in oklab, var(--accent) 16%, transparent);
 
   height: 100%; width: 100%;
   display: flex; min-width: 0; min-height: 0;
@@ -23,15 +23,13 @@
   display: flex; flex-direction: column;
   padding: 26px 24px 22px;
   background:
-    radial-gradient(420px 280px at 8% -8%, color-mix(in oklch, var(--accent) 10%, transparent) 0%, transparent 62%),
+    radial-gradient(420px 280px at 8% -8%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 62%),
     var(--bg-inset);
   border-right: 1px solid var(--border);
 }
 .ob-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 38px; }
 .ob-brand-mark {
-  width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
-  color: var(--accent); background: var(--gi-ghost-bg);
-  box-shadow: inset 0 0 0 1px var(--gi-ghost-border);
+  width: 30px; height: 30px; display: grid; place-items: center;
 }
 .ob-brand-name { font-size: 15px; font-weight: 680; letter-spacing: -0.01em; color: var(--fg); }
 .ob-brand-tag {
@@ -65,10 +63,10 @@
 }
 .ob-step.active .ob-node {
   background: var(--gi-ghost-bg); border-color: var(--gi-ghost-border); color: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 10%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 10%, transparent);
 }
 .ob-step.done .ob-node { background: var(--accent); border-color: transparent; color: var(--accent-fg); }
-.ob-step.done .ob-node::after { background: color-mix(in oklch, var(--accent) 55%, var(--border)); }
+.ob-step.done .ob-node::after { background: color-mix(in oklab, var(--accent) 55%, var(--border)); }
 .ob-step-body { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; min-width: 0; }
 .ob-step-t { font-size: 13px; font-weight: 500; line-height: 1.25; }
 .ob-step.active .ob-step-t { color: var(--fg); font-weight: 600; }
@@ -110,7 +108,7 @@
 .ob-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); opacity: 0.92; }
 .ob-title { margin: 1px 0 0; font-size: 25px; font-weight: 680; letter-spacing: -0.02em; color: var(--fg); line-height: 1.1; }
 .ob-sub { margin: 2px 0 0; font-size: var(--fs-md); line-height: 1.55; color: var(--fg-muted); }
-.ob-sub code, .ob-mono-i { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 5px; background: var(--bg-elev-2); border-radius: var(--radius-xs); color: var(--fg-2); }
+.ob-sub code, .ob-mono-i { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 5px; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius-xs); color: var(--code-fg); }
 
 /* generic field */
 .ob-field { display: flex; flex-direction: column; gap: 6px; }
@@ -143,7 +141,7 @@
 .ob-btn.ghost:hover { background: var(--surface-hover); color: var(--fg); border-color: transparent; }
 .ob-btn.accent { background: var(--gi-ghost-bg); border-color: var(--gi-ghost-border); color: var(--accent); }
 .ob-btn.accent:hover { background: var(--gi-ghost-bg-hover); }
-.ob-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 2px 12px -2px color-mix(in oklch, var(--accent) 55%, transparent); }
+.ob-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 2px 12px -2px color-mix(in oklab, var(--accent) 55%, transparent); }
 .ob-btn.primary:hover { background: var(--accent-hover); }
 .ob-btn.primary:disabled { background: var(--bg-elev-3); color: var(--fg-faint); cursor: not-allowed; box-shadow: none; }
 .ob-btn:disabled { opacity: 0.55; cursor: not-allowed; }
@@ -303,7 +301,7 @@
   position: relative; height: 166px; border-radius: var(--r-card); overflow: hidden;
   display: grid; place-items: center;
   background:
-    radial-gradient(440px 210px at 50% 128%, color-mix(in oklch, var(--accent) 13%, transparent), transparent 72%),
+    radial-gradient(440px 210px at 50% 128%, color-mix(in oklab, var(--accent) 13%, transparent), transparent 72%),
     var(--bg-inset);
   border: 1px solid var(--border);
 }
@@ -356,7 +354,7 @@
 /* 5 · Sync — scan line over file rows */
 .ob-scan { position: relative; z-index: 2; width: 214px; display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
 .ob-scan-row { height: 9px; border-radius: 3px; background: var(--bg-elev-2); overflow: hidden; }
-.ob-scan-row > i { display: block; height: 100%; border-radius: 3px; background: color-mix(in oklch, var(--accent) 38%, var(--bg-elev-3)); }
+.ob-scan-row > i { display: block; height: 100%; border-radius: 3px; background: color-mix(in oklab, var(--accent) 38%, var(--bg-elev-3)); }
 .ob-scan-line { position: absolute; top: -5px; bottom: -5px; left: 0; width: 2px; background: var(--accent); box-shadow: 0 0 13px 1px var(--accent); opacity: 0; z-index: 3; }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -383,8 +381,8 @@
 @keyframes ob-lock { 0%, 58% { color: var(--fg-muted); border-color: var(--border); background: var(--bg-elev-2); } 78%, 100% { color: var(--accent); border-color: var(--gi-ghost-border); background: var(--gi-ghost-bg); } }
 @keyframes ob-pkt-r { 0% { left: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
 @keyframes ob-pkt-l { 0% { left: 100%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 0; opacity: 0; } }
-@keyframes ob-glow { 0%, 38% { box-shadow: none; border-color: var(--border); color: var(--fg-muted); } 58%, 100% { box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 11%, transparent); border-color: var(--gi-ghost-border); color: var(--accent); } }
-@keyframes ob-breathe { 0%, 100% { transform: scale(1); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 0 color-mix(in oklch, var(--accent) 24%, transparent); } 50% { transform: scale(1.07); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 13px color-mix(in oklch, var(--accent) 0%, transparent); } }
+@keyframes ob-glow { 0%, 38% { box-shadow: none; border-color: var(--border); color: var(--fg-muted); } 58%, 100% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 11%, transparent); border-color: var(--gi-ghost-border); color: var(--accent); } }
+@keyframes ob-breathe { 0%, 100% { transform: scale(1); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 0 color-mix(in oklab, var(--accent) 24%, transparent); } 50% { transform: scale(1.07); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 13px color-mix(in oklab, var(--accent) 0%, transparent); } }
 @keyframes ob-twinkle { 0%, 100% { opacity: 0; transform: scale(0.5); } 50% { opacity: 0.9; transform: scale(1); } }
 @keyframes ob-bounce { 0%, 100% { transform: translateY(0); opacity: 0.4; background: var(--fg-subtle); } 50% { transform: translateY(-6px); opacity: 1; background: var(--accent); } }
 @keyframes ob-sweep { 0% { left: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 100%; opacity: 0; } }

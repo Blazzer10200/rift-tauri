@@ -12,7 +12,13 @@
     <span class="ob-ring r1"></span>
     <span class="ob-ring r2"></span>
     <span class="ob-ring r3"></span>
-    <div class="ob-w-mark"><Sparkles size={26} /></div>
+    <div class="ob-w-mark">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8 3 5 12l4 2-2 7" />
+        <path d="M17 3l-2 7 4 2-3 9" opacity="0.55" />
+      </svg>
+    </div>
   {:else if kind === "ssh"}
     <div class="ob-ssh">
       <div class="ob-ssh-row">

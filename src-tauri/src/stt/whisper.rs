@@ -36,8 +36,16 @@ mod real {
             })
         }
 
-        /// Transcribe 16 kHz mono f32 samples. Blocking.
-        pub fn transcribe(&self, samples: &[f32], initial_prompt: &str) -> Result<String, String> {
+        /// Transcribe 16 kHz mono f32 samples. Blocking. `language` is an ISO
+        /// 639-1 code (`Some("en")`) or `None` for whisper.cpp auto-detect;
+        /// `beam_size` of `Some(n)` with `n > 1` switches greedy → beam search.
+        pub fn transcribe(
+            &self,
+            samples: &[f32],
+            initial_prompt: &str,
+            language: Option<&str>,
+            beam_size: Option<u8>,
+        ) -> Result<String, String> {
             if samples.is_empty() {
                 return Ok(String::new());
             }
@@ -46,8 +54,15 @@ mod real {
                 .create_state()
                 .map_err(|e| format!("whisper create_state: {e}"))?;
 
-            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-            params.set_language(Some("en"));
+            let strategy = match beam_size {
+                Some(n) if n > 1 => SamplingStrategy::BeamSearch {
+                    beam_size: n as i32,
+                    patience: 1.0,
+                },
+                _ => SamplingStrategy::Greedy { best_of: 1 },
+            };
+            let mut params = FullParams::new(strategy);
+            params.set_language(language.or(Some("en")));
             params.set_translate(false);
             params.set_no_timestamps(true);
             params.set_suppress_blank(true);
@@ -106,7 +121,13 @@ for GPU). The Web Speech engine remains available in Settings → Speech.";
             Err(NOT_BUILT_MSG.into())
         }
 
-        pub fn transcribe(&self, _samples: &[f32], _initial_prompt: &str) -> Result<String, String> {
+        pub fn transcribe(
+            &self,
+            _samples: &[f32],
+            _initial_prompt: &str,
+            _language: Option<&str>,
+            _beam_size: Option<u8>,
+        ) -> Result<String, String> {
             Err(NOT_BUILT_MSG.into())
         }
     }

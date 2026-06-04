@@ -279,7 +279,7 @@
     padding: 16px 18px 12px;
     background:
       linear-gradient(180deg,
-        color-mix(in oklch, var(--accent) 14%, var(--bg-elev-2)) 0%,
+        color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)) 0%,
         var(--bg-elev-2) 100%);
     border-bottom: 1px solid var(--border);
     overflow: hidden;
@@ -291,7 +291,7 @@
   }
   .upd-head[data-variant="danger"] {
     background: linear-gradient(180deg,
-      color-mix(in oklch, var(--danger) 14%, var(--bg-elev-2)) 0%,
+      color-mix(in oklab, var(--danger) 14%, var(--bg-elev-2)) 0%,
       var(--bg-elev-2) 100%);
   }
   .upd-head[data-variant="info"] {
@@ -305,13 +305,13 @@
     inset: -40% -20% auto -20%;
     height: 80%;
     background: radial-gradient(60% 100% at 50% 0%,
-      color-mix(in oklch, var(--accent) 25%, transparent) 0%,
+      color-mix(in oklab, var(--accent) 25%, transparent) 0%,
       transparent 70%);
     pointer-events: none;
     opacity: 0.7;
   }
   .upd-head[data-variant="ok"] .head-glow     { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklch, var(--ok) 22%, transparent), transparent 70%); }
-  .upd-head[data-variant="danger"] .head-glow { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklch, var(--danger) 22%, transparent), transparent 70%); }
+  .upd-head[data-variant="danger"] .head-glow { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--danger) 22%, transparent), transparent 70%); }
   .upd-head[data-variant="info"] .head-glow   { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklch, var(--info) 22%, transparent), transparent 70%); }
 
   .head-row {
@@ -324,13 +324,13 @@
     width: 32px; height: 32px;
     border-radius: 8px;
     display: flex; align-items: center; justify-content: center;
-    background: color-mix(in oklch, var(--accent) 25%, var(--bg-elev-3));
+    background: color-mix(in oklab, var(--accent) 25%, var(--bg-elev-3));
     color: var(--accent);
-    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
-    box-shadow: 0 0 16px color-mix(in oklch, var(--accent) 22%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
+    box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 22%, transparent);
   }
   .head-icon[data-variant="ok"]     { background: color-mix(in oklch, var(--ok) 25%, var(--bg-elev-3));     color: var(--ok);     border-color: color-mix(in oklch, var(--ok) 30%, transparent);     box-shadow: 0 0 16px color-mix(in oklch, var(--ok) 22%, transparent); }
-  .head-icon[data-variant="danger"] { background: color-mix(in oklch, var(--danger) 25%, var(--bg-elev-3)); color: var(--danger); border-color: color-mix(in oklch, var(--danger) 30%, transparent); box-shadow: 0 0 16px color-mix(in oklch, var(--danger) 22%, transparent); }
+  .head-icon[data-variant="danger"] { background: color-mix(in oklab, var(--danger) 25%, var(--bg-elev-3)); color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); box-shadow: 0 0 16px color-mix(in oklab, var(--danger) 22%, transparent); }
   .head-icon[data-variant="info"]   { background: color-mix(in oklch, var(--info) 25%, var(--bg-elev-3));   color: var(--info);   border-color: color-mix(in oklch, var(--info) 30%, transparent);   box-shadow: 0 0 16px color-mix(in oklch, var(--info) 22%, transparent); }
 
   .head-text { min-width: 0; }
@@ -376,12 +376,12 @@
   }
   .diff-chip.target {
     color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 14%, var(--bg-elev-3));
-    border-color: color-mix(in oklch, var(--accent) 35%, transparent);
+    background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-3));
+    border-color: color-mix(in oklab, var(--accent) 35%, transparent);
   }
   .upd-head[data-variant="ok"]     .diff-chip.target { color: var(--ok);     background: color-mix(in oklch, var(--ok) 14%, var(--bg-elev-3));     border-color: color-mix(in oklch, var(--ok) 35%, transparent); }
   .upd-head[data-variant="info"]   .diff-chip.target { color: var(--info);   background: color-mix(in oklch, var(--info) 14%, var(--bg-elev-3));   border-color: color-mix(in oklch, var(--info) 35%, transparent); }
-  .upd-head[data-variant="danger"] .diff-chip.target { color: var(--danger); background: color-mix(in oklch, var(--danger) 14%, var(--bg-elev-3)); border-color: color-mix(in oklch, var(--danger) 35%, transparent); }
+  .upd-head[data-variant="danger"] .diff-chip.target { color: var(--danger); background: color-mix(in oklab, var(--danger) 14%, var(--bg-elev-3)); border-color: color-mix(in oklab, var(--danger) 35%, transparent); }
 
   :global(.diff-arrow) { color: var(--fg-faint); }
   .diff-meta {
@@ -427,8 +427,8 @@
   .err-card {
     display: grid; grid-template-columns: 18px 1fr; gap: 10px;
     padding: 12px 14px;
-    background: color-mix(in oklch, var(--danger) 8%, var(--bg-elev-2));
-    border: 1px solid color-mix(in oklch, var(--danger) 30%, var(--border));
+    background: color-mix(in oklab, var(--danger) 8%, var(--bg-elev-2));
+    border: 1px solid color-mix(in oklab, var(--danger) 30%, var(--border));
     border-radius: var(--radius-sm);
   }
   .err-card :global(svg) { color: var(--danger); }
@@ -505,8 +505,8 @@
 
   .btn.glow {
     box-shadow:
-      0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
-      0 0 18px color-mix(in oklch, var(--accent) 35%, transparent);
+      0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent),
+      0 0 18px color-mix(in oklab, var(--accent) 35%, transparent);
   }
 
   /* Download progress */

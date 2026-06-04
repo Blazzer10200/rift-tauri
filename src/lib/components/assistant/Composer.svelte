@@ -1,11 +1,13 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
-    Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, SlidersHorizontal,
-    Bot, Terminal, Wrench, ListPlus, Sparkles } from "lucide-svelte";
+    Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon,
+    Bot, Terminal, Wrench, ListPlus, Sparkles, Eye, ChevronUp } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { ModelSel, PermissionMode } from "../../state/assistant/types";
+  import Markdown from "./Markdown.svelte";
   import { modelFamily, liveActivity } from "../../state/assistant/helpers";
   import { stt } from "../../state/stt.svelte";
+  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { tick, onMount } from "svelte";
 
@@ -125,40 +127,26 @@
     version: string;
     tagline: string;
     ctx: string;
+    suffix: string;   // muted inline tag beside the name (e.g. "1M context")
+    legacy: boolean;   // previous-generation — grouped under a "Legacy" subhead
   };
-  // Laid out 2×2 (row-major): Sonnet · Haiku on top, the two Opus versions
-  // below. `opus` is the alias → newest Opus (4.8, 1M-ctx beta);
-  // `claude-opus-4-7` pins the prior generation. Both render purple via the
-  // shared opus family hue.
+  // Flat single-column list (Claude-Code-Desktop layout): current models first,
+  // legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
+  // 1M-ctx beta); `claude-opus-4-7` pins the prior generation. The CLI takes
+  // the alias / pinned id; name + suffix are display-only.
   const MODEL_OPTIONS: ModelOpt[] = [
-    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default", ctx: "1M ctx" },
-    { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", ctx: "200K ctx" },
-    { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning", ctx: "1M ctx" },
-    { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx" },
+    { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false },
+    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false },
+    { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             ctx: "200K ctx", suffix: "200K context", legacy: false },
+    { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    ctx: "1M ctx",   suffix: "1M context",   legacy: true  },
   ];
+  const currentModels = MODEL_OPTIONS.filter((m) => !m.legacy);
+  const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
+  // 1-based number shortcut → model id (digit keys pick directly in the menu).
+  const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
 
-  // Session-rotated idle placeholders — cycle every ~6s while the composer is
-  // unfocused + empty, so the user sees tips drift past without staring at a
-  // single line. Pauses on focus/draft so it never moves under the cursor.
-  const IDLE_PLACEHOLDERS = [
-    "Ask Claude",
-    "Ask Claude · @ to mention a file",
-    "Ask Claude · / for commands",
-    "Ask Claude · Shift+Enter for newline",
-    "Ask Claude · paste an image to attach",
-  ];
-  let placeholderIdx = $state(Math.floor(Math.random() * IDLE_PLACEHOLDERS.length));
-  let placeholderKey = $state(0); // bumps to retrigger fade animation
+  // Idle placeholder — static ghost with `/` `@` keycaps (mock `.ph-ghost`).
   let composerFocused = $state(false);
-  const idlePlaceholder = $derived(IDLE_PLACEHOLDERS[placeholderIdx % IDLE_PLACEHOLDERS.length]);
-  $effect(() => {
-    if (composerFocused || draft.length > 0 || streaming || attachments.length > 0) return;
-    const h = setInterval(() => {
-      placeholderIdx = (placeholderIdx + 1) % IDLE_PLACEHOLDERS.length;
-      placeholderKey++;
-    }, 6000);
-    return () => clearInterval(h);
-  });
 
   function autosize() {
     if (!ta) return;
@@ -274,11 +262,13 @@
 
   // Slash menu state. Triggers when the draft starts with `/` and the
   // textarea has focus. Filters by the text after the slash.
-  // One unified settings popover folds model + thinking depth + permission
-  // mode into a single toolbar control. `settingsOpen` flips it; `settingsIdx`
-  // is the flat cursor across all three sections (see `settingsRows`).
+  // Two toolbar pills (mock split): `settingsOpen` drives the model+effort
+  // popover (settings-pill), `permOpen` drives the permission-mode popover
+  // (perm-pill). `settingsIdx`/`permIdx` are the keyboard cursors for each.
   let settingsOpen = $state(false);
   let settingsIdx = $state(0);
+  let permOpen = $state(false);
+  let permIdx = $state(0);
   const slashOpen = $derived(
     !settingsOpen &&
       draft.startsWith("/") &&
@@ -310,11 +300,38 @@
     { id: "ultra", label: "Ultracode", level: 4, hint: "Ultracode — max reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
-  function pickEffort(e: EffortOpt) {
-    assistant.setThinkingEffort(e.id);
-    settingsOpen = false;
-    void tick().then(() => ta?.focus());
+  // Haiku ignores extended thinking server-side — the backend drops `--effort`
+  // (effortToFlag → null) and never sets the ultracode key. Single source of
+  // truth for every effort-affordance gate (slider, pill label, ultra glyph).
+  const effortApplies = $derived(assistant.model !== "haiku");
+  // Effort rendered as a Faster↔Smarter slider: stops map 1:1 to EFFORT_OPTIONS
+  // (Instant→Ultracode). Index drives the knob position + keyboard ←/→ nudge.
+  const effortIdx = $derived(Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)));
+  function setEffortByIdx(i: number) {
+    const c = Math.min(EFFORT_OPTIONS.length - 1, Math.max(0, i));
+    assistant.setThinkingEffort(EFFORT_OPTIONS[c].id);
   }
+  // Pointer-drag the slider: map clientX → nearest stop. Pointer-capture on the
+  // track keeps move/up flowing even when the cursor leaves the row.
+  let effortTrackEl: HTMLDivElement | null = $state(null);
+  let draggingEffort = $state(false);
+  function effortIdxFromClientX(clientX: number): number {
+    if (!effortTrackEl) return effortIdx;
+    const r = effortTrackEl.getBoundingClientRect();
+    const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    return Math.round(frac * (EFFORT_OPTIONS.length - 1));
+  }
+  function startEffortDrag(e: PointerEvent) {
+    e.preventDefault();
+    draggingEffort = true;
+    setEffortByIdx(effortIdxFromClientX(e.clientX));
+    effortTrackEl?.setPointerCapture?.(e.pointerId);
+  }
+  function moveEffortDrag(e: PointerEvent) {
+    if (!draggingEffort) return;
+    setEffortByIdx(effortIdxFromClientX(e.clientX));
+  }
+  function endEffortDrag() { draggingEffort = false; }
 
   // Permission-mode picker — mirrors the effort/model pills. Order matches the
   // VS Code Claude Code menu: ask → auto-edit → plan → auto → bypass. Icons
@@ -328,10 +345,16 @@
     { id: "bypassPermissions", label: "Bypass permissions", icon: InfinityIcon, hint: "Bypass permissions — never ask before running anything" },
   ];
   const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
+  const PermIcon = $derived(currentMode.icon);
   function pickMode(m: ModeOpt) {
     assistant.setPermissionMode(m.id);
-    settingsOpen = false;
+    permOpen = false;
     void tick().then(() => ta?.focus());
+  }
+  // Shift+Tab cycles the permission mode (mock affordance) without opening the menu.
+  function cyclePerm() {
+    const i = MODE_OPTIONS.findIndex((m) => m.id === assistant.permissionMode);
+    assistant.setPermissionMode(MODE_OPTIONS[(i + 1) % MODE_OPTIONS.length].id);
   }
 
   // Flat, navigable row list spanning all three sections of the unified
@@ -340,14 +363,12 @@
   // + the active highlight; mouse clicks call the per-kind pick fns directly.
   type SettingsRow =
     | { kind: "model"; model: ModelOpt }
-    | { kind: "effort"; effort: EffortOpt }
-    | { kind: "mode"; mode: ModeOpt };
+    | { kind: "fast" }
+    | { kind: "effort" };
   const settingsRows = $derived.by<SettingsRow[]>(() => {
     const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
-    if (assistant.model !== "haiku") {
-      rows.push(...EFFORT_OPTIONS.map((e) => ({ kind: "effort" as const, effort: e })));
-    }
-    rows.push(...MODE_OPTIONS.map((m) => ({ kind: "mode" as const, mode: m })));
+    rows.push({ kind: "fast" });
+    if (effortApplies) rows.push({ kind: "effort" });
     return rows;
   });
   // Re-seed the cursor to the current model row whenever the panel opens.
@@ -357,10 +378,17 @@
       settingsIdx = i >= 0 ? i : 0;
     }
   });
+  // Re-seed the perm cursor to the current mode whenever the perm menu opens.
+  $effect(() => {
+    if (permOpen) {
+      const i = MODE_OPTIONS.findIndex((m) => m.id === assistant.permissionMode);
+      permIdx = i >= 0 ? i : 0;
+    }
+  });
   function pickRow(row: SettingsRow) {
     if (row.kind === "model") pickModel(row.model);
-    else if (row.kind === "effort") pickEffort(row.effort);
-    else pickMode(row.mode);
+    else if (row.kind === "fast") uiPrefs.toggleFastMode();
+    else { settingsOpen = false; void tick().then(() => ta?.focus()); }
   }
 
   function pickSlash(c: SlashCmd) {
@@ -420,6 +448,8 @@
   let enhancing = $state(false);
   let enhancedPreview = $state<string | null>(null);
   let enhanceError = $state<string | null>(null);
+  // Draft preview (eye) — render the composer draft as Markdown before sending.
+  let previewing = $state(false);
   // Split preserving whitespace so the reveal can stagger word-by-word while
   // keeping spacing/newlines intact. Each chunk gets its own materialize delay.
   const enhancedWords = $derived(
@@ -551,6 +581,42 @@
     return () => window.removeEventListener("resize", onResize);
   });
 
+  // Permission-mode menu — portals to <body> like the hint pop, so it escapes
+  // the composer's `overflow: hidden` + backdrop-filter containing block.
+  let permWrap = $state<HTMLButtonElement | null>(null);
+  let permPop = $state<HTMLDivElement | null>(null);
+  let permPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
+  function positionPerm() {
+    if (!permWrap || !permPop) return;
+    const a = permWrap.getBoundingClientRect();
+    const ph = permPop.offsetHeight || 220;
+    const pw = permPop.offsetWidth || 252;
+    let top = a.top - ph - 8;
+    if (top < 8) top = a.bottom + 8;
+    let left = a.left;
+    const maxLeft = window.innerWidth - pw - 8;
+    if (left > maxLeft) left = maxLeft;
+    if (left < 8) left = 8;
+    permPos = { top, left };
+  }
+  function onDocPermMousedown(ev: MouseEvent) {
+    if (!permOpen) return;
+    if (permWrap && ev.target instanceof Node && permWrap.contains(ev.target)) return;
+    if (permPop && ev.target instanceof Node && permPop.contains(ev.target)) return;
+    permOpen = false;
+  }
+  $effect(() => {
+    window.addEventListener("mousedown", onDocPermMousedown);
+    return () => window.removeEventListener("mousedown", onDocPermMousedown);
+  });
+  $effect(() => {
+    if (!permOpen) return;
+    void tick().then(positionPerm);
+    const onResize = () => positionPerm();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  });
+
   let attachError = $state<string | null>(null);
   async function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
@@ -598,11 +664,26 @@
   function resetRecall() { recallOffset = -1; }
 
   function onKey(e: KeyboardEvent) {
+    // Shift+Tab cycles permission mode (mock affordance), regardless of menus.
+    if (e.key === "Tab" && e.shiftKey) {
+      e.preventDefault();
+      cyclePerm();
+      return;
+    }
     // Enhance preview claims Escape first — dismiss it before menu handlers.
     if ((enhancedPreview !== null || enhanceError !== null) && e.key === "Escape") {
       e.preventDefault();
       dismissEnhanced();
       return;
+    }
+    // Permission-mode menu nav (mirrors the settings-menu nav below).
+    if (permOpen) {
+      const n = MODE_OPTIONS.length;
+      if (e.key === "ArrowDown") { e.preventDefault(); permIdx = (permIdx + 1) % n; return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); permIdx = (permIdx - 1 + n) % n; return; }
+      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickMode(MODE_OPTIONS[permIdx]); return; }
+      if (e.key === "Escape") { e.preventDefault(); permOpen = false; return; }
+      if (e.key.length === 1) permOpen = false;
     }
     // Mention picker keys take precedence — runs before history recall so
     // arrow keys navigate the list, not the prompt history.
@@ -666,6 +747,7 @@
     }
     if (settingsOpen) {
       const n = settingsRows.length;
+      const cur = settingsRows[settingsIdx];
       if (e.key === "ArrowDown") {
         e.preventDefault();
         settingsIdx = (settingsIdx + 1) % n;
@@ -676,9 +758,20 @@
         settingsIdx = (settingsIdx - 1 + n) % n;
         return;
       }
+      // ←/→ drives the effort slider when the cursor is parked on it.
+      if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && cur?.kind === "effort") {
+        e.preventDefault();
+        setEffortByIdx(effortIdx + (e.key === "ArrowRight" ? 1 : -1));
+        return;
+      }
+      // Digit 1–N jumps straight to that model row.
+      if (/^[1-9]$/.test(e.key)) {
+        const m = MODEL_OPTIONS[Number(e.key) - 1];
+        if (m) { e.preventDefault(); pickModel(m); return; }
+      }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
-        pickRow(settingsRows[settingsIdx]);
+        pickRow(cur);
         return;
       }
       if (e.key === "Escape") {
@@ -945,18 +1038,31 @@
       </div>
     {/if}
 
+    {#if previewing && draft.trim().length > 0}
+      <div class="preview-panel" role="region" aria-label="Message preview">
+        <div class="preview-head">
+          <Eye size={12} />
+          <span class="preview-title">Preview</span>
+          <span class="preview-sub">rendered Markdown</span>
+        </div>
+        <div class="preview-body"><Markdown text={draft} /></div>
+      </div>
+    {/if}
+
     {#if slashOpen && slashFiltered.length > 0}
-      <div class="slash-menu" role="listbox">
+      <div class="rift-menu slash-menu" role="listbox">
         {#each slashFiltered as c, i (c.name)}
           <button
             type="button"
-            class="slash-item"
+            class="rift-menu-row slash-row"
             class:active={i === slashIdx}
             style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickSlash(c); }}
           >
-            <span class="slash-name">/{c.name}</span>
-            <span class="slash-desc">{c.desc}</span>
+            <span class="rift-menu-row-body">
+              <span class="rift-menu-row-t slash-cmd">/{c.name}</span>
+              <span class="rift-menu-row-d">{c.desc}</span>
+            </span>
           </button>
         {/each}
         <div class="slash-hint">↑↓ select · Tab/Enter pick · Esc cancel</div>
@@ -964,14 +1070,14 @@
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
-      <div class="slash-menu mention-menu" role="listbox">
+      <div class="rift-menu slash-menu mention-menu" role="listbox">
         {#each mentionResults as path, i (path)}
           {@const slash = path.lastIndexOf("/")}
           {@const dir = slash > 0 ? path.slice(0, slash + 1) : ""}
           {@const base = slash >= 0 ? path.slice(slash + 1) : path}
           <button
             type="button"
-            class="slash-item mention-item"
+            class="rift-menu-row mention-item"
             class:active={i === mentionIdx}
             style="--idx: {i}"
             onmousedown={(e) => { e.preventDefault(); pickMention(path); }}
@@ -989,92 +1095,109 @@
     {/if}
 
     {#if settingsOpen}
-      <div class="slash-menu model-menu settings-menu" role="listbox">
-        <div class="settings-section">
-          <div class="model-header"><span>Model</span></div>
-          <div class="settings-grid">
-            {#each MODEL_OPTIONS as m (m.id)}
-              {@const idx = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === m.id)}
-              <button
-                type="button"
-                class="settings-item model-card"
-                class:active={idx === settingsIdx}
-                class:current={m.id === assistant.model}
-                data-id={m.id}
-                style="--idx: {idx}"
-                use:tooltip={m.tagline}
-                onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
-              >
-                <span class="card-head">
-                  <span class="model-dot" aria-hidden="true"></span>
-                  <span class="model-label">{m.label}</span>
-                  <span class="model-version">{m.version}</span>
-                </span>
-                <span class="model-ctx" class:wide={m.ctx === "1M ctx"}>{m.ctx}</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-        <div class="settings-cols">
-          {#if assistant.model !== "haiku"}
-            <div class="settings-section">
-              <div class="model-header"><span>Thinking depth</span></div>
-              <div class="settings-stack">
-                {#each EFFORT_OPTIONS as e (e.id)}
-                  {@const idx = settingsRows.findIndex((r) => r.kind === "effort" && r.effort.id === e.id)}
-                  <button
-                    type="button"
-                    class="settings-item effort-row"
-                    class:active={idx === settingsIdx}
-                    class:current={e.id === assistant.thinkingEffort}
-                    class:ultra={e.id === "ultra"}
-                    data-level={e.level}
-                    style="--idx: {idx}"
-                    use:tooltip={e.hint}
-                    onmousedown={(ev) => { ev.preventDefault(); pickEffort(e); }}
-                  >
-                    {#if e.id === "ultra"}
-                      <span class="effort-ultra-icon" aria-hidden="true"><Sparkles size={13} /></span>
-                    {:else}
-                      <span class="effort-bars" aria-hidden="true" data-level={e.level}>
-                        <span class="bar"></span>
-                        <span class="bar"></span>
-                        <span class="bar"></span>
-                      </span>
-                    {/if}
-                    <span class="model-label">{e.label}</span>
-                  </button>
-                {/each}
-              </div>
-            </div>
+      {@const stops = EFFORT_OPTIONS.length}
+      {@const effortPct = stops > 1 ? (effortIdx / (stops - 1)) * 100 : 0}
+      <div class="rift-menu settings-menu" role="listbox">
+        <div class="rift-menu-head">Model</div>
+        {#each MODEL_OPTIONS as m, i (m.id)}
+          {#if m.legacy && (i === 0 || !MODEL_OPTIONS[i - 1].legacy)}
+            <div class="rift-menu-sub">Legacy</div>
           {/if}
-          <div class="settings-section">
-            <div class="model-header"><span>Permission mode</span></div>
-            <div class="settings-stack">
-              {#each MODE_OPTIONS as m (m.id)}
-                {@const idx = settingsRows.findIndex((r) => r.kind === "mode" && r.mode.id === m.id)}
-                {@const Icon = m.icon}
+          <button
+            type="button"
+            class="rift-menu-row model-row"
+            class:active={i === settingsIdx}
+            class:current={m.id === assistant.model}
+            use:tooltip={m.tagline}
+            onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
+          >
+            <span class="rift-menu-row-t model-row-name">{m.label} {m.version}</span>
+            {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
+            {#if m.id === assistant.model}
+              <Check size={14} class="rift-menu-row-chk" />
+            {:else}
+              <kbd class="model-num">{modelShortcut(m.id)}</kbd>
+            {/if}
+          </button>
+        {/each}
+
+        <div class="rift-menu-divider"></div>
+        <div class="rift-menu-sub">Fast mode</div>
+        <button
+          type="button"
+          class="rift-menu-row toggle-row"
+          class:active={settingsRows[settingsIdx]?.kind === "fast"}
+          onmousedown={(e) => { e.preventDefault(); uiPrefs.toggleFastMode(); }}
+          aria-pressed={uiPrefs.fastMode}
+        >
+          <span class="rift-menu-row-body">
+            <span class="rift-menu-row-t">Enable fast mode</span>
+            <span class="rift-menu-row-d">Opus with faster output</span>
+          </span>
+          <span class="rift-toggle" class:on={uiPrefs.fastMode} aria-hidden="true">
+            <span class="rift-toggle-knob"></span>
+          </span>
+        </button>
+
+        {#if effortApplies}
+          <div class="rift-menu-divider"></div>
+          <div class="effort-head" class:ultra={currentEffort.id === "ultra"}>
+            <span class="effort-head-l">Effort <b>{currentEffort.label}</b></span>
+            <button
+              type="button"
+              class="effort-help"
+              use:tooltip={currentEffort.hint}
+              onmousedown={(e) => e.preventDefault()}
+              aria-label="What does effort do?"
+            ><HelpCircle size={12} /></button>
+          </div>
+          <div
+            class="effort-slider"
+            class:active={settingsRows[settingsIdx]?.kind === "effort"}
+            class:ultra={currentEffort.id === "ultra"}
+            class:dragging={draggingEffort}
+            role="slider"
+            tabindex="-1"
+            aria-label="Effort"
+            aria-valuemin={1}
+            aria-valuemax={stops}
+            aria-valuenow={effortIdx + 1}
+            aria-valuetext={currentEffort.label}
+          >
+            <div
+              class="effort-track"
+              role="presentation"
+              bind:this={effortTrackEl}
+              onpointerdown={startEffortDrag}
+              onpointermove={moveEffortDrag}
+              onpointerup={endEffortDrag}
+              onpointercancel={endEffortDrag}
+            >
+              <div class="effort-fill" style="width: {effortPct}%"></div>
+              {#each EFFORT_OPTIONS as e, i (e.id)}
                 <button
                   type="button"
-                  class="settings-item mode-row"
-                  class:active={idx === settingsIdx}
-                  class:current={m.id === assistant.permissionMode}
-                  data-id={m.id}
-                  style="--idx: {idx}"
-                  use:tooltip={m.hint}
-                  onmousedown={(ev) => { ev.preventDefault(); pickMode(m); }}
-                >
-                  <span class="mode-icon" aria-hidden="true"><Icon size={15} /></span>
-                  <span class="model-label">{m.label}</span>
-                </button>
+                  class="effort-notch"
+                  class:on={i <= effortIdx}
+                  class:cur={i === effortIdx}
+                  class:ultra={e.id === "ultra"}
+                  style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
+                  use:tooltip={e.hint}
+                  aria-label={e.label}
+                  onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
+                ></button>
               {/each}
+              <div class="effort-knob" style="left: {effortPct}%"></div>
             </div>
+            <div class="effort-ends"><span>Faster</span><span>Smarter</span></div>
           </div>
-        </div>
-        <div class="slash-hint model-hint">
-          <span><kbd>↑↓</kbd> navigate</span>
-          <span><kbd>↵</kbd> pick</span>
-          <span><kbd>Esc</kbd> close</span>
+        {/if}
+
+        <div class="rift-menu-hint">
+          <span><kbd>1–{MODEL_OPTIONS.length}</kbd>model</span>
+          {#if effortApplies}<span><kbd>←→</kbd>effort</span>{/if}
+          <span><kbd>↵</kbd>pick</span>
+          <span><kbd>Esc</kbd>close</span>
         </div>
       </div>
     {/if}
@@ -1102,9 +1225,7 @@
           rows="1"
         ></textarea>
         {#if draft.length === 0 && !streaming && attachments.length === 0}
-          {#key placeholderKey}
-            <span class="placeholder-ghost" aria-hidden="true">{idlePlaceholder}</span>
-          {/key}
+          <span class="placeholder-ghost static" aria-hidden="true">Ask Claude · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file</span>
         {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Type to queue — Enter sends, /stop halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
@@ -1133,7 +1254,7 @@
           {/if}
         </div>
         {#if ctxTokens > 0}
-          <span class="ctx-readout" data-tone={ctxTone} aria-hidden="true">{ctxPct < 1 ? "<1" : Math.round(ctxPct)}%</span>
+          <span class="ctx-readout" data-tone={ctxTone} aria-hidden="true">{ctxPct < 1 ? "<1" : Math.round(ctxPct)}% context</span>
         {/if}
       </div>
 
@@ -1157,6 +1278,17 @@
             aria-label="Attach image"
           >
             <Paperclip size={14} />
+          </button>
+          <button
+            class="iconbtn wandbtn"
+            class:enhancing
+            type="button"
+            onclick={runEnhance}
+            disabled={enhancing || draft.trim().length === 0}
+            use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify"}
+            aria-label="Improve prompt"
+          >
+            <Wand2 size={14} />
           </button>
           {#if stt.config.enabled && (
             (stt.config.engine === "web_speech" && stt.supported) ||
@@ -1187,6 +1319,18 @@
             {/if}
           </button>
           {/if}
+          <button
+            class="iconbtn previewbtn"
+            class:on={previewing}
+            type="button"
+            onclick={() => (previewing = !previewing)}
+            disabled={draft.trim().length === 0}
+            aria-pressed={previewing}
+            use:tooltip={previewing ? "Hide preview" : "Preview as Markdown"}
+            aria-label="Preview message"
+          >
+            <Eye size={14} />
+          </button>
           <div class="hint-wrap" bind:this={hintWrap}>
             <button
               type="button"
@@ -1218,19 +1362,6 @@
               </div>
             {/if}
           </div>
-          {#if draft.trim().length > 0 && !streaming}
-            <button
-              class="iconbtn wandbtn"
-              class:enhancing
-              type="button"
-              onclick={runEnhance}
-              disabled={enhancing}
-              use:tooltip={enhancing ? "Enhancing…" : "Enhance prompt — clean up & clarify"}
-              aria-label="Enhance prompt"
-            >
-              <Wand2 size={14} />
-            </button>
-          {/if}
           {#if draft.length > 500}
             <span
               class="char-count"
@@ -1309,23 +1440,75 @@
         <div class="toolbar-cluster toolbar-right">
           <button
             type="button"
+            class="perm-pill"
+            class:open={permOpen}
+            data-mode={currentMode.id}
+            bind:this={permWrap}
+            onclick={() => { permOpen = !permOpen; settingsOpen = false; void tick().then(() => ta?.focus()); }}
+            aria-haspopup="listbox"
+            aria-expanded={permOpen}
+            aria-label="Permission mode"
+            use:tooltip={{ text: `Permission mode — ${currentMode.label}`, kbd: "⇧Tab" }}
+          >
+            <PermIcon size={13} />
+            <span class="perm-label">{currentMode.label}</span>
+            <ChevronUp size={12} class="pill-chev" />
+          </button>
+
+          {#if permOpen}
+            <div
+              class="perm-menu"
+              role="listbox"
+              bind:this={permPop}
+              use:portal
+              style="top: {permPos.top}px; left: {permPos.left}px;"
+            >
+              <div class="mm-head">Permission mode <kbd class="perm-kbd">⇧Tab</kbd></div>
+              {#each MODE_OPTIONS as m, i (m.id)}
+                {@const Icon = m.icon}
+                <button
+                  type="button"
+                  class="perm-row"
+                  class:active={i === permIdx}
+                  class:current={m.id === assistant.permissionMode}
+                  data-mode={m.id}
+                  use:tooltip={m.hint}
+                  onmousedown={(ev) => { ev.preventDefault(); pickMode(m); }}
+                >
+                  <span class="perm-row-ic"><Icon size={13} /></span>
+                  <span class="perm-row-tt">
+                    <span class="perm-row-t">{m.label}</span>
+                    <span class="perm-row-d">{m.hint.split(" — ")[1] ?? m.hint}</span>
+                  </span>
+                  {#if m.id === assistant.permissionMode}<Check size={13} class="perm-row-chk" />{/if}
+                </button>
+              {/each}
+            </div>
+          {/if}
+
+          <button
+            type="button"
             class="settings-pill"
             class:open={settingsOpen}
-            class:ultra={assistant.thinkingEffort === "ultra"}
-            data-mode={currentMode.id}
-            onclick={() => { settingsOpen = !settingsOpen; void tick().then(() => ta?.focus()); }}
+            class:ultra={effortApplies && assistant.thinkingEffort === "ultra"}
+            data-model={currentModel ? modelFamily(currentModel.id) : ""}
+            onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
-            aria-label="Model, thinking depth & permission mode"
-            use:tooltip={`Model · thinking depth · permission mode\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model} · ${currentEffort.label} · ${currentMode.label}`}
+            aria-label="Model & thinking depth"
+            use:tooltip={effortApplies
+              ? `Model · thinking depth\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model} · ${currentEffort.label}`
+              : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model} · no extended thinking`}
           >
-            <SlidersHorizontal size={15} />
+            <span class="mode-dot" aria-hidden="true"></span>
             <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model}</span>
-            {#if assistant.thinkingEffort === "ultra"}
+            {#if effortApplies}
+              <span class="pill-effort">· {currentEffort.label}</span>
+            {/if}
+            {#if effortApplies && assistant.thinkingEffort === "ultra"}
               <span class="pill-ultra" aria-hidden="true" use:tooltip={"Ultracode — max reasoning + autonomous workflows"}><Sparkles size={11} /></span>
             {/if}
-            <span class="mode-dot" aria-hidden="true"></span>
-            <span class="pill-caret" aria-hidden="true">▾</span>
+            <ChevronUp size={13} class="pill-chev" />
           </button>
           <button
             class="sendbtn"
@@ -1366,12 +1549,9 @@
     width: 100%;
     box-sizing: border-box;
   }
-  /* Aurora hue follows the active model — sonnet=blue, opus=purple,
-     haiku=teal. Resolved here so every accent inside (border, ripple,
-     streaming ring, model-pill pulse) reads from the same single source. */
-  .composer-wrap[data-model="sonnet"] { --model-color: oklch(0.74 0.13 230); }
-  .composer-wrap[data-model="opus"]   { --model-color: oklch(0.70 0.18 295); }
-  .composer-wrap[data-model="haiku"]  { --model-color: oklch(0.78 0.14 180); }
+  /* Composer chrome is emerald-only — the ring/divider/send/ripple no longer
+     tint by model. Every accent inside reads from this single source; model
+     identity lives on the model-card swatch in the picker. */
   .composer-wrap                      { --model-color: var(--accent); }
   .composer-shell { position: relative; }
   .composer-shell.drag-over .composer {
@@ -1525,6 +1705,7 @@
     z-index: 0;
   }
   .placeholder-ghost.static { animation: none; }
+  .placeholder-ghost .ph-k { font-family: var(--font-mono); color: var(--fg-faint); font-size: 11px; padding: 0 2px; }
   .composer:focus-within .placeholder-ghost { color: var(--fg-faint); }
   @keyframes placeholder-fade {
     from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
@@ -1555,9 +1736,9 @@
   /* Trailing ctx% — tabular so it doesn't jitter as the number ticks; tone
      steps mirror the fill (yellow ≥70, red ≥90). */
   .ctx-readout {
-    flex-shrink: 0;
-    font-size: 9px; font-weight: 600; line-height: 1;
-    letter-spacing: 0.02em;
+    flex-shrink: 0; white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 10px; line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--fg-faint);
     transition: color 240ms ease-out;
@@ -1575,11 +1756,11 @@
   }
   .composer-divider[data-tone="yellow"] .composer-divider-fill {
     background: var(--warn);
-    box-shadow: 0 0 6px color-mix(in oklch, var(--warn) 50%, transparent);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 50%, transparent);
   }
   .composer-divider[data-tone="red"] .composer-divider-fill {
     background: var(--danger);
-    box-shadow: 0 0 8px color-mix(in oklch, var(--danger) 55%, transparent);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--danger) 55%, transparent);
     animation: ctx-pulse 1.6s ease-in-out infinite;
   }
   @keyframes ctx-pulse {
@@ -1652,13 +1833,13 @@
   }
   .micbtn.transcribing {
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 40%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
     opacity: 1;
   }
   :global(.mic-spin) { animation: mic-spin 0.9s linear infinite; }
   @keyframes mic-spin { to { transform: rotate(360deg); } }
   @keyframes mic-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--danger) 45%, transparent); }
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger) 45%, transparent); }
     50%      { box-shadow: 0 0 0 6px transparent; }
   }
   /* Live recording waveform — 3 bars w/ staggered scaleY pulses. Pure CSS;
@@ -1705,8 +1886,8 @@
   }
   .char-count.warn {
     color: var(--warn);
-    border-color: color-mix(in oklch, var(--warn) 35%, var(--border));
-    background: color-mix(in oklch, var(--warn) 10%, transparent);
+    border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
+    background: color-mix(in oklab, var(--warn) 10%, transparent);
   }
 
   /* Live turn pills — additive readout that only mounts while a turn is in
@@ -1778,16 +1959,16 @@
                 box-shadow 220ms ease-out, opacity 140ms ease-out;
     box-shadow:
       inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
-      0 0 0 1px color-mix(in oklch, var(--accent) 40%, transparent),
-      0 6px 18px -4px color-mix(in oklch, var(--accent) 60%, transparent);
+      0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent),
+      0 6px 18px -4px color-mix(in oklab, var(--accent) 60%, transparent);
   }
   .sendbtn:hover:not(:disabled) {
     background: var(--accent-hover);
     transform: translateY(-1px);
     box-shadow:
       inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-      0 0 0 1px color-mix(in oklch, var(--accent) 55%, transparent),
-      0 10px 28px -4px color-mix(in oklch, var(--accent) 75%, transparent);
+      0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent),
+      0 10px 28px -4px color-mix(in oklab, var(--accent) 75%, transparent);
   }
   .sendbtn:active:not(:disabled) { transform: translateY(0) scale(0.96); }
   .sendbtn:disabled {
@@ -1799,19 +1980,19 @@
     box-shadow:
       inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
       0 0 0 3px var(--ring),
-      0 6px 18px -4px color-mix(in oklch, var(--accent) 60%, transparent);
+      0 6px 18px -4px color-mix(in oklab, var(--accent) 60%, transparent);
   }
   .sendbtn.stop {
     background: var(--danger);
     color: oklch(0.98 0.01 22);
     box-shadow:
       inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-      0 0 0 1px color-mix(in oklch, var(--danger) 50%, transparent),
-      0 6px 18px -4px color-mix(in oklch, var(--danger) 60%, transparent);
+      0 0 0 1px color-mix(in oklab, var(--danger) 50%, transparent),
+      0 6px 18px -4px color-mix(in oklab, var(--danger) 60%, transparent);
   }
   .sendbtn.stop:hover { filter: brightness(1.08); transform: translateY(-1px); }
   .sendbtn.queue {
-    background: color-mix(in oklch, var(--accent) 70%, var(--surface));
+    background: color-mix(in oklab, var(--accent) 70%, var(--surface));
   }
   /* Launch ripple — two concentric rings expand outward on every fire().
      Mounted by {#key fireKey}; self-removed when the animation ends via
@@ -1897,8 +2078,8 @@
   .attach-error {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 8px 4px 10px;
-    background: var(--danger-soft, color-mix(in oklch, var(--danger) 12%, transparent));
-    border: 1px solid color-mix(in oklch, var(--danger) 35%, var(--border));
+    background: var(--danger-soft, color-mix(in oklab, var(--danger) 12%, transparent));
+    border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--border));
     border-radius: 8px;
     font-size: var(--fs-xs);
     color: var(--danger);
@@ -1913,7 +2094,7 @@
     opacity: 0.7;
     padding: 0;
   }
-  .attach-error-x:hover { opacity: 1; background: color-mix(in oklch, var(--danger) 18%, transparent); }
+  .attach-error-x:hover { opacity: 1; background: color-mix(in oklab, var(--danger) 18%, transparent); }
 
   .queue {
     display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
@@ -1957,9 +2138,9 @@
     margin-left: auto;
     padding: 2px 9px;
     background: transparent;
-    border: 1px solid color-mix(in oklch, var(--danger) 30%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--danger) 30%, var(--border));
     border-radius: 999px;
-    color: color-mix(in oklch, var(--danger) 80%, var(--fg-muted));
+    color: color-mix(in oklab, var(--danger) 80%, var(--fg-muted));
     cursor: pointer;
     font: inherit;
     font-size: 10px;
@@ -1968,6 +2149,8 @@
   }
   .qclear:hover { background: var(--danger-soft); color: oklch(0.95 0.04 22); }
 
+  /* Slash + mention popovers — share the .rift-menu chrome; this only carries
+     positioning (full-width, anchored above the composer) + the entry tween. */
   .slash-menu {
     position: absolute;
     bottom: calc(100% + 8px);
@@ -1975,16 +2158,6 @@
     width: 100%;
     max-height: 280px;
     overflow-y: auto;
-    background: color-mix(in oklch, var(--surface) 86%, transparent);
-    backdrop-filter: blur(14px) saturate(135%);
-    -webkit-backdrop-filter: blur(14px) saturate(135%);
-    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-    border-radius: 14px;
-    box-shadow:
-      0 18px 44px -8px oklch(0 0 0 / 0.55),
-      0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent),
-      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
-    padding: 6px;
     z-index: 10;
     animation: slash-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
@@ -1992,18 +2165,8 @@
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  .slash-item {
-    display: flex; align-items: baseline; gap: 12px;
-    width: 100%;
-    padding: 8px 12px;
-    background: transparent;
-    border: 0; border-radius: 8px;
-    color: var(--fg);
-    text-align: left;
-    cursor: pointer;
-    font: inherit;
-    transition: background 140ms ease-out;
-    /* Stagger each item's entry — driven by inline style="--idx: {i}". */
+  /* Per-row staggered entry — driven by inline style="--idx: {i}". */
+  .slash-row, .mention-item {
     animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--idx, 0) * 22ms);
   }
@@ -2012,22 +2175,9 @@
     to   { opacity: 1; transform: translateY(0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .slash-item { animation: none; }
+    .slash-row, .mention-item { animation: none; }
   }
-  .slash-item:hover, .slash-item.active {
-    background: color-mix(in oklch, var(--accent) 11%, transparent);
-  }
-  .slash-name {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: var(--fs-sm);
-    font-weight: 600;
-    color: var(--accent);
-    min-width: 72px;
-  }
-  .slash-desc {
-    font-size: var(--fs-xs);
-    color: var(--fg-muted);
-  }
+  .slash-cmd { font-family: var(--font-mono, ui-monospace, monospace); color: var(--accent); }
   .slash-hint {
     display: flex;
     align-items: center;
@@ -2067,6 +2217,46 @@
     margin-bottom: 8px;
     color: var(--model-color);
   }
+  /* Draft preview (eye) — same glass panel as enhance, neutral chrome. */
+  .preview-panel {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    background: color-mix(in oklch, var(--surface) 88%, transparent);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    box-shadow:
+      0 18px 44px -8px oklch(0 0 0 / 0.55),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    padding: 12px;
+    z-index: 10;
+    animation: slash-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .preview-head {
+    display: flex; align-items: center; gap: 7px;
+    margin-bottom: 8px;
+    color: var(--fg-muted);
+  }
+  .preview-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
+  .preview-sub {
+    font-size: 10px; font-weight: 500;
+    color: var(--fg-faint);
+    margin-left: auto;
+    letter-spacing: 0.02em;
+  }
+  .preview-body {
+    font-size: var(--fs-md);
+    line-height: 1.55;
+    color: var(--fg);
+    max-height: 280px;
+    overflow-y: auto;
+    padding: 2px 4px;
+  }
+  .previewbtn.on { color: var(--accent); background: var(--accent-soft); }
   .enhance-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
   .enhance-sub {
     font-size: 10px; font-weight: 500;
@@ -2244,7 +2434,7 @@
      aria-expanded "open" treatment is specific. */
   .hintbtn[aria-expanded="true"] {
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 25%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 25%, transparent);
     background: var(--accent-soft);
     opacity: 1;
   }
@@ -2260,11 +2450,11 @@
     background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
-    border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
     border-radius: 12px;
     box-shadow:
       0 16px 40px -8px oklch(0 0 0 / 0.6),
-      0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent),
+      0 0 0 1px color-mix(in oklab, var(--accent) 8%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     z-index: 9998;
     display: flex; flex-direction: column; gap: 2px;
@@ -2345,90 +2535,126 @@
     border-color: var(--border);
   }
   .settings-pill.open {
-    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
     color: var(--fg);
   }
-  .settings-pill:hover .pill-caret { color: var(--fg-muted); transform: translateY(1px); }
-  /* Bypass = unguarded. Don't flood the whole pill in warning-amber (it washed
-     the model name + clashed with the violet ultracode marker). Keep the label
-     neutral; the posture reads from the dot alone. */
-  .settings-pill[data-mode="bypassPermissions"] { color: var(--fg-2); }
-  .settings-pill[data-mode="default"] { color: var(--accent); }
-  /* Current-model label on the pill — replaces the icon-only rest state so
-     the active model reads at a glance without hovering. */
+  .settings-pill:hover :global(.pill-chev) { color: var(--fg-muted); }
+  /* Current-model label on the pill. */
   .pill-label {
     font-size: 11px;
     font-weight: 600;
     line-height: 1;
     letter-spacing: 0.01em;
-    max-width: 72px;
+    max-width: 84px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .mode-icon { display: inline-flex; align-items: center; }
-  /* Signal-bar effort indicator — 3 vertical bars growing left-to-right.
-     `data-level` (1|2|3) fills bars in current color; unfilled bars stay
-     dim. Same visual vocab as wifi/battery so the ladder reads instantly. */
-  .effort-bars {
-    display: inline-flex; align-items: flex-end; gap: 2px;
-    height: 11px;
-    animation: effort-bars-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  .effort-bars .bar {
-    width: 2.5px;
-    background: color-mix(in oklch, currentColor 22%, transparent);
-    border-radius: 1px;
-    transition: background 200ms ease-out, height 200ms ease-out;
-  }
-  .effort-bars .bar:nth-child(1) { height: 35%; }
-  .effort-bars .bar:nth-child(2) { height: 65%; }
-  .effort-bars .bar:nth-child(3) { height: 100%; }
-  .effort-bars[data-level="1"] .bar:nth-child(1),
-  .effort-bars[data-level="2"] .bar:nth-child(-n+2),
-  .effort-bars[data-level="3"] .bar { background: currentColor; }
-  /* Active bar gets a tiny pulse — draws the eye to the current rung. */
-  .effort-bars[data-level="1"] .bar:nth-child(1),
-  .effort-bars[data-level="2"] .bar:nth-child(2),
-  .effort-bars[data-level="3"] .bar:nth-child(3) {
-    animation: effort-bar-tip 1.8s ease-in-out infinite;
-  }
-  @keyframes effort-bars-in {
-    from { opacity: 0; transform: translateY(-2px) scale(0.6); }
-    to   { opacity: 1; transform: translateY(0)    scale(1); }
-  }
-  @keyframes effort-bar-tip {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.6; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .effort-bars { animation: none; }
-    .effort-bars .bar { animation: none; }
-  }
+  /* Effort label trails the model name (mock `.pill-effort`). */
+  .pill-effort { font-size: 11px; font-weight: 500; color: var(--fg-faint); line-height: 1; white-space: nowrap; }
   /* Permission-mode dot — one consistent at-a-glance signal for all five
      modes (the pill's text-tint only covered ask/bypass). Colored per mode:
      ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */
+  /* Leading dot on the collapsed settings-pill — emerald (model identity lives
+     in the model-card dropdown, not the always-visible pill). */
   .mode-dot {
     width: 6px; height: 6px; border-radius: 50%;
     flex-shrink: 0;
-    background: var(--fg-faint);
+    background: var(--accent);
     transition: background 140ms ease-out;
   }
-  .settings-pill[data-mode="default"] .mode-dot       { background: var(--accent); }
-  .settings-pill[data-mode="acceptEdits"] .mode-dot   { background: var(--ok); }
-  .settings-pill[data-mode="plan"] .mode-dot          { background: oklch(0.74 0.13 230); }
-  .settings-pill[data-mode="auto"] .mode-dot          { background: var(--accent); }
-  .settings-pill[data-mode="bypassPermissions"] .mode-dot {
-    background: oklch(0.72 0.165 55);
-    box-shadow: 0 0 5px color-mix(in oklch, oklch(0.72 0.165 55) 70%, transparent);
-  }
-  .pill-caret {
-    font-size: 8px;
+  /* Chevron-up caret on both composer pills; rotates 180° when its menu opens. */
+  :global(.settings-pill .pill-chev),
+  :global(.perm-pill .pill-chev) {
     color: var(--fg-faint);
-    margin-left: 1px;
-    line-height: 1;
     transition: color 140ms ease-out, transform 140ms ease-out;
   }
+  .settings-pill.open :global(.pill-chev),
+  .perm-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
+
+  /* ── Permission-mode pill + menu (mock split from the model pill) ──────── */
+  .toolbar-right { position: relative; }
+  .perm-pill {
+    align-self: center;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 26px; padding: 0 7px 0 9px;
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
+    border-radius: 999px; color: var(--fg-2); cursor: pointer; font: inherit;
+    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+  }
+  .perm-pill:hover, .perm-pill.open {
+    background: color-mix(in oklch, var(--bg-elev-2) 90%, transparent);
+    color: var(--fg); border-color: var(--border);
+  }
+  .perm-pill > :global(svg:first-child) { color: var(--fg-muted); flex-shrink: 0; }
+  .perm-label { font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; }
+  /* acceptEdits + auto read as "edits flow" → accent; bypass → warn; rest neutral. */
+  .perm-pill[data-mode="acceptEdits"], .perm-pill[data-mode="auto"] {
+    color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
+    background: color-mix(in oklab, var(--accent) 11%, transparent);
+  }
+  .perm-pill[data-mode="acceptEdits"] > :global(svg:first-child),
+  .perm-pill[data-mode="auto"] > :global(svg:first-child),
+  .perm-pill[data-mode="acceptEdits"] :global(.pill-chev),
+  .perm-pill[data-mode="auto"] :global(.pill-chev) { color: var(--accent); }
+  .perm-pill[data-mode="bypassPermissions"] {
+    color: var(--warn); border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
+    background: color-mix(in oklab, var(--warn) 10%, transparent);
+  }
+  .perm-pill[data-mode="bypassPermissions"] > :global(svg:first-child),
+  .perm-pill[data-mode="bypassPermissions"] :global(.pill-chev) { color: var(--warn); }
+
+  :global(.perm-menu) {
+    position: fixed; width: 252px; padding: 5px;
+    background: color-mix(in oklch, var(--surface) 86%, transparent);
+    backdrop-filter: blur(16px) saturate(135%);
+    -webkit-backdrop-filter: blur(16px) saturate(135%);
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    border-radius: 14px;
+    box-shadow:
+      0 18px 44px -8px oklch(0 0 0 / 0.55),
+      0 0 0 1px color-mix(in oklab, var(--accent) 6%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    z-index: 9998;
+    animation: hint-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    transform-origin: bottom left;
+  }
+  :global(.perm-menu .mm-head) {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    color: var(--fg-faint); padding: 4px 8px 6px;
+  }
+  :global(.perm-menu .perm-kbd) {
+    font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-muted);
+    background: var(--bg-inset); border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 5px; text-transform: none; letter-spacing: 0;
+  }
+  :global(.perm-menu .perm-row) {
+    position: relative; display: flex; align-items: flex-start; gap: 9px; width: 100%;
+    padding: 6px 8px; border-radius: 7px; border: 0; background: transparent;
+    color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
+    transition: background 120ms;
+  }
+  :global(.perm-menu .perm-row:hover), :global(.perm-menu .perm-row.active) { background: var(--surface-hover); }
+  :global(.perm-menu .perm-row-ic) {
+    width: 16px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg-subtle); margin-top: 1px; transition: color 130ms ease;
+  }
+  :global(.perm-menu .perm-row:hover .perm-row-ic), :global(.perm-menu .perm-row.active .perm-row-ic) { color: var(--fg-2); }
+  :global(.perm-menu .perm-row-tt) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  :global(.perm-menu .perm-row-t) { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); line-height: 1.25; }
+  :global(.perm-menu .perm-row-d) { font-size: 10.5px; color: var(--fg-subtle); line-height: 1.3; }
+  :global(.perm-menu .perm-row-chk) { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+  /* current row: accent left-bar + accent icon, no slab (matches mock) */
+  :global(.perm-menu .perm-row.current::before) {
+    content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2.5px;
+    border-radius: 0 3px 3px 0; background: var(--accent); box-shadow: 0 0 8px var(--ring);
+  }
+  :global(.perm-menu .perm-row.current .perm-row-ic) { color: var(--accent); }
+  :global(.perm-menu .perm-row[data-mode="bypassPermissions"].current::before) { background: var(--warn); box-shadow: 0 0 8px color-mix(in oklab, var(--warn) 55%, transparent); }
+  :global(.perm-menu .perm-row[data-mode="bypassPermissions"].current .perm-row-ic),
+  :global(.perm-menu .perm-row[data-mode="bypassPermissions"].current .perm-row-chk) { color: var(--warn); }
   .mention-menu { max-height: 280px; }
   .mention-item {
     display: grid;
@@ -2458,143 +2684,164 @@
   }
   .mention-item.active .mention-base { color: var(--accent); }
 
-  .model-menu {
-    padding: 6px;
-    background: color-mix(in oklch, var(--surface) 86%, transparent);
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
-    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-    box-shadow:
-      0 18px 44px -8px oklch(0 0 0 / 0.55),
-      0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent),
-      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+  /* Unified settings panel — flat single-column list (Claude-Code-Desktop
+     layout) on the shared .rift-menu chrome: model rows, a fast-mode toggle,
+     and a Faster↔Smarter effort slider. Right-anchored, content-width. */
+  .settings-menu {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: auto; right: 0;
+    width: 320px;
+    max-height: min(82vh, 600px);
+    overflow-y: auto;
+    z-index: 10;
+    animation: slash-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .model-menu .model-header {
-    display: flex; align-items: center; gap: 10px;
-    padding: 8px 12px 6px;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-faint);
+  /* Model row — name + muted suffix on one line, number shortcut / ✓ trailing. */
+  .model-row { align-items: center; gap: 8px; }
+  .model-row .model-row-name { flex: 0 0 auto; }
+  .model-suffix {
+    font-size: 11px; font-weight: 500; color: var(--fg-subtle);
+    margin-right: auto;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .model-menu .model-header::after {
-    content: "";
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(to right,
-      color-mix(in oklch, var(--border) 80%, transparent),
-      transparent);
+  .model-suffix.legacy { color: var(--fg-faint); }
+  .model-row.current .model-suffix { color: color-mix(in oklab, var(--accent) 65%, var(--fg-muted)); }
+  .model-num {
+    flex-shrink: 0;
+    font-family: var(--font-mono); font-size: 10px; font-weight: 600; line-height: 1;
+    color: var(--fg-faint); background: var(--bg-inset);
+    border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px;
   }
-  .model-dot {
-    width: 8px; height: 8px;
+  .model-row:hover .model-num, .model-row.active .model-num { color: var(--fg-muted); }
+
+  /* Fast-mode toggle row. */
+  .toggle-row { align-items: center; }
+  .rift-toggle {
+    position: relative; flex-shrink: 0; align-self: center;
+    width: 30px; height: 17px; border-radius: 999px;
+    background: color-mix(in oklch, var(--fg-faint) 38%, transparent);
+    border: 1px solid var(--border);
+    transition: background 160ms ease, border-color 160ms ease;
+  }
+  .rift-toggle.on { background: var(--accent); border-color: transparent; }
+  .rift-toggle-knob {
+    position: absolute; top: 1px; left: 1px;
+    width: 13px; height: 13px; border-radius: 999px;
+    background: oklch(0.97 0 0);
+    box-shadow: 0 1px 2px oklch(0 0 0 / 0.4);
+    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .rift-toggle.on .rift-toggle-knob { transform: translateX(13px); }
+
+  /* Effort slider — Faster↔Smarter, stops = EFFORT_OPTIONS levels. */
+  .effort-head {
+    display: flex; align-items: center;
+    padding: 6px 8px 3px;
+    font-size: 11px; color: var(--fg-muted);
+  }
+  .effort-head .effort-head-l { letter-spacing: 0.01em; }
+  .effort-head .effort-head-l b {
+    color: var(--fg); font-weight: 650; margin-left: 2px;
+    transition: color 180ms ease;
+  }
+  .effort-head.ultra .effort-head-l b { color: var(--accent); }
+  .effort-head .effort-help {
+    margin-left: auto; display: inline-flex; padding: 2px; border: 0;
+    background: transparent; color: var(--fg-faint); cursor: help;
+    transition: color 140ms ease;
+  }
+  .effort-head .effort-help:hover { color: var(--fg-muted); }
+  .effort-slider {
+    padding: 13px 16px 8px; margin: 0 2px; border-radius: 11px;
+    transition: background 160ms ease, box-shadow 160ms ease;
+  }
+  .effort-slider.active {
+    background: var(--surface-hover);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .effort-track {
+    position: relative; height: 5px; border-radius: 999px;
+    background: color-mix(in oklch, var(--fg-faint) 24%, transparent);
+    box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.28);
+    cursor: grab; touch-action: none;
+  }
+  /* Invisible vertical hit-area so the 5px track is easy to grab. */
+  .effort-track::before { content: ""; position: absolute; inset: -11px 0; }
+  .effort-slider.dragging .effort-track { cursor: grabbing; }
+  .effort-fill {
+    position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      color-mix(in oklab, var(--accent) 68%, var(--fg-faint)),
+      var(--accent)
+    );
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 42%, transparent);
+    transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+                background 220ms ease, box-shadow 220ms ease;
+  }
+  .effort-slider.ultra .effort-fill {
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 68%, var(--fg-faint)), var(--accent));
+    box-shadow: 0 0 11px color-mix(in oklab, var(--accent) 55%, transparent);
+  }
+  .effort-notch {
+    position: absolute; top: 50%; width: 9px; height: 9px; padding: 0;
+    transform: translate(-50%, -50%);
+    border-radius: 999px; border: 1.5px solid var(--border-strong);
+    background: var(--surface); cursor: pointer;
+    transition: border-color 160ms ease, background 160ms ease,
+                transform 220ms cubic-bezier(0.34, 1.4, 0.5, 1);
+  }
+  .effort-notch:hover { transform: translate(-50%, -50%) scale(1.3); }
+  .effort-notch.on {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 24%, var(--surface));
+  }
+  .effort-notch.cur { transform: translate(-50%, -50%) scale(0); }
+  .effort-slider.ultra .effort-notch.on { border-color: var(--accent); }
+  .effort-knob {
+    position: absolute; top: 50%; width: 15px; height: 15px; z-index: 2;
+    transform: translate(-50%, -50%);
     border-radius: 999px;
-    background: var(--model-color, var(--fg-muted));
-    box-shadow:
-      0 0 0 2px color-mix(in oklch, var(--model-color, var(--fg-muted)) 16%, transparent),
-      0 0 8px color-mix(in oklch, var(--model-color, var(--fg-muted)) 55%, transparent);
+    background: radial-gradient(circle at 35% 30%, oklch(1 0 0), var(--fg));
+    border: 2px solid var(--accent);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 15%, transparent),
+                0 2px 5px oklch(0 0 0 / 0.4);
+    transition: left 260ms cubic-bezier(0.34, 1.4, 0.5, 1),
+                border-color 220ms ease, box-shadow 220ms ease;
+    pointer-events: none;
+  }
+  .effort-slider.dragging .effort-fill { transition: background 220ms ease, box-shadow 220ms ease; }
+  .effort-slider.dragging .effort-knob { transition: border-color 220ms ease, box-shadow 220ms ease; }
+  .effort-slider.active .effort-knob {
+    box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 22%, transparent),
+                0 2px 6px oklch(0 0 0 / 0.45);
+  }
+  .effort-slider.ultra .effort-knob {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 22%, transparent),
+                0 0 11px color-mix(in oklab, var(--accent) 55%, transparent),
+                0 2px 5px oklch(0 0 0 / 0.45);
+  }
+  .effort-ends {
+    display: flex; justify-content: space-between;
+    margin-top: 9px; font-size: 9px; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-faint);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .effort-fill, .effort-knob, .effort-notch { transition: none; }
   }
 
-  /* Unified settings panel — compact, right-anchored under the pill. Model is
-     a 2×2 card grid; thinking depth + permission mode sit side-by-side below.
-     Descriptions live in hover tooltips so the panel stays short (no scroll)
-     and content-width instead of spanning the whole composer. */
-  .settings-menu {
-    left: auto; right: 0;
-    width: max-content;
-    min-width: 440px; max-width: 560px;
-    max-height: min(82vh, 600px);
-    padding: 8px 10px 4px;
-  }
-  .settings-section { padding: 0 2px; }
-  .settings-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 6px;
-    padding: 2px 2px 8px;
-  }
-  .settings-cols {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    align-items: start;
-  }
-  .settings-stack {
-    display: flex; flex-direction: column; gap: 2px;
-    padding: 2px 2px 4px;
-  }
-  .settings-item {
-    position: relative;
-    display: flex; align-items: center; gap: 8px;
-    width: 100%;
-    padding: 7px 10px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 9px;
-    color: var(--fg);
-    text-align: left;
-    cursor: pointer;
-    font: inherit;
-    transition: background 140ms ease-out, border-color 140ms ease-out;
-    animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: calc(var(--idx, 0) * 16ms);
-  }
-  .settings-item:hover,
-  .settings-item.active {
-    background: color-mix(in oklch, var(--accent) 11%, transparent);
-  }
-  .settings-item.current {
-    background: color-mix(in oklch, var(--accent) 13%, transparent);
-    border-color: color-mix(in oklch, var(--accent) 38%, var(--border));
-  }
-  /* Model card — name + version on top, ctx badge beneath; tagline in tooltip. */
-  .model-card {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 9px 10px;
-  }
-  .model-card .card-head { display: inline-flex; align-items: center; gap: 7px; }
-  .model-card[data-id="sonnet"]          { --model-color: oklch(0.74 0.13 230); }
-  .model-card[data-id="opus"]            { --model-color: oklch(0.70 0.18 295); }
-  .model-card[data-id="claude-opus-4-7"] { --model-color: oklch(0.70 0.18 295); }
-  .model-card[data-id="haiku"]           { --model-color: oklch(0.78 0.14 180); }
-  .settings-item.current .model-label { color: var(--accent); }
-  .settings-item.current .model-version {
-    color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 16%, transparent);
-  }
-  /* Effort + mode rows — single line: indicator + label, desc in tooltip. */
-  .effort-row .effort-bars { height: 12px; color: var(--fg-muted); animation: none; }
-  .effort-row .effort-bars .bar { animation: none; }
-  .effort-row.current .effort-bars { color: var(--accent); }
-  .mode-row .mode-icon { color: var(--fg-muted); }
-  .mode-row.current .mode-icon { color: var(--accent); }
-  /* Ultracode tier — the top rung, set apart from the bar ladder. Violet (the
-     CLI's own ultracode accent) + a sparkle glyph signal "beyond the ladder":
-     xhigh effort + autonomous multi-agent workflow orchestration. */
-  .effort-ultra-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 12px; height: 12px;
-    color: oklch(0.72 0.19 300);
-    opacity: 0.7;
-    transition: opacity 160ms ease-out, filter 160ms ease-out;
-  }
-  .effort-row.ultra.current .effort-ultra-icon,
-  .effort-row.ultra.active .effort-ultra-icon {
-    opacity: 1;
-    filter: drop-shadow(0 0 5px color-mix(in oklch, oklch(0.72 0.19 300) 55%, transparent));
-  }
-  .effort-row.ultra.current .model-label { color: oklch(0.79 0.14 300); }
+  /* Glanceable pill marker when ultracode is the active tier. */
   /* Glanceable pill marker when ultracode is the active tier. */
   .pill-ultra {
     display: inline-flex; align-items: center;
-    color: oklch(0.75 0.18 300);
-    filter: drop-shadow(0 0 4px color-mix(in oklch, oklch(0.72 0.19 300) 55%, transparent));
+    color: var(--accent);
+    filter: drop-shadow(0 0 4px color-mix(in oklab, var(--accent) 55%, transparent));
     animation: ultra-pulse 2.6s ease-in-out infinite;
   }
   .settings-pill.ultra {
-    border-color: color-mix(in oklch, oklch(0.72 0.19 300) 42%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
   }
   @keyframes ultra-pulse {
     0%, 100% { opacity: 1; }
@@ -2604,58 +2851,4 @@
     .pill-ultra { animation: none; }
   }
 
-  .model-label {
-    font-weight: 600;
-    color: var(--fg);
-    font-size: var(--fs-sm);
-  }
-  .model-version {
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--fg-faint);
-    font-variant-numeric: tabular-nums;
-    padding: 1px 5px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border-radius: 4px;
-  }
-  .model-ctx {
-    font-size: 10px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    padding: 3px 8px;
-    border-radius: 999px;
-    white-space: nowrap;
-    color: var(--fg-muted);
-    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
-  }
-  .model-ctx.wide {
-    color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 8%, transparent);
-    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);
-  }
-
-  .model-menu .model-hint {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 8px 12px 6px;
-    margin-top: 4px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-  }
-  .model-menu .model-hint kbd {
-    display: inline-block;
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 9.5px;
-    font-weight: 600;
-    line-height: 1;
-    padding: 2px 5px;
-    margin-right: 5px;
-    border-radius: 4px;
-    background: color-mix(in oklch, var(--bg-elev-2) 75%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    color: var(--fg-muted);
-    vertical-align: 1px;
-  }
 </style>

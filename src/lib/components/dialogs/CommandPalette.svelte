@@ -3,28 +3,23 @@
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import {
-    Search, MessageSquare, RefreshCcw, FolderOpen, Activity as ActivityIcon,
-    Settings as SettingsIcon, Plus, Server, Palette, Accessibility as A11yIcon,
-    Sparkles, Mic, Info, Pause, Play, Trash2, RotateCw, History,
+    Search, MessageSquare,
+    Settings as SettingsIcon, Plus, Palette, Accessibility as A11yIcon,
+    Sparkles, Mic, Info, History,
   } from "lucide-svelte";
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
-  import { connection } from "../../state/connection.svelte";
-  import { syncPage } from "../../state/sync-page.svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import { diagnostics } from "../../state/diagnostics.svelte";
 
-  // lucide-svelte 1.x ships icons as legacy components — `typeof ActivityIcon`
+  // lucide-svelte 1.x ships icons as legacy components — `typeof Search`
   // matches what the workspaces registry uses (see workspaces/index.ts).
-  type Icon = typeof ActivityIcon;
-
-  let { onAddServer }: { onAddServer: () => void } = $props();
+  type Icon = typeof Search;
 
   type Item = {
     id: string;
     label: string;
     sub?: string;
-    group: "Go to" | "Servers" | "Recent chats" | "Actions";
+    group: "Go to" | "Recent chats" | "Actions";
     icon: Icon;
     tone?: "accent" | "info" | "warn" | "danger" | "ok" | "neutral";
     keywords?: string;
@@ -42,10 +37,8 @@
 
     // Workspace navigation
     const navs: { id: WorkspaceId; label: string; icon: Icon; sub: string }[] = [
-      { id: "chat",     label: "Chat",     icon: MessageSquare, sub: "Ctrl+1" },
-      { id: "sync",     label: "Sync",     icon: RefreshCcw,    sub: "Ctrl+2" },
-      { id: "files",    label: "Files",    icon: FolderOpen,    sub: "Ctrl+3" },
-      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+5" },
+      { id: "chat",     label: "Chat",     icon: MessageSquare, sub: "Ctrl+2" },
+      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+3" },
     ];
     for (const n of navs) {
       out.push({
@@ -59,24 +52,12 @@
       });
     }
 
-    // Activity is a tab within Sync (no standalone workspace) — deeplink to it.
-    out.push({
-      id: "nav:activity",
-      label: "Go to Activity",
-      sub: "Sync ▸ Activity",
-      group: "Go to",
-      icon: ActivityIcon,
-      keywords: "workspace pane activity feed log events",
-      run: () => { syncPage.tab = "activity"; workspace.setActive("sync"); },
-    });
-
     // Settings sections (deep-link)
     const sects: { id: SettingsSection; label: string; icon: Icon }[] = [
       { id: "appearance",    label: "Appearance",    icon: Palette },
       { id: "accessibility", label: "Accessibility", icon: A11yIcon },
       { id: "assistant",     label: "Assistant",     icon: Sparkles },
       { id: "speech",        label: "Speech",        icon: Mic },
-      { id: "network",       label: "Network",       icon: Server },
       { id: "about",         label: "About",         icon: Info },
     ];
     for (const s of sects) {
@@ -91,21 +72,6 @@
           commandPalette.requestSettingsSection(s.id);
           workspace.setActive("settings");
         },
-      });
-    }
-
-    // Servers
-    for (const srv of connection.servers) {
-      const active = connection.selectedKey === srv.key;
-      out.push({
-        id: `server:${srv.key}`,
-        label: active ? `${srv.name} (current)` : `Connect to ${srv.name}`,
-        sub: `${srv.user}@${srv.host}${srv.port !== 22 ? `:${srv.port}` : ""}`,
-        group: "Servers",
-        icon: Server,
-        tone: active ? "ok" : "neutral",
-        keywords: `${srv.user} ${srv.host} ssh ${srv.key}`,
-        run: () => void connection.select(srv.key),
       });
     }
 
@@ -142,36 +108,6 @@
         void assistant.newTab();
       },
     });
-    out.push({
-      id: "act:add-server",
-      label: "Add server",
-      sub: "Connect a new SSH profile",
-      group: "Actions",
-      icon: Plus,
-      tone: "accent",
-      keywords: "create ssh profile new",
-      run: () => onAddServer(),
-    });
-    out.push({
-      id: "act:pause-activity",
-      label: diagnostics.paused ? "Resume diagnostics capture" : "Pause diagnostics capture",
-      sub: "Activity → Diagnostics tab",
-      group: "Actions",
-      icon: diagnostics.paused ? Play : Pause,
-      keywords: "freeze halt",
-      run: () => diagnostics.togglePause(),
-    });
-    out.push({
-      id: "act:clear-activity",
-      label: "Clear activity feed",
-      sub: "Wipe local event history",
-      group: "Actions",
-      icon: Trash2,
-      tone: "warn",
-      keywords: "delete reset",
-      run: () => connection.clearActivity(),
-    });
-
     return out;
   });
 
@@ -209,7 +145,7 @@
   });
 
   const grouped = $derived.by(() => {
-    const order: Item["group"][] = ["Go to", "Servers", "Recent chats", "Actions"];
+    const order: Item["group"][] = ["Go to", "Recent chats", "Actions"];
     const map = new Map<string, Item[]>();
     for (const it of filtered) {
       const arr = map.get(it.group) ?? [];
@@ -377,11 +313,11 @@
     max-height: 70vh;
     display: flex; flex-direction: column;
     background: var(--bg-elev-2);
-    border: 1px solid color-mix(in oklch, var(--accent) 22%, var(--border-strong));
+    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border-strong));
     border-radius: var(--radius-lg);
     box-shadow:
       0 24px 64px -16px rgba(0, 0, 0, 0.6),
-      0 0 0 1px color-mix(in oklch, var(--accent) 14%, transparent),
+      0 0 0 1px color-mix(in oklab, var(--accent) 14%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
     overflow: hidden;
   }
@@ -391,7 +327,7 @@
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     background: linear-gradient(to bottom,
-      color-mix(in oklch, var(--accent) 4%, transparent),
+      color-mix(in oklab, var(--accent) 4%, transparent),
       transparent);
   }
   .cp-search :global(svg) { color: var(--fg-muted); flex-shrink: 0; }
@@ -448,8 +384,8 @@
     transition: background 80ms;
   }
   .cp-item[data-active="true"] {
-    background: color-mix(in oklch, var(--accent) 16%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 26%, transparent);
+    background: color-mix(in oklab, var(--accent) 16%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 26%, transparent);
   }
   .cp-item:focus-visible { outline: none; }
 
@@ -464,7 +400,7 @@
   }
   .cp-item[data-active="true"] .cp-item-icon {
     color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 18%, transparent);
+    background: color-mix(in oklab, var(--accent) 18%, transparent);
   }
   .cp-item[data-tone="ok"]     .cp-item-icon { color: var(--ok); }
   .cp-item[data-tone="warn"]   .cp-item-icon { color: var(--warn); }

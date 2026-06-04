@@ -2,33 +2,49 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-02 (cont. 5) — redesign verified COMPLETE + UNSHIPPED; docs/tree cleaned for new session
+## Session 2026-06-04 (cont. 33) — ACTIVITY PANEL REORG + SESSION DIFF (UNSHIPPED v0.4.46)
 
-### 🟢 RESUME HERE — the ONLY remaining work is P6: SHIP the redesign
-The "UI off big time / missing UI" was **never a code gap** — the redesign is done on `main` but was never built, so the user's *installed* app still shows the old UI:
-- Installed `%LOCALAPPDATA%\rift\rift-tauri.exe` = **v0.4.46, built 5/31** (activity-dock release, PRE-redesign). Dev server (current `main`) has the full redesign.
-- Whole P1–P6 graphite-ink arc landed on `main` 6/02, **unbumped, no changelog entry, never built.**
-- Re-verified live via CDP this session: ALL 5 surfaces (home/chat/sync/files/settings) + token layer (`app.css :root` == `DESIGN_TOKENS.md`: accent `oklch(0.78 0.15 163)`=#34D399, radii 4/6/8/10/12, motion vars, fs scale) + `FbDetail.svelte` faithfully match the mockup. "Design reference suspect" hypothesis DISPROVEN — implementation == spec.
+Frontend-only. `npm run check` 4081/0/0. **Verified live against a REAL assistant turn (CDP)** — not just preview.
 
-**Next action → `/git-ship`** (user-initiated): bump 3 files + Cargo.lock → write redesign CHANGELOG entry → check → build (self-replace dance, dev must quit) → install. Puts the new UI on the user's machine.
+**Activity panel** (`ActivityPanel.svelte`): killed Now/Steps double-spin — live units live ONLY in the Now cluster (headline + `.now-live` rows at 2+ running); **Steps = settled, actions-only** (`logSteps` filters out `cat==="write"`). New **Outputs** section = deduped write/edit artifacts w/ net +/−, opens Diff. Timeline spine (`.rows::before`, icons z1 punch through). Done-cap enriched. Path rows rtl-clip (keep extension).
 
-### Cleanup done this session
-- CHANGELOG trimmed 9558w → current-version-only (v0.4.46) per convention; history in `git log -- docs/CHANGELOG.md`.
-- `redesign-gap-audit.md` → `docs/archive/` (P1–P6 plan executed + verified); CLAUDE.md design-brief pointer updated.
-- ⌘K Titlebar search committed (was done+verified but uncommitted). Tree clean: no scratch/orphan/untracked files; legacy `settings/Settings.svelte` already gone.
+**Session Diff** (NEW `SessionDiff.svelte`): full-pane review of every edit this convo, grouped by file; reuses `EditDiff` via new `hideHead` prop; Write→all-adds (`old_string:""`), MultiEdit expands. Reads `tab.messages` (real). State `assistant.ui.diffOpen/diffTarget`. 5 entry points, all verified live: **Review-diff btn** (`MessageBubble.reviewDiff` — was DEAD, scrolled to removed `actnode-*` anchor; now opens overlay deep-linked via new `turnStats.firstEditFile`), Outputs Diff-link + row, `Ctrl+Shift+D` (AppShell), View-menu "Session diff" (`ChatTabsBar`).
 
-### Deferred (blocked, none ship-blocking)
-Lua code-preview (needs read-only backend file-read cmd — user declined 2nd backend exception; offer again) · RCON live round-trip (needs live FXServer) · Files populated LED pips live pixels (code present; needs varied file states).
+**Preview** (flask toggle + `activity-preview.svelte.ts`) added to iterate, then **fully removed** per user — file deleted, every `preview.on?` branch reverted to real source. Grep-clean.
 
-### Env + lessons
-- Dev app RUNNING (connected Endure RP, CDP wrapper :9223 / :9222) — re-attach via `bash scripts/cdp/c.sh`, no relaunch unless dead. v0.4.46 unbumped.
-- **Don't run `npm run check` while `tauri dev` is alive** — `svelte-kit sync` reloads the webview → drops `connection.servers` (backend SSH stays; full restart re-restores). Same family as cargo-check-during-dev.
-- Clean dev restart: TaskStop npm task → `taskkill` orphaned `rift-tauri.exe` by EXACT PID (never `rift*` glob, never `rift.exe`) → kill orphaned vite :1420 → relaunch.
+### 🟡 Next / flags
+- Done-cap counts all settled tools (incl writes) → shows "7 steps" while Steps badge shows 5. Left as whole-turn total; relabel "actions" if it reads odd.
+- `classifyTool` + SessionDiff don't strip `mcp__rift__` prefix (MessageBubble does, ln 355). CLI built-in Read/Write render fine; rift MCP `read_file/list_dir/grep` would show as generic `meta` rows — map+strip next pass.
+- Scratch `.tmp/activity-test.md` left in dev workspace from live test — deletable.
 
-## CRITICAL DON'T-TOUCH (frontend/redesign)
-- **Onboarding gate (#7):** `showOnboarding` keeps all 4 conditions (`!dismissed && serversLoaded && servers.length===0 && defaultSshKeyExists===false`). Loosening flashes onboarding for existing users.
-- **Accent themeable via `--accent-h`** (app.css `:root` only): `oklch(L C var(--accent-h))`; never hard-code an accent hue. Components use `var(--accent)`/`--accent-soft` (already retheme) — do NOT add `--accent-h` to them. Status LEDs (`--ok/warn/danger/info`) stay fixed.
-- **IA:** kbds home·1 chat·2 sync·3 files·4 settings·5; Activity is a Sync tab (`syncPage.tab`). Home wiring real-data only.
+## Session 2026-06-04 (cont. 32) — SHELL NAV REDESIGN (titlebar nav, UNSHIPPED v0.4.46)
+
+Frontend-only. `npm run check` 4080/0/0; CDP-verified live (titlebar + chat both shotted).
+
+**Left activity column removed.** 3-destination vertical rail read as wasted space → nav moved into the titlebar. `Titlebar.svelte`: horizontal Home/Chat nav (`.navitem`, accent-soft active pill @ 0.12α, Ctrl+1/2) + brand↔nav hairline `.nav-sep`; Settings → gear in `.right` group; ⌘K placeholder "Search or run a command…", max-width 360→300. `AppShell.svelte`: `<ActivityBar/>` removed, `.body` grid → single `1fr`.
+
+**Chat-history rail toggle relocated.** Floating `>` sliver killed (`ChatRail.svelte`: collapsed = `width:0;border:0`; removed `.cr-expand-btn`, `ChevronRight`, local `RAIL_KEY`). New `.rail-toggle` PanelLeft at left edge of `ChatTabsBar.svelte` — contextual to Chat, mirrors the right-side Activity PanelRight. Collapse state centralized → `uiPrefs.toggleChatRail()` (key `rift.ui.chat-rail-collapsed.v1`).
+
+**Two earlier-this-session fixes.** (1) Model dropdown opacity (`app.css .rift-menu`): translucent `color-mix(surface 86%,transparent)`+`backdrop-filter blur` → solid `var(--surface)`+`var(--border)`; shared chrome so slash/mention/file-path menus go opaque too. (2) Activity dock resize bar (`AssistantPane.svelte .dock-resize`): z-index 2→6 so the green seam clears the sticky `.dock-head` (z5) instead of being clipped at the header.
+
+### 🟡 Flags / next
+- **Orphaned (cleanup candidate):** `ActivityBar.svelte` no longer mounted (left in place, NOT deleted per safety); `railPinned`/`applyRail`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts` now dead. Workspace **drag-to-reorder** lost with the bar (3 fixed dests → likely fine). Remove the lot in one pass if confirmed.
+- `HomePage` "Still up" eyebrow = intentional time-greeting (`hr<5`), left as-is.
+- CHANGELOG/version bump deferred to /git-ship per policy — cont.13–32 ships as ONE commit.
+
+## Earlier this arc (cont. 13–31) — detail in `git log`
+- **31/30:** logo on platform icons; theming `--bg-inset` 0.178 + `--field`/`--track`/`--code-*`; body hue 270→250; tint mixes oklch→**oklab** (13 files).
+- **29–27:** remote-shell rip; Settings IA 6→5; `AskUserRegistry`; CLI-update detector. ⚠️ **CSP** `connect-src` keeps `https://registry.npmjs.org` — don't remove.
+- **20/21 PURE-ASSISTANT:** SFTP/sync/server/RCON ripped; MCP→`read_file/list_dir/grep`+`git_*`; IA=3 workspaces.
+- **Open:** orphaned `closeAllTabs()`; `cargo machete` deps + stale `SAFE_MCP` (`mod.rs:2425`); STT blocked (whisper-rs 0.13→0.16).
+- **Entire cont.13–33 UNSHIPPED on v0.4.46 — ship as ONE commit.** CDP: `bash scripts/cdp/c.sh {shot|eval|click}` (dev via `run-dev.bat` + `npm run cdp:serve`). Nav Ctrl+digit; Alt+digit tabs.
+
+## CRITICAL DON'T-TOUCH
+- **Onboarding gate:** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && !assistant.hasApiKey && !assistant.auth?.loggedIn`. `configLoaded` gates timing so it never flashes pre-probe.
+- **Accent themeable via `--accent-h`** (app.css `:root` only): `oklch(L C var(--accent-h))`; never hard-code accent hue. Components use `var(--accent)`/`--accent-soft`. Status LEDs (`--ok/warn/danger/info`) stay fixed. **Tint mixes use `in oklab`, not `in oklch`** (cont.30 — oklch wraps warm hues to purple).
+- **Surface tiers:** page `--bg` 0.142 · card `--surface` 0.215 · wells `--bg-inset` 0.178 · raised inputs `--field` 0.25 · seg track `--track` 0.175. Don't reintroduce near-black wells.
+- **IA: 3 workspaces** — home·1 chat·2 settings·3. Nav lives in the **titlebar** now (cont.32, no left activity column): Home/Chat `.navitem`s + Settings gear in `Titlebar.svelte`; switching still via `workspace.setActive`/Ctrl+1-3. Settings = one scroll-doc, **5 sections** (Appearance landing · Accessibility · Assistant · Speech · About).
 - **AssistantPane drop handlers on `.pane` outer only**; `tauri.conf.json dragDropEnabled:false`; `.shell` `position:fixed; inset:0`.
-- **RCON:** pw plaintext over UDP (how FXServer RCON works) — keychain only, never disk/IPC. Targets `bridge_port`, not SSH port.
-- **Versions lockstep** across `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at `/git-ship`.
+- **Blur-reveal** (`Markdown.svelte`): `shownCount` is the ONLY `$state`, written ONLY by the rAF loop — never inside a derived.
+- **Activity panel split (cont.33):** Steps = settled ACTIONS only (`logSteps` drops `cat==="write"`); Outputs owns writes/edits → opens Session Diff. Live units render ONLY in the Now cluster (don't re-add pending/writes to Steps). `SessionDiff.svelte` reads `tab.messages` (real) via `EditDiff` `hideHead`; open via `assistant.ui.diffOpen/diffTarget`. `MessageBubble.reviewDiff` deep-links by `firstEditFile` basename — don't repoint at `actnode-*` (removed).
+- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at `/git-ship`. v0.4.46 stands.

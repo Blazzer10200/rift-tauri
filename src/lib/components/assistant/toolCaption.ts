@@ -79,6 +79,11 @@ export function captionForTool(name: string, input: Input = {}): string {
     return sk ? `Using the ${sk} skill` : "Using a skill";
   }
   if (n === "TodoWrite") return "Updating the task list";
+  if (n === "TaskCreate") {
+    const subj = s("subject");
+    return subj ? `Planning · ${clip(subj, 36)}` : "Adding a task";
+  }
+  if (n === "TaskUpdate") return "Updating the task list";
   return `Running ${n}`;
 }
 
@@ -97,6 +102,8 @@ export function captionForGroup(blocks: Array<{ type: string; name?: string }>):
     if (n === "Glob") return `Running ${c} file searches`;
     if (n === "Bash" || n === "remote_bash") return `Running ${c} commands`;
     if (n === "WebFetch") return `Fetching ${c} pages`;
+    if (n === "TaskCreate") return `Planning ${c} task${c === 1 ? "" : "s"}`;
+    if (n === "TaskUpdate") return `Updating ${c} task${c === 1 ? "" : "s"}`;
     return `Running ${c} ${n} calls`;
   }
   return `Running ${c} actions`;

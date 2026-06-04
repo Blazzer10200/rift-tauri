@@ -8,8 +8,3 @@
 //! lands in Phase 1b.
 
 pub mod paths;
-pub mod remote_state;
-pub mod sync_snapshot;
-
-pub use remote_state::RemoteStateCache;
-pub use sync_snapshot::SyncSnapshot;

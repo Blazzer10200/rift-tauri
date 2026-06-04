@@ -350,16 +350,6 @@ pub fn tool_git_push(args: &Value, roots: &[PathBuf]) -> Result<String, String> 
         return Err("detached HEAD — checkout a branch before pushing.".into());
     }
 
-    // Pre-check: if the Rift sync queue has pending uploads, warn the model so
-    // it can wait/inform the user. Best-effort — only when the bridge is up.
-    if let Some(pending) = crate::assistant::mcp_server::bridge_pending_uploads() {
-        if pending > 0 {
-            return Err(format!(
-                "Rift sync queue has {pending} pending upload(s). Wait for the queue to drain (call sync_status) before pushing, so the pushed commit matches what's on the server."
-            ));
-        }
-    }
-
     let out = run_git(root, &["push", &remote, &branch])?;
     if !out.ok() {
         return Err(format!("git push failed: {}", out.err_text()));

@@ -5,7 +5,7 @@
 //!     Speech API (Edge's Azure-backed recogniser). No Rust audio path; Rust
 //!     only persists settings.
 //!   * `whisper`    — local Whisper Large v3 Turbo via whisper-rs on CUDA,
-//!     gated by Silero VAD, optionally polished by Claude Haiku. Rust owns
+//!     gated by webrtc-vad, optionally polished by Claude Haiku. Rust owns
 //!     mic capture (cpal), inference, and event emission. Default after the
 //!     user's first successful Whisper transcription.
 //!
@@ -72,6 +72,11 @@ pub struct SttConfig {
     /// written into the composer draft.
     #[serde(default = "default_true")]
     pub cleanup_enabled: bool,
+    /// Whisper decode strategy. `None`/`Some(1)` = greedy (fast). `Some(n>1)`
+    /// = beam search with that width (slower, sharper on technical vocab — GPU
+    /// only in practice). Whisper engine only; ignored by `web_speech`.
+    #[serde(default)]
+    pub beam_size: Option<u8>,
 
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -107,6 +112,7 @@ impl Default for SttConfig {
             initial_prompt: default_initial_prompt(),
             vocab_text: String::new(),
             cleanup_enabled: true,
+            beam_size: None,
             extra: serde_json::Map::new(),
         }
     }
@@ -190,6 +196,11 @@ pub struct WhisperSession(pub AsyncMutex<Option<ActiveSession>>);
 pub struct ActiveSession {
     ring: audio::AudioRing,
     initial_prompt: String,
+    language: Option<String>,
+    beam_size: Option<u8>,
+    /// Workspace-context string (project/branch/files) reused for the Haiku
+    /// cleanup pass at stop-time so it shares Whisper's domain vocabulary.
+    workspace_ctx: String,
     cleanup_enabled: bool,
     rolling_cancel: CancellationToken,
     /// Dropping sends a stop signal; capture thread drops cpal::Stream, mic
@@ -244,6 +255,58 @@ fn emit_error(app: &AppHandle, code: &str, message: &str) {
         "stt://error",
         json!({ "code": code, "message": message }),
     );
+}
+
+/// BCP-47 (`"en-US"`) → ISO 639-1 (`"en"`) for whisper.cpp's `set_language`.
+/// Empty/whitespace → `None`, which lets whisper.cpp auto-detect.
+fn lang_code(bcp47: &str) -> Option<String> {
+    let t = bcp47.trim();
+    if t.is_empty() {
+        return None;
+    }
+    Some(
+        t.split(['-', '_'])
+            .next()
+            .unwrap_or(t)
+            .to_ascii_lowercase(),
+    )
+}
+
+/// A short workspace-context string — project name, git branch, and a sample
+/// of open filenames — used to bias Whisper (and the Haiku cleanup pass)
+/// toward the user's project vocabulary. Empty when no folder is open.
+fn workspace_context() -> String {
+    use std::fmt::Write as _;
+    let root = match crate::assistant::current_root() {
+        Some(r) => r,
+        None => return String::new(),
+    };
+    let mut ctx = String::new();
+    if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
+        let _ = write!(ctx, "Project: {name}.");
+    }
+    if let Some(branch) = crate::assistant::assistant_workspace_branch() {
+        let _ = write!(ctx, " Branch: {branch}.");
+    }
+    if let Ok(files) = crate::assistant::assistant_list_workspace_files() {
+        // Distinct basenames, first ~30. compose_prompt's 800-char cap is the
+        // final backstop; this keeps the file list from dominating it.
+        let mut names: Vec<&str> = Vec::new();
+        for p in &files {
+            let n = p.rsplit('/').next().unwrap_or(p.as_str());
+            if n.starts_with('.') || names.contains(&n) {
+                continue;
+            }
+            names.push(n);
+            if names.len() >= 30 {
+                break;
+            }
+        }
+        if !names.is_empty() {
+            let _ = write!(ctx, " Files: {}.", names.join(", "));
+        }
+    }
+    ctx
 }
 
 #[tauri::command]
@@ -326,7 +389,20 @@ pub async fn stt_start_recording(
         .recv()
         .map_err(|e| format!("capture init channel: {e}"))??;
 
-    let initial_prompt = whisper::compose_prompt(&cfg.initial_prompt, &cfg.vocab_text);
+    // Fold the workspace context into the vocab slot so it biases the decoder
+    // toward project filenames/symbols; user vocab follows (trimmed first if
+    // the 800-char prompt budget is exceeded).
+    let workspace_ctx = workspace_context();
+    let vocab = if workspace_ctx.is_empty() {
+        cfg.vocab_text.clone()
+    } else if cfg.vocab_text.trim().is_empty() {
+        workspace_ctx.clone()
+    } else {
+        format!("{workspace_ctx} {}", cfg.vocab_text)
+    };
+    let initial_prompt = whisper::compose_prompt(&cfg.initial_prompt, &vocab);
+    let language = lang_code(&cfg.language);
+    let beam_size = cfg.beam_size;
     let cleanup_enabled = cfg.cleanup_enabled;
     let rolling_cancel = CancellationToken::new();
 
@@ -336,9 +412,19 @@ pub async fn stt_start_recording(
         let task_ring = ring.clone();
         let task_engine = engine.clone();
         let task_prompt = initial_prompt.clone();
+        let task_lang = language.clone();
         let task_cancel = rolling_cancel.clone();
         tokio::spawn(async move {
-            rolling_window_loop(task_app, task_ring, task_engine, task_prompt, task_cancel).await;
+            rolling_window_loop(
+                task_app,
+                task_ring,
+                task_engine,
+                task_prompt,
+                task_lang,
+                beam_size,
+                task_cancel,
+            )
+            .await;
         });
     }
 
@@ -347,6 +433,9 @@ pub async fn stt_start_recording(
         *slot = Some(ActiveSession {
             ring,
             initial_prompt,
+            language,
+            beam_size,
+            workspace_ctx,
             cleanup_enabled,
             rolling_cancel,
             capture_stop: Some(cap_stop_tx),
@@ -381,14 +470,18 @@ pub async fn stt_stop_recording(
             .ok_or_else(|| "whisper engine missing — model unloaded mid-session".to_string())?
     };
     let prompt = active.initial_prompt.clone();
-    let raw = tokio::task::spawn_blocking(move || engine.transcribe(&samples, &prompt))
-        .await
-        .map_err(|e| format!("final transcribe join: {e}"))??;
+    let language = active.language.clone();
+    let beam_size = active.beam_size;
+    let raw = tokio::task::spawn_blocking(move || {
+        engine.transcribe(&samples, &prompt, language.as_deref(), beam_size)
+    })
+    .await
+    .map_err(|e| format!("final transcribe join: {e}"))??;
 
     let scrubbed = vad::strip_hallucinations(&raw);
 
     let final_text = if active.cleanup_enabled && !scrubbed.is_empty() {
-        match cleanup::polish(&scrubbed).await {
+        match cleanup::polish_with_ctx(&scrubbed, &active.workspace_ctx).await {
             Ok(t) => t,
             Err(e) => {
                 log::warn!("[stt] cleanup hop failed, returning raw: {e}");
@@ -420,6 +513,8 @@ async fn rolling_window_loop(
     ring: audio::AudioRing,
     engine: whisper::WhisperEngine,
     initial_prompt: String,
+    language: Option<String>,
+    beam_size: Option<u8>,
     cancel: CancellationToken,
 ) {
     const TICK_MS: u64 = 1000;
@@ -442,8 +537,9 @@ async fn rolling_window_loop(
         }
         let engine_c = engine.clone();
         let prompt_c = initial_prompt.clone();
+        let lang_c = language.clone();
         let raw = match tokio::task::spawn_blocking(move || {
-            engine_c.transcribe(&samples, &prompt_c)
+            engine_c.transcribe(&samples, &prompt_c, lang_c.as_deref(), beam_size)
         })
         .await
         {

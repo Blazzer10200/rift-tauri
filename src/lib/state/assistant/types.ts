@@ -175,19 +175,6 @@ export type StreamEnvelope =
   | { type: "user"; message: { content: ContentBlock[] } }
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
 
-export type RemoteLockEvt = {
-  file_path: string;
-  user: string;
-  host: string;
-  since: string;
-};
-
-export type RemoteShellEvt = {
-  command: string;
-  remote_root: string;
-  at: string;
-};
-
 /** Extended-thinking tier. `ultra` = ultracode: xhigh effort + autonomous
  *  dynamic-workflow orchestration, enabled via the CLI's `ultracode` settings
  *  key (see assistant_send in mod.rs). Haiku ignores all tiers server-side. */

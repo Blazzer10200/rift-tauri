@@ -1,37 +1,42 @@
 <script lang="ts">
   import {
-    ArrowDownUp, MessageSquare, Sparkles, Send, RefreshCcw,
-    GitBranch, Upload, ChevronRight, History,
+    MessageSquare, Sparkles, Send, FolderOpen, Folder, FolderGit2,
+    GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check,
   } from "lucide-svelte";
+  import { onMount } from "svelte";
   import { assistant } from "$lib/state/assistant.svelte";
-  import { connection, type ActivityKind, type ActivityRow } from "$lib/state/connection.svelte";
-  import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
+  import { cliUpdate } from "$lib/state/cliUpdate.svelte";
+  import { workspace } from "$lib/state/workspace.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
-  // ── Real sync state (no fabricated absolutes — only fields the engine exposes) ──
-  const server = $derived(connection.selected);
-  const connected = $derived(server != null);
-  const conflicts = $derived(connection.conflicts.length);
-  const localAhead = $derived(connection.dirtyEdits.size);
-  const queued = $derived(connection.status?.pending ?? connection.pendingReuploads.length);
-  const watches = $derived(connection.status?.watches ?? 0);
-  const flagged = $derived(conflicts + localAhead + queued);
-  const scanAt = $derived(connection.lastScanAt);
+  // Claude Code CLI update — the dashboard is the launch surface, so kick the
+  // (throttled) npm check here and surface a dismissible banner if one's live.
+  const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
+  const cliUpdAvail = $derived(cliUpdate.available(cliInstalled));
+  onMount(() => { void cliUpdate.maybeCheck(); });
 
-  type HeroState = "offline" | "attention" | "clear";
-  const heroState = $derived<HeroState>(!connected ? "offline" : flagged > 0 ? "attention" : "clear");
-  const pct = $derived(connected ? Math.max(0, 100 - flagged) : 0);
+  // ── Workspace state — the local folder Claude operates on ──
+  const root = $derived(assistant.workspace.current);
+  const hasRoot = $derived(root != null);
+  const recents = $derived(assistant.workspace.recent);
+  const branch = $derived(assistant.workspaceBranch);
 
-  const pillCls = $derived.by<"ok" | "warn" | "danger" | "info" | "muted">(() => {
-    switch (connection.pill) {
-      case "Connected": return "ok";
-      case "Syncing": return "info";
-      case "Conflict": return "danger";
-      case "Lock-blocked": return "warn";
-      case "Sync error": return "danger";
-      default: return "muted";
-    }
+  // Resolve the git branch lazily whenever a root is set.
+  $effect(() => {
+    if (assistant.workspace.current) void assistant.loadWorkspaceBranch();
   });
+
+  function leafName(p: string): string {
+    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
+    const parts = norm.split("/");
+    return parts[parts.length - 1] || norm;
+  }
+  function shortPath(p: string): string {
+    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
+    const parts = norm.split("/");
+    if (parts.length <= 2) return norm;
+    return `…/${parts.slice(-2).join("/")}`;
+  }
 
   function fmtAgo(input: number | string | null): string {
     if (input == null) return "—";
@@ -46,16 +51,20 @@
     return new Date(ms).toLocaleDateString();
   }
 
-  function dotTone(k: ActivityKind): "ok" | "warn" | "info" {
-    if (k === "conflict" || k === "error" || k === "block" || k === "drift") return "warn";
-    if (k === "system") return "info";
-    return "ok";
+  // Default model the composer opens a new chat with — display-only mirror.
+  const MODEL_LABELS: Record<string, string> = {
+    sonnet: "Sonnet 4.6", haiku: "Haiku 4.5", "claude-opus-4-7": "Opus 4.7", opus: "Opus 4.8",
+  };
+  const modelLabel = $derived(MODEL_LABELS[assistant.model] ?? String(assistant.model));
+
+  function greeting(): string {
+    const hr = new Date().getHours();
+    if (hr < 5) return "Still up";
+    if (hr < 12) return "Good morning";
+    if (hr < 18) return "Good afternoon";
+    return "Good evening";
   }
-  function badgeLabel(r: ActivityRow): string {
-    const a = r.action || r.kind;
-    return a.charAt(0).toUpperCase() + a.slice(1);
-  }
-  const feed = $derived(connection.activityFeed.slice(0, 4));
+  const greet = greeting();
 
   // ── Recents — real conversations w/ a real back-and-forth ──
   const recentChats = $derived(
@@ -65,11 +74,9 @@
       .slice(0, 6),
   );
 
-  // ── Navigation (folds redesign destinations that don't exist yet onto live ones) ──
-  function go(target: string, draft?: string) {
+  function go(draft?: string) {
     if (draft != null) assistant.composerDraft = draft;
-    const remap: Record<string, WorkspaceId> = { conflicts: "sync", history: "chat" };
-    workspace.setActive((remap[target] ?? target) as WorkspaceId);
+    workspace.setActive("chat");
   }
   function resume(id: string) {
     void assistant.openTab(id);
@@ -79,96 +86,100 @@
 
 <div class="hf">
   <div class="hf-inner">
-    <!-- Honest status hero -->
-    <section class="hf-hero" data-state={heroState}>
+    <!-- Hero -->
+    <section class="hf-hero">
       <div class="hf-hero-l">
-        <div class="hf-eyebrow"><span class="led"></span>{connected ? `Watching · ${server?.name}` : "Not connected"}</div>
-        {#if heroState === "offline"}
-          <h1 class="hf-title">No server connected</h1>
-          <p class="hf-sub">Connect an SFTP server to start mirroring and drift detection.</p>
-        {:else if heroState === "attention"}
-          <h1 class="hf-title">
-            {#if conflicts > 0}{conflicts} file{conflicts === 1 ? "" : "s"} need <span class="amber">your review</span>
-            {:else}{flagged} change{flagged === 1 ? "" : "s"} <span class="amber">pending</span>{/if}
-          </h1>
-          <p class="hf-sub"><span class="mono">{flagged} flagged</span> · last scan {fmtAgo(scanAt)}</p>
+        <div class="hf-eyebrow"><span class="led"></span>{greet}</div>
+        {#if hasRoot}
+          <h1 class="hf-title">What's next for <span class="emer">{leafName(root!)}</span>?</h1>
+          <p class="hf-sub">Claude reads, greps, and edits across your workspace in place.</p>
         {:else}
-          <h1 class="hf-title">{server?.name} is <span class="emer">fully in sync</span></h1>
-          <p class="hf-sub"><span class="mono">0 drift</span> · {watches} folders watched · last scan {fmtAgo(scanAt)}</p>
+          <h1 class="hf-title">Open a project to begin</h1>
+          <p class="hf-sub">Point Claude at any folder on your disk — it reads, greps, and edits in place.</p>
         {/if}
       </div>
       <div class="hf-hero-actions">
-        {#if heroState === "offline"}
-          <button class="hf-btn primary" onclick={() => go("sync")}><RefreshCcw size={15} />Connect server</button>
-        {:else if heroState === "attention"}
-          {#if conflicts > 0}
-            <button class="hf-btn primary" onclick={() => go("conflicts")}><GitBranch size={15} />Resolve {conflicts} conflict{conflicts === 1 ? "" : "s"}</button>
-          {/if}
-          {#if localAhead > 0}
-            <button class="hf-btn" onclick={() => go("sync")}><Upload size={15} />Push {localAhead}</button>
-          {/if}
-          <button class="hf-btn icon" use:tooltip={"Open Sync"} aria-label="Open Sync" onclick={() => go("sync")}><RefreshCcw size={16} /></button>
-        {:else}
-          <button class="hf-btn" onclick={() => go("sync")}><RefreshCcw size={15} />Rescan</button>
-          <button class="hf-btn primary" onclick={() => go("chat")}><Sparkles size={15} />New chat</button>
-        {/if}
+        <button class="hf-btn primary" onclick={() => go()}><Sparkles size={15} />New chat</button>
       </div>
     </section>
 
-    <!-- Signature feature — Ask Claude -->
-    <button class="dash-ask" onclick={() => go("chat")}>
+    <!-- Ask Claude -->
+    <button class="dash-ask" onclick={() => go()}>
       <span class="da-glyph"><Sparkles size={16} /></span>
-      <span class="da-text">{assistant.composerDraft || (server ? `Ask Claude about ${server.name}…` : "Ask Claude anything…")}</span>
+      <span class="da-text">{assistant.composerDraft || (hasRoot ? `Ask Claude about ${leafName(root!)}…` : "Ask Claude anything…")}</span>
+      <span class="da-model"><span class="da-dot"></span>{modelLabel}</span>
       <span class="da-send"><Send size={14} /></span>
     </button>
 
+    {#if cliUpdAvail}
+      <div class="dash-cli" role="status">
+        <span class="dc-ic"><ArrowUpCircle size={17} /></span>
+        <span class="dc-body">
+          <span class="dc-t">Claude Code update available</span>
+          <span class="dc-s">Your CLI is <code>{cliInstalled}</code> · npm has <code>{cliUpdate.latest}</code> — update it from a terminal</span>
+        </span>
+        <code class="dc-cmd">{cliUpdate.updateCommand}</code>
+        <button
+          class="dc-copy"
+          class:done={cliUpdate.copied}
+          type="button"
+          onclick={() => void cliUpdate.copyCommand()}
+          use:tooltip={"Copy update command"}
+          aria-label="Copy update command"
+        >
+          {#if cliUpdate.copied}<Check size={14} />Copied{:else}<Copy size={14} />Copy{/if}
+        </button>
+        <button class="dc-x" type="button" use:tooltip={"Dismiss"} aria-label="Dismiss update notice" onclick={() => cliUpdate.dismiss()}><X size={14} /></button>
+      </div>
+    {/if}
+
     <div class="hf-grid">
-      <!-- Sync health (activity folded in) -->
+      <!-- Workspace -->
       <div class="hf-card">
         <div class="l3-card-head">
-          <span class="ci"><ArrowDownUp size={14} /></span>
-          <span class="t">Sync health</span>
-          <span class="badge {pillCls}">{connection.pill}</span>
+          <span class="ci"><FolderGit2 size={14} /></span>
+          <span class="t">Workspace</span>
+          {#if branch}<span class="badge info"><GitBranch size={11} /> {branch}</span>{/if}
         </div>
 
-        <div class="hf-metrics">
-          <button class="hf-metric" onclick={() => go("conflicts")}>
-            <div class="mv" class:danger={conflicts > 0} class:ok={conflicts === 0}>{conflicts}</div>
-            <div class="ml">Conflicts</div>
+        {#if hasRoot}
+          <div class="ws-current">
+            <span class="ws-cur-ic"><Folder size={15} /></span>
+            <span class="ws-cur-body">
+              <span class="ws-cur-name">{leafName(root!)}</span>
+              <span class="ws-cur-path mono">{root}</span>
+            </span>
+          </div>
+          <button class="hf-btn ws-change" onclick={() => void assistant.pickFolder()}>
+            <FolderOpen size={14} />Change folder
           </button>
-          <button class="hf-metric" onclick={() => go("sync")}>
-            <div class="mv" class:warn={localAhead > 0} class:ok={localAhead === 0}>{localAhead}</div>
-            <div class="ml">Local ahead</div>
+        {:else}
+          <button class="ws-open" type="button" onclick={() => void assistant.pickFolder()}>
+            <span class="ws-open-ic"><FolderOpen size={18} /></span>
+            <span class="ws-open-body">
+              <span class="ws-open-t">Open folder…</span>
+              <span class="ws-open-s">Pick any project on your disk</span>
+            </span>
+            <ChevronRight size={16} />
           </button>
-          <button class="hf-metric" onclick={() => go("sync")}>
-            <div class="mv" class:warn={queued > 0} class:ok={queued === 0}>{queued}</div>
-            <div class="ml">Queued</div>
-          </button>
-        </div>
+        {/if}
 
-        <div class="hf-meter">
-          <div class="bar"><i style="width: {pct}%"></i></div>
-          <span class="pct">{pct}%</span>
-        </div>
-
-        <div class="hf-divider"></div>
-        <div class="hf-feed-label">Latest activity</div>
-        <div class="hf-feed">
-          {#if feed.length === 0}
-            <div class="hf-empty">No activity yet.</div>
-          {:else}
-            {#each feed as f, i (i)}
-              <div class="l3-fi">
-                <span class="fd {dotTone(f.kind)}"></span>
-                <span class="ft"><b>{badgeLabel(f)}</b> {f.rel_path ?? f.file ?? f.resource}</span>
-                <span class="fw">{fmtAgo(f.at)}</span>
+        {#if recents.length > 0}
+          <div class="hf-divider"></div>
+          <div class="hf-feed-label">Recent folders</div>
+          <div class="ws-recents">
+            {#each recents.slice(0, 5) as r (r)}
+              <div class="ws-recent-row">
+                <button class="ws-recent" type="button" onclick={() => void assistant.setRoot(r)} use:tooltip={r}>
+                  <span class="ws-recent-ic"><Folder size={13} /></span>
+                  <span class="ws-recent-t">{leafName(r)}</span>
+                  <span class="ws-recent-meta mono">{shortPath(r)}</span>
+                </button>
+                <button class="ws-recent-x" type="button" use:tooltip={"Forget"} onclick={() => void assistant.removeRecentRoot(r)}><X size={11} /></button>
               </div>
             {/each}
-          {/if}
-        </div>
-        <button class="hf-allchats" onclick={() => go("sync")}>
-          <ArrowDownUp size={13} />Open Sync dashboard<ChevronRight size={13} />
-        </button>
+          </div>
+        {/if}
       </div>
 
       <!-- Jump back in -->
@@ -194,7 +205,7 @@
             {/each}
           {/if}
         </div>
-        <button class="hf-allchats" onclick={() => go("history")}>
+        <button class="hf-allchats" onclick={() => go()}>
           <History size={13} />Browse all conversations<ChevronRight size={13} />
         </button>
       </div>
@@ -209,24 +220,19 @@
   .hf-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex: none; }
   .hf-hero-l { min-width: 0; }
   .hf-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 11px; }
-  .hf-eyebrow .led { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
-  .hf-hero[data-state="attention"] .hf-eyebrow .led { background: var(--warn); box-shadow: 0 0 8px color-mix(in oklch, var(--warn) 60%, transparent); }
-  .hf-hero[data-state="clear"] .hf-eyebrow .led { background: var(--ok); box-shadow: 0 0 8px color-mix(in oklch, var(--ok) 60%, transparent); }
+  .hf-eyebrow .led { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 60%, transparent); }
   @media (prefers-reduced-motion: no-preference) {
-    .hf-hero[data-state="clear"] .hf-eyebrow .led { animation: led-breathe 2.6s ease-in-out infinite; }
+    .hf-eyebrow .led { animation: led-breathe 2.6s ease-in-out infinite; }
   }
   @keyframes led-breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
   .hf-title { margin: 2px 0 0; font-size: 33px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.08; color: var(--fg); }
-  .hf-title .amber { color: var(--warn); }
   .hf-title .emer { color: var(--accent); }
   .hf-sub { margin: 12px 0 0; color: var(--fg-muted); font-size: var(--fs-lg); }
-  .hf-sub .mono { font-family: var(--font-mono); color: var(--fg-2); }
 
   .hf-hero-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
   .hf-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: var(--radius-lg); font: inherit; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg); transition: background 140ms, border-color 140ms; }
   .hf-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-  .hf-btn.icon { width: 40px; padding: 0; justify-content: center; color: var(--fg-muted); }
-  .hf-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 4px 16px -4px color-mix(in oklch, var(--accent) 55%, transparent); }
+  .hf-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 4px 16px -4px color-mix(in oklab, var(--accent) 55%, transparent); }
   .hf-btn.primary:hover { background: var(--accent-hover); }
 
   .dash-ask {
@@ -238,49 +244,101 @@
   .dash-ask:hover { border-color: var(--ghost-border); box-shadow: 0 0 0 3px var(--ring); }
   .da-glyph { width: 32px; height: 32px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
   .da-text { flex: 1; color: var(--fg-subtle); font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .da-send { width: 36px; height: 32px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex-shrink: 0; box-shadow: 0 2px 10px -2px color-mix(in oklch, var(--accent) 50%, transparent); }
+  .da-model { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; height: 32px; padding: 0 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--border); color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
+  .da-model .da-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent); flex-shrink: 0; }
+  .da-send { width: 36px; height: 32px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex-shrink: 0; box-shadow: 0 2px 10px -2px color-mix(in oklab, var(--accent) 50%, transparent); }
 
-  .hf-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.55fr 1fr; gap: 20px; }
+  /* CLI update banner — slim accent strip under the Ask bar. */
+  .dash-cli {
+    flex: none; display: flex; align-items: center; gap: 13px;
+    padding: 11px 12px 11px 14px; border-radius: 14px;
+    background: color-mix(in oklab, var(--accent) 9%, var(--surface));
+    border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
+    animation: dash-cli-in 240ms var(--ease-page, ease);
+  }
+  @keyframes dash-cli-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .dash-cli { animation: none; } }
+  .dash-cli .dc-ic {
+    width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+    display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .dash-cli .dc-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .dash-cli .dc-t { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
+  .dash-cli .dc-s { font-size: var(--fs-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-cli .dc-s code { font-family: var(--font-mono); color: var(--fg-2); }
+  .dash-cli .dc-cmd {
+    margin-left: auto; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px;
+    color: var(--fg); background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong);
+    border-radius: 8px; padding: 5px 9px; max-width: 280px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .dash-cli .dc-copy {
+    flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 11px; border-radius: 8px; font: inherit; font-size: var(--fs-xs); font-weight: 600;
+    cursor: pointer; background: var(--accent); color: var(--accent-fg); border: 1px solid transparent;
+    transition: background 130ms ease;
+  }
+  .dash-cli .dc-copy:hover { background: var(--accent-hover); }
+  .dash-cli .dc-copy.done { background: var(--ok, var(--accent)); }
+  .dash-cli .dc-x {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
+    background: transparent; border: 0; color: var(--fg-faint);
+    transition: color 120ms ease, background 120ms ease;
+  }
+  .dash-cli .dc-x:hover { color: var(--fg); background: var(--surface-hover); }
+  @media (max-width: 760px) { .dash-cli .dc-cmd { display: none; } }
+
+  .hf-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; }
   .hf-card { min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 24px 24px 18px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent); }
   .l3-card-head { display: flex; align-items: center; gap: 9px; flex: none; margin-bottom: 20px; }
   .l3-card-head .ci { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
   .l3-card-head .t { font-weight: 650; font-size: var(--fs-md); color: var(--fg); }
-  .l3-card-head .badge { margin-left: auto; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+  .l3-card-head .badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
   .badge.ok { background: var(--ok-soft); color: var(--ok); }
-  .badge.warn { background: var(--warn-soft); color: var(--warn); }
-  .badge.danger { background: var(--danger-soft); color: var(--danger); }
   .badge.info { background: var(--info-soft); color: var(--info); }
-  .badge.muted { background: var(--bg-elev-2); color: var(--fg-muted); }
 
-  .hf-metrics { display: flex; align-items: stretch; gap: 0; flex: none; }
-  .hf-metric { flex: 1; text-align: left; background: transparent; border: 0; padding: 2px 4px 2px 0; cursor: pointer; font: inherit; transition: opacity 140ms; }
-  .hf-metric + .hf-metric { border-left: 1px solid var(--border); padding-left: 20px; }
-  .hf-metric:hover { opacity: 0.72; }
-  .hf-metric .mv { font-family: var(--font-mono); font-size: 30px; font-weight: 680; line-height: 1; color: var(--fg); }
-  .hf-metric .mv.warn { color: var(--warn); }
-  .hf-metric .mv.danger { color: var(--danger); }
-  .hf-metric .mv.ok { color: var(--ok); }
-  .hf-metric .ml { font-size: 11.5px; color: var(--fg-subtle); margin-top: 9px; }
+  /* Workspace current-folder block */
+  .ws-current { display: flex; align-items: center; gap: 12px; flex: none; margin-bottom: 14px; }
+  .ws-cur-ic { width: 38px; height: 38px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
+  .ws-cur-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .ws-cur-name { font-size: var(--fs-md); font-weight: 650; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-cur-path { font-size: var(--fs-xs); color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mono { font-family: var(--font-mono, monospace); }
+  .ws-change { align-self: flex-start; flex: none; }
 
-  .hf-meter { display: flex; align-items: center; gap: 13px; margin-top: 22px; flex: none; }
-  .hf-meter .bar { flex: 1; height: 8px; border-radius: 999px; background: var(--bg-elev-3); overflow: hidden; }
-  .hf-meter .bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 400ms var(--ease-page); }
-  .hf-meter .pct { font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 600; color: var(--fg); min-width: 38px; text-align: right; }
+  .ws-open {
+    display: grid; grid-template-columns: 40px 1fr auto; align-items: center; gap: 13px;
+    width: 100%; padding: 15px 16px; text-align: left; cursor: pointer; color: var(--fg);
+    background: var(--accent-soft); border: 1px solid var(--ghost-border); border-radius: var(--radius-lg);
+    font: inherit; flex: none;
+    transition: background 140ms ease, transform 140ms ease;
+  }
+  .ws-open:hover { background: color-mix(in oklab, var(--accent) 14%, transparent); transform: translateY(-1px); }
+  .ws-open-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+  .ws-open-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ws-open-t { font-size: var(--fs-md); font-weight: 600; }
+  .ws-open-s { font-size: var(--fs-xs); color: var(--fg-muted); }
 
-  .hf-divider { height: 1px; background: var(--border); margin: 20px 0 0; flex: none; }
+  .hf-divider { height: 1px; background: var(--border); margin: 18px 0 0; flex: none; }
   .hf-feed-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); margin: 16px 2px 4px; flex: none; }
-  .hf-feed { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 6px 0 0; }
-  .l3-fi { display: flex; align-items: center; gap: 10px; padding: 8px 6px; font-size: var(--fs-sm); }
-  .l3-fi .fd { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-  .l3-fi .fd.ok { background: var(--ok); }
-  .l3-fi .fd.info { background: var(--info); }
-  .l3-fi .fd.warn { background: var(--warn); }
-  .l3-fi .ft { flex: 1; color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .l3-fi .ft b { color: var(--fg); font-weight: 600; }
-  .l3-fi .fw { font-size: 10.5px; color: var(--fg-faint); font-family: var(--font-mono); }
+
+  .ws-recents { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+  .ws-recent-row { display: flex; align-items: stretch; gap: 2px; border-radius: 10px; }
+  .ws-recent { flex: 1; min-width: 0; display: grid; grid-template-columns: 24px auto 1fr; align-items: center; gap: 11px; padding: 9px 11px; text-align: left; cursor: pointer; color: var(--fg); background: transparent; border: 1px solid transparent; border-radius: 10px; font: inherit; transition: background 130ms ease, border-color 130ms ease; }
+  .ws-recent:hover { background: var(--surface-hover); border-color: var(--border); }
+  .ws-recent-ic { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--bg-elev-2); color: var(--fg-muted); }
+  .ws-recent:hover .ws-recent-ic { color: var(--accent); }
+  .ws-recent-t { font-size: var(--fs-sm); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-recent-meta { font-size: var(--fs-xs); color: var(--fg-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ws-recent-x { background: transparent; border: 0; padding: 0 8px; color: var(--fg-faint); cursor: pointer; opacity: 0; display: inline-flex; align-items: center; border-radius: 8px; transition: opacity 120ms, color 120ms; }
+  .ws-recent-row:hover .ws-recent-x { opacity: 1; }
+  .ws-recent-x:hover { color: var(--danger); }
+
   .hf-empty { color: var(--fg-subtle); font-size: var(--fs-sm); padding: 8px 6px; }
 
-  .hf-chats { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+  .hf-chats { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
   .hf-chat { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 11px; padding: 11px 8px; border-radius: 9px; background: transparent; border: 0; width: 100%; text-align: left; font: inherit; cursor: pointer; transition: background 120ms; }
   .hf-chat:hover { background: var(--surface-hover); }
   .hf-chat-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }

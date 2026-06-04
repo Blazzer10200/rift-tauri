@@ -3,7 +3,6 @@
   import { WORKSPACES } from "../workspaces";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
-  import { PanelLeftClose, PanelLeft } from "lucide-svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Pointer-event drag-to-reorder. The previous HTML5 DnD path didn't fire
@@ -211,29 +210,6 @@
         {/if}
       </button>
     {/if}
-
-    <!-- Pin / collapse toggle -->
-    <button
-      class="ab-btn ab-pin-btn"
-      type="button"
-      data-disabled="false"
-      use:tooltip={uiPrefs.railPinned ? "Collapse sidebar" : "Pin sidebar"}
-      aria-label={uiPrefs.railPinned ? "Collapse sidebar" : "Pin sidebar"}
-      onclick={() => uiPrefs.toggleRailPinned()}
-    >
-      <span class="ab-hit">
-        <span class="ab-icon">
-          {#if uiPrefs.railPinned}
-            <PanelLeftClose size={17} />
-          {:else}
-            <PanelLeft size={17} />
-          {/if}
-        </span>
-      </span>
-      {#if uiPrefs.railPinned}
-        <span class="ab-label">Collapse</span>
-      {/if}
-    </button>
   </div>
 </nav>
 
@@ -354,7 +330,7 @@
 
   .ab-btn[data-active="true"] { color: var(--accent); }
   .ab-btn[data-active="true"] .ab-hit {
-    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
     color: var(--accent);
   }
   /* Thin static accent left-bar — the redesign's "active = accent + thin left
@@ -369,12 +345,12 @@
     width: 3px;
     background: var(--accent);
     border-radius: 0 3px 3px 0;
-    box-shadow: 0 0 8px color-mix(in oklch, var(--accent) 40%, transparent);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 40%, transparent);
   }
   /* Hover halo on the hit-target — subtle accent ring on hover so non-active
      workspaces feel reactive, not just bg-tinted. */
   .ab-btn:not([data-active="true"]):not([data-disabled="true"]):hover .ab-hit {
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 20%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 20%, transparent);
   }
 
   /* Dragging — the picked-up row visibly lifts: stronger accent fill,
@@ -385,7 +361,7 @@
     transition: none;
   }
   .ab-btn[data-drag-src="true"] .ab-hit {
-    background: color-mix(in oklch, var(--accent) 28%, transparent);
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
     color: var(--accent);
     box-shadow:
       0 0 0 1.5px var(--accent),
@@ -459,18 +435,4 @@
     pointer-events: auto;
   }
 
-  /* Pin toggle — calm, non-draggable, sits at the very bottom. */
-  .ab-pin-btn {
-    cursor: pointer;
-    opacity: 0.6;
-    transition: opacity 140ms ease, transform 180ms cubic-bezier(.2,.7,.2,1);
-  }
-  .ab-pin-btn:hover {
-    opacity: 1;
-  }
-  /* Collapsed: center it like the other icon buttons. */
-  .activitybar:not([data-expanded="true"]) .ab-pin-btn {
-    justify-content: center;
-    padding: 0;
-  }
 </style>

@@ -85,7 +85,120 @@
     },
   });
 
-  let { text }: { text: string } = $props();
+  let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
+
+  const prefersReducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+  // Paced word reveal — decoupled from token arrival so prose flows in a
+  // steady cascade (mockup `splitReveal`: word i reveals at i·42ms) instead of
+  // popping in at the backend's bursty token rate. `shownCount` ($state) is the
+  // reveal cursor, advanced by a fixed-cadence rAF timer below; words past it
+  // are held (present, blurred) so the cell never reflows — exactly like the
+  // mock, which lays out the whole prose and un-blurs it in place.
+  // totalWords/everStreamed are plain lets (NOT $state) → mutating them inside
+  // the derived can't trigger a reactivity loop; idempotent under double-invoke
+  // (same as the legacy revealFrom pattern).
+  const WORD_MS = 42;      // mock stagger: i * 0.042s
+  const REVEAL_MS = 500;   // per-word blur duration (matches md-word keyframe)
+  const REVEAL_WINDOW = Math.ceil(REVEAL_MS / WORD_MS) + 1; // words still mid-blur behind the cursor (+1 so the oldest finishes before snapping solid)
+  let shownCount = $state(0);
+  let totalWords = 0;
+  let everStreamed = false;
+  let lastLen = 0;
+
+  // Re-cascade when the turn is replaced/regenerated (text shrinks).
+  $effect(() => {
+    const L = text.length;
+    if (L < lastLen) shownCount = 0;
+    lastLen = L;
+  });
+
+  // Single lifetime-persistent rAF loop: drips `shownCount` toward `totalWords`
+  // at WORD_MS cadence, time-based so a frame drop or fast burst still paces
+  // smoothly. Reads happen in the async callback (untracked) → the effect's
+  // only dep is prefersReducedMotion, so it sets up once and never re-subscribes.
+  $effect(() => {
+    if (prefersReducedMotion) return;
+    let raf = 0;
+    let last = 0;
+    let stopped = false;
+    const step = (t: number) => {
+      if (stopped) return;
+      // Overshoot totalWords by the window so the trailing words finish their
+      // blur after the backend stops emitting, instead of snapping to solid.
+      const target = totalWords > 0 ? totalWords + REVEAL_WINDOW : 0;
+      if (shownCount < target) {
+        if (!last) last = t;
+        const due = Math.floor((t - last) / WORD_MS);
+        if (due > 0) {
+          shownCount = Math.min(shownCount + due, target);
+          last = t;
+        }
+      } else {
+        last = 0;
+      }
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => { stopped = true; cancelAnimationFrame(raf); };
+  });
+
+  // Walk prose text nodes, classifying each word by its age behind the cursor
+  // (ageWords = how many words have been revealed since this one):
+  //   ageWords ≥ WINDOW → solid (blur finished; plain text so it never re-blurs)
+  //   0 ≤ ageWords      → animating (.md-w, negative delay resumes the blur at
+  //                       its true phase so the full 0.5s plays across remounts)
+  //   ageWords < 0      → held (.md-w-hold: present + blurred, reserves layout)
+  // Only code BLOCKS (pre / shiki) are skipped; inline <code> reveals with the
+  // prose so green inline tokens don't pop in ahead of the surrounding words.
+  function revealWords(htmlIn: string, shown: number): { html: string; count: number } {
+    if (typeof document === "undefined") return { html: htmlIn, count: 0 };
+    const tpl = document.createElement("template");
+    tpl.innerHTML = htmlIn;
+    const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        let p = n.parentElement;
+        while (p) {
+          if (p.tagName === "PRE" || p.classList.contains("shiki-block")) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentElement;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    const targets: Text[] = [];
+    let node: Node | null;
+    while ((node = walker.nextNode())) targets.push(node as Text);
+    let gi = 0;
+    for (const tn of targets) {
+      const parts = (tn.nodeValue ?? "").split(/(\s+)/);
+      const frag = document.createDocumentFragment();
+      for (const p of parts) {
+        if (p === "") continue;
+        if (/^\s+$/.test(p)) { frag.appendChild(document.createTextNode(p)); continue; }
+        const ageWords = shown - 1 - gi++;
+        if (ageWords >= REVEAL_WINDOW) {
+          frag.appendChild(document.createTextNode(p));
+        } else if (ageWords >= 0) {
+          const span = document.createElement("span");
+          span.className = "md-w";
+          span.style.animationDelay = -(ageWords * WORD_MS) + "ms";
+          span.textContent = p;
+          frag.appendChild(span);
+        } else {
+          const span = document.createElement("span");
+          span.className = "md-w-hold";
+          span.textContent = p;
+          frag.appendChild(span);
+        }
+      }
+      tn.parentNode?.replaceChild(frag, tn);
+    }
+    return { html: tpl.innerHTML, count: gi };
+  }
 
   function fireCodeCopy(copyBtn: HTMLElement) {
     // Shiki blocks: copy lives in .shiki-head (sibling of <pre>, both
@@ -211,10 +324,12 @@
     return tpl.innerHTML;
   }
 
-  const processed = $derived.by(() => {
-    // Re-run when shikiReady flips — `code()` renderer reads from the same
-    // highlighter singleton, so on the first paint after warmup all code
-    // blocks upgrade from plain → syntax-highlighted in place.
+  // Parse markdown → sanitized HTML. Depends only on `text`/`shikiReady`, so it
+  // runs once per backend delta — NOT on every reveal-cursor tick (the paced
+  // reveal below re-walks this cached HTML at ~24fps; re-parsing there would be
+  // wasteful). Re-runs when shikiReady flips so code blocks upgrade to
+  // syntax-highlighted in place.
+  const parsed = $derived.by(() => {
     void shikiReady;
     const raw = marked.parse(text, { async: false }) as string;
     const clean = DOMPurify.sanitize(raw, {
@@ -235,8 +350,22 @@
       // highlighter output we generated ourselves.
       ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open", "style", "tabindex", "role", "aria-label", "data-lang"],
     });
+    if (streaming) everStreamed = true;
     const extracted = extractAndStripChecklists(clean);
     return { html: annotateCodeBlocks(tagFlatShortLists(extracted.html)), items: extracted.items };
+  });
+
+  const processed = $derived.by(() => {
+    const baseHtml = parsed.html;
+    // Reveal while this turn is (or was) streaming and the cursor hasn't caught
+    // up to the full word count yet — the tail keeps draining after the backend
+    // finishes so the cascade plays out instead of snapping.
+    const revealActive =
+      everStreamed && !prefersReducedMotion && (streaming || shownCount < totalWords + REVEAL_WINDOW);
+    if (!revealActive) return { html: baseHtml, items: parsed.items };
+    const r = revealWords(baseHtml, shownCount);
+    totalWords = r.count;
+    return { html: r.html, items: parsed.items };
   });
   const html = $derived(processed.html);
 
@@ -260,12 +389,35 @@
 <style>
   .md {
     font-size: var(--fs-md);
-    line-height: 1.6;
-    color: var(--fg);
+    /* Mockup `.ct-prose`: airier rhythm + softer body so strong/accent carry the
+       emphasis (full-white body read as a flat wall). */
+    line-height: 1.68;
+    color: var(--fg-2);
     word-wrap: break-word;
     /* Reserve 10px on the left for the heading accent bars. */
     padding-left: 10px;
   }
+  /* Per-word blur-reveal — newly-streamed words fade + un-blur in, cascading
+     by a small per-word delay (mockup .ct-w / ct-word). Wrapped only while
+     streaming; already-revealed words render as plain text. */
+  .md :global(.md-w) {
+    animation: md-word 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* Received-but-not-yet-revealed words: present (reserve layout, no reflow)
+     but invisible + blurred until the cursor reaches them. */
+  .md :global(.md-w-hold) {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  @keyframes md-word {
+    from { opacity: 0; filter: blur(3px); }
+    to   { opacity: 1; filter: blur(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .md :global(.md-w) { animation: none; }
+    .md :global(.md-w-hold) { opacity: 1; filter: none; }
+  }
+
   /* First/last children flush so the bubble itself controls outer padding. */
   .md > :global(*:first-child) { margin-top: 0; }
   .md > :global(*:last-child) { margin-bottom: 0; }
@@ -285,12 +437,9 @@
 
   .md :global(code) {
     font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 0.86em;
-    padding: 1px 5px;
-    background: var(--bg-elev-2);
-    border-radius: 4px;
-    color: var(--fg-2);
-    /* Avoid bumping line-height; aligns inline-code with surrounding prose. */
+    font-size: 0.9em;
+    /* Mockup `.kbd`: subtle inline code — emerald color only, no pill (declutter). */
+    color: var(--accent);
     line-height: inherit;
   }
   .md :global(pre) {
@@ -298,7 +447,7 @@
     padding: 10px 14px;
     background: var(--bg-elev-1);
     border: 1px solid var(--border);
-    border-left: 3px solid color-mix(in oklch, var(--accent) 50%, var(--border));
+    border-left: 3px solid color-mix(in oklab, var(--accent) 50%, var(--border));
     border-radius: 8px;
     overflow-x: auto;
     font-size: var(--fs-sm);
@@ -342,7 +491,7 @@
   }
   .md :global(pre .code-copy.copied) {
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
     opacity: 1;
   }
 
@@ -521,7 +670,7 @@
     background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
   }
   .md :global(tbody tr:hover td) {
-    background: color-mix(in oklch, var(--accent) 6%, var(--surface));
+    background: color-mix(in oklab, var(--accent) 6%, var(--surface));
   }
 
   /* GitHub-flavored alerts ([!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION])
@@ -558,32 +707,32 @@
   .md :global(.markdown-alert-title svg) { display: none; }
 
   .md :global(.markdown-alert-note) {
-    border-left-color: oklch(0.70 0.16 240);
-    background: oklch(0.70 0.16 240 / 0.08);
+    border-left-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
   }
-  .md :global(.markdown-alert-note .markdown-alert-title) { color: oklch(0.78 0.14 240); }
+  .md :global(.markdown-alert-note .markdown-alert-title) { color: var(--accent); }
 
   .md :global(.markdown-alert-tip) {
-    border-left-color: oklch(0.76 0.18 152);
-    background: oklch(0.76 0.18 152 / 0.08);
+    border-left-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
   }
-  .md :global(.markdown-alert-tip .markdown-alert-title) { color: oklch(0.80 0.16 152); }
+  .md :global(.markdown-alert-tip .markdown-alert-title) { color: var(--accent); }
 
   .md :global(.markdown-alert-important) {
     border-left-color: var(--accent);
-    background: color-mix(in oklch, var(--accent) 8%, transparent);
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
   }
   .md :global(.markdown-alert-important .markdown-alert-title) { color: var(--accent); }
 
   .md :global(.markdown-alert-warning) {
     border-left-color: var(--warn);
-    background: color-mix(in oklch, var(--warn) 8%, transparent);
+    background: color-mix(in oklab, var(--warn) 8%, transparent);
   }
   .md :global(.markdown-alert-warning .markdown-alert-title) { color: var(--warn); }
 
   .md :global(.markdown-alert-caution) {
     border-left-color: var(--danger);
-    background: color-mix(in oklch, var(--danger) 8%, transparent);
+    background: color-mix(in oklab, var(--danger) 8%, transparent);
   }
   .md :global(.markdown-alert-caution .markdown-alert-title) { color: oklch(0.78 0.18 22); }
 
@@ -603,19 +752,25 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 10px;
-    background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent);
+    padding: 8px 10px;
+    background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
     border-bottom: 1px solid var(--border);
     font-size: 10px;
     color: var(--fg-muted);
     letter-spacing: 0.04em;
-    text-transform: lowercase;
   }
+  /* Lang label — a small pill badge (mock ct-diff-lang), not plain text. */
   .md :global(.shiki-lang) {
+    padding: 1px 6px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg-elev-2);
     color: var(--fg-2);
-    font-weight: 600;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     font-family: var(--font-mono, ui-monospace, monospace);
-    letter-spacing: 0.02em;
   }
   .md :global(.shiki-sep) { color: var(--fg-faint); opacity: 0.6; }
   .md :global(.shiki-lines) {
@@ -647,7 +802,7 @@
   }
   .md :global(.shiki-head .code-copy.copied) {
     color: var(--accent);
-    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
   }
   /* Shiki's own <pre.shiki> — strip our default border/radius/elev so the
      wrapper's chrome takes over. */
@@ -658,8 +813,10 @@
     border: 0;
     border-radius: 0;
     overflow-x: auto;
-    font-size: 12px;
-    line-height: 1.55;
+    font-size: var(--code-fs, 12px);
+    tab-size: var(--code-tab, 2);
+    font-variant-ligatures: var(--code-liga, none);
+    line-height: 1.72;
   }
   .md :global(.shiki-block pre.shiki code) {
     background: transparent;
@@ -667,6 +824,7 @@
     padding: 0;
     font-size: inherit;
     color: inherit;
+    font-variant-ligatures: inherit;
     font-family: var(--font-mono, ui-monospace, monospace);
   }
 
@@ -804,7 +962,7 @@
     margin: 8px 0 0;
     padding: 4px 10px;
     background: var(--accent-soft);
-    border: 1px solid color-mix(in oklch, var(--accent) 22%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 22%, transparent);
     border-radius: 999px;
     font-size: var(--fs-xs);
     color: var(--fg-2);
@@ -867,7 +1025,7 @@
 
   /* ── <mark> highlighted text ──────────────────────────────────────── */
   .md :global(mark) {
-    background: color-mix(in oklch, var(--warn) 30%, transparent);
+    background: color-mix(in oklab, var(--warn) 30%, transparent);
     color: var(--fg);
     padding: 0 3px;
     border-radius: 3px;

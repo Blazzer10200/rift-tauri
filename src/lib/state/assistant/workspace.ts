@@ -16,6 +16,7 @@ type WorkspaceHost = {
   workspace: WorkspaceState;
   workspaceFiles: string[];
   workspaceFilesLoadingFor: string | null;
+  workspaceBranch: string | null;
   lastError: string | null;
   lastNotice: string | null;
 };
@@ -46,6 +47,7 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
     host.workspaceFiles = [];
+    host.workspaceBranch = null;
     host.lastNotice = `Workspace: ${path}`;
   } catch (e) {
     host.lastError = `Set workspace failed: ${String(e)}`;
@@ -56,6 +58,7 @@ export async function clearRoot(host: WorkspaceHost): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_clear_root");
     host.workspaceFiles = [];
+    host.workspaceBranch = null;
   } catch (e) {
     console.warn("assistant_clear_root failed", e);
   }
@@ -83,5 +86,17 @@ export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
     console.warn("assistant_list_workspace_files failed", e);
   } finally {
     host.workspaceFilesLoadingFor = null;
+  }
+}
+
+/** Lazy-load the active workspace's git branch (or null if not a git repo).
+ *  Cheap (`git rev-parse`); surfaced in the Welcome context strip. */
+export async function loadWorkspaceBranch(host: WorkspaceHost): Promise<void> {
+  if (!host.workspace.current) { host.workspaceBranch = null; return; }
+  try {
+    host.workspaceBranch = await invoke<string | null>("assistant_workspace_branch");
+  } catch (e) {
+    console.warn("assistant_workspace_branch failed", e);
+    host.workspaceBranch = null;
   }
 }

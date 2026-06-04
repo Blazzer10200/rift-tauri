@@ -4,7 +4,7 @@
 
 ## Stack
 
-Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. SSH/SFTP via `russh` (pure Rust, no libssh2/C deps). Self-update: GH-release-API path — `commands/update.rs` polls `api.github.com/repos/Blazzer10200/rift-releases/releases/latest`, semver-compares, opens Setup.exe in browser on user confirm (no signing key, no `latest.json`, no `.sig`; replaced `tauri-plugin-updater` in v0.4.34 after key-loss bricked all clients on v0.4.33). NSIS installer (perUser).
+Tauri 2 (Rust backend) + SvelteKit 2 + Svelte 5 (runes) + Tailwind 4. **Pure local-workspace coding assistant** — the SFTP/sync/server/RCON half was fully stripped (2026-06-03, "pure-assistant conversion"). The backend spawns the Claude CLI as a subprocess and hosts a local stdio MCP server (`assistant/`) exposing workspace-scoped `read_file/list_dir/grep` + local-git tools; there are no remote connections, no russh, no file-watcher. Self-update: GH-release-API path — `commands/update.rs` polls `api.github.com/repos/Blazzer10200/rift-releases/releases/latest`, semver-compares, opens Setup.exe in browser on user confirm (no signing key, no `latest.json`, no `.sig`; replaced `tauri-plugin-updater` in v0.4.34 after key-loss bricked all clients on v0.4.33). NSIS installer (perUser).
 
 Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml` + `src-tauri/tauri.conf.json`. Source of truth for current version: `docs/CHANGELOG.md` (don't hard-code in this file — went stale at v0.2.4 vs v0.2.48 reality before 2026-05-13 cleanup).
 
@@ -17,37 +17,26 @@ Versions in lockstep across THREE files: `package.json` + `src-tauri/Cargo.toml`
 | Live state — read first each session | `docs/HANDOFF.md` |
 | Versioned changelog | `docs/CHANGELOG.md` |
 | Live issue tracker | `docs/ISSUES.md` (single source — open AUDIT findings folded in 2026-05-19) |
-| Design briefs | `docs/design/` (active: `assistant-svelte-split.md` + `proxmox-sftp-test-target.md` live infra; `git-rcon-tools.md` + `redesign-gap-audit.md` → `docs/archive/` after their arcs completed) |
+| Design briefs | `docs/design/` (per-arc; completed arcs move to `docs/archive/`) |
 | Dev launcher | `scripts/run-dev.bat` |
 
 Skip in every agent scope: `node_modules/`, `.svelte-kit/`, `build/`, `src-tauri/target/`.
 
-## Hot files (measured 2026-05-28)
+## Hot files (measured 2026-06-03, post pure-assistant rip)
 
 Files large enough to matter for agent scoping. Everything else is small enough for inline or `recon`.
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/assistant/mod.rs` | 2795 | claude CLI integration + auth + workspace + git-rcon tools (grew from git_local additions v0.4.37; lost kill_child_processes_on_exit in v0.4.34 updater cleanup) |
-| `src-tauri/src/sync/auto_sync.rs` | 2232 | engine orchestrator; FSW + dirty queue + drift reconcile + force_push/pull |
-| `src-tauri/src/assistant/mcp_server.rs` | 1265 | stdio JSON-RPC MCP server (grew w/ git-tool dispatch v0.4.37) |
-| `src-tauri/src/sync/auto_sync/flush.rs` | 880 | flush_batch pipeline (split out 2026-05-13) |
-| `src-tauri/src/sync/drift_scanner.rs` | 757 | 3-way drift diff |
-| `src-tauri/src/state/sync_snapshot.rs` | 688 | snapshot persistence |
-| `src-tauri/src/sync/lock_presence.rs` | 508 | .rift-lock advisory presence |
-| `src-tauri/src/diagnostics/mod.rs` | 487 | DiagBus + LogForwarder + frontend pump |
-| `src-tauri/src/sync/auto_sync/watch.rs` | 474 | notify lifecycle + queue_path |
-| `src-tauri/src/sftp/list.rs` | 464 | exec-fast-path + worker fallback (split v0.2.49) |
-| `src-tauri/src/sync/ignore.rs` | 447 | full WPF ignore-rule parity + tests |
-| `src-tauri/src/sftp/transfer.rs` | 435 | atomic upload/download + `with_t` op timeouts |
-| `src-tauri/src/sync/drift_watcher.rs` | 419 | pull_one / delete_local_one / register_conflict (auto-poll loop removed v0.2.38) |
-| `src-tauri/src/assistant/git_local.rs` | 414 | local-git MCP tools (git_status/diff/log/pull/commit/push) — shipped v0.4.37 |
-| `src-tauri/src/sftp/mod.rs` | 359 | session core (split v0.2.49 from 1100L → 307L) |
-| `src-tauri/src/lib.rs` | 312 | tauri command registry (post-split — see `commands/*.rs` for per-domain handlers) |
+| `src-tauri/src/assistant/mod.rs` | 2991 | claude CLI integration + auth + workspace + config + per-turn spawn. Largest backend file, next split candidate |
+| `src-tauri/src/assistant/mcp_server.rs` | 605 | stdio JSON-RPC MCP server — exposes `read_file/list_dir/grep` + `git_*` only (all sync/bridge/remote_bash/ask_user tools ripped) |
+| `src-tauri/src/diagnostics/mod.rs` | 487 | DiagBus + LogForwarder + panic hook + frontend pump (`diag://event`). Sync-only `diag_state` DTO/pump removed |
+| `src-tauri/src/assistant/git_local.rs` | 404 | local-git MCP tools (git_status/diff/log/pull/commit/push) |
+| `src-tauri/src/lib.rs` | 203 | tauri command registry (per-domain handlers in `commands/*.rs`) |
 
-Frontend hot files (2026-05-28): `assistant.svelte.ts` 2314L (down from 3356L; #20 M0-M7 all carved into `src/lib/state/assistant/{types,helpers,telemetry,workspace,attachments,persistence,tabs,compaction}.ts`; M8 streaming + M9 send still open), `Settings.svelte` 1595L, `SyncPage.svelte` 1343L, `ChatTabsBar.svelte` 1268L, `ActivityFeed.svelte` 1181L. `TerminalPanel.svelte` removed (terminal section stripped 2026-05-25, no successor).
+Backend dirs after the rip: `assistant/ browser/ commands/ diagnostics/ state/ stt/` + `lib.rs main.rs secrets.rs`. The entire `sftp/ sync/ bootstrap/ edit/ tunnel/ transport/ bridge/ rcon/ profile/` set is gone, plus `local_fs.rs path_guard.rs` and the `remote_state`/`sync_snapshot` state caches.
 
-`assistant/mod.rs` is the largest backend file (2795L, grew from git-rcon additions) and the next backend split candidate; `auto_sync.rs` has also crossed the 2000-line threshold (2232L). `lib.rs` split into `commands/*.rs` landed 2026-05-22 (M9, #20 part 1).
+Frontend hot files: `assistant.svelte.ts` 2356L, `ToolChip.svelte` 1552L, `SettingsPage.svelte` 1040L (gutted of Server/RCON/SSH), `AssistantPane.svelte` 878L, `ChatTabsBar.svelte`. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
 
 ## Agent routing
 
@@ -55,12 +44,12 @@ Only `recon` + `scout` are defined as local subagents. `architect` / `operator` 
 
 | Area / task | Default | Why |
 |---|---|---|
-| `sync/`, `sftp/` multi-file changes | **operator** | Coupled state across watcher + queue + transport |
-| `bootstrap/`, `profile/`, `state/`, `tunnel/`, `transport/`, `bridge/`, `edit/`, `local_fs.rs`, `commands/update.rs` | inline | All <400 lines, single-file edits typical |
+| `assistant/` multi-file changes (mod.rs + mcp_server.rs + git_local.rs) | **operator** | Coupled CLI-spawn + MCP tool surface + config |
+| `commands/`, `state/`, `secrets.rs`, `browser/`, `stt/` | inline | Single-file edits typical |
 | Svelte/TS / Rust symbol lookup | inline + LSP tool | TS/JS native; Rust via `rust-analyzer-lsp` plugin (installed 2026-05-21). Svelte: no LSP — grep + `/check` (skipped Piebald `svelte-lsp` — needs tweakcc patch) |
 | "Where does X live" (LSP miss) | **recon** | Terse `path:line :: snippet` output |
 | IPC contract change, tradeoff calls | inline (or `Plan` skill for multi-track) | Built-in `architect` agent is available but heavyweight; usually inline reasoning is enough |
-| Tauri 2 / russh docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
+| Tauri 2 / Claude CLI docs lookup | `blazzer-search` MCP or inline `WebFetch` | Per `rules/tools.md` |
 
 ## Verification
 

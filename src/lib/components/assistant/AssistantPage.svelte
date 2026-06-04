@@ -327,7 +327,7 @@
   }
   .dock-divider:hover,
   .workbench[data-dock-dragging="true"] .dock-divider {
-    background: color-mix(in oklch, var(--accent) 50%, var(--border));
+    background: color-mix(in oklab, var(--accent) 50%, var(--border));
   }
   .dock-divider:focus-visible {
     outline: 2px solid var(--accent);
@@ -348,7 +348,7 @@
   }
   .divider:hover,
   .split[data-dragging="true"] > .divider {
-    background: color-mix(in oklch, var(--accent) 50%, var(--border));
+    background: color-mix(in oklab, var(--accent) 50%, var(--border));
   }
   .divider:focus-visible {
     outline: 2px solid var(--accent);

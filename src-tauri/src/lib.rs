@@ -1,4 +1,5 @@
-//! Rift v14 — Tauri + Svelte + russh backend.
+//! Rift — pure local-workspace coding assistant (Tauri + Svelte).
+//! The Claude CLI integration + local MCP server live under `assistant/`.
 //!
 //! Auto-update via the GH-release-API path (v0.4.34+, see
 //! `commands/update.rs`). Frontend polls the latest GitHub release on launch,
@@ -13,56 +14,14 @@
 //! domain (#20).
 
 pub mod assistant;
-pub mod bootstrap;
-pub mod bridge;
 pub mod browser;
 pub mod commands;
 pub mod diagnostics;
-pub mod edit;
-pub mod local_fs;
-pub mod path_guard;
-pub mod profile;
-pub mod rcon;
 pub mod secrets;
-pub mod sftp;
 pub mod state;
-pub mod sync;
 pub mod stt;
-pub mod transport;
-pub mod tunnel;
 
-use std::sync::Arc;
 use tauri::Manager;
-use tokio::sync::Mutex as AsyncMutex;
-use tokio_util::sync::CancellationToken;
-
-use crate::sync::AutoSyncEngine;
-
-/// Tauri-managed handle to the active AutoSync engine. None until start_autosync.
-pub struct AutoSyncState(pub AsyncMutex<Option<Arc<AutoSyncEngine>>>);
-
-/// Tauri-managed handle to the active SSH local-port-forward (Phase 1g). Some
-/// only when a profile w/ `bridge_port` is active. Lifecycle bound to AutoSync.
-pub struct TunnelState(pub AsyncMutex<Option<tunnel::SshTunnel>>);
-
-/// Phase 4: per-server EditInPlaceManager. Keyed by server_key.
-pub struct EditInPlaceState(
-    pub AsyncMutex<std::collections::HashMap<String, Arc<edit::in_place::EditInPlaceManager>>>,
-);
-
-/// M13: holds the CancellationToken for the currently in-flight download_paths.
-pub struct DownloadState(pub AsyncMutex<Option<CancellationToken>>);
-
-/// #106: cancellation handle for the `diag_state_pump` background task. Fired
-/// on `RunEvent::Exit` so the pump exits before Tauri tears the runtime down.
-pub struct DiagPumpCancel(pub CancellationToken);
-
-/// #249: subscriber refcount for `diag_state_pump`. Pump short-circuits the
-/// 500ms collect+emit when count == 0 (no Diagnostics tab mounted). Refcount
-/// (not bool) because the Diagnostics surface can be mounted twice — as a
-/// page workspace AND as `<Diagnostics embedded />` inside ActivityFeed.
-/// `diag_subscribe_state`/`diag_unsubscribe_state` increment/decrement.
-pub struct DiagPumpSubscribers(pub std::sync::atomic::AtomicU64);
 
 /// Application entry point. Registers managed state + Tauri commands and
 /// blocks on the event loop. Update flow lives in `commands/update.rs` —
@@ -146,10 +105,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
-        .manage(AutoSyncState(AsyncMutex::new(None)))
-        .manage(TunnelState(AsyncMutex::new(None)))
-        .manage(EditInPlaceState(AsyncMutex::new(std::collections::HashMap::new())))
-        .manage(DownloadState(AsyncMutex::new(None)))
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
         .manage(stt::WhisperCache(tokio::sync::Mutex::new(None)))
         .manage(stt::WhisperSession(tokio::sync::Mutex::new(None)))
@@ -166,12 +121,6 @@ pub fn run() {
             // every 500ms. Both run for the life of the process.
             let app_handle = app.handle().clone();
             diagnostics::spawn_frontend_pump(app_handle.clone());
-            // #106: stash the pump's cancel token in managed state so
-            // RunEvent::Exit can cancel it cleanly.
-            let pump_cancel = CancellationToken::new();
-            app.manage(DiagPumpCancel(pump_cancel.clone()));
-            app.manage(DiagPumpSubscribers(std::sync::atomic::AtomicU64::new(0)));
-            tauri::async_runtime::spawn(commands::sync::diag_state_pump(app_handle, pump_cancel));
             // Phase E4: best-effort sweep of CLI JSONLs whose sessions were
             // retired by compaction >30 days ago.
             tauri::async_runtime::spawn_blocking(|| {
@@ -184,67 +133,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
-            commands::scan_drift,
-            commands::start_autosync,
-            commands::stop_autosync,
-            commands::get_autosync_status,
-            commands::enqueue_for_flush_batch,
-            commands::resolve_conflict,
-            commands::resolve_conflicts_bulk,
-            commands::retry_failed,
-            commands::list_servers,
-            commands::get_last_selected,
-            commands::set_last_selected,
-            commands::save_server,
-            commands::delete_server,
-            commands::local_list_dir,
-            commands::remote_list_dir,
-            commands::upload_paths,
-            commands::download_paths,
-            commands::cancel_download,
-            commands::remote_rename_path,
-            commands::remote_delete_paths,
-            commands::local_rename_path,
-            commands::local_delete_paths,
-            commands::detect_bootstrap,
-            commands::bootstrap_list_files,
-            commands::generate_ssh_key,
-            commands::generate_default_ssh_key,
-            commands::default_ssh_key_exists,
-            commands::default_ssh_key_path,
-            commands::read_default_ssh_pub_key,
-            commands::probe_server_fingerprint,
-            commands::set_server_fingerprint,
-            commands::clear_server_fingerprint,
-            commands::rotate_bridge_token,
-            commands::rcon_has_password,
-            commands::rcon_set_password,
-            commands::rcon_send,
-            commands::validate_ssh_key_file,
+            commands::diag_log_frontend_error,
+            commands::open_in_vscode,
             commands::check_for_updates,
             commands::download_update,
-            commands::begin_edit_in_place,
-            commands::save_edit_in_place,
-            commands::close_edit_in_place,
-            commands::list_watched_edits,
-            commands::diag_get_state,
-            commands::diag_snapshot_path,
-            commands::diag_log_frontend_error,
-            commands::diag_subscribe_state,
-            commands::diag_unsubscribe_state,
-            commands::sync_reconcile,
-            commands::sync_cancel,
-            commands::sync_pull_pending,
-            commands::sync_push_pending,
-            commands::sync_get_drift_snapshot,
-            commands::list_watched_folders,
-            commands::sync_get_aborted_shrunk,
-            commands::sync_rebaseline_folder,
-            commands::sync_apply_selected,
-            commands::sync_sweep_stale_locks,
-            commands::sync_set_mirror_mode,
-            commands::sync_get_mirror_mode,
-            commands::diag_ignored_breakdown,
             commands::assistant_auth_probe,
             commands::assistant_get_api_key_present,
             commands::assistant_set_api_key,
@@ -252,8 +144,6 @@ pub fn run() {
             commands::assistant_set_use_full_config,
             commands::assistant_get_max_budget_usd,
             commands::assistant_set_max_budget_usd,
-            commands::assistant_get_allow_remote_shell,
-            commands::assistant_set_allow_remote_shell,
             commands::assistant_get_thinking_effort,
             commands::assistant_set_thinking_effort,
             commands::assistant_get_permission_mode,
@@ -281,6 +171,7 @@ pub fn run() {
             commands::assistant_clear_root,
             commands::assistant_remove_recent_root,
             commands::assistant_list_workspace_files,
+            commands::assistant_workspace_branch,
             commands::browser_open,
             commands::browser_navigate,
             commands::browser_set_bounds,
@@ -303,15 +194,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
-        .run(|app_handle, event| {
+        .run(|_app_handle, event| {
             // Scrub the on-disk bridge token from `~/.rift/assistant/mcp-config.json`
             // on app exit. The token becomes stale the instant the process exits.
             if let tauri::RunEvent::Exit = event {
-                // #106: cancel the diag pump before cleanup so it stops emitting
-                // events into a tearing-down Tauri runtime.
-                if let Some(c) = app_handle.try_state::<DiagPumpCancel>() {
-                    c.0.cancel();
-                }
                 assistant::cleanup_mcp_config_on_exit();
             }
         });

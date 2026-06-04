@@ -299,6 +299,28 @@ export async function deleteConversation(host: PersistenceHost, id: string): Pro
   }
 }
 
+export async function deleteAllConversations(host: PersistenceHost): Promise<void> {
+  const ids = host.conversations.map((c) => c.id);
+  if (ids.length === 0) return;
+  try {
+    for (const id of ids) {
+      await invoke("assistant_delete_conversation", { id });
+    }
+  } catch (e) {
+    host.lastError = `Failed to delete all conversations: ${String(e)}`;
+  }
+  // Wipe to a clean slate — drop every open tab + reset active-convo fields.
+  // dropTab (not closeTab) since there's no neighbor worth picking after a purge.
+  for (const id of [...host.openTabs]) host.dropTab(id);
+  host.currentConvoId = null;
+  host.currentCliSessionId = null;
+  host.convoCreatedAt = null;
+  host.convoTitle = null;
+  host.queue = [];
+  host.lastNotice = null;
+  await refreshConversations(host);
+}
+
 export function persistTabs(host: PersistenceHost): void {
   try {
     localStorage.setItem(

@@ -67,7 +67,7 @@
     padding: 6px 10px;
     border-radius: 7px;
     background: color-mix(in oklch, var(--warn-soft) 55%, var(--bg-elev-1));
-    border: 1px solid color-mix(in oklch, var(--warn) 40%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--border));
     border-left-width: 3px;
     border-left-color: var(--warn);
     animation: perm-enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -120,7 +120,7 @@
     border-color: color-mix(in oklch, var(--ok) 65%, var(--border));
   }
   .perm-btn.deny:hover:not(:disabled) {
-    border-color: color-mix(in oklch, var(--danger) 45%, var(--border));
+    border-color: color-mix(in oklab, var(--danger) 45%, var(--border));
     color: var(--danger);
   }
   .perm-btn :global(.perm-spin) { animation: perm-spin 1s linear infinite; }

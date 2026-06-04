@@ -715,7 +715,7 @@
     position: relative;
   }
   .row:hover { background: var(--surface-hover); }
-  .row.active { background: color-mix(in oklch, var(--accent) 14%, var(--surface)); }
+  .row.active { background: color-mix(in oklab, var(--accent) 14%, var(--surface)); }
   .row.active::before {
     content: "";
     position: absolute;
@@ -729,7 +729,7 @@
   /* selected highlight in full mode (detail pane open) */
   .row.selected {
     background: color-mix(in oklch, var(--accent-soft) 70%, var(--surface));
-    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
   }
   .row.selected::before {
     content: "";
@@ -790,9 +790,9 @@
       0 0 4px color-mix(in oklch, var(--row-model-color, var(--fg-muted)) 40%, transparent);
     flex-shrink: 0;
   }
-  .row-main[data-model="sonnet"] { --row-model-color: oklch(0.74 0.13 230); }
-  .row-main[data-model="opus"]   { --row-model-color: oklch(0.70 0.18 295); }
-  .row-main[data-model="haiku"]  { --row-model-color: oklch(0.78 0.14 180); }
+  .row-main[data-model="sonnet"] { --row-model-color: var(--accent); }
+  .row-main[data-model="opus"]   { --row-model-color: var(--accent); }
+  .row-main[data-model="haiku"]  { --row-model-color: var(--accent); }
 
   .row-tools {
     display: flex; align-items: center; gap: 2px;
@@ -888,7 +888,7 @@
   .hp-d-titlewrap { min-width: 0; }
   .hp-d-title {
     margin: 0;
-    font-size: 17px; font-weight: 680;
+    font-size: 19px; font-weight: 680;
     letter-spacing: -0.02em; line-height: 1.2;
     color: var(--fg);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1021,7 +1021,7 @@
   .hpv-av.claude {
     background: var(--accent-soft);
     color: var(--accent);
-    border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
   }
   .hpv-body { min-width: 0; }
   .hpv-who {

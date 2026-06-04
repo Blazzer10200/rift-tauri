@@ -6,49 +6,45 @@
 
 pub mod assistant;
 pub mod browser;
-pub mod profile;
-pub mod rcon;
-pub mod sftp;
-pub mod sync;
 pub mod update;
 
 pub use assistant::*;
 pub use browser::*;
-pub use profile::*;
-pub use rcon::*;
-pub use sftp::*;
-pub use sync::*;
 pub use update::*;
 
-/// Audit H11: reject paths that can escape via `..`. Rift's identity files
-/// and key-output dirs come from JS; without this, a malicious profile
-/// could point key reads at arbitrary filesystem locations.
-pub(crate) fn reject_path_traversal(p: &std::path::Path, label: &str) -> Result<(), String> {
-    use std::path::Component;
-    for c in p.components() {
-        if matches!(c, Component::ParentDir) {
-            return Err(format!("{label}: '..' components not allowed"));
-        }
-    }
-    Ok(())
+/// #248: surface frontend-side failures (wire/runtime errors) to the DiagBus so
+/// the panic-hook log path + any diagnostics consumers see them. Pre-fix these
+/// only `console.error`'d in the WebView console. Emits as System/Error. (Moved
+/// here from the deleted `commands::sync` module during the pure-assistant rip.)
+/// Open a path in VS Code. The opener plugin's `openWith` can't launch VS Code
+/// on Windows (its CLI is `code.cmd`, which `Command::new("code")` won't resolve
+/// without a shell) — so spawn through `cmd /C` on Windows, direct `code` elsewhere.
+#[tauri::command]
+pub fn open_in_vscode(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "code", &path]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = std::process::Command::new("code");
+        c.arg(&path);
+        c
+    };
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|e| format!("Couldn't launch VS Code (is `code` on PATH?): {e}"))
 }
 
-/// #10: defense-in-depth guard against silent TOFU. Sync entry paths
-/// (`scan_drift`, `start_autosync`) + every SFTP-touching command must refuse
-/// to connect when no fingerprint is pinned in the profile -- the frontend's
-/// `probe_server_fingerprint` + user-confirm flow is the only sanctioned
-/// way to capture a host key.
-pub(crate) fn require_pinned_fingerprint(server_key: &str, fingerprint: Option<&str>) -> Result<(), String> {
-    if fingerprint.unwrap_or("").trim().is_empty() {
-        return Err(format!(
-            "server '{server_key}' has no pinned fingerprint -- run probe_server_fingerprint + \
-             set_server_fingerprint (AddServer dialog) to capture and confirm the host key first"
-        ));
-    }
-    Ok(())
-}
-
-pub(crate) fn basename_for_log(p: &str) -> String {
-    let norm = p.replace('\\', "/");
-    norm.rsplit('/').next().unwrap_or(p).to_string()
+#[tauri::command]
+pub fn diag_log_frontend_error(label: String, message: String) {
+    let label = label.chars().take(64).collect::<String>();
+    let message = message.chars().take(512).collect::<String>();
+    crate::diagnostics::emit(
+        crate::diagnostics::DiagStage::System,
+        crate::diagnostics::DiagLevel::Error,
+        format!("frontend/{label}: {message}"),
+    );
 }

@@ -1,7 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { connection } from "$lib/state/connection.svelte";
-  import { workspace } from "$lib/state/workspace.svelte";
+  import { onMount, onDestroy } from "svelte";
 
   type Props = {
     onComplete: () => void;
@@ -9,16 +7,13 @@
   let { onComplete }: Props = $props();
 
   let exiting = $state(false);
+  let destroyed = false;
+  onDestroy(() => { destroyed = true; });
 
   // FLOOR_MS keeps the splash visible long enough to register as intentional.
-  // Tuned slower-on-purpose for character — bar fills over BAR_FILL_MS, then
-  // holds completed for the remainder so the "ready" beat lands.
-  // MAX_WAIT_MS is the ceiling: if preload IPC hangs (slow SSH probe, dead
-  // Velopack endpoint) we still dismiss so the user isn't stranded — AppShell
-  // surfaces the failure via the wire-error banner once visible.
-  // BAR_FILL_MS must match the CSS `fill` keyframe duration below.
+  // The bar fills over the CSS keyframe duration, then holds completed for the
+  // remainder so the "ready" beat lands.
   const FLOOR_MS = 1600;
-  const MAX_WAIT_MS = 5500;
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,51 +29,11 @@
     const exitMs = prefersReducedMotion ? 120 : 720;
 
     try {
-      // Independent .catch per call: one failure can't reject Promise.all
-      // and strand the splash. wireEvents specifically sets connection.wireError
-      // on its own failure path — AppShell reads that and shows the retry banner.
-      const preloadPromise = (async () => {
-        const wirePromise = connection.wireEvents().catch((e) => {
-          console.error("splash: wireEvents failed; banner will offer retry", e);
-        });
-        const loadPromise = connection.loadServers().catch((e) => {
-          console.error("splash: loadServers failed", e);
-        });
-        // CR3: probe the default SSH key here, under the blur, alongside
-        // loadServers. The first-run gate (AppShell `showOnboarding`) needs
-        // BOTH serversLoaded AND a resolved defaultSshKeyExists; probing here
-        // rather than in AppShell.onMount keeps the second signal from landing
-        // after the splash lifts, which on a slow fresh-install IPC would flash
-        // the normal UI before onboarding snaps in.
-        const probePromise = connection.probeSshKey().catch((e) => {
-          console.debug("splash: probeSshKey failed", e);
-        });
-        await Promise.all([wirePromise, loadPromise, probePromise]);
-        await connection.refreshStatus().catch((e) => {
-          console.error("splash: refreshStatus failed", e);
-        });
-        if (!connection.selectedKey && connection.servers.length === 0) {
-          workspace.setActive("settings");
-        }
-      })();
-
-      let timedOut = false;
-      const ceiling = new Promise<void>((resolve) => {
-        setTimeout(() => {
-          timedOut = true;
-          resolve();
-        }, MAX_WAIT_MS);
-      });
-      await Promise.race([preloadPromise, ceiling]);
-      if (timedOut) {
-        console.warn(`splash: preload exceeded ${MAX_WAIT_MS}ms ceiling — dismissing`);
-      }
-
       const elapsed = performance.now() - t0;
       const remaining = Math.max(0, FLOOR_MS - elapsed);
       if (remaining > 0) await sleep(remaining);
     } catch (e) {
-      console.error("splash: unexpected error in preload", e);
+      console.error("splash: unexpected error", e);
     } finally {
       // Persist a 'seen' marker. sessionStorage clears on window close, so
       // prod cold-launches always replay. Dev HMR (same window) skips —
@@ -92,7 +47,7 @@
       }
       exiting = true;
       await sleep(exitMs);
-      onComplete();
+      if (!destroyed) onComplete();
     }
   });
 </script>
@@ -176,8 +131,8 @@
     letter-spacing: 0.22em;
     color: var(--fg);
     text-shadow:
-      0 0 28px color-mix(in oklch, var(--accent) 45%, transparent),
-      0 0 64px color-mix(in oklch, var(--accent) 18%, transparent);
+      0 0 28px color-mix(in oklab, var(--accent) 45%, transparent),
+      0 0 64px color-mix(in oklab, var(--accent) 18%, transparent);
     /* Compensate for trailing letter-spacing so the wordmark reads
        optically centered. */
     padding-left: 0.22em;
@@ -199,7 +154,7 @@
     /* Slightly shorter than FLOOR_MS so the bar reaches 100% with ~400ms
        of "completed" hold before exit kicks in — gives the beat a landing. */
     animation: fill 1200ms cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    box-shadow: 0 0 8px color-mix(in oklch, var(--accent) 70%, transparent);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 70%, transparent);
   }
   @keyframes fill {
     from {
