@@ -4,7 +4,7 @@
 
 ## Session 2026-06-04 (cont. 39) — PHASE 2 COMPLETE: ALL 244 AUDIT FINDINGS DISPOSITIONED
 
-Cleared the remaining 140. `edit-done.json` 104→**244** (`phase2-list.py` = 0 remaining). cargo check clean, 14 cargo tests pass (incl. new absolute-`..` traversal test), npm 4067/0/0. **8 commits** `8a21c25`→`f3ba880`. **Full per-finding breakdown: `docs/audit-2026-06-04/PHASE2-dispositions.md`.**
+Cleared the remaining 140. `edit-done.json` 104→**244** (`phase2-list.py` = 0 remaining). cargo check clean, 14 cargo tests pass (incl. new absolute-`..` traversal test), npm 4067/0/0. **8 commits** `8a21c25`→`f3ba880` (per-finding detail in those commit messages; audit working dir retired cont.39).
 - **FIXED security (hand):** git traversal F13/F50 (+test) · browser scheme allowlist F17/F18 · cmd-metachar F19 · stt empty `--allowed-tools` F7/F79/F113 + kill-on-timeout F16/F116 · update repo-pin F238 · Markdown style-attr DOMPurify F32 · secrets/roots F128/F59 · UpdateDialog F47/F175 · pane-keying F39 · data:-scheme F199.
 - **FIXED panics/concur:** grep UTF-8+single-open+cap F11/F10/F80/F81 · fail-closed roots F240/F244 · stderr byte-index F70 · drain-EOF deadlock F4 · task-leak F6 · summarize panic F3/F5/F66/F68. **Other:** dead-cmd rip F48 · `#[serde(flatten)]` persists forceNextFirstTurn+compactionHistory F51 · vitest 2→4.1.8 F237 · settings F159/F160. **Already-fixed:** F34/F35, F46, F245.
 
