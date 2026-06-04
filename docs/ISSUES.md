@@ -12,6 +12,7 @@
 
 - **Steer feature — live-verify on a tool-using turn.** Mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`). Remaining: confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
 - **Permission round-trip — code-complete, needs live-verify.** Wired end-to-end: `--permission-prompt-tool stdio` (mod.rs) → `can_use_tool` handler → control-response write → `PermissionBar.svelte` Allow/Deny UI → `submitPermissionDecision()`. Remaining: live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
+- **#30 Update UI redesign (queued — tomorrow).** The update toast + dialog look dated and under-organized — visual + IA refresh wanted. See #30 block below.
 - **CR-UX (DECISION PENDING — user)** Trust segment is binary (Read-only/Standard) over a **ternary** backend enum (`readonly/standard/full`). Once clicked, `trust_level` pins and can't return to the derived state via UI; "full" (rank 2) is functionally identical to "standard" — only `"standard"` is gated for git writes. **Recommendation: collapse to a true 2-level enum** (drop dead "full"). Touches `mcp_server::trust_rank`/`trust_level`, `mod.rs::is_valid_trust_level`/`effective_trust_level`/git-write gate, serde, + persisted config migration. Held for user sign-off — security-relevant + persisted-config change.
 
 ### Active design briefs
@@ -51,6 +52,12 @@
 - **Symptom:** The surviving high-risk surface — the per-turn stream/reader in `assistant/mod.rs` and the store orchestrator in `assistant.svelte.ts` — has no end-to-end coverage. A regression in the stream pump or the send/queue/steer path can break a turn silently.
 - **Fix sketch:** Build a conversation-playback harness (feed recorded NDJSON frames through the reader + store) — also the unblocker for the #20 M8/M9 extractions. Then cover the git_local MCP tools against a throwaway repo.
 
+## 30. Update UI — visual + organizational redesign
+
+- **Where (re-grep — may have drifted):** the update toast/notification, [src/lib/components/.../UpdateDialog.svelte](../src), and [src/lib/state/updates.svelte.ts](../src/lib/state/updates.svelte.ts). The auto-update *flow* (Velopack check → download → apply-on-exit → relaunch) works correctly and is verified live (v0.4.48 → v0.5.0); this is **presentation only**, not the update mechanism.
+- **Symptom:** The "Update available" toast + the dialog look dated and feel under-organized — spacing, hierarchy, and styling don't match the current emerald/bento design language of the rest of the app (Home, Harness, Settings). The toast shows `0.4.48 → 0.5.0 · 9.5 MB`; the layout reads as legacy.
+- **Fix sketch:** Visual + IA refresh pass over the toast and the available/downloading/installing/error states of `UpdateDialog`. Align to the app's surface tiers + accent (`--accent`, never hardcoded), tighten the version/size/progress hierarchy, and make the available→downloading→installing progression read smoothly (the installing-state height-jump was partly addressed in v0.4.47 — finish the job). Keep the "View release on GitHub" fallback. Pure CSS/markup + state-presentation; don't touch the Velopack invoke contract.
+
 ## 29. CSP allows `style-src 'unsafe-inline'` (LOW)
 
 - **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `csp`.
@@ -68,7 +75,7 @@
 - Steer mid-turn redirect on a tool turn · Permission round-trip Allow/Deny bar.
 
 **Tier 3 — strategic / longer-term**
-- #4 App-wide UX consistency sweep · #20 hot-file split M8-M9 · #17 two-repo collapse · CR-UX trust-enum decision (user sign-off).
+- **#30 Update UI redesign (next up — queued for tomorrow)** · #4 App-wide UX consistency sweep · #20 hot-file split M8-M9 · #17 two-repo collapse · CR-UX trust-enum decision (user sign-off).
 
 **Tier 4 — backend LOW (opportunistic)**
 - #29 CSP `style-src 'unsafe-inline'` (Tailwind-blocked) · Wave-1 LOWs #91-#134 — clippy/doc/perf nits (see `docs/archive/audit-history.md`).
