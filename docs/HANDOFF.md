@@ -2,23 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-04 (cont. 36) — EDIT-SWARM: ALL FRONTEND-SWARMABLE DONE
+## Session 2026-06-04 (cont. 36) — EDIT-SWARM: 64 FRONTEND FIXES + TOOLING HARDENED
 
-Ran the edit-swarm over every frontend-swarmable audit finding. 4 batches, each gated `npm run check` 4080/0/0 + committed separately. **64 fixes committed** (on top of cont.34's 19).
+Ran the edit-swarm over all 3 frontend buckets. 4 batches, each gated `npm run check` 4080/0/0 + committed separately. **64 fixes committed** (on top of cont.34's 19).
 - `f1446bc` b2-canary: 3 state · `9d1f3d1` b2: 24 state-layer · `fea1df3` b3: 16 assistant-components · `f127664` b4: 21 shell/dialog/component.
 - Categories: reactivity/keying ($state/untrack, MessageBubble expandedThinking stable-key, CommandPalette O(N) index map), fail-loud error handling (.catch on IPC, surface lastError/lastNotice), a11y (aria-labels, focus rings, reduced-motion, headings), type-safety (drop unsafe IPC casts), leaks (timer onDestroy, listener guards).
-- **Manual completions** where swarm patches partial-applied: F144, F26, F45, F152. All re-verified green.
-- ⚠️ **`git add -A` entanglement:** this session's batch commits swept up a concurrent session's then-uncommitted cont.35 work (backdrop + ChatRail deletion) into `f1446bc`/`9d1f3d1`. Nothing lost; tree clean. **Future swarm batches: commit only the touched paths, not `-A`.**
+- **Manual completions** where coupled patches partial-applied: F144, F26, F45, F152. All re-verified green.
+- **Tooling hardened (`942ad5c`):** `edit-apply.py` now applies each finding **atomically** (all-or-nothing — kills the partial-apply build-break class; writes `.tmp/edit-last-touched.txt` for scoped commits). `edit-batch.py` held-set now also auto-catches dependency bumps, dead-code deletions, package.json/lockfiles, + explicit `HELD_IDS`.
+- ⚠️ **`git add -A` entanglement:** b2 commits `f1446bc`/`9d1f3d1` swept a concurrent session's then-uncommitted cont.35 work (backdrop + ChatRail delete). Nothing lost; tree clean. **Use scoped `git add` now (the applier emits the path list).**
 
-### RESUME HERE — only MANUAL findings remain (no more auto-swarm)
-Every frontend-swarmable finding went through the swarm once. What's left is held intentionally:
-1. **3 highs:** `mod.rs:2143` stdout deadlock, `mcp_server.rs:302` UTF-8 slice panic, `AssistantPage.svelte:205` pane-keying (F39).
-2. **All Rust** (quit tauri dev before cargo-check) · **all security** (git_local.rs:72 traversal, browser URL scheme, DOMPurify style, capabilities wildcard…).
-3. **Held specials:** vitest bump F237 (`npm i -D vitest@^4.1.8`, semver-major) · dead-CSS deletes F233/F234 (flag-not-delete).
-4. **Swarm-deferred (~40 FE, need judgment):** F33 Markdown streaming perf, F44 toast remaining-time, F150 menu arrow-keys, F190/F191 HomePage branch race/error, F206 Splash destroy-guard, F209 toast icon typing — full per-batch lists in the 4 commit bodies.
-5. **Apply-missed (re-try manually):** F164 progressbar aria-label, F173 stt per-channel try/catch, F232 Confirm dontAsk reset.
+### RESUME HERE — 47 frontend findings remain (deferred/missed/rejected) + held
+The 4 batches APPLIED 62; the rest of each bucket did NOT apply (swarm deferred, verifier rejected, or apply-missed) and are NOT in `edit-done.json`. `edit-batch.py` re-emits them: **state-ts 14 · comp-assistant 17 · comp-other 16**.
+- **Option A — one more swarm pass (cheap, now safe):** the atomic applier means a re-run can't break the build. `python scripts/edit-batch.py <bucket>` → Workflow `args.findings` → `edit-apply.py <out> --apply` → `npm run check` → `git add $(cat .tmp/edit-last-touched.txt)` → commit → append applied IDs to `edit-done.json`. A 2nd pass catches findings the swarm deferred conservatively the first time.
+- **Option B — hand-do the true-manual ones:** F33 Markdown streaming perf · F44 toast remaining-time · F150 menu arrow-keys · F190/F191 HomePage branch race/error · F206 Splash destroy-guard · F209 toast icon typing · apply-missed F164/F173/F232.
+- **HELD — do NOT swarm (manual only):** 3 highs (`mod.rs:2143`, `mcp_server.rs:302`, F39 `AssistantPage:205`) · all Rust (quit tauri dev first) · all security · vitest F237 (`npm i -D vitest@^4.1.8`) · dead-CSS F233/F234 (flag-not-delete). `edit-batch.py` now auto-holds these.
 
-Tracking: `.tmp/edit-done.json` (62 applied IDs). New tool `scripts/edit-batch.py` (bucket emit). Watchers: `scripts/edit-watch.{sh,ps1,cmd}` auto-find newest run (`scripts\edit-watch.cmd` for command-prompt).
+Tracking: `.tmp/edit-done.json` (62 IDs). Watchers: `scripts/edit-watch.{sh,ps1,cmd}` auto-find newest run (`scripts\edit-watch.cmd` = command-prompt).
 
 ## Session 2026-06-04 (cont. 35) — BACKDROP CALM + LEFT CHAT-RAIL RETIRED (UNSHIPPED v0.4.46)
 
