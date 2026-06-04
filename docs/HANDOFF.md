@@ -2,22 +2,38 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-04 (cont. 38) — HAND-FIXED THE 21 FLAGGED FE FINDINGS (FRONTEND AUDIT DONE)
+
+Worked the cont.37 flagged list manually (no swarm — these needed judgment). `npm run check` 4080/0/0 at every commit; `edit-done.json` 88→104. **Frontend audit is now fully resolved.** Commits:
+- `0657e8c` **state:** F140 (StreamEnvelope `usage` type, drop unsafe cast), F190/F191 (branch-load race guard + fail-loud via `lastError`), F204 (telemetry single-pass per-model timings).
+- `cd2a9b4` **toast+greeting:** F44/F224 (toast pause/resume preserves remaining time via deadline tracking), F182/F189 (greeting ticks hourly via reactive `nowHour` clock — `$derived` alone was insufficient).
+- `5d16612` **markdown:** F165 (latch `everStreamed` in `$effect` not the parsed `$derived`; `revealActive` accepts live `streaming` → no 1-frame gap).
+- `d3379a2` **a11y:** F150 (arrow-key/Home/End nav for proj+view `role=menu`), F135 (`listbox`→`menu` + `menuitem`/`menuitemradio`/`menuitemcheckbox` across slash/mention/perm/settings menus).
+- `50051d9` **perf:** F166 (adaptive ActivityPanel ticker — 1s streaming / 10s idle).
+- **Verified already-fixed** (recorded, grep-confirmed): F24 (6 mutators), F146, F147, F226.
+
+### Genuinely remaining (NOT done — by deliberate call)
+- **F209** — wontfix-by-design: the toast `icon: any` is deliberate + documented (precise typing fights lucide-svelte defs).
+- **F230** — moot: `EmptyState.svelte` is **dead** (zero imports/renders in `src`). 🟡 Flag: unused component — delete-or-keep is user's call (not deleted per flag-not-delete).
+- **F33** — DEFER w/ rationale: per-tick DOM reparse is on the blur-reveal animation that has a CRITICAL DON'T-TOUCH invariant; cost is transient (streaming only); a wrong move breaks the cascade. Needs careful design + live CDP visual verify.
+- **F187** — DEFER w/ rationale: ActivityBar pointer-capture edge only bites if `setPointerCapture` throws AND user drags fast past a button; the robust fix (window-listener drag model) is a real refactor with regression risk on a working drag-reorder. Low value vs risk.
+- **F48 / F51 → RUST PHASE** (below): both need a Rust-side change. F48 = remove the dead `assistant_set/get_thinking_effort`/`permission_mode` commands (frontend uses localStorage; no observable live bug). F51 = persist `forceNextFirstTurn` — needs a field on the `Conversation` struct (`mod.rs:388`; `created_at` is non-optional `i64`, no extra-field capture). ⚠️ Also noticed `compactionHistory` doesn't round-trip through that struct either (latent).
+
+### RESUME HERE — RUST + SECURITY PHASE (frontend done)
+All actionable frontend work is committed. What's left is the **HELD set**, which needs `tauri dev` (`rift-tauri.exe`) quit first so `cargo check` won't collide:
+- **3 highs:** `mod.rs:2143` stdout deadlock · `mcp_server.rs:302` UTF-8 slice panic · F39 `AssistantPage:205` pane keying (the only FE high — re-verify, may already be handled).
+- **All Rust** findings + **all security** (e.g. `git_local.rs:72` traversal) · **F48/F51** (above) · vitest **F237** (`npm i -D vitest@^4.1.8`) · dead-CSS **F233/F234** (flag-not-delete).
+- Quit dev targeting **`rift-tauri.exe` EXACTLY** (never a `rift*` glob — `rift.exe` is the user's prod app). Then `cargo check --manifest-path src-tauri/Cargo.toml`.
+
+Tracking: `.tmp/edit-done.json` (104 IDs).
+
 ## Session 2026-06-04 (cont. 37) — EDIT-SWARM 2nd PASS: 47 REMAINING FE FINDINGS CLEARED
 
 2nd swarm pass over all 3 buckets (state-ts 14 · comp-assistant 17 · comp-other 16 = 47). All 47 now **resolved or flagged**. `npm run check` 4080/0/0 at every commit. `edit-done.json` 62→88.
 - **10 applied + committed:** `90ff50f` state-ts (F172 stt `destroy()`, F180 restoreTabs single-load, F215/F217 everOpened) · `80d24f1` comp-assistant (F30 no openTab on right-click, F134 effort-slider keyboard-reachable) · `ad04775` comp-other (F164 progressbar aria-label, F232 Confirm dontAsk reset, F198 Select aria-disabled+CSS) · `092f07f` hand-done F173 (stt per-channel listen try/catch).
 - **12 verified already-fixed** (recorded as done, grep-confirmed): F20,F27,F29,F155,F184,F223,F228,F148,F174,F206,F207,F209 — fixed in 1st pass / coincidentally; swarm correctly deferred.
 - **4 resolved-by-deletion:** F167–F170 target `ChatRail.svelte` (deleted cont.35).
-- **21 FLAGGED — genuine judgment, NOT applied, NOT in done.json:**
-  - state-ts (9): **F24** config-mutator try/catch (6 mutators) · **F48** thinking-effort/permission-mode dual-storage split · **F51** compaction `forceNextFirstTurn` persistence · **F140** StreamEnvelope `usage` type · **F146** removeQueued tabId param · **F147** void send() catch · **F204** telemetry O(M×N) per-model avg · **F224** toast resume remaining-time · **F226** accessibility init try/catch.
-  - comp-assistant (4): **F135** settings-menu mixed-ARIA roles · **F165** Markdown `everStreamed` $derived→$effect (1-frame reveal regression) · **F166** ActivityPanel 1s-ticker re-render · **F182** AssistantWelcome greeting reactivity (needs clock tick, $derived insufficient).
-  - comp-other (8): **F33** Markdown per-tick DOM reparse · **F44** toast pause/resume remaining-time (store-side, pairs w/ F224) · **F150** role=menu arrow-key roving-tabindex · **F187** ActivityBar pointer-capture ownership · **F189** HomePage greeting (same as F182) · **F190** HomePage branch stale-write race · **F191** branch-load fail-loud (state-side) · **F230** EmptyState tone — *audit's suggested_fix is WRONG* (CSS targets `.empty-glyph`, not `.empty`; real fix needs a `.empty[data-tone]` rule or restructure).
-
-### RESUME HERE — frontend audit swarm COMPLETE
-All swarmable + mechanical FE findings done. Remaining work = the 21 judgment calls above (hand-do per-item, not swarmable) + the permanent HELD set below. Pick any flagged ID and implement manually.
-- **HELD — never swarm (manual only):** 3 highs (`mod.rs:2143`, `mcp_server.rs:302`, F39 `AssistantPage:205`) · all Rust (quit tauri dev first) · all security · vitest F237 (`npm i -D vitest@^4.1.8`) · dead-CSS F233/F234 (flag-not-delete). `edit-batch.py` auto-holds these.
-
-Tracking: `.tmp/edit-done.json` (88 IDs). Re-emit any bucket: `python scripts/edit-batch.py <bucket>` (auto-excludes done+held).
+- **21 FLAGGED judgment calls** → all worked in cont.38 above (12 fixed, 4 already-fixed, F209 wontfix, F230 moot, F33/F187 deferred, F48/F51 → Rust). Re-emit any bucket: `python scripts/edit-batch.py <bucket>`.
 
 ## Session 2026-06-04 (cont. 36) — EDIT-SWARM: 64 FRONTEND FIXES + TOOLING HARDENED
 
