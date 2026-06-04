@@ -121,14 +121,20 @@
   const branch = $derived(assistant.workspaceBranch);
 
   // Time-of-day greeting eyebrow (mockup parity).
-  function greeting(): string {
-    const hr = new Date().getHours();
+  // #182: tick the hour each minute so the greeting refreshes across day
+  // boundaries instead of freezing at the value computed when first mounted.
+  let nowHour = $state(new Date().getHours());
+  $effect(() => {
+    const t = setInterval(() => { nowHour = new Date().getHours(); }, 60_000);
+    return () => clearInterval(t);
+  });
+  function greeting(hr: number): string {
     if (hr < 5) return "Still up";
     if (hr < 12) return "Good morning";
     if (hr < 18) return "Good afternoon";
     return "Good evening";
   }
-  const greet = greeting();
+  const greet = $derived(greeting(nowHour));
 
   // Resume-tiles — top recent conversations excluding the current empty tab.
   // Curate, don't dump: a 1-turn convo (≤2 messages) is almost always a
