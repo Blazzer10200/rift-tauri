@@ -1,13 +1,13 @@
 //! Rift — pure local-workspace coding assistant (Tauri + Svelte).
 //! The Claude CLI integration + local MCP server live under `assistant/`.
 //!
-//! Auto-update via the GH-release-API path (v0.4.34+, see
-//! `commands/update.rs`). Frontend polls the latest GitHub release on launch,
-//! offers a one-click "Download" that opens the Setup.exe asset URL via
-//! `tauri-plugin-opener`; NSIS handles install over the running binary.
-//! No signing key, no `latest.json`, no plugin runtime dependency — the
-//! prior `tauri-plugin-updater` path bricked all clients on key loss
-//! (2026-05-27 incident → v0.4.34 rebuild).
+//! Auto-update via Velopack (v0.4.47+, restored 2026-06-04, see
+//! `update_service.rs` + `commands/update.rs`). Frontend checks the latest
+//! GitHub release on launch + every 6h; one-click download streams progress,
+//! then Velopack applies on exit and relaunches the new version unattended.
+//! `VelopackApp::build().run()` runs early in `run()` to handle install/update
+//! hooks. (Replaced the GH-release-API browser-handoff path; that in turn
+//! replaced `tauri-plugin-updater`, which bricked clients on key loss.)
 //!
 //! Tauri command surface at the bottom of this file (`run()`'s
 //! `invoke_handler!`). Command fns live under `commands/` — one file per
@@ -20,6 +20,7 @@ pub mod diagnostics;
 pub mod secrets;
 pub mod state;
 pub mod stt;
+pub mod update_service;
 
 use tauri::Manager;
 
@@ -95,16 +96,25 @@ pub fn run() {
 
     // Assistant α2: when launched by the Claude CLI as an MCP server (env
     // RIFT_MCP_SERVER=1), serve JSON-RPC on stdio and skip Tauri entirely.
+    // MUST precede VelopackApp::build() — in stdio mode nothing may touch
+    // stdout (it would corrupt the JSON-RPC framing), and the Velopack
+    // installer never launches us with RIFT_MCP_SERVER set.
     if std::env::var_os("RIFT_MCP_SERVER").is_some() {
         assistant::mcp_server::run_stdio();
         return;
     }
+
+    // Velopack: install/update/uninstall hooks run FIRST on normal launches
+    // (the installer passes `--veloapp-*` args). In all other cases this is a
+    // near-instant no-op. Must run before Tauri spins up. See update_service.rs.
+    velopack::VelopackApp::build().run();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
+        .manage(std::sync::Arc::new(update_service::UpdateService::new()))
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
         .manage(stt::WhisperCache(tokio::sync::Mutex::new(None)))
         .manage(stt::WhisperSession(tokio::sync::Mutex::new(None)))
@@ -137,7 +147,9 @@ pub fn run() {
             commands::open_in_vscode,
             commands::check_for_updates,
             commands::download_update,
+            commands::apply_pending_update,
             commands::assistant_auth_probe,
+            commands::assistant_update_cli,
             commands::assistant_get_api_key_present,
             commands::assistant_set_api_key,
             commands::assistant_get_use_full_config,
@@ -160,6 +172,7 @@ pub fn run() {
             commands::assistant_answer_permission,
             commands::assistant_list_conversations,
             commands::assistant_load_conversation,
+            commands::assistant_export_save,
             commands::assistant_save_conversation,
             commands::assistant_delete_conversation,
             commands::assistant_get_workspace,

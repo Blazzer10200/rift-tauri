@@ -1,7 +1,7 @@
 // #7 first-run onboarding gate state. Tracks whether the guided flow has been
 // dismissed (completed or skipped) so it shows at most once per install. The
 // actual "is this a fresh install" decision lives in AppShell, combining this
-// flag with connection signals (no servers + no SSH key).
+// flag with the assistant auth probe result (no API key + not logged in).
 
 const DISMISS_KEY = "rift.onboarding.dismissed";
 

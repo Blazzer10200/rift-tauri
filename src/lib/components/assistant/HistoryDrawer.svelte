@@ -1,10 +1,11 @@
 <script lang="ts">
   import {
     History, Plus, Trash2, Pencil, Check, MessagesSquare, Search, X,
-    Calendar, Clock, Bot, MessageSquare, GitBranch, Download, ExternalLink,
-    FileText, Sparkles, ChevronRight, Maximize2,
+    Calendar, Clock, Bot, MessageSquare, ExternalLink,
+    FileText, FileJson, Sparkles, ChevronRight, Maximize2, DollarSign, Download,
   } from "lucide-svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { save } from "@tauri-apps/plugin-dialog";
   import { assistant, type ConversationMeta } from "../../state/assistant.svelte";
   import type { ConversationRecord, Block, TextBlock } from "../../state/assistant/types";
   import PageHeader from "../shell/PageHeader.svelte";
@@ -157,11 +158,34 @@
       .slice(0, 6);
   });
 
+  // Total cost = Σ per-turn costs across the transcript (mirrors the live
+  // session counter, which sums each turn's total_cost_usd).
+  const detailCost = $derived.by(() => {
+    if (!detailRecord) return null;
+    return detailRecord.messages.reduce((sum, m) => sum + (m.costUsd ?? 0), 0);
+  });
+
+  function fmtCost(usd: number): string {
+    if (usd <= 0) return "$0.00";
+    if (usd < 0.01) return `$${usd.toFixed(4)}`;
+    return `$${usd.toFixed(2)}`;
+  }
+
   // Compaction recap — most recent summary if present
   const latestRecap = $derived.by(() => {
     if (!detailRecord?.compactionHistory?.length) return null;
     const hist = detailRecord.compactionHistory;
     return hist[hist.length - 1].summary;
+  });
+
+  // Fallback when no compaction recap exists (the common case): first user
+  // message, so the block previews the conversation instead of looking empty.
+  const firstUserPreview = $derived.by(() => {
+    if (!detailRecord) return null;
+    const first = detailRecord.messages.find((m) => m.role === "user");
+    if (!first) return null;
+    const t = msgTextPreview(first.blocks);
+    return t || null;
   });
 
   function msgTextPreview(blocks: Block[]): string {
@@ -178,6 +202,76 @@
     if (!selectedId) return;
     void assistant.openTab(selectedId);
     onSelected();
+  }
+
+  // ── Export ──────────────────────────────────────────────────────────
+  let exportMenuOpen = $state(false);
+  let exporting = $state(false);
+
+  function blocksToMarkdown(blocks: Block[]): string {
+    const lines: string[] = [];
+    let tools: string[] = [];
+    const flushTools = () => {
+      if (tools.length) { lines.push(`> 🔧 ${tools.join(", ")}`); tools = []; }
+    };
+    for (const b of blocks) {
+      if (b.type === "text") { flushTools(); if (b.text.trim()) lines.push(b.text.trim()); }
+      else if (b.type === "tool") { tools.push(b.name); }
+      else if (b.type === "boundary") { flushTools(); lines.push(`> — context compacted —`); }
+    }
+    flushTools();
+    return lines.join("\n\n");
+  }
+
+  function buildMarkdown(rec: ConversationRecord): string {
+    const head = [
+      `# ${rec.title}`,
+      "",
+      `- **Model:** ${modelLabel(rec.model)}`,
+      `- **Created:** ${fmtDate(rec.createdAt)}`,
+      `- **Updated:** ${fmtDate(rec.updatedAt)}`,
+      `- **Messages:** ${rec.messages.length}`,
+      `- **Cost:** ${fmtCost(rec.messages.reduce((s, m) => s + (m.costUsd ?? 0), 0))}`,
+      "",
+      "---",
+      "",
+    ];
+    const body: string[] = [];
+    for (const m of rec.messages) {
+      if (m.role === "user") body.push(`## You`);
+      else if (m.role === "assistant") body.push(`## Assistant${m.model ? ` (${m.model})` : ""}`);
+      else continue;
+      const md = blocksToMarkdown(m.blocks);
+      body.push(md || "_(no text)_");
+      body.push("");
+    }
+    return head.join("\n") + body.join("\n");
+  }
+
+  function slugify(s: string): string {
+    return (s || "conversation").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "conversation";
+  }
+
+  async function exportConvo(format: "md" | "json") {
+    exportMenuOpen = false;
+    if (!detailRecord || exporting) return;
+    const rec = detailRecord;
+    exporting = true;
+    try {
+      const ext = format === "md" ? "md" : "json";
+      const name = format === "md" ? "Markdown" : "JSON";
+      const dest = await save({
+        defaultPath: `${slugify(rec.title)}.${ext}`,
+        filters: [{ name, extensions: [ext] }],
+      });
+      if (!dest) return;
+      const contents = format === "md" ? buildMarkdown(rec) : JSON.stringify(rec, null, 2);
+      await invoke("assistant_export_save", { dest, contents });
+    } catch (e) {
+      detailError = e instanceof Error ? e.message : "Export failed.";
+    } finally {
+      exporting = false;
+    }
   }
 </script>
 
@@ -311,6 +405,10 @@
                   <span class="meta-model">{modelLabel(c.model)}</span>
                   <span class="meta-dot">·</span>
                   <span>{c.messageCount} msg</span>
+                  {#if c.costUsd > 0}
+                    <span class="meta-dot">·</span>
+                    <span class="meta-cost">{fmtCost(c.costUsd)}</span>
+                  {/if}
                   <span class="meta-time">{fmtTime(c.updatedAt)}</span>
                 </span>
               </button>
@@ -378,6 +476,15 @@
                   <div class="hp-stat-l">Messages</div>
                 </div>
               </div>
+              {#if detailCost !== null}
+                <div class="hp-stat">
+                  <span class="hp-stat-ico"><DollarSign size={14} /></span>
+                  <div>
+                    <div class="hp-stat-v">{fmtCost(detailCost)}</div>
+                    <div class="hp-stat-l">Cost</div>
+                  </div>
+                </div>
+              {/if}
               {#if detailTurnCount !== null}
                 <div class="hp-stat">
                   <span class="hp-stat-ico"><ChevronRight size={14} /></span>
@@ -410,11 +517,11 @@
               </div>
             </div>
 
-            <!-- AI Recap block -->
+            <!-- AI Recap block (falls back to first-message preview) -->
             <div class="hp-block">
               <div class="hp-block-label">
                 <Sparkles size={12} />
-                AI Recap
+                {latestRecap ? "AI Recap" : "Preview"}
               </div>
               {#if detailLoading}
                 <p class="hp-noedit">Loading…</p>
@@ -422,8 +529,10 @@
                 <p class="hp-noedit">Error: {detailError}</p>
               {:else if latestRecap}
                 <p class="hp-summary">{latestRecap}</p>
+              {:else if firstUserPreview}
+                <p class="hp-summary">{firstUserPreview}…</p>
               {:else}
-                <p class="hp-noedit">No recap available — recaps are generated when a conversation is compacted.</p>
+                <p class="hp-noedit">No messages yet.</p>
               {/if}
             </div>
 
@@ -483,22 +592,29 @@
             >
               <ExternalLink size={13} /> Open
             </button>
-            <button
-              class="hp-cta"
-              type="button"
-              disabled
-              use:tooltip={"Coming soon"}
-            >
-              <GitBranch size={13} /> Branch
-            </button>
-            <button
-              class="hp-cta"
-              type="button"
-              disabled
-              use:tooltip={"Coming soon"}
-            >
-              <Download size={13} /> Export
-            </button>
+            <div class="hp-export">
+              {#if exportMenuOpen}
+                <button class="hp-export-scrim" type="button" aria-label="Close export menu" onclick={() => (exportMenuOpen = false)}></button>
+                <div class="hp-export-menu" role="menu">
+                  <button class="hp-export-opt" type="button" role="menuitem" onclick={() => exportConvo("md")}>
+                    <FileText size={13} /> Markdown <span class="hp-export-ext">.md</span>
+                  </button>
+                  <button class="hp-export-opt" type="button" role="menuitem" onclick={() => exportConvo("json")}>
+                    <FileJson size={13} /> JSON <span class="hp-export-ext">.json</span>
+                  </button>
+                </div>
+              {/if}
+              <button
+                class="hp-cta"
+                type="button"
+                disabled={exporting}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+                onclick={() => (exportMenuOpen = !exportMenuOpen)}
+              >
+                <Download size={13} /> {exporting ? "Exporting…" : "Export"}
+              </button>
+            </div>
           </div>
         {/if}
       </div>
@@ -621,7 +737,7 @@
     color: var(--fg-faint);
     padding: 12px 12px 6px;
     position: sticky; top: 0;
-    background: linear-gradient(180deg, var(--surface, var(--bg-elev-1)) 70%, transparent);
+    background: var(--surface, var(--bg-elev-1));
     z-index: 1;
   }
   .group-label::after {
@@ -686,7 +802,11 @@
   .list {
     flex: 1; min-height: 0;
     overflow-y: auto;
-    padding: 6px;
+    /* No top padding: the sticky group-label sticks at top:0, so any padding
+       above it would leave a gap where scrolled rows peek through behind the
+       filter box. Top spacing comes from the first label's own padding. */
+    padding: 0 6px 6px;
+    background: var(--surface, var(--bg-elev-1));
     display: flex; flex-direction: column;
     gap: 2px;
   }
@@ -781,6 +901,10 @@
     border-radius: 999px;
     background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
   }
+  .meta-cost {
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
+  }
 
   .row-model-dot {
     width: 5px; height: 5px;
@@ -791,9 +915,10 @@
       0 0 4px color-mix(in oklch, var(--row-model-color, var(--fg-muted)) 40%, transparent);
     flex-shrink: 0;
   }
-  .row-main[data-model="sonnet"] { --row-model-color: var(--accent); }
+  /* Distinct per-tier dot so the colour actually carries model info. */
   .row-main[data-model="opus"]   { --row-model-color: var(--accent); }
-  .row-main[data-model="haiku"]  { --row-model-color: var(--accent); }
+  .row-main[data-model="sonnet"] { --row-model-color: var(--info); }
+  .row-main[data-model="haiku"]  { --row-model-color: var(--ok); }
 
   .row-tools {
     display: flex; align-items: center; gap: 2px;
@@ -1097,6 +1222,43 @@
   .hp-cta:disabled {
     opacity: 0.45;
     cursor: not-allowed;
+  }
+
+  /* Export menu */
+  .hp-export { position: relative; }
+  .hp-export-scrim {
+    position: fixed; inset: 0;
+    z-index: 1;
+    background: transparent; border: 0; cursor: default;
+  }
+  .hp-export-menu {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    right: 0;
+    z-index: 2;
+    min-width: 168px;
+    padding: 4px;
+    display: flex; flex-direction: column; gap: 2px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius, 8px);
+    box-shadow: 0 12px 32px -10px rgba(0, 0, 0, 0.55);
+  }
+  .hp-export-opt {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 9px;
+    background: transparent; border: 0; border-radius: 6px;
+    color: var(--fg-2, var(--fg-muted));
+    font: inherit; font-size: var(--fs-sm); font-weight: 550;
+    text-align: left; cursor: pointer;
+    transition: background 110ms, color 110ms;
+  }
+  .hp-export-opt:hover { background: var(--surface-hover); color: var(--fg); }
+  .hp-export-ext {
+    margin-left: auto;
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle, var(--fg-faint));
+    font-variant-numeric: tabular-nums;
   }
 
   /* Responsive: narrow detail */

@@ -12,7 +12,7 @@
   const variant = $derived<Variant>(
     updates.state === "available" ? "accent" :
     updates.state === "downloading" ? "accent" :
-    updates.state === "launched"  ? "ok"     :
+    updates.state === "installing" ? "ok"     :
     updates.state === "uptodate"  ? "ok"     :
     updates.state === "error"     ? "danger" :
                                     "info"
@@ -21,7 +21,7 @@
   const subTitle = $derived(
     updates.state === "available" ? "A new release is ready" :
     updates.state === "downloading" ? "Downloading update…" :
-    updates.state === "launched"  ? "Installer launched" :
+    updates.state === "installing" ? "Installing — relaunching…" :
     updates.state === "uptodate"  ? "You're up to date" :
     updates.state === "error"     ? "Update check failed" :
                                     "Checking for updates"
@@ -118,7 +118,7 @@
         </div>
 
         <!-- Version diff strip (only when we know the target) -->
-        {#if updates.info && (updates.state === "available" || updates.state === "downloading" || updates.state === "launched")}
+        {#if updates.info && (updates.state === "available" || updates.state === "downloading" || updates.state === "installing")}
           <div class="head-diff">
             <span class="diff-chip current mono">v{updates.currentVersion}</span>
             <ArrowRight size={12} class="diff-arrow"/>
@@ -148,24 +148,23 @@
             {#if updates.sizeLabel}<div class="dl-sub">{updates.sizeLabel}</div>{/if}
           </div>
 
-        {:else if updates.state === "available" || updates.state === "launched"}
-          {#if updates.state === "launched"}
-            <div class="ready-card">
-              <Download size={18}/>
-              <div class="ready-text">
-                <div class="ready-title">Installer launched.</div>
-                <div class="ready-sub">Windows will close Rift, install v{updates.info?.version}, and relaunch. If nothing happened, use "View release on GitHub" below.</div>
-              </div>
+        {:else if updates.state === "installing"}
+          <div class="ready-card">
+            <RefreshCw size={18} class="spin"/>
+            <div class="ready-text">
+              <div class="ready-title">Installing v{updates.info?.version}…</div>
+              <div class="ready-sub">Rift will close, apply the update, and relaunch automatically.</div>
             </div>
-          {/if}
+          </div>
 
-          {#if updates.state === "available" && updates.downloadError}
+        {:else if updates.state === "available"}
+          {#if updates.downloadError}
             <div class="err-card">
               <AlertTriangle size={16}/>
               <div class="err-text">
-                <div class="err-title">Couldn't open the installer link.</div>
+                <div class="err-title">Couldn't install the update.</div>
                 <div class="err-detail mono">{updates.downloadError}</div>
-                <div class="err-hint">Click "View release on GitHub" below to download manually, or try again after relaunch.</div>
+                <div class="err-hint">Try again, or click "View release on GitHub" below to download manually.</div>
               </div>
             </div>
           {/if}
@@ -241,10 +240,12 @@
             <RefreshCw size={11} class="spin"/> Please wait
           </button>
 
-        {:else if updates.state === "launched"}
-          <span class="foot-status">Run Setup.exe to finish.</span>
+        {:else if updates.state === "installing"}
+          <span class="foot-status">Installing… Rift will relaunch.</span>
           <div class="foot-spacer"></div>
-          <button class="btn" type="button" onclick={() => updates.close()}>Close</button>
+          <button class="btn" type="button" disabled>
+            <RefreshCw size={11} class="spin"/> Please wait
+          </button>
 
         {:else}
           <button class="btn ghost" type="button" onclick={() => updates.close()}>Close</button>

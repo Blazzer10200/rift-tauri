@@ -4,7 +4,7 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, Layers, History, ChevronDown, ChevronRight, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff } from "lucide-svelte";
+  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, Layers, History, ChevronDown, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff, Loader2 } from "lucide-svelte";
   import { onDestroy, onMount } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
@@ -92,11 +92,16 @@
   let cliBadgeAnchor = $state<HTMLButtonElement | undefined>();
   let cliPanel = $state<HTMLDivElement | undefined>();
   let cliPanelOpen = $state(false);
-  let cliHowOpen = $state(false);
   let cliPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
   const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
   const cliUpdateReady = $derived(cliUpdate.available(cliInstalled));
+  const cliIsNative = $derived((assistant.auth?.installMethod ?? null) === "native");
   onMount(() => { void cliUpdate.maybeCheck(); });
+  $effect(() => { cliUpdate.setMethod(assistant.auth?.installMethod ?? null); });
+  async function runCliUpdate() {
+    const ok = await cliUpdate.runUpdate();
+    if (ok) { await assistant.refreshAuth(); cliPanelOpen = false; }
+  }
   function toggleCliPanel() {
     if (cliPanelOpen) { cliPanelOpen = false; return; }
     if (!cliBadgeAnchor) return;
@@ -769,8 +774,17 @@
       <span class="cli-vchip new">{cliUpdate.latest ?? "?"}</span>
     </div>
     <div class="cli-panel-sub">
-      A newer <code>claude</code> CLI is on npm. Rift uses your local install — update it from a terminal:
+      {#if cliUpdate.updateError}
+        <span class="cli-err">{cliUpdate.updateError}</span> — or run it yourself:
+      {:else if cliIsNative}
+        A newer <code>claude</code> CLI is available. Native installs auto-update in the background — or apply it now:
+      {:else}
+        A newer <code>claude</code> CLI is on npm. Rift can update it for you:
+      {/if}
     </div>
+    <button type="button" class="cli-update-go" disabled={cliUpdate.updating} onclick={runCliUpdate}>
+      {#if cliUpdate.updating}<Loader2 size={14} class="cli-spin" /> Updating…{:else}<ArrowUpCircle size={14} /> Update now{/if}
+    </button>
     <div class="cli-cmd">
       <code>{cliUpdate.updateCommand}</code>
       <button
@@ -784,17 +798,6 @@
         {#if cliUpdate.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
       </button>
     </div>
-    <button type="button" class="cli-how-toggle" class:open={cliHowOpen} onclick={() => (cliHowOpen = !cliHowOpen)} aria-expanded={cliHowOpen}>
-      <ChevronRight size={12} class="cli-how-chev" />
-      How do I update?
-    </button>
-    {#if cliHowOpen}
-      <ol class="cli-how-steps">
-        <li>Open a terminal — on Windows press <kbd>Win</kbd>+<kbd>R</kbd>, type <code>cmd</code>, hit Enter.</li>
-        <li>Paste the command above and press Enter. Let it finish (a few seconds).</li>
-        <li>Restart Rift — it'll pick up the new <code>claude</code> automatically.</li>
-      </ol>
-    {/if}
     <div class="cli-panel-foot">
       <a class="cli-panel-link" href={cliUpdate.changelogUrl} target="_blank" rel="noreferrer">
         <ExternalLink size={11} /> What's new
@@ -1590,31 +1593,18 @@
   }
   .cli-cmd-copy:hover { color: var(--fg); border-color: var(--border-strong); }
   .cli-cmd-copy.done { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
-  .cli-how-toggle {
-    display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
-    padding: 2px 2px; margin: -2px 0; border: 0; background: transparent;
-    color: var(--fg-muted); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
-    transition: color 120ms var(--ease-soft);
+  .cli-err { color: var(--danger, #e66); font-weight: 600; }
+  .cli-update-go {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 32px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;
+    background: var(--accent); color: var(--accent-fg); font: inherit; font-size: 12px; font-weight: 650;
+    transition: background 130ms var(--ease-soft), opacity 130ms var(--ease-soft);
   }
-  .cli-how-toggle:hover { color: var(--fg); }
-  .cli-how-toggle :global(.cli-how-chev) { transition: transform 140ms var(--ease-soft); }
-  .cli-how-toggle.open :global(.cli-how-chev) { transform: rotate(90deg); }
-  .cli-how-steps {
-    margin: 0; padding: 2px 0 0 18px;
-    display: flex; flex-direction: column; gap: 5px;
-    color: var(--fg-2); font-size: 11px; line-height: 1.45;
-    list-style: decimal;
-  }
-  .cli-how-steps li::marker { color: var(--fg-faint); font-weight: 700; }
-  .cli-how-steps code {
-    font-family: var(--font-mono); font-size: 10.5px; color: var(--fg);
-    background: var(--bg-inset); padding: 0 4px; border-radius: 4px;
-  }
-  .cli-how-steps kbd {
-    font-family: var(--font-mono); font-size: 10px; color: var(--fg-2);
-    background: var(--bg-elev-2); border: 1px solid var(--border);
-    border-radius: 4px; padding: 0 4px;
-  }
+  .cli-update-go:hover:not(:disabled) { background: var(--accent-hover); }
+  .cli-update-go:disabled { opacity: 0.7; cursor: default; }
+  .cli-update-go :global(.cli-spin) { animation: cli-spin 0.8s linear infinite; }
+  @keyframes cli-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .cli-update-go :global(.cli-spin) { animation: none; } }
   .cli-panel-foot {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);

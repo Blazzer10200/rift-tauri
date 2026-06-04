@@ -2,7 +2,6 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { Terminal, UserCheck, BadgeCheck, CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-svelte";
-  import ObStage from "./ObStage.svelte";
 
   type AuthStatus = {
     cliPresent: boolean;
@@ -36,12 +35,10 @@
   onMount(probe);
 </script>
 
-<ObStage kind="claude" caption="embedded assistant" />
-
 <header class="ob-head">
-  <span class="ob-eyebrow">Step 3 · Assistant (optional)</span>
+  <span class="ob-eyebrow">Step 3 · Connect Claude</span>
   <h1 class="ob-title">Connect Claude</h1>
-  <p class="ob-sub">Rift's assistant reuses your existing <code>claude</code> CLI auth. Skip this and wire it later in Settings → Assistant — sync works without it.</p>
+  <p class="ob-sub">Rift runs the <code>claude</code> CLI under the hood. If it's already installed and logged in, you're set — otherwise you can finish this anytime in Settings → Assistant.</p>
 </header>
 
 {#if probing}

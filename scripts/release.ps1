@@ -1,10 +1,20 @@
-# Rift release pipeline -- GH-release-API path (v0.4.34+).
+# Rift release pipeline -- Velopack path (v0.4.47+).
 #
-# Produces a single NSIS Setup.exe and uploads it to the public rift-releases
-# GitHub repo. v0.4.34+ clients hit api.github.com/.../releases/latest, semver-
-# compare the tag, and open Setup.exe in the browser on user confirm.
-# No signing key, no latest.json, no *.sig -- the prior tauri-plugin-updater
-# path bricked all clients on key loss (see commands/update.rs header).
+# Builds the app, packs it with Velopack (`vpk pack`), and publishes to the
+# public `rift-releases` GitHub repo (`vpk upload github`). Installed clients
+# run Velopack's UpdateManager over the native GithubSource: check on launch +
+# every 6h, one-click download, then unattended apply-on-exit + relaunch.
+# See src-tauri/src/update_service.rs + docs/design/velopack-auto-update.md.
+#
+# Two-repo split: source lives in private `rift-tauri`; releases publish to
+# public `rift-releases` so unauthenticated GithubSource fetches succeed.
+#
+# CRITICAL -- vpk CLI version MUST equal the `velopack` crate version (both
+# pinned to 1.2.0). Bump together: `dotnet tool update -g vpk` + the `=x.y.z`
+# pin in src-tauri/Cargo.toml. A mismatch packs an Update runtime incompatible
+# with the linked client runtime.
+#
+# Prereqs on PATH: npm, vpk (`dotnet tool install -g vpk`), gh (logged in).
 #
 # Bump versions BEFORE running -- use `scripts/bump.ps1 <version>` to write the
 # three lockstep files (package.json + Cargo.toml + tauri.conf.json).
@@ -24,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
 
-Write-Host '=== Rift release pipeline (GH-release-API path) ===' -ForegroundColor Cyan
+Write-Host '=== Rift release pipeline (Velopack) ===' -ForegroundColor Cyan
 
 # --- Preflight: version sync ---------------------------------------------
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
@@ -41,11 +51,26 @@ $version = $pkg.version
 $tag = "v$version"
 Write-Host "Version: $version (tag $tag)" -ForegroundColor Green
 
+# --- Preflight: vpk version == velopack crate version --------------------
+# Velopack requires the packing CLI and the linked runtime to match exactly.
+$crateVer = $null
+if ($cargoText -match '(?m)^\s*velopack\s*=\s*"=?([0-9]+\.[0-9]+\.[0-9]+)"') {
+    $crateVer = $matches[1]
+}
+$vpkBanner = (& vpk -h 2>&1 | Select-String 'Velopack CLI ([0-9.]+)')
+$vpkVer = if ($vpkBanner) { $vpkBanner.Matches[0].Groups[1].Value } else { $null }
+if ($crateVer -and $vpkVer -and ($crateVer -ne $vpkVer)) {
+    throw "vpk/crate version mismatch: vpk=$vpkVer, velopack crate=$crateVer. Run ``dotnet tool update -g vpk`` and align the Cargo.toml pin."
+}
+Write-Host "Velopack: crate=$crateVer, vpk=$vpkVer" -ForegroundColor Green
+
 # --- Preflight: extract release notes from CHANGELOG ---------------------
 # ASCII-only source -- \uXXXX in -replace patterns resolves at .NET regex
 # compile time, NOT at PS string-parse time, so the source bytes stay ASCII.
-# BOM-less .ps1 read as Win-1252 by PS5.1 would mojibake any literal
-# multi-byte chars.
+# BOM-less .ps1 read as Win-1252 by PS5.1 would mojibake literal multi-byte
+# chars. vpk pack embeds the notes into the nuspec <releaseNotes>; Latin-1
+# chars trip the XmlReader on read-back (v0.4.26 `1.15x` XmlException), so
+# pre-strip to pure ASCII.
 function Convert-ToAsciiSafe([string]$s) {
     $s = $s -replace '\u2014', '--'   # em-dash
     $s = $s -replace '\u2013', '-'    # en-dash
@@ -72,7 +97,6 @@ function Convert-ToAsciiSafe([string]$s) {
 }
 
 $releaseNotesFile = $null
-$notesBodyAscii = ""
 $changelogPath = 'docs/CHANGELOG.md'
 if (Test-Path $changelogPath) {
     $clText = [System.IO.File]::ReadAllText($changelogPath)
@@ -84,10 +108,20 @@ if (Test-Path $changelogPath) {
         if ($topVer -eq $version) {
             $body = $m.Groups['body'].Value.Trim()
             if ($body) {
-                $notesBodyAscii = Convert-ToAsciiSafe $body
+                $bodyAscii = Convert-ToAsciiSafe $body
+                # Sanity: synthesize the nuspec releaseNotes element + parse as
+                # XML before handing to vpk. Catches char hazards fast, not
+                # after a 5-min build burns.
+                $probeXml = "<?xml version='1.0' encoding='utf-8'?><r>$([System.Security.SecurityElement]::Escape($bodyAscii))</r>"
+                try {
+                    [xml]$null = $probeXml
+                } catch {
+                    throw "Release notes failed XML sanity probe: $($_.Exception.Message)"
+                }
                 $releaseNotesFile = Join-Path ([System.IO.Path]::GetTempPath()) "rift-release-notes-$version.md"
-                [System.IO.File]::WriteAllText($releaseNotesFile, $notesBodyAscii)
-                Write-Host "Release notes: top CHANGELOG entry ($($notesBodyAscii.Length) chars)" -ForegroundColor Green
+                [System.IO.File]::WriteAllText($releaseNotesFile, $bodyAscii)
+                $delta = $body.Length - $bodyAscii.Length
+                Write-Host "Release notes: top CHANGELOG entry ($($bodyAscii.Length) chars, $delta non-ASCII stripped)" -ForegroundColor Green
             } else {
                 Write-Host "Warning: CHANGELOG entry for v$version has empty body -- skipping notes" -ForegroundColor Yellow
             }
@@ -102,7 +136,7 @@ if (Test-Path $changelogPath) {
 }
 
 # --- Preflight: tools ----------------------------------------------------
-foreach ($t in @('npm', 'gh')) {
+foreach ($t in @('npm', 'vpk', 'gh')) {
     if (-not (Get-Command $t -ErrorAction SilentlyContinue)) {
         throw "$t not found on PATH"
     }
@@ -132,76 +166,87 @@ try {
 }
 
 # --- Build ---------------------------------------------------------------
-Write-Host '=== tauri build (NSIS) ===' -ForegroundColor Cyan
+# `npm run tauri build` builds the frontend (vite) + the release exe (which
+# embeds those assets). Velopack wraps the self-contained exe directly and
+# produces its own Setup.exe, so Tauri's NSIS bundle output is unused here.
+Write-Host '=== tauri build ===' -ForegroundColor Cyan
 & npm run tauri build
 if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
-# tauri build emits to either src-tauri/target/ or $env:CARGO_TARGET_DIR.
 $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'src-tauri/target' }
-$nsisDir = Join-Path $targetRoot 'release/bundle/nsis'
-if (-not (Test-Path $nsisDir)) { throw "NSIS bundle dir not produced: $nsisDir" }
+$exePath = Join-Path $targetRoot 'release/rift-tauri.exe'
+if (-not (Test-Path $exePath)) { throw "exe not produced: $exePath" }
 
-# Bundle dir is shared across all builds; filter to the exact current version
-# so we don't pick up artifacts from prior tags. Pattern matches Tauri's NSIS
-# naming: <productName>_<version>_<arch>-setup.exe.
-$setupPattern = "*_${version}_*-setup.exe"
-$setupCandidates = @(Get-ChildItem -Path $nsisDir -Filter $setupPattern -File)
-if ($setupCandidates.Count -ne 1) {
-    throw "Expected exactly one $setupPattern in $nsisDir, found $($setupCandidates.Count)"
-}
-$setupPath = $setupCandidates[0].FullName
-Write-Host "  Setup: $setupPath" -ForegroundColor DarkGray
+# --- Stage a clean directory for vpk pack -------------------------------
+# vpk packs every file in -p verbatim. Copy ONLY the exe + window icon.
+# If a future Tauri release bundles a WebView2 redistributable, sidecar, or
+# any *.dll next to the exe, IT MUST BE ADDED HERE or it'll be missing on
+# installed clients.
+$staging = "Releases/staging-$version"
+if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
+New-Item -ItemType Directory -Path $staging -Force | Out-Null
+Copy-Item $exePath $staging
+Copy-Item 'src-tauri/icons/icon.ico' $staging
 
-# --- Create + upload to GitHub ------------------------------------------
-Write-Host '=== gh release create ===' -ForegroundColor Cyan
-$releasesDir = Join-Path $repoRoot 'Releases'
-if (-not (Test-Path $releasesDir)) { New-Item -ItemType Directory -Path $releasesDir | Out-Null }
-$ghArgs = @(
-    'release', 'create', $tag,
-    '--repo', $releaseRepo,
-    '--title', $tag
+# --- vpk pack ------------------------------------------------------------
+Write-Host '=== vpk pack ===' -ForegroundColor Cyan
+$packArgs = @(
+    'pack',
+    '-u', 'Rift',
+    '-v', $version,
+    '-p', $staging,
+    '-e', 'rift-tauri.exe',
+    '-c', 'win',
+    '--packTitle', 'Rift',
+    '--packAuthors', 'Blazzer',
+    '--icon', "$staging/icon.ico",
+    '-o', 'Releases'
 )
 if ($releaseNotesFile) {
-    $ghArgs += @('--notes-file', $releaseNotesFile)
-} else {
-    $ghArgs += @('--notes', '')
+    $packArgs += @('--releaseNotes', $releaseNotesFile)
 }
-# DO NOT add --prerelease. GitHub's releases/latest API endpoint EXCLUDES
-# prereleases — the GH-release-API updater path queries that exact endpoint,
-# so a prerelease ship would be invisible to all clients. Alpha-ness is
-# communicated via the version suffix (`-alpha`), not the GH flag.
-$ghArgs += @($setupPath)
+# Optional themed installer splash -- drop a ~560x140 PNG/GIF here to swap the
+# bland default.
+$splashPath = 'src-tauri/installer-splash.png'
+if (Test-Path $splashPath) {
+    Write-Host "  splash: $splashPath" -ForegroundColor DarkGray
+    $packArgs += @('--splashImage', $splashPath)
+}
+& vpk @packArgs
+if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 
-& gh @ghArgs
-if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
+# --- Upload to GitHub ----------------------------------------------------
+# vpk uploads Setup.exe + .nupkg + delta + releases.win.json as release assets
+# and creates/publishes the release. --channel win matches the pack channel +
+# the client manifest. --pre for alpha/beta/rc: the client's
+# GithubSource(prerelease:true) reads the prerelease list, so pre-releases are
+# visible (unlike the old GH-release-API `/latest` path, which excluded them).
+Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
+$ghToken = (gh auth token).Trim()
+if (-not $ghToken) { throw 'gh auth token returned empty -- run `gh auth login` first' }
 
-# --- Round-trip verify ---------------------------------------------------
-# Download the just-uploaded Setup.exe and SHA256-compare against the local
-# pre-upload artifact. Catches corrupt/wrong-asset uploads before clients see
-# a broken update (issue #18).
-Write-Host '=== Round-trip verify (SHA256) ===' -ForegroundColor Cyan
-$verifyDir = Join-Path $releasesDir "verify-$version"
-if (Test-Path $verifyDir) { Remove-Item -Recurse -Force $verifyDir }
-New-Item -ItemType Directory -Path $verifyDir | Out-Null
-gh release download $tag --repo $releaseRepo --pattern "*-setup.exe" -D $verifyDir
-if ($LASTEXITCODE -ne 0) { throw 'gh release download (verify) failed' }
-$downloaded = @(Get-ChildItem -Path $verifyDir -Filter '*-setup.exe' -File)
-if ($downloaded.Count -ne 1) {
-    throw "Expected exactly one downloaded *-setup.exe in $verifyDir, found $($downloaded.Count)"
+$uploadArgs = @(
+    'upload', 'github',
+    '-o', 'Releases',
+    '--repoUrl', "https://github.com/$releaseRepo",
+    '--channel', 'win',
+    '--publish',
+    '--releaseName', $tag,
+    '--tag', $tag,
+    '--token', $ghToken
+)
+if ($version -match '-(alpha|beta|rc)') {
+    $uploadArgs += '--pre'
 }
-$localHash = (Get-FileHash -Algorithm SHA256 -Path $setupPath).Hash
-$remoteHash = (Get-FileHash -Algorithm SHA256 -Path $downloaded[0].FullName).Hash
-if ($localHash -ne $remoteHash) {
-    throw "Round-trip verify FAILED: local SHA256=$localHash remote SHA256=$remoteHash. Setup.exe upload corrupted."
-}
-Write-Host "  SHA256 match: $localHash" -ForegroundColor Green
-Remove-Item -Recurse -Force $verifyDir
+& vpk @uploadArgs
+if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
 
 # --- Verify --------------------------------------------------------------
 Write-Host '=== Release published ===' -ForegroundColor Green
 gh release view $tag --repo $releaseRepo
 
 # --- Cleanup -------------------------------------------------------------
+Remove-Item -Recurse -Force $staging
 if ($releaseNotesFile -and (Test-Path $releaseNotesFile)) {
     Remove-Item -Force $releaseNotesFile
 }

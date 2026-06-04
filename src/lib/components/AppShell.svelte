@@ -34,6 +34,9 @@
   $effect(() => {
     browserDock.init();
     void updates.checkOnLaunch();
+    // Dev-only: expose the update store so CDP can drive its visual states
+    // (toast + dialog) without a live feed. Stripped from prod builds.
+    if (import.meta.env.DEV) (window as unknown as { __updates?: typeof updates }).__updates = updates;
   });
 
   // HMR-safe global keydown — $effect cleanup runs on unmount AND when the

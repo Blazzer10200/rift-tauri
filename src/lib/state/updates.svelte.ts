@@ -1,37 +1,43 @@
-// Update store — v0.4.34+ GH-release-API path.
+// Update store — Velopack path (v0.4.47+, restored 2026-06-04).
 //
-// Replaced `tauri-plugin-updater` (2026-05-27 → 2026-05-27 brief lifetime;
-// signing-key loss bricks all clients permanently, see commands/update.rs).
-// Backend `check_for_updates` polls the latest GitHub release; on user
-// confirm we open the Setup.exe asset URL via `tauri-plugin-opener`. NSIS
-// handles install over the running binary (its template prompts to close
-// Rift if needed, then relaunches).
+// Backend (`update_service.rs` + `commands/update.rs`) wraps Velopack's
+// UpdateManager over the native GithubSource. Flow:
+//   checkOnLaunch → check_for_updates → (available) → download() →
+//   download_update [streams `update-progress`] → apply_pending_update
+//   [Velopack swaps files on exit + relaunches the new version].
+//
+// "One-click, then unattended": the user clicks Download once; we download
+// with progress, then immediately apply — the app exits and Velopack's
+// Update.exe installs silently and relaunches. No second prompt.
 //
 // State machine:
-//   idle → checking → available → launched
-//                  ↘ uptodate
+//   idle → checking → available → downloading → installing
+//                  ↘ uptodate                ↘ (error → back to available)
 //                  ↘ error
 //
-// `launched` = user clicked Download, browser opened the asset URL. They run
-// Setup.exe externally; next launch is the new version.
-//
-// `dismissedVersion` is persisted in localStorage so a snoozed version
-// doesn't pop the toast again next launch; a NEWER version supersedes.
+// `dismissedVersion` is persisted in localStorage so a snoozed version doesn't
+// pop the toast again next launch; a NEWER version supersedes.
 
 import { invoke } from "@tauri-apps/api/core";
-import { openUrl, openPath } from "@tauri-apps/plugin-opener";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { Sparkles } from "lucide-svelte";
 import { toast } from "./toast.svelte";
 
-export type UpdateInfo = {
+/** Public release repo — used only to synthesize the human "View release on
+ *  GitHub" link (Velopack's source doesn't return an html_url). */
+const RELEASES_REPO_URL = "https://github.com/Blazzer10200/rift-releases";
+
+/** What `check_for_updates` returns from the backend (UpdateInfoDto). */
+type UpdateInfoDto = {
   version: string;
   releaseName: string;
   sizeBytes: number;
   notesMarkdown: string;
+};
+
+export type UpdateInfo = UpdateInfoDto & {
+  /** Synthesized client-side from the version tag — the canonical release page. */
   releaseUrl: string;
-  downloadUrl: string;
-  publishedAt: string;
 };
 
 export type UpdateState =
@@ -39,7 +45,7 @@ export type UpdateState =
   | "checking"
   | "available"
   | "downloading"
-  | "launched"
+  | "installing"
   | "uptodate"
   | "error";
 
@@ -60,17 +66,21 @@ class UpdateStore {
   info = $state<UpdateInfo | null>(null);
   error = $state("");
   currentVersion = $state("?");
-  /** Retained for back-compat w/ UI bindings; always 0 in the GH-release path. */
+  /** Download progress 0..100, streamed from Velopack via `update-progress`. */
   progress = $state(0);
   dialogOpen = $state(false);
   toastVisible = $state(false);
   dismissedVersion = $state<string | null>(loadDismissed());
-  /** Error from the most recent `download()` attempt. Distinct from
-   *  `error` (which is feed/check failures only) — keeps `state` on
-   *  "available" so the user can retry the Download button. */
+  /** Error from the most recent `download()`/apply attempt. Distinct from
+   *  `error` (feed/check failures) — keeps `state` on "available" so the user
+   *  can retry the Download button or grab it manually from GitHub. */
   downloadError = $state("");
   /** Active toast id when an update notification is on screen. */
   private toastId: number | null = null;
+  /** Periodic re-check timer — Rift can stay open for days, so launch-only
+   *  checking would never surface a release shipped mid-session. */
+  private autoTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly AUTO_MS = 6 * 60 * 60 * 1000; // every 6h
 
   /** True when there's an unsnoozed update waiting for user action. */
   get pillVisible(): boolean {
@@ -90,13 +100,10 @@ class UpdateStore {
     return `${(b / 1024).toFixed(0)} KB`;
   }
 
-  /** ISO date → "May 19, 2026". Empty string if backend didn't fill it. */
+  /** Velopack's feed carries no publish date — kept for UI back-compat (the
+   *  dialog guards with `{#if}`), always empty. */
   get publishedLabel(): string {
-    const raw = this.info?.publishedAt ?? "";
-    if (!raw) return "";
-    try {
-      return new Date(raw).toLocaleDateString([], { year: "numeric", month: "short", day: "numeric" });
-    } catch { return raw; }
+    return "";
   }
 
   async refresh() {
@@ -110,9 +117,12 @@ class UpdateStore {
       return;
     }
     try {
-      const res = await invoke<UpdateInfo | null>("check_for_updates");
+      const res = await invoke<UpdateInfoDto | null>("check_for_updates");
       if (res) {
-        this.info = res;
+        this.info = {
+          ...res,
+          releaseUrl: `${RELEASES_REPO_URL}/releases/tag/v${res.version}`,
+        };
         this.state = "available";
       } else {
         this.info = null;
@@ -124,44 +134,36 @@ class UpdateStore {
     }
   }
 
-  /** Download the installer in-app (with progress), then launch it via the
-   *  opener plugin — NSIS closes Rift, installs, and relaunches. Falls back to
-   *  opening the URL in the browser (the prior v0.4.36 behavior) on any
-   *  download/launch failure, so this never regresses. */
+  /** Download the update (with progress) then apply it. Velopack stages the
+   *  package, and on apply it schedules Update.exe, exits Rift, installs
+   *  silently, and relaunches the new version. On any failure we drop back to
+   *  "available" with a `downloadError` so the user can retry or grab it
+   *  manually from the GitHub release link. */
   async download() {
-    if (this.state !== "available" || !this.info?.downloadUrl) return;
-    const url = this.info.downloadUrl;
+    if (this.state !== "available") return;
     this.downloadError = "";
     this.progress = 0;
     this.state = "downloading";
     let unlisten: UnlistenFn | null = null;
     try {
-      unlisten = await listen<{ downloaded: number; total: number }>(
-        "update://download-progress",
-        (e) => {
-          const { downloaded, total } = e.payload;
-          this.progress =
-            total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
-        },
-      );
-      const path = await invoke<string>("download_update", { url });
-      await openPath(path);
-      this.state = "launched";
+      unlisten = await listen<number>("update-progress", (e) => {
+        this.progress = Math.min(100, Math.max(0, e.payload));
+      });
+      await invoke("download_update");
+      // Download complete — apply. This exits the app, so the invoke below
+      // never resolves on success; Velopack relaunches the new version.
+      this.state = "installing";
+      this.progress = 100;
+      await invoke("apply_pending_update");
     } catch (e) {
-      // In-app path failed — fall back to the proven browser handoff.
-      try {
-        await openUrl(url);
-        this.state = "launched";
-      } catch (e2) {
-        this.state = "available";
-        this.downloadError = String(e2) + (e2 !== e ? ` (after: ${String(e)})` : '');
-      }
+      this.state = "available";
+      this.downloadError = String(e);
     } finally {
       if (unlisten) unlisten();
     }
   }
 
-  /** Back-compat alias — UpdateDialog's "Install" button calls this. */
+  /** Back-compat alias — any "Install" caller routes through the same flow. */
   async applyNow() { await this.download(); }
 
   /** Snooze the current available version — toast + pill stay quiet until a
@@ -214,6 +216,12 @@ class UpdateStore {
    *  newer release exists and the user hasn't snoozed that exact version. */
   async checkOnLaunch() {
     await this.refresh();
+    this.maybeToast();
+    this.startAutoCheck();
+  }
+
+  /** Pop the toast iff a newer-than-dismissed release is available. */
+  private maybeToast() {
     if (
       this.state === "available" &&
       this.info &&
@@ -223,11 +231,28 @@ class UpdateStore {
     }
   }
 
+  private startAutoCheck() {
+    if (this.autoTimer != null) return;
+    this.autoTimer = setInterval(() => void this.autoTick(), this.AUTO_MS);
+  }
+
+  /** Background re-check — never disrupts an in-flight download or open dialog. */
+  private async autoTick() {
+    if (this.state === "downloading" || this.state === "installing" || this.dialogOpen) return;
+    await this.refresh();
+    this.maybeToast();
+  }
+
   open()  { this.dialogOpen = true; this.clearToast(); }
   close() { this.dialogOpen = false; }
 
-  /** No-op in the GH-release path — kept so HMR teardown callers don't error. */
-  dispose() {}
+  /** Clear the periodic re-check timer (HMR teardown / app teardown). */
+  dispose() {
+    if (this.autoTimer != null) {
+      clearInterval(this.autoTimer);
+      this.autoTimer = null;
+    }
+  }
 }
 
 export const updates = new UpdateStore();

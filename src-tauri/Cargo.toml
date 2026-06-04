@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.4.46"
+version = "0.4.47"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 edition = "2021"
@@ -65,9 +65,13 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # File system watcher — replaces .NET FileSystemWatcher
 notify = "8"
 
-# Auto-updater: GH-release-API path (v0.4.34+, replaced tauri-plugin-updater).
-# See src-tauri/src/commands/update.rs header. No plugin needed — frontend
-# opens the Setup.exe asset URL via tauri-plugin-opener; NSIS handles install.
+# Auto-updater: Velopack (v0.4.47+). Background download + apply-on-exit +
+# relaunch via Velopack's Update.exe — one-click then unattended. v1.x ships a
+# native GithubSource so no custom REST source is needed. See update_service.rs
+# + docs/design/velopack-auto-update.md. PINNED EXACT: the `vpk` CLI version
+# MUST equal this crate version (both 1.2.0) so the packed Update runtime ==
+# the linked runtime. Bump vpk (`dotnet tool update -g vpk`) and this pin together.
+velopack = "=1.2.0"
 
 # Logging
 log = "0.4"

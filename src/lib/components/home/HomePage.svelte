@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     MessageSquare, Sparkles, Send, FolderOpen, Folder, FolderGit2,
-    GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check,
+    GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check, Loader2,
   } from "lucide-svelte";
   import { onMount } from "svelte";
   import { assistant } from "$lib/state/assistant.svelte";
@@ -13,7 +13,15 @@
   // (throttled) npm check here and surface a dismissible banner if one's live.
   const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
   const cliUpdAvail = $derived(cliUpdate.available(cliInstalled));
+  const cliIsNative = $derived((assistant.auth?.installMethod ?? null) === "native");
   onMount(() => { void cliUpdate.maybeCheck(); });
+  // Keep the update command method-aware (npm vs native).
+  $effect(() => { cliUpdate.setMethod(assistant.auth?.installMethod ?? null); });
+
+  async function runCliUpdate() {
+    const ok = await cliUpdate.runUpdate();
+    if (ok) await assistant.refreshAuth();
+  }
 
   // ── Workspace state — the local folder Claude operates on ──
   const root = $derived(assistant.workspace.current);
@@ -122,9 +130,21 @@
         <span class="dc-ic"><ArrowUpCircle size={17} /></span>
         <span class="dc-body">
           <span class="dc-t">Claude Code update available</span>
-          <span class="dc-s">Your CLI is <code>{cliInstalled}</code> · npm has <code>{cliUpdate.latest}</code> — update it from a terminal</span>
+          <span class="dc-s">
+            <code>{cliInstalled}</code> → <code>{cliUpdate.latest}</code>
+            {#if cliUpdate.updateError}· <span class="dc-err">{cliUpdate.updateError}</span>
+            {:else if cliIsNative}· installs automatically, or update now{/if}
+          </span>
         </span>
-        <code class="dc-cmd">{cliUpdate.updateCommand}</code>
+        <button
+          class="dc-go"
+          type="button"
+          disabled={cliUpdate.updating}
+          onclick={runCliUpdate}
+          use:tooltip={cliUpdate.updateCommand}
+        >
+          {#if cliUpdate.updating}<Loader2 size={14} class="dc-spin" />Updating…{:else}<ArrowUpCircle size={14} />Update now{/if}
+        </button>
         <button
           class="dc-copy"
           class:done={cliUpdate.copied}
@@ -133,7 +153,7 @@
           use:tooltip={"Copy update command"}
           aria-label="Copy update command"
         >
-          {#if cliUpdate.copied}<Check size={14} />Copied{:else}<Copy size={14} />Copy{/if}
+          {#if cliUpdate.copied}<Check size={14} />{:else}<Copy size={14} />{/if}
         </button>
         <button class="dc-x" type="button" use:tooltip={"Dismiss"} aria-label="Dismiss update notice" onclick={() => cliUpdate.dismiss()}><X size={14} /></button>
       </div>
@@ -273,20 +293,26 @@
   .dash-cli .dc-t { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
   .dash-cli .dc-s { font-size: var(--fs-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dash-cli .dc-s code { font-family: var(--font-mono); color: var(--fg-2); }
-  .dash-cli .dc-cmd {
-    margin-left: auto; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px;
-    color: var(--fg); background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong);
-    border-radius: 8px; padding: 5px 9px; max-width: 280px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .dash-cli .dc-copy {
-    flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
-    height: 30px; padding: 0 11px; border-radius: 8px; font: inherit; font-size: var(--fs-xs); font-weight: 600;
+  .dash-cli .dc-err { color: var(--danger, #e66); }
+  .dash-cli .dc-go {
+    margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 12px; border-radius: 8px; font: inherit; font-size: var(--fs-xs); font-weight: 650;
     cursor: pointer; background: var(--accent); color: var(--accent-fg); border: 1px solid transparent;
-    transition: background 130ms ease;
+    transition: background 130ms ease, opacity 130ms ease;
   }
-  .dash-cli .dc-copy:hover { background: var(--accent-hover); }
-  .dash-cli .dc-copy.done { background: var(--ok, var(--accent)); }
+  .dash-cli .dc-go:hover:not(:disabled) { background: var(--accent-hover); }
+  .dash-cli .dc-go:disabled { opacity: 0.7; cursor: default; }
+  :global(.dash-cli .dc-go .dc-spin) { animation: dc-spin 0.8s linear infinite; }
+  @keyframes dc-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { :global(.dash-cli .dc-go .dc-spin) { animation: none; } }
+  .dash-cli .dc-copy {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px; border-radius: 8px; font: inherit;
+    cursor: pointer; background: var(--surface-hover); color: var(--fg-2); border: 1px solid var(--border);
+    transition: background 130ms ease, color 130ms ease;
+  }
+  .dash-cli .dc-copy:hover { color: var(--fg); }
+  .dash-cli .dc-copy.done { color: var(--ok, var(--accent)); }
   .dash-cli .dc-x {
     flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
     width: 28px; height: 28px; border-radius: 8px; cursor: pointer;
@@ -294,7 +320,6 @@
     transition: color 120ms ease, background 120ms ease;
   }
   .dash-cli .dc-x:hover { color: var(--fg); background: var(--surface-hover); }
-  @media (max-width: 760px) { .dash-cli .dc-cmd { display: none; } }
 
   .hf-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; }
   .hf-card { min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 24px 24px 18px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent); }

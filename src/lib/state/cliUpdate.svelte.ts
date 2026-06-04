@@ -1,4 +1,4 @@
-// Claude Code CLI update detector — frontend-only.
+// Claude Code CLI update detector + in-app updater.
 //
 // Rift spawns the local `claude` CLI and already reads its installed version
 // (assistant.auth.cliVersion ← `claude --version`). This store supplies the
@@ -8,7 +8,15 @@
 // — which the CSP `connect-src` allowlist grants. Result + last-check time +
 // the version the user dismissed all persist to localStorage, so the check is
 // throttled (≤ once / 6h) and a dismissed version stops nagging until the next
-// one ships. Rift only *informs*; the CLI self-updates via npm.
+// one ships.
+//
+// `runUpdate()` then applies the update IN-APP via the `assistant_update_cli`
+// backend command, which routes by install method (`assistant.auth.install
+// Method`): npm installs run `npm install -g …@latest`, native installs run
+// `claude update`. The command shown/copied is method-aware so a native user
+// is never told to run npm (which would create a conflicting second install).
+
+import { invoke } from "@tauri-apps/api/core";
 
 const PKG = "@anthropic-ai/claude-code";
 const LATEST_URL = `https://registry.npmjs.org/${PKG}/latest`;
@@ -49,9 +57,28 @@ class CliUpdate {
   copied = $state(false);
   private _copyTimer: ReturnType<typeof setTimeout> | null = null;
 
-  readonly pkg = PKG;
-  readonly updateCommand = `npm install -g ${PKG}`;
+  /** Install method from the auth probe ("npm" | "native" | "unknown" | null).
+   *  Components sync this via setMethod() so the command shown matches reality. */
+  method = $state<string | null>(null);
+  /** True while an in-app `assistant_update_cli` run is in flight. */
+  updating = $state(false);
+  /** Error from the most recent runUpdate(), or null. Shown inline. */
+  updateError = $state<string | null>(null);
+  /** Tail of the updater's output on success — brief "what happened" line. */
+  updateOutput = $state<string | null>(null);
+
   readonly changelogUrl = `https://www.npmjs.com/package/${PKG}`;
+
+  /** The exact upgrade command for the detected install method. Native installs
+   *  self-update + accept `claude update`; everything else uses npm's `@latest`
+   *  (NOT `npm update -g`, which respects the original semver range). */
+  get updateCommand(): string {
+    return this.method === "native" ? "claude update" : `npm install -g ${PKG}@latest`;
+  }
+
+  setMethod(m: string | null) {
+    this.method = m;
+  }
 
   constructor() {
     try {
@@ -107,6 +134,12 @@ class CliUpdate {
       if (!res.ok) throw new Error(`npm registry returned HTTP ${res.status}`);
       const json = (await res.json()) as { version?: string };
       if (!json.version) throw new Error("registry response had no version");
+      // A different latest = a new release: drop any prior run-state so a stale
+      // error/output never shows next to a fresh version.
+      if (json.version !== this.latest) {
+        this.updateError = null;
+        this.updateOutput = null;
+      }
       this.latest = json.version;
       this.checkedAt = Date.now();
       this.status = "ok";
@@ -121,6 +154,27 @@ class CliUpdate {
             : String(e);
     } finally {
       clearTimeout(timer);
+    }
+  }
+
+  /** Apply the update in-app via the backend (routes by install method).
+   *  Returns true on success — callers should then re-probe auth so the new
+   *  `cliVersion` lands and the badge clears. Falls loud: errors surface in
+   *  `updateError` and the copy-command fallback stays available. */
+  async runUpdate(): Promise<boolean> {
+    if (this.updating) return false;
+    this.updating = true;
+    this.updateError = null;
+    this.updateOutput = null;
+    try {
+      const res = await invoke<{ method: string; output: string }>("assistant_update_cli");
+      this.updateOutput = res.output;
+      return true;
+    } catch (e) {
+      this.updateError = e instanceof Error ? e.message : String(e);
+      return false;
+    } finally {
+      this.updating = false;
     }
   }
 

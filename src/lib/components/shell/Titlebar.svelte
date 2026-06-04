@@ -51,7 +51,7 @@
       class="cmdk"
       type="button"
       onclick={() => commandPalette.show()}
-      use:tooltip={"Search commands, servers & chats — Ctrl+K"}
+      use:tooltip={"Search commands & chats — Ctrl+K"}
       aria-label="Open command palette"
     >
       <Search size={13} aria-hidden="true" />
