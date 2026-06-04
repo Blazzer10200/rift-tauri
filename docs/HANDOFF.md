@@ -2,6 +2,24 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-04 (cont. 36) — EDIT-SWARM: ALL FRONTEND-SWARMABLE DONE
+
+Ran the edit-swarm over every frontend-swarmable audit finding. 4 batches, each gated `npm run check` 4080/0/0 + committed separately. **64 fixes committed** (on top of cont.34's 19).
+- `f1446bc` b2-canary: 3 state · `9d1f3d1` b2: 24 state-layer · `fea1df3` b3: 16 assistant-components · `f127664` b4: 21 shell/dialog/component.
+- Categories: reactivity/keying ($state/untrack, MessageBubble expandedThinking stable-key, CommandPalette O(N) index map), fail-loud error handling (.catch on IPC, surface lastError/lastNotice), a11y (aria-labels, focus rings, reduced-motion, headings), type-safety (drop unsafe IPC casts), leaks (timer onDestroy, listener guards).
+- **Manual completions** where swarm patches partial-applied: F144, F26, F45, F152. All re-verified green.
+- ⚠️ **`git add -A` entanglement:** this session's batch commits swept up a concurrent session's then-uncommitted cont.35 work (backdrop + ChatRail deletion) into `f1446bc`/`9d1f3d1`. Nothing lost; tree clean. **Future swarm batches: commit only the touched paths, not `-A`.**
+
+### RESUME HERE — only MANUAL findings remain (no more auto-swarm)
+Every frontend-swarmable finding went through the swarm once. What's left is held intentionally:
+1. **3 highs:** `mod.rs:2143` stdout deadlock, `mcp_server.rs:302` UTF-8 slice panic, `AssistantPage.svelte:205` pane-keying (F39).
+2. **All Rust** (quit tauri dev before cargo-check) · **all security** (git_local.rs:72 traversal, browser URL scheme, DOMPurify style, capabilities wildcard…).
+3. **Held specials:** vitest bump F237 (`npm i -D vitest@^4.1.8`, semver-major) · dead-CSS deletes F233/F234 (flag-not-delete).
+4. **Swarm-deferred (~40 FE, need judgment):** F33 Markdown streaming perf, F44 toast remaining-time, F150 menu arrow-keys, F190/F191 HomePage branch race/error, F206 Splash destroy-guard, F209 toast icon typing — full per-batch lists in the 4 commit bodies.
+5. **Apply-missed (re-try manually):** F164 progressbar aria-label, F173 stt per-channel try/catch, F232 Confirm dontAsk reset.
+
+Tracking: `.tmp/edit-done.json` (62 applied IDs). New tool `scripts/edit-batch.py` (bucket emit). Watchers: `scripts/edit-watch.{sh,ps1,cmd}` auto-find newest run (`scripts\edit-watch.cmd` for command-prompt).
+
 ## Session 2026-06-04 (cont. 35) — BACKDROP CALM + LEFT CHAT-RAIL RETIRED (UNSHIPPED v0.4.46)
 
 Frontend-only, concurrent w/ cont.34 swarm session. `npm run check` 4080/0/0 (−1 file). Verified live via CDP.
@@ -23,10 +41,8 @@ Built two multi-agent Workflow pipelines. **Read `docs/audit-2026-06-04/README.m
 - **Edit swarm** (`scripts/edit-swarm.workflow.js`): per-finding read-only patch propose → adversarial diff-verify. Returns patches; **never writes** (writes caller-side via `scripts/edit-apply.py`, exact-match + uniqueness, `--apply` to write, dry by default).
 - **20/247 fixed, all svelte-check green, committed:** canary 4 + batch 1 (16 a11y/error fixes, 12 files). Commits: `e1a616f` (baseline = pure-assistant conversion + tooling), `abf2899` (batch 1).
 
-### RESUME HERE — remaining ~224 findings
-1. Durable worklist (244 swarmable, excl 3 highs, COMMITTED) at `docs/audit-2026-06-04/edit-worklist.json`. Each entry: id/file/line/severity/title/suggested_fix.
-2. Process in **batches by area** (~20-40). Filter the worklist for the next area, pass as Workflow `args.findings`. Then `python scripts/edit-apply.py <task-output> --apply` → `npm run check` → commit. Watch via `scripts/edit-watch.sh`.
-3. Batch 1 already done = the 19 a11y/swallowed-error findings. Next areas: remaining frontend correctness/reactivity, perf, type-safety. Skip anything in the MANUAL list below.
+### (RESUME superseded by cont.36 — all frontend-swarmable now done)
+Durable worklist (244, COMMITTED) at `docs/audit-2026-06-04/edit-worklist.json` (id/file/line/severity/title/suggested_fix). Edit-swarm flow: filter bucket → Workflow `args.findings` → `python scripts/edit-apply.py <task-output> --apply` → `npm run check` → commit touched paths.
 
 ### Key Decisions / Invariants
 - **Hybrid by design:** swarm only FRONTEND mechanical (a11y, swallowed-err, null-guards, keying). **Hold for MANUAL:** the **3 highs** (mod.rs:2143 stdout deadlock, mcp_server.rs:302 UTF-8 slice panic, AssistantPage.svelte:205 pane keying), all **Rust** (cargo-check collides w/ tauri dev — quit dev first), and **security** findings (git_local.rs:72 traversal etc.).
