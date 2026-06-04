@@ -36,13 +36,7 @@
 
   function onRowContext(e: MouseEvent, id: string) {
     e.preventDefault();
-    if (!assistant.openTabs.includes(id)) {
-      void assistant.openTab(id).then(() => {
-        ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
-      }).catch(err => console.error('openTab failed', err));
-    } else {
-      ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
-    }
+    ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
   }
 
   const filteredConversations = $derived.by(() => {
