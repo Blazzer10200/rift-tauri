@@ -163,11 +163,15 @@ pub async fn download_update(app: tauri::AppHandle, url: String) -> Result<Strin
     use std::io::Write;
     use tauri::Emitter;
 
-    // Only ever download from the release host we control.
-    if !(url.starts_with("https://github.com/")
+    // Only ever download from the release repo we control. The github.com branch
+    // is pinned to Blazzer10200/rift-releases so a tampered manifest can't point
+    // at some other repo's binary (F238). Release assets are 302-redirected to
+    // objects.githubusercontent.com with opaque, repo-less paths, so that host is
+    // allowed by prefix only — reachable solely via the redirect from our asset.
+    if !(url.starts_with("https://github.com/Blazzer10200/rift-releases/")
         || url.starts_with("https://objects.githubusercontent.com/"))
     {
-        return Err(format!("Refusing to download from an unexpected host: {url}"));
+        return Err("Refusing to download from an unexpected host.".to_string());
     }
     // Derive a safe filename from the URL's last segment.
     let fname = url.rsplit('/').next().unwrap_or("");

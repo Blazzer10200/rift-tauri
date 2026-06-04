@@ -5,6 +5,7 @@
   } from "lucide-svelte";
   import { fade, fly } from "svelte/transition";
   import { updates } from "../../state/updates.svelte";
+  import { toast } from "../../state/toast.svelte";
 
   type Variant = "accent" | "ok" | "warn" | "danger" | "info";
 
@@ -64,11 +65,17 @@
   async function openReleasePage() {
     const url = updates.info?.releaseUrl;
     if (!url) return;
+    // F47: only ever hand a real web URL to the OS opener — never file:/data:/js:.
+    if (!/^https:\/\//i.test(url)) {
+      toast.push({ severity: "danger", title: "Release link looks unsafe — not opening." });
+      return;
+    }
     try {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
     } catch (e) {
-      console.warn("openUrl failed", e);
+      // F175: surface the failure instead of swallowing it silently.
+      toast.push({ severity: "danger", title: "Couldn't open the release page", detail: String(e) });
     }
   }
 </script>
