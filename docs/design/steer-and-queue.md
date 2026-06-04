@@ -1,13 +1,26 @@
 # Steer & Queue — mid-turn intervention on a running turn
 
-> Status: **DESIGN, not implemented (2026-06-04)**. Core feasibility
-> **PROVEN** — a standalone probe injected a second `user` envelope mid-turn
-> into the user's real `claude` CLI; the agent abandoned its in-flight tool
-> loop and obeyed the injected instruction within a **single `result` frame**
-> (one turn, no restart). Confirmed against Anthropic's official Streaming
-> Input docs + the claude-agent-sdk-python interactive-streaming reference.
-> Confidence ~97%. Scope this session: doc only (a dev/CDP session was live, so
-> no `cargo check`). Implementation deferred to a dedicated session.
+> Status: **IMPLEMENTED + verified (2026-06-04)**. Backend (`assistant_steer`
+> command, `STEER_TX` registry, `tokio::select!` reader, `build_user_envelope`
+> shared helper) + frontend (`assistant.steer()`, **Alt+Enter** trigger, toast)
+> shipped. Verified: `cargo check` Finished (0 warnings), `npm run check` 0/0,
+> and a live CDP test on the running app — a steer injected into an active turn
+> returned `steer=steered` and did not corrupt the stream.
+>
+> **Behavioral nuance found in live testing:** a steer produces a *visible*
+> mid-turn redirect only when the turn has **tool-call step boundaries** (the
+> standalone probe proved this with a Bash loop). On a **pure-text turn** (one
+> assistant message, no tool steps) the model finishes its single generation
+> before the steer lands, and Rift's reader breaks on the first `result`, so the
+> steer has no visible effect — by design. Steering matters exactly when the
+> agent is *doing work* you want to redirect. Remaining: a UI live-verify of the
+> visible redirect on a multi-step tool turn (tracked in ISSUES.md).
+>
+> Original feasibility (kept for context): a standalone probe injected a second
+> `user` envelope mid-turn into the real `claude` CLI; the agent abandoned its
+> in-flight tool loop and obeyed within a single `result` frame. Confirmed
+> against Anthropic's official Streaming Input docs + the claude-agent-sdk-python
+> interactive-streaming reference.
 >
 > **All code anchors + behavioral claims below verified against the tree
 > 2026-06-04** (not memory-drafted). Verification-pass corrections: registry is
