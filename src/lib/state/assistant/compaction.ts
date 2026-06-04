@@ -172,6 +172,7 @@ export async function compactConversation(
       // summarizeCurrentSession already set lastError. Drop the staged
       // boundary so the chat doesn't keep a half-rendered pill.
       tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
+      host.lastNotice = null;
       return false;
     }
     const newSid = crypto.randomUUID();
@@ -183,6 +184,7 @@ export async function compactConversation(
     } catch (e) {
       host.lastError = `Remint failed: ${String(e)}`;
       tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
+      host.lastNotice = null;
       return false;
     }
 
@@ -233,5 +235,13 @@ export async function compactConversation(
   } finally {
     tab.compactingNow = false;
     if (progressUnlisten) progressUnlisten();
+    // Clean up orphaned boundary if the success path never cleared streaming.
+    const orphan = tab.messages.find((m) => m.id === boundaryId);
+    if (orphan) {
+      const b = orphan.blocks[0];
+      if (b?.type === "boundary" && b.streaming) {
+        tab.messages = tab.messages.filter((m) => m.id !== boundaryId);
+      }
+    }
   }
 }

@@ -47,6 +47,7 @@ class CliUpdate {
   dismissed = $state<string | null>(null);
   /** Transient flag for the "Copied!" affordance on the copy-command button. */
   copied = $state(false);
+  private _copyTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly pkg = PKG;
   readonly updateCommand = `npm install -g ${PKG}`;
@@ -135,8 +136,10 @@ class CliUpdate {
     try {
       await navigator.clipboard?.writeText(this.updateCommand);
       this.copied = true;
-      setTimeout(() => {
+      if (this._copyTimer) clearTimeout(this._copyTimer);
+      this._copyTimer = setTimeout(() => {
         this.copied = false;
+        this._copyTimer = null;
       }, 1600);
     } catch {
       /* clipboard blocked — the command is visible to copy manually */

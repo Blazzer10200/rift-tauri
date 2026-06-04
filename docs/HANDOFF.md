@@ -2,6 +2,18 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-04 (cont. 35) — BACKDROP CALM + LEFT CHAT-RAIL RETIRED (UNSHIPPED v0.4.46)
+
+Frontend-only, concurrent w/ cont.34 swarm session. `npm run check` 4080/0/0 (−1 file). Verified live via CDP.
+
+- **Atmos backdrop** (`AssistantPane.svelte` `.atmos-glow`): killed top-edge accent band (was `radial 85% 100% at 50% 0%`, accent 6→2%). Now ambient lift — neutral center pool behind hero (`radial 120% 80% at 50% 34%`, accent **3%** + `--fg` 1.5%) + faint floor vignette (`#000 26%` at 50% 118%), opacity 0.85. Blends into `--bg`; grain kept. **Pane-wide** (behind convos too, intentional).
+- **Left chat rail RETIRED** (user: redundant vs History drawer). Deleted `ChatRail.svelte`; removed its mount+import in `AssistantPage.svelte`, the `.rail-toggle` btn+CSS + orphaned `PanelLeft`/`uiPrefs` imports in `ChatTabsBar.svelte`; stripped ALL `chatRail*` state from `ui-prefs.svelte.ts` (collapsed/width, set/toggle, CHAT_RAIL_* consts, 2 LS keys). History unchanged (`openHistory()` → `HistoryDrawer` via View menu).
+
+### 🟡 Next / flags
+- `railPinned`/`applyRail()`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts` STILL dead (separate cont.32 orphan) — user deferred sweep. Safe next pass.
+
+---
+
 ## Session 2026-06-04 (cont. 34) — SWARM AUDIT + EDIT-SWARM (in progress)
 
 Built two multi-agent Workflow pipelines. **Read `docs/audit-2026-06-04/README.md` first.**
@@ -57,7 +69,7 @@ Titlebar nav: left activity column removed → Home/Chat `.navitem`s + Settings 
 - **Onboarding gate:** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && !assistant.hasApiKey && !assistant.auth?.loggedIn`. `configLoaded` gates timing so it never flashes pre-probe.
 - **Accent themeable via `--accent-h`** (app.css `:root` only): `oklch(L C var(--accent-h))`; never hard-code accent hue. Components use `var(--accent)`/`--accent-soft`. Status LEDs (`--ok/warn/danger/info`) stay fixed. **Tint mixes use `in oklab`, not `in oklch`** (cont.30 — oklch wraps warm hues to purple).
 - **Surface tiers:** page `--bg` 0.142 · card `--surface` 0.215 · wells `--bg-inset` 0.178 · raised inputs `--field` 0.25 · seg track `--track` 0.175. Don't reintroduce near-black wells.
-- **IA: 3 workspaces** — home·1 chat·2 settings·3. Nav lives in the **titlebar** now (cont.32, no left activity column): Home/Chat `.navitem`s + Settings gear in `Titlebar.svelte`; switching still via `workspace.setActive`/Ctrl+1-3. Settings = one scroll-doc, **5 sections** (Appearance landing · Accessibility · Assistant · Speech · About).
+- **IA: 3 workspaces** — home·1 chat·2 settings·3. Nav lives in the **titlebar** now (cont.32, no left activity column): Home/Chat `.navitem`s + Settings gear in `Titlebar.svelte`; switching still via `workspace.setActive`/Ctrl+1-3. Settings = one scroll-doc, **5 sections** (Appearance landing · Accessibility · Assistant · Speech · About). **Left chat rail retired (cont.35)** — no `ChatRail`/`.rail-toggle`; chat history lives ONLY in the History drawer (View-menu → `HistoryDrawer`).
 - **AssistantPane drop handlers on `.pane` outer only**; `tauri.conf.json dragDropEnabled:false`; `.shell` `position:fixed; inset:0`.
 - **Blur-reveal** (`Markdown.svelte`): `shownCount` is the ONLY `$state`, written ONLY by the rAF loop — never inside a derived.
 - **Activity panel split (cont.33):** Steps = settled ACTIONS only (`logSteps` drops `cat==="write"`); Outputs owns writes/edits → opens Session Diff. Live units render ONLY in the Now cluster (don't re-add pending/writes to Steps). `SessionDiff.svelte` reads `tab.messages` (real) via `EditDiff` `hideHead`; open via `assistant.ui.diffOpen/diffTarget`. `MessageBubble.reviewDiff` deep-links by `firstEditFile` basename — don't repoint at `actnode-*` (removed).

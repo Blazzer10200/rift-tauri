@@ -268,6 +268,8 @@ export async function restoreTabs(host: TabsHost) {
     }
   } catch (e) {
     console.warn("restoreTabs failed", e);
+    host.openTabs = [];
+    host.panes = [{ tabId: null }];
   } finally {
     host.persistTabs();
   }
@@ -484,6 +486,11 @@ export async function closeAllTabs(host: TabsHost) {
     host.scheduleSave(true);
   }
   // Drop every TabState; the convos persisted to disk above.
+  for (const id of host.openTabs) {
+    host.dropTab(id);
+    host.pruneTabUi(id);
+    scrubTabFromPanes(host, id);
+  }
   host.tabs = new Map();
   host.openTabs = [];
   host.currentConvoId = null;

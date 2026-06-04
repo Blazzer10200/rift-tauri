@@ -206,6 +206,7 @@ class SttStore {
       );
       this.unlisten.push(
         await listen<DownloadProgress>("stt://download_progress", (ev) => {
+          if (!ev.payload?.model) return;
           this.modelDownloads = { ...this.modelDownloads, [ev.payload.model]: ev.payload };
           if (ev.payload.phase === "done") {
             void this.refreshModels();
