@@ -6,6 +6,7 @@ import {
 } from "lucide-svelte";
 import HomePage from "../home/HomePage.svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
+import HarnessPage from "./HarnessPage.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
 
 // lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
@@ -32,5 +33,6 @@ export type WorkspaceDef = {
 export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   home:        { component: HomePage,          title: "Home",        icon: HomeIcon,      kbd: "1" },
   chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "2" },
-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "3" },
+  harness:     { component: HarnessPage,       title: "Harness",     icon: Activity,      kbd: "3" },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
 };

@@ -106,6 +106,7 @@ import {
   deleteConversation as persistDelete,
   deleteAllConversations as persistDeleteAll,
 } from "./assistant/persistence";
+import { saveSessionLog, pruneSessionLogs } from "./assistant/sessionLog";
 // M6 split (2026-05-27): tab lifecycle + split-pane management in
 // `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
 // tabByCliSession) + scroll cache stay on the class; only the lifecycle
@@ -1137,6 +1138,32 @@ class AssistantStore {
    *  `/diag-clear`. Non-reactive: callers don't render off this, they only
    *  serialize-and-export. */
   telemetry = new SessionTelemetry();
+  /** Debounce handle for session-log persistence (see recordSessionLog). */
+  private sessionLogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Persist the current session's telemetry snapshot to disk (debounced).
+   *  Fired after every completed turn so a crash/HMR reload loses at most the
+   *  in-flight turn. Skips empty sessions so dev hot-reloads don't litter the
+   *  log dir with zero-turn files. `flush=true` writes immediately (window
+   *  close). Best-effort: saveSessionLog swallows IPC errors to a warn. */
+  recordSessionLog(flush = false): void {
+    if (this.telemetry.turns.length === 0) return;
+    const write = () => {
+      this.sessionLogTimer = null;
+      const snap = this.telemetry.snapshot();
+      void saveSessionLog({
+        ...snap,
+        model: this.model,
+        workspace: this.workspace.current,
+      });
+    };
+    if (this.sessionLogTimer) {
+      clearTimeout(this.sessionLogTimer);
+      this.sessionLogTimer = null;
+    }
+    if (flush) write();
+    else this.sessionLogTimer = setTimeout(write, 1500);
+  }
 
   /** Phase 6 (#37): the value never crosses IPC — only whether one is set. */
   hasApiKey = $state<boolean>(false);
@@ -1452,6 +1479,9 @@ class AssistantStore {
     await this.refreshWorkspace();
     await this.restoreTabs();
 
+    // Trim the persisted session-log ring buffer on launch (keep recent 40).
+    void pruneSessionLogs(40);
+
     // Best-effort flush on window close so we don't lose the last turn
     // sitting inside the 700ms scheduleSave debounce. See flushNow() doc.
     // #177: store the handler so destroy() can remove it; anonymous arrow
@@ -1650,7 +1680,7 @@ class AssistantStore {
     return persistBuildRecord(this, convoId, tab);
   }
 
-  flushNow() { persistFlushNow(this); }
+  flushNow() { persistFlushNow(this); this.recordSessionLog(true); }
 
   // M6: relaxed from `private` so the tabs module calls it through the host ref.
   scheduleSave(flush = false, convoId?: string) { persistSchedule(this, flush, convoId); }
@@ -2065,6 +2095,7 @@ class AssistantStore {
       }
     }
     this.scheduleSave(false, convoId);
+    this.recordSessionLog();
     this.drainQueue(tab);
   }
 
@@ -2120,6 +2151,45 @@ class AssistantStore {
       await invoke("assistant_stop", { sessionId: sid });
     } catch (e) {
       console.warn("assistant_stop failed", e);
+    }
+  }
+
+  /** Steer the RUNNING turn: inject `text` into the live CLI stdin so the agent
+   *  course-corrects at its next loop step (no restart, no lost work). Unlike
+   *  the queue, this does NOT wait for the turn to finish. Falls back to the
+   *  queue if the turn already ended (or the tab isn't streaming). Defaults to
+   *  the focused-pane tab when `tabId` is omitted. */
+  async steer(text: string, tabId?: string | null) {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (!tab) return;
+    const enqueue = () => {
+      tab.queue = [...tab.queue, { id: crypto.randomUUID(), text: trimmed }];
+    };
+    // No active turn locally → nothing to steer; queue as a normal follow-up.
+    if (!tab.streaming) {
+      enqueue();
+      return;
+    }
+    const sid = tab.cliSessionId;
+    try {
+      const res = await invoke<string>("assistant_steer", { sessionId: sid, text: trimmed });
+      if (res === "no_active_turn") {
+        // Turn ended between keypress and IPC — don't lose the message.
+        enqueue();
+        return;
+      }
+      this.telemetry.event("turn.steer", { convoId: sid });
+      toast.push({
+        severity: "info",
+        title: "Steering",
+        detail: trimmed.length > 60 ? trimmed.slice(0, 60) + "…" : trimmed,
+        timeoutMs: 2500,
+      });
+    } catch (e) {
+      console.warn("assistant_steer failed", e);
+      enqueue();
     }
   }
 

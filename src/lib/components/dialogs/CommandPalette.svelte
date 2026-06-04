@@ -3,7 +3,7 @@
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import {
-    Search, MessageSquare,
+    Search, MessageSquare, Activity,
     Settings as SettingsIcon, Plus, Palette, Accessibility as A11yIcon,
     Sparkles, Mic, Info, History,
   } from "lucide-svelte";
@@ -38,7 +38,8 @@
     // Workspace navigation
     const navs: { id: WorkspaceId; label: string; icon: Icon; sub: string }[] = [
       { id: "chat",     label: "Chat",     icon: MessageSquare, sub: "Ctrl+2" },
-      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+3" },
+      { id: "harness",  label: "Harness",  icon: Activity,      sub: "Ctrl+3" },
+      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+4" },
     ];
     for (const n of navs) {
       out.push({

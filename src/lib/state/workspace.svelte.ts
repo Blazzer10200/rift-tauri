@@ -4,11 +4,11 @@
 
 export type WorkspaceId =
   | "home" | "chat"
-  | "settings";
+  | "harness" | "settings";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
   "home", "chat",
-  "settings",
+  "harness", "settings",
 ] as const;
 
 const ACTIVE_KEY = "rift.ui.workspace.v1";
@@ -86,7 +86,19 @@ class WorkspaceState {
           const seen = new Set(valid);
           // Backfill any ids missing from stored order — covers new workspace
           // additions in later releases for users w/ persisted older order.
-          for (const id of DEFAULT_ORDER) if (!seen.has(id)) valid.push(id);
+          // Insert at the new id's DEFAULT_ORDER-relative slot (not the end) so
+          // a mid-list addition like "harness" lands before "settings", keeping
+          // positional Ctrl+N switching aligned with the kbd hints.
+          for (const id of DEFAULT_ORDER) {
+            if (seen.has(id)) continue;
+            const di = DEFAULT_ORDER.indexOf(id);
+            let at = valid.length;
+            for (let i = 0; i < valid.length; i++) {
+              if (DEFAULT_ORDER.indexOf(valid[i]) > di) { at = i; break; }
+            }
+            valid.splice(at, 0, id);
+            seen.add(id);
+          }
           this.order = valid;
         }
       }
