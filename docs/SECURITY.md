@@ -3,21 +3,6 @@
 > Per-advisory rationale for items `cargo audit` / `npm audit` flag but that we
 > explicitly accept and ship. Re-evaluate on every dep bump.
 
-## RUSTSEC-2023-0071 — `rsa 0.10.0-rc.16` Marvin Attack timing sidechannel
-
-- **Severity:** MEDIUM (CVSS 5.9)
-- **Status:** ACCEPTED. No upstream fix available.
-- **Transitive chain:** `russh` → `russh-keys` → `ssh-key` → `rsa`.
-- **Rift exposure:** RSA is only invoked at SSH host-key signature *verification*
-  during a single, user-initiated SFTP connect. We do not verify untrusted-server
-  signatures at scale and do not process attacker-chosen RSA inputs in a
-  high-volume / chosen-ciphertext setting. The Marvin attack vector (timing
-  oracle on PKCS#1 v1.5 decryption) does not match Rift's use.
-- **Practical risk:** LOW. Documented to satisfy `cargo audit` + filtered via
-  `--ignore RUSTSEC-2023-0071` in `scripts/audit.ps1`.
-- **Revisit when:** `russh` bumps `ssh-key` past the patched `rsa` release
-  (track upstream).
-
 ## Linux GTK chain — `atk`, `gtk`, `gdk` unmaintained warnings
 
 - **Severity:** WARNING (informational, no CVE assigned).
