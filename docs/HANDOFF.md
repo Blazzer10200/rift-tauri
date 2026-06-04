@@ -12,9 +12,9 @@ Built two multi-agent Workflow pipelines. **Read `docs/audit-2026-06-04/README.m
 - **20/247 fixed, all svelte-check green, committed:** canary 4 + batch 1 (16 a11y/error fixes, 12 files). Commits: `e1a616f` (baseline = pure-assistant conversion + tooling), `abf2899` (batch 1).
 
 ### RESUME HERE — remaining ~224 findings
-1. Full worklist (244 swarmable, excl 3 highs) at `.tmp/edit-worklist.json`. Regen: `python scripts/edit-worklist.py <audit.output> --out .tmp/edit-worklist.json`.
-2. Process in **batches by area** (~20-40). Pass batch as Workflow `args.findings` (slim: id/file/line/severity/title/suggested_fix). Then `edit-apply.py <out> --apply` → `npm run check` → commit. Watch via `scripts/edit-watch.sh`.
-3. Audit result cached at `…/tasks/wi86g1oy9.output` (rawConfirmed = all 247).
+1. Durable worklist (244 swarmable, excl 3 highs, COMMITTED) at `docs/audit-2026-06-04/edit-worklist.json`. Each entry: id/file/line/severity/title/suggested_fix.
+2. Process in **batches by area** (~20-40). Filter the worklist for the next area, pass as Workflow `args.findings`. Then `python scripts/edit-apply.py <task-output> --apply` → `npm run check` → commit. Watch via `scripts/edit-watch.sh`.
+3. Batch 1 already done = the 19 a11y/swallowed-error findings. Next areas: remaining frontend correctness/reactivity, perf, type-safety. Skip anything in the MANUAL list below.
 
 ### Key Decisions / Invariants
 - **Hybrid by design:** swarm only FRONTEND mechanical (a11y, swallowed-err, null-guards, keying). **Hold for MANUAL:** the **3 highs** (mod.rs:2143 stdout deadlock, mcp_server.rs:302 UTF-8 slice panic, AssistantPage.svelte:205 pane keying), all **Rust** (cargo-check collides w/ tauri dev — quit dev first), and **security** findings (git_local.rs:72 traversal etc.).
