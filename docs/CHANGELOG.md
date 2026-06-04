@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.4.48 — 2026-06-04 — chore: auto-update verification release
+
+> **Why this exists.** v0.4.47 was the one-time Velopack migration install (manual). This is the **second** Velopack release — the first that an installed v0.4.47 client pulls *automatically*: check → one-click download → apply-on-exit → relaunch on v0.4.48, with no manual installer. Shipping it is the live proof that the restored auto-updater works end-to-end (design doc §6 R1). No functional code changes — version bump only.
+
 ## v0.4.47 — 2026-06-04 — feat: automatic updates (Velopack restored) + pure-assistant conversion
 
 > **Why.** Updates were detection-only — the user had to click through a browser download + NSIS wizard every time. Auto-update is back: one click, then unattended. Velopack downloads in the background, applies on exit, and relaunches the new version with no further interaction.
