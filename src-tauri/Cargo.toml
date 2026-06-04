@@ -47,13 +47,6 @@ serde_json = "1"
 # Async runtime — narrowed from "full" to what we actually use.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util", "process"] }
 
-# SSH + SFTP — pure Rust, no libssh2/C deps. Reference: T-Shell, Reach, Shell360.
-russh = { version = "~0.60", default-features = false, features = ["ring", "rsa", "flate2", "async-trait"] }
-russh-sftp = "2.1"
-# Object-safe async methods for the `SftpOps` trait (mockable SFTP surface for
-# sync-layer tests). Already in the tree transitively via russh.
-async-trait = "0.1"
-
 # L9: force `ring` crypto provider on rustls — drops aws-lc-rs from dep tree.
 # Declared for feature control only — never `use rustls::*` directly (cargo-machete
 # flags it as unused; see [package.metadata.cargo-machete] below).
@@ -80,10 +73,6 @@ env_logger = "0.11"
 # Misc
 chrono = { version = "0.4", features = ["serde"] }
 
-# SHA1 — pure Rust (RustCrypto). Used by SyncSnapshot for content-hash drift jitter
-# elimination + first-scan equality. NOT cryptographically-strong needs; matches
-# the WPF side's System.Security.Cryptography.SHA1.
-sha1 = "0.10"
 dashmap = "6.1.0"
 walkdir = "2.5.0"
 # Assistant α2 — Rift MCP server uses regex for the `rift__grep` tool. Pure-Rust
@@ -93,17 +82,9 @@ regex = "1"
 futures = "0.3.32"
 reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream", "json"] }
 
-# Phase 1h: server pubkey fingerprint pinning (OpenSSH-style SHA256:base64).
-# `sha2` for the digest, `base64` w/ NO_PAD engine to match OpenSSH's
-# `ssh-keygen -lf` output. Profile field `fingerprint` is also accepted in WPF's
-# WinSCP format (`ssh-ed25519 256 SHA256:xxx`) via exact normalized match in Handler.
+# sha2 — SHA-256 digest for STT Whisper model-download integrity verification
+# (see stt/model_manager.rs). Pure-Rust RustCrypto impl.
 sha2 = "0.10"
-base64 = "0.22"
-
-# Phase 1j: ed25519 keypair generation for SshKeygen. ssh-key types come via
-# russh::keys; rand 0.10 provides `rand::rng()` for `PrivateKey::random`
-# (russh 0.60 dropped the rand_core 0.6 OsRng path in favor of rand_core 0.10).
-rand = "0.10"
 
 # Phase 6 (#9.3 / #37 / #38): OS-keychain bridge. Windows Credential Manager,
 # macOS Keychain, Linux Secret Service. Migrates bridge_token + api_key out of
@@ -131,7 +112,7 @@ whisper-rs = { version = "0.14", default-features = false, optional = true }
 
 [package.metadata.cargo-machete]
 # rustls is declared at the top-level to force the `ring` crypto provider features
-# across the transitive tree (via reqwest/russh); we never `use rustls::*` directly.
+# across the transitive tree (via reqwest); we never `use rustls::*` directly.
 ignored = ["rustls"]
 
 # Speech-to-text — Phase 2: local Whisper pipeline.

@@ -771,11 +771,6 @@ impl Drop for McpConfigGuard {
 /// roots are passed via `RIFT_MCP_ROOTS` (newline-separated) so the spawned
 /// child knows the path-safety boundary at request time.
 ///
-/// S73: when `bridge` is `Some` AND `remote_shell_enabled` is true, the MCP
-/// child also gets `RIFT_BRIDGE_PORT` + `RIFT_BRIDGE_TOKEN` so its
-/// `remote_bash` tool can dial the parent Tauri's loopback bridge. The bridge
-/// itself reuses the AutoSync engine's live russh session for the exec.
-///
 /// `session_id` is appended to the filename so concurrent `assistant_send`
 /// calls (multi-tab) each get their own file — no cross-tab cred leak.
 fn write_mcp_config(
