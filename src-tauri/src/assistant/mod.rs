@@ -14,9 +14,14 @@ pub mod ask_user;
 pub mod git_local;
 pub mod mcp_server;
 pub mod permission;
+pub mod session_log;
 
 pub use ask_user::AskUserRegistry;
 pub use permission::PermissionRegistry;
+// Flatten the session-log commands into `crate::assistant` so the wildcard
+// `pub use crate::assistant::*` in commands/assistant.rs forwards them to the
+// path `invoke_handler!` resolves.
+pub use session_log::*;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -28,6 +33,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::mpsc;
 
 /// PID of every currently-streaming `claude` child, keyed by the CLI session
 /// ID we passed via `--session-id` / `--resume`. Set on spawn, removed on
@@ -97,6 +103,73 @@ fn mark_session_stopped(session_id: &str) {
 /// silent CLI crash.
 fn take_session_stopped(session_id: &str) -> bool {
     with_session_stopped(|s| s.remove(session_id)).unwrap_or(false)
+}
+
+/// A mid-turn steer: a user message injected into the RUNNING turn's stdin so
+/// the agent course-corrects at its next loop step (no restart, no lost work).
+struct SteerMsg {
+    text: String,
+    attachments: Vec<AssistantAttachment>,
+}
+
+/// Per-session steer channel sender, registered while a turn streams. Mirrors
+/// the SESSION_PIDS convention: const-init `Mutex<Option<HashMap>>` + a
+/// poison-recovering accessor. `assistant_steer` looks up the sender; the
+/// reader task owns the receiver and writes each `SteerMsg` to the live stdin.
+static STEER_TX: Mutex<Option<HashMap<String, mpsc::UnboundedSender<SteerMsg>>>> =
+    Mutex::new(None);
+
+fn with_steer_tx<R>(
+    f: impl FnOnce(&mut HashMap<String, mpsc::UnboundedSender<SteerMsg>>) -> R,
+) -> Option<R> {
+    let mut g = match STEER_TX.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            log::error!("STEER_TX mutex poisoned — recovering inner state");
+            p.into_inner()
+        }
+    };
+    let map = g.get_or_insert_with(HashMap::new);
+    Some(f(map))
+}
+
+fn register_steer_tx(session_id: &str, tx: mpsc::UnboundedSender<SteerMsg>) {
+    with_steer_tx(|m| { m.insert(session_id.to_string(), tx); });
+}
+
+fn clear_steer_tx(session_id: &str) {
+    with_steer_tx(|m| { m.remove(session_id); });
+}
+
+fn get_steer_tx(session_id: &str) -> Option<mpsc::UnboundedSender<SteerMsg>> {
+    with_steer_tx(|m| m.get(session_id).cloned()).flatten()
+}
+
+/// Build a stream-json `user` message NDJSON line (trailing `\n`). Shared by
+/// the per-turn message and mid-turn steer injection. `parent_tool_use_id:
+/// null` matches the Agent SDK's user-message shape.
+fn build_user_envelope(text: &str, attachments: &[AssistantAttachment]) -> Result<Vec<u8>, String> {
+    let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
+    content.push(serde_json::json!({ "type": "text", "text": text }));
+    for a in attachments {
+        content.push(serde_json::json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": a.mime,
+                "data": a.data_base64,
+            }
+        }));
+    }
+    let envelope = serde_json::json!({
+        "type": "user",
+        "parent_tool_use_id": null,
+        "message": { "role": "user", "content": content }
+    });
+    let mut line = serde_json::to_vec(&envelope)
+        .map_err(|e| format!("serialize input envelope: {e}"))?;
+    line.push(b'\n');
+    Ok(line)
 }
 
 /// Cached absolute path to the user's `claude` CLI. Windows' `Command::new`
@@ -2787,31 +2860,16 @@ pub async fn assistant_send(
     }
     let stdin = child.stdin.take().expect("stdin checked is_some above");
 
-    // The per-turn user message — always a stream-json `user` envelope now
-    // (text + optional image blocks). Sent by the reader task once the
-    // `initialize` handshake is acknowledged.
-    let user_line: Vec<u8> = {
-        let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
-        content.push(serde_json::json!({ "type": "text", "text": effective_prompt }));
-        for a in &attachments {
-            content.push(serde_json::json!({
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": a.mime,
-                    "data": a.data_base64,
-                }
-            }));
-        }
-        let envelope = serde_json::json!({
-            "type": "user",
-            "message": { "role": "user", "content": content }
-        });
-        let mut line = serde_json::to_vec(&envelope)
-            .map_err(|e| format!("serialize input envelope: {e}"))?;
-        line.push(b'\n');
-        line
-    };
+    // The per-turn user message — always a stream-json `user` envelope (text +
+    // optional image blocks). Sent by the reader task once the `initialize`
+    // handshake is acknowledged. Shares build_user_envelope with steer injection.
+    let user_line: Vec<u8> = build_user_envelope(&effective_prompt, &attachments)?;
+
+    // Steer channel: register the sender while this turn streams so
+    // `assistant_steer` can inject mid-turn user messages; the reader task owns
+    // the receiver. Cleared at the same points as the session PID (turn end).
+    let (steer_tx, mut steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
+    register_steer_tx(&session_id, steer_tx);
 
     let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
@@ -2848,8 +2906,13 @@ pub async fn assistant_send(
 
         let mut user_sent = false;
         let mut first_line_logged = false;
+        // Steers that arrive before the init handshake completes are buffered,
+        // then flushed the instant the user turn is sent (see user_sent branch).
+        let mut steer_pending: Vec<SteerMsg> = Vec::new();
         loop {
-            match lines.next_line().await {
+            tokio::select! {
+            read = lines.next_line() => {
+            match read {
                 Ok(Some(line)) => {
                     let trimmed = line.trim();
                     if trimmed.is_empty() {
@@ -2867,6 +2930,13 @@ pub async fn assistant_send(
                                     "session_id": stream_sid, "message": format!("write user turn: {e}"),
                                 }));
                                 break;
+                            }
+                            let _ = stdin.flush().await;
+                            // Flush steers that landed during the handshake.
+                            for m in steer_pending.drain(..) {
+                                if let Ok(env) = build_user_envelope(&m.text, &m.attachments) {
+                                    let _ = stdin.write_all(&env).await;
+                                }
                             }
                             let _ = stdin.flush().await;
                             continue;
@@ -2925,6 +2995,36 @@ pub async fn assistant_send(
                     );
                     break;
                 }
+            }
+            }
+            // Mid-turn steer: write the injected user message to the live stdin.
+            // The CLI folds it into the running turn at the next agent-loop step.
+            // The STEER_TX registry holds a sender for the whole turn, so recv()
+            // never yields None mid-turn (no busy-loop); the branch just parks.
+            Some(msg) = steer_rx.recv() => {
+                if !user_sent {
+                    // Init handshake not yet acked — buffer until the turn is sent.
+                    steer_pending.push(msg);
+                } else {
+                    match build_user_envelope(&msg.text, &msg.attachments) {
+                        Ok(env) => {
+                            if let Err(e) = stdin.write_all(&env).await {
+                                let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                    "session_id": stream_sid,
+                                    "message": format!("write steer: {e}"),
+                                }));
+                                break;
+                            }
+                            let _ = stdin.flush().await;
+                        }
+                        Err(e) => {
+                            let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                "session_id": stream_sid, "message": e,
+                            }));
+                        }
+                    }
+                }
+            }
             }
         }
         // stdin dropped here → EOF.
@@ -2990,6 +3090,7 @@ pub async fn assistant_send(
                 stdout_task.abort();
                 stderr_task.abort();
                 clear_session_pid(&session_id);
+                clear_steer_tx(&session_id);
                 return Err(format!("await claude: {e}"));
             }
             Err(_) => {
@@ -3010,6 +3111,7 @@ pub async fn assistant_send(
         }
     };
     clear_session_pid(&session_id);
+    clear_steer_tx(&session_id);
     // #241: total turn wall-clock (spawn → claude exit). Compare against the
     // TTFT line above: large TTFT w/ small (total−TTFT) = harness/prefill bound;
     // small TTFT w/ large remainder = model generation bound.
@@ -3197,5 +3299,33 @@ pub async fn assistant_stop(session_id: String) -> Result<(), String> {
             Ok(s) => Err(format!("kill exited {}", s.code().unwrap_or(-1))),
             Err(e) => Err(format!("spawn kill: {e}")),
         }
+    }
+}
+
+/// Inject a steer message into the RUNNING turn for `session_id`. Unlike the
+/// queue (which fires a fresh turn after `result`), a steer is written to the
+/// live CLI stdin and folded into the current turn at the agent's next loop
+/// step — no restart, no lost work. Returns `"steered"` when an active turn
+/// accepted it, or `"no_active_turn"` when the turn already ended (the caller
+/// should fall back to queueing a fresh turn).
+#[tauri::command]
+pub async fn assistant_steer(session_id: String, text: String) -> Result<String, String> {
+    if !is_valid_session_id(&session_id) {
+        return Err(format!(
+            "invalid session_id: must be a UUID (got {} chars)",
+            session_id.len()
+        ));
+    }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("empty steer text".into());
+    }
+    let Some(tx) = get_steer_tx(&session_id) else {
+        return Ok("no_active_turn".into());
+    };
+    match tx.send(SteerMsg { text: trimmed.to_string(), attachments: Vec::new() }) {
+        Ok(()) => Ok("steered".into()),
+        // Receiver dropped between lookup and send → turn just ended.
+        Err(_) => Ok("no_active_turn".into()),
     }
 }

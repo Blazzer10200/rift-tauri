@@ -1,7 +1,18 @@
 import type { TurnRecord } from "./types";
 
+/** UUID for a fresh session. `crypto.randomUUID` is available in the webview;
+ *  the fallback keeps SSR/test contexts from throwing. */
+function newSessionId(): string {
+  const c = (globalThis as { crypto?: Crypto }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return "sess-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e9).toString(36);
+}
+
 /** Session-wide telemetry singleton. */
 export class SessionTelemetry {
+  /** Stable per-launch id. Doubles as the on-disk session-log filename so a
+   *  persisted snapshot keeps the same identity across autosaves. */
+  id = newSessionId();
   startedAt = Date.now();
   turns: TurnRecord[] = [];
   /** Non-turn lifecycle events: tab open/close/new/switch, slash commands,
@@ -16,6 +27,7 @@ export class SessionTelemetry {
   snapshot() {
     const now = Date.now();
     return {
+      id: this.id,
       startedAt: this.startedAt,
       capturedAt: now,
       durationMs: now - this.startedAt,
@@ -191,6 +203,7 @@ export class SessionTelemetry {
   }
 
   reset() {
+    this.id = newSessionId();
     this.startedAt = Date.now();
     this.turns = [];
     this.events = [];

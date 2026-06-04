@@ -443,6 +443,18 @@
     void tick().then(autosize);
   }
 
+  // Alt+Enter while streaming: steer the running turn instead of queueing.
+  // Injects the draft into the live CLI stdin (assistant.steer) so the agent
+  // course-corrects mid-turn. Shift+Enter stays newline; Enter stays queue.
+  function steer() {
+    const text = draft.trim();
+    if (!text || !streaming) return;
+    setDraft("");
+    stt.consume();
+    void assistant.steer(text, tabId);
+    void tick().then(autosize);
+  }
+
   // ── Prompt enhancer (wand) ───────────────────────────────────────────────
   // One-shot Haiku rewrite of the current draft into a clearer prompt. Result
   // shows as an editable preview above the composer — Accept drops it into the
@@ -785,6 +797,13 @@
         setDraft("");
         return;
       }
+    }
+    // Alt+Enter steers the running turn (must precede the plain-Enter branch
+    // below, which also matches when Alt is held).
+    if (e.key === "Enter" && e.altKey && streaming && draft.trim().length > 0) {
+      e.preventDefault();
+      steer();
+      return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1254,7 +1273,7 @@
         {#if draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask Claude · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file</span>
         {:else if streaming && draft.length === 0}
-          <span class="placeholder-ghost static" aria-hidden="true">Type to queue — Enter sends, /stop halts</span>
+          <span class="placeholder-ghost static" aria-hidden="true">Enter queues · <span class="ph-k">Alt</span>+Enter steers · /stop halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
         {/if}

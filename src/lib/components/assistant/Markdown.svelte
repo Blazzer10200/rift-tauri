@@ -2,6 +2,7 @@
   import { marked } from "marked";
   import markedAlert from "marked-alert";
   import DOMPurify from "dompurify";
+  import { untrack } from "svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
   import { highlightSync, normalizeLang, whenReady } from "../../state/highlighter.svelte";
@@ -28,8 +29,8 @@
   }
 
   // Reactive flag — flips to true once Shiki's singleton has warmed up.
-  // Markdown's `processed` $derived depends on this so all code blocks
-  // re-render w/ syntax highlighting on first warmup.
+  // The `parsed` $derived depends on this so all code blocks re-render w/
+  // syntax highlighting on first warmup.
   let shikiReady = $state(false);
   whenReady().then(() => { shikiReady = true; }).catch(() => {});
 
@@ -125,6 +126,13 @@
   let totalWords = 0;
   let everStreamed = false;
   let lastLen = 0;
+  // Persistent per-word spans + how far the reveal/solidify cursors have walked.
+  // The render effect rebuilds these once per markdown delta; the cursor effect
+  // only toggles classes on the spans that crossed a threshold this frame.
+  let container: HTMLDivElement | undefined;
+  let wordSpans: HTMLSpanElement[] = [];
+  let revealedUpTo = 0;
+  let solidUpTo = 0;
 
   // Re-cascade when the turn is replaced/regenerated (text shrinks).
   $effect(() => {
@@ -163,19 +171,15 @@
     return () => { stopped = true; cancelAnimationFrame(raf); };
   });
 
-  // Walk prose text nodes, classifying each word by its age behind the cursor
-  // (ageWords = how many words have been revealed since this one):
-  //   ageWords ≥ WINDOW → solid (blur finished; plain text so it never re-blurs)
-  //   0 ≤ ageWords      → animating (.md-w, negative delay resumes the blur at
-  //                       its true phase so the full 0.5s plays across remounts)
-  //   ageWords < 0      → held (.md-w-hold: present + blurred, reserves layout)
-  // Only code BLOCKS (pre / shiki) are skipped; inline <code> reveals with the
-  // prose so green inline tokens don't pop in ahead of the surrounding words.
-  function revealWords(htmlIn: string, shown: number): { html: string; count: number } {
-    if (typeof document === "undefined") return { html: htmlIn, count: 0 };
-    const tpl = document.createElement("template");
-    tpl.innerHTML = htmlIn;
-    const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_TEXT, {
+  // Wrap every prose word in a <span> ONCE per markdown delta (held + blurred to
+  // start, reserving layout so the cell never reflows). State is then toggled by
+  // applyReveal per frame — so a long turn never re-serializes or re-injects its
+  // whole DOM on every reveal tick (the old per-frame {@html} swap was O(doc) and
+  // caused the streaming jank + list flicker). Only code BLOCKS (pre / shiki) are
+  // skipped; inline <code> reveals with the prose.
+  function wrapWords(root: ParentNode): HTMLSpanElement[] {
+    if (typeof document === "undefined") return [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         let p = n.parentElement;
         while (p) {
@@ -190,32 +194,43 @@
     const targets: Text[] = [];
     let node: Node | null;
     while ((node = walker.nextNode())) targets.push(node as Text);
-    let gi = 0;
+    const spans: HTMLSpanElement[] = [];
     for (const tn of targets) {
       const parts = (tn.nodeValue ?? "").split(/(\s+)/);
       const frag = document.createDocumentFragment();
       for (const p of parts) {
         if (p === "") continue;
         if (/^\s+$/.test(p)) { frag.appendChild(document.createTextNode(p)); continue; }
-        const ageWords = shown - 1 - gi++;
-        if (ageWords >= REVEAL_WINDOW) {
-          frag.appendChild(document.createTextNode(p));
-        } else if (ageWords >= 0) {
-          const span = document.createElement("span");
-          span.className = "md-w";
-          span.style.animationDelay = -(ageWords * WORD_MS) + "ms";
-          span.textContent = p;
-          frag.appendChild(span);
-        } else {
-          const span = document.createElement("span");
-          span.className = "md-w-hold";
-          span.textContent = p;
-          frag.appendChild(span);
-        }
+        const span = document.createElement("span");
+        span.className = "md-w-hold";
+        span.textContent = p;
+        frag.appendChild(span);
+        spans.push(span);
       }
       tn.parentNode?.replaceChild(frag, tn);
     }
-    return { html: tpl.innerHTML, count: gi };
+    return spans;
+  }
+
+  // Advance the reveal/solidify cursors over the persisted spans to match
+  // `shown`. O(words advanced), not O(doc): each span is touched at most twice
+  // over its life — revealed (.md-w, blur animation plays), then solidified
+  // (.md-w-shown, plain text, never re-blurs). animationDelay is set ONCE at
+  // reveal (phase-correct via ageWords so a delta re-wrap resumes mid-blur) and
+  // never mutated again, so a running animation is never restarted → no flicker.
+  function applyReveal(shown: number) {
+    const n = wordSpans.length;
+    const revealEnd = Math.min(shown, n);
+    for (; revealedUpTo < revealEnd; revealedUpTo++) {
+      const span = wordSpans[revealedUpTo];
+      const ageWords = shown - 1 - revealedUpTo;
+      span.style.animationDelay = -(Math.max(0, ageWords) * WORD_MS) + "ms";
+      span.className = "md-w";
+    }
+    const solidEnd = Math.min(shown - REVEAL_WINDOW, n);
+    for (; solidUpTo < solidEnd; solidUpTo++) {
+      wordSpans[solidUpTo].className = "md-w-shown";
+    }
   }
 
   function fireCodeCopy(copyBtn: HTMLElement) {
@@ -378,36 +393,49 @@
   // reveals before this effect has latched.
   $effect(() => { if (streaming) everStreamed = true; });
 
-  const processed = $derived.by(() => {
+  // Render: inject the parsed markdown into the container ONCE per delta (tracks
+  // parsed.html + shikiReady, NOT shownCount → never re-runs per reveal frame).
+  // While revealing, wrap its prose words so the cursor effect can animate them;
+  // otherwise (loaded/non-streaming/reduced-motion turns) inject plain HTML.
+  $effect(() => {
     const baseHtml = parsed.html;
-    // Reveal while this turn is (or was) streaming and the cursor hasn't caught
-    // up to the full word count yet — the tail keeps draining after the backend
-    // finishes so the cascade plays out instead of snapping.
-    const revealActive =
-      (everStreamed || streaming) && !prefersReducedMotion && (streaming || shownCount < totalWords + REVEAL_WINDOW);
-    if (!revealActive) return { html: baseHtml, items: parsed.items };
-    const r = revealWords(baseHtml, shownCount);
-    totalWords = r.count;
-    return { html: r.html, items: parsed.items };
+    if (!container) return;
+    const revealActive = (everStreamed || streaming) && !prefersReducedMotion;
+    container.innerHTML = baseHtml;
+    if (!revealActive) {
+      wordSpans = [];
+      totalWords = 0;
+      return;
+    }
+    wordSpans = wrapWords(container);
+    totalWords = wordSpans.length;
+    revealedUpTo = 0;
+    solidUpTo = 0;
+    untrack(() => applyReveal(shownCount));
   });
-  const html = $derived(processed.html);
+
+  // Reveal cursor: cheap per-frame class toggle over the persisted spans. Tracks
+  // only shownCount; the spans are a plain (untracked) array.
+  $effect(() => {
+    const shown = shownCount;
+    if (wordSpans.length === 0) return;
+    applyReveal(shown);
+  });
 
   // Auto-sync any rendered checklist into the Tasks dock. Equality-check
   // against the previous payload before dispatching — DOMPurify + 2 template
   // walks per delta means a 200-token stream otherwise re-parses 200×. (#162)
   let lastItemsKey = "";
   $effect(() => {
-    if (processed.items.length === 0) return;
-    const key = JSON.stringify(processed.items);
+    if (parsed.items.length === 0) return;
+    const key = JSON.stringify(parsed.items);
     if (key === lastItemsKey) return;
     lastItemsKey = key;
-    assistant.pinTasksFromChecklist(processed.items);
+    assistant.pinTasksFromChecklist(parsed.items);
   });
 </script>
 
-<div class="md" onclick={onClick} onkeydown={onKey} role="presentation">
-  {@html html}
-</div>
+<div class="md" bind:this={container} onclick={onClick} onkeydown={onKey} role="presentation"></div>
 
 <style>
   .md {
