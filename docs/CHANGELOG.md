@@ -2,6 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.5.0 — 2026-06-04 — feat: Harness telemetry workspace + Steer (mid-turn redirect)
+
+> **Why.** Two features land together. Rift gains a real telemetry surface — a dedicated workspace that shows what the assistant is actually doing, per session and cumulatively — and the ability to redirect a turn *while it streams* instead of stopping and re-prompting.
+
+**Harness — a live telemetry workspace (Ctrl+3).** A new 4th top-level workspace: a single-page bento dashboard of assistant telemetry (turns, tokens, tool calls, durations, uptime), live and accurate. Every session is now persisted to `~/.rift/assistant/session-logs/<id>.json` (`session_log.rs` save/list/load/delete, debounced from turn-complete, pruned to 40); the dashboard reads a Live / past / empty `source` snapshot so you can inspect prior sessions, not just the current one. The Live folds recompute correctly across streaming turns (fixed a memoized-`$derived` aliasing bug + a stale last-turn `doneAt`). Files: `assistant/session_log.rs`, `state/assistant/sessionLog.ts`, `workspaces/HarnessPage.svelte`.
+
+**Steer — redirect a streaming turn without restarting it.** Type while a turn is streaming and press **Alt+Enter**: the text is injected into the live Claude CLI's stdin so the agent course-corrects at its next step — no stop, no re-prompt. Shift+Enter stays newline; a toast confirms the injection. Backend: an `assistant_steer` command + a `STEER_TX` registry (mirrors `SESSION_PIDS`) feeding a `tokio::select!` stdin reader, over a shared `build_user_envelope`. (A *visible* redirect needs tool-step boundaries; a pure-text turn finishes first, by design.) Brief: `docs/design/steer-and-queue.md`.
+
+**Cleanup + docs.** Dropped unused Rust deps (`dashmap`, `notify`) and removed 8 unreferenced frontend files (FlashToast, the Confirm dialog, the ActivityBar/EmptyState/PageToolbar shells, the browser-tabs store, the file-display/time utils). Destaled README / DEVELOPING / ISSUES / SECURITY to the pure-assistant reality (no more sync/SSH/russh references).
+
+**Verify.** `cargo check` 0 / 0 · `npm run check` 0 / 0 · both features verified live via CDP across real streaming turns in prior sessions.
+
 ## v0.4.48 — 2026-06-04 — chore: auto-update verification release
 
 > **Why this exists.** v0.4.47 was the one-time Velopack migration install (manual). This is the **second** Velopack release — the first that an installed v0.4.47 client pulls *automatically*: check → one-click download → apply-on-exit → relaunch on v0.4.48, with no manual installer. Shipping it is the live proof that the restored auto-updater works end-to-end (design doc §6 R1). No functional code changes — version bump only.
@@ -36,16 +48,4 @@
 
 **Composer declutter + Improve-prompt revamp (same arc).** `Composer.svelte` — cut the always-on icon row from 5 to 2: the resting bar is now just attach + mic, with Improve/Preview/Clear revealing only once the draft has text; removed the keyboard-shortcuts (?) popover (it duplicated the placeholder + `/`·`@` menus — its state, portal-positioning, and ~90 CSS lines deleted). Lifted icon contrast (`--fg-faint→--fg-subtle`) to clear the WCAG 3:1 floor for controls. Focus now surfaces a `↵ send · ⇧↵ new line` hint in the toolbar's middle gap (yields to the live-turn pills mid-turn). New Clear-draft (×) reveal button; auto-grow ceiling raised 220→340px. **Improve-prompt (wand) revamp:** the headless rewrite now runs **Sonnet** (was Haiku) under a length-proportional meta-prompt v2 (light touch on already-clear drafts, structure on vague ones); `assistant_enhance_prompt` gained `model`/`directive`/`cwd` params. The preview became a refine loop — Regenerate + Concise / More detail / + Acceptance steer it via a `directive`; a Diff toggle shows original→enhanced (reuses `EditDiff`); a Ground toggle (opt-in, workspace-open only) runs a turn-capped (`--max-turns 6`) agentic pass with read-only `read_file/grep/list_dir` (mirrors the main-turn `write_mcp_config` wiring) so the rewrite can cite real files/symbols. Fast context-free path unchanged when not grounded. Files: `assistant/mod.rs`, `assistant.svelte.ts`, `Composer.svelte`. Verified `cargo check` 0 errors · `npm run check` 0/0 · all states CDP-verified live (Sonnet rewrite, refine, diff, grounded pass).
 
-## v0.4.46 — 2026-05-31 — feat: permanent activity dock with live "reacts as it works" feedback
-
-> **Why this release exists.** The assistant activity dock graduated from a peek-on-demand panel into a permanent, live workspace. Work no longer silently appears and vanishes — each tool call visibly lands with its result, the dock gained quick actions, and file outputs now show how much changed.
-
-**The activity dock is always open.** It used to default closed and snap shut on every new or cleared conversation; now it's a permanent surface that stays put across new / clear / tab-switch (you can still hide it from the composer when you want the room). [assistant.svelte.ts](src/lib/state/assistant.svelte.ts)
-
-**Quick actions, surfaced.** A compact toolbar at the top of the dock: copy the whole transcript as Markdown, compact the conversation, and jump to the latest message — plus a one-click Stop while a turn is streaming. [ActivityPanel.svelte](src/lib/components/assistant/ActivityPanel.svelte)
-
-**File outputs show their churn.** Every file Claude writes or edits now carries a `+added / −removed` line count, accumulated across repeat edits, so a glance tells you what changed where.
-
-**Live work reacts as it happens.** The headline change: a finished tool no longer just disappears. Each call now lands with a green check and its duration (a red ✗ on error), holds for a moment, then eases out — and rows slide and reorder instead of popping in and out. The redundant idle pulses were cut down to a single live indicator, and a completed turn ends on a calm "Done · {time}" confirmation. All motion respects your reduced-motion setting.
-
-**Verify.** `npm run check` 0 / 0 (4110 files); live-verified across real streaming turns via CDP (live row → completion tick → turn-end confirmation). NSIS bundle + SHA256 round-trip via `release.ps1` at ship.
+_Older entries (v0.4.46 and earlier) live in `git log -- docs/CHANGELOG.md`._
