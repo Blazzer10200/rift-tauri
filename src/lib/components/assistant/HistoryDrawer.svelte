@@ -31,6 +31,7 @@
   let selectedId = $state<string | null>(null);
   let detailRecord = $state<ConversationRecord | null>(null);
   let detailLoading = $state(false);
+  let detailError = $state<string | null>(null);
   let previewExpanded = $state(false);
 
   function onRowContext(e: MouseEvent, id: string) {
@@ -38,7 +39,7 @@
     if (!assistant.openTabs.includes(id)) {
       void assistant.openTab(id).then(() => {
         ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
-      });
+      }).catch(err => console.error('openTab failed', err));
     } else {
       ctxMenu = { tabId: id, x: e.clientX, y: e.clientY };
     }
@@ -94,12 +95,14 @@
     if (selectedId === id) return;
     selectedId = id;
     detailRecord = null;
+    detailError = null;
     previewExpanded = false;
     detailLoading = true;
     try {
       detailRecord = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-    } catch {
+    } catch (e) {
       detailRecord = null;
+      detailError = e instanceof Error ? e.message : "Failed to load conversation.";
     } finally {
       detailLoading = false;
     }
@@ -169,8 +172,8 @@
 
   function msgTextPreview(blocks: Block[]): string {
     return blocks
-      .filter(b => b.type === "text")
-      .map(b => (b as TextBlock).text)
+      .filter((b): b is TextBlock => b.type === "text")
+      .map(b => b.text)
       .join(" ")
       .trim()
       .replace(/\s+/g, " ")
@@ -421,6 +424,8 @@
               </div>
               {#if detailLoading}
                 <p class="hp-noedit">Loading…</p>
+              {:else if detailError}
+                <p class="hp-noedit">Error: {detailError}</p>
               {:else if latestRecap}
                 <p class="hp-summary">{latestRecap}</p>
               {:else}
@@ -436,6 +441,8 @@
               </div>
               {#if detailLoading}
                 <p class="hp-noedit">Loading…</p>
+              {:else if detailError}
+                <p class="hp-noedit">Error: {detailError}</p>
               {:else if previewMessages.length === 0}
                 <p class="hp-noedit">No messages yet.</p>
               {:else}

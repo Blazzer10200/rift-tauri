@@ -35,11 +35,16 @@
       if (!menuEl.contains(e.target as Node)) onClose();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    setTimeout(() => {
-      document.addEventListener("mousedown", onDocClick);
-      document.addEventListener("keydown", onKey);
+    let destroyed = false;
+    const tid = setTimeout(() => {
+      if (!destroyed) {
+        document.addEventListener("mousedown", onDocClick);
+        document.addEventListener("keydown", onKey);
+      }
     }, 0);
     return () => {
+      destroyed = true;
+      clearTimeout(tid);
       document.removeEventListener("mousedown", onDocClick);
       document.removeEventListener("keydown", onKey);
     };

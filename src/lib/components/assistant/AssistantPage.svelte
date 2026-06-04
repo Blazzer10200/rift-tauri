@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { cubicOut } from "svelte/easing";
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
@@ -92,7 +92,7 @@
 
   $effect(() => {
     const n = assistant.panes.length || 1;
-    if (fracs.length !== n) fracs = loadFracs(n);
+    if (untrack(() => fracs.length) !== n) fracs = loadFracs(n);
   });
 
   const gridTemplate = $derived.by(() => {

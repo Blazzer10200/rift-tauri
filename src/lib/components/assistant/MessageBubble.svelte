@@ -155,7 +155,7 @@
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
-  let expandedThinking = $state(new Set<number>());
+  let expandedThinking = $state(new Set<string>());
   // Live tick so `active` thinking blocks + the role-row heartbeat show
   // real-time elapsed seconds. Runs while either an active thinking block
   // is present OR this bubble is the in-flight streaming message.
@@ -267,7 +267,7 @@
     return t.length > 110 ? t.slice(0, 108) + "…" : t;
   }
 
-  function toggleThinking(i: number) {
+  function toggleThinking(i: string) {
     const next = new Set(expandedThinking);
     if (next.has(i)) next.delete(i);
     else next.add(i);
@@ -657,7 +657,7 @@
     {/if}
 
     <div class="content">
-      {#snippet renderBlock(b: Block, bi: number, caption: string | null = null, revealing: boolean = false)}
+      {#snippet renderBlock(b: Block, bi: string, caption: string | null = null, revealing: boolean = false)}
         {#if b.type === "image"}
           <button
             type="button"
@@ -710,8 +710,9 @@
           </div>
         {:else if b.type === "tool" && isInlineDiffTool(b.name)}
           {#if b.name === "MultiEdit" && Array.isArray(b.input.edits)}
-            {#each (b.input.edits as Array<Record<string, unknown>>) as edit, ei (ei)}
-              <EditDiff input={{ ...edit, file_path: b.input.file_path }} />
+            {@const inp = b.input as { file_path?: string; edits?: Array<{ file_path?: string; old_string?: string; new_string?: string }> }}
+            {#each (inp.edits ?? []) as edit, ei (ei)}
+              <EditDiff input={{ ...edit, file_path: inp.file_path }} />
             {/each}
           {:else}
             <EditDiff input={b.input} />
@@ -757,7 +758,7 @@
             {#if open}
               <div class="tg-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
                 {#each unit.blocks as gb, gi (gb.type === "tool" ? gb.id : gi)}
-                  {@render renderBlock(gb, 10000 + ui * 100 + gi)}
+                  {@render renderBlock(gb, `tg_inner_${ui}_${gi}`)}
                 {/each}
               </div>
             {/if}
@@ -784,7 +785,7 @@
             style="--idx: {Math.min(ui, 6)}"
           >
             {#if unit.stepNum}<span class="tl-stepdot mono" aria-hidden="true">{unit.stepNum}</span>{/if}
-            {@render renderBlock(unit.block, ui, unit.caption, streaming && !isUser && unit.block.type === "text" && unit.key === lastBlockKey)}
+            {@render renderBlock(unit.block, unit.key, unit.caption, streaming && !isUser && unit.block.type === "text" && unit.key === lastBlockKey)}
           </div>
         {/if}
       {/each}

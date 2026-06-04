@@ -4,7 +4,7 @@
   // (`compact`). When `input` lacks old_string / new_string, renders nothing
   // and the parent can fall back to raw JSON.
 
-  import { untrack } from "svelte";
+  import { untrack, onDestroy } from "svelte";
   import { slide } from "svelte/transition";
   import { diffArrays } from "diff";
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
@@ -179,8 +179,8 @@
       // decide auto-expand; the precise +N/-M still comes from `counts`.
       const oldStr = typeof input.old_string === "string" ? input.old_string : "";
       const newStr = typeof input.new_string === "string" ? input.new_string : "";
-      const changed = Math.abs(oldStr.split("\n").length - newStr.split("\n").length)
-        + (oldStr === newStr ? 0 : 1);
+      const _chunks = diffArrays(oldStr.split("\n"), newStr.split("\n"));
+      const changed = _chunks.reduce((n, c) => n + (c.added || c.removed ? c.value.length : 0), 0);
       return changed <= SMALL_DIFF;
     }),
   );
@@ -229,6 +229,8 @@
     if (copyTimer) clearTimeout(copyTimer);
     copyTimer = setTimeout(() => { copied = false; }, 1400);
   }
+  onDestroy(() => { if (copyTimer) clearTimeout(copyTimer); });
+
   // Open the file-actions menu (open in VS Code / default app, reveal, copy)
   // anchored to the crumb button.
   let menuPos = $state<{ x: number; y: number } | null>(null);

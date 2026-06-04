@@ -15,6 +15,7 @@
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
+  import { untrack } from "svelte";
   import Markdown from "./Markdown.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -28,9 +29,8 @@
   const isTodoWrite = $derived(/^(mcp__rift__)?TodoWrite$/.test(tool.name));
   const isAskUser = $derived(/^mcp__rift__ask_user$/.test(tool.name));
   const isCard = $derived(isAgent || isTodoWrite || isAskUser);
-  let expanded = $state(false);
   // Cards open by default; chips closed.
-  $effect(() => { if (isCard) expanded = true; });
+  let expanded = $state(untrack(() => isCard));
 
   // ── AskUser state — single-select index OR multi-select set per question.
   //    `otherText` holds the freeform input when the user picks "Other".
@@ -110,6 +110,7 @@
     askError = null;
     try {
       await assistant.submitAskUserAnswer(tool.id, { answers });
+      askSubmitting = false;
     } catch (e) {
       console.warn("submitAskUserAnswer failed", e);
       askError = e instanceof Error ? e.message : "Submit failed — please retry.";
@@ -123,6 +124,7 @@
     askError = null;
     try {
       await assistant.submitAskUserAnswer(tool.id, { cancelled: true });
+      askSubmitting = false;
     } catch (e) {
       console.warn("cancelAskUser failed", e);
       askError = e instanceof Error ? e.message : "Dismiss failed — please retry.";
@@ -648,7 +650,6 @@
                   disabled={askSubmitting || askAnswered}
                   role={q.multiSelect ? "checkbox" : "radio"}
                   aria-checked={otherSelected}
-                  aria-pressed={q.multiSelect ? otherSelected : undefined}
                   onclick={() => {
                     if (q.multiSelect) {
                       toggleAskMulti(qi, OTHER_IDX);
