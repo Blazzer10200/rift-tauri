@@ -1302,10 +1302,11 @@ pub async fn assistant_enhance_prompt(
         let mut buf = String::new();
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
-            buf.push_str(&l);
-            buf.push('\n');
-            if buf.len() > 8192 {
-                break;
+            // F4: keep draining to EOF even past the cap — `break`ing would let
+            // the child's stderr pipe fill and deadlock it on wait().
+            if buf.len() <= 8192 {
+                buf.push_str(&l);
+                buf.push('\n');
             }
         }
         buf
@@ -1442,10 +1443,11 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
         let mut buf = String::new();
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
-            buf.push_str(&l);
-            buf.push('\n');
-            if buf.len() > 8192 {
-                break;
+            // F4: keep draining to EOF even past the cap — `break`ing would let
+            // the child's stderr pipe fill and deadlock it on wait().
+            if buf.len() <= 8192 {
+                buf.push_str(&l);
+                buf.push('\n');
             }
         }
         buf
@@ -1753,10 +1755,11 @@ pub async fn assistant_summarize_session(
         let mut buf = String::new();
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
-            buf.push_str(&l);
-            buf.push('\n');
-            if buf.len() > 32 * 1024 {
-                break;
+            // F4: keep draining to EOF past the cap so the child never blocks
+            // on a full stderr pipe at wait().
+            if buf.len() <= 32 * 1024 {
+                buf.push_str(&l);
+                buf.push('\n');
             }
         }
         buf
@@ -1766,8 +1769,17 @@ pub async fn assistant_summarize_session(
         .wait()
         .await
         .map_err(|e| format!("await claude (summarize): {e}"))?;
+    // F3/F5/F66/F68: surface a panicked stdout drain instead of `unwrap_or_default`
+    // silently zeroing the whole tuple (empty summary + zero tokens read as a
+    // successful-but-blank turn).
     let (summary, cost_usd, input_tokens, output_tokens, cache_read, cache_create, result_model) =
-        stdout_task.await.unwrap_or_default();
+        match stdout_task.await {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!("summarize stdout drain task panicked: {e}");
+                return Err(format!("summarize stdout drain task panicked: {e}"));
+            }
+        };
     // #222: surface drain-task JoinError as a string instead of swallowing it.
     let stderr_buf = stderr_task.await.unwrap_or_else(|e| {
         log::error!("summarize stderr drain task panicked: {e}");
@@ -2744,10 +2756,21 @@ pub async fn assistant_send(
                 // Find the first newline >= STDERR_TRIM bytes in so we drop on
                 // a line boundary, not mid-line. Safe `String::drain` requires
                 // a char boundary; newline is always one.
-                let cut = buf[STDERR_TRIM..]
-                    .find('\n')
+                // F70: index the BYTES, not the str — `buf[STDERR_TRIM..]` on a
+                // String panics when STDERR_TRIM lands inside a multi-byte
+                // codepoint. A byte slice is always valid; the cut (just past a
+                // `\n`, or the next char boundary) stays drain-safe.
+                let cut = buf.as_bytes()[STDERR_TRIM..]
+                    .iter()
+                    .position(|&b| b == b'\n')
                     .map(|n| STDERR_TRIM + n + 1)
-                    .unwrap_or(STDERR_TRIM);
+                    .unwrap_or_else(|| {
+                        let mut c = STDERR_TRIM;
+                        while c < buf.len() && !buf.is_char_boundary(c) {
+                            c += 1;
+                        }
+                        c
+                    });
                 buf.drain(..cut);
             }
         }
@@ -2768,7 +2791,14 @@ pub async fn assistant_send(
     let status: Option<std::process::ExitStatus> = loop {
         match tokio::time::timeout(std::time::Duration::from_millis(150), child.wait()).await {
             Ok(Ok(s)) => break Some(s),
-            Ok(Err(e)) => return Err(format!("await claude: {e}")),
+            Ok(Err(e)) => {
+                // F6: don't leak the two pipe-drain tasks on the wait()-error
+                // path — abort them before bailing.
+                stdout_task.abort();
+                stderr_task.abort();
+                clear_session_pid(&session_id);
+                return Err(format!("await claude: {e}"));
+            }
             Err(_) => {
                 if result_seen.load(std::sync::atomic::Ordering::SeqCst) {
                     let dl = *reap_deadline

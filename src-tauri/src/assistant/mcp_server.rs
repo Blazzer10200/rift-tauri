@@ -31,6 +31,9 @@ const MAX_READ_BYTES: u64 = 500 * 1024;
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_GREP_MATCHES: usize = 200;
 const MAX_GREP_FILES: usize = 5000;
+/// Per-file byte cap for grep: never load more than this from any one file
+/// (F10 — bound the full read after the binary probe).
+const MAX_GREP_FILE_BYTES: u64 = 4 * 1024 * 1024;
 const SKIP_DIRS: &[&str] = &[
     "node_modules", ".git", ".svelte-kit", "build", "dist", "target",
     ".rift-trail", ".rift-tmp", "__pycache__", ".venv", ".next",
@@ -67,7 +70,10 @@ fn load_roots() -> Vec<PathBuf> {
         .lines()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .filter_map(|s| dunce::canonicalize(s).ok().or_else(|| Some(PathBuf::from(s))))
+        // Fail-closed: a root we can't canonicalize can't serve as a reliable
+        // containment boundary (the later starts_with check compares canonical
+        // candidates), so drop it rather than store the raw path (F240/F244).
+        .filter_map(|s| dunce::canonicalize(s).ok())
         .collect()
 }
 
@@ -267,30 +273,25 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
                 continue;
             }
         }
-        // #71: Cheap binary skip — actually read only the first 8 KiB for the
-        // NUL probe. Prior impl called `std::fs::read(p)` (loads entire file)
-        // then `.iter().take(8192)`; under a 5000-file scan that loaded ~5000
-        // full files into stdio-process memory. Now: open + take(8192) for the
-        // probe, full read only after the file passes.
-        {
-            use std::io::Read;
-            let mut probe = Vec::with_capacity(8192);
-            let Ok(f) = std::fs::File::open(p) else { continue };
-            if f.take(8192).read_to_end(&mut probe).is_err() {
-                continue;
-            }
-            if probe.iter().any(|&b| b == 0) {
-                continue;
-            }
-        }
-        let bytes = match std::fs::read(p) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
+        // F81: enforce the file-count cap BEFORE the expensive read, so the
+        // (MAX+1)th file is never loaded just to be discarded.
         files_scanned += 1;
         if files_scanned > MAX_GREP_FILES {
             matches.push(format!("(scan stopped at {} files)", MAX_GREP_FILES));
             break 'walk;
+        }
+        // #71 + F80 + F10: open the file ONCE. Read up to the per-file byte cap
+        // from a single handle (no second open for the full read), then NUL-probe
+        // the head of that same buffer. Bounds memory at MAX_GREP_FILE_BYTES even
+        // for a pathologically large text file.
+        use std::io::Read;
+        let Ok(f) = std::fs::File::open(p) else { continue };
+        let mut bytes = Vec::new();
+        if f.take(MAX_GREP_FILE_BYTES).read_to_end(&mut bytes).is_err() {
+            continue;
+        }
+        if bytes.iter().take(8192).any(|&b| b == 0) {
+            continue;
         }
         let text = match std::str::from_utf8(&bytes) {
             Ok(s) => s,
@@ -299,7 +300,17 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
         for (lineno, line) in text.lines().enumerate() {
             if re.is_match(line) {
                 let rel = p.strip_prefix(&search_root).unwrap_or(p);
-                let truncated = if line.len() > 200 { &line[..200] } else { line };
+                // F11: back off to a char boundary — `&line[..200]` panics when
+                // byte 200 lands inside a multi-byte UTF-8 codepoint.
+                let truncated = if line.len() > 200 {
+                    let mut end = 200;
+                    while end > 0 && !line.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    &line[..end]
+                } else {
+                    line
+                };
                 matches.push(format!("{}:{}: {}", rel.display(), lineno + 1, truncated));
                 if matches.len() >= MAX_GREP_MATCHES {
                     matches.push(format!("(truncated at {} matches)", MAX_GREP_MATCHES));
