@@ -251,7 +251,7 @@
           bind:this={input}
           bind:value={query}
           type="text"
-          placeholder="Type a command, server, or chat…"
+          placeholder="Search or run a command…"
           autocomplete="off"
           spellcheck="false"
         />
@@ -315,12 +315,12 @@
     max-height: 70vh;
     display: flex; flex-direction: column;
     background: var(--bg-elev-2);
-    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border-strong));
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     box-shadow:
-      0 24px 64px -16px rgba(0, 0, 0, 0.6),
-      0 0 0 1px color-mix(in oklab, var(--accent) 14%, transparent),
-      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
+      0 16px 48px -12px rgba(0, 0, 0, 0.55),
+      0 2px 8px -4px rgba(0, 0, 0, 0.4),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     overflow: hidden;
   }
 
@@ -364,12 +364,12 @@
   }
 
   .cp-group-label {
-    font-size: 9px;
+    font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     color: var(--fg-subtle);
-    padding: 10px 12px 4px;
+    padding: 12px 12px 5px;
   }
   .cp-group-label:first-child { padding-top: 6px; }
 

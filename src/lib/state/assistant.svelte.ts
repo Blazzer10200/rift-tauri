@@ -2128,13 +2128,18 @@ class AssistantStore {
     if (tab) tab.queue = tab.queue.filter((q) => q.id !== id);
   }
 
-  /** Composer wand: one-shot rewrite of a rough draft into a clearer prompt.
-   *  Stateless — the backend streams a headless Haiku rewrite token-by-token
-   *  over `assistant://enhance-stream` (so the preview fills within ~1-2s
-   *  instead of blocking on the full completion), then resolves to the
-   *  authoritative final text. `onDelta` receives the accumulated text on each
-   *  chunk for live display. Throws on failure so the caller can surface it. */
-  async enhancePrompt(text: string, onDelta?: (full: string) => void): Promise<string> {
+  /** Composer wand: rewrite a rough draft into a clearer prompt. Stateless —
+   *  the backend streams a headless rewrite token-by-token over
+   *  `assistant://enhance-stream`, then resolves to the authoritative final
+   *  text. `onDelta` receives the accumulated text on each chunk. `opts` steers
+   *  it: `model` (default sonnet), `directive` (refine instruction), `cwd`
+   *  (workspace dir → grounded read-only pass over the real code). Throws on
+   *  failure so the caller can surface it. */
+  async enhancePrompt(
+    text: string,
+    onDelta?: (full: string) => void,
+    opts?: { model?: string; directive?: string; cwd?: string },
+  ): Promise<string> {
     const requestId = crypto.randomUUID();
     let acc = "";
     const unlisten = await listen<{ request_id: string; delta?: string; done?: boolean }>(
@@ -2148,7 +2153,13 @@ class AssistantStore {
       },
     );
     try {
-      return await invoke<string>("assistant_enhance_prompt", { requestId, prompt: text });
+      return await invoke<string>("assistant_enhance_prompt", {
+        requestId,
+        prompt: text,
+        model: opts?.model,
+        directive: opts?.directive,
+        cwd: opts?.cwd,
+      });
     } finally {
       unlisten();
     }

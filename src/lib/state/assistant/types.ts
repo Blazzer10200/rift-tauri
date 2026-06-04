@@ -24,6 +24,9 @@ export type AuthStatus = {
   /** A system ANTHROPIC_API_KEY env var exists but Rift deliberately ignores
    *  it (stripped from every CLI spawn). Surfaced so the UI can warn. */
   envApiKeyPresent: boolean;
+  /** How the resolved `claude` binary was installed — "npm" | "native" |
+   *  "unknown". Drives the correct in-app update command. Null when no CLI. */
+  installMethod: string | null;
   pill: "green" | "yellow" | "red";
   summary: string;
 };
@@ -108,6 +111,8 @@ export type ConversationMeta = {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Σ of per-turn costs across the transcript. 0 for convos predating cost capture. */
+  costUsd: number;
   /** Phase E5: flattened compactionHistory summaries for HistoryDrawer search. */
   compactionSummaries?: string[];
 };

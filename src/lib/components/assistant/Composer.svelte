@@ -1,10 +1,12 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
     Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon,
-    Bot, Terminal, Wrench, ListPlus, Sparkles, Eye, ChevronUp } from "lucide-svelte";
+    Bot, Terminal, Wrench, ListPlus, Sparkles, Eye, ChevronUp,
+    RefreshCw, FolderSearch, GitCompare } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { ModelSel, PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
+  import EditDiff from "./EditDiff.svelte";
   import { modelFamily, liveActivity } from "../../state/assistant/helpers";
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
@@ -151,7 +153,7 @@
   function autosize() {
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 220) + "px";
+    ta.style.height = Math.min(ta.scrollHeight, 340) + "px";
   }
 
   $effect(() => {
@@ -448,6 +450,14 @@
   let enhancing = $state(false);
   let enhancedPreview = $state<string | null>(null);
   let enhanceError = $state<string | null>(null);
+  // The draft we enhanced FROM — kept so Regenerate/refine re-run on the
+  // original (not the already-enhanced text) and the diff has a baseline.
+  let enhanceOriginal = $state<string | null>(null);
+  // Toggle the body between the enhanced text and a diff vs the original.
+  let showEnhanceDiff = $state(false);
+  // Opt-in: let the rewrite read the real workspace (read-only). Slower, more
+  // specific. Preference persists across regenerates within the session.
+  let groundEnhance = $state(false);
   // Draft preview (eye) — render the composer draft as Markdown before sending.
   let previewing = $state(false);
   // Split preserving whitespace so the reveal can stagger word-by-word while
@@ -455,34 +465,44 @@
   const enhancedWords = $derived(
     enhancedPreview === null ? [] : enhancedPreview.split(/(\s+)/),
   );
-  async function runEnhance() {
-    const text = draft.trim();
+  // `directive` steers a refine pass (Concise / More detail / + Acceptance);
+  // omitted for the first run + plain Regenerate.
+  async function runEnhance(directive?: string) {
+    const text = (enhanceOriginal ?? draft).trim();
     if (!text || enhancing) return;
+    if (enhanceOriginal === null) enhanceOriginal = text;
     enhancing = true;
-    enhancedPreview = null;
     enhanceError = null;
+    enhancedPreview = "";
     try {
-      // Stream: deltas fill the preview live (first text in ~1-2s); the
-      // resolved value is the authoritative final text.
-      enhancedPreview = await assistant.enhancePrompt(text, (full) => {
-        enhancedPreview = full;
-      });
+      // Stream: deltas fill the preview live; the resolved value is the
+      // authoritative final text. Grounded mode passes the workspace cwd.
+      enhancedPreview = await assistant.enhancePrompt(
+        text,
+        (full) => { enhancedPreview = full; },
+        { directive, cwd: groundEnhance ? (assistant.workspace.current ?? undefined) : undefined },
+      );
     } catch (e) {
       enhanceError = String(e);
+      enhancedPreview = null;
     } finally {
       enhancing = false;
     }
   }
   function acceptEnhanced() {
-    if (enhancedPreview === null) return;
+    if (!enhancedPreview) return;
     setDraft(enhancedPreview);
     enhancedPreview = null;
     enhanceError = null;
+    enhanceOriginal = null;
+    showEnhanceDiff = false;
     void tick().then(() => { autosize(); ta?.focus(); });
   }
   function dismissEnhanced() {
     enhancedPreview = null;
     enhanceError = null;
+    enhanceOriginal = null;
+    showEnhanceDiff = false;
     void tick().then(() => ta?.focus());
   }
 
@@ -542,44 +562,6 @@
     return { destroy() { node.remove(); } };
   }
 
-  // Hint popover — keyboard shortcuts. Portals to <body> + position: fixed
-  // w/ JS-computed coords so it escapes the composer's clip + backdrop-filter
-  // containing block.
-  let hintOpen = $state(false);
-  let hintWrap = $state<HTMLDivElement | null>(null);
-  let hintPop = $state<HTMLDivElement | null>(null);
-  let hintPos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
-  function positionHint() {
-    if (!hintWrap || !hintPop) return;
-    const a = hintWrap.getBoundingClientRect();
-    const ph = hintPop.offsetHeight || 160;
-    const pw = hintPop.offsetWidth || 240;
-    // Prefer above the trigger (matches the old visual); flip down if no room.
-    let top = a.top - ph - 8;
-    if (top < 8) top = a.bottom + 8;
-    let left = a.left;
-    const maxLeft = window.innerWidth - pw - 8;
-    if (left > maxLeft) left = maxLeft;
-    if (left < 8) left = 8;
-    hintPos = { top, left };
-  }
-  function onDocHintMousedown(ev: MouseEvent) {
-    if (!hintOpen) return;
-    if (hintWrap && ev.target instanceof Node && hintWrap.contains(ev.target)) return;
-    if (hintPop && ev.target instanceof Node && hintPop.contains(ev.target)) return;
-    hintOpen = false;
-  }
-  $effect(() => {
-    window.addEventListener("mousedown", onDocHintMousedown);
-    return () => window.removeEventListener("mousedown", onDocHintMousedown);
-  });
-  $effect(() => {
-    if (!hintOpen) return;
-    void tick().then(positionHint);
-    const onResize = () => positionHint();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  });
 
   // Permission-mode menu — portals to <body> like the hint pop, so it escapes
   // the composer's `overflow: hidden` + backdrop-filter containing block.
@@ -1012,20 +994,58 @@
         {#if enhancedPreview !== null}
           <div class="enhance-head">
             <Wand2 size={13} />
-            <span class="enhance-title">Enhanced prompt</span>
-            <span class="enhance-sub">review before sending</span>
+            <span class="enhance-title">{enhancing ? (groundEnhance ? "Consulting workspace…" : "Enhancing…") : "Enhanced prompt"}</span>
+            <div class="enhance-head-tools">
+              {#if assistant.workspace.current}
+                <button
+                  type="button"
+                  class="enhance-toggle"
+                  class:on={groundEnhance}
+                  onclick={() => (groundEnhance = !groundEnhance)}
+                  disabled={enhancing}
+                  aria-pressed={groundEnhance}
+                  use:tooltip={"Ground the rewrite in your real code (read-only). Slower, more specific. Re-run to apply."}
+                >
+                  <FolderSearch size={12} /> Ground
+                </button>
+              {/if}
+              {#if enhanceOriginal && !enhancing}
+                <button
+                  type="button"
+                  class="enhance-toggle"
+                  class:on={showEnhanceDiff}
+                  onclick={() => (showEnhanceDiff = !showEnhanceDiff)}
+                  aria-pressed={showEnhanceDiff}
+                  use:tooltip={showEnhanceDiff ? "Show enhanced text" : "Show what changed vs your draft"}
+                >
+                  <GitCompare size={12} /> Diff
+                </button>
+              {/if}
+            </div>
           </div>
-          <div class="enhance-text">
-            {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
-          </div>
+          {#if showEnhanceDiff && enhanceOriginal}
+            <div class="enhance-diff">
+              <EditDiff input={{ old_string: enhanceOriginal, new_string: enhancedPreview }} hideHead compact />
+            </div>
+          {:else}
+            <div class="enhance-text">
+              {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
+            </div>
+          {/if}
           <div class="enhance-actions">
-            <button type="button" class="enhance-btn enhance-accept" onclick={acceptEnhanced}>
+            <button type="button" class="enhance-btn enhance-accept" onclick={acceptEnhanced} disabled={enhancing || !enhancedPreview}>
               <Check size={13} /> Use this
             </button>
             <button type="button" class="enhance-btn enhance-discard" onclick={dismissEnhanced}>
               Discard
             </button>
-            <span class="enhance-kbd">Esc to dismiss</span>
+            <span class="enhance-sep" aria-hidden="true"></span>
+            <button type="button" class="enhance-refine" onclick={() => runEnhance()} disabled={enhancing} use:tooltip={"Regenerate from your original draft"}>
+              <RefreshCw size={12} /> Regenerate
+            </button>
+            <button type="button" class="enhance-refine" onclick={() => runEnhance("Make it more concise — cut to the essentials, keep every technical specific.")} disabled={enhancing}>Concise</button>
+            <button type="button" class="enhance-refine" onclick={() => runEnhance("Add more implementation detail and the edge cases worth handling.")} disabled={enhancing}>More detail</button>
+            <button type="button" class="enhance-refine" onclick={() => runEnhance("Append a short acceptance-criteria checklist of what 'done' looks like.")} disabled={enhancing}>+ Acceptance</button>
           </div>
         {:else if enhanceError !== null}
           <div class="enhance-error" role="alert">
@@ -1286,17 +1306,6 @@
           >
             <Paperclip size={14} />
           </button>
-          <button
-            class="iconbtn wandbtn"
-            class:enhancing
-            type="button"
-            onclick={runEnhance}
-            disabled={enhancing || draft.trim().length === 0}
-            use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify"}
-            aria-label="Improve prompt"
-          >
-            <Wand2 size={14} />
-          </button>
           {#if stt.config.enabled && (
             (stt.config.engine === "web_speech" && stt.supported) ||
             (stt.config.engine === "whisper" && stt.backendAvailable)
@@ -1326,49 +1335,40 @@
             {/if}
           </button>
           {/if}
+          {#if draft.trim().length > 0}
+          <span class="tb-div reveal" aria-hidden="true"></span>
           <button
-            class="iconbtn previewbtn"
+            class="iconbtn wandbtn reveal"
+            class:enhancing
+            type="button"
+            onclick={() => runEnhance()}
+            disabled={enhancing}
+            use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify"}
+            aria-label="Improve prompt"
+          >
+            <Wand2 size={14} />
+          </button>
+          <button
+            class="iconbtn previewbtn reveal"
             class:on={previewing}
             type="button"
             onclick={() => (previewing = !previewing)}
-            disabled={draft.trim().length === 0}
             aria-pressed={previewing}
             use:tooltip={previewing ? "Hide preview" : "Preview as Markdown"}
             aria-label="Preview message"
           >
             <Eye size={14} />
           </button>
-          <div class="hint-wrap" bind:this={hintWrap}>
-            <button
-              type="button"
-              class="iconbtn hintbtn"
-              onclick={() => (hintOpen = !hintOpen)}
-              aria-expanded={hintOpen}
-              aria-label="Composer hints"
-              aria-describedby={hintOpen ? "composer-hint-pop" : undefined}
-              use:tooltip={"Keyboard shortcuts"}
-            >
-              <HelpCircle size={14} />
-            </button>
-            {#if hintOpen}
-              <div
-                id="composer-hint-pop"
-                class="hint-pop"
-                role="tooltip"
-                bind:this={hintPop}
-                use:portal
-                style="top: {hintPos.top}px; left: {hintPos.left}px;"
-              >
-                <div class="hint-head">Keyboard shortcuts</div>
-                <div class="hint-row"><span class="hint-keys"><kbd>Enter</kbd></span><span>Send message</span></div>
-                <div class="hint-row"><span class="hint-keys"><kbd>Shift</kbd><kbd>Enter</kbd></span><span>New line</span></div>
-                <div class="hint-row"><span class="hint-keys"><kbd>/</kbd></span><span>Slash command menu</span></div>
-                <div class="hint-row"><span class="hint-keys"><kbd>@</kbd></span><span>Mention a file</span></div>
-                <div class="hint-row"><span class="hint-keys"><kbd>↑</kbd></span><span>Recall previous prompt</span></div>
-                <div class="hint-row"><span class="hint-keys"><kbd>Esc</kbd></span><span>Close any open menu</span></div>
-              </div>
-            {/if}
-          </div>
+          <button
+            class="iconbtn clearbtn reveal"
+            type="button"
+            onclick={() => { setDraft(""); ta?.focus(); }}
+            use:tooltip={"Clear draft"}
+            aria-label="Clear draft"
+          >
+            <X size={14} />
+          </button>
+          {/if}
           {#if draft.length > 500}
             <span
               class="char-count"
@@ -1446,6 +1446,12 @@
                 <span class="mono">{queue.length}</span>
               </button>
             {/if}
+          </div>
+        {:else if composerFocused}
+          <div class="kbd-hint" aria-hidden="true">
+            <kbd>↵</kbd><span class="kh-t">send</span>
+            <span class="kh-sep">·</span>
+            <kbd>⇧↵</kbd><span class="kh-t">new line</span>
           </div>
         {/if}
 
@@ -1689,7 +1695,7 @@
     flex: 1;
     resize: none;
     width: 100%;
-    min-height: 28px; max-height: 220px;
+    min-height: 28px; max-height: 340px;
     padding: 8px 10px 6px;
     background: transparent;
     border: 0; outline: none;
@@ -1817,12 +1823,12 @@
     width: 28px; height: 28px;
     display: inline-flex; align-items: center; justify-content: center;
     background: transparent;
-    color: var(--fg-faint);
+    color: var(--fg-subtle);
     border: 1px solid transparent;
     border-radius: 8px;
     cursor: pointer;
     flex-shrink: 0;
-    opacity: 0.85;
+    opacity: 0.9;
     padding: 0;
     transition: color 140ms, background 140ms, border-color 140ms, opacity 140ms, transform 140ms;
   }
@@ -1836,6 +1842,12 @@
   .iconbtn:focus-visible {
     outline: none;
     box-shadow: 0 0 0 2px var(--ring);
+  }
+  /* Hairline splitting compose-tools (attach/improve/mic) from view-tools (preview/help). */
+  .tb-div {
+    width: 1px; height: 16px; flex-shrink: 0;
+    margin: 0 3px;
+    background: color-mix(in oklch, var(--border) 80%, transparent);
   }
 
   /* Mic — recording / transcribing states inherit .iconbtn base + override. */
@@ -2275,12 +2287,6 @@
   }
   .previewbtn.on { color: var(--accent); background: var(--accent-soft); }
   .enhance-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-  .enhance-sub {
-    font-size: 10px; font-weight: 500;
-    color: var(--fg-faint);
-    margin-left: auto;
-    letter-spacing: 0.02em;
-  }
   .enhance-text {
     font-size: var(--fs-md);
     line-height: 1.55;
@@ -2292,7 +2298,7 @@
     padding: 2px 0;
     margin-bottom: 10px;
   }
-  .enhance-actions { display: flex; align-items: center; gap: 8px; }
+  .enhance-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .enhance-btn {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 5px 12px;
@@ -2317,7 +2323,46 @@
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
     color: var(--fg);
   }
-  .enhance-kbd { margin-left: auto; font-size: 10px; color: var(--fg-faint); }
+  /* Refine + diff/ground controls on the enhance panel. */
+  .enhance-head-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+  .enhance-toggle {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 999px;
+    font: inherit; font-size: 10.5px; font-weight: 600;
+    color: var(--fg-muted);
+    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    cursor: pointer;
+    transition: color 130ms, background 130ms, border-color 130ms;
+  }
+  .enhance-toggle:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
+  .enhance-toggle:disabled { opacity: 0.5; cursor: default; }
+  .enhance-toggle.on {
+    color: var(--model-color);
+    border-color: color-mix(in oklab, var(--model-color) 45%, var(--border));
+    background: color-mix(in oklab, var(--model-color) 12%, transparent);
+  }
+  .enhance-diff {
+    max-height: 240px; overflow-y: auto;
+    margin-bottom: 10px;
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    border-radius: 10px;
+    padding: 4px;
+  }
+  .enhance-sep { width: 1px; height: 18px; background: color-mix(in oklch, var(--border) 70%, transparent); margin: 0 2px; }
+  .enhance-refine {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 4px 9px; border-radius: 8px;
+    font: inherit; font-size: 11px; font-weight: 600;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    cursor: pointer;
+    transition: color 130ms, background 130ms, border-color 130ms, transform 120ms;
+  }
+  .enhance-refine:hover:not(:disabled) { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
+  .enhance-refine:active:not(:disabled) { transform: scale(0.96); }
+  .enhance-refine:disabled { opacity: 0.45; cursor: default; }
   .enhance-error {
     display: flex; align-items: center; gap: 8px;
     font-size: var(--fs-sm);
@@ -2442,94 +2487,32 @@
     .ew { animation: none; }
   }
 
-  /* Phase 3a: hint popover. Replaces the dedicated hint row; lives adjacent
-     to the mic in the composer row. Pop animates fade + 4px translate-y +
-     scale 0.98→1 over 140ms. */
-  .hint-wrap {
-    position: relative;
-    display: inline-flex;
-    align-self: center;
-  }
-  /* .hintbtn inherits .iconbtn base (size, radius, hover). Only the
-     aria-expanded "open" treatment is specific. */
-  .hintbtn[aria-expanded="true"] {
-    color: var(--accent);
-    border-color: color-mix(in oklab, var(--accent) 25%, transparent);
-    background: var(--accent-soft);
-    opacity: 1;
-  }
-  /* Hint popover — viewport-fixed so it escapes .composer's overflow:hidden.
-     Coords computed in positionHint(). `:global()` because Svelte 5 scopes
-     style by the markup it sees; this element renders inside the composer
-     but the CSS would otherwise be tree-shaken since the popover has been
-     moved out of scoped scope by some HMR paths. */
-  :global(.hint-pop) {
-    position: fixed;
-    min-width: 240px;
-    padding: 10px 14px 8px;
-    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
-    backdrop-filter: blur(16px) saturate(140%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
-    border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
-    border-radius: 12px;
-    box-shadow:
-      0 16px 40px -8px oklch(0 0 0 / 0.6),
-      0 0 0 1px color-mix(in oklab, var(--accent) 8%, transparent),
-      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
-    z-index: 9998;
-    display: flex; flex-direction: column; gap: 2px;
-    animation: hint-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
-    transform-origin: bottom left;
-  }
-  :global(.hint-pop .hint-head) {
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--fg-faint);
-    padding-bottom: 6px;
-    margin-bottom: 4px;
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-  }
-  @keyframes hint-in {
-    from { opacity: 0; transform: translateY(4px) scale(0.98); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
+  /* Compose-tools (improve/preview) reveal once the draft has text — the empty
+     composer stays calm. Reuses the global `enter` keyframe. */
+  .iconbtn.reveal, .tb-div.reveal { animation: enter 160ms ease-out; }
   @media (prefers-reduced-motion: reduce) {
-    :global(.hint-pop) { animation: none; }
+    .iconbtn.reveal, .tb-div.reveal { animation: none; }
   }
-  :global(.hint-pop .hint-row) {
-    display: grid;
-    grid-template-columns: 92px 1fr;
-    align-items: center;
-    gap: 12px;
-    padding: 4px 2px;
-    font-size: var(--fs-xs);
-    color: var(--fg-2);
+  /* Keyboard hint — occupies the toolbar's middle slot while the composer is
+     focused (and no turn is live); keeps the idle bar empty + calm. */
+  .kbd-hint {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 10.5px; color: var(--fg-faint);
+    user-select: none; white-space: nowrap;
+    animation: enter 160ms ease-out;
   }
-  :global(.hint-pop .hint-keys) {
-    display: inline-flex; align-items: center; gap: 3px;
-    justify-content: flex-start;
-  }
-  :global(.hint-pop .hint-row > span:last-child) {
-    color: var(--fg-muted);
-    text-align: left;
-    line-height: 1.3;
-  }
-  :global(.hint-pop kbd) {
+  .kbd-hint .kh-t { letter-spacing: 0.01em; }
+  .kbd-hint .kh-sep { color: var(--fg-subtle); opacity: 0.55; margin: 0 1px; }
+  .kbd-hint kbd {
     display: inline-flex; align-items: center; justify-content: center;
-    min-width: 18px; height: 18px;
-    padding: 0 6px;
-    font-family: var(--font-ui);
-    font-size: 10.5px;
-    font-weight: 600;
-    background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border-strong) 70%, transparent);
+    min-width: 16px; height: 16px; padding: 0 4px;
+    font-family: var(--font-ui); font-size: 10px; font-weight: 600; line-height: 1;
+    color: var(--fg-muted);
+    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     border-radius: 4px;
-    color: var(--fg);
-    line-height: 1;
-    letter-spacing: 0.01em;
   }
+  @media (prefers-reduced-motion: reduce) { .kbd-hint { animation: none; } }
 
   /* Unified settings pill — one icon-only control opening the model /
      thinking-depth / permission-mode panel. `data-mode` faintly tints the

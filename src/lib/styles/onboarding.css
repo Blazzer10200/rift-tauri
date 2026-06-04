@@ -3,7 +3,8 @@
    Graphite-Ink mockup. Loaded globally by OnboardingFlow.svelte (so the shared
    .ob-* classes aren't stripped by Svelte's per-component scoping).
    Token mapping: mockup --gi-ghost-* aliased to the app's accent ramp below;
-   all colors OKLCH (no hex/srgb); accent via var(--accent), never var(--accent-h).
+   all colors OKLCH (no hex/srgb); accent via var(--accent), never var(--accent-h);
+   tint mixes use `in oklab` (oklch wraps warm hues to purple).
    ============================================================================ */
 
 .ob-overlay {
@@ -74,7 +75,6 @@
 .ob-step-s { font-size: 11px; color: var(--fg-faint); line-height: 1.3; }
 
 .ob-rail-foot { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
-.ob-time { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-faint); }
 .ob-skip-link {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 5px;
   padding: 0; border: 0; background: none; cursor: pointer;
@@ -110,21 +110,7 @@
 .ob-sub { margin: 2px 0 0; font-size: var(--fs-md); line-height: 1.55; color: var(--fg-muted); }
 .ob-sub code, .ob-mono-i { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 5px; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius-xs); color: var(--code-fg); }
 
-/* generic field */
-.ob-field { display: flex; flex-direction: column; gap: 6px; }
-.ob-label { font-size: 11px; font-weight: 600; letter-spacing: 0.03em; color: var(--fg-muted); }
-.ob-input {
-  width: 100%; height: 34px; padding: 0 11px; border-radius: var(--radius);
-  background: var(--bg-inset); border: 1px solid var(--border); color: var(--fg);
-  font: inherit; font-size: var(--fs-sm);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
-}
-.ob-input::placeholder { color: var(--fg-faint); }
-.ob-input:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
-.ob-input.mono { font-family: var(--font-mono); font-size: 11.5px; }
-.ob-input[readonly], .ob-input:disabled { color: var(--fg-muted); background: color-mix(in oklch, var(--bg-inset) 70%, transparent); cursor: default; }
 .ob-input-row { display: flex; gap: 8px; align-items: center; }
-.ob-input-row .ob-input { flex: 1; min-width: 0; }
 
 /* buttons */
 .ob-btn {
@@ -139,8 +125,6 @@
 .ob-btn.sm { height: 30px; padding: 0 11px; font-size: var(--fs-xs); font-weight: 500; }
 .ob-btn.ghost { background: none; border-color: transparent; color: var(--fg-muted); }
 .ob-btn.ghost:hover { background: var(--surface-hover); color: var(--fg); border-color: transparent; }
-.ob-btn.accent { background: var(--gi-ghost-bg); border-color: var(--gi-ghost-border); color: var(--accent); }
-.ob-btn.accent:hover { background: var(--gi-ghost-bg-hover); }
 .ob-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 2px 12px -2px color-mix(in oklab, var(--accent) 55%, transparent); }
 .ob-btn.primary:hover { background: var(--accent-hover); }
 .ob-btn.primary:disabled { background: var(--bg-elev-3); color: var(--fg-faint); cursor: not-allowed; box-shadow: none; }
@@ -150,7 +134,7 @@
 .ob-foot {
   flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
   padding: 16px clamp(28px, 6vw, 76px); border-top: 1px solid var(--border);
-  background: color-mix(in oklch, var(--bg) 80%, transparent); backdrop-filter: blur(8px);
+  background: color-mix(in oklab, var(--bg) 80%, transparent); backdrop-filter: blur(8px);
 }
 .ob-foot-left { display: flex; align-items: center; gap: 6px; }
 .ob-foot-dots { display: flex; gap: 6px; align-items: center; }
@@ -172,8 +156,8 @@
 .ob-vt { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
 .ob-vp { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.5; }
 
-/* welcome step — personalize accent picker */
-.ob-accent { display: flex; flex-direction: column; gap: 11px; margin-top: 4px; padding-top: 18px; border-top: 1px solid var(--border); }
+/* personalize step — accent picker */
+.ob-accent { display: flex; flex-direction: column; gap: 11px; margin-top: 4px; }
 .ob-accent-label { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); }
 .ob-accent-row { display: flex; flex-wrap: wrap; gap: 10px; }
 .ob-accent-dot {
@@ -183,62 +167,14 @@
   transition: transform .12s ease, box-shadow .15s ease;
 }
 .ob-accent-dot:hover { transform: translateY(-2px); }
-.ob-accent-dot.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in oklch, var(--sw) 80%, transparent); }
+.ob-accent-dot.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in oklab, var(--sw) 80%, transparent); }
 .ob-accent-dot :global(.lucide) { stroke-width: 3; }
 
-.ob-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.ob-choice {
-  display: flex; flex-direction: column; gap: 8px; padding: 16px 15px;
-  text-align: left; cursor: pointer; color: var(--fg);
-  background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card);
-  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
-}
-.ob-choice:hover { border-color: var(--gi-ghost-border); background: var(--surface-hover); transform: translateY(-2px); box-shadow: 0 12px 28px oklch(0 0 0 / 0.28); }
-.ob-choice:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
-.ob-choice-ic { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--gi-ghost-bg); color: var(--accent); }
-.ob-choice-t { font-size: var(--fs-sm); font-weight: 600; }
-.ob-choice-p { font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.45; }
-
-/* generated-key / saved confirmation block */
-.ob-confirm {
-  display: flex; flex-direction: column; gap: 13px; padding: 17px;
-  background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card);
-}
-.ob-confirm-line { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--fg-2); line-height: 1.5; margin: 0; }
-.ob-cmd { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 11px; word-break: break-all; }
-
-.ob-ready { display: flex; flex-direction: column; gap: 13px; padding: 17px; background: var(--bg-elev-1); border: 1px solid var(--gi-ghost-border); border-radius: var(--r-card); }
-.ob-status { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); font-weight: 600; }
-.ob-status :global(.lucide) { flex: none; }
-.ob-status.ok { color: var(--ok); }
-.ob-pathrow { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--fg-muted); }
-.ob-pathrow code { font-family: var(--font-mono); color: var(--fg-2); }
 .ob-hint { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; margin: 0; }
 .ob-hint :global(.lucide) { flex: none; margin-top: 1px; color: var(--fg-subtle); }
-.ob-keybox {
-  position: relative; font-family: var(--font-mono); font-size: 11px; line-height: 1.55;
-  padding: 11px 12px; padding-right: 40px;
-  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm);
-  color: var(--fg-2); word-break: break-all; white-space: pre-wrap;
-}
-.ob-keycopy {
-  position: absolute; top: 8px; right: 8px;
-  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
-  height: 24px; padding: 0 8px; border-radius: var(--radius-sm);
-  background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--fg-muted);
-  font: inherit; font-size: 10.5px; cursor: pointer; transition: all 120ms ease;
-}
-.ob-keycopy:hover { color: var(--fg); border-color: var(--border-strong); }
-.ob-keycopy.copied { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 40%, transparent); }
 
 .ob-error { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--danger); }
 .ob-error :global(.lucide) { flex: none; }
-
-/* ── Connect-server step — grid form ──────────────────────────────────────── */
-.ob-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
-.ob-grid .ob-field.full { grid-column: 1 / -1; }
-.ob-divider { display: flex; align-items: center; gap: 10px; font-size: 10.5px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); }
-.ob-divider::before, .ob-divider::after { content: ""; height: 1px; background: var(--border); flex: 1; }
 
 /* ── Claude step — status rows ────────────────────────────────────────────── */
 .ob-statcard { display: flex; flex-direction: column; gap: 2px; padding: 6px 15px; background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card); }
@@ -249,49 +185,7 @@
 .ob-statrow .v { display: flex; align-items: center; gap: 6px; color: var(--fg); font-weight: 500; }
 .ob-statrow .v.ok { color: var(--ok); }
 .ob-statrow .v.warn { color: var(--warn); }
-.ob-statrow .v.muted { color: var(--fg-faint); }
 .ob-statrow .v :global(.lucide) { flex: none; }
-
-/* ── First-sync step — animated scan / progress ───────────────────────────── */
-.ob-sync { display: flex; flex-direction: column; gap: 16px; }
-.ob-sync-stage {
-  display: flex; flex-direction: column; gap: 15px; padding: 20px;
-  background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card);
-}
-.ob-sync-head { display: flex; align-items: center; gap: 11px; }
-.ob-sync-spin {
-  width: 36px; height: 36px; border-radius: 11px; flex: none; display: grid; place-items: center;
-  background: var(--gi-ghost-bg); color: var(--accent);
-}
-.ob-sync-spin.done { background: color-mix(in oklch, var(--ok) 16%, transparent); color: var(--ok); }
-.ob-sync-htext { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.ob-sync-phase { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-.ob-sync-meta { font-size: 11.5px; color: var(--fg-muted); font-family: var(--font-mono); }
-
-.ob-bar { height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
-.ob-bar-fill { height: 100%; border-radius: 999px; background: var(--accent); width: 0%; transition: width 360ms var(--ease-soft); }
-.ob-bar-fill.done { background: var(--ok); }
-
-.ob-log { display: flex; flex-direction: column; gap: 0; font-family: var(--font-mono); font-size: 11px; }
-.ob-logline { display: flex; align-items: center; gap: 8px; padding: 5px 0; color: var(--fg-muted); }
-@media (prefers-reduced-motion: no-preference) { .ob-logline { animation: ob-logslide 280ms var(--ease-page); } }
-@keyframes ob-logslide { from { transform: translateX(-5px); } to { transform: none; } }
-.ob-logline :global(.lucide) { flex: none; color: var(--ok); }
-.ob-logline .lt { color: var(--fg-2); }
-.ob-logline .ld { margin-left: auto; color: var(--fg-faint); }
-
-/* result summary pills */
-.ob-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-.ob-spill { display: flex; flex-direction: column; gap: 3px; padding: 13px 14px; background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card); }
-.ob-spill .n { font-family: var(--font-mono); font-size: 23px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
-.ob-spill .l { font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-muted); }
-.ob-spill.pull .n { color: var(--info); }
-.ob-spill.push .n { color: var(--accent); }
-.ob-spill.del .n { color: var(--fg-faint); }
-
-.ob-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--fg-muted); line-height: 1.55; }
-.ob-note :global(.lucide) { flex: none; margin-top: 1px; color: var(--fg-subtle); }
-.ob-note strong { color: var(--fg-2); font-weight: 600; }
 
 :where(.ob-overlay) .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -316,7 +210,7 @@
   color: var(--fg-faint); text-transform: uppercase;
 }
 
-/* 1 · Welcome — pulse rings behind the mark */
+/* Welcome / Personalize — pulse rings behind the mark */
 .ob-w-mark {
   position: relative; z-index: 2; width: 58px; height: 58px; border-radius: 17px;
   display: grid; place-items: center; color: var(--accent); background: var(--gi-ghost-bg);
@@ -327,46 +221,17 @@
   border: 1px solid var(--gi-ghost-border); transform: translate(-50%, -50%) scale(0.7); opacity: 0;
 }
 
-/* 2 · SSH — key → lock + hex stream */
-.ob-ssh { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 17px; }
-.ob-ssh-row { display: flex; align-items: center; }
-.ob-ssh-ic { width: 46px; height: 46px; border-radius: 13px; display: grid; place-items: center; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--fg-muted); transition: none; }
-.ob-ssh-wire { width: 86px; height: 2px; position: relative; margin: 0 2px; background: repeating-linear-gradient(90deg, var(--border-strong) 0 5px, transparent 5px 10px); }
-.ob-ssh-dot { position: absolute; top: 50%; left: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); transform: translate(-50%, -50%); box-shadow: 0 0 9px var(--accent); opacity: 0; }
-.ob-hexrow { font-family: var(--font-mono); font-size: 11px; letter-spacing: 2.5px; color: var(--fg-subtle); min-height: 14px; }
-
-/* 3 · Server — local ↔ remote packets */
-.ob-srv { position: relative; z-index: 2; display: flex; align-items: center; }
-.ob-srv-node { width: 50px; height: 50px; border-radius: 14px; display: grid; place-items: center; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--fg-muted); position: relative; }
-.ob-srv-lab { position: absolute; top: calc(100% + 7px); left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-faint); white-space: nowrap; }
-.ob-srv-wire { width: 128px; height: 2px; background: var(--border-strong); position: relative; margin: 0 6px; }
-.ob-srv-pkt { position: absolute; top: 50%; width: 9px; height: 9px; border-radius: 2px; transform: translate(-50%, -50%); opacity: 0; }
-.ob-srv-pkt.up { background: var(--accent); }
-.ob-srv-pkt.down { background: var(--info); }
-
-/* 4 · Claude — breathing core + typing dots */
+/* Claude — breathing core + typing dots */
 .ob-cl { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 16px; }
 .ob-cl-core { position: relative; width: 56px; height: 56px; border-radius: 17px; display: grid; place-items: center; color: var(--accent); background: var(--gi-ghost-bg); box-shadow: inset 0 0 0 1px var(--gi-ghost-border); }
 .ob-tw { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: 0; z-index: 2; }
 .ob-typing { display: flex; gap: 6px; }
 .ob-typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
 
-/* 5 · Sync — scan line over file rows */
-.ob-scan { position: relative; z-index: 2; width: 214px; display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
-.ob-scan-row { height: 9px; border-radius: 3px; background: var(--bg-elev-2); overflow: hidden; }
-.ob-scan-row > i { display: block; height: 100%; border-radius: 3px; background: color-mix(in oklab, var(--accent) 38%, var(--bg-elev-3)); }
-.ob-scan-line { position: absolute; top: -5px; bottom: -5px; left: 0; width: 2px; background: var(--accent); box-shadow: 0 0 13px 1px var(--accent); opacity: 0; z-index: 3; }
-
 @media (prefers-reduced-motion: no-preference) {
   .ob-ring { animation: ob-ring 3.3s ease-out infinite; }
   .ob-ring.r2 { animation-delay: 1.1s; }
   .ob-ring.r3 { animation-delay: 2.2s; }
-  .ob-ssh-dot { animation: ob-travel 2.6s ease-in-out infinite; }
-  .ob-ssh-ic.lock { animation: ob-lock 2.6s ease-in-out infinite; }
-  .ob-srv-pkt.up { animation: ob-pkt-r 2.4s linear infinite; }
-  .ob-srv-pkt.down { animation: ob-pkt-l 2.4s linear infinite; animation-delay: 1.2s; }
-  .ob-srv-node.local { animation: ob-glow 2.4s ease-in-out infinite; }
-  .ob-srv-node.remote { animation: ob-glow 2.4s ease-in-out infinite; animation-delay: 1.2s; }
   .ob-cl-core { animation: ob-breathe 2.8s ease-in-out infinite; }
   .ob-tw.t1 { animation: ob-twinkle 2.4s ease-in-out infinite; }
   .ob-tw.t2 { animation: ob-twinkle 2.4s ease-in-out infinite; animation-delay: 0.8s; }
@@ -374,18 +239,11 @@
   .ob-typing i { animation: ob-bounce 1.3s ease-in-out infinite; }
   .ob-typing i:nth-child(2) { animation-delay: 0.16s; }
   .ob-typing i:nth-child(3) { animation-delay: 0.32s; }
-  .ob-scan-line { animation: ob-sweep 2.6s ease-in-out infinite; }
 }
 @keyframes ob-ring { 0% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.7); } 70% { opacity: 0; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(2.3); } }
-@keyframes ob-travel { 0% { left: 0; opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
-@keyframes ob-lock { 0%, 58% { color: var(--fg-muted); border-color: var(--border); background: var(--bg-elev-2); } 78%, 100% { color: var(--accent); border-color: var(--gi-ghost-border); background: var(--gi-ghost-bg); } }
-@keyframes ob-pkt-r { 0% { left: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
-@keyframes ob-pkt-l { 0% { left: 100%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 0; opacity: 0; } }
-@keyframes ob-glow { 0%, 38% { box-shadow: none; border-color: var(--border); color: var(--fg-muted); } 58%, 100% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 11%, transparent); border-color: var(--gi-ghost-border); color: var(--accent); } }
 @keyframes ob-breathe { 0%, 100% { transform: scale(1); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 0 color-mix(in oklab, var(--accent) 24%, transparent); } 50% { transform: scale(1.07); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 13px color-mix(in oklab, var(--accent) 0%, transparent); } }
 @keyframes ob-twinkle { 0%, 100% { opacity: 0; transform: scale(0.5); } 50% { opacity: 0.9; transform: scale(1); } }
 @keyframes ob-bounce { 0%, 100% { transform: translateY(0); opacity: 0.4; background: var(--fg-subtle); } 50% { transform: translateY(-6px); opacity: 1; background: var(--accent); } }
-@keyframes ob-sweep { 0% { left: 0; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { left: 100%; opacity: 0; } }
 
 /* ── Narrow window ────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {

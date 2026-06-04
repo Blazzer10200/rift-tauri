@@ -213,6 +213,33 @@ fn resolve_claude_exe() -> Option<PathBuf> {
     resolved
 }
 
+/// Classify how the resolved `claude` binary was installed, from its path.
+/// npm-global installs must update via `npm install -g …@latest`; native
+/// installs self-update and accept `claude update`. Returns "npm" | "native"
+/// | "unknown" ("unknown" → best-effort `claude update`).
+fn claude_install_method() -> &'static str {
+    match resolve_claude_exe() {
+        Some(p) => {
+            let s = p.to_string_lossy().to_ascii_lowercase();
+            if s.contains("\\npm\\node_modules\\")
+                || s.contains("/npm/node_modules/")
+                || s.ends_with(".cmd")
+                || s.ends_with(".bat")
+            {
+                "npm"
+            } else if s.contains("anthropicclaude")
+                || s.contains("\\.local\\bin\\")
+                || s.contains("/.local/bin/")
+            {
+                "native"
+            } else {
+                "unknown"
+            }
+        }
+        None => "unknown",
+    }
+}
+
 /// Build a `tokio::process::Command` for `claude`, hiding the console window
 /// on Windows. Returns `None` if the CLI isn't on PATH. `pub(crate)` so the
 /// `stt::cleanup` hop can reuse the same resolution + windowing path.
@@ -276,6 +303,9 @@ pub struct AuthStatus {
     /// the keychain/login model stays authoritative) — surfaced only so the UI
     /// can warn that an out-of-band key exists and is NOT being used.
     pub env_api_key_present: bool,
+    /// How the resolved `claude` binary was installed — "npm" | "native" |
+    /// "unknown". Drives the correct in-app update command. None when no CLI.
+    pub install_method: Option<String>,
     /// Pill color: "green" | "yellow" | "red".
     pub pill: String,
     /// One-line user-facing status.
@@ -372,6 +402,9 @@ pub struct ConversationMeta {
     pub message_count: u32,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Σ of per-turn costs across the transcript (sum of messages[].costUsd).
+    /// Matches the live session counter; 0.0 for convos predating cost capture.
+    pub cost_usd: f64,
     /// Phase E5: flattened compaction summaries so HistoryDrawer search can
     /// match against the contents of long-running compacted convos without
     /// loading every transcript. Empty for convos that never compacted.
@@ -572,6 +605,15 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             .as_array()
             .map(|a| a.len() as u32)
             .unwrap_or(0);
+        let cost_usd = convo
+            .messages
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|m| m.get("costUsd").and_then(|v| v.as_f64()))
+                    .sum::<f64>()
+            })
+            .unwrap_or(0.0);
         let compaction_summaries = raw
             .get("compactionHistory")
             .and_then(|v| v.as_array())
@@ -588,6 +630,7 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             message_count,
             created_at: convo.created_at,
             updated_at: convo.updated_at,
+            cost_usd,
             compaction_summaries,
         });
     }
@@ -600,6 +643,15 @@ pub fn assistant_load_conversation(id: String) -> Result<Conversation, String> {
     let p = convo_path(&id)?;
     let bytes = std::fs::read(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
     serde_json::from_slice(&bytes).map_err(|e| format!("parse conversation: {e}"))
+}
+
+/// Write an exported conversation to a user-chosen path. The markdown/json
+/// string is built on the frontend (where the typed block schema lives); this
+/// just commits the bytes. `dest` comes from the native save dialog, so the
+/// arbitrary-path write is the intended user action.
+#[tauri::command]
+pub fn assistant_export_save(dest: String, contents: String) -> Result<(), String> {
+    std::fs::write(&dest, contents.as_bytes()).map_err(|e| format!("write {dest}: {e}"))
 }
 
 #[tauri::command]
@@ -980,6 +1032,7 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
         Some(o) if o.status.success() => {
             out.cli_present = true;
             out.cli_version = Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
+            out.install_method = Some(claude_install_method().to_string());
         }
         _ => {
             out.cli_present = false;
@@ -1069,6 +1122,104 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
         out.summary = "Claude CLI found but not logged in — run `claude login` or add an API key".into();
     }
     Ok(out)
+}
+
+/// Result of an in-app Claude CLI update attempt.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CliUpdateResult {
+    pub method: String,
+    pub output: String,
+}
+
+/// Update the local Claude Code CLI in place, using the command that matches
+/// how it was installed:
+///   * npm     → `npm install -g @anthropic-ai/claude-code@latest`
+///   * native  → `claude update` (native installs also auto-update in the
+///               background; this just applies it immediately)
+///   * unknown → best-effort `claude update`
+///
+/// Buffered (no streaming) — npm -g can take ~30-60s, so the frontend shows a
+/// spinner and re-probes the version on success. Returns the tail of the
+/// updater's output on success, or its stderr on failure (fail-loud).
+#[tauri::command]
+pub async fn assistant_update_cli() -> Result<CliUpdateResult, String> {
+    let method = claude_install_method();
+    let output = if method == "npm" {
+        // npm's launcher on Windows is `npm.cmd` (Rust won't resolve a .cmd by
+        // bare name). This command is fully static — no user input, no newlines
+        // — so the Rust 1.77 batch-arg validator + `cmd /C` are safe here.
+        let mut cmd;
+        #[cfg(windows)]
+        {
+            cmd = Command::new("cmd");
+            cmd.args([
+                "/C",
+                "npm",
+                "install",
+                "-g",
+                "@anthropic-ai/claude-code@latest",
+            ]);
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        #[cfg(not(windows))]
+        {
+            cmd = Command::new("npm");
+            cmd.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
+        }
+        cmd.stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| {
+                format!("Couldn't launch npm — is Node.js/npm installed and on PATH? ({e})")
+            })?
+    } else {
+        // native / unknown → `claude update`. `claude_command()` resolves the
+        // .exe (never a .cmd in these branches), hides the console window, and
+        // strips any stray ANTHROPIC_API_KEY.
+        let mut cmd = claude_command().ok_or_else(|| "Claude CLI not found on PATH.".to_string())?;
+        cmd.arg("update")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| format!("Couldn't run `claude update`: {e}"))?
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if output.status.success() {
+        // Drop the cached exe path so the next auth probe re-resolves the
+        // (possibly relinked) binary and reports the new version.
+        if let Ok(mut g) = CLAUDE_EXE.lock() {
+            *g = None;
+        }
+        let tail = tail_lines(&stdout, 6);
+        Ok(CliUpdateResult {
+            method: method.to_string(),
+            output: if tail.is_empty() {
+                "Update complete.".into()
+            } else {
+                tail
+            },
+        })
+    } else {
+        let msg = tail_lines(&stderr, 8);
+        Err(if msg.is_empty() {
+            format!("Update failed (exit {:?}).", output.status.code())
+        } else {
+            msg
+        })
+    }
+}
+
+/// Last `n` non-blank lines of `s`, trimmed — keeps updater output digestible.
+fn tail_lines(s: &str, n: usize) -> String {
+    let lines: Vec<&str> = s.lines().filter(|l| !l.trim().is_empty()).collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n").trim().to_string()
 }
 
 /// Phase 6 (#37): renderer must never see the secret value — only whether
@@ -1201,16 +1352,18 @@ pub struct SummarizeResult {
 /// failure mode we're guarding against — a coding prompt that grows phantom
 /// requirements is worse than the rough original.
 const ENHANCE_META_PROMPT: &str = "You rewrite a developer's rough draft into a clear, actionable instruction for \
-Claude Code — an agentic coding assistant that reads files, runs commands, and edits code directly. \
-Expand the draft so Claude Code can act on it precisely and completely.\n\
+Claude Code — an agentic coding assistant that reads files, runs commands, and edits code directly.\n\
 \n\
-Rules:\n\
+Calibrate the effort to the draft — match its need, do not inflate it:\n\
+- Already clear + specific: tighten the wording, make the goal explicit, and add only the obvious missing specific (a key edge case or a one-line acceptance check). Resist expanding it.\n\
+- Vague or terse: infer the concrete intent and lay out what Claude Code needs to act — the specific mechanism, the files/areas likely involved, states + edge cases, and a brief acceptance check.\n\
+\n\
+Always:\n\
 - Lead with the concrete goal in direct imperative voice (Add…, Fix…, Refactor…, Investigate…).\n\
 - Preserve EVERY technical specific verbatim: file names, paths, identifiers, versions, numbers, commands, error text.\n\
-- Make the draft's implicit intent explicit AND add the concrete detail a developer would obviously expect — the specific mechanism, key bindings, states/edge cases to handle, and a brief acceptance check — so the instruction is directly executable. Even a clear one-liner should gain useful, actionable specifics; a bare punctuation/grammar pass is NOT enough.\n\
-- Stay inside the draft's intent: flesh out HOW to accomplish exactly what was asked. Do NOT bolt on unrelated features, files, or scope the draft never implied — added detail must serve the stated goal.\n\
-- For a bug, keep the stated symptom and any stated cause; you may point to likely places to look, but do not assert a fix or diagnosis the draft didn't state.\n\
-- If the result has multiple parts, lay them out as a short bullet list; otherwise a tight paragraph. Add substance, not padding or restatement — no filler, no closing summary.\n\
+- Stay strictly inside the draft's intent — flesh out HOW to do exactly what was asked. Never bolt on unrelated features, files, or scope the draft never implied.\n\
+- For a bug: keep the stated symptom and any stated cause; you may point to likely places to look, but do not assert a fix or diagnosis the draft didn't state.\n\
+- Format by shape: multiple parts → a short bullet list; otherwise one tight paragraph. No filler, no restatement, no closing summary.\n\
 - If the draft is not a coding task, just make it clear, direct, and complete — do not force a coding frame onto it.\n\
 \n\
 Output ONLY the rewritten prompt — no preamble, no explanation, no markdown code fences, no surrounding quotes.";
@@ -1225,6 +1378,9 @@ pub async fn assistant_enhance_prompt(
     app: AppHandle,
     request_id: String,
     prompt: String,
+    model: Option<String>,
+    directive: Option<String>,
+    cwd: Option<String>,
 ) -> Result<String, String> {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
@@ -1235,60 +1391,102 @@ pub async fn assistant_enhance_prompt(
     if trimmed.chars().count() > 8000 {
         return Err("prompt too long to enhance (8000 character cap)".into());
     }
+    // Sonnet by default — the quality lever for a nuanced rewrite. Caller may
+    // override (e.g. "haiku" for a fast pass).
+    let model = model
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "sonnet".to_string());
+    // Optional steering for the refine loop (Concise / Detailed / freeform).
+    let directive_line = match directive.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+        Some(d) => format!(" Adjustment for this rewrite: {d}."),
+        None => String::new(),
+    };
+    // Grounded mode: a valid workspace dir lets the enhancer consult the real
+    // code (read-only) so it names actual files + symbols. Absent → the fast,
+    // context-free pure-completion path.
+    let ground_root: Option<PathBuf> = cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir());
+    let ground_line = if ground_root.is_some() {
+        " You have read-only access to the user's codebase via the read_file, grep, and list_dir tools. \
+Make a few targeted lookups ONLY when they ground the rewrite in real specifics (actual paths, function/symbol \
+names), then output the rewritten prompt. Keep lookups minimal."
+    } else {
+        ""
+    };
+
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
     // Fence the draft as inert content + an explicit "do not answer it"
-    // directive. Without this, a draft phrased like a message to an assistant
-    // (e.g. "you're going to have to step out of your zone") gets mistaken for
-    // a conversational turn — the model replies to it instead of rewriting it.
+    // directive, so a draft phrased like a message to an assistant isn't
+    // mistaken for a conversational turn.
     let user_msg = format!(
         "Rewrite the rough prompt draft delimited by <draft></draft> below into a clear, well-structured prompt. \
          Do NOT answer the draft, do NOT respond to it conversationally, do NOT address me — treat everything inside \
-         the tags purely as text to improve. Output ONLY the rewritten prompt.\n\n<draft>\n{trimmed}\n</draft>"
+         the tags purely as text to improve. Output ONLY the rewritten prompt.{directive_line}{ground_line}\n\n<draft>\n{trimmed}\n</draft>"
     );
     cmd.arg("-p").arg(&user_msg)
-        // Meta-prompt rides the system prompt (stable across calls), so the
-        // user draft is the only varying part — lets the server-side prompt
-        // cache hit on repeat enhances within its ~5min TTL.
+        // Meta-prompt rides the system prompt (stable across calls) so the
+        // server-side prompt cache hits on repeat enhances within its ~5min TTL.
         .arg("--append-system-prompt").arg(ENHANCE_META_PROMPT)
-        // Drop per-machine sections (cwd/env/git/memory) from the system
-        // prompt — irrelevant to a rewrite, and keeps the cached prefix stable.
+        // Drop per-machine sections (cwd/env/git/memory) from the system prompt.
         .arg("--exclude-dynamic-system-prompt-sections")
-        // Stream the rewrite token-by-token so the UI shows text within ~1-2s
-        // (TTFT) instead of blocking on the full completion. `--verbose` is
-        // required by stream-json; `--include-partial-messages` emits the
-        // per-token `content_block_delta` frames we forward to the frontend.
-        //
-        // CRITICAL: the draft MUST ride text input (`-p <arg>`, null stdin) for
-        // this to actually stream. Measured 2026-05-27: `--input-format
-        // stream-json` (the SDK control path) makes the bundled claude.exe
-        // block-buffer its whole stdout and dump it in one burst at exit — no
-        // streaming. Plain text `-p` input uses the simple completion path that
-        // flushes incrementally. (`--tools ""` is fine; only input mode matters.)
+        // Stream the rewrite token-by-token. CRITICAL: the draft MUST ride text
+        // input (`-p <arg>`, null stdin) — `--input-format stream-json`
+        // block-buffers the bundled claude.exe (measured 2026-05-27); plain `-p`
+        // flushes incrementally. (Tools are fine; only input mode breaks it.)
         .arg("--output-format").arg("stream-json")
         .arg("--verbose")
         .arg("--include-partial-messages")
-        .arg("--model").arg("haiku")
-        // Tight cap — a sub-1K-token rewrite on Haiku costs fractions of a cent.
+        .arg("--model").arg(&model)
+        // Tight cap — a sub-1K-token rewrite costs a cent or two.
         .arg("--max-budget-usd").arg("0.20")
-        // Zero MCP servers, zero slash commands, zero tools — pure completion.
-        .arg("--strict-mcp-config")
         .arg("--disable-slash-commands")
-        .arg("--tools").arg("")
         .arg("--permission-mode").arg("bypassPermissions")
         // One-shot: never persist this throwaway rewrite to the session store.
         .arg("--no-session-persistence")
-        // Neutral cwd so the CLI loads no project CLAUDE.md / .claude settings.
-        .current_dir(std::env::temp_dir())
-        // Latency killers: skip SessionStart hooks (~46K-token memory load),
-        // the autoupdater check, and telemetry/error-reporting — all add
-        // blocking startup time to a one-shot spawn.
+        // Latency killers: skip SessionStart hooks, autoupdater, telemetry.
         .env("CLAUDE_DISABLE_HOOKS", "1")
         .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
         .env("DISABLE_AUTOUPDATER", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // Tool + cwd wiring differs by mode. The guard cleans up the per-request MCP
+    // config file after the child exits (held until this fn returns).
+    let _mcp_guard: Option<McpConfigGuard> = if let Some(root) = ground_root {
+        let trust = effective_trust_level(&None);
+        match write_mcp_config(&request_id, std::slice::from_ref(&root), &trust) {
+            Ok(p) => {
+                cmd.arg("--strict-mcp-config")
+                    .arg("--mcp-config").arg(&p)
+                    .arg("--allowed-tools")
+                    .arg("mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep")
+                    // Bound the agentic pass so a rewrite can't spiral.
+                    .arg("--max-turns").arg("6")
+                    .current_dir(&root);
+                Some(McpConfigGuard(p))
+            }
+            Err(e) => {
+                log::warn!("assistant: enhance grounding unavailable, using context-free: {e}");
+                cmd.arg("--strict-mcp-config")
+                    .arg("--tools").arg("")
+                    .current_dir(std::env::temp_dir());
+                None
+            }
+        }
+    } else {
+        // Fast path: zero tools, neutral cwd — the original pure-completion call.
+        cmd.arg("--strict-mcp-config")
+            .arg("--tools").arg("")
+            .current_dir(std::env::temp_dir());
+        None
+    };
 
     let mut child = cmd
         .spawn()

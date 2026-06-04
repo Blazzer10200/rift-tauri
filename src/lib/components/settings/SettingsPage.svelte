@@ -4,7 +4,7 @@
   import {
     Cog, Info, RefreshCw, Sparkles, Palette,
     FolderOpen, Copy, Check, Eye, EyeOff, Mic, Accessibility as A11yIcon,
-    CircleCheck, RotateCcw, Trash2,
+    CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
@@ -133,6 +133,12 @@
   // always shows the true status even after the toolbar badge was dismissed.
   const cliInstalled = $derived(assistantStore.auth?.cliVersion ?? null);
   const cliNewer = $derived(cliUpdate.isNewer(cliInstalled));
+  const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
+  $effect(() => { cliUpdate.setMethod(assistantStore.auth?.installMethod ?? null); });
+  async function runCliUpdate() {
+    const ok = await cliUpdate.runUpdate();
+    if (ok) await assistantStore.refreshAuth();
+  }
   function fmtAgo(ts: number, now: number): string {
     const s = Math.max(0, Math.round((now - ts) / 1000));
     if (s < 10) return "just now";
@@ -473,14 +479,27 @@
                     <button class="st-btn" type="button" onclick={() => void cliUpdate.maybeCheck(true)} disabled={cliUpdate.status === "checking"}><RefreshCw size={14} /> Check</button>
                   </div>
                 </div>
-                <div class="st-row-desc">Rift spawns your local <code>claude</code> install{#if cliInstalled} (currently <code>{cliInstalled}</code>){/if}. It checks npm for newer releases — the CLI self-updates, Rift just lets you know.</div>
+                <div class="st-row-desc">
+                  Rift spawns your local <code>claude</code> install{#if cliInstalled} (currently <code>{cliInstalled}</code>){/if}{#if cliIsNative} via the native installer{:else if cliUpdate.method === "npm"} via npm{/if}.
+                  {#if cliIsNative}It auto-updates in the background — Rift can also apply updates on demand.{:else}Rift checks npm for newer releases and can update it for you.{/if}
+                </div>
                 {#if cliNewer}
-                  <div class="st-cli-cmd">
-                    <code>{cliUpdate.updateCommand}</code>
-                    <button class="st-cli-copy" class:done={cliUpdate.copied} type="button" onclick={() => void cliUpdate.copyCommand()} use:tooltip={"Copy update command"} aria-label="Copy update command">
-                      {#if cliUpdate.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
+                  <div class="st-cli-act">
+                    <button class="st-btn primary" type="button" disabled={cliUpdate.updating} onclick={runCliUpdate}>
+                      {#if cliUpdate.updating}<Loader2 size={14} class="st-spin" /> Updating…{:else}<ArrowUpCircle size={14} /> Update now{/if}
                     </button>
+                    <div class="st-cli-cmd">
+                      <code>{cliUpdate.updateCommand}</code>
+                      <button class="st-cli-copy" class:done={cliUpdate.copied} type="button" onclick={() => void cliUpdate.copyCommand()} use:tooltip={"Copy update command"} aria-label="Copy update command">
+                        {#if cliUpdate.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
+                      </button>
+                    </div>
                   </div>
+                  {#if cliUpdate.updateError}
+                    <div class="st-cli-err">{cliUpdate.updateError}</div>
+                  {:else if cliUpdate.updateOutput}
+                    <div class="st-cli-ok">{cliUpdate.updateOutput}</div>
+                  {/if}
                 {/if}
               </div>
               <div class="st-row">
@@ -977,6 +996,13 @@
   .st-cli-copy { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; transition: color 120ms, border-color 120ms, background 120ms; }
   .st-cli-copy:hover { color: var(--fg); border-color: var(--border-strong); }
   .st-cli-copy.done { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .st-cli-act { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .st-cli-act .st-cli-cmd { margin-top: 0; }
+  .st-btn :global(.st-spin) { animation: st-spin 0.8s linear infinite; }
+  @keyframes st-spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .st-btn :global(.st-spin) { animation: none; } }
+  .st-cli-err { margin-top: 7px; font-size: var(--fs-xs); color: var(--danger, #e66); white-space: pre-wrap; }
+  .st-cli-ok { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); white-space: pre-wrap; }
 
   /* ── About: kv + resource rows ── */
   .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 17px; }
