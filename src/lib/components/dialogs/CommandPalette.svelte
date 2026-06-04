@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { fly, fade } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import {
@@ -159,6 +159,7 @@
 
   // Flat list used for keyboard cursor — must mirror the rendered order.
   const flat = $derived(grouped.flatMap((g) => g.items));
+  const flatIdx = $derived(new Map(flat.map((it, i) => [it.id, i])));
 
   // ── Open / focus / keyboard ─────────────────────────────────────────
   $effect(() => {
@@ -182,7 +183,8 @@
 
   // Clamp cursor when filter shrinks the list
   $effect(() => {
-    if (activeIdx >= flat.length) activeIdx = Math.max(0, flat.length - 1);
+    const len = flat.length;
+    untrack(() => { if (activeIdx >= len) activeIdx = Math.max(0, len - 1); });
   });
 
   function onKeydown(e: KeyboardEvent) {
@@ -263,7 +265,7 @@
           {#each grouped as g (g.group)}
             <div class="cp-group-label">{g.group}</div>
             {#each g.items as it (it.id)}
-              {@const idx = flat.indexOf(it)}
+              {@const idx = flatIdx.get(it.id) ?? 0}
               {@const Icon = it.icon}
               <!-- svelte-ignore a11y_mouse_events_have_key_events -->
               <button
@@ -387,7 +389,7 @@
     background: color-mix(in oklab, var(--accent) 16%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 26%, transparent);
   }
-  .cp-item:focus-visible { outline: none; }
+  .cp-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   .cp-item-icon {
     display: inline-flex; align-items: center; justify-content: center;

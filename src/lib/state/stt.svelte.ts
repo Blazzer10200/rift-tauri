@@ -134,7 +134,7 @@ class SttStore {
 
   // Whisper-specific reactive state.
   models = $state<ModelInfo[]>([]);
-  modelDownloads = $state<Record<string, DownloadProgress>>({});
+  modelDownloads = $state<Record<string, DownloadProgress | undefined>>({});
   inputDevices = $state<string[]>([]);
   /** True once stt_start_recording has been invoked but before recording=true arrives via event. */
   whisperStartInvoked = $state(false);

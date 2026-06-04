@@ -161,7 +161,7 @@
         disabled={def.disabled}
         use:tooltip={uiPrefs.railPinned ? "" : (def.disabled ? `${def.title} — Coming soon` : `${def.title} · Ctrl+${def.kbd} · drag to reorder`)}
         aria-label={isActive ? `${def.title} (active)` : def.title}
-        aria-pressed={isActive}
+        aria-current={isActive ? 'page' : undefined}
         onpointerdown={(e) => { if (!def.disabled) onPointerDown(idx, e); }}
         onpointermove={onPointerMove}
         onpointerup={onPointerUp}
@@ -199,7 +199,7 @@
         data-disabled="false"
         use:tooltip={uiPrefs.railPinned ? "" : `${def.title} · Ctrl+${def.kbd} · Ctrl+,`}
         aria-label={isActive ? `${def.title} (active)` : def.title}
-        aria-pressed={isActive}
+        aria-current={isActive ? 'page' : undefined}
         onclick={() => workspace.setActive("settings")}
       >
         <span class="ab-hit">

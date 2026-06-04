@@ -93,7 +93,7 @@
     const onChat = workspace.activeId === "chat";
     if (!opened) return;
     if (onChat) {
-      void invoke("browser_show").then(syncBounds);
+      void invoke("browser_show").then(syncBounds).catch((e) => { error = String(e); });
     } else {
       void invoke("browser_hide");
     }

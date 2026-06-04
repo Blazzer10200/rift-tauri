@@ -33,7 +33,7 @@
   // ── lifecycle ──────────────────────────────────────────────────────
   $effect(() => {
     browserDock.init();
-    updates.checkOnLaunch();
+    void updates.checkOnLaunch();
   });
 
   // HMR-safe global keydown — $effect cleanup runs on unmount AND when the
@@ -72,7 +72,7 @@
       }
       if (e.key === "Tab") {
         e.preventDefault();
-        void assistant.cycleTab(e.shiftKey ? -1 : 1);
+        assistant.cycleTab(e.shiftKey ? -1 : 1).catch(err => toast.push({ severity: "danger", title: String(err) }));
         return;
       }
       // Ctrl+\ → add a pane (right of focused). Ctrl+Shift+\ → close focused pane.
