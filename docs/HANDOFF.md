@@ -2,73 +2,43 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-04 (cont. 37) — EDIT-SWARM 2nd PASS: 47 REMAINING FE FINDINGS CLEARED
+
+2nd swarm pass over all 3 buckets (state-ts 14 · comp-assistant 17 · comp-other 16 = 47). All 47 now **resolved or flagged**. `npm run check` 4080/0/0 at every commit. `edit-done.json` 62→88.
+- **10 applied + committed:** `90ff50f` state-ts (F172 stt `destroy()`, F180 restoreTabs single-load, F215/F217 everOpened) · `80d24f1` comp-assistant (F30 no openTab on right-click, F134 effort-slider keyboard-reachable) · `ad04775` comp-other (F164 progressbar aria-label, F232 Confirm dontAsk reset, F198 Select aria-disabled+CSS) · `092f07f` hand-done F173 (stt per-channel listen try/catch).
+- **12 verified already-fixed** (recorded as done, grep-confirmed): F20,F27,F29,F155,F184,F223,F228,F148,F174,F206,F207,F209 — fixed in 1st pass / coincidentally; swarm correctly deferred.
+- **4 resolved-by-deletion:** F167–F170 target `ChatRail.svelte` (deleted cont.35).
+- **21 FLAGGED — genuine judgment, NOT applied, NOT in done.json:**
+  - state-ts (9): **F24** config-mutator try/catch (6 mutators) · **F48** thinking-effort/permission-mode dual-storage split · **F51** compaction `forceNextFirstTurn` persistence · **F140** StreamEnvelope `usage` type · **F146** removeQueued tabId param · **F147** void send() catch · **F204** telemetry O(M×N) per-model avg · **F224** toast resume remaining-time · **F226** accessibility init try/catch.
+  - comp-assistant (4): **F135** settings-menu mixed-ARIA roles · **F165** Markdown `everStreamed` $derived→$effect (1-frame reveal regression) · **F166** ActivityPanel 1s-ticker re-render · **F182** AssistantWelcome greeting reactivity (needs clock tick, $derived insufficient).
+  - comp-other (8): **F33** Markdown per-tick DOM reparse · **F44** toast pause/resume remaining-time (store-side, pairs w/ F224) · **F150** role=menu arrow-key roving-tabindex · **F187** ActivityBar pointer-capture ownership · **F189** HomePage greeting (same as F182) · **F190** HomePage branch stale-write race · **F191** branch-load fail-loud (state-side) · **F230** EmptyState tone — *audit's suggested_fix is WRONG* (CSS targets `.empty-glyph`, not `.empty`; real fix needs a `.empty[data-tone]` rule or restructure).
+
+### RESUME HERE — frontend audit swarm COMPLETE
+All swarmable + mechanical FE findings done. Remaining work = the 21 judgment calls above (hand-do per-item, not swarmable) + the permanent HELD set below. Pick any flagged ID and implement manually.
+- **HELD — never swarm (manual only):** 3 highs (`mod.rs:2143`, `mcp_server.rs:302`, F39 `AssistantPage:205`) · all Rust (quit tauri dev first) · all security · vitest F237 (`npm i -D vitest@^4.1.8`) · dead-CSS F233/F234 (flag-not-delete). `edit-batch.py` auto-holds these.
+
+Tracking: `.tmp/edit-done.json` (88 IDs). Re-emit any bucket: `python scripts/edit-batch.py <bucket>` (auto-excludes done+held).
+
 ## Session 2026-06-04 (cont. 36) — EDIT-SWARM: 64 FRONTEND FIXES + TOOLING HARDENED
 
-Ran the edit-swarm over all 3 frontend buckets. 4 batches, each gated `npm run check` 4080/0/0 + committed separately. **64 fixes committed** (on top of cont.34's 19).
-- `f1446bc` b2-canary: 3 state · `9d1f3d1` b2: 24 state-layer · `fea1df3` b3: 16 assistant-components · `f127664` b4: 21 shell/dialog/component.
-- Categories: reactivity/keying ($state/untrack, MessageBubble expandedThinking stable-key, CommandPalette O(N) index map), fail-loud error handling (.catch on IPC, surface lastError/lastNotice), a11y (aria-labels, focus rings, reduced-motion, headings), type-safety (drop unsafe IPC casts), leaks (timer onDestroy, listener guards).
-- **Manual completions** where coupled patches partial-applied: F144, F26, F45, F152. All re-verified green.
-- **Tooling hardened (`942ad5c`):** `edit-apply.py` now applies each finding **atomically** (all-or-nothing — kills the partial-apply build-break class; writes `.tmp/edit-last-touched.txt` for scoped commits). `edit-batch.py` held-set now also auto-catches dependency bumps, dead-code deletions, package.json/lockfiles, + explicit `HELD_IDS`.
-- ⚠️ **`git add -A` entanglement:** b2 commits `f1446bc`/`9d1f3d1` swept a concurrent session's then-uncommitted cont.35 work (backdrop + ChatRail delete). Nothing lost; tree clean. **Use scoped `git add` now (the applier emits the path list).**
-
-### RESUME HERE — 47 frontend findings remain (deferred/missed/rejected) + held
-The 4 batches APPLIED 62; the rest of each bucket did NOT apply (swarm deferred, verifier rejected, or apply-missed) and are NOT in `edit-done.json`. `edit-batch.py` re-emits them: **state-ts 14 · comp-assistant 17 · comp-other 16**.
-- **Option A — one more swarm pass (cheap, now safe):** the atomic applier means a re-run can't break the build. `python scripts/edit-batch.py <bucket>` → Workflow `args.findings` → `edit-apply.py <out> --apply` → `npm run check` → `git add $(cat .tmp/edit-last-touched.txt)` → commit → append applied IDs to `edit-done.json`. A 2nd pass catches findings the swarm deferred conservatively the first time.
-- **Option B — hand-do the true-manual ones:** F33 Markdown streaming perf · F44 toast remaining-time · F150 menu arrow-keys · F190/F191 HomePage branch race/error · F206 Splash destroy-guard · F209 toast icon typing · apply-missed F164/F173/F232.
-- **HELD — do NOT swarm (manual only):** 3 highs (`mod.rs:2143`, `mcp_server.rs:302`, F39 `AssistantPage:205`) · all Rust (quit tauri dev first) · all security · vitest F237 (`npm i -D vitest@^4.1.8`) · dead-CSS F233/F234 (flag-not-delete). `edit-batch.py` now auto-holds these.
-
-Tracking: `.tmp/edit-done.json` (62 IDs). Watchers: `scripts/edit-watch.{sh,ps1,cmd}` auto-find newest run (`scripts\edit-watch.cmd` = command-prompt).
+Edit-swarm 1st pass: 4 batches, each gated 4080/0/0, committed separately. **64 fixes** (`f1446bc`/`9d1f3d1`/`fea1df3`/`f127664`) — reactivity/keying, fail-loud .catch, a11y, type-safety, leaks. **Tooling hardened (`942ad5c`):** `edit-apply.py` atomic per-finding (+ writes `.tmp/edit-last-touched.txt` for scoped commits); `edit-batch.py` auto-holds Rust/security/deps/deletions/pkg + `HELD_IDS`. ⚠️ Use scoped `git add` (applier emits path list) — `git add -A` once swept a concurrent session's work. Detail: `git log`.
 
 ## Session 2026-06-04 (cont. 35) — BACKDROP CALM + LEFT CHAT-RAIL RETIRED (UNSHIPPED v0.4.46)
 
-Frontend-only, concurrent w/ cont.34 swarm session. `npm run check` 4080/0/0 (−1 file). Verified live via CDP.
+Frontend-only, concurrent w/ cont.34 swarm. 4080/0/0, CDP-verified. **Atmos backdrop** (`AssistantPane.svelte` `.atmos-glow`): killed top-edge accent band → ambient neutral pool behind hero (`radial 120% 80% at 50% 34%`, accent 3% + `--fg` 1.5%) + faint floor vignette, opacity 0.85, pane-wide. **Left chat rail RETIRED** — `ChatRail.svelte` deleted, all `chatRail*`/`.rail-toggle` state stripped; history lives only in `HistoryDrawer` (View menu). 🟡 `railPinned`/`applyRail()`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts` still dead (cont.32 orphan, user-deferred). Detail: `git log`.
 
-- **Atmos backdrop** (`AssistantPane.svelte` `.atmos-glow`): killed top-edge accent band (was `radial 85% 100% at 50% 0%`, accent 6→2%). Now ambient lift — neutral center pool behind hero (`radial 120% 80% at 50% 34%`, accent **3%** + `--fg` 1.5%) + faint floor vignette (`#000 26%` at 50% 118%), opacity 0.85. Blends into `--bg`; grain kept. **Pane-wide** (behind convos too, intentional).
-- **Left chat rail RETIRED** (user: redundant vs History drawer). Deleted `ChatRail.svelte`; removed its mount+import in `AssistantPage.svelte`, the `.rail-toggle` btn+CSS + orphaned `PanelLeft`/`uiPrefs` imports in `ChatTabsBar.svelte`; stripped ALL `chatRail*` state from `ui-prefs.svelte.ts` (collapsed/width, set/toggle, CHAT_RAIL_* consts, 2 LS keys). History unchanged (`openHistory()` → `HistoryDrawer` via View menu).
+## Session 2026-06-04 (cont. 34) — SWARM AUDIT + EDIT-SWARM INFRA
 
-### 🟡 Next / flags
-- `railPinned`/`applyRail()`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts` STILL dead (separate cont.32 orphan) — user deferred sweep. Safe next pass.
-
----
-
-## Session 2026-06-04 (cont. 34) — SWARM AUDIT + EDIT-SWARM (in progress)
-
-Built two multi-agent Workflow pipelines. **Read `docs/audit-2026-06-04/README.md` first.**
-
-### Completed
-- **Audit swarm** (`scripts/audit-swarm.workflow.js`): 217 finders → adversarial verify → synth. 554 agents, ~18M tok, ~24min. **247 confirmed findings** → `docs/audit-2026-06-04/` (README index, `00-priority-triage.md`, 11 area files, `_full-report.md`).
-- **Edit swarm** (`scripts/edit-swarm.workflow.js`): per-finding read-only patch propose → adversarial diff-verify. Returns patches; **never writes** (writes caller-side via `scripts/edit-apply.py`, exact-match + uniqueness, `--apply` to write, dry by default).
-- **20/247 fixed, all svelte-check green, committed:** canary 4 + batch 1 (16 a11y/error fixes, 12 files). Commits: `e1a616f` (baseline = pure-assistant conversion + tooling), `abf2899` (batch 1).
-
-### (RESUME superseded by cont.36 — all frontend-swarmable now done)
-Durable worklist (244, COMMITTED) at `docs/audit-2026-06-04/edit-worklist.json` (id/file/line/severity/title/suggested_fix). Edit-swarm flow: filter bucket → Workflow `args.findings` → `python scripts/edit-apply.py <task-output> --apply` → `npm run check` → commit touched paths.
-
-### Key Decisions / Invariants
-- **Hybrid by design:** swarm only FRONTEND mechanical (a11y, swallowed-err, null-guards, keying). **Hold for MANUAL:** the **3 highs** (mod.rs:2143 stdout deadlock, mcp_server.rs:302 UTF-8 slice panic, AssistantPage.svelte:205 pane keying), all **Rust** (cargo-check collides w/ tauri dev — quit dev first), and **security** findings (git_local.rs:72 traversal etc.).
-- Applier **normalizes paths before grouping** (planners return mixed abs/rel → same file = one group).
-- Baseline committed → `git checkout <file>` is now a SAFE per-file revert for a bad batch.
-- `docs/IDEAS.md` = edit-swarm concept notes.
-
-### Files / scripts added
-- `scripts/`: audit-swarm.workflow.js, audit-watch.sh, audit-assemble.py, audit-split.py, edit-swarm.workflow.js, edit-apply.py, edit-worklist.py, edit-watch.sh
-- `docs/audit-2026-06-04/`, `docs/IDEAS.md`
+**Read `docs/audit-2026-06-04/README.md` first.** Two multi-agent Workflow pipelines built:
+- **Audit swarm** (`scripts/audit-swarm.workflow.js`): 217 finders → adversarial verify → synth. **247 confirmed findings** → `docs/audit-2026-06-04/` (durable worklist at `edit-worklist.json`).
+- **Edit swarm** (`scripts/edit-swarm.workflow.js`): per-finding read-only patch propose → adversarial diff-verify; **never writes** (caller-side `scripts/edit-apply.py`, exact-match + uniqueness, `--apply` to write, dry by default). Baseline `e1a616f` committed → `git checkout <file>` = safe per-file revert.
+- **Hybrid by design:** swarm only FE mechanical. Applier normalizes paths before grouping. `docs/IDEAS.md` = concept notes. Other scripts: audit-watch/assemble/split, edit-batch/watch.
 
 ---
 
 ## Session 2026-06-04 (cont. 33) — ACTIVITY PANEL REORG + SESSION DIFF (UNSHIPPED v0.4.46)
 
-Frontend-only. `npm run check` 4081/0/0. **Verified live against a REAL assistant turn (CDP)** — not just preview.
-
-**Activity panel** (`ActivityPanel.svelte`): killed Now/Steps double-spin — live units live ONLY in the Now cluster (headline + `.now-live` rows at 2+ running); **Steps = settled, actions-only** (`logSteps` filters out `cat==="write"`). New **Outputs** section = deduped write/edit artifacts w/ net +/−, opens Diff. Timeline spine (`.rows::before`, icons z1 punch through). Done-cap enriched. Path rows rtl-clip (keep extension).
-
-**Session Diff** (NEW `SessionDiff.svelte`): full-pane review of every edit this convo, grouped by file; reuses `EditDiff` via new `hideHead` prop; Write→all-adds (`old_string:""`), MultiEdit expands. Reads `tab.messages` (real). State `assistant.ui.diffOpen/diffTarget`. 5 entry points, all verified live: **Review-diff btn** (`MessageBubble.reviewDiff` — was DEAD, scrolled to removed `actnode-*` anchor; now opens overlay deep-linked via new `turnStats.firstEditFile`), Outputs Diff-link + row, `Ctrl+Shift+D` (AppShell), View-menu "Session diff" (`ChatTabsBar`).
-
-**Preview** (flask toggle + `activity-preview.svelte.ts`) added to iterate, then **fully removed** per user — file deleted, every `preview.on?` branch reverted to real source. Grep-clean.
-
-### 🟡 Next / flags
-- Done-cap counts all settled tools (incl writes) → shows "7 steps" while Steps badge shows 5. Left as whole-turn total; relabel "actions" if it reads odd.
-- `classifyTool` + SessionDiff don't strip `mcp__rift__` prefix (MessageBubble does, ln 355). CLI built-in Read/Write render fine; rift MCP `read_file/list_dir/grep` would show as generic `meta` rows — map+strip next pass.
-- Scratch `.tmp/activity-test.md` left in dev workspace from live test — deletable.
+Frontend-only, 4081/0/0, CDP-verified. **Activity panel** Now/Steps double-spin killed (invariant in DON'T-TOUCH). **Session Diff** (`SessionDiff.svelte`): full-pane per-file review reusing `EditDiff` (`hideHead`), reads `tab.messages`, 5 live-verified entry points incl. revived `MessageBubble.reviewDiff` (deep-links `turnStats.firstEditFile`). Preview toggle added then fully removed (grep-clean). 🟡 flags: done-cap counts writes (shows "7 steps" vs badge 5); `classifyTool`+SessionDiff don't strip `mcp__rift__` prefix; scratch `.tmp/activity-test.md` deletable. Detail: `git log`.
 
 ## cont. 32 — SHELL NAV REDESIGN (UNSHIPPED v0.4.46)
 Titlebar nav: left activity column removed → Home/Chat `.navitem`s + Settings gear in `Titlebar.svelte` (Ctrl+1/2); chat-rail toggle → `.rail-toggle` in `ChatTabsBar` (`uiPrefs.toggleChatRail()`); model/slash/mention menus → opaque (`app.css .rift-menu`); dock-resize z 2→6. **Orphans (cleanup):** `ActivityBar.svelte` unmounted (kept per safety) + dead `railPinned`/`applyRail`/`--rail-w`/`RAIL_PINNED_KEY` in `ui-prefs.svelte.ts`. Detail: `git log`.
