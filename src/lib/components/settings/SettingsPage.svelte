@@ -148,6 +148,7 @@
     try {
       await assistantStore.setApiKey(asstApiKeyDraft);
       asstApiKeyMsg = asstApiKeyDraft.trim() ? "Saved." : "Cleared.";
+      asstApiKeyDraft = ""; // F159: clear so the Save button disables after a successful save
     } catch (e) {
       asstApiKeyMsg = `Failed: ${e}`;
     } finally {
@@ -192,7 +193,7 @@
     void assistantStore.init().then(() => {
       asstApiKeyDraft = "";
       asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
-    });
+    }).catch((e) => console.warn("assistantStore.init failed", e)); // F160: no unhandled rejection
     void stt.init();
     void loadAboutPaths();
     void cliUpdate.maybeCheck();
