@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Live watcher for the rift-edit-swarm. Usage: bash scripts/edit-watch.sh [run_id]
 set -u
-BASE="C:/Users/BLAZZER/.claude/projects/c--AI-Workflow-projects-rift-tauri/119d105b-86c2-4475-be27-acefbda9f7fe/subagents/workflows"
-DIR=$([ "${1:-}" != "" ] && echo "$BASE/$1" || ls -dt "$BASE"/wf_* 2>/dev/null | head -1)
+# auto-find the newest wf_* run across ALL session dirs (session UUID changes per session)
+ROOT="C:/Users/BLAZZER/.claude/projects/c--AI-Workflow-projects-rift-tauri"
+if [ "${1:-}" != "" ]; then
+  DIR=$(ls -dt "$ROOT"/*/subagents/workflows/"$1" 2>/dev/null | head -1)
+else
+  DIR=$(ls -dt "$ROOT"/*/subagents/workflows/wf_* 2>/dev/null | head -1)
+fi
 J="$DIR/journal.jsonl"
 cnt(){ grep -o "$1" "$J" 2>/dev/null | wc -l | tr -d ' '; }
 while true; do

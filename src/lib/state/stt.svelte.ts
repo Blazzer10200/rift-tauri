@@ -136,6 +136,8 @@ class SttStore {
   models = $state<ModelInfo[]>([]);
   modelDownloads = $state<Record<string, DownloadProgress>>({});
   inputDevices = $state<string[]>([]);
+  /** True once stt_start_recording has been invoked but before recording=true arrives via event. */
+  whisperStartInvoked = $state(false);
 
   // --- Private fields ---
   private recognition: SpeechRecognitionInstance | null = null;
@@ -295,6 +297,7 @@ class SttStore {
       try {
         await invoke("stt_start_recording", { model: this.config.whisper_model });
         // `recording` flips to true once the `stt://state: recording` event arrives.
+        this.whisperStartInvoked = true;
         return true;
       } catch (e) {
         this.lastError = `Could not start whisper recording: ${e}`;
@@ -337,7 +340,8 @@ class SttStore {
   /** End live recognition. */
   async stop(): Promise<string> {
     if (this.config.engine === "whisper") {
-      if (!this.recording && !this.transcribing) return this.lastTranscript;
+      if (!this.recording && !this.transcribing && !this.whisperStartInvoked) return this.lastTranscript;
+      this.whisperStartInvoked = false;
       try {
         this.transcribing = true;
         const final = await invoke<string>("stt_stop_recording");

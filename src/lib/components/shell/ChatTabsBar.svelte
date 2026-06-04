@@ -4,10 +4,9 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, PanelLeft, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, Layers, History, ChevronDown, ChevronRight, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff } from "lucide-svelte";
+  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, Layers, History, ChevronDown, ChevronRight, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff } from "lucide-svelte";
   import { onDestroy, onMount } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
   import { browserDock } from "../../state/browserDock.svelte";
@@ -436,17 +435,6 @@
 </script>
 
 <div class="tabsbar" data-model={modelFamily(assistant.model)} role="tablist" aria-label="Chat tabs">
-  <button
-    class="rail-toggle"
-    type="button"
-    data-active={!uiPrefs.chatRailCollapsed}
-    onclick={() => uiPrefs.toggleChatRail()}
-    use:tooltip={uiPrefs.chatRailCollapsed ? "Show chat history" : "Hide chat history"}
-    aria-label="Toggle chat history"
-    aria-pressed={!uiPrefs.chatRailCollapsed}
-  >
-    <PanelLeft size={15}/>
-  </button>
   <div class="strip">
     {#each tabs as id, idx (id)}
       <div
@@ -931,23 +919,6 @@
   /* Emerald-only — the tabs bar no longer tints by model, matching the
      composer ring. Model identity lives on the picker model-card swatch. */
   .tabsbar                      { --model-color: var(--accent); }
-  /* History-rail toggle — pinned at the bar's left edge (replaced the floating
-     `>` sliver). Active = rail open. Only mounted on the Chat workspace. */
-  .rail-toggle {
-    flex-shrink: 0;
-    display: grid; place-items: center;
-    width: 30px; align-self: center; height: 26px;
-    margin-left: 6px;
-    border: 1px solid transparent;
-    border-radius: 7px;
-    background: transparent;
-    color: var(--fg-subtle);
-    cursor: pointer;
-    transition: background 130ms var(--ease-soft), color 130ms var(--ease-soft), border-color 130ms var(--ease-soft);
-  }
-  .rail-toggle:hover { background: var(--surface-hover); color: var(--fg); border-color: var(--border); }
-  .rail-toggle[data-active="true"] { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
-  .rail-toggle:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
   .strip {
     flex: 1; min-width: 0;

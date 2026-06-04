@@ -168,6 +168,7 @@ class TabState {
   messages = $state<ChatMessage[]>([]);
   streaming = $state(false);
   tasks = $state<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }[]>([]);
+  taskCreateCount = $state(0);
   activity = $state<{ currentLabel: string | null; turnStartedAt: number | null }>({
     currentLabel: null,
     turnStartedAt: null,
@@ -547,7 +548,8 @@ class TabState {
   private applyTaskCreate(input: Record<string, unknown> | undefined): boolean {
     const subject = typeof input?.subject === "string" ? (input.subject as string) : null;
     if (!subject) return false;
-    const id = String(this.tasks.length + 1);
+    this.taskCreateCount += 1;
+    const id = String(this.taskCreateCount);
     this.tasks = [...this.tasks, { id, content: subject, status: "pending" }];
     if (!this.dockAutoOpenedThisConvo) {
       this.dockAutoOpenedThisConvo = true;
@@ -603,6 +605,7 @@ class TabState {
         ...this.agentSpawns,
         { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false },
       ];
+      return;
     }
     const DENY = new Set(["ToolSearch"]);
     if (DENY.has(block.name)) return;
@@ -2381,6 +2384,7 @@ class AssistantStore {
       tab.lastError = null;
       tab.totalCostUsd = null;
       tab.tasks = [];
+      tab.taskCreateCount = 0;
       tab.promptHistory = [];
       tab.dockAutoOpenedThisConvo = false;
     }
