@@ -83,7 +83,7 @@
   });
   // Resolve the workspace git branch lazily for the context strip (null = not a repo).
   $effect(() => {
-    if (assistant.workspace.current) void assistant.loadWorkspaceBranch();
+    if (assistant.workspace.current && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
 
   const stack = $derived(detectStack(assistant.workspaceFiles));

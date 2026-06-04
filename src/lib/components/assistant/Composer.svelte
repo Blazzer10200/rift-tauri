@@ -1432,6 +1432,7 @@
                 type="button"
                 class="live-pill queued"
                 onclick={openActivity}
+                aria-label={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}
                 use:tooltip={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}
               >
                 <ListPlus size={12} />
@@ -1871,6 +1872,8 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .mic-wave span { animation: none; transform: scaleY(0.7); }
+    .micbtn.recording { animation: none; }
+    :global(.mic-spin) { animation: none; }
   }
 
   /* Live character count — stays hidden until the draft passes 500 chars, so
@@ -2402,6 +2405,9 @@
   @keyframes wand-pulse {
     0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--model-color) 40%, transparent); transform: scale(1); }
     50%      { box-shadow: 0 0 10px 2px color-mix(in oklch, var(--model-color) 32%, transparent); transform: scale(1.08); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wandbtn.enhancing { animation: none; }
   }
 
   /* Reveal — each chunk of the enhanced text materializes out of blur,
