@@ -105,7 +105,9 @@ class UpdateStore {
     try {
       this.currentVersion = await invoke<string>("app_version");
     } catch (e) {
-      console.warn("app_version invoke failed", e);
+      this.error = String(e);
+      this.state = "error";
+      return;
     }
     try {
       const res = await invoke<UpdateInfo | null>("check_for_updates");
@@ -152,7 +154,7 @@ class UpdateStore {
         this.state = "launched";
       } catch (e2) {
         this.state = "available";
-        this.downloadError = String(e2 ?? e);
+        this.downloadError = String(e2) + (e2 !== e ? ` (after: ${String(e)})` : '');
       }
     } finally {
       if (unlisten) unlisten();

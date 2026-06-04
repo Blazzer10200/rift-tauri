@@ -81,7 +81,8 @@ export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
   if (host.workspaceFilesLoadingFor === root) return;
   host.workspaceFilesLoadingFor = root;
   try {
-    host.workspaceFiles = await invoke<string[]>("assistant_list_workspace_files");
+    const files = await invoke<string[]>("assistant_list_workspace_files");
+    if (host.workspace.current === root) host.workspaceFiles = files;
   } catch (e) {
     console.warn("assistant_list_workspace_files failed", e);
   } finally {

@@ -197,7 +197,8 @@ export function tooltip(node: HTMLElement, opts: TooltipOpts) {
     if (!cfg || tip) return;
     try {
       if (!node.matches(":focus-visible")) return;
-    } catch {
+    } catch (e) {
+      if (!(e instanceof DOMException)) throw e;
       // Older engines w/o :focus-visible — fall through and show.
     }
     show();

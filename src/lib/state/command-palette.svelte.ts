@@ -34,4 +34,3 @@ class CommandPaletteState {
 
 export const commandPalette = new CommandPaletteState();
 export type { Section as SettingsSection };
-export type { WorkspaceId };

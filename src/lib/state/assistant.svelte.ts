@@ -599,8 +599,8 @@ class TabState {
       return;
     }
     if (block.name === "Task" || block.name === "Agent") {
-      const subagentType = String((block.input?.subagent_type as string) ?? "fork");
-      const description = String((block.input?.description as string) ?? "(no description)");
+      const subagentType = String(block.input?.subagent_type ?? "fork");
+      const description = String(block.input?.description ?? "(no description)");
       this.agentSpawns = [
         ...this.agentSpawns,
         { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false },
@@ -1370,10 +1370,10 @@ class AssistantStore {
           if (tab && typeof line === "string") tab.onStream(line);
         },
       ),
-      await listen<{ session_id?: string; exit_code?: number } | { exit_code: number }>(
+      await listen<{ session_id?: string; exit_code?: number }>(
         "assistant://done",
         (e) => {
-          const p = e.payload as { session_id?: string } | undefined;
+          const p = e.payload;
           const sid = p?.session_id;
           const tab = sid ? this.tabByCliSession(sid) : this.activeTab;
           tab?.onDone();
@@ -2084,7 +2084,9 @@ class AssistantStore {
     const capturedConvoId = this.currentConvoId;
     queueMicrotask(() => {
       if (this.currentConvoId !== capturedConvoId || tab.streaming) {
-        tab.queue = [next, ...tab.queue];
+        if ([...this.tabs.values()].includes(tab)) {
+          tab.queue = [next, ...tab.queue];
+        }
         return;
       }
       this.send(next.text).catch(e => tab.onError(String(e)));

@@ -53,7 +53,11 @@ class UiPrefs {
 
     try {
       const c = JSON.parse(localStorage.getItem(CODE_KEY) ?? "null");
-      if (c && typeof c === "object") this.code = { ...DEFAULT_CODE, ...c };
+      if (c && typeof c === "object") this.code = {
+        fontSize:  typeof c.fontSize  === "number"  ? c.fontSize  : DEFAULT_CODE.fontSize,
+        tabWidth:  typeof c.tabWidth  === "number"  ? c.tabWidth  : DEFAULT_CODE.tabWidth,
+        ligatures: typeof c.ligatures === "boolean" ? c.ligatures : DEFAULT_CODE.ligatures,
+      };
     } catch {
       /* malformed code prefs — fall back to defaults */
     }

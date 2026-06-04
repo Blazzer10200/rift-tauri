@@ -17,9 +17,23 @@ function loadPersisted(): Persisted | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Persisted;
-    if (!Array.isArray(parsed.tabs)) return null;
-    return parsed;
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      !Array.isArray(parsed.tabs) ||
+      typeof parsed.activeIdx !== "number" ||
+      !parsed.tabs.every(
+        (t: unknown) =>
+          t !== null &&
+          typeof t === "object" &&
+          typeof (t as Record<string, unknown>).id === "string" &&
+          typeof (t as Record<string, unknown>).name === "string" &&
+          typeof (t as Record<string, unknown>).localPath === "string" &&
+          typeof (t as Record<string, unknown>).remotePath === "string"
+      )
+    ) return null;
+    return parsed as Persisted;
   } catch {
     return null;
   }
@@ -64,7 +78,7 @@ class BrowserTabsStore {
     this.tabs = [];
     this.activeIdx = 0;
     if (typeof localStorage !== "undefined") {
-      try { localStorage.removeItem(STORAGE_KEY); } catch {}
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e) { console.warn('browser-tabs reset failed', e); }
     }
   }
 

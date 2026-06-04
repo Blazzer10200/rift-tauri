@@ -90,7 +90,7 @@ class WorkspaceState {
           this.order = valid;
         }
       }
-    } catch { /* parse fail → default order */ }
+    } catch (e) { console.warn('[workspace] ORDER_KEY parse failed, using default:', e); }
   }
 
   /** One-time migration on first launch under the new shell:

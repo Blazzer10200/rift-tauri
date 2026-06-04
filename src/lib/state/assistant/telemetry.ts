@@ -14,10 +14,11 @@ export class SessionTelemetry {
 
   /** JSON snapshot for /diag clipboard export. */
   snapshot() {
+    const now = Date.now();
     return {
       startedAt: this.startedAt,
-      capturedAt: Date.now(),
-      durationMs: Date.now() - this.startedAt,
+      capturedAt: now,
+      durationMs: now - this.startedAt,
       turnCount: this.turns.length,
       summary: this.summarize(),
       turns: this.turns,
@@ -61,6 +62,15 @@ export class SessionTelemetry {
     const doneTimes: number[] = [];
     for (let i = 0; i < this.turns.length; i++) {
       const t = this.turns[i];
+      // Cold-start surfacing: the first turn typically pays the SessionStart
+      // 40-50K cache_creation tax; we record turn[0]'s cost+cacheCreate to
+      // make that tax legible without folding turns[]. Must run before the
+      // modelId guard so a failed turn[0] still records the cold-start metrics.
+      if (i === 0) {
+        firstTurnCostUsd = t.costUsd ?? null;
+        const u0 = t.resultUsage || t.envelopeUsage;
+        coldStartCacheCreate = u0?.cacheCreate ?? null;
+      }
       // Skip user-stop / error turns w/ no resolved modelId from the byModel
       // rollup — they otherwise create a phantom "opus"/"sonnet"/"haiku"
       // bucket alongside the real "claude-opus-4-7" etc.
@@ -120,14 +130,7 @@ export class SessionTelemetry {
           mostParallelTurn = { idx: i, maxConcurrentTools: peak };
         }
       }
-      // Cold-start surfacing: the first turn typically pays the SessionStart
-      // 40-50K cache_creation tax; we record turn[0]'s cost+cacheCreate to
-      // make that tax legible without folding turns[].
-      if (i === 0) {
-        firstTurnCostUsd = t.costUsd ?? null;
-        const u0 = t.resultUsage || t.envelopeUsage;
-        coldStartCacheCreate = u0?.cacheCreate ?? null;
-      }
+
       // Stale-cache flag: a continuation turn that paid full cache_create but
       // got zero cache_read = the API isn't reusing our prefix. Flagged what
       // surfaced the sonnet cache anomaly during effort A/B.
@@ -139,7 +142,6 @@ export class SessionTelemetry {
       }
       // Streaming velocity accumulator.
       if (t.firstPaintAt != null && t.doneAt != null && t.doneAt > t.firstPaintAt) {
-        const u = t.resultUsage || t.envelopeUsage;
         if (u) {
           totalOutputTokens += u.output;
           totalStreamMs += t.doneAt - t.firstPaintAt;
