@@ -69,6 +69,12 @@ fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
         return Err(format!("invalid path `{raw}`: must not start with '-'"));
     }
     let p = PathBuf::from(raw);
+    // `..` is rejected for BOTH absolute and relative paths. `starts_with(root)`
+    // is purely lexical, so an absolute `<root>/../../etc/passwd` would otherwise
+    // pass the prefix check yet resolve outside the workspace.
+    if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err(format!("path `{raw}` escapes the workspace root (`..` not allowed)"));
+    }
     if p.is_absolute() {
         // Absolute paths must already live under the root.
         if !p.starts_with(root) {
@@ -77,11 +83,9 @@ fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
     } else if p.components().any(|c| matches!(c, std::path::Component::Prefix(_))) {
         // Windows drive-relative (`C:foo`) and UNC (`\\server\share`) paths
         // report is_absolute()==false yet carry a Prefix component, so they'd
-        // otherwise slip past the `..` check and git would resolve them
-        // relative to the process CWD on that drive — outside the workspace.
+        // otherwise slip past the checks and git would resolve them relative to
+        // the process CWD on that drive — outside the workspace.
         return Err(format!("path `{raw}` must be workspace-relative (no drive or UNC prefix)"));
-    } else if p.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
-        return Err(format!("path `{raw}` escapes the workspace root (`..` not allowed)"));
     }
     Ok(raw.to_string())
 }
@@ -136,6 +140,11 @@ fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
     let mut cmd = Command::new("git");
     cmd.current_dir(root)
         .args(args)
+        // Detach git's stdin from the MCP server's stdin pipe — a git subprocess
+        // that reads stdin (credential helper, hook) must never drain bytes out
+        // of the JSON-RPC request stream. `output()` already closes stdin, but
+        // be explicit so a future switch to `spawn()` keeps the guarantee.
+        .stdin(std::process::Stdio::null())
         // Fail fast instead of blocking on a credential prompt; suppress GUI
         // credential-manager popups; don't inherit a foreign GIT_DIR. PATH /
         // HOME / SSH_AUTH_SOCK / GIT_SSH are intentionally preserved — Windows
@@ -170,7 +179,10 @@ fn current_branch(root: &Path) -> Result<String, String> {
     if !out.ok() {
         return Err(format!("not a git repository (or no commits yet): {}", out.err_text()));
     }
-    Ok(out.stdout.trim().to_string())
+    // Re-validate before this value is reused as a `git push` argument: a branch
+    // name containing odd bytes (or a leading `-`) must never reach the command
+    // line. "HEAD" (detached) passes the allowlist and is handled by the caller.
+    validate_ref("branch", out.stdout.trim())
 }
 
 /// True if the working tree has uncommitted changes (staged or unstaged).
@@ -383,6 +395,10 @@ mod tests {
         assert!(validate_path(&root, "-rf").is_err());
         assert!(validate_path(&root, "src/foo.rs").is_ok());
         assert!(validate_path(&root, "a/b/c.lua").is_ok());
+        // Absolute path under root but with `..` must NOT pass the lexical
+        // starts_with guard (F13/F50 — would resolve to /etc/passwd).
+        let escape = if cfg!(windows) { r"C:\ws\..\Windows\x" } else { "/ws/../etc/passwd" };
+        assert!(validate_path(&root, escape).is_err());
         // Windows drive-relative / UNC / cross-drive paths report
         // is_absolute()==false or fall outside root — all must be rejected.
         #[cfg(windows)]

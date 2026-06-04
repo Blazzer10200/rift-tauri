@@ -398,6 +398,13 @@ pub struct Conversation {
     /// (Option default = None); frontend falls back to `id` on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_session_id: Option<String>,
+    /// Catch-all for conversation-level fields the frontend owns but Rust does
+    /// not model — `forceNextFirstTurn` (F51) and `compactionHistory` (the
+    /// latent round-trip bug). Without flatten, `from_value` → `to_string` on
+    /// every save silently dropped them, so a post-restart load lost compaction
+    /// state and re-sent `--resume` against a non-existent JSONL.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 fn convo_path(id: &str) -> Result<PathBuf, String> {
@@ -734,9 +741,13 @@ fn write_mcp_config(
     let path = dir.join(format!("mcp-config-{safe_id}.json"));
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    // RIFT_MCP_ROOTS is newline-separated, so a root path containing an embedded
+    // newline would split into two phantom roots in the MCP child — widening the
+    // path-safety boundary. Drop any such path rather than corrupt the list (F59).
     let roots_joined = roots
         .iter()
         .map(|p| p.to_string_lossy().to_string())
+        .filter(|s| !s.contains('\n') && !s.contains('\r'))
         .collect::<Vec<_>>()
         .join("\n");
 
@@ -1092,47 +1103,17 @@ pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
     save_config(&cfg)
 }
 
-#[tauri::command]
-pub fn assistant_get_thinking_effort() -> Result<String, String> {
-    Ok(load_config()
-        .thinking_effort
-        .filter(|v| matches!(v.as_str(), "none" | "quick" | "deep" | "ultra"))
-        .unwrap_or_else(|| "quick".to_string()))
-}
-
-#[tauri::command]
-pub fn assistant_set_thinking_effort(value: String) -> Result<(), String> {
-    if !matches!(value.as_str(), "none" | "quick" | "deep" | "ultra") {
-        return Err(format!("invalid thinking_effort: {value}"));
-    }
-    let mut cfg = load_config();
-    cfg.thinking_effort = Some(value);
-    save_config(&cfg)
-}
+// F48: assistant_{get,set}_thinking_effort and _permission_mode commands removed
+// — the frontend persists both via localStorage and passes them per-send through
+// assistant_send's args; the config-file round-trip these commands wrote was a
+// dead second store the UI never read. The `thinking_effort`/`permission_mode`
+// config fields + `is_valid_permission_mode` are still used as per-send fallbacks.
 
 /// The CLI's `--permission-mode` values Rift exposes. `dontAsk` (the CLI's
 /// auto-DENY mode) is intentionally excluded — there's no Rift surface to
 /// approve, so it would silently block everything (see the S92 note below).
 fn is_valid_permission_mode(v: &str) -> bool {
     matches!(v, "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions")
-}
-
-#[tauri::command]
-pub fn assistant_get_permission_mode() -> Result<String, String> {
-    Ok(load_config()
-        .permission_mode
-        .filter(|v| is_valid_permission_mode(v))
-        .unwrap_or_else(|| "bypassPermissions".to_string()))
-}
-
-#[tauri::command]
-pub fn assistant_set_permission_mode(value: String) -> Result<(), String> {
-    if !is_valid_permission_mode(&value) {
-        return Err(format!("invalid permission_mode: {value}"));
-    }
-    let mut cfg = load_config();
-    cfg.permission_mode = Some(value);
-    save_config(&cfg)
 }
 
 /// The Assistant trust levels Rift exposes. Gates the local git tools in the

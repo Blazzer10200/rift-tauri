@@ -32,6 +32,12 @@ pub fn get(key: &str) -> Option<String> {
 }
 
 pub fn set(key: &str, value: &str) -> Result<(), String> {
+    // `get()` treats an empty stored value as absent; storing one would be a
+    // write that silently reads back as None. Reject it — callers that mean
+    // "clear this secret" must call `delete()`.
+    if value.is_empty() {
+        return Err(format!("refusing to store empty value for {key} (use delete to clear)"));
+    }
     let entry = Entry::new(SERVICE, key).map_err(|e| format!("keyring entry {key}: {e}"))?;
     entry
         .set_password(value)
