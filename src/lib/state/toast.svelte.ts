@@ -45,6 +45,15 @@ class ToastStore {
   items = $state<ToastItem[]>([]);
   private nextId = 1;
   private timers = new Map<number, ReturnType<typeof setTimeout>>();
+  // #44/#224: absolute expiry per running timer + remaining-on-pause, so
+  // resume() continues the countdown instead of restarting the full duration.
+  private deadlines = new Map<number, number>();
+  private remaining = new Map<number, number>();
+
+  private arm(id: number, ms: number): void {
+    this.deadlines.set(id, Date.now() + ms);
+    this.timers.set(id, setTimeout(() => this.dismiss(id), ms));
+  }
 
   push(opts: ToastPushOptions): number {
     const id = this.nextId++;
@@ -62,8 +71,7 @@ class ToastStore {
     this.items = next;
 
     if (!opts.sticky) {
-      const ms = opts.timeoutMs ?? defaultTimeout(opts.severity);
-      this.timers.set(id, setTimeout(() => this.dismiss(id), ms));
+      this.arm(id, opts.timeoutMs ?? defaultTimeout(opts.severity));
     }
     return id;
   }
@@ -71,12 +79,15 @@ class ToastStore {
   dismiss(id: number, callHandler = true): void {
     const item = this.items.find((i) => i.id === id);
     this.clearTimer(id);
+    this.remaining.delete(id);
     if (!item) return;
     this.items = this.items.filter((i) => i.id !== id);
     if (callHandler && item.onDismiss) item.onDismiss();
   }
 
   pause(id: number): void {
+    const dl = this.deadlines.get(id);
+    if (dl != null) this.remaining.set(id, Math.max(0, dl - Date.now()));
     this.clearTimer(id);
   }
 
@@ -84,8 +95,9 @@ class ToastStore {
     if (this.timers.has(id)) return;
     const item = this.items.find((i) => i.id === id);
     if (!item || item.sticky) return;
-    const ms = item.timeoutMs ?? defaultTimeout(item.severity);
-    this.timers.set(id, setTimeout(() => this.dismiss(id), ms));
+    const ms = this.remaining.get(id) ?? item.timeoutMs ?? defaultTimeout(item.severity);
+    this.remaining.delete(id);
+    this.arm(id, ms);
   }
 
   clear(): void {
@@ -99,6 +111,7 @@ class ToastStore {
       clearTimeout(t);
       this.timers.delete(id);
     }
+    this.deadlines.delete(id);
   }
 }
 
