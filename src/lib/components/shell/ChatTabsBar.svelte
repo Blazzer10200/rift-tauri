@@ -189,6 +189,25 @@
   let projMenu = $state<HTMLDivElement | undefined>();
   let projPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
 
+  // #150: ARIA menu keyboard contract — ArrowUp/Down + Home/End move focus
+  // between the role=menuitem(checkbox) buttons. Shared by proj + view menus.
+  function menuKeydown(e: KeyboardEvent, container: HTMLElement | undefined) {
+    if (!container) return;
+    const items = [...container.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]')];
+    if (items.length === 0) return;
+    const cur = items.indexOf(document.activeElement as HTMLButtonElement);
+    let next: number;
+    switch (e.key) {
+      case "ArrowDown": next = cur < 0 ? 0 : (cur + 1) % items.length; break;
+      case "ArrowUp":   next = cur < 0 ? items.length - 1 : (cur - 1 + items.length) % items.length; break;
+      case "Home":      next = 0; break;
+      case "End":       next = items.length - 1; break;
+      default: return;
+    }
+    e.preventDefault();
+    items[next]?.focus();
+  }
+
   function openProjMenu() {
     if (!projAnchor) return;
     const r = projAnchor.getBoundingClientRect();
@@ -791,8 +810,10 @@
   <div
     class="rift-menu proj-menu"
     role="menu"
+    tabindex="-1"
     aria-label="Switch project folder"
     bind:this={projMenu}
+    onkeydown={(e) => menuKeydown(e, projMenu)}
     use:portal
     style="top: {projPos.top}px; right: {projPos.right}px;"
   >
@@ -831,8 +852,10 @@
   <div
     class="rift-menu view-menu"
     role="menu"
+    tabindex="-1"
     aria-label="Panels &amp; layout"
     bind:this={viewMenu}
+    onkeydown={(e) => menuKeydown(e, viewMenu)}
     use:portal
     style="top: {viewPos.top}px; right: {viewPos.right}px;"
   >

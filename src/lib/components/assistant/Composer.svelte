@@ -1050,10 +1050,11 @@
     {/if}
 
     {#if slashOpen && slashFiltered.length > 0}
-      <div class="rift-menu slash-menu" role="listbox">
+      <div class="rift-menu slash-menu" role="menu">
         {#each slashFiltered as c, i (c.name)}
           <button
             type="button"
+            role="menuitem"
             class="rift-menu-row slash-row"
             class:active={i === slashIdx}
             style="--idx: {i}"
@@ -1070,13 +1071,14 @@
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
-      <div class="rift-menu slash-menu mention-menu" role="listbox">
+      <div class="rift-menu slash-menu mention-menu" role="menu">
         {#each mentionResults as path, i (path)}
           {@const slash = path.lastIndexOf("/")}
           {@const dir = slash > 0 ? path.slice(0, slash + 1) : ""}
           {@const base = slash >= 0 ? path.slice(slash + 1) : path}
           <button
             type="button"
+            role="menuitem"
             class="rift-menu-row mention-item"
             class:active={i === mentionIdx}
             style="--idx: {i}"
@@ -1097,7 +1099,7 @@
     {#if settingsOpen}
       {@const stops = EFFORT_OPTIONS.length}
       {@const effortPct = stops > 1 ? (effortIdx / (stops - 1)) * 100 : 0}
-      <div class="rift-menu settings-menu" role="listbox">
+      <div class="rift-menu settings-menu" role="menu">
         <div class="rift-menu-head">Model</div>
         {#each MODEL_OPTIONS as m, i (m.id)}
           {#if m.legacy && (i === 0 || !MODEL_OPTIONS[i - 1].legacy)}
@@ -1105,6 +1107,8 @@
           {/if}
           <button
             type="button"
+            role="menuitemradio"
+            aria-checked={m.id === assistant.model}
             class="rift-menu-row model-row"
             class:active={i === settingsIdx}
             class:current={m.id === assistant.model}
@@ -1128,7 +1132,8 @@
           class="rift-menu-row toggle-row"
           class:active={settingsRows[settingsIdx]?.kind === "fast"}
           onmousedown={(e) => { e.preventDefault(); uiPrefs.toggleFastMode(); }}
-          aria-pressed={uiPrefs.fastMode}
+          role="menuitemcheckbox"
+          aria-checked={uiPrefs.fastMode}
         >
           <span class="rift-menu-row-body">
             <span class="rift-menu-row-t">Enable fast mode</span>
@@ -1145,6 +1150,7 @@
             <span class="effort-head-l">Effort <b>{currentEffort.label}</b></span>
             <button
               type="button"
+              role="menuitem"
               class="effort-help"
               use:tooltip={currentEffort.hint}
               onmousedown={(e) => e.preventDefault()}
@@ -1464,7 +1470,7 @@
           {#if permOpen}
             <div
               class="perm-menu"
-              role="listbox"
+              role="menu"
               bind:this={permPop}
               use:portal
               style="top: {permPos.top}px; left: {permPos.left}px;"
@@ -1474,6 +1480,8 @@
                 {@const Icon = m.icon}
                 <button
                   type="button"
+                  role="menuitemradio"
+                  aria-checked={m.id === assistant.permissionMode}
                   class="perm-row"
                   class:active={i === permIdx}
                   class:current={m.id === assistant.permissionMode}
