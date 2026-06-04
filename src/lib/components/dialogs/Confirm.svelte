@@ -26,6 +26,8 @@
   let dontAsk = $state(false);
   let confirmBtn = $state<HTMLButtonElement>();
 
+  $effect(() => { if (!open) dontAsk = false; });
+
   function decide(confirmed: boolean) {
     onClose({ confirmed, dontAsk });
     dontAsk = false;
