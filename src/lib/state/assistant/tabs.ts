@@ -241,11 +241,6 @@ export async function restoreTabs(host: TabsHost) {
     const valid = ids.filter((id) => existing.has(id));
     host.openTabs = valid;
     const active = typeof parsed.activeTabId === "string" ? parsed.activeTabId : null;
-    if (active && valid.includes(active)) {
-      await host.loadConversation(active);
-    } else if (valid.length > 0) {
-      await host.loadConversation(valid[0]);
-    }
     // Restore split state — N-pane shape. Accepts length 1..MAX_PANES.
     // Stale tab refs are pruned to null (pane survives, empty). Legacy
     // null/missing keeps single-pane default.
@@ -260,11 +255,16 @@ export async function restoreTabs(host: TabsHost) {
       host.panes = restored.length > 0 ? restored : [{ tabId: null }];
       const fi = typeof parsed.focusedPaneIdx === "number" ? parsed.focusedPaneIdx : 0;
       host.focusedPaneIdx = Math.max(0, Math.min(fi, host.panes.length - 1));
-      // Sync currentConvoId to focused pane if needed.
-      const focused = host.panes[host.focusedPaneIdx].tabId;
-      if (focused && focused !== host.currentConvoId) {
-        await host.loadConversation(focused);
-      }
+    }
+    // Single load: prefer focused pane tab, then active, then first valid.
+    const focusedId = host.panes[host.focusedPaneIdx]?.tabId ?? null;
+    const winner = (focusedId && valid.includes(focusedId))
+      ? focusedId
+      : (active && valid.includes(active))
+        ? active
+        : valid.length > 0 ? valid[0] : null;
+    if (winner) {
+      await host.loadConversation(winner);
     }
   } catch (e) {
     console.warn("restoreTabs failed", e);

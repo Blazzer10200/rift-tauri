@@ -62,7 +62,7 @@ class WorkspaceState {
   /** Lazy-mount latch — once a workspace has been active, its component stays
    *  mounted (hidden via [hidden]) so scroll/terminal/etc. state survives
    *  workspace switches. Same pattern v0.4.1 RightPane used. */
-  everOpened = $state<Set<WorkspaceId>>(new Set(["chat"]));
+  everOpened = $state<Set<WorkspaceId>>(new Set<WorkspaceId>());
 
   init() {
     if (typeof window === "undefined") return;
@@ -123,7 +123,7 @@ class WorkspaceState {
     if (DISABLED.has(id)) return;
     this.activeId = id;
     if (!this.everOpened.has(id)) {
-      this.everOpened = new Set([...this.everOpened, id]);
+      const s = new Set(this.everOpened); s.add(id); this.everOpened = s;
     }
     localStorage.setItem(ACTIVE_KEY, id);
   }
