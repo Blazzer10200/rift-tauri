@@ -12,7 +12,7 @@ Composer model/effort panel now tells the truth about each model's real capabili
 
 ### RESUME HERE (cont.57)
 - All cont.52–57 UNSHIPPED → ride next `/git-ship` (3-file lockstep + `Cargo.lock`; CHANGELOG/bump deferred). Committed as WIP checkpoints; version bump + CHANGELOG still due at ship.
-- ISSUES #31–35 fixed in-tree (still in tracker — delete on ship).
+- ISSUES #31–35 fixed in-tree (still in tracker — delete on ship). Doc pass 2026-06-05: each re-verified against code + ✅-tagged w/ exact file:line, #30/#32 broken links repaired, #35 corrected to "manual Forget button" (not auto-prune). Tracker is accurate as-of now.
 - Pending USER live-verify: harness polish pixels (motion/stagger/idle-gate) · steer mid-turn on a tool turn · permission Allow/Deny bar · v0.5.0 auto-update on a real machine · beta onboarding step on a fresh tester install.
 
 ---

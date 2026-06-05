@@ -10,7 +10,7 @@
 
 > Live queue. HANDOFF.md = session state; this section = what's queued.
 
-- **✅ FIXED in-tree (cont.54, 2026-06-05) — unshipped, delete on ship:** #32 (`\\?\` path-prefix strip), #33 (Harness avg-dead-wait recompute on load), #34 (palette "Go to Home"), #35 (prune dead Recent Folders). Plus a **Harness no-scroll redesign** (KPI rail + collapsible "Show details"; not an ISSUES item — detail in HANDOFF cont.54). Blocks below kept until `/git-ship`.
+- **✅ RESOLVED in-tree — unshipped, delete on `/git-ship` (code re-verified 2026-06-05):** #31 (fast-mode hidden until wired, cont.57), #32 (`\\?\` strip, cont.54), #33 (Harness avg-dead-wait recompute on load, cont.54), #34 (palette "Go to Home", cont.54), #35 (per-recent "Forget" button, cont.54). Each carries a `✅` tag + verified file:line on its block below. Plus a **Harness no-scroll redesign** (KPI rail + collapsible "Show details"; not an ISSUES item — detail in HANDOFF cont.54). Blocks kept until ship so `git log` preserves them.
 - **Steer feature — live-verify on a tool-using turn.** Mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`). Remaining: confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
 - **Permission round-trip — code-complete, needs live-verify.** Wired end-to-end: `--permission-prompt-tool stdio` (mod.rs) → `can_use_tool` handler → control-response write → `PermissionBar.svelte` Allow/Deny UI → `submitPermissionDecision()`. Remaining: live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
 - **#30 Update UI redesign (queued — tomorrow).** The update toast + dialog look dated and under-organized — visual + IA refresh wanted. See #30 block below.
@@ -55,7 +55,7 @@
 
 ## 30. Update UI — visual + organizational redesign
 
-- **Where (re-grep — may have drifted):** the update toast/notification, [src/lib/components/.../UpdateDialog.svelte](../src), and [src/lib/state/updates.svelte.ts](../src/lib/state/updates.svelte.ts). The auto-update *flow* (Velopack check → download → apply-on-exit → relaunch) works correctly and is verified live (v0.4.48 → v0.5.0); this is **presentation only**, not the update mechanism.
+- **Where (re-grep — may have drifted):** the update toast/notification, [UpdateDialog.svelte](../src/lib/components/dialogs/UpdateDialog.svelte), and [updates.svelte.ts](../src/lib/state/updates.svelte.ts). The auto-update *flow* (Velopack check → download → apply-on-exit → relaunch) works correctly and is verified live (v0.4.48 → v0.5.0); this is **presentation only**, not the update mechanism.
 - **Symptom:** The "Update available" toast + the dialog look dated and feel under-organized — spacing, hierarchy, and styling don't match the current emerald/bento design language of the rest of the app (Home, Harness, Settings). The toast shows `0.4.48 → 0.5.0 · 9.5 MB`; the layout reads as legacy.
 - **Fix sketch:** Visual + IA refresh pass over the toast and the available/downloading/installing/error states of `UpdateDialog`. Align to the app's surface tiers + accent (`--accent`, never hardcoded), tighten the version/size/progress hierarchy, and make the available→downloading→installing progression read smoothly (the installing-state height-jump was partly addressed in v0.4.47 — finish the job). Keep the "View release on GitHub" fallback. Pure CSS/markup + state-presentation; don't touch the Velopack invoke contract.
 
@@ -74,27 +74,31 @@
 
 ## 32. `\\?\` extended-length path prefix leaks into UI (LOW — cosmetic)
 
-- **Where:** [src/lib/components/home/HomePage.svelte](../src/lib) Workspace card path display (shows `\\?\C:\AI Workflow\projects\remotion-playground`). Harness chips use `cleanPath()` which appears to strip it; Home does not — confirm whether `cleanPath` exists/handles `\\?\` and reuse it everywhere a path renders.
+- **✅ RESOLVED in-tree (cont.54) — unshipped, delete on ship:** [HomePage.svelte:50](../src/lib/components/home/HomePage.svelte) strips `^\\\\\?\\UNC\\` → `\\\\` and `^\\\\\?\\` → `` for display only (inline regex, not the `cleanPath()` helper — that one lives only in HarnessPage). Verified 2026-06-05.
+- **Where:** [HomePage.svelte](../src/lib/components/home/HomePage.svelte) Workspace card path display (showed `\\?\C:\AI Workflow\projects\remotion-playground`). Harness chips use `cleanPath()`; Home now strips inline.
 - **Symptom:** The raw Win32 extended-length prefix `\\?\` is shown verbatim in the Home workspace path. Ugly; reads as a bug to users.
 - **Fix sketch:** Strip a leading `\\?\` (and `\\?\UNC\`) for display only — never on the value passed to the backend. Centralize in the existing `cleanPath` helper and apply on the Home card. Surfaced during the 2026-06-05 live-UI test pass (~3 AM session).
 
 ## 33. Harness "avg dead wait" shows "—" for archived sessions (LOW-MED — legacy data)
 
+- **✅ RESOLVED in-tree (cont.54) — unshipped, delete on ship:** [sessionLog.ts:50](../src/lib/state/assistant/sessionLog.ts) recomputes `snap.summary = summarizeSession(snap.turns, snap.events)` on load — the frozen on-disk summary is discarded, so new `summarize()` fields backfill for old logs. Verified 2026-06-05.
 - **Where:** [src/lib/components/workspaces/HarnessPage.svelte:237](../src/lib/components/workspaces/HarnessPage.svelte) (binds `fmtMs(sum.avgDeadWaitMs)`), `sum = source.summary` where `source` comes from [loadSessionLog](../src/lib/state/assistant/sessionLog.ts) → `assistant_load_session_log` returning the **persisted** `SessionSnapshot` incl. its frozen `summary` (serialized at save via [telemetry.ts:35](../src/lib/state/assistant/telemetry.ts)).
 - **Symptom:** For sessions logged **before** cont.53 added `avgDeadWaitMs` to `summarize()`, the persisted summary lacks the field → `fmtMs(undefined)` → "—". Meanwhile the per-turn `.tl-dead` timeline markers ([HarnessPage.svelte:203,660](../src/lib/components/workspaces/HarnessPage.svelte)) recompute live from raw `source.turns` and DO render. So the aggregate stat and the timeline permanently disagree for any pre-field session. **Live/new sessions compute correctly** (verified `avg dead wait 6.2s` on a fresh turn) — this is purely stale persisted-summary data.
 - **Fix sketch:** Don't trust the frozen summary on load — recompute `summary` from the persisted `turns[]` in `loadSessionLog` (or in the `source` derived) so new derived fields backfill for old logs. Same pattern would future-proof any later `summarize()` additions. Surfaced 2026-06-05 live-UI test (this was the cont.53 RESUME-HERE verify item).
 
 ## 34. Command palette omits "Go to Home" (LOW — consistency)
 
+- **✅ RESOLVED in-tree (cont.54) — unshipped, delete on ship:** [CommandPalette.svelte:40](../src/lib/components/dialogs/CommandPalette.svelte) now has `{ id: "home", label: "Home", icon: Home, sub: "Ctrl+1" }` as the first `navs` entry. Verified 2026-06-05.
 - **Where:** [src/lib/components/dialogs/CommandPalette.svelte:39-42](../src/lib/components/dialogs/CommandPalette.svelte) — the `navs` array lists only `chat`/`harness`/`settings`.
 - **Symptom:** Home (Ctrl+1) is a primary workspace but has no "Go to Home" entry in the palette's GO TO group, while every other workspace does. Inconsistent.
 - **Fix sketch:** Add `{ id: "home", label: "Home", icon: Home, sub: "Ctrl+1" }` as the first `navs` entry. One-line addition. Surfaced 2026-06-05 live-UI test.
 
 ## 35. Deleted project still in Home "Recent folders" (LOW — stale recents)
 
-- **Where:** Home workspace "Recent folders" list (recent-workspaces persistence — re-grep; likely `ui-prefs`/workspace store).
-- **Symptom:** `vein-modding` (retired + deleted 2026-06-04 per workspace CLAUDE.md) still appears in Recent Folders; selecting it would point at a non-existent dir. Also `Coinsmith` listed.
-- **Fix sketch:** Validate recent-folder entries against existence on Home mount (or on click) and prune/grey missing ones. Don't auto-delete silently mid-list without a signal. LOW — expected-ish for a recents list, but a missing-dir click should fail gracefully. Surfaced 2026-06-05 live-UI test.
+- **✅ RESOLVED in-tree (cont.54) — unshipped, delete on ship:** chose the **manual-prune** half of the fix — [HomePage.svelte:208](../src/lib/components/home/HomePage.svelte) renders a per-row "Forget" (×) button → `assistant.removeRecentRoot(r)` (→ `wsRemoveRecentRoot`, [assistant.svelte.ts:1671](../src/lib/state/assistant.svelte.ts)), so a dead recent can be dismissed. Verified 2026-06-05.
+- **Where:** Home "Recent folders" list, [HomePage.svelte:197-209](../src/lib/components/home/HomePage.svelte) (`recents = assistant.workspace.recent`).
+- **Symptom:** `vein-modding` (retired + deleted 2026-06-04 per workspace CLAUDE.md) still appeared in Recent Folders; selecting it pointed at a non-existent dir. Also `Coinsmith` listed.
+- **Remaining (optional, future):** no auto-validation against existence on mount — dead entries still appear until manually Forgotten, and a missing-dir click isn't yet proven to fail gracefully. Auto-grey/prune-on-mount would fully close it.
 
 ---
 
