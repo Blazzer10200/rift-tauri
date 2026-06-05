@@ -10,6 +10,7 @@
 
 > Live queue. HANDOFF.md = session state; this section = what's queued.
 
+- **🔍 Full-app CDP stress pass 2026-06-05 (cont.58) — app is healthy.** Walked every workspace + dialog live (Home · Chat · Harness · Settings · command palette · History drawer · Web-browser panel · Panels menu). Ran a real read-only backend turn end-to-end (CLI spawn → MCP `grep`/`glob`/`list_dir`/`read_file` → stream → cost/context/activity render — all correct). Stress: 12 rapid workspace switches + a 14.8K-char emoji/unicode/`<script>` composer paste (auto-grew to the 340px cap, inert, no XSS). **Console: 0 errors / 0 warnings the entire session.** Verified live: cont.57 model/effort capability matrix (Haiku hides slider + shows the no-effort caption), #31–#35 fixes, themeable accent incl. **Amber warm-hue with no oklch purple-wrap**, Harness no-scroll + trust-gated git tools. **Only one new defect found → #36 below.** Could NOT live-exercise: #30 update toast/dialog (app is up-to-date on v0.5.0 → state never renders) and the first-run onboarding (next-launch only).
 - **✅ RESOLVED in-tree — unshipped, delete on `/git-ship` (code re-verified 2026-06-05):** #31 (fast-mode hidden until wired, cont.57), #32 (`\\?\` strip, cont.54), #33 (Harness avg-dead-wait recompute on load, cont.54), #34 (palette "Go to Home", cont.54), #35 (per-recent "Forget" button, cont.54). Each carries a `✅` tag + verified file:line on its block below. Plus a **Harness no-scroll redesign** (KPI rail + collapsible "Show details"; not an ISSUES item — detail in HANDOFF cont.54). Blocks kept until ship so `git log` preserves them.
 - **Steer feature — live-verify on a tool-using turn.** Mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`). Remaining: confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
 - **Permission round-trip — code-complete, needs live-verify.** Wired end-to-end: `--permission-prompt-tool stdio` (mod.rs) → `can_use_tool` handler → control-response write → `PermissionBar.svelte` Allow/Deny UI → `submitPermissionDecision()`. Remaining: live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
@@ -98,7 +99,18 @@
 - **✅ RESOLVED in-tree (cont.54) — unshipped, delete on ship:** chose the **manual-prune** half of the fix — [HomePage.svelte:208](../src/lib/components/home/HomePage.svelte) renders a per-row "Forget" (×) button → `assistant.removeRecentRoot(r)` (→ `wsRemoveRecentRoot`, [assistant.svelte.ts:1671](../src/lib/state/assistant.svelte.ts)), so a dead recent can be dismissed. Verified 2026-06-05.
 - **Where:** Home "Recent folders" list, [HomePage.svelte:197-209](../src/lib/components/home/HomePage.svelte) (`recents = assistant.workspace.recent`).
 - **Symptom:** `vein-modding` (retired + deleted 2026-06-04 per workspace CLAUDE.md) still appeared in Recent Folders; selecting it pointed at a non-existent dir. Also `Coinsmith` listed.
-- **Remaining (optional, future):** no auto-validation against existence on mount — dead entries still appear until manually Forgotten, and a missing-dir click isn't yet proven to fail gracefully. Auto-grey/prune-on-mount would fully close it.
+- **Remaining (optional, future):** no auto-validation against existence on mount — dead entries still appear until manually Forgotten, and a missing-dir click isn't yet proven to fail gracefully. Auto-grey/prune-on-mount would fully close it. **Live-confirmed 2026-06-05 (cont.58):** `vein-modding` + `Coinsmith` still visible in Home Recent Folders; the per-row Forget (×) button is present and wired.
+
+## 36. Settings sidebar scroll-spy never activates the last section ("About") (LOW — cosmetic)
+
+- **Where:** [SettingsPage.svelte](../src/lib/components/settings/SettingsPage.svelte) — the settings page is one scrolling column with a scroll-spy sidebar (Appearance/Accessibility/Assistant/Speech/About). The active-highlight is driven by which section is scrolled into view (likely an IntersectionObserver), not by the click.
+- **Symptom:** Clicking **About** (the last item) scrolls the About section fully into the content area, but the sidebar keeps **Speech** highlighted — the active indicator is stuck one section behind. Found 2026-06-05 (cont.58) live CDP pass: clicked About → About's BUILD/PATHS/HELP content filled the viewport, yet `Speech` stayed lit. Root cause: About is the last/short section and the container can't scroll it to the top, so the observer's threshold never fires for it. Likely also affects any section that can't reach the top on click.
+- **Fix sketch:** On nav click, set the active section explicitly (don't rely solely on the scroll observer), OR special-case "last section becomes active when the scroll container hits the bottom." Pure presentation — navigation/scroll itself works; only the highlight is wrong.
+
+## Investigated 2026-06-05 — NOT current bugs (don't re-chase)
+
+- **`ReferenceError: MessageCircle is not defined` in the console ring** — STALE. The symbol IS imported ([HarnessPage.svelte:4](../src/lib/components/workspaces/HarnessPage.svelte)) and used (line ~537); the error was a transient intermediate-HMR artifact from ~50min before the pass. Navigating to Harness throws nothing now. No action.
+- **Model menu rows "don't switch on click"** — NOT a bug. Rows use `onmousedown` ([Composer.svelte:1209](../src/lib/components/assistant/Composer.svelte)) (fires before blur so the menu doesn't close first); a synthetic `click` simply doesn't trigger them. Real pointer + keyboard both work.
 
 ---
 
@@ -113,5 +125,5 @@
 **Tier 3 — strategic / longer-term**
 - **#30 Update UI redesign (next up — queued for tomorrow)** · #4 App-wide UX consistency sweep · #20 hot-file split M8-M9 · #17 two-repo collapse · CR-UX trust-enum decision (user sign-off).
 
-**Tier 4 — backend LOW (opportunistic)**
-- #29 CSP `style-src 'unsafe-inline'` (Tailwind-blocked) · ~~#31 fast-mode toggle cosmetic~~ (✅ resolved in-tree cont.57 — hidden until wired) · Wave-1 LOWs #91-#134 — clippy/doc/perf nits (see `docs/archive/audit-history.md`).
+**Tier 4 — LOW / cosmetic (opportunistic)**
+- #36 Settings scroll-spy last-section ("About") highlight (cont.58) · #29 CSP `style-src 'unsafe-inline'` (Tailwind-blocked) · ~~#31 fast-mode toggle cosmetic~~ (✅ resolved in-tree cont.57 — hidden until wired) · Wave-1 LOWs #91-#134 — clippy/doc/perf nits (see `docs/archive/audit-history.md`).
