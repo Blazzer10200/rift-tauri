@@ -2,30 +2,31 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-05 (cont. 57) — Model-picker capability accuracy (unshipped)
+## Session 2026-06-05 (cont. 58) — Issue cleanup + tracker reorg (unshipped)
 
-Composer model/effort panel now tells the truth about each model's real capability — no affordance that silently no-ops. `npm run check` 0/0; **all gates CDP-verified live**.
-- **Capability matrix on `ModelOpt`** (`Composer.svelte`): per-model `effort`/`maxEffort`/`fastMode` is the single source of truth for every gate (replaces ad-hoc `model !== "haiku"`).
-- **Effort slider caps per model** via `effortStops` (Opus→Ultracode/xhigh, Sonnet→Deep/high, Haiku→none); a `$effect` auto-clamps stored effort down on model switch so xhigh/ultracode never reaches a model that rejects it. CDP-verified: Opus 4 stops / Sonnet 3 / Haiku 0; Ultracode→Deep clamp.
-- **Awareness caption** (`.model-caption`): plain-language "what this gets you" per model+effort; **amber on Ultracode** (flags autonomous multi-agent cost); Haiku shows why there's no slider.
-- **Fast mode → ISSUES #31 resolved:** hidden behind `FAST_MODE_WIRED=false` + Opus-only `fastMode` flag (was a dead toggle on every model); re-surfaces Opus-only when wired.
+Cleared the last low-hanging open bug + reorganized the tracker. `npm run check` 0/0. WIP checkpoints — ride next `/git-ship`.
+- **#36 fixed** (`d551856`): Settings scroll-spy. [SettingsPage.svelte:45-49](../src/lib/components/settings/SettingsPage.svelte) `onScroll()` bottom-detects (`scrollTop+clientHeight >= scrollHeight-2`) → spies the last `ST_SECTIONS` entry, so the bottom (incl. About nav → `jump()`) lights "About" not "Speech".
+- **ISSUES.md reorganized** (`89f65dc`): legend → index table → blocks grouped status→tier, numeric within group. Durable IDs + all facts preserved.
+- **Other docs left as-is:** DEVELOPING + IDEAS already clean; CHANGELOG is `/git-ship`-only.
 
-### RESUME HERE (cont.57)
-- All cont.52–57 UNSHIPPED → ride next `/git-ship` (3-file lockstep + `Cargo.lock`; CHANGELOG/bump deferred). Committed as WIP checkpoints; version bump + CHANGELOG still due at ship.
-- ISSUES #31–35 fixed in-tree (still in tracker — delete on ship). Doc pass 2026-06-05: each re-verified against code + ✅-tagged w/ exact file:line, #30/#32 broken links repaired, #35 corrected to "manual Forget button" (not auto-prune). Tracker is accurate as-of now.
-- Pending USER live-verify: harness polish pixels (motion/stagger/idle-gate) · steer mid-turn on a tool turn · permission Allow/Deny bar · v0.5.0 auto-update on a real machine · beta onboarding step on a fresh tester install.
+### RESUME HERE (cont.58)
+- All cont.52–58 UNSHIPPED → next `/git-ship` (3-file lockstep + `Cargo.lock`; CHANGELOG/bump deferred).
+- ISSUES **#31–36** fixed in-tree (delete on ship). Tracker reorganized + accurate.
+- **Open work is all blocked / needs-you / live-verify** (no quick code wins): #21 test harness (T1) · #30 Update-UI redesign (taste — your eye/CDP) · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum (sign-off).
+- Pending USER live-verify: steer mid-turn on a tool turn · permission Allow/Deny bar · v0.5.0 auto-update on a real machine · beta onboarding on a fresh tester install.
 
 ---
 
 ## Prior unshipped (detail in git log, all ride next ship)
+- **cont.57 Model-picker capability accuracy:** capability matrix on `ModelOpt` (`Composer.svelte`) drives every gate; per-model `effortStops` + `$effect` auto-clamp (Opus→Ultracode/xhigh, Sonnet→Deep/high, Haiku→none); amber Ultracode awareness caption; fast-mode hidden behind `FAST_MODE_WIRED=false` (→#31). CDP-verified live.
 - **cont.56 Harness polish:** shared motion tokens (`app.css`); idle-gated spark + LEDs unified to 2s; staggered `.bento` cell entrance (reduced-motion-aware); reliability "all clear" collapse; calm "Awaiting first turn" hero.
-- **cont.55:** Beta-notice onboarding step (`OnboardingFlow` step 4 + `betaNotice.svelte.ts` ack; Composer footer disclaimer). See CRITICAL onboarding-gate note.
-- **cont.52–54:** `Markdown.svelte` streaming reveal (52); Harness dead-wait split + `.tl-dead` (53); ISSUES #32–35 fixes + Harness KPI-rail/Show-details no-scroll redesign (54).
+- **cont.55:** Beta-notice onboarding step (`OnboardingFlow` step 4 + `betaNotice.svelte.ts` ack). See CRITICAL onboarding-gate note.
+- **cont.52–54:** `Markdown.svelte` streaming reveal (52); Harness dead-wait split + `.tl-dead` (53); ISSUES #32–35 + Harness KPI-rail no-scroll redesign (54).
 
 ---
 
 ## Shipped + prior arcs — detail in `git log`
-- **v0.5.0** (2026-06-04, cont.51, `62dae27`): Velopack stable to `Blazzer10200/rift-releases`. **Pending live-confirm:** 2nd auto-update proof point (v0.4.48 → auto-apply-on-exit → relaunch) on a real machine. Older arcs (20/21 pure-assistant, 44–45 Velopack, 46b–49 Harness) in `git log`.
+- **v0.5.0** (2026-06-04, cont.51, `62dae27`): Velopack stable to `rift-releases`. **Pending live-confirm:** 2nd auto-update proof point (v0.4.48 → apply-on-exit → relaunch) on a real machine. Older arcs in `git log`.
 - **Open carry-over:** `check.yml` per-push email spam; prod app now ALSO `rift-tauri.exe` → revisit "never blanket-kill rift" rule.
 
 ## CRITICAL DON'T-TOUCH
