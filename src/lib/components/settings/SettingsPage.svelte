@@ -41,6 +41,12 @@
   function onScroll() {
     const sc = scrollEl;
     if (!sc) return;
+    // Bottom-of-scroll: the last (often short) section can't reach the 140px
+    // threshold before the container bottoms out, so spy it explicitly.
+    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) {
+      activeSec = ST_SECTIONS[ST_SECTIONS.length - 1].id;
+      return;
+    }
     const scTop = sc.getBoundingClientRect().top;
     let cur: Section = ST_SECTIONS[0].id;
     for (const s of ST_SECTIONS) {
