@@ -38,9 +38,28 @@ export class SessionTelemetry {
     };
   }
 
-  /** Per-session rollup. Self-summarizing JSON so a `/diag` reader doesn't
-   *  have to fold over `turns[]` to see the basics. */
+  /** Per-session rollup. Delegates to the pure {@link summarizeSession} so a
+   *  snapshot loaded from disk can re-derive fields added after it was written
+   *  (#33: avgDeadWaitMs et al. showed "—" on pre-field logs). */
   private summarize() {
+    return summarizeSession(this.turns, this.events);
+  }
+
+  reset() {
+    this.id = newSessionId();
+    this.startedAt = Date.now();
+    this.turns = [];
+    this.events = [];
+  }
+}
+
+/** Pure per-session rollup over raw turns/events. Self-summarizing JSON so a
+ *  `/diag` reader doesn't have to fold over `turns[]` — and so a loaded log can
+ *  backfill derived fields that postdate its on-disk summary. */
+export function summarizeSession(
+  turns: TurnRecord[],
+  events: { ts: number; kind: string; detail?: unknown }[],
+) {
     const byModel: Record<string, {
       turns: number;
       costUsd: number;
@@ -72,11 +91,26 @@ export class SessionTelemetry {
     let staleCacheTurns = 0;
     const ttfps: number[] = [];
     const doneTimes: number[] = [];
+    // Latency attribution: ttfp is what the user *feels* as the silent wait, but
+    // it lumps together two very different costs. `deadWait` = the slice of
+    // time-to-first-paint NOT explained by thinking (CLI subprocess spawn,
+    // prefill on a cache miss, queue) — the genuinely silent stall. Surfaced
+    // because a zero-tool turn was observed at 52s ttfp / 5.5s thinking = ~46s
+    // of unattributed silence the dashboard couldn't previously see.
+    const deadWaits: number[] = [];
+    let worstDeadWaitTurn: { idx: number; deadWaitMs: number } | null = null;
+    // Done-time attribution: split a turn's wall-clock into tool-active time
+    // (union of tool intervals — they parallelize, so sum would over-count) vs
+    // model time (generation/decode). Tells whether a slow turn was tool-bound
+    // or generation-bound.
+    let totalToolActiveMs = 0;
+    let totalModelMs = 0;
+    let worstToolBoundTurn: { idx: number; toolActiveMs: number; doneMs: number } | null = null;
     // #204: per-model timing accumulators, filled in the single pass below so
-    // the per-model averages don't re-filter this.turns once per model key.
+    // the per-model averages don't re-filter turns once per model key.
     const byModelTimings: Record<string, { ttfp: number[]; done: number[] }> = {};
-    for (let i = 0; i < this.turns.length; i++) {
-      const t = this.turns[i];
+    for (let i = 0; i < turns.length; i++) {
+      const t = turns[i];
       // Cold-start surfacing: the first turn typically pays the SessionStart
       // 40-50K cache_creation tax; we record turn[0]'s cost+cacheCreate to
       // make that tax legible without folding turns[]. Must run before the
@@ -111,7 +145,14 @@ export class SessionTelemetry {
       if (t.blankTurn) { bucket.blankTurns += 1; blank += 1; }
       if (t.envelopeFallback) { bucket.envelopeFallbacks += 1; envFallback += 1; }
       totalCost += t.costUsd ?? 0;
-      if (t.firstPaintAt != null) { const v = t.firstPaintAt - t.ts; ttfps.push(v); tm.ttfp.push(v); }
+      if (t.firstPaintAt != null) {
+        const v = t.firstPaintAt - t.ts; ttfps.push(v); tm.ttfp.push(v);
+        const dead = Math.max(0, v - t.thinkingTotalMs);
+        deadWaits.push(dead);
+        if (!worstDeadWaitTurn || dead > worstDeadWaitTurn.deadWaitMs) {
+          worstDeadWaitTurn = { idx: i, deadWaitMs: dead };
+        }
+      }
       if (t.doneAt != null) {
         const dur = t.doneAt - t.ts;
         doneTimes.push(dur);
@@ -135,16 +176,32 @@ export class SessionTelemetry {
           intervals.push({ ts: tu.completedAt, delta: -1 });
         }
       }
+      let toolActiveMs = 0;
       if (intervals.length > 0) {
         intervals.sort((a, b) => a.ts - b.ts || b.delta - a.delta);
         let active = 0;
         let peak = 0;
+        let spanStart = 0;
         for (const iv of intervals) {
+          const prev = active;
           active += iv.delta;
+          // Union span: a busy region opens when concurrency leaves 0 and
+          // closes when it returns to 0; the gap is wall-clock with ≥1 tool live.
+          if (prev === 0 && active > 0) spanStart = iv.ts;
+          else if (prev > 0 && active === 0) toolActiveMs += iv.ts - spanStart;
           if (active > peak) peak = active;
         }
         if (!mostParallelTurn || peak > mostParallelTurn.maxConcurrentTools) {
           mostParallelTurn = { idx: i, maxConcurrentTools: peak };
+        }
+      }
+      totalToolActiveMs += toolActiveMs;
+      if (t.doneAt != null) {
+        // Model time = wall-clock minus thinking minus tool-active. Floored at 0
+        // since the three are independently measured and can slightly overlap.
+        totalModelMs += Math.max(0, (t.doneAt - t.ts) - t.thinkingTotalMs - toolActiveMs);
+        if (toolActiveMs > 0 && (!worstToolBoundTurn || toolActiveMs > worstToolBoundTurn.toolActiveMs)) {
+          worstToolBoundTurn = { idx: i, toolActiveMs, doneMs: t.doneAt - t.ts };
         }
       }
 
@@ -174,7 +231,7 @@ export class SessionTelemetry {
       bucket.avgDoneMs = tm.done.length ? Math.round(tm.done.reduce((a, b) => a + b, 0) / tm.done.length) : null;
     }
     return {
-      totalTurns: this.turns.length,
+      totalTurns: turns.length,
       totalCostUsd: Math.round(totalCost * 10000) / 10000,
       blankTurns: blank,
       envelopeFallbacks: envFallback,
@@ -191,21 +248,18 @@ export class SessionTelemetry {
       coldStartCacheCreate,
       mostParallelTurn,
       staleCacheTurns,
+      avgDeadWaitMs: deadWaits.length ? Math.round(deadWaits.reduce((a, b) => a + b, 0) / deadWaits.length) : null,
+      worstDeadWaitTurn,
+      totalToolActiveMs,
+      totalModelMs,
+      worstToolBoundTurn,
       outputTokensPerSec: totalStreamMs > 0
         ? Math.round((totalOutputTokens / totalStreamMs) * 1000)
         : null,
       byModel,
-      eventCounts: this.events.reduce<Record<string, number>>((acc, e) => {
+      eventCounts: events.reduce<Record<string, number>>((acc, e) => {
         acc[e.kind] = (acc[e.kind] ?? 0) + 1;
         return acc;
       }, {}),
     };
   }
-
-  reset() {
-    this.id = newSessionId();
-    this.startedAt = Date.now();
-    this.turns = [];
-    this.events = [];
-  }
-}

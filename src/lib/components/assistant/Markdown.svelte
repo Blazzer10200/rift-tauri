@@ -122,6 +122,7 @@
   const WORD_MS = 42;      // mock stagger: i * 0.042s
   const REVEAL_MS = 500;   // per-word blur duration (matches md-word keyframe)
   const REVEAL_WINDOW = Math.ceil(REVEAL_MS / WORD_MS) + 1; // words still mid-blur behind the cursor (+1 so the oldest finishes before snapping solid)
+  const CATCHUP_LAG = Math.ceil(800 / WORD_MS); // trail beyond ~800ms of words drains proportionally so a burst never crawls behind
   let shownCount = $state(0);
   let totalWords = 0;
   let everStreamed = false;
@@ -133,10 +134,30 @@
   let wordSpans: HTMLSpanElement[] = [];
   let revealedUpTo = 0;
   let solidUpTo = 0;
+  let wakeReveal: () => void = () => {}; // restarts the parked rAF loop when new text lands
+
+  // Coalesce markdown re-parse to one-per-frame while streaming. The backend can
+  // emit many token deltas faster than a frame (and faster than the reveal shows
+  // them at WORD_MS), so re-parsing the whole accumulated text on every delta is
+  // wasted O(n) work per token. Throttle to rAF — bounds parses to framerate,
+  // output byte-identical. Non-streaming / reduced-motion parse immediately so
+  // history loads and the final delta never wait a frame.
+  // svelte-ignore state_referenced_locally -- intentional initial snapshot; driven by the effect below
+  let renderText = $state(text);
+  let parseQueued = false;
+  let destroyed = false;
+  $effect(() => {
+    const t = text;
+    if (!streaming || prefersReducedMotion) { renderText = t; return; }
+    if (parseQueued) return;
+    parseQueued = true;
+    requestAnimationFrame(() => { parseQueued = false; if (!destroyed) renderText = text; });
+  });
+  $effect(() => () => { destroyed = true; });
 
   // Re-cascade when the turn is replaced/regenerated (text shrinks).
   $effect(() => {
-    const L = text.length;
+    const L = renderText.length;
     if (L < lastLen) shownCount = 0;
     lastLen = L;
   });
@@ -149,6 +170,7 @@
     if (prefersReducedMotion) return;
     let raf = 0;
     let last = 0;
+    let parked = false;
     let stopped = false;
     const step = (t: number) => {
       if (stopped) return;
@@ -157,18 +179,29 @@
       const target = totalWords > 0 ? totalWords + REVEAL_WINDOW : 0;
       if (shownCount < target) {
         if (!last) last = t;
-        const due = Math.floor((t - last) / WORD_MS);
+        let due = Math.floor((t - last) / WORD_MS);
         if (due > 0) {
+          // Adaptive catch-up: when the reveal trails the delivered text by more
+          // than CATCHUP_LAG words, drain the backlog proportionally faster so a
+          // fast burst stays bounded behind instead of crawling at WORD_MS/word.
+          const lag = totalWords - shownCount;
+          if (lag > CATCHUP_LAG) due = Math.ceil((due * lag) / CATCHUP_LAG);
           shownCount = Math.min(shownCount + due, target);
           last = t;
         }
+        raf = requestAnimationFrame(step);
       } else {
+        // Caught up — park the loop instead of spinning rAF forever for every
+        // settled message. wakeReveal() restarts it when the next delta lands.
+        parked = true;
         last = 0;
       }
-      raf = requestAnimationFrame(step);
+    };
+    wakeReveal = () => {
+      if (parked && !stopped) { parked = false; raf = requestAnimationFrame(step); }
     };
     raf = requestAnimationFrame(step);
-    return () => { stopped = true; cancelAnimationFrame(raf); };
+    return () => { stopped = true; wakeReveal = () => {}; cancelAnimationFrame(raf); };
   });
 
   // Wrap every prose word in a <span> ONCE per markdown delta (held + blurred to
@@ -357,14 +390,14 @@
     return tpl.innerHTML;
   }
 
-  // Parse markdown → sanitized HTML. Depends only on `text`/`shikiReady`, so it
-  // runs once per backend delta — NOT on every reveal-cursor tick (the paced
-  // reveal below re-walks this cached HTML at ~24fps; re-parsing there would be
-  // wasteful). Re-runs when shikiReady flips so code blocks upgrade to
-  // syntax-highlighted in place.
+  // Parse markdown → sanitized HTML. Depends only on `renderText`/`shikiReady`,
+  // so it runs at most once per frame (renderText is the rAF-coalesced text) —
+  // NOT on every reveal-cursor tick (the paced reveal below re-walks this cached
+  // HTML at ~24fps; re-parsing there would be wasteful). Re-runs when shikiReady
+  // flips so code blocks upgrade to syntax-highlighted in place.
   const parsed = $derived.by(() => {
     void shikiReady;
-    const raw = marked.parse(text, { async: false }) as string;
+    const raw = marked.parse(renderText, { async: false }) as string;
     const clean = DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: [
         "p", "br", "strong", "em", "del", "code", "pre",
@@ -412,6 +445,7 @@
     revealedUpTo = 0;
     solidUpTo = 0;
     untrack(() => applyReveal(shownCount));
+    wakeReveal();
   });
 
   // Reveal cursor: cheap per-frame class toggle over the persisted spans. Tracks
