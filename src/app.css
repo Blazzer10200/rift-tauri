@@ -84,6 +84,9 @@
   --dur-page-out: 240ms;   /* a screen leaves */
   --dur-rise:     460ms;   /* a content block rises */
   --stagger:      62ms;    /* gap between staggered blocks */
+  --dur-fast:     140ms;   /* control hover / small state flip */
+  --dur-base:     240ms;   /* default transition */
+  --dur-slow:     520ms;   /* large data reveal (bars, gauge, timeline) */
 
   /* density (compact default; overridden below by data-density) */
   --row-h: 28px;

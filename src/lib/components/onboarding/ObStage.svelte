@@ -1,9 +1,9 @@
 <script lang="ts">
   // Per-step looping explainer visual. Pure markup — all styling + keyframes
   // live in $lib/styles/onboarding.css (loaded globally by OnboardingFlow).
-  import { Sparkles, Palette } from "lucide-svelte";
+  import { Sparkles, Palette, FlaskConical } from "lucide-svelte";
 
-  type Kind = "welcome" | "personalize" | "claude";
+  type Kind = "welcome" | "personalize" | "claude" | "beta";
   let { kind, caption }: { kind: Kind; caption?: string } = $props();
 </script>
 
@@ -34,6 +34,11 @@
       </div>
       <div class="ob-typing"><i></i><i></i><i></i></div>
     </div>
+  {:else if kind === "beta"}
+    <span class="ob-ring r1"></span>
+    <span class="ob-ring r2"></span>
+    <span class="ob-ring r3"></span>
+    <div class="ob-w-mark"><FlaskConical size={24} /></div>
   {/if}
   {#if caption}<span class="ob-stage-cap">{caption}</span>{/if}
 </div>

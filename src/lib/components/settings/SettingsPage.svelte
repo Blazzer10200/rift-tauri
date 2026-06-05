@@ -16,6 +16,7 @@
   import { commandPalette } from "../../state/command-palette.svelte";
   import { uiPrefs, ACCENTS } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
+  import { betaNotice } from "../../state/betaNotice.svelte";
   import { scrubUser } from "$lib/utils/redact";
   import { tooltip } from "$lib/actions/tooltip";
   import Select from "../Select.svelte";
@@ -864,9 +865,9 @@
                 <span class="st-about-ic">{#if diagCopied}<Check size={15} />{:else}<Copy size={15} />{/if}</span>
                 <span class="st-about-body"><span class="st-about-t">{diagCopied ? "Copied to clipboard" : "Copy diagnostic"}</span><span class="st-about-s">Version, platform, and paths — username-scrubbed</span></span>
               </button>
-              <button class="st-about-row" type="button" onclick={() => onboarding.reset()}>
+              <button class="st-about-row" type="button" onclick={() => { onboarding.reset(); betaNotice.reset(); }}>
                 <span class="st-about-ic"><RotateCcw size={15} /></span>
-                <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Shows the welcome walkthrough again on next launch when you're not signed in to Claude</span></span>
+                <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Shows the welcome walkthrough — including the beta &amp; AI-disclaimer notice — again on next launch</span></span>
               </button>
             </div>
           </div>

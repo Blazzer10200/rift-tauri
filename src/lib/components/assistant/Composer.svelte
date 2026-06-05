@@ -123,6 +123,8 @@
   // Model picker rows — version + tagline + context window. The CLI takes
   // the alias (`sonnet`/`opus`/`haiku`); version is display-only and pulled
   // from CLAUDE.md's source-of-truth section on the current model family.
+  // Effort tiers, low→high. Used by both the slider and per-model capability caps.
+  type EffortId = "none" | "quick" | "deep" | "ultra";
   type ModelOpt = {
     id: ModelSel;
     label: string;
@@ -131,16 +133,28 @@
     ctx: string;
     suffix: string;   // muted inline tag beside the name (e.g. "1M context")
     legacy: boolean;   // previous-generation — grouped under a "Legacy" subhead
+    // ── Capability matrix (source of truth for what each model can actually do).
+    // Drives every affordance gate so the panel never offers a mode the model
+    // ignores server-side. Grounded in the model capability docs:
+    //   • effort     — accepts the CLI `--effort` flag at all. Haiku skips
+    //                  extended thinking wholesale, so this is false for Haiku.
+    //   • maxEffort  — highest effort tier the model honors. Opus reaches
+    //                  "ultra" (xhigh + ultracode); Sonnet tops out at "deep"
+    //                  (high) — xhigh/ultracode are Opus-tier only.
+    //   • fastMode   — Opus-only faster-output mode (CC's `/fast`).
+    effort: boolean;
+    maxEffort: EffortId;
+    fastMode: boolean;
   };
   // Flat single-column list (Claude-Code-Desktop layout): current models first,
   // legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
   // 1M-ctx beta); `claude-opus-4-7` pins the prior generation. The CLI takes
   // the alias / pinned id; name + suffix are display-only.
   const MODEL_OPTIONS: ModelOpt[] = [
-    { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false },
-    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false },
-    { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             ctx: "200K ctx", suffix: "200K context", legacy: false },
-    { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    ctx: "1M ctx",   suffix: "1M context",   legacy: true  },
+    { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "ultra", fastMode: true  },
+    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "deep",  fastMode: false },
+    { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: "none",  fastMode: false },
+    { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: "ultra", fastMode: true  },
   ];
   const currentModels = MODEL_OPTIONS.filter((m) => !m.legacy);
   const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
@@ -294,7 +308,7 @@
   // hide the pill on Haiku to avoid implying it does something. Cycle on click:
   // none → quick → deep → none. Names describe quality not speed — "Fast"
   // and "Quick" were ambiguous siblings; Instant/Smart/Deep is a real ladder.
-  type EffortOpt = { id: "none" | "quick" | "deep" | "ultra"; label: string; hint: string; level: 1 | 2 | 3 | 4 };
+  type EffortOpt = { id: EffortId; label: string; hint: string; level: 1 | 2 | 3 | 4 };
   const EFFORT_OPTIONS: EffortOpt[] = [
     { id: "none",  label: "Instant", level: 1, hint: "Instant — straight to the answer, no thinking time" },
     { id: "quick", label: "Smart",   level: 2, hint: "Smart — thinks briefly before answering (~5s extra)" },
@@ -302,17 +316,57 @@
     { id: "ultra", label: "Ultracode", level: 4, hint: "Ultracode — max reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
-  // Haiku ignores extended thinking server-side — the backend drops `--effort`
-  // (effortToFlag → null) and never sets the ultracode key. Single source of
-  // truth for every effort-affordance gate (slider, pill label, ultra glyph).
-  const effortApplies = $derived(assistant.model !== "haiku");
-  // Effort rendered as a Faster↔Smarter slider: stops map 1:1 to EFFORT_OPTIONS
-  // (Instant→Ultracode). Index drives the knob position + keyboard ←/→ nudge.
-  const effortIdx = $derived(Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)));
+  // ── Capability gates, all derived from the current model's matrix entry. The
+  // panel offers ONLY what the selected model honors server-side, so the UI
+  // never promises a mode that silently does nothing.
+  // `effortApplies`: does this model use extended-thinking effort at all (false
+  // for Haiku — the backend drops `--effort` / never sets the ultracode key).
+  const effortApplies = $derived(currentModel?.effort ?? true);
+  // `effortStops`: the slider's allowed tiers — EFFORT_OPTIONS truncated at the
+  // model's ceiling (Opus → Ultracode/xhigh; Sonnet → Deep/high). A prefix
+  // slice, so an index into it equals the absolute tier index.
+  const effortStops = $derived.by(() => {
+    if (!currentModel?.effort) return [] as EffortOpt[];
+    const cap = EFFORT_OPTIONS.findIndex((e) => e.id === currentModel.maxEffort);
+    return EFFORT_OPTIONS.slice(0, cap >= 0 ? cap + 1 : EFFORT_OPTIONS.length);
+  });
+  // Fast mode is Opus-only (CC's `/fast`). It is also not yet plumbed to the CLI
+  // spawn (ui-prefs TODO), so the row stays hidden behind FAST_MODE_WIRED until
+  // the backend honors it — showing a dead toggle would be the exact false
+  // signal we're removing. Flip to true once wired; it then appears Opus-only.
+  const FAST_MODE_WIRED = false;
+  const fastModeApplies = $derived((currentModel?.fastMode ?? false) && FAST_MODE_WIRED);
+  // Effort rendered as a Faster↔Smarter slider over `effortStops`. Index drives
+  // the knob position + keyboard ←/→ nudge.
+  const effortIdx = $derived(
+    Math.min(
+      Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)),
+      Math.max(0, effortStops.length - 1),
+    ),
+  );
   function setEffortByIdx(i: number) {
-    const c = Math.min(EFFORT_OPTIONS.length - 1, Math.max(0, i));
-    assistant.setThinkingEffort(EFFORT_OPTIONS[c].id);
+    const max = Math.max(0, effortStops.length - 1);
+    const c = Math.min(max, Math.max(0, i));
+    if (effortStops[c]) assistant.setThinkingEffort(effortStops[c].id);
   }
+  // Switching to a lower-ceiling model (e.g. Ultracode → Sonnet) must pull the
+  // stored effort down to that model's max, so we never send xhigh/ultracode to
+  // a model that rejects it.
+  $effect(() => {
+    if (!effortApplies || effortStops.length === 0) return;
+    if (!effortStops.some((e) => e.id === assistant.thinkingEffort)) {
+      assistant.setThinkingEffort(effortStops[effortStops.length - 1].id);
+    }
+  });
+  // Plain-language summary of what the current model + effort selection actually
+  // does — so users aren't guessing what a mode gets them into. Model-aware:
+  // reflects each model's real ceiling, and flags the heavy Ultracode tier.
+  const modelCaption = $derived.by(() => {
+    const m = currentModel;
+    if (!m) return "";
+    if (!m.effort) return `${m.label} ${m.version} answers right away — it doesn't use extended-thinking effort modes.`;
+    return currentEffort.hint;
+  });
   // Pointer-drag the slider: map clientX → nearest stop. Pointer-capture on the
   // track keeps move/up flowing even when the cursor leaves the row.
   let effortTrackEl: HTMLDivElement | null = $state(null);
@@ -369,8 +423,8 @@
     | { kind: "effort" };
   const settingsRows = $derived.by<SettingsRow[]>(() => {
     const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
-    rows.push({ kind: "fast" });
-    if (effortApplies) rows.push({ kind: "effort" });
+    if (fastModeApplies) rows.push({ kind: "fast" });
+    if (effortApplies && effortStops.length > 0) rows.push({ kind: "effort" });
     return rows;
   });
   // Re-seed the cursor to the current model row whenever the panel opens.
@@ -1136,7 +1190,7 @@
     {/if}
 
     {#if settingsOpen}
-      {@const stops = EFFORT_OPTIONS.length}
+      {@const stops = effortStops.length}
       {@const effortPct = stops > 1 ? (effortIdx / (stops - 1)) * 100 : 0}
       <div class="rift-menu settings-menu" role="menu">
         <div class="rift-menu-head">Model</div>
@@ -1164,27 +1218,29 @@
           </button>
         {/each}
 
-        <div class="rift-menu-divider"></div>
-        <div class="rift-menu-sub">Fast mode</div>
-        <button
-          type="button"
-          class="rift-menu-row toggle-row"
-          class:active={settingsRows[settingsIdx]?.kind === "fast"}
-          onmousedown={(e) => { e.preventDefault(); uiPrefs.toggleFastMode(); }}
-          role="menuitemcheckbox"
-          aria-checked={uiPrefs.fastMode}
-        >
-          <span class="rift-menu-row-body">
-            <span class="rift-menu-row-t">Enable fast mode</span>
-            <span class="rift-menu-row-d">Opus with faster output</span>
-          </span>
-          <span class="rift-toggle" class:on={uiPrefs.fastMode} aria-hidden="true">
-            <span class="rift-toggle-knob"></span>
-          </span>
-        </button>
-
-        {#if effortApplies}
+        {#if fastModeApplies}
           <div class="rift-menu-divider"></div>
+          <div class="rift-menu-sub">Fast mode</div>
+          <button
+            type="button"
+            class="rift-menu-row toggle-row"
+            class:active={settingsRows[settingsIdx]?.kind === "fast"}
+            onmousedown={(e) => { e.preventDefault(); uiPrefs.toggleFastMode(); }}
+            role="menuitemcheckbox"
+            aria-checked={uiPrefs.fastMode}
+          >
+            <span class="rift-menu-row-body">
+              <span class="rift-menu-row-t">Enable fast mode</span>
+              <span class="rift-menu-row-d">Opus with faster output</span>
+            </span>
+            <span class="rift-toggle" class:on={uiPrefs.fastMode} aria-hidden="true">
+              <span class="rift-toggle-knob"></span>
+            </span>
+          </button>
+        {/if}
+
+        <div class="rift-menu-divider"></div>
+        {#if effortApplies}
           <div class="effort-head" class:ultra={currentEffort.id === "ultra"}>
             <span class="effort-head-l">Effort <b>{currentEffort.label}</b></span>
             <button
@@ -1220,7 +1276,7 @@
               onpointercancel={endEffortDrag}
             >
               <div class="effort-fill" style="width: {effortPct}%"></div>
-              {#each EFFORT_OPTIONS as e, i (e.id)}
+              {#each effortStops as e, i (e.id)}
                 <button
                   type="button"
                   class="effort-notch"
@@ -1238,6 +1294,7 @@
             <div class="effort-ends"><span>Faster</span><span>Smarter</span></div>
           </div>
         {/if}
+        <p class="model-caption" class:warn={effortApplies && currentEffort.id === "ultra"}>{modelCaption}</p>
 
         <div class="rift-menu-hint">
           <span><kbd>1–{MODEL_OPTIONS.length}</kbd>model</span>
@@ -1578,6 +1635,11 @@
       </div>
     </div>
   </div>
+
+  <div class="composer-disclaimer">
+    <span class="cd-tag">Beta</span>
+    AI can make mistakes — review changes before relying on them.
+  </div>
 </div>
 
 <style>
@@ -1588,6 +1650,20 @@
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
+  }
+  /* Persistent beta + AI-disclaimer line under the input. Quiet, single-line. */
+  .composer-disclaimer {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    margin-top: 7px;
+    font-size: 10px; line-height: 1.2; color: var(--fg-faint);
+    text-align: center;
+  }
+  .composer-disclaimer .cd-tag {
+    padding: 1px 6px; border-radius: 999px;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 28%, transparent);
   }
   /* Composer chrome is emerald-only — the ring/divider/send/ripple no longer
      tint by model. Every accent inside reads from this single source; model
@@ -2850,6 +2926,14 @@
     margin-top: 9px; font-size: 9px; font-weight: 600;
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-faint);
   }
+  /* Plain-language "what you're getting" line under the effort slider. Amber on
+     the Ultracode tier to flag its higher cost / autonomous behavior. */
+  .model-caption {
+    margin: 8px 10px 2px; padding: 0;
+    font-size: 10.5px; line-height: 1.4; color: var(--fg-muted);
+    transition: color 180ms ease;
+  }
+  .model-caption.warn { color: var(--warn); }
   @media (prefers-reduced-motion: reduce) {
     .effort-fill, .effort-knob, .effort-notch { transition: none; }
   }

@@ -6,6 +6,7 @@
 // and must never surface as a user-facing failure).
 
 import { invoke } from "@tauri-apps/api/core";
+import { summarizeSession } from "./telemetry";
 
 /** Thin per-session metadata for the Harness session picker. Mirrors the Rust
  *  `SessionLogMeta` (camelCase serde). */
@@ -40,7 +41,14 @@ export async function listSessionLogs(): Promise<SessionLogMeta[]> {
 
 export async function loadSessionLog(id: string): Promise<SessionSnapshot | null> {
   try {
-    return await invoke<SessionSnapshot>("assistant_load_session_log", { id });
+    const snap = await invoke<SessionSnapshot>("assistant_load_session_log", { id });
+    // Re-derive the rollup from the raw turns instead of trusting the frozen
+    // on-disk summary (#33): fields added after a log was written (e.g.
+    // avgDeadWaitMs) are absent from older summaries and render as "—", while
+    // the timeline markers — which recompute from turns[] — show data. One
+    // source of truth, and future summarize() additions backfill for free.
+    if (snap) snap.summary = summarizeSession(snap.turns ?? [], snap.events ?? []);
+    return snap;
   } catch (e) {
     console.warn("assistant_load_session_log failed", e);
     return null;

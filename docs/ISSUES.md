@@ -10,6 +10,7 @@
 
 > Live queue. HANDOFF.md = session state; this section = what's queued.
 
+- **✅ FIXED in-tree (cont.54, 2026-06-05) — unshipped, delete on ship:** #32 (`\\?\` path-prefix strip), #33 (Harness avg-dead-wait recompute on load), #34 (palette "Go to Home"), #35 (prune dead Recent Folders). Plus a **Harness no-scroll redesign** (KPI rail + collapsible "Show details"; not an ISSUES item — detail in HANDOFF cont.54). Blocks below kept until `/git-ship`.
 - **Steer feature — live-verify on a tool-using turn.** Mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`). Remaining: confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
 - **Permission round-trip — code-complete, needs live-verify.** Wired end-to-end: `--permission-prompt-tool stdio` (mod.rs) → `can_use_tool` handler → control-response write → `PermissionBar.svelte` Allow/Deny UI → `submitPermissionDecision()`. Remaining: live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
 - **#30 Update UI redesign (queued — tomorrow).** The update toast + dialog look dated and under-organized — visual + IA refresh wanted. See #30 block below.
@@ -64,6 +65,37 @@
 - **Symptom:** Inline styles permitted — required by current Tailwind output, weakens CSP.
 - **Fix sketch:** Switch to nonce/strict-dynamic once Tailwind supports hashed inline styles end-to-end.
 
+## 31. Fast-mode toggle is cosmetic — not plumbed to CLI spawn (LOW)
+
+- **✅ RESOLVED in-tree (2026-06-05, cont.57) — unshipped, delete on ship:** Chose **hide-until-wired** (the "don't ship a lying control" half of the fix sketch). The toggle is now gated behind `FAST_MODE_WIRED = false` **and** the per-model `fastMode` capability flag in [Composer.svelte](../src/lib/components/assistant/Composer.svelte) — so it renders nowhere today, and reappears **Opus-only** the moment the CLI side is wired (flip one const). `uiPrefs.fastMode` state + persistence kept dormant for that wiring. Block kept until `/git-ship`.
+- **Where:** [src/lib/state/ui-prefs.svelte.ts:33-35](../src/lib/state/ui-prefs.svelte.ts) (`fastMode` $state + its own TODO), toggle UI in [src/lib/components/assistant/Composer.svelte:~1175](../src/lib/components/assistant/Composer.svelte). Persisted under `rift.ui.fast-mode.v1`.
+- **Symptom (was):** The Composer model-menu showed a working fast-mode toggle that persists its on/off intent to localStorage, but the value is never read by the CLI-spawn path in `assistant.svelte.ts` / `assistant/mod.rs` — flipping it had zero effect on the turn. A visible control that did nothing.
+- **Remaining (to fully close on a future arc):** Plumb `uiPrefs.fastMode` into the spawn envelope alongside the effort flag (CC's `/fast` = Opus-with-faster-output, valid on Opus 4.6/4.7/4.8 only), then flip `FAST_MODE_WIRED` to surface it Opus-only. Surfaced during the 2026-06-04 harness/audit pass.
+
+## 32. `\\?\` extended-length path prefix leaks into UI (LOW — cosmetic)
+
+- **Where:** [src/lib/components/home/HomePage.svelte](../src/lib) Workspace card path display (shows `\\?\C:\AI Workflow\projects\remotion-playground`). Harness chips use `cleanPath()` which appears to strip it; Home does not — confirm whether `cleanPath` exists/handles `\\?\` and reuse it everywhere a path renders.
+- **Symptom:** The raw Win32 extended-length prefix `\\?\` is shown verbatim in the Home workspace path. Ugly; reads as a bug to users.
+- **Fix sketch:** Strip a leading `\\?\` (and `\\?\UNC\`) for display only — never on the value passed to the backend. Centralize in the existing `cleanPath` helper and apply on the Home card. Surfaced during the 2026-06-05 live-UI test pass (~3 AM session).
+
+## 33. Harness "avg dead wait" shows "—" for archived sessions (LOW-MED — legacy data)
+
+- **Where:** [src/lib/components/workspaces/HarnessPage.svelte:237](../src/lib/components/workspaces/HarnessPage.svelte) (binds `fmtMs(sum.avgDeadWaitMs)`), `sum = source.summary` where `source` comes from [loadSessionLog](../src/lib/state/assistant/sessionLog.ts) → `assistant_load_session_log` returning the **persisted** `SessionSnapshot` incl. its frozen `summary` (serialized at save via [telemetry.ts:35](../src/lib/state/assistant/telemetry.ts)).
+- **Symptom:** For sessions logged **before** cont.53 added `avgDeadWaitMs` to `summarize()`, the persisted summary lacks the field → `fmtMs(undefined)` → "—". Meanwhile the per-turn `.tl-dead` timeline markers ([HarnessPage.svelte:203,660](../src/lib/components/workspaces/HarnessPage.svelte)) recompute live from raw `source.turns` and DO render. So the aggregate stat and the timeline permanently disagree for any pre-field session. **Live/new sessions compute correctly** (verified `avg dead wait 6.2s` on a fresh turn) — this is purely stale persisted-summary data.
+- **Fix sketch:** Don't trust the frozen summary on load — recompute `summary` from the persisted `turns[]` in `loadSessionLog` (or in the `source` derived) so new derived fields backfill for old logs. Same pattern would future-proof any later `summarize()` additions. Surfaced 2026-06-05 live-UI test (this was the cont.53 RESUME-HERE verify item).
+
+## 34. Command palette omits "Go to Home" (LOW — consistency)
+
+- **Where:** [src/lib/components/dialogs/CommandPalette.svelte:39-42](../src/lib/components/dialogs/CommandPalette.svelte) — the `navs` array lists only `chat`/`harness`/`settings`.
+- **Symptom:** Home (Ctrl+1) is a primary workspace but has no "Go to Home" entry in the palette's GO TO group, while every other workspace does. Inconsistent.
+- **Fix sketch:** Add `{ id: "home", label: "Home", icon: Home, sub: "Ctrl+1" }` as the first `navs` entry. One-line addition. Surfaced 2026-06-05 live-UI test.
+
+## 35. Deleted project still in Home "Recent folders" (LOW — stale recents)
+
+- **Where:** Home workspace "Recent folders" list (recent-workspaces persistence — re-grep; likely `ui-prefs`/workspace store).
+- **Symptom:** `vein-modding` (retired + deleted 2026-06-04 per workspace CLAUDE.md) still appears in Recent Folders; selecting it would point at a non-existent dir. Also `Coinsmith` listed.
+- **Fix sketch:** Validate recent-folder entries against existence on Home mount (or on click) and prune/grey missing ones. Don't auto-delete silently mid-list without a signal. LOW — expected-ish for a recents list, but a missing-dir click should fail gracefully. Surfaced 2026-06-05 live-UI test.
+
 ---
 
 ## Priority tiers
@@ -78,4 +110,4 @@
 - **#30 Update UI redesign (next up — queued for tomorrow)** · #4 App-wide UX consistency sweep · #20 hot-file split M8-M9 · #17 two-repo collapse · CR-UX trust-enum decision (user sign-off).
 
 **Tier 4 — backend LOW (opportunistic)**
-- #29 CSP `style-src 'unsafe-inline'` (Tailwind-blocked) · Wave-1 LOWs #91-#134 — clippy/doc/perf nits (see `docs/archive/audit-history.md`).
+- #29 CSP `style-src 'unsafe-inline'` (Tailwind-blocked) · ~~#31 fast-mode toggle cosmetic~~ (✅ resolved in-tree cont.57 — hidden until wired) · Wave-1 LOWs #91-#134 — clippy/doc/perf nits (see `docs/archive/audit-history.md`).

@@ -152,6 +152,7 @@
 }
 .ob-vrow:hover { background: var(--surface-hover); }
 .ob-vic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--bg-elev-2); color: var(--accent); }
+.ob-vic.warn { background: color-mix(in oklch, var(--warn) 14%, transparent); color: var(--warn); }
 .ob-vbody { display: flex; flex-direction: column; gap: 2px; }
 .ob-vt { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
 .ob-vp { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.5; }

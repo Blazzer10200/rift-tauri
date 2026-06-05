@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon } from "lucide-svelte";
+  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { effortToFlag } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
@@ -96,6 +96,9 @@
   //    shape so every derived stays non-null without a hand-written stub. ──
   const EMPTY_SNAP = new SessionTelemetry().snapshot() as SessionSnapshot;
   let view = $state<"live" | "all" | string>("live");
+  // Diagnostic cards (reliability / session details / tools granted) collapse by
+  // default so the core dashboard fits one viewport with no scroll; one click reveals.
+  let showDetails = $state(false);
   let sessions = $state<SessionLogMeta[]>([]);
   let loadedSnaps = $state<Record<string, SessionSnapshot>>({});
 
@@ -199,6 +202,8 @@
         cost: t.costUsd,
         dur: t.doneAt != null ? t.doneAt - t.ts : null,
         ttfp: t.firstPaintAt != null ? t.firstPaintAt - t.ts : null,
+        // Silent pre-paint stall not attributable to thinking (spawn/prefill/queue).
+        deadWait: t.firstPaintAt != null ? Math.max(0, (t.firstPaintAt - t.ts) - t.thinkingTotalMs) : null,
         tools: t.toolUses.length,
         think: t.thinkingCount > 0,
         thinkMs: t.thinkingTotalMs,
@@ -232,8 +237,10 @@
   // ── Timing / reliability / config rows ──
   const timeRows = $derived([
     { k: "avg first paint", v: fmtMs(sum.avgTtfpMs) },
+    { k: "avg dead wait",   v: fmtMs(sum.avgDeadWaitMs), warn: (sum.avgDeadWaitMs ?? 0) > 8000 },
     { k: "avg turn",        v: fmtMs(sum.avgDoneMs) },
     { k: "reasoning time",  v: fmtMs(thinkMsTotal || null) },
+    { k: "tool vs model",   v: (sum.totalToolActiveMs || sum.totalModelMs) ? `${fmtMs(sum.totalToolActiveMs || null)} / ${fmtMs(sum.totalModelMs || null)}` : "—" },
     { k: "thinking turns",  v: String(sum.thinkingTurns) },
     { k: "max parallel",    v: sum.mostParallelTurn ? sum.mostParallelTurn.maxConcurrentTools + "×" : "—" },
     { k: "cold-start cache", v: sum.coldStartCacheCreate != null ? fmtTok(sum.coldStartCacheCreate) + " tok" : "—" },
@@ -246,6 +253,9 @@
     { k: "session lost",  v: sum.eventCounts?.["session.lost"] ?? 0,   warn: (sum.eventCounts?.["session.lost"] ?? 0) > 0 },
     { k: "model swaps",   v: sum.eventCounts?.["model.change"] ?? 0,   warn: false },
   ]);
+  // When nothing is flagged, collapse the 6-cell grid to one "all clear" line —
+  // a wall of zeroes reads as noise; the absence of warnings is the signal.
+  const relClean = $derived(relRows.every((r) => !r.warn));
   // Config adapts: live = resolved-by-CLI runtime state; past = what the
   // snapshot recorded (model/workspace) + the session's own shape.
   const cfgRows = $derived(isLive
@@ -274,8 +284,6 @@
   // ── Gauge geometry ──
   const R = 82, C = 2 * Math.PI * 82;
   const ctxDash = $derived(C * (1 - ctxPct / 100));
-  const DR = 54, DC = 2 * Math.PI * 54;
-  const cacheDash = $derived(DC * (1 - Math.min(100, cacheEff) / 100));
   // Zone threshold ticks on the context ring (60% = filling, 85% = near-full).
   function tickAt(pct: number) {
     const a = (-90 + (pct / 100) * 360) * (Math.PI / 180);
@@ -506,43 +514,65 @@
     <!-- ── Per-session bento (live or archived) ── -->
     <div class="bento">
 
+      <!-- KPI rail (session-wide headline metrics) -->
+      <section class="cell full kpi-rail">
+        <div class="kpi"><span class="kpi-v">{fmtUsd(sum.totalCostUsd)}</span><span class="kpi-k">session cost</span></div>
+        <div class="kpi"><span class="kpi-v">{sum.totalTurns}</span><span class="kpi-k">turns</span></div>
+        <div class="kpi"><span class="kpi-v">{sum.toolCallTotal}</span><span class="kpi-k">tool calls</span></div>
+        <div class="kpi"><span class="kpi-v" class:nodata={sum.outputTokensPerSec == null}>{sum.outputTokensPerSec ?? "—"}{#if sum.outputTokensPerSec}<span class="kpi-u"> t/s</span>{/if}</span><span class="kpi-k">output speed</span></div>
+        <div class="kpi"><span class="kpi-v">{cacheEff.toFixed(0)}<span class="kpi-u">%</span></span><span class="kpi-k">cache hit</span></div>
+        <div class="kpi"><span class="kpi-v" class:nodata={sum.avgTtfpMs == null}>{fmtMs(sum.avgTtfpMs)}</span><span class="kpi-k">avg first paint</span></div>
+      </section>
+
       {#if isLive}
         <!-- HERO: context ring (active conversation) -->
-        <section class="cell hero">
+        <section class="cell hero" class:waiting={!lt}>
           <div class="hero-glow"></div>
           <div class="hero-tag">active conversation</div>
-          <div class="gauge">
-            <svg viewBox="0 0 200 200" class="gauge-svg">
-              <defs>
-                <linearGradient id="ctxgrad" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" class="g0" />
-                  <stop offset="100%" class="g1" />
-                </linearGradient>
-              </defs>
-              <circle cx="100" cy="100" r={R} class="gauge-track" />
-              {#each ticks as t (t.x1)}
-                <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} class="gauge-tick" />
-              {/each}
-              <circle cx="100" cy="100" r={R} class="gauge-fill"
-                stroke="url(#ctxgrad)"
-                stroke-dasharray={C} stroke-dashoffset={ctxDash}
-                transform="rotate(-90 100 100)" />
-            </svg>
-            <div class="gauge-mid">
-              <div class="gauge-pct" class:nodata={!lt} data-zone={ctxZone}>{lt ? ctxPct.toFixed(0) : "—"}{#if lt}<span class="gauge-pct-u">%</span>{/if}</div>
-              <div class="gauge-cap">context used</div>
+          {#if !lt}
+            <!-- No turn yet: a calm placeholder, not a dash-filled gauge. -->
+            <div class="hero-wait">
+              <div class="hero-wait-ring">
+                <svg viewBox="0 0 200 200" class="gauge-svg"><circle cx="100" cy="100" r={R} class="gauge-track ghost" /></svg>
+                <span class="hero-wait-ico"><MessageCircle size={26} strokeWidth={1.75} /></span>
+              </div>
+              <div class="hero-wait-t">Awaiting first turn</div>
+              <div class="hero-wait-s">Context fills here once you send a message — capacity {fmtTok(assistant.ctxWindow)} tokens.</div>
             </div>
-          </div>
-          <div class="hero-foot">
-            <div class="hero-tok">{lt ? fmtTok(assistant.ctxTokens) : "0"} <span class="dim">/ {fmtTok(assistant.ctxWindow)} tokens</span></div>
-            <div class="hero-zone" data-zone={ctxZone}>{ctxZone === "ok" ? "roomy" : ctxZone === "warn" ? "filling" : "near full"}</div>
-            <div class="hero-last">
-              <span class="hero-last-lbl">last turn</span>
-              {#each ltBreak as b (b.k)}
-                <span class="hero-last-stat"><span class="hero-last-v mono">{fmtTok(b.v)}</span><span class="hero-last-k">{b.k}</span></span>
-              {/each}
+          {:else}
+            <div class="gauge">
+              <svg viewBox="0 0 200 200" class="gauge-svg">
+                <defs>
+                  <linearGradient id="ctxgrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" class="g0" />
+                    <stop offset="100%" class="g1" />
+                  </linearGradient>
+                </defs>
+                <circle cx="100" cy="100" r={R} class="gauge-track" />
+                {#each ticks as t (t.x1)}
+                  <line x1={t.x1} y1={t.y1} x2={t.x2} y2={t.y2} class="gauge-tick" />
+                {/each}
+                <circle cx="100" cy="100" r={R} class="gauge-fill"
+                  stroke="url(#ctxgrad)"
+                  stroke-dasharray={C} stroke-dashoffset={ctxDash}
+                  transform="rotate(-90 100 100)" />
+              </svg>
+              <div class="gauge-mid">
+                <div class="gauge-pct" data-zone={ctxZone}>{ctxPct.toFixed(0)}<span class="gauge-pct-u">%</span></div>
+                <div class="gauge-cap">context used</div>
+              </div>
             </div>
-          </div>
+            <div class="hero-foot">
+              <div class="hero-tok">{fmtTok(assistant.ctxTokens)} <span class="dim">/ {fmtTok(assistant.ctxWindow)} tokens</span></div>
+              <div class="hero-zone" data-zone={ctxZone}>{ctxZone === "ok" ? "roomy" : ctxZone === "warn" ? "filling" : "near full"}</div>
+              <div class="hero-last">
+                <span class="hero-last-lbl">last turn</span>
+                {#each ltBreak as b (b.k)}
+                  <span class="hero-last-stat"><span class="hero-last-v mono">{fmtTok(b.v)}</span><span class="hero-last-k">{b.k}</span></span>
+                {/each}
+              </div>
+            </div>
+          {/if}
         </section>
       {:else}
         <!-- HERO (archived): session overview -->
@@ -556,52 +586,8 @@
           <div class="ov-cost">{fmtUsd(sum.totalCostUsd)}</div>
           <div class="ov-cap">session cost</div>
           <div class="ov-when">{fmtDate(source.startedAt)} · {fmtDur(source.durationMs)}</div>
-          <div class="ov-grid">
-            <div class="ov-stat"><span class="ov-v mono">{sum.totalTurns}</span><span class="ov-k">turns</span></div>
-            <div class="ov-stat"><span class="ov-v mono">{sum.toolCallTotal}</span><span class="ov-k">tools</span></div>
-            <div class="ov-stat"><span class="ov-v mono">{cacheEff.toFixed(0)}%</span><span class="ov-k">cache</span></div>
-            <div class="ov-stat"><span class="ov-v mono">{sum.outputTokensPerSec ?? "—"}</span><span class="ov-k">tok/s</span></div>
-          </div>
         </section>
       {/if}
-
-      <!-- KPI squares (session-wide) -->
-      <section class="cell sq">
-        <div class="sq-v">{fmtUsd(sum.totalCostUsd)}</div>
-        <div class="sq-k">session cost</div>
-        <div class="sq-glow"></div>
-      </section>
-      <section class="cell sq">
-        <div class="sq-v">{sum.totalTurns}</div>
-        <div class="sq-k">turns</div>
-        <div class="sq-glow"></div>
-      </section>
-      <section class="cell sq">
-        <div class="sq-v" class:nodata={sum.outputTokensPerSec == null}>{sum.outputTokensPerSec ?? "—"}<span class="sq-u">{sum.outputTokensPerSec ? " t/s" : ""}</span></div>
-        <div class="sq-k">output speed</div>
-        <div class="sq-glow"></div>
-      </section>
-      <section class="cell sq">
-        <div class="sq-v">{sum.toolCallTotal}</div>
-        <div class="sq-k">tool calls</div>
-        <div class="sq-glow"></div>
-      </section>
-
-      <!-- cache donut -->
-      <section class="cell donut-cell">
-        <div class="donut">
-          <svg viewBox="0 0 130 130" class="donut-svg">
-            <circle cx="65" cy="65" r={DR} class="gauge-track" />
-            <circle cx="65" cy="65" r={DR} class="donut-fill"
-              stroke-dasharray={DC} stroke-dashoffset={cacheDash}
-              transform="rotate(-90 65 65)" />
-          </svg>
-          <div class="donut-mid">
-            <div class="donut-pct">{cacheEff.toFixed(0)}<span class="gauge-pct-u">%</span></div>
-          </div>
-        </div>
-        <div class="cell-cap">cache hit rate</div>
-      </section>
 
       <!-- token flow bars -->
       <section class="cell wide">
@@ -620,7 +606,7 @@
       </section>
 
       <!-- by model -->
-      <section class="cell">
+      <section class="cell wide">
         <div class="cell-head"><span class="cell-title">By model</span></div>
         {#if byModel.length === 0}
           <div class="empty">No turns yet.</div>
@@ -651,8 +637,9 @@
             {#each turnViz.rows.slice(-80) as r (r.i)}
               <span class="tl-bar" data-end={r.end}
                 style="height:{Math.max(7, (r.dur ? r.dur / turnViz.maxDur : 0) * 100)}%"
-                use:tooltip={`Turn ${r.i} · ${shortModel(r.model)}  ·  ${fmtUsd(r.cost)}\nttfp ${fmtMs(r.ttfp)} · dur ${fmtMs(r.dur)} · ${r.out} out\n${r.tools} tool${r.tools === 1 ? "" : "s"}${r.think ? ` · reasoned ${fmtMs(r.thinkMs)}` : ""}${r.end !== "success" ? `  · ${r.end}` : ""}`}>
+                use:tooltip={`Turn ${r.i} · ${shortModel(r.model)}  ·  ${fmtUsd(r.cost)}\nttfp ${fmtMs(r.ttfp)} · dur ${fmtMs(r.dur)} · ${r.out} out\n${r.tools} tool${r.tools === 1 ? "" : "s"}${r.think ? ` · reasoned ${fmtMs(r.thinkMs)}` : ""}${r.deadWait && r.deadWait > 4000 ? ` · dead-wait ${fmtMs(r.deadWait)}` : ""}${r.end !== "success" ? `  · ${r.end}` : ""}`}>
                 {#if r.think}<span class="tl-think"></span>{/if}
+                {#if r.deadWait && r.deadWait > 8000}<span class="tl-dead"></span>{/if}
               </span>
             {/each}
           </div>
@@ -679,23 +666,35 @@
       </section>
 
       <!-- timing + reasoning -->
-      <section class="cell wide">
+      <section class="cell full">
         <div class="cell-head"><span class="cell-title">Timing &amp; reasoning</span></div>
         <div class="stat6">
           {#each timeRows as r (r.k)}
-            <div class="mini"><div class="mini-v mono">{r.v}</div><div class="mini-k">{r.k}</div></div>
+            <div class="mini"><div class="mini-v mono" data-warn={r.warn}>{r.v}</div><div class="mini-k">{r.k}</div></div>
           {/each}
         </div>
       </section>
 
+      <!-- Details toggle — collapses the diagnostic cards so the core fits one viewport -->
+      <button class="cell full det-toggle" type="button" onclick={() => (showDetails = !showDetails)}>
+        <span class="det-lbl">{showDetails ? "Hide" : "Show"} details</span>
+        <span class="det-sub">reliability · session {isLive ? "config · diagnostics stream" : "details"}</span>
+        <span class="det-caret" class:open={showDetails}>▾</span>
+      </button>
+
+      {#if showDetails}
       <!-- reliability / health -->
       <section class="cell wide">
         <div class="cell-head"><span class="cell-title">Reliability</span><span class="cell-meta">harness health</span></div>
-        <div class="stat6">
-          {#each relRows as r (r.k)}
-            <div class="mini"><div class="mini-v mono" data-warn={r.warn}>{r.v}</div><div class="mini-k">{r.k}</div></div>
-          {/each}
-        </div>
+        {#if relClean}
+          <div class="rel-clear"><span class="rel-clear-dot"></span>All clear — no stale cache, tool errors, blank turns, or lost sessions.</div>
+        {:else}
+          <div class="stat6">
+            {#each relRows as r (r.k)}
+              <div class="mini"><div class="mini-v mono" data-warn={r.warn}>{r.v}</div><div class="mini-k">{r.k}</div></div>
+            {/each}
+          </div>
+        {/if}
       </section>
 
       <!-- harness config -->
@@ -752,6 +751,7 @@
           </div>
         </section>
       {/if}
+      {/if}
 
     </div>
   {/if}
@@ -761,12 +761,15 @@
   .dash { position: relative; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; background:
       radial-gradient(circle, color-mix(in oklab, var(--fg) 3%, transparent) 1px, transparent 1px) 0 0 / 26px 26px,
       radial-gradient(130% 90% at 50% -25%, color-mix(in oklab, var(--accent) 5%, transparent), transparent 52%),
-      var(--bg); color: var(--fg); padding: 22px 26px 56px; }
+      var(--bg); color: var(--fg); padding: 16px 22px 14px; }
 
   /* ── Header ── */
   .dhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
   .dhead-title { font-size: 23px; font-weight: 750; letter-spacing: -0.02em; display: flex; align-items: center; gap: 9px; }
-  .dhead-spark { display: inline-flex; color: var(--accent); animation: pulse 2.6s var(--ease-soft) infinite; }
+  /* Spark only breathes while the session is live-streaming — motion means
+     "something is happening", not perpetual decoration. */
+  .dhead-spark { display: inline-flex; color: var(--fg-subtle); transition: color var(--dur-base) var(--ease-soft); }
+  .dash[data-live="true"] .dhead-spark { color: var(--accent); animation: pulse 2s ease-in-out infinite; }
   .dhead-sub { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 3px; }
   .dhead-chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
   .chip { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 11px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 600; border: 1px solid var(--border); background: color-mix(in oklab, var(--surface) 70%, transparent); color: var(--fg-muted); backdrop-filter: blur(8px); }
@@ -776,13 +779,13 @@
   .chip.archived { color: var(--fg-subtle); }
   .chip-dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; }
   .chip.livechip { color: var(--accent); border-color: var(--ghost-border); background: var(--accent-soft); }
-  .chip.livechip :global(svg) { color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+  .chip.livechip :global(svg) { color: var(--accent); animation: pulse 2s ease-in-out infinite; }
 
   /* ── Session selector strip ── */
   .sesh { display: flex; align-items: center; gap: 7px; margin-bottom: 18px; min-width: 0; }
   .sesh-scroll { display: flex; align-items: center; gap: 7px; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; padding-bottom: 2px; scrollbar-width: thin; }
   .sesh-div { width: 1px; height: 22px; background: var(--border); flex: none; }
-  .sesh-pill { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--fg-muted); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; flex: none; white-space: nowrap; transition: border-color 160ms, background 160ms, color 160ms; }
+  .sesh-pill { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--fg-muted); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; flex: none; white-space: nowrap; transition: border-color var(--dur-fast) var(--ease-soft), background var(--dur-fast) var(--ease-soft), color var(--dur-fast) var(--ease-soft); }
   .sesh-pill:hover { border-color: var(--border-strong); color: var(--fg); }
   .sesh-pill.on { border-color: var(--ghost-border); background: var(--accent-soft); color: var(--accent); }
   .sesh-pill :global(svg) { color: currentColor; opacity: 0.8; }
@@ -790,59 +793,82 @@
   .sesh-pill-meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); }
   .sesh-pill.on .sesh-pill-meta { color: color-mix(in oklab, var(--accent) 80%, var(--fg)); }
   .sesh-led { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-faint); flex: none; }
-  .sesh-led.beat { background: var(--ok); box-shadow: 0 0 7px var(--ok); animation: pulse 1.4s ease-in-out infinite; }
+  .sesh-led.beat { background: var(--ok); box-shadow: 0 0 7px var(--ok); animation: pulse 2s ease-in-out infinite; }
   .sesh-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: oklch(0.74 0.15 var(--mH)); box-shadow: 0 0 6px oklch(0.74 0.15 var(--mH) / 0.55); }
   .sesh-none { font-size: var(--fs-xs); color: var(--fg-subtle); padding: 0 4px; }
   .sesh-refresh { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; flex: none; }
   .sesh-refresh:hover { color: var(--fg); border-color: var(--border-strong); }
 
   /* ── Bento grid ── */
-  .bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; grid-auto-flow: dense; }
-  .cell { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px 17px; overflow: hidden; min-width: 0; }
+  .bento { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; grid-auto-flow: dense; }
+  .cell { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 11px 14px; overflow: hidden; min-width: 0; }
   .wide { grid-column: span 2; }
   .full { grid-column: 1 / -1; }
 
-  .cell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  /* Cells rise+fade in on mount, lightly staggered by DOM order. Because each
+     view (live/all/archived) is a separate {#if} branch, switching remounts the
+     grid — so this doubles as a crossfade between views, no extra wiring. */
+  .bento > .cell, .bento > .det-toggle { animation: cellrise var(--dur-rise) var(--ease-page) both; }
+  .bento > :nth-child(1) { animation-delay: 0ms; }
+  .bento > :nth-child(2) { animation-delay: var(--stagger); }
+  .bento > :nth-child(3) { animation-delay: calc(var(--stagger) * 2); }
+  .bento > :nth-child(4) { animation-delay: calc(var(--stagger) * 3); }
+  .bento > :nth-child(5) { animation-delay: calc(var(--stagger) * 4); }
+  /* Cap the cascade so later cells (incl. the on-demand details reveal) don't
+     sit invisible behind a long delay on click. */
+  .bento > :nth-child(n + 6) { animation-delay: calc(var(--stagger) * 5); }
+
+  .cell-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
   .cell-title { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); display: inline-flex; align-items: center; gap: 8px; }
   .cell-meta { font-size: 10.5px; color: var(--fg-subtle); font-family: var(--font-mono); }
-  .cell-cap { text-align: center; font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 6px; }
   .empty { font-size: var(--fs-xs); color: var(--fg-subtle); padding: 10px 0; }
   .dim { color: var(--fg-subtle); }
 
   .loadbox { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--fg-subtle); font-family: var(--font-mono); padding: 50px 0; justify-content: center; }
 
   /* ── Hero context ring ── */
-  .hero { grid-column: span 2; grid-row: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; min-height: 300px; }
+  .hero { grid-column: span 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 12px 16px; }
   .hero-tag { position: absolute; top: 14px; left: 16px; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--fg-faint); z-index: 1; }
   /* Backlight — one soft radial behind the hero focal point (ring / cost),
      biased up to ~42% so it sits on the ring, not the footer. Kept OUTSIDE the
      gauge: nesting a blur() layer inside the gauge's stacking context made
      WebView2 composite it as an opaque black rect. Hero content is z-index:1,
      so z-index:0 keeps this behind it. */
-  .hero-glow { position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); width: 340px; height: 340px; border-radius: 50%; z-index: 0; filter: blur(32px); opacity: 0.5; transition: opacity 450ms var(--ease-soft); pointer-events: none;
+  .hero-glow { position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%); width: 340px; height: 340px; border-radius: 50%; z-index: 0; filter: blur(32px); opacity: 0.5; transition: opacity var(--dur-rise) var(--ease-soft); pointer-events: none;
     background: radial-gradient(circle, color-mix(in oklab, var(--accent) 17%, transparent), transparent 66%); }
   .dash[data-live="true"] .hero-glow { opacity: 0.9; }
-  .gauge { position: relative; width: 216px; height: 216px; z-index: 1; }
+  .gauge { position: relative; width: 148px; height: 148px; z-index: 1; }
+
+  /* Hero "awaiting first turn" — replaces the empty dash-filled gauge before any
+     turn lands. Same footprint as the real gauge so nothing jumps on first use. */
+  .hero.waiting { gap: 16px; }
+  .hero-wait { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 13px; z-index: 1; padding: 6px 0; }
+  .hero-wait-ring { position: relative; width: 148px; height: 148px; display: grid; place-items: center; }
+  .hero-wait-ring .gauge-svg { position: absolute; inset: 0; }
+  .gauge-track.ghost { stroke: color-mix(in oklab, var(--fg) 9%, transparent); stroke-width: 6; stroke-dasharray: 2.5 10; stroke-linecap: round; }
+  .hero-wait-ico { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 50%; color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 10%, transparent); border: 1px solid var(--accent-soft); }
+  .hero-wait-t { font-size: var(--fs-md); font-weight: 650; color: var(--fg-2); letter-spacing: -0.01em; }
+  .hero-wait-s { font-size: var(--fs-xs); color: var(--fg-subtle); text-align: center; max-width: 250px; line-height: 1.5; }
   .gauge-svg { width: 100%; height: 100%; }
   .gauge-track { fill: none; stroke: var(--bg-inset); stroke-width: 13; }
   .gauge-tick { stroke: color-mix(in oklab, var(--fg) 22%, transparent); stroke-width: 2; stroke-linecap: round; }
   .g0 { stop-color: oklch(0.66 0.16 var(--accent-h)); }
   .g1 { stop-color: oklch(0.85 0.13 var(--accent-h)); }
-  .gauge-fill { fill: none; stroke-width: 13; stroke-linecap: round; transition: stroke-dashoffset 700ms var(--ease-page); filter: drop-shadow(0 0 6px color-mix(in oklab, var(--accent) 45%, transparent)); }
+  .gauge-fill { fill: none; stroke-width: 13; stroke-linecap: round; transition: stroke-dashoffset var(--dur-slow) var(--ease-page); filter: drop-shadow(0 0 6px color-mix(in oklab, var(--accent) 45%, transparent)); }
   .gauge-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
   .gauge-pct { font-size: 54px; font-weight: 760; letter-spacing: -0.03em; line-height: 1; color: var(--fg); font-variant-numeric: tabular-nums; }
   .gauge-pct[data-zone="warn"] { color: var(--warn); }
   .gauge-pct[data-zone="hot"] { color: var(--danger); }
-  .gauge-pct.nodata { color: var(--fg-faint); }
   .gauge-pct-u { font-size: 22px; font-weight: 600; color: var(--fg-subtle); margin-left: 2px; }
   .gauge-cap { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .hero-foot { display: flex; flex-direction: column; align-items: center; gap: 7px; z-index: 1; width: 100%; max-width: 340px; }
+  .hero-foot { display: flex; flex-direction: column; align-items: center; gap: 5px; z-index: 1; width: 100%; max-width: 340px; }
   .hero-tok { font-size: var(--fs-sm); color: var(--fg-2); font-family: var(--font-mono); }
   .hero-zone { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; padding: 2px 10px; border-radius: 999px; }
   .hero-zone[data-zone="ok"] { color: var(--ok); background: var(--ok-soft); }
   .hero-zone[data-zone="warn"] { color: var(--warn); background: var(--warn-soft); }
   .hero-zone[data-zone="hot"] { color: var(--danger); background: color-mix(in oklab, var(--danger) 15%, transparent); }
-  .hero-last { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 5px; padding-top: 14px; width: 100%; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+  .hero-last { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 2px; padding-top: 9px; width: 100%; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
   .hero-last-lbl { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); }
   .hero-last-stat { display: inline-flex; align-items: baseline; gap: 5px; }
   .hero-last-v { font-size: var(--fs-sm); font-weight: 650; color: var(--fg-2); font-variant-numeric: tabular-nums; }
@@ -856,36 +882,30 @@
   .ov-cost { font-size: 50px; font-weight: 760; letter-spacing: -0.03em; line-height: 1; color: var(--fg); font-variant-numeric: tabular-nums; z-index: 1; }
   .ov-cap { font-size: var(--fs-xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; z-index: 1; }
   .ov-when { font-size: var(--fs-xs); color: var(--fg-subtle); font-family: var(--font-mono); margin-top: 4px; z-index: 1; }
-  .ov-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 16px; padding-top: 16px; width: 100%; max-width: 360px; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); z-index: 1; }
-  .ov-stat { display: flex; flex-direction: column; align-items: center; gap: 3px; }
-  .ov-v { font-size: 18px; font-weight: 680; color: var(--fg); font-variant-numeric: tabular-nums; }
-  .ov-k { font-size: 9.5px; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.05em; }
 
-  /* ── Square stat tiles ── */
-  .sq { display: flex; flex-direction: column; justify-content: flex-end; gap: 3px; min-height: 96px; }
-  .sq-v { font-size: 27px; font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; z-index: 1; }
-  .sq-u { font-size: 13px; color: var(--fg-subtle); font-weight: 500; }
-  .sq-v.nodata { color: var(--fg-faint); }
-  .sq-k { font-size: var(--fs-xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; z-index: 1; }
-  .sq-glow { position: absolute; top: -34px; right: -34px; width: 86px; height: 86px; border-radius: 50%; filter: blur(28px); opacity: 0.16;
-    background: var(--accent); transition: opacity 300ms var(--ease-soft); }
-  .sq:hover .sq-glow { opacity: 0.28; }
-  .sq::after { content: ""; position: absolute; left: 0; top: 14px; bottom: 14px; width: 2px; border-radius: 2px; background: var(--accent); opacity: 0.5; }
+  /* ── KPI rail (session-wide headline metrics) ── */
+  .kpi-rail { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; padding: 0; }
+  .kpi { flex: 1 1 120px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 12px 18px; position: relative; }
+  .kpi + .kpi { border-left: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+  .kpi-v { font-size: 24px; font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
+  .kpi-v.nodata { color: var(--fg-faint); }
+  .kpi-u { font-size: 12px; color: var(--fg-subtle); font-weight: 500; }
+  .kpi-k { font-size: var(--fs-xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 
-  /* ── Cache donut ── */
-  .donut-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; }
-  .donut { position: relative; width: 130px; height: 130px; }
-  .donut-svg { width: 100%; height: 100%; }
-  .donut-fill { fill: none; stroke: url(#ctxgrad); stroke-width: 11; stroke-linecap: round; transition: stroke-dashoffset 700ms var(--ease-page); filter: drop-shadow(0 0 5px color-mix(in oklab, var(--accent) 40%, transparent)); }
-  .donut-mid { position: absolute; inset: 0; display: grid; place-items: center; }
-  .donut-pct { font-size: 30px; font-weight: 740; color: var(--fg); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  /* ── Details toggle ── */
+  .det-toggle { display: flex; align-items: center; gap: 12px; cursor: pointer; padding: 8px 16px; background: color-mix(in oklab, var(--surface) 55%, transparent); color: var(--fg-muted); transition: border-color var(--dur-fast) var(--ease-soft), color var(--dur-fast) var(--ease-soft), background var(--dur-fast) var(--ease-soft); }
+  .det-toggle:hover { border-color: var(--border-strong); color: var(--fg); background: var(--surface); }
+  .det-lbl { font-size: var(--fs-sm); font-weight: 650; color: var(--fg-2); }
+  .det-sub { font-size: var(--fs-xs); color: var(--fg-subtle); font-family: var(--font-mono); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .det-caret { font-size: 12px; color: var(--fg-faint); transition: transform var(--dur-base) var(--ease-soft); }
+  .det-caret.open { transform: rotate(180deg); }
 
   /* ── Bars ── */
-  .bars { display: flex; flex-direction: column; gap: 11px; }
+  .bars { display: flex; flex-direction: column; gap: 8px; }
   .bar-row { display: grid; grid-template-columns: 84px 1fr 54px; align-items: center; gap: 11px; }
   .bar-k { font-size: var(--fs-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bar-track { height: 9px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; position: relative; }
-  .bar-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; transition: width 600ms var(--ease-page);
+  .bar-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-page);
     background: linear-gradient(90deg, oklch(0.62 0.15 var(--barH)), oklch(0.78 0.16 var(--barH))); }
   .bar-fill.zero { background: none; }
   .bar-fill.flow::after { content: ""; position: absolute; inset: 0; border-radius: 999px;
@@ -900,26 +920,34 @@
   .mdl-stats { font-size: 10.5px; color: var(--fg-subtle); flex: none; }
 
   /* ── Turn timeline ── */
-  .tl-track { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 110px; padding-top: 10px; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid color-mix(in oklab, var(--border) 85%, transparent); }
+  .tl-track { position: relative; display: flex; align-items: flex-end; gap: 3px; height: 70px; padding-top: 10px; overflow-x: auto; overflow-y: hidden; border-bottom: 1px solid color-mix(in oklab, var(--border) 85%, transparent); }
   .tl-grid { position: absolute; inset: 10px 0 0 0; z-index: 0; pointer-events: none;
     background: repeating-linear-gradient(to top, transparent 0, transparent 32px, color-mix(in oklab, var(--border) 45%, transparent) 32px, color-mix(in oklab, var(--border) 45%, transparent) 33px); }
   .tl-bar { flex: 1 1 6px; min-width: 5px; max-width: 24px; border-radius: 3px 3px 2px 2px; position: relative; z-index: 1; align-self: flex-end;
     background: linear-gradient(180deg, oklch(0.82 0.13 var(--accent-h)), oklch(0.58 0.15 var(--accent-h)));
-    transition: height 500ms var(--ease-page); cursor: default; }
+    transition: height var(--dur-slow) var(--ease-page); cursor: default; }
   .tl-bar:hover { filter: brightness(1.18); }
   .tl-btn { border: 0; padding: 0; cursor: pointer; }
   .tl-bar[data-end="error"] { background: linear-gradient(180deg, color-mix(in oklab, var(--danger) 88%, white), var(--danger)); }
   .tl-bar[data-end="user-stop"], .tl-bar[data-end="session-lost"] { background: var(--fg-faint); opacity: 0.55; }
   .tl-think { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); width: 4px; height: 4px; border-radius: 50%;
     background: oklch(0.88 0.12 var(--accent-h)); box-shadow: 0 0 5px oklch(0.88 0.12 var(--accent-h)); }
-  .tl-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--fg-faint); margin-top: 9px; letter-spacing: 0.04em; }
+  /* Silent pre-paint stall (>8s spawn/prefill/queue) — fixed danger hue, never themed. */
+  .tl-dead { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; border-radius: 0 0 2px 2px;
+    background: var(--danger); box-shadow: 0 0 5px var(--danger); }
+  .tl-axis { display: flex; justify-content: space-between; font-size: 10px; color: var(--fg-faint); margin-top: 6px; letter-spacing: 0.04em; }
   .tl-empty { padding: 30px 0; text-align: center; }
 
   /* ── 6-up stat grid (timing / reliability) ── */
-  .stat6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 16px; }
+  .stat6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px 16px; }
+  .full .stat6 { grid-template-columns: repeat(4, 1fr); }
   .mini-v { font-size: 18px; font-weight: 680; color: var(--fg); }
   .mini-v[data-warn="true"] { color: var(--warn); }
   .mini-k { font-size: 10.5px; color: var(--fg-muted); margin-top: 2px; }
+
+  /* Reliability "all clear" — replaces the 6-zero grid when nothing is flagged. */
+  .rel-clear { display: flex; align-items: center; gap: 9px; font-size: var(--fs-xs); color: var(--fg-muted); padding: 8px 0 4px; }
+  .rel-clear-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok); box-shadow: 0 0 7px color-mix(in oklab, var(--ok) 70%, transparent); }
 
   /* ── Harness config ── */
   .cfg { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 22px; }
@@ -951,7 +979,7 @@
   /* ── Terminal / diagnostics ── */
   .term { padding-bottom: 0; }
   .term-led { width: 8px; height: 8px; border-radius: 50%; background: var(--fg-faint); display: inline-block; }
-  .term-led.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: pulse 1.8s ease-in-out infinite; }
+  .term-led.on { background: var(--ok); box-shadow: 0 0 8px var(--ok); animation: pulse 2s ease-in-out infinite; }
   .term-ctl { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
   .seg { display: inline-flex; background: var(--track); border: 1px solid var(--border); border-radius: 7px; padding: 2px; gap: 2px; }
   .seg-btn { height: 23px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--fg-muted); font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
@@ -978,6 +1006,7 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   @keyframes blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
   @keyframes tickin { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes cellrise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 
   @media (max-width: 1080px) {
     .bento { grid-template-columns: repeat(2, 1fr); }
@@ -987,6 +1016,7 @@
     .cfg { grid-template-columns: 1fr; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .dhead-spark, .chip.livechip :global(svg), .term-led.on, .bar-fill.flow::after, .caret, .sesh-led.beat { animation: none; }
+    .dhead-spark, .chip.livechip :global(svg), .term-led.on, .bar-fill.flow::after, .caret, .sesh-led.beat,
+    .dash[data-live="true"] .dhead-spark, .bento > .cell, .bento > .det-toggle { animation: none; }
   }
 </style>

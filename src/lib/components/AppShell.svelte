@@ -13,18 +13,27 @@
   import { assistant } from "../state/assistant.svelte";
   import { toast } from "../state/toast.svelte";
   import { onboarding } from "../state/onboarding.svelte";
+  import { betaNotice } from "../state/betaNotice.svelte";
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
 
-  // First-run gate: show the (Claude-auth-only) onboarding flow when the
-  // assistant has no usable auth — no API key AND the claude CLI isn't logged
-  // in — but only after the probes resolve so it never flashes for users who
-  // already have either. Dismissible + persisted.
+  // First-run gate: show the onboarding flow until it's been completed/skipped
+  // once. Triggers when the assistant has no usable auth (no API key AND the
+  // claude CLI isn't logged in) OR the beta notice hasn't been acknowledged —
+  // the final onboarding step captures that ack, so every fresh tester sees it
+  // before they start, regardless of auth. Gated on configLoaded so it never
+  // flashes pre-probe. Dismissible + persisted.
   const showOnboarding = $derived(
     !onboarding.dismissed &&
     assistant.configLoaded &&
-    !assistant.hasApiKey &&
-    !assistant.auth?.loggedIn,
+    ((!assistant.hasApiKey && !assistant.auth?.loggedIn) || !betaNotice.acknowledged),
   );
+
+  // Finishing or skipping onboarding records both the dismissal and the beta
+  // acknowledgment (the notice is the last step) so the gate stays closed.
+  function finishOnboarding() {
+    onboarding.dismiss();
+    betaNotice.acknowledge();
+  }
 
   function gotoSettings() {
     workspace.setActive("settings");
@@ -125,7 +134,7 @@
 
   <div class="middle">
     {#if showOnboarding}
-      <OnboardingFlow onDone={() => onboarding.dismiss()} />
+      <OnboardingFlow onDone={finishOnboarding} />
     {:else}
       <div class="body">
         <div class="content">

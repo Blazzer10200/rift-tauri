@@ -11,6 +11,7 @@
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, Terminal, Zap,
+    Sparkles, TriangleAlert,
   } from "lucide-svelte";
 
   type Props = { onDone: () => void };
@@ -20,6 +21,7 @@
     { t: "Welcome", s: "What Rift is" },
     { t: "Personalize", s: "Make it yours" },
     { t: "Connect Claude", s: "Optional" },
+    { t: "Before you start", s: "A quick heads-up" },
   ];
 
   let step = $state(1);
@@ -130,9 +132,32 @@
                 {/each}
               </div>
             </div>
-          {:else}
+          {:else if step === 3}
             <ObStage kind="claude" caption="embedded assistant" />
             <ClaudeAuth />
+          {:else}
+            <ObStage kind="beta" caption="beta program" />
+            <header class="ob-head">
+              <span class="ob-eyebrow">Step 4 · Before you start</span>
+              <h1 class="ob-title">You're testing the beta</h1>
+              <p class="ob-sub">Thanks for trying Rift early. Two things to keep in mind while you use it.</p>
+            </header>
+            <div class="ob-vlist">
+              <div class="ob-vrow">
+                <span class="ob-vic"><Sparkles size={18} /></span>
+                <span class="ob-vbody">
+                  <span class="ob-vt">This is pre-release software</span>
+                  <span class="ob-vp">Rift is still being fine-tuned — expect rough edges, occasional bugs, and features that may change or break between updates.</span>
+                </span>
+              </div>
+              <div class="ob-vrow">
+                <span class="ob-vic warn"><TriangleAlert size={18} /></span>
+                <span class="ob-vbody">
+                  <span class="ob-vt">AI can make mistakes</span>
+                  <span class="ob-vp">Responses and code edits are AI-generated and may be wrong, incomplete, or unsafe. Review every change before relying on it — and keep your work backed up.</span>
+                </span>
+              </div>
+            </div>
           {/if}
         </div>
       {/key}
@@ -156,7 +181,7 @@
         {/if}
         <button type="button" class="ob-btn primary" onclick={next}>
           {#if step === last}
-            <Check size={15} /> Finish setup
+            <Check size={15} /> Start working
           {:else}
             Next <ChevronRight size={15} />
           {/if}

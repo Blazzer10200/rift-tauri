@@ -50,7 +50,15 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
     host.workspaceBranch = null;
     host.lastNotice = `Workspace: ${path}`;
   } catch (e) {
-    host.lastError = `Set workspace failed: ${String(e)}`;
+    const msg = String(e);
+    // #35: a recent folder that was moved/deleted fails here ("not a directory").
+    // Self-heal — drop the dead entry so the MRU stops offering a path that 404s.
+    if (/not a directory/i.test(msg) && host.workspace.recent.includes(path)) {
+      await removeRecentRoot(host, path);
+      host.lastNotice = `Folder no longer exists — removed from recents: ${path}`;
+    } else {
+      host.lastError = `Set workspace failed: ${msg}`;
+    }
   }
 }
 

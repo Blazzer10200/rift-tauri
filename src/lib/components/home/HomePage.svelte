@@ -45,6 +45,10 @@
     if (parts.length <= 2) return norm;
     return `…/${parts.slice(-2).join("/")}`;
   }
+  // Display-only strip of Windows extended-length prefixes; stored value keeps them.
+  function dispPath(p: string): string {
+    return p.replace(/^\\\\\?\\UNC\\/, "\\\\").replace(/^\\\\\?\\/, "");
+  }
 
   function fmtAgo(input: number | string | null): string {
     if (input == null) return "—";
@@ -173,7 +177,7 @@
             <span class="ws-cur-ic"><Folder size={15} /></span>
             <span class="ws-cur-body">
               <span class="ws-cur-name">{leafName(root!)}</span>
-              <span class="ws-cur-path mono">{root}</span>
+              <span class="ws-cur-path mono">{dispPath(root!)}</span>
             </span>
           </div>
           <button class="hf-btn ws-change" onclick={() => void assistant.pickFolder()}>
