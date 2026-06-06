@@ -295,7 +295,7 @@
   }
   .upd-head[data-variant="ok"] {
     background: linear-gradient(180deg,
-      color-mix(in oklch, var(--ok) 14%, var(--bg-elev-2)) 0%,
+      color-mix(in oklab, var(--ok) 14%, var(--bg-elev-2)) 0%,
       var(--bg-elev-2) 100%);
   }
   .upd-head[data-variant="danger"] {
@@ -305,7 +305,7 @@
   }
   .upd-head[data-variant="info"] {
     background: linear-gradient(180deg,
-      color-mix(in oklch, var(--info) 14%, var(--bg-elev-2)) 0%,
+      color-mix(in oklab, var(--info) 14%, var(--bg-elev-2)) 0%,
       var(--bg-elev-2) 100%);
   }
 
@@ -319,9 +319,9 @@
     pointer-events: none;
     opacity: 0.7;
   }
-  .upd-head[data-variant="ok"] .head-glow     { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklch, var(--ok) 22%, transparent), transparent 70%); }
+  .upd-head[data-variant="ok"] .head-glow     { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--ok) 22%, transparent), transparent 70%); }
   .upd-head[data-variant="danger"] .head-glow { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--danger) 22%, transparent), transparent 70%); }
-  .upd-head[data-variant="info"] .head-glow   { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklch, var(--info) 22%, transparent), transparent 70%); }
+  .upd-head[data-variant="info"] .head-glow   { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--info) 22%, transparent), transparent 70%); }
 
   .head-row {
     position: relative;
@@ -338,9 +338,9 @@
     border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
     box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 22%, transparent);
   }
-  .head-icon[data-variant="ok"]     { background: color-mix(in oklch, var(--ok) 25%, var(--bg-elev-3));     color: var(--ok);     border-color: color-mix(in oklch, var(--ok) 30%, transparent);     box-shadow: 0 0 16px color-mix(in oklch, var(--ok) 22%, transparent); }
+  .head-icon[data-variant="ok"]     { background: color-mix(in oklab, var(--ok) 25%, var(--bg-elev-3));     color: var(--ok);     border-color: color-mix(in oklab, var(--ok) 30%, transparent);     box-shadow: 0 0 16px color-mix(in oklab, var(--ok) 22%, transparent); }
   .head-icon[data-variant="danger"] { background: color-mix(in oklab, var(--danger) 25%, var(--bg-elev-3)); color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); box-shadow: 0 0 16px color-mix(in oklab, var(--danger) 22%, transparent); }
-  .head-icon[data-variant="info"]   { background: color-mix(in oklch, var(--info) 25%, var(--bg-elev-3));   color: var(--info);   border-color: color-mix(in oklch, var(--info) 30%, transparent);   box-shadow: 0 0 16px color-mix(in oklch, var(--info) 22%, transparent); }
+  .head-icon[data-variant="info"]   { background: color-mix(in oklab, var(--info) 25%, var(--bg-elev-3));   color: var(--info);   border-color: color-mix(in oklab, var(--info) 30%, transparent);   box-shadow: 0 0 16px color-mix(in oklab, var(--info) 22%, transparent); }
 
   .head-text { min-width: 0; }
   .head-title {
@@ -388,8 +388,8 @@
     background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-3));
     border-color: color-mix(in oklab, var(--accent) 35%, transparent);
   }
-  .upd-head[data-variant="ok"]     .diff-chip.target { color: var(--ok);     background: color-mix(in oklch, var(--ok) 14%, var(--bg-elev-3));     border-color: color-mix(in oklch, var(--ok) 35%, transparent); }
-  .upd-head[data-variant="info"]   .diff-chip.target { color: var(--info);   background: color-mix(in oklch, var(--info) 14%, var(--bg-elev-3));   border-color: color-mix(in oklch, var(--info) 35%, transparent); }
+  .upd-head[data-variant="ok"]     .diff-chip.target { color: var(--ok);     background: color-mix(in oklab, var(--ok) 14%, var(--bg-elev-3));     border-color: color-mix(in oklab, var(--ok) 35%, transparent); }
+  .upd-head[data-variant="info"]   .diff-chip.target { color: var(--info);   background: color-mix(in oklab, var(--info) 14%, var(--bg-elev-3));   border-color: color-mix(in oklab, var(--info) 35%, transparent); }
   .upd-head[data-variant="danger"] .diff-chip.target { color: var(--danger); background: color-mix(in oklab, var(--danger) 14%, var(--bg-elev-3)); border-color: color-mix(in oklab, var(--danger) 35%, transparent); }
 
   :global(.diff-arrow) { color: var(--fg-faint); }
@@ -411,8 +411,8 @@
     display: grid; grid-template-columns: 24px 1fr; gap: 12px;
     align-items: start;
     padding: 12px 14px;
-    background: color-mix(in oklch, var(--ok) 10%, var(--bg-elev-2));
-    border: 1px solid color-mix(in oklch, var(--ok) 30%, var(--border));
+    background: color-mix(in oklab, var(--ok) 10%, var(--bg-elev-2));
+    border: 1px solid color-mix(in oklab, var(--ok) 30%, var(--border));
     border-radius: var(--radius-sm);
     color: var(--fg);
   }

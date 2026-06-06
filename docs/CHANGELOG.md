@@ -2,23 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.6.1 — 2026-06-06 — feat: CLI multi-install awareness + unified update UI
+
+> **Why.** A box with both an npm-global and a native `claude` install (they drift to different versions) could show "out of date" while **Update** did nothing — Rift only ever resolved and bumped *one* install. Now Rift sees every install, runs the newest, and updates them all. The surfaces that report this were also unified so they can no longer drift apart.
+
+**CLI multi-install detection + update-all.** `enumerate_claude_installs()` finds every `claude` on the machine — PATH entries, native install sites, the npm-bundled exe, and `.cmd` shims (deduped shim→exe) — and probes each `--version`. The newest wins and is the binary Rift spawns; **Update now** updates them all (npm once, native per-binary) so versions can't skew. If a copy is still behind afterward (a native no-op that reports success without bumping), a "still behind" hint points at a manual reinstall. A new `ClaudeInstall` DTO rides the auth probe, and **Settings → Assistant** lists each install with active / behind tags and a per-row, method-aware copy button (npm users are never handed a `claude update` command, or vice-versa). Files: `assistant/mod.rs`, `cliUpdate.svelte.ts`, `assistant/types.ts`.
+
+**Unified update UI.** The CLI-update notice was hand-authored three times (Home banner, tab-bar popover, Settings row) and drifted; the contextual line — npm / native / multi-install / stuck / error — now comes from one `summary()` source, and the Home banner + tab-bar popover share a tone-aware treatment (accent / warn / danger). Separately, the Velopack **app**-update dialog's status tints were fixed from `oklch` to `oklab` color-mixing, so a non-default accent hue no longer wraps warm status tones toward purple. Files: `UpdateDialog.svelte`, `HomePage.svelte`, `ChatTabsBar.svelte`, `SettingsPage.svelte`.
+
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0 (4062 files) · every update surface — Home banner, tab-bar popover, Settings row, and the Velopack dialog across all states + tones — CDP-verified live.
+
 ## v0.6.0 — 2026-06-06 — feat: in-app browser dock + harness / model-picker polish
 
-> **Why.** Rift gains a browser it can *see*. A dockable web panel lets you browse inside the app and hand the page you're on straight to the assistant — including authenticated, JS-rendered pages that `WebFetch` can't reach. Plus a round of harness, model-picker, and onboarding polish, and the fixes batched since v0.5.0.
-
-**In-app browser dock (Ctrl+Shift+B).** A resizable web panel beside the chat. The omnibox takes a URL or a search query (a dotted, space-free host → `https://`; anything else → a DuckDuckGo search). Back / forward / true in-place reload (`location.reload()` — no duplicate history entry); a loading spinner tracks *every* navigation (link clicks, redirects, back/forward) via a native `on_page_load` event, with a 20s watchdog fallback. **Add to chat** pulls the page's *rendered* `innerText` (post-JS, authenticated since the dock holds the session) into the composer as a labelled context block — exactly what a server-side fetch can't get. A `⋯` menu carries Copy URL + Open in system browser; **Ctrl+L** focuses and selects the address bar. The native child webview paints in the app's dark surface color, killing the pre-first-paint flash. Files: `browser/mod.rs`, `commands/browser.rs`, `WebBrowserPage.svelte`, `browserDock.svelte.ts`.
-
-**Harness — one viewport, no scroll.** The telemetry workspace was redesigned around a single KPI rail (cost / turns / tools / tok-s / cache / ttfp), with reliability, session details, granted tools, and the live stream tucked behind a "Show details" toggle — the whole dashboard fits one screen.
-
-**Model picker — capability matrix.** Per-model effort stops with an auto-clamp: Haiku hides the effort slider and shows a no-effort caption; Ultracode gets an amber caption. Fast-mode stays hidden behind a wiring flag until the CLI side lands, so no control lies about what it does.
-
-**Onboarding + reading polish.** Everyone — authed users included — now hits a final beta-notice step before working. Markdown answers reveal with a blur-in as they stream; harness timelines mark dead-wait gaps.
-
-**Batched fixes (#31–#36).** Cosmetic fast-mode toggle hidden until wired · `\\?\` extended-path prefix stripped from the Home workspace path · harness "avg dead wait" backfills for older session logs · command palette gained "Go to Home" · deleted recent folders can be Forgotten (×) · Settings scroll-spy now lights the last section ("About") at the scroll bottom.
-
-**Cleanup + release.** Removed dead keychain helpers left from the SFTP/sync rip (`bridge_token_key`, `rcon_password_key`) + idiomatic clippy fixes. The release now publishes **Setup.exe only** — the redundant portable zip is dropped so a new user has one obvious download.
-
-**Verify.** `cargo check` 0/0 · `cargo clippy` clean (1 intentional arity warning) · `npm run check` 0/0 (4062 files) · browser dock + the per-turn MCP tool pipeline CDP-verified live end-to-end.
+In-app browser dock (Ctrl+Shift+B) Rift can *see* + hand to the assistant; harness one-viewport redesign; model-picker capability matrix; onboarding beta-notice step; fixes #31–#36. Detail in `git log -- docs/CHANGELOG.md`.
 
 ## v0.5.0 — 2026-06-04 — feat: Harness telemetry workspace + Steer (mid-turn redirect)
 

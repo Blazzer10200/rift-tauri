@@ -16,7 +16,6 @@
 | #21 | Test coverage thin after the pure-assistant rip | T1 | 🚧 open |
 | Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🧪 live-verify |
-| #30 | Update UI — visual + IA redesign | T3 | 🚧 open |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
 | #20 | Hot files over the 2000-line split threshold | T3 | 🚧 open |
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
@@ -49,13 +48,6 @@
 - **Remaining:** live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
 
 ### Tier 3 — strategic / longer-term
-
-#### 30. Update UI — visual + organizational redesign
-
-- **Where (re-grep — may have drifted):** the update toast/notification, [UpdateDialog.svelte](../src/lib/components/dialogs/UpdateDialog.svelte), and [updates.svelte.ts](../src/lib/state/updates.svelte.ts). The auto-update *flow* (Velopack check → download → apply-on-exit → relaunch) works and is verified live (v0.4.48 → v0.5.0); this is **presentation only**, not the mechanism.
-- **Symptom:** the "Update available" toast + dialog look dated and under-organized — spacing, hierarchy, and styling don't match the current emerald/bento design language (Home, Harness, Settings). The toast shows `0.4.48 → 0.5.0 · 9.5 MB`; the layout reads as legacy.
-- **Fix sketch:** visual + IA refresh over the toast and the available/downloading/installing/error states of `UpdateDialog`. Align to the app's surface tiers + accent (`--accent`, never hardcoded), tighten the version/size/progress hierarchy, smooth the available→downloading→installing progression (the installing-state height-jump was partly addressed in v0.4.47 — finish it). Keep the "View release on GitHub" fallback. Pure CSS/markup + state-presentation; don't touch the Velopack invoke contract.
-- **Note:** taste-driven on an already-polished dialog → best done with the live states visible (CDP) or under review, not blind.
 
 #### 4. UI/UX consistency + navigability sweep (app-wide)
 

@@ -16,6 +16,7 @@ import { toast } from "./toast.svelte";
 export type {
   WorkspaceState,
   AuthStatus,
+  ClaudeInstall,
   ToolBlock,
   TextBlock,
   ThinkingBlock,

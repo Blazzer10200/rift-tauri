@@ -12,6 +12,17 @@ export type WorkspaceState = {
   recent: string[];
 };
 
+/** One detected Claude Code CLI install. A machine can have several at once
+ *  (npm-global + native), which silently drift to different versions — Rift
+ *  enumerates all, runs on the newest, and updates every one. */
+export type ClaudeInstall = {
+  path: string;
+  method: string; // "npm" | "native" | "unknown"
+  version: string | null;
+  onPath: boolean;
+  active: boolean;
+};
+
 export type AuthStatus = {
   cliPresent: boolean;
   cliVersion: string | null;
@@ -29,6 +40,9 @@ export type AuthStatus = {
   installMethod: string | null;
   pill: "green" | "yellow" | "red";
   summary: string;
+  /** Every Claude CLI install detected on this machine. The `active` one drives
+   *  cliVersion/installMethod; the rest are shown + updated alongside it. */
+  installs: ClaudeInstall[];
 };
 
 export type ToolBlock = {

@@ -10,11 +10,19 @@
 // throttled (≤ once / 6h) and a dismissed version stops nagging until the next
 // one ships.
 //
+// Staleness is judged against EVERY detected install (`assistant.auth.installs`
+// — a box can carry both an npm-global and a native copy that drift apart), so
+// `availableAny`/`isAnyStale` flag an update if any one is behind, not just the
+// active one Rift spawns.
+//
 // `runUpdate()` then applies the update IN-APP via the `assistant_update_cli`
-// backend command, which routes by install method (`assistant.auth.install
-// Method`): npm installs run `npm install -g …@latest`, native installs run
-// `claude update`. The command shown/copied is method-aware so a native user
-// is never told to run npm (which would create a conflicting second install).
+// backend command, which updates ALL installs at once — npm once (`npm install
+// -g …@latest`), native per-binary (`<exe> update`) — so the versions can't
+// stay skewed. It returns the post-update enumeration; if a copy is STILL
+// behind latest afterward (a native no-op that reports success), `updateStuck`
+// is set so the UI can point the user at a manual reinstall. Per-install copy
+// buttons (`commandFor`) show the right command for each method so a native
+// user is never told to run npm (which would create a conflicting install).
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -66,6 +74,14 @@ class CliUpdate {
   updateError = $state<string | null>(null);
   /** Tail of the updater's output on success — brief "what happened" line. */
   updateOutput = $state<string | null>(null);
+  /** True when the last runUpdate() finished but an install is STILL behind
+   *  npm's latest — the signature of a native copy that reports success without
+   *  actually bumping. Drives the "may need a manual reinstall" hint. */
+  updateStuck = $state(false);
+  /** The command string most recently copied via copyValue() — lets a single
+   *  per-row copy button flip to its "Copied!" state without affecting others. */
+  copiedCmd = $state<string | null>(null);
+  private _rowCopyTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly changelogUrl = `https://www.npmjs.com/package/${PKG}`;
 
@@ -73,7 +89,14 @@ class CliUpdate {
    *  self-update + accept `claude update`; everything else uses npm's `@latest`
    *  (NOT `npm update -g`, which respects the original semver range). */
   get updateCommand(): string {
-    return this.method === "native" ? "claude update" : `npm install -g ${PKG}@latest`;
+    return this.commandFor(this.method);
+  }
+
+  /** The upgrade command for a specific install method — so a multi-install box
+   *  can show the right command per copy (npm vs native), not just the active
+   *  one's. */
+  commandFor(method: string | null | undefined): string {
+    return method === "native" ? "claude update" : `npm install -g ${PKG}@latest`;
   }
 
   setMethod(m: string | null) {
@@ -116,6 +139,68 @@ class CliUpdate {
   /** An update exists AND the user hasn't dismissed this exact version. */
   available(installed: string | null): boolean {
     return this.isNewer(installed) && this.latest !== this.dismissed;
+  }
+
+  /** npm's latest is strictly newer than AT LEAST ONE detected install. A box
+   *  can carry both an npm and a native copy that drift apart; if either is
+   *  behind, an update is warranted. Falls back to the single active version
+   *  when the backend hasn't reported an installs list yet. */
+  isAnyStale(
+    installs: { version: string | null }[] | null | undefined,
+    fallback: string | null,
+  ): boolean {
+    if (!this.latest) return false;
+    const versions =
+      installs && installs.length
+        ? installs.map((i) => i.version).filter((v): v is string => !!v)
+        : fallback
+          ? [fallback]
+          : [];
+    return versions.some((v) => cmpSemver(this.latest as string, v) > 0);
+  }
+
+  /** Single source for the contextual "what's going on" line shown by every
+   *  update surface (Home banner, tab-bar popover, Settings). Previously this
+   *  5-way branch was hand-re-authored in three components and drifted; now they
+   *  all read one tone + headline + detail. */
+  summary(
+    installs: { version: string | null }[] | null | undefined,
+  ): { tone: "accent" | "warn" | "danger"; headline: string; detail: string } {
+    const count = installs?.length ?? 0;
+    if (this.updateError)
+      return { tone: "danger", headline: "Update failed", detail: this.updateError };
+    if (this.updateStuck)
+      return {
+        tone: "warn",
+        headline: "Still behind after update",
+        detail:
+          "A native install reported success without bumping. Copy its command and run it in a terminal, or reinstall it.",
+      };
+    if (count > 1)
+      return {
+        tone: "accent",
+        headline: "Update available",
+        detail: `${count} claude installs found — Rift updates them all.`,
+      };
+    if (this.method === "native")
+      return {
+        tone: "accent",
+        headline: "Update available",
+        detail: "Native installs auto-update in the background — or apply it now.",
+      };
+    return {
+      tone: "accent",
+      headline: "Update available",
+      detail: "A newer claude CLI is on npm. Rift can update it for you.",
+    };
+  }
+
+  /** Multi-install variant of available(): any install behind AND not dismissed. */
+  availableAny(
+    installs: { version: string | null }[] | null | undefined,
+    fallback: string | null,
+  ): boolean {
+    return this.isAnyStale(installs, fallback) && this.latest !== this.dismissed;
   }
 
   /** Fetch latest from npm. Skips if checked within STALE_MS unless `force`. */
@@ -166,9 +251,19 @@ class CliUpdate {
     this.updating = true;
     this.updateError = null;
     this.updateOutput = null;
+    this.updateStuck = false;
     try {
-      const res = await invoke<{ method: string; output: string }>("assistant_update_cli");
+      const res = await invoke<{
+        method: string;
+        output: string;
+        installs?: { version: string | null }[];
+      }>("assistant_update_cli");
       this.updateOutput = res.output;
+      // The backend updates EVERY install; if one is still behind latest after
+      // that, it ran but didn't actually bump (classic native no-op) — flag it
+      // so the UI can point the user at a manual reinstall instead of leaving a
+      // banner stuck "out of date" with no explanation.
+      this.updateStuck = this.isAnyStale(res.installs, null);
       return true;
     } catch (e) {
       this.updateError = e instanceof Error ? e.message : String(e);
@@ -197,6 +292,22 @@ class CliUpdate {
       }, 1600);
     } catch {
       /* clipboard blocked — the command is visible to copy manually */
+    }
+  }
+
+  /** Copy an arbitrary string (a per-install command), tracking it in
+   *  `copiedCmd` so only the clicked row flips to its "Copied!" state. */
+  async copyValue(text: string) {
+    try {
+      await navigator.clipboard?.writeText(text);
+      this.copiedCmd = text;
+      if (this._rowCopyTimer) clearTimeout(this._rowCopyTimer);
+      this._rowCopyTimer = setTimeout(() => {
+        this.copiedCmd = null;
+        this._rowCopyTimer = null;
+      }, 1600);
+    } catch {
+      /* clipboard blocked — the command stays visible to copy manually */
     }
   }
 }

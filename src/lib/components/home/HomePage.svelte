@@ -12,8 +12,8 @@
   // Claude Code CLI update — the dashboard is the launch surface, so kick the
   // (throttled) npm check here and surface a dismissible banner if one's live.
   const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
-  const cliUpdAvail = $derived(cliUpdate.available(cliInstalled));
-  const cliIsNative = $derived((assistant.auth?.installMethod ?? null) === "native");
+  const cliUpdAvail = $derived(cliUpdate.availableAny(assistant.auth?.installs, cliInstalled));
+  const cliSummary = $derived(cliUpdate.summary(assistant.auth?.installs));
   onMount(() => { void cliUpdate.maybeCheck(); });
   // Keep the update command method-aware (npm vs native).
   $effect(() => { cliUpdate.setMethod(assistant.auth?.installMethod ?? null); });
@@ -130,14 +130,13 @@
     </button>
 
     {#if cliUpdAvail}
-      <div class="dash-cli" role="status">
+      <div class="dash-cli" role="status" data-tone={cliSummary.tone}>
         <span class="dc-ic"><ArrowUpCircle size={17} /></span>
         <span class="dc-body">
-          <span class="dc-t">Claude Code update available</span>
+          <span class="dc-t">{cliSummary.headline}</span>
           <span class="dc-s">
             <code>{cliInstalled}</code> → <code>{cliUpdate.latest}</code>
-            {#if cliUpdate.updateError}· <span class="dc-err">{cliUpdate.updateError}</span>
-            {:else if cliIsNative}· installs automatically, or update now{/if}
+            <span class="dc-detail">· {cliSummary.detail}</span>
           </span>
         </span>
         <button
@@ -286,6 +285,14 @@
     border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
     animation: dash-cli-in 240ms var(--ease-page, ease);
   }
+  .dash-cli[data-tone="warn"] {
+    background: color-mix(in oklab, var(--warn) 9%, var(--surface));
+    border-color: color-mix(in oklab, var(--warn) 32%, var(--border));
+  }
+  .dash-cli[data-tone="danger"] {
+    background: color-mix(in oklab, var(--danger) 9%, var(--surface));
+    border-color: color-mix(in oklab, var(--danger) 32%, var(--border));
+  }
   @keyframes dash-cli-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
   @media (prefers-reduced-motion: reduce) { .dash-cli { animation: none; } }
   .dash-cli .dc-ic {
@@ -293,11 +300,14 @@
     display: grid; place-items: center;
     background: var(--accent-soft); color: var(--accent);
   }
+  .dash-cli[data-tone="warn"] .dc-ic { background: color-mix(in oklab, var(--warn) 14%, transparent); color: var(--warn); }
+  .dash-cli[data-tone="danger"] .dc-ic { background: color-mix(in oklab, var(--danger) 14%, transparent); color: var(--danger); }
   .dash-cli .dc-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
   .dash-cli .dc-t { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
   .dash-cli .dc-s { font-size: var(--fs-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dash-cli .dc-s code { font-family: var(--font-mono); color: var(--fg-2); }
-  .dash-cli .dc-err { color: var(--danger, #e66); }
+  .dash-cli[data-tone="warn"] .dc-detail { color: var(--warn); }
+  .dash-cli[data-tone="danger"] .dc-detail { color: var(--danger); }
   .dash-cli .dc-go {
     margin-left: auto; flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px;
     height: 30px; padding: 0 12px; border-radius: 8px; font: inherit; font-size: var(--fs-xs); font-weight: 650;

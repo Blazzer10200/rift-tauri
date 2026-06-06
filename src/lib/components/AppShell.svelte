@@ -153,6 +153,7 @@
 
   <UpdateDialog />
 
+
   <ToastHost />
 
   <CommandPalette />

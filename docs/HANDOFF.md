@@ -2,29 +2,23 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-06 (cont. 61) — SHIPPED v0.6.0 (browser arc + polish)
+## Session 2026-06-06 (cont. 63) — SHIPPED v0.6.1: CLI multi-install + unified update UI
 
-Full pre-ship review + release. **v0.6.0 published** to `rift-releases` (commit `316dc5e`, pushed to origin). Browser arc + harness/model-picker polish + #31–36 all shipped.
-- **Review:** `svelte-check` 0/0 · `cargo check` 0/0 · `clippy` → 1 intentional ([mod.rs:2432](../src-tauri/src/assistant/mod.rs) arity) · browser dock + per-turn MCP pipeline CDP-verified live (omnibox, add-to-chat, back/fwd, reload). `{@html}` in [EditDiff.svelte](../src/lib/components/assistant/EditDiff.svelte) safe — shiki-escaped tokens.
-- **Fixes this session (behavior-preserving, verified):** removed dead [secrets.rs](../src-tauri/src/secrets.rs) keys (`bridge_token_key`/`rcon_password_key`); 6 clippy idioms (`sort_by_key`/`?`/match).
-- **Release:** **Setup.exe-only** — portable dropped *post-upload* (`release.ps1` patched + committed). Assets: Setup.exe + full/delta nupkg + releases.win.json + RELEASES. Velopack delta 0.5.0→0.6.0 built. The two GitHub "Source code" archives = LICENSE+README only (rift-releases repo), auto-gen + unremovable + harmless. Also pruned the portable from the live v0.5.0 release.
-- **release.ps1 gotchas learned:** (1) drop portable AFTER `vpk upload` — vpk's pack manifest needs the file present at upload time; (2) if a pack half-runs, clean the 0.6.0 artifacts from `Releases/` before retry (vpk refuses to re-pack over an existing ≥ version); (3) never wrap `release.ps1`/`tauri build` in `*>&1`/`2>&1` from the PS tool — PS5.1 turns native stderr into a terminating `NativeCommandError`.
+Shipped the cont.62 CLI multi-install backend plus this session's update-UI redesign as **v0.6.1**.
+- **CLI multi-install (cont.62):** `enumerate_claude_installs()` ([assistant/mod.rs](../src-tauri/src/assistant/mod.rs)) finds EVERY claude (PATH + native sites + npm bundled exe + `.cmd` shims, deduped shim→exe), newest wins, `assistant_update_cli` updates ALL (npm once, native per-exe). `ClaudeInstall` DTO on `AuthStatus.installs`. Settings lists installs w/ active/behind tags + per-row method-aware copy; "still behind" hint on a native no-op.
+- **Update UI redesign (this session):** one `cliUpdate.summary(installs)` source ([cliUpdate.svelte.ts](../src/lib/state/cliUpdate.svelte.ts)) feeds the contextual line (npm/native/multi/stuck/error) across Home banner + tab-bar popover + Settings — was hand-authored 3× and drifted. Home + popover now share a tone-aware treatment (`data-tone` = accent/warn/danger). `UpdateDialog.svelte` status tints fixed `oklch`→`oklab` (warm-hue purple-wrap bug, per CRITICAL rule). A temp `UpdatePreview.svelte` dev panel drove all states/tones for live CDP verification, then was removed (file + AppShell mount).
+- **Verified:** `cargo check` 0/0 · `npm run check` 0/0 (4063 files) · every surface (banner, popover, Settings row, Velopack dialog across all states+tones) CDP-verified live.
 
-### RESUME HERE (cont.61)
-- **v0.6.0 SHIPPED + pushed. Tree clean.**
-- **PENDING USER live-verify:** v0.6.0 auto-update on a real machine (v0.5.0→v0.6.0 = 2nd Velopack proof point) · browser render-flash visual (native webview CDP-invisible) · steer mid-turn on a tool turn · permission Allow/Deny bar · beta onboarding on a fresh install.
-- **Open:** #21 test harness (T1) · #30 Update-UI redesign · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum sign-off.
-- Dev pipeline was killed for the release build — relaunch via `scripts/run-dev.bat` (sets the CDP port) if resuming UI work.
-
----
-
-## Prior unshipped (detail in git log, all ride next ship)
-- **cont.57:** Model-picker capability matrix (`Composer.svelte` `ModelOpt`) — per-model `effortStops`+`$effect` auto-clamp, amber Ultracode caption, fast-mode behind `FAST_MODE_WIRED=false` (→#31). **cont.55–56:** Harness motion polish + beta-notice onboarding step (see CRITICAL gate). **cont.52–54:** `Markdown.svelte` streaming reveal · Harness dead-wait `.tl-dead` · ISSUES #32–35 + KPI no-scroll redesign.
+### RESUME HERE (cont.63)
+- **v0.6.1 SHIPPED** (feat commit + published to `rift-releases` via `release.ps1`). PENDING live-verify on a real dual-install box: banner clears after Update-all; if a native copy truly won't bump, the "still behind" hint + DiagBus logs name the culprit.
+- **v0.6.0 carry-over live-verify still owed:** v0.5→0.6 auto-update on a real machine · browser render-flash · mid-turn steer · permission bar · fresh-install onboarding.
+- **Open:** #21 test harness (T1) · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum sign-off. (#30 update-UI redesign shipped + block deleted from ISSUES.)
 
 ---
 
 ## Shipped + prior arcs — detail in `git log`
-- **v0.5.0** (2026-06-04, cont.51, `62dae27`): Velopack stable to `rift-releases`. **Pending live-confirm:** 2nd auto-update proof point on a real machine.
+- **v0.6.1** (cont.63) CLI multi-install + unified update UI · **v0.6.0** (cont.61, `316dc5e`) browser dock + polish (includes the cont.57 model-picker capability matrix — that work shipped here, NOT pending) · **v0.5.0** (cont.51, `62dae27`) Velopack stable.
+- **release.ps1 gotchas:** bump THREE files + `Cargo.lock` (run `cargo check` so the lock updates) BEFORE; commit for a clean tree or pass `-Force`; quit `rift-tauri.exe` (dev) before build — Win file-lock; drop portable AFTER `vpk upload`; never wrap `release.ps1`/`tauri build` in `*>&1` from the PS tool (PS5.1 → terminating `NativeCommandError`). Setup.exe-only. vpk CLI version == velopack crate version.
 - **Carry-over:** `check.yml` per-push email spam; prod app now ALSO `rift-tauri.exe` → revisit "never blanket-kill rift" rule.
 
 ## CRITICAL DON'T-TOUCH
@@ -36,4 +30,4 @@ Full pre-ship review + release. **v0.6.0 published** to `rift-releases` (commit 
 - **AssistantPane drop handlers on `.pane` outer only**; `tauri.conf.json dragDropEnabled:false`; `.shell` `position:fixed; inset:0`.
 - **Blur-reveal** (`Markdown.svelte`): `shownCount` is the ONLY `$state`, written ONLY by the rAF loop — never inside a derived.
 - **Activity panel split:** Steps = settled ACTIONS only (`logSteps` drops `cat==="write"`); Outputs owns writes/edits → Session Diff (`assistant.ui.diffOpen/diffTarget`).
-- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at `/git-ship`. **v0.5.0 stands** (shipped 2026-06-04, cont.51).
+- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at `/git-ship`. **v0.6.1 stands** (shipped 2026-06-06, cont.63).

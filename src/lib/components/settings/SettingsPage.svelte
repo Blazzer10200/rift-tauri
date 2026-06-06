@@ -139,7 +139,8 @@
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
   // always shows the true status even after the toolbar badge was dismissed.
   const cliInstalled = $derived(assistantStore.auth?.cliVersion ?? null);
-  const cliNewer = $derived(cliUpdate.isNewer(cliInstalled));
+  const cliInstalls = $derived(assistantStore.auth?.installs ?? []);
+  const cliNewer = $derived(cliUpdate.isAnyStale(assistantStore.auth?.installs, cliInstalled));
   const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
   $effect(() => { cliUpdate.setMethod(assistantStore.auth?.installMethod ?? null); });
   async function runCliUpdate() {
@@ -490,6 +491,26 @@
                   Rift spawns your local <code>claude</code> install{#if cliInstalled} (currently <code>{cliInstalled}</code>){/if}{#if cliIsNative} via the native installer{:else if cliUpdate.method === "npm"} via npm{/if}.
                   {#if cliIsNative}It auto-updates in the background — Rift can also apply updates on demand.{:else}Rift checks npm for newer releases and can update it for you.{/if}
                 </div>
+                {#if cliInstalls.length > 1}
+                  <div class="st-cli-installs" use:tooltip={"Multiple Claude CLIs found — Rift runs the newest and updates them all so their versions can't drift apart."}>
+                    {#each cliInstalls as inst (inst.path)}
+                      {@const stale = cliUpdate.isAnyStale([inst], null)}
+                      {@const cmd = cliUpdate.commandFor(inst.method)}
+                      <div class="st-cli-inst" class:active={inst.active}>
+                        <span class="st-cli-inst-method">{inst.method}</span>
+                        <code>{inst.version ?? "?"}</code>
+                        {#if inst.active}<span class="st-cli-inst-tag">active</span>{/if}
+                        {#if stale}<span class="st-cli-inst-tag stale">behind</span>{/if}
+                        <span class="st-cli-inst-path" use:tooltip={inst.path}>{inst.path}</span>
+                        {#if stale}
+                          <button class="st-cli-copy sm" class:done={cliUpdate.copiedCmd === cmd} type="button" onclick={() => void cliUpdate.copyValue(cmd)} use:tooltip={"Copy: " + cmd} aria-label="Copy this install's update command">
+                            {#if cliUpdate.copiedCmd === cmd}<Check size={12} />{:else}<Copy size={12} />{/if}
+                          </button>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
                 {#if cliNewer}
                   <div class="st-cli-act">
                     <button class="st-btn primary" type="button" disabled={cliUpdate.updating} onclick={runCliUpdate}>
@@ -506,6 +527,9 @@
                     <div class="st-cli-err">{cliUpdate.updateError}</div>
                   {:else if cliUpdate.updateOutput}
                     <div class="st-cli-ok">{cliUpdate.updateOutput}</div>
+                  {/if}
+                  {#if cliUpdate.updateStuck}
+                    <div class="st-cli-warn">Update ran, but a copy is still behind. A native install sometimes reports success without bumping — copy its command above and run it in a terminal, or reinstall it.</div>
                   {/if}
                 {/if}
               </div>
@@ -1003,6 +1027,15 @@
   .st-cli-copy { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; transition: color 120ms, border-color 120ms, background 120ms; }
   .st-cli-copy:hover { color: var(--fg); border-color: var(--border-strong); }
   .st-cli-copy.done { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .st-cli-copy.sm { flex-shrink: 0; width: 22px; height: 20px; border-radius: 5px; }
+  .st-cli-installs { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .st-cli-inst { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--fg-muted); padding: 4px 8px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .st-cli-inst.active { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+  .st-cli-inst-method { text-transform: uppercase; font-size: 9px; letter-spacing: 0.05em; font-weight: 600; color: var(--fg); }
+  .st-cli-inst code { font-family: var(--font-mono); color: var(--fg); }
+  .st-cli-inst-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 4px; background: color-mix(in oklab, var(--accent) 22%, transparent); color: var(--accent); }
+  .st-cli-inst-tag.stale { background: color-mix(in oklab, var(--warn) 22%, transparent); color: var(--warn); }
+  .st-cli-inst-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; opacity: 0.6; font-family: var(--font-mono); font-size: 10px; }
   .st-cli-act { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
   .st-cli-act .st-cli-cmd { margin-top: 0; }
   .st-btn :global(.st-spin) { animation: st-spin 0.8s linear infinite; }
@@ -1010,6 +1043,7 @@
   @media (prefers-reduced-motion: reduce) { .st-btn :global(.st-spin) { animation: none; } }
   .st-cli-err { margin-top: 7px; font-size: var(--fs-xs); color: var(--danger, #e66); white-space: pre-wrap; }
   .st-cli-ok { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); white-space: pre-wrap; }
+  .st-cli-warn { margin-top: 7px; font-size: var(--fs-xs); color: var(--warn); line-height: 1.4; }
 
   /* ── About: kv + resource rows ── */
   .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 17px; }
