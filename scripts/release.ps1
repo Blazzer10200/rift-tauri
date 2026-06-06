@@ -215,17 +215,6 @@ if (Test-Path $splashPath) {
 & vpk @packArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 
-# --- Drop the portable zip before upload ---------------------------------
-# vpk always emits a *-Portable.zip alongside Setup.exe. We publish Setup.exe
-# only so a new user has one obvious "download + run" path; the portable build
-# just adds a "which one do I click?" fork. Safe to delete -- it's standalone,
-# not referenced by releases.win.json / the Velopack update manifest.
-$portable = Get-ChildItem -Path 'Releases' -Filter '*-Portable.zip' -ErrorAction SilentlyContinue
-foreach ($p in $portable) {
-    Write-Host "  dropping portable build: $($p.Name)" -ForegroundColor DarkGray
-    Remove-Item -Force $p.FullName
-}
-
 # --- Upload to GitHub ----------------------------------------------------
 # vpk uploads Setup.exe + .nupkg + delta + releases.win.json as release assets
 # and creates/publishes the release. --channel win matches the pack channel +
@@ -251,6 +240,17 @@ if ($version -match '-(alpha|beta|rc)') {
 }
 & vpk @uploadArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
+
+# --- Drop the portable zip from the published release --------------------
+# vpk's pack manifest lists the portable as an upload asset, so the file must
+# exist at upload time -- we remove it from the release afterward. We publish
+# Setup.exe only so a new user has one obvious "download + run" path. Safe:
+# the portable isn't part of the Velopack update feed (releases.win.json
+# references the .nupkgs). Non-fatal -- a failure here doesn't unship.
+Write-Host '=== dropping portable asset from release ===' -ForegroundColor Cyan
+& gh release delete-asset $tag 'Rift-win-Portable.zip' --repo $releaseRepo -y
+if ($LASTEXITCODE -ne 0) { Write-Host '  (portable asset not present or already removed)' -ForegroundColor DarkGray }
+$global:LASTEXITCODE = 0
 
 # --- Verify --------------------------------------------------------------
 Write-Host '=== Release published ===' -ForegroundColor Green
