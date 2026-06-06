@@ -123,6 +123,8 @@
       return;
     }
     if (e.shiftKey) return;
+    // Ctrl+L → focus the browser dock's address bar (open it if closed).
+    if (k === "l" && workspace.activeId === "chat") { e.preventDefault(); browserDock.focusAddress(); return; }
     if (e.key === ",") { e.preventDefault(); gotoSettings(); return; }
     // Ctrl+P / Ctrl+K → global command palette.
     if (k === "p" || k === "k") { e.preventDefault(); commandPalette.show(); return; }

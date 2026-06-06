@@ -13,12 +13,6 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
-| #31 | Fast-mode toggle cosmetic → hidden until wired | T4 | ✅ resolved (ship) |
-| #32 | `\\?\` path prefix leaks into Home UI | T4 | ✅ resolved (ship) |
-| #33 | Harness "avg dead wait" "—" for archived sessions | T4 | ✅ resolved (ship) |
-| #34 | Command palette omits "Go to Home" | T4 | ✅ resolved (ship) |
-| #35 | Deleted project lingers in Home "Recent folders" | T4 | ✅ resolved (ship) |
-| #36 | Settings scroll-spy skips last section ("About") | T4 | ✅ resolved (ship) |
 | #21 | Test coverage thin after the pure-assistant rip | T1 | 🚧 open |
 | Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🧪 live-verify |
@@ -29,50 +23,6 @@
 | CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
 | #29 | CSP allows `style-src 'unsafe-inline'` | T4 | 🔒 blocked |
 | #14 | No release CI — local-only path | — | 🗄 closed |
-
----
-
-## ✅ Resolved in-tree — delete on `/git-ship`
-
-> Fixed in earlier conts, unshipped. Blocks ride the next ship commit, then get deleted. Each was code-re-verified 2026-06-05. A non-ISSUES change shipping alongside: the **Harness no-scroll redesign** (KPI rail + collapsible "Show details" — detail in HANDOFF cont.54).
-
-### 31. Fast-mode toggle is cosmetic — not plumbed to CLI spawn (T4)
-
-- **✅ Resolved (2026-06-05, cont.57):** chose **hide-until-wired** (the "don't ship a lying control" half of the fix). The toggle is gated behind `FAST_MODE_WIRED = false` **and** the per-model `fastMode` capability flag in [Composer.svelte](../src/lib/components/assistant/Composer.svelte) — renders nowhere today, reappears **Opus-only** the moment the CLI side is wired (flip one const). `uiPrefs.fastMode` state + persistence kept dormant for that wiring.
-- **Where:** [src/lib/state/ui-prefs.svelte.ts:33-35](../src/lib/state/ui-prefs.svelte.ts) (`fastMode` $state + its own TODO); toggle UI in [src/lib/components/assistant/Composer.svelte:~1175](../src/lib/components/assistant/Composer.svelte). Persisted under `rift.ui.fast-mode.v1`.
-- **Symptom (was):** the Composer model-menu showed a working fast-mode toggle that persisted on/off to localStorage, but the value was never read by the CLI-spawn path (`assistant.svelte.ts` / `assistant/mod.rs`) — flipping it had zero effect. A visible control that did nothing.
-- **Remaining (future arc, full close):** plumb `uiPrefs.fastMode` into the spawn envelope alongside the effort flag (CC's `/fast` = Opus-with-faster-output, Opus 4.6/4.7/4.8 only), then flip `FAST_MODE_WIRED` to surface it Opus-only.
-
-### 32. `\\?\` extended-length path prefix leaks into UI (T4 — cosmetic)
-
-- **✅ Resolved (cont.54):** [HomePage.svelte:50](../src/lib/components/home/HomePage.svelte) strips `^\\\\\?\\UNC\\` → `\\\\` and `^\\\\\?\\` → `` for display only (inline regex, not the `cleanPath()` helper — that one lives only in HarnessPage).
-- **Where:** [HomePage.svelte](../src/lib/components/home/HomePage.svelte) Workspace card path display (showed `\\?\C:\AI Workflow\projects\remotion-playground`). Harness chips use `cleanPath()`; Home now strips inline.
-- **Symptom:** the raw Win32 extended-length prefix `\\?\` shown verbatim in the Home workspace path. Ugly; reads as a bug.
-
-### 33. Harness "avg dead wait" shows "—" for archived sessions (T4 — legacy data)
-
-- **✅ Resolved (cont.54):** [sessionLog.ts:50](../src/lib/state/assistant/sessionLog.ts) recomputes `snap.summary = summarizeSession(snap.turns, snap.events)` on load — the frozen on-disk summary is discarded, so new `summarize()` fields backfill for old logs.
-- **Where:** [HarnessPage.svelte:237](../src/lib/components/workspaces/HarnessPage.svelte) binds `fmtMs(sum.avgDeadWaitMs)`, `sum = source.summary`; `source` from [loadSessionLog](../src/lib/state/assistant/sessionLog.ts) → `assistant_load_session_log` returning the **persisted** `SessionSnapshot` incl. its frozen `summary` (serialized at save via [telemetry.ts:35](../src/lib/state/assistant/telemetry.ts)).
-- **Symptom:** sessions logged before cont.53 added `avgDeadWaitMs` lacked the field → `fmtMs(undefined)` → "—", while the per-turn `.tl-dead` timeline markers recomputed live and DID render — so aggregate and timeline permanently disagreed for any pre-field session. Live/new sessions always computed correctly; purely stale persisted-summary data.
-
-### 34. Command palette omits "Go to Home" (T4 — consistency)
-
-- **✅ Resolved (cont.54):** [CommandPalette.svelte:40](../src/lib/components/dialogs/CommandPalette.svelte) now has `{ id: "home", label: "Home", icon: Home, sub: "Ctrl+1" }` as the first `navs` entry.
-- **Where:** [CommandPalette.svelte:39-42](../src/lib/components/dialogs/CommandPalette.svelte) — the `navs` array previously listed only `chat`/`harness`/`settings`.
-- **Symptom:** Home (Ctrl+1) is a primary workspace but had no "Go to Home" entry in the palette's GO TO group, while every other workspace did.
-
-### 35. Deleted project still in Home "Recent folders" (T4 — stale recents)
-
-- **✅ Resolved (cont.54):** chose the **manual-prune** half — [HomePage.svelte:208](../src/lib/components/home/HomePage.svelte) renders a per-row "Forget" (×) button → `assistant.removeRecentRoot(r)` (→ `wsRemoveRecentRoot`, [assistant.svelte.ts:1671](../src/lib/state/assistant.svelte.ts)), so a dead recent can be dismissed.
-- **Where:** Home "Recent folders" list, [HomePage.svelte:197-209](../src/lib/components/home/HomePage.svelte) (`recents = assistant.workspace.recent`).
-- **Symptom:** `vein-modding` (retired + deleted 2026-06-04) still appeared; selecting it pointed at a non-existent dir. `Coinsmith` also listed.
-- **Remaining (optional, future):** no auto-validation against existence on mount — dead entries appear until manually Forgotten, and a missing-dir click isn't yet proven to fail gracefully. Auto-grey/prune-on-mount would fully close it. Live-confirmed 2026-06-05 (cont.58): both still visible, Forget (×) present + wired.
-
-### 36. Settings sidebar scroll-spy never activates the last section ("About") (T4 — cosmetic)
-
-- **✅ Resolved (2026-06-05, cont.58):** [SettingsPage.svelte:45-49](../src/lib/components/settings/SettingsPage.svelte) `onScroll()` now bottom-detects (`scrollTop + clientHeight >= scrollHeight - 2`) and explicitly spies the last `ST_SECTIONS` entry — so reaching the bottom (incl. via the About nav click → `jump()` smooth-scroll) lights "About" instead of leaving "Speech" stuck. `npm run check` 0/0.
-- **Where:** [SettingsPage.svelte](../src/lib/components/settings/SettingsPage.svelte) — one scrolling column with a scroll-spy sidebar (Appearance/Accessibility/Assistant/Speech/About). Active-highlight driven by a positional 140px-from-top threshold in `onScroll`, not by the click.
-- **Symptom:** clicking About (last item) scrolled it fully into view but the sidebar kept Speech lit. Root cause: About is the last/short section and the container can't scroll it to the top, so the threshold never fired for it. Affected any section that can't reach the top on click.
 
 ---
 

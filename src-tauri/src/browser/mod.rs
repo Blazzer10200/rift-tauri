@@ -11,7 +11,11 @@
 //! `hide` it whenever the dock isn't actually visible (dock closed, or a
 //! different workspace is active).
 
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Url, WebviewBuilder, WebviewUrl};
+use std::sync::Mutex;
+use std::time::Duration;
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, WebviewBuilder, WebviewUrl};
 
 /// Label of the embedded webview child. Single instance — one browser dock.
 const LABEL: &str = "rift-browser";
@@ -43,9 +47,26 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
     let window = app
         .get_window(HOST_WINDOW)
         .ok_or("main window not found")?;
+    // Emit page-load phase + URL to the frontend so the address bar + loading
+    // spinner track real navigations (link clicks, redirects, back/forward),
+    // not just the explicit `go()` path. Fires for the webview's whole lifetime.
+    let builder = WebviewBuilder::new(LABEL, WebviewUrl::External(u.clone()))
+        // Match the app's page bg (oklch(0.142) → #090a0b) so the pre-first-paint
+        // flash reads as the app's dark surface, not a white/black blast.
+        .background_color(tauri::webview::Color(9, 10, 11, 255))
+        .on_page_load(|webview, payload| {
+            let phase = match payload.event() {
+                tauri::webview::PageLoadEvent::Started => "started",
+                tauri::webview::PageLoadEvent::Finished => "finished",
+            };
+            let _ = webview.app_handle().emit(
+                "browser://load",
+                serde_json::json!({ "phase": phase, "url": payload.url().to_string() }),
+            );
+        });
     let wv = window
         .add_child(
-            WebviewBuilder::new(LABEL, WebviewUrl::External(u.clone())),
+            builder,
             LogicalPosition::new(x, y),
             LogicalSize::new(w, h),
         )
@@ -102,4 +123,111 @@ pub fn close(app: &AppHandle) -> Result<(), String> {
         wv.close().map_err(|e| format!("close: {e}"))?;
     }
     Ok(())
+}
+
+/// History navigation in the dock webview. Fire-and-forget — no-op at history
+/// ends (the browser ignores `history.back()` with no prior entry).
+pub fn go_back(app: &AppHandle) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(LABEL) {
+        wv.eval("history.back()").map_err(|e| format!("back: {e}"))?;
+    }
+    Ok(())
+}
+
+pub fn go_forward(app: &AppHandle) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(LABEL) {
+        wv.eval("history.forward()").map_err(|e| format!("forward: {e}"))?;
+    }
+    Ok(())
+}
+
+/// True reload of the dock page. `location.reload()` re-fetches in place —
+/// unlike a fresh `navigate()` to the same URL, it preserves history (no
+/// duplicate Back entry) and re-runs SPA/hash state.
+pub fn reload(app: &AppHandle) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(LABEL) {
+        wv.eval("location.reload()").map_err(|e| format!("reload: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Readable snapshot of the dock page — feeds "Add page to chat". Captures the
+/// *rendered* `innerText` (post-JS, and authenticated since the webview holds
+/// the session), which is exactly what `WebFetch` can't reach.
+#[derive(Serialize)]
+pub struct PageContent {
+    pub title: String,
+    pub url: String,
+    pub text: String,
+    /// True when the page exceeded the extraction cap and `text` is a prefix.
+    pub truncated: bool,
+    /// Full `innerText` length before capping (chars).
+    pub full_len: u64,
+}
+
+/// Extraction cap (chars). ~10k tokens — a hefty doc page — while keeping the
+/// injected composer block from ballooning.
+const EXTRACT_CAP: usize = 40_000;
+
+/// Pull the dock page's rendered text via `eval_with_callback` (the result is
+/// JSON-serialized by wry and handed to the callback). Returns an error when no
+/// page is open or the webview doesn't answer within the timeout.
+pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
+    let wv = app
+        .get_webview(LABEL)
+        .ok_or("no page open — enter a URL first")?;
+
+    // IIFE returns an object; wry serializes it to a JSON string for the
+    // callback. Capping happens in-page so we never marshal a huge string.
+    let js = format!(
+        r#"(function(){{
+            var b = document.body ? document.body.innerText : "";
+            var full = b.length;
+            var cap = {EXTRACT_CAP};
+            return {{
+                title: document.title || "",
+                url: location.href,
+                text: full > cap ? b.slice(0, cap) : b,
+                truncated: full > cap,
+                fullLen: full
+            }};
+        }})()"#
+    );
+
+    // `eval_with_callback` wants `Fn` (may be retained), but a oneshot sender is
+    // single-use — guard it in a Mutex<Option<_>> and take on first fire.
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let slot = Mutex::new(Some(tx));
+    wv.eval_with_callback(js, move |json| {
+        if let Ok(mut g) = slot.lock() {
+            if let Some(tx) = g.take() {
+                let _ = tx.send(json);
+            }
+        }
+    })
+    .map_err(|e| format!("eval: {e}"))?;
+
+    let json = tokio::time::timeout(Duration::from_secs(5), rx)
+        .await
+        .map_err(|_| "timed out reading page".to_string())?
+        .map_err(|_| "page read was cancelled".to_string())?;
+
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        title: String,
+        url: String,
+        text: String,
+        truncated: bool,
+        #[serde(rename = "fullLen")]
+        full_len: u64,
+    }
+    let raw: Raw =
+        serde_json::from_str(&json).map_err(|e| format!("decode page snapshot: {e}"))?;
+    Ok(PageContent {
+        title: raw.title,
+        url: raw.url,
+        text: raw.text,
+        truncated: raw.truncated,
+        full_len: raw.full_len,
+    })
 }

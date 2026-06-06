@@ -112,7 +112,7 @@ pub fn assistant_list_session_logs() -> Result<Vec<SessionLogMeta>, String> {
         });
     }
     // Newest first — the picker reads top-down.
-    out.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    out.sort_by_key(|s| std::cmp::Reverse(s.started_at));
     Ok(out)
 }
 
@@ -159,7 +159,7 @@ pub fn assistant_prune_session_logs(keep: usize) -> Result<u32, String> {
     if files.len() <= keep {
         return Ok(0);
     }
-    files.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+    files.sort_by_key(|f| std::cmp::Reverse(f.0)); // newest first
     let mut removed = 0u32;
     for (_, p) in files.into_iter().skip(keep) {
         if std::fs::remove_file(&p).is_ok() {

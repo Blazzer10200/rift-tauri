@@ -1,10 +1,8 @@
-//! Phase 6: OS-keychain wrapper for at-rest secrets.
+//! OS-keychain wrapper for at-rest secrets.
 //!
-//! Replaces plaintext storage of `bridge_token` (per server) and `api_key`
-//! (Anthropic) in `~/.rift/*.json`. Backends per the `keyring` crate:
-//! Windows Credential Manager, macOS Keychain, Linux Secret Service.
-//!
-//! Issues addressed: #9.3, #37, #38.
+//! Stores the Anthropic `api_key` outside `~/.rift/*.json`. Backends per the
+//! `keyring` crate: Windows Credential Manager, macOS Keychain, Linux Secret
+//! Service.
 
 use keyring::Entry;
 
@@ -54,16 +52,6 @@ pub fn delete(key: &str) -> Result<(), String> {
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("keyring delete {key}: {e}")),
     }
-}
-
-/// Namespaced key for a per-server bridge token.
-pub fn bridge_token_key(server_key: &str) -> String {
-    format!("bridge.{server_key}")
-}
-
-/// Namespaced key for a per-server FXServer RCON password.
-pub fn rcon_password_key(server_key: &str) -> String {
-    format!("rcon.{server_key}")
 }
 
 /// Single-tenant key for the Anthropic API key.

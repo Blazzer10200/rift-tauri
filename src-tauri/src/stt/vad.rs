@@ -22,9 +22,7 @@ pub fn window_has_speech(samples_f32: &[f32]) -> bool {
     if samples_f32.is_empty() {
         return false;
     }
-    let mut vad = match Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::Aggressive) {
-        v => v,
-    };
+    let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::Aggressive);
     let total_frames = samples_f32.len() / FRAME_SAMPLES;
     if total_frames == 0 {
         // Tiny window — fall back to RMS energy gate.

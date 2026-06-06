@@ -14,6 +14,9 @@ const DEFAULT_W = 560;
 class BrowserDock {
   open = $state(false);
   width = $state(DEFAULT_W);
+  // Bumped to request the address bar take focus + select-all (Ctrl+L). The
+  // WebBrowserPage input watches this token rather than holding a DOM ref here.
+  focusToken = $state(0);
 
   init() {
     if (typeof window === "undefined") return;
@@ -25,6 +28,12 @@ class BrowserDock {
   toggle() {
     this.open = !this.open;
     try { localStorage.setItem(OPEN_KEY, this.open ? "1" : "0"); } catch { /* noop */ }
+  }
+
+  // Open the dock if needed, then ask the address bar to focus.
+  focusAddress() {
+    if (!this.open) this.toggle();
+    this.focusToken++;
   }
 
   setWidth(w: number) {
