@@ -21,6 +21,7 @@
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
 | CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
 | #29 | CSP allows `style-src 'unsafe-inline'` | T4 | 🔒 blocked |
+| UI-drift | App-update surfaces disagree (toast vs card) | T4 | 🚧 open |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -83,6 +84,12 @@
 - **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `csp`.
 - **Symptom:** inline styles permitted — required by current Tailwind output, weakens CSP.
 - **Fix sketch:** switch to nonce/strict-dynamic once Tailwind supports hashed inline styles end-to-end. Blocked on Tailwind.
+
+#### UI-drift. App-update surfaces disagree (🚧 open)
+
+- **Where:** the Velopack app-update surfaces — toast (`updates.svelte.ts`), Home/Settings status card(s). User screenshot (cont.64) showed the toast saying "update available v0.5.0 → v0.6.1" while another card read "Rift 0.5.0 · up to date" at the same time.
+- **Symptom:** the surfaces read different slices of update state, so one can show "available" while another shows "up to date" — looks broken even when the updater is fine. (Functional bug was the apply file-lock, fixed in v0.6.2; this is the remaining *cosmetic* drift.)
+- **Fix sketch:** mirror the cont.63 CLI-update unification — drive every app-update surface from one derived summary off the `updates` store so they can't diverge.
 
 > Also parked: **Wave-1 LOWs #91–#134** — clippy/doc/perf nits, in `docs/archive/audit-history.md` (not tracked live here).
 

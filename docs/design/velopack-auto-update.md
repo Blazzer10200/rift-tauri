@@ -1,11 +1,14 @@
 # Auto-update — return to Velopack (one-click, then unattended)
 
-> Status: **IMPLEMENTED 2026-06-04 (cont.44), compile-verified, NOT ship-tested**.
-> `cargo check` 0/0 (velopack 1.2.0), `npm run check` 0/0, `release.ps1`
-> PS-parses clean. Ships v0.4.47. Remaining: the 2-machine ship test (§6 R1) —
-> auto-apply only proves out across two real Velopack releases. All signatures
-> below verified against docs.rs/velopack/latest (1.2.0) and matched the built
-> code. Implementation notes vs this plan: native `GithubSource` replaced the
+> Status: **SHIPPED; apply-path bug found + fixed in v0.6.2 (cont.64, 2026-06-06)**.
+> v0.4.47 shipped the Velopack integration. The apply path was then found dead in
+> practice — **R1 (§6) was hit**: a child-process file lock blocked the swap, so
+> in-app updates downloaded but never applied. Fixed in **v0.6.2** by reaping the
+> child processes before exit (see §3 "Post-ship correction" + `update_service.rs`).
+> v0.6.3 shipped as the live-verify vehicle (a no-op bump to click Update against).
+> Compile-verified `cargo check` 0/0 (velopack 1.2.0), `npm run check` 0/0. All
+> signatures below verified against docs.rs/velopack/latest (1.2.0) and matched the
+> built code. Implementation notes vs this plan: native `GithubSource` replaced the
 > custom source (module ~390→~135L); `UpdateCheck::UpdateAvailable` wraps a
 > `Box<UpdateInfo>` and the asset is `info.TargetFullRelease`; dropped
 > `release_url`/`published_at` from the DTO (synthesized `releaseUrl` client-side
@@ -83,6 +86,32 @@ exit, so WebView2 children die in order and no file lock occurs.
 `NO_ARGS` = `Vec::<&str>::new()` (concrete type for the `C: IntoIterator<Item=S>,
 S: AsRef<OsStr>` bound; `std::iter::empty()` can't infer `S`).
 
+### Post-ship correction (v0.6.2) — `wait_exit_then_apply_updates` was NOT enough
+
+The §3 assumption — "trigger Tauri's clean exit and WebView2 children die in
+order, so no file lock" — was **wrong for this app**. Velopack applies by
+renaming `current/`, and `Update.exe` waits **only for the main PID** (the one
+passed via `--waitPid`). But every turn the Claude CLI spawns `rift-tauri.exe`
+with `RIFT_MCP_SERVER=1` as its MCP server, and **any** live `rift-tauri.exe`
+holds an exclusive lock on `current/` (proven: a rename fails with a sharing
+violation). Worse, `app.exit(0)` is `std::process::exit`, which **skips `Drop`**,
+so the `kill_on_drop(true)` on the claude `Command` never fires — the children
+orphan and keep the directory locked. Result: the swap silently no-ops and the
+relaunch lands on the *old* build.
+
+**Fix (in `update_service::apply`, after `wait_exit_then_apply_updates`, before
+`app.exit(0)`):** reap the lockers ourselves.
+1. `crate::assistant::kill_all_session_children()` — `taskkill /F /T /PID` every
+   tracked `claude` child (tree-kill, so its `RIFT_MCP_SERVER` grandchild dies
+   too), draining `SESSION_PIDS` so none can respawn in the exit window.
+2. Windows sweep: `taskkill /F /FI "IMAGENAME eq rift-tauri.exe" /FI "PID ne
+   <self>"` — kills any MCP child orphaned from an earlier turn.
+
+Both are best-effort (`let _ =`); a "no tasks" exit is fine. Only then `app.exit(0)`.
+**Bootstrap caveat:** the fix lives in the *applying* binary, so clients on ≤0.6.1
+still hit the lock updating *to* 0.6.2 → one-time manual `Setup.exe`. From 0.6.2
+onward, in-app updates apply cleanly.
+
 ### Resolved code details (closed during research)
 
 - **`VelopackApp::build().run()` ordering.** Must be near-first, BUT after the
@@ -158,9 +187,12 @@ real Velopack releases.
 
 ## 6. Risks
 
-- **R1 — apply still races WebView2.** Mitigation: `wait_exit_then_apply_updates`
-  + `app.exit(0)` (§3). If still flaky, salvage the old stashed
-  `kill_child_processes_on_exit` taskkill helper as a pre-exit hook.
+- **R1 — apply still races child processes. ✅ HIT + RESOLVED (v0.6.2).** The
+  `wait_exit_then_apply_updates` + `app.exit(0)` mitigation was **insufficient**
+  (the locker was the self-spawned `rift-tauri.exe` MCP child, not WebView2, and
+  `app.exit` skips `Drop` so `kill_on_drop` never ran). The contingency named
+  here — a pre-exit taskkill of child processes — is exactly what shipped. See
+  §3 "Post-ship correction".
 - **R2 — v1.2.0 API drift from docs.** All signatures here are read from
   docs.rs/velopack/latest (1.2.0). `cargo check` is the real verifier — run it
   with dev **quit** (project rule: no `cargo check` during `tauri dev`).
