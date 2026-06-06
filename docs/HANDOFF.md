@@ -2,14 +2,16 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-06 (cont. 63) — SHIPPED v0.6.1: CLI multi-install + unified update UI
+## Session 2026-06-06 (cont. 64) — SHIPPED v0.6.2: in-app update apply fix (file-lock)
 
-Shipped cont.62 (CLI multi-install: `enumerate_claude_installs()` runs the newest + `assistant_update_cli` updates all; `ClaudeInstall` DTO on `AuthStatus.installs`; Settings per-install list) **plus** this session's update-UI redesign (one `cliUpdate.summary()` feeds Home banner + tab-bar popover + Settings, tone-aware; `UpdateDialog` `oklch`→`oklab` warm-hue fix). Temp `UpdatePreview.svelte` drove a CDP state/tone sweep, then removed. Full detail in CHANGELOG/git. `cargo check` + `npm run check` 0/0; all surfaces CDP-verified.
+**Bug:** clicking Update downloaded but never applied — app relaunched on same build. **Root cause (proven):** Velopack applies by renaming `current/`; its `Update.exe` waits only for the MAIN pid. But each turn's claude CLI spawns `rift-tauri.exe` (`RIFT_MCP_SERVER=1`) as MCP server, and ANY live `rift-tauri.exe` holds an exclusive lock on `current/` (verified: rename → sharing violation). `app.exit(0)` = `std::process::exit` skips `Drop` → `kill_on_drop` never reaps the children → they orphan → swap blocked. Standalone download+apply proven working (probe + manual `Update.exe apply`). **Fix:** `update_service::apply()` now reaps lockers before `app.exit(0)` — `assistant::kill_all_session_children()` (tree-kills tracked claude trees) then a `taskkill /FI "IMAGENAME eq rift-tauri.exe" /FI "PID ne <self>"` sweep. `cargo check` + `npm run check` 0/0. SHIPPED via `release.ps1` (commit `f67e2d7`, pushed).
 
-### RESUME HERE (cont.63)
-- **v0.6.1 SHIPPED** (feat commit + published to `rift-releases` via `release.ps1`). PENDING live-verify on a real dual-install box: banner clears after Update-all; if a native copy truly won't bump, the "still behind" hint + DiagBus logs name the culprit.
-- **v0.6.0 carry-over live-verify still owed:** v0.5→0.6 auto-update on a real machine · browser render-flash · mid-turn steer · permission bar · fresh-install onboarding.
-- **Open:** #21 test harness (T1) · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum sign-off. (#30 update-UI redesign shipped + block deleted from ISSUES.)
+### RESUME HERE (cont.64)
+- **v0.6.2 SHIPPED + published** to `rift-releases`. This box manually bootstrapped to 0.6.2 via the published `Rift-win-Setup.exe` (verified `sq.version`=0.6.2). **Bootstrap caveat:** the fix lives in the APPLYING binary, so clients on ≤0.6.1 still hit the lock updating *to* 0.6.2 → one-time manual Setup.exe (called out in CHANGELOG + release notes). v0.6.2→later auto-applies.
+- **Owed live-verify:** v0.6.2→0.6.3 in-app update on a real machine WITH an active turn/MCP child (the exact failure case) — the only thing the compile-level fix can't prove. Needs the next release to test.
+- **Cosmetic, deferred:** update-surface drift (toast "update available" vs a card showing "up to date") — user flagged via screenshot, not yet chased.
+- **v0.6.0 carry-over live-verify still owed:** browser render-flash · mid-turn steer · permission bar · fresh-install onboarding.
+- **Open:** #21 test harness (T1) · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum sign-off.
 
 ---
 
