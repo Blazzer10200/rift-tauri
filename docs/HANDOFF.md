@@ -2,24 +2,19 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-06 (cont. 60) — Browser arc finished + render polish (unshipped)
+## Session 2026-06-06 (cont. 61) — SHIPPED v0.6.0 (browser arc + polish)
 
-Completed the in-app browser dock. CDP-live-verified; `svelte-check` 0/0; backend verified via live event pipeline (dev console = Rust verifier, dev was running — no `cargo check`). Files: [browser/mod.rs](../src-tauri/src/browser/mod.rs), [commands/browser.rs](../src-tauri/src/commands/browser.rs), [lib.rs](../src-tauri/src/lib.rs), [WebBrowserPage.svelte](../src/lib/components/webview/WebBrowserPage.svelte), [browserDock.svelte.ts](../src/lib/state/browserDock.svelte.ts), [AppShell.svelte](../src/lib/components/AppShell.svelte).
-- **Functions:** Enter-to-go (was wired) · **true reload** (`browser_reload`→`location.reload()`, replaces re-`navigate()` that polluted Back) · **Ctrl+L** focus+select (`browserDock.focusAddress()`+`focusToken`, gated chat) · select-all on focus · Copy URL + Open-external in a **`⋯` menu** (`.rift-menu`+portal, scrim+Esc).
-- **Bar 8→6 buttons** (dropped Go arrow): `[←][→][⟳] [address] [Add to chat] [⋯] [✕]`.
-- **Loading spinner on ALL navs:** native `on_page_load`→emits `browser://load {phase,url}`; frontend `listen()` drives `loading`+address; 20s watchdog.
-- **Render polish:** native webview `.background_color(Color(9,10,11,255))` = `--bg` #090a0b (kills pre-paint flash); stage `#0b0b0d`→`var(--bg)`. Page renders fine (read_page=202 chars); CDP can't capture native child webviews — black in shots ≠ bug.
-- **Decisions:** Back/Fwd grey-out SKIPPED (Tauri doesn't expose WebView2 `CanGoBack`). MCP `read_page`/`open_url` bridge DEFERRED — MCP server is a SEPARATE PROCESS ([lib.rs:102](../src-tauri/src/lib.rs#L102), no `AppHandle`) → cross-process IPC, own session. Repaint nudge HELD (flicker risk).
+Full pre-ship review + release. **v0.6.0 published** to `rift-releases` (commit `316dc5e`, pushed to origin). Browser arc + harness/model-picker polish + #31–36 all shipped.
+- **Review:** `svelte-check` 0/0 · `cargo check` 0/0 · `clippy` → 1 intentional ([mod.rs:2432](../src-tauri/src/assistant/mod.rs) arity) · browser dock + per-turn MCP pipeline CDP-verified live (omnibox, add-to-chat, back/fwd, reload). `{@html}` in [EditDiff.svelte](../src/lib/components/assistant/EditDiff.svelte) safe — shiki-escaped tokens.
+- **Fixes this session (behavior-preserving, verified):** removed dead [secrets.rs](../src-tauri/src/secrets.rs) keys (`bridge_token_key`/`rcon_password_key`); 6 clippy idioms (`sort_by_key`/`?`/match).
+- **Release:** **Setup.exe-only** — portable dropped *post-upload* (`release.ps1` patched + committed). Assets: Setup.exe + full/delta nupkg + releases.win.json + RELEASES. Velopack delta 0.5.0→0.6.0 built. The two GitHub "Source code" archives = LICENSE+README only (rift-releases repo), auto-gen + unremovable + harmless. Also pruned the portable from the live v0.5.0 release.
+- **release.ps1 gotchas learned:** (1) drop portable AFTER `vpk upload` — vpk's pack manifest needs the file present at upload time; (2) if a pack half-runs, clean the 0.6.0 artifacts from `Releases/` before retry (vpk refuses to re-pack over an existing ≥ version); (3) never wrap `release.ps1`/`tauri build` in `*>&1`/`2>&1` from the PS tool — PS5.1 turns native stderr into a terminating `NativeCommandError`.
 
-cont.59 (browser model's-eyes: `read_page`→Add-to-chat, omnibox) folded in — arc complete. cont.58: #36 scroll-spy + ISSUES reorg.
-
-### RESUME HERE (cont.60)
-- All cont.52–60 UNSHIPPED → next `/git-ship` (3-file lockstep + `Cargo.lock`; CHANGELOG/bump deferred). Browser arc is shippable.
-- **PENDING USER EYEBALL:** browser render-flash fix + does page show content cleanly (native webview CDP-invisible — only user can confirm).
-- ISSUES **#31–36** fixed in-tree (delete on ship).
-- **Open work all blocked / needs-you / live-verify:** #21 test harness (T1) · #30 Update-UI redesign (taste — CDP-drivable via `window.__updates`) · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum (sign-off).
-- Pending USER live-verify: steer mid-turn on a tool turn · permission Allow/Deny bar · v0.5.0 auto-update on a real machine · beta onboarding on a fresh tester install.
-- CDP wrapper (`npm run cdp:serve`) left running.
+### RESUME HERE (cont.61)
+- **v0.6.0 SHIPPED + pushed. Tree clean.**
+- **PENDING USER live-verify:** v0.6.0 auto-update on a real machine (v0.5.0→v0.6.0 = 2nd Velopack proof point) · browser render-flash visual (native webview CDP-invisible) · steer mid-turn on a tool turn · permission Allow/Deny bar · beta onboarding on a fresh install.
+- **Open:** #21 test harness (T1) · #30 Update-UI redesign · #4/#20/#17 strategic · #29 Tailwind-blocked · CR-UX trust-enum sign-off.
+- Dev pipeline was killed for the release build — relaunch via `scripts/run-dev.bat` (sets the CDP port) if resuming UI work.
 
 ---
 
