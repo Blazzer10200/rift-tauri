@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.6.3 — 2026-06-06 — chore: hotfix release to live-verify in-app auto-update
+
+No code changes — a version-only bump shipped to confirm the v0.6.2 apply fix works end-to-end from inside the app (download → swap → relaunch on the new build). This is the live-verify owed in v0.6.2's notes. If you can read this from an app that updated itself without a manual reinstall, the fix holds.
+
 ## v0.6.2 — 2026-06-06 — fix: in-app update could never apply (child-process file lock)
 
 > **Why.** Clicking **Update** in the app downloaded fine but the new version never took — the app would relaunch on the *same* build. Auto-update was effectively dead from inside the app, even though the Velopack machinery itself was sound.
