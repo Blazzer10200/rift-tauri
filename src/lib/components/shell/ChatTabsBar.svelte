@@ -94,8 +94,8 @@
   let cliPanelOpen = $state(false);
   let cliPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
   const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
-  const cliUpdateReady = $derived(cliUpdate.available(cliInstalled));
-  const cliIsNative = $derived((assistant.auth?.installMethod ?? null) === "native");
+  const cliUpdateReady = $derived(cliUpdate.availableAny(assistant.auth?.installs, cliInstalled));
+  const cliSummary = $derived(cliUpdate.summary(assistant.auth?.installs));
   onMount(() => { void cliUpdate.maybeCheck(); });
   $effect(() => { cliUpdate.setMethod(assistant.auth?.installMethod ?? null); });
   async function runCliUpdate() {
@@ -764,24 +764,16 @@
     use:portal
     style="top: {cliPos.top}px; right: {cliPos.right}px;"
   >
-    <div class="cli-panel-head">
+    <div class="cli-panel-head" data-tone={cliSummary.tone}>
       <span class="cli-panel-ic"><ArrowUpCircle size={15} /></span>
-      <span class="cli-panel-title">Claude Code update</span>
+      <span class="cli-panel-title">{cliSummary.headline}</span>
     </div>
     <div class="cli-panel-vers">
       <span class="cli-vchip old">{cliInstalled ?? "?"}</span>
       <span class="cli-varrow">→</span>
       <span class="cli-vchip new">{cliUpdate.latest ?? "?"}</span>
     </div>
-    <div class="cli-panel-sub">
-      {#if cliUpdate.updateError}
-        <span class="cli-err">{cliUpdate.updateError}</span> — or run it yourself:
-      {:else if cliIsNative}
-        A newer <code>claude</code> CLI is available. Native installs auto-update in the background — or apply it now:
-      {:else}
-        A newer <code>claude</code> CLI is on npm. Rift can update it for you:
-      {/if}
-    </div>
+    <div class="cli-panel-sub" data-tone={cliSummary.tone}>{cliSummary.detail}</div>
     <button type="button" class="cli-update-go" disabled={cliUpdate.updating} onclick={runCliUpdate}>
       {#if cliUpdate.updating}<Loader2 size={14} class="cli-spin" /> Updating…{:else}<ArrowUpCircle size={14} /> Update now{/if}
     </button>
@@ -1553,6 +1545,8 @@
   @media (prefers-reduced-motion: reduce) { .cli-panel { animation: none; } }
   .cli-panel-head { display: flex; align-items: center; gap: 8px; }
   .cli-panel-ic { display: inline-flex; color: var(--accent); }
+  .cli-panel-head[data-tone="warn"] .cli-panel-ic { color: var(--warn); }
+  .cli-panel-head[data-tone="danger"] .cli-panel-ic { color: var(--danger); }
   .cli-panel-title { font-weight: 600; color: var(--fg); font-size: var(--fs-sm); }
   .cli-panel-vers {
     display: flex; align-items: center; gap: 8px;
@@ -1570,11 +1564,8 @@
   }
   .cli-varrow { color: var(--fg-faint); }
   .cli-panel-sub { color: var(--fg-muted); line-height: 1.45; }
-  .cli-panel-sub code {
-    font-family: var(--font-mono); font-size: 11px;
-    color: var(--fg-2); background: var(--bg-inset);
-    padding: 0 4px; border-radius: 4px;
-  }
+  .cli-panel-sub[data-tone="warn"] { color: var(--warn); }
+  .cli-panel-sub[data-tone="danger"] { color: var(--danger); word-break: break-word; }
   .cli-cmd {
     display: flex; align-items: center; gap: 8px;
     background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong);
@@ -1593,7 +1584,6 @@
   }
   .cli-cmd-copy:hover { color: var(--fg); border-color: var(--border-strong); }
   .cli-cmd-copy.done { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
-  .cli-err { color: var(--danger, #e66); font-weight: 600; }
   .cli-update-go {
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     height: 32px; border-radius: 8px; border: 1px solid transparent; cursor: pointer;

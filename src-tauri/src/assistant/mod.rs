@@ -184,14 +184,88 @@ fn build_user_envelope(text: &str, attachments: &[AssistantAttachment]) -> Resul
 /// re-resolution, so CLI installs/moves take effect on the next spawn.
 static CLAUDE_EXE: Mutex<Option<Option<PathBuf>>> = Mutex::new(None);
 
-fn resolve_claude_exe_uncached() -> Option<PathBuf> {
+/// One detected Claude Code CLI installation. A single machine can carry
+/// several at once — the classic case is an npm-global install AND Anthropic's
+/// native installer side by side, which silently drift to different versions.
+/// Rift enumerates every one, runs turns on the newest, and updates all of
+/// them so the versions can't diverge (the dual-install "stuck out of date"
+/// bug). All fields camelCase for the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeInstall {
+    /// Absolute path to the runnable binary (never a `.cmd`/`.bat` shim).
+    pub path: String,
+    /// "npm" | "native" | "unknown" — drives the correct update command.
+    pub method: String,
+    /// `claude --version` output for THIS binary, or None if it failed to run.
+    pub version: Option<String>,
+    /// Resolvable via `where`/`which` — i.e. what a plain shell would launch.
+    pub on_path: bool,
+    /// The install Rift currently spawns (newest version wins).
+    pub active: bool,
+}
+
+/// Lowercase + backslash-normalize a path string for case-insensitive compares
+/// (Windows paths are case-insensitive; `where.exe` and our probes can differ
+/// in case/separator for the same file).
+fn norm_path(s: &str) -> String {
+    s.to_ascii_lowercase().replace('/', "\\")
+}
+
+/// Run `where claude` (Windows) / `which -a claude` (unix) and return every
+/// non-blank line. Empty on failure (no CLI on PATH).
+fn where_claude_lines() -> Vec<String> {
     let (program, args): (&str, &[&str]) = if cfg!(windows) {
         ("where.exe", &["claude"])
     } else {
-        ("which", &["claude"])
+        ("which", &["-a", "claude"])
     };
     let mut cmd = std::process::Command::new(program);
     cmd.args(args).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    match cmd.output() {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Classify how a `claude` binary at `p` was installed, from its path.
+/// npm-global installs must update via `npm install -g …@latest`; native
+/// installs self-update and accept `claude update`.
+fn classify_install_method(p: &Path) -> &'static str {
+    let s = p.to_string_lossy().to_ascii_lowercase();
+    if s.contains("\\npm\\node_modules\\")
+        || s.contains("/npm/node_modules/")
+        || s.ends_with(".cmd")
+        || s.ends_with(".bat")
+    {
+        "npm"
+    } else if s.contains("anthropicclaude")
+        || s.contains("\\.local\\bin\\")
+        || s.contains("/.local/bin/")
+    {
+        "native"
+    } else {
+        "unknown"
+    }
+}
+
+/// Run `<exe> --version` and return its trimmed output (None if it can't run).
+/// Strips a stray `ANTHROPIC_API_KEY` like every other spawn; hides the window.
+fn probe_version_at(exe: &Path) -> Option<String> {
+    let mut cmd = std::process::Command::new(exe);
+    cmd.arg("--version").stderr(Stdio::null());
+    cmd.env_remove("ANTHROPIC_API_KEY");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -202,63 +276,195 @@ fn resolve_claude_exe_uncached() -> Option<PathBuf> {
     if !out.status.success() {
         return None;
     }
-    // `where.exe` prints one path per line. On Windows we MUST prefer
-    // `.exe` over `.cmd`/`.bat` — Rust 1.77+ refuses to safely escape
-    // newlines/special chars for batch-file invocation (CVE-2024-24576
-    // mitigation, fails as "batch file arguments are invalid"). The
-    // multi-line `--append-system-prompt` payload + Human:/Assistant:
-    // history chain both contain newlines, so a `.cmd` shim is
-    // unusable here. Native Claude Code installs `.exe` directly.
-    let text = String::from_utf8_lossy(&out.stdout);
-    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    if cfg!(windows) {
-        // 1) .exe on PATH wins.
-        if let Some(p) = lines.iter().find(|l| l.to_ascii_lowercase().ends_with(".exe")) {
-            return Some(PathBuf::from(*p));
-        }
-        // 2) Native installer drops claude.exe at known LOCALAPPDATA
-        // locations but doesn't always wire it into PATH (the npm
-        // shim claims `where.exe claude` first). Probe directly.
-        if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
-            let candidates = [
-                PathBuf::from(&lad).join("AnthropicClaude").join("claude.exe"),
-                PathBuf::from(&lad).join("Programs").join("AnthropicClaude").join("claude.exe"),
-            ];
-            for c in candidates {
-                if c.is_file() {
-                    return Some(c);
-                }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!s.is_empty()).then_some(s)
+}
+
+/// Pull a `major.minor.patch` triple out of a version string, tolerating a
+/// leading `v` and trailing noise like `"2.1.111 (Claude Code)"`.
+fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
+    let cleaned: String = v
+        .chars()
+        .map(|c| if c.is_ascii_digit() || c == '.' { c } else { ' ' })
+        .collect();
+    for tok in cleaned.split_whitespace() {
+        let parts: Vec<&str> = tok.split('.').collect();
+        if parts.len() >= 3 {
+            if let (Ok(a), Ok(b), Ok(c)) = (parts[0].parse(), parts[1].parse(), parts[2].parse()) {
+                return Some((a, b, c));
             }
         }
-        // 2b) npm-installed claude bundles the real claude.exe inside
-        // its node_modules dir. The shim on PATH is `claude.cmd`
-        // which forwards via `%*` — and cmd.exe arg forwarding
-        // silently mangles `--output-format stream-json` so the CLI
-        // downgrades to plain text output. Calling the bundled .exe
-        // directly avoids the shim entirely.
-        if let Some(appdata) = std::env::var_os("APPDATA") {
-            let bundled = PathBuf::from(&appdata)
-                .join("npm")
-                .join("node_modules")
-                .join("@anthropic-ai")
-                .join("claude-code")
-                .join("bin")
-                .join("claude.exe");
-            if bundled.is_file() {
-                return Some(bundled);
-            }
-        }
-        // 3) Fall back to .cmd/.bat. assistant_send keeps spawn args
-        // newline-free (system addendum is single-line, prompt goes
-        // via stdin) so the Rust 1.77 batch-args validator accepts it.
-        lines
-            .iter()
-            .find(|l| l.to_ascii_lowercase().ends_with(".cmd"))
-            .or_else(|| lines.first())
-            .map(|s| PathBuf::from(*s))
-    } else {
-        lines.first().map(|s| PathBuf::from(*s))
     }
+    None
+}
+
+/// Enumerate EVERY Claude CLI install on this machine — PATH hits plus the
+/// known native + npm drop sites — de-duplicated, each probed for its version
+/// and classified by install method. Only real `.exe` binaries are kept on
+/// Windows (a `.cmd`/`.bat` shim mangles the newline-bearing stream-json spawn
+/// args, CVE-2024-24576 mitigation); the npm shim's bundled `.exe` is probed
+/// directly instead. Synchronous (spawns several short `--version` children) —
+/// call from a blocking task on the async paths.
+fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
+    let where_lines = where_claude_lines();
+    let where_norm: Vec<String> = where_lines.iter().map(|l| norm_path(l)).collect();
+
+    let mut paths: Vec<PathBuf> = Vec::new();
+    let add = |p: PathBuf, list: &mut Vec<PathBuf>| {
+        if p.is_file() {
+            let n = norm_path(&p.to_string_lossy());
+            if !list.iter().any(|q| norm_path(&q.to_string_lossy()) == n) {
+                list.push(p);
+            }
+        }
+    };
+
+    if cfg!(windows) {
+        // Real `.exe` entries directly on PATH.
+        for l in &where_lines {
+            if l.to_ascii_lowercase().ends_with(".exe") {
+                add(PathBuf::from(l), &mut paths);
+            }
+        }
+        // Native installer drop sites (not always wired into PATH).
+        if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
+            add(PathBuf::from(&lad).join("AnthropicClaude").join("claude.exe"), &mut paths);
+            add(
+                PathBuf::from(&lad).join("Programs").join("AnthropicClaude").join("claude.exe"),
+                &mut paths,
+            );
+        }
+        // npm-global bundled exe (PATH only carries the `.cmd` shim).
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            add(
+                PathBuf::from(&appdata)
+                    .join("npm")
+                    .join("node_modules")
+                    .join("@anthropic-ai")
+                    .join("claude-code")
+                    .join("bin")
+                    .join("claude.exe"),
+                &mut paths,
+            );
+        }
+        // ~/.local/bin native-script install.
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            add(PathBuf::from(&home).join(".local").join("bin").join("claude.exe"), &mut paths);
+        }
+        // Last-resort: `.cmd`/`.bat` shims on PATH (custom npm prefix with no
+        // bundled `.exe` at the default site). Ranked below any real binary and
+        // collapsed into its bundled `.exe` (same version) by the dedup below.
+        for l in &where_lines {
+            let low = l.to_ascii_lowercase();
+            if low.ends_with(".cmd") || low.ends_with(".bat") {
+                add(PathBuf::from(l), &mut paths);
+            }
+        }
+    } else {
+        for l in &where_lines {
+            add(PathBuf::from(l), &mut paths);
+        }
+        if let Some(home) = std::env::var_os("HOME") {
+            add(PathBuf::from(&home).join(".local").join("bin").join("claude"), &mut paths);
+        }
+    }
+
+    let raw: Vec<ClaudeInstall> = paths
+        .into_iter()
+        .map(|p| {
+            let pstr = p.to_string_lossy().to_string();
+            let pn = norm_path(&pstr);
+            let method = classify_install_method(&p);
+            // on_path: the exe itself is a `where` hit, OR (npm) its prefix's
+            // `.cmd` shim is — the bundled exe lives one dir deeper than PATH.
+            let on_path = where_norm.iter().any(|w| *w == pn)
+                || (method == "npm"
+                    && where_norm.iter().any(|w| w.contains("\\npm\\") || w.contains("/npm/")));
+            ClaudeInstall {
+                version: probe_version_at(&p),
+                method: method.to_string(),
+                on_path,
+                active: false,
+                path: pstr,
+            }
+        })
+        .collect();
+
+    // Collapse entries that are really the SAME install reached two ways — the
+    // npm `.cmd` shim and the bundled `.exe` it forwards to share method +
+    // version. Keep the real binary, fold in the shim's on_path flag.
+    let mut deduped: Vec<ClaudeInstall> = Vec::new();
+    for inst in raw {
+        if let Some(dup) = deduped
+            .iter_mut()
+            .find(|e| e.method == inst.method && e.version == inst.version && inst.version.is_some())
+        {
+            dup.on_path = dup.on_path || inst.on_path;
+            if is_shim(&dup.path) && !is_shim(&inst.path) {
+                dup.path = inst.path.clone();
+            }
+            continue;
+        }
+        deduped.push(inst);
+    }
+    deduped
+}
+
+fn method_rank(m: &str) -> u8 {
+    match m {
+        "native" => 2,
+        "npm" => 1,
+        _ => 0,
+    }
+}
+
+/// A `.cmd`/`.bat` forwarder, not a real binary. These mangle the newline-
+/// bearing stream-json spawn args (CVE-2024-24576), so they're only ever an
+/// active pick of last resort.
+fn is_shim(path: &str) -> bool {
+    let s = path.to_ascii_lowercase();
+    s.ends_with(".cmd") || s.ends_with(".bat")
+}
+
+/// True if `a` is the better "active" pick than `b`: newest version wins; a
+/// working (versioned) install beats a broken one; a real binary beats a shim;
+/// ties break toward the on-PATH copy (what the user's shell uses) then method.
+fn install_is_better(a: &ClaudeInstall, b: &ClaudeInstall) -> bool {
+    match (
+        a.version.as_deref().and_then(parse_semver),
+        b.version.as_deref().and_then(parse_semver),
+    ) {
+        (Some(va), Some(vb)) if va != vb => return va > vb,
+        (Some(_), None) => return true,
+        (None, Some(_)) => return false,
+        _ => {}
+    }
+    let (a_shim, b_shim) = (is_shim(&a.path), is_shim(&b.path));
+    if a_shim != b_shim {
+        return !a_shim;
+    }
+    if a.on_path != b.on_path {
+        return a.on_path;
+    }
+    method_rank(&a.method) > method_rank(&b.method)
+}
+
+/// Index of the install Rift should spawn — newest usable one. None if empty.
+fn select_active_index(installs: &[ClaudeInstall]) -> Option<usize> {
+    let mut best: Option<usize> = None;
+    for (i, inst) in installs.iter().enumerate() {
+        match best {
+            None => best = Some(i),
+            Some(b) if install_is_better(inst, &installs[b]) => best = Some(i),
+            _ => {}
+        }
+    }
+    best
+}
+
+fn resolve_claude_exe_uncached() -> Option<PathBuf> {
+    let installs = enumerate_claude_installs();
+    select_active_index(&installs).map(|i| PathBuf::from(&installs[i].path))
 }
 
 fn resolve_claude_exe() -> Option<PathBuf> {
@@ -284,33 +490,6 @@ fn resolve_claude_exe() -> Option<PathBuf> {
         *g = Some(resolved.clone());
     }
     resolved
-}
-
-/// Classify how the resolved `claude` binary was installed, from its path.
-/// npm-global installs must update via `npm install -g …@latest`; native
-/// installs self-update and accept `claude update`. Returns "npm" | "native"
-/// | "unknown" ("unknown" → best-effort `claude update`).
-fn claude_install_method() -> &'static str {
-    match resolve_claude_exe() {
-        Some(p) => {
-            let s = p.to_string_lossy().to_ascii_lowercase();
-            if s.contains("\\npm\\node_modules\\")
-                || s.contains("/npm/node_modules/")
-                || s.ends_with(".cmd")
-                || s.ends_with(".bat")
-            {
-                "npm"
-            } else if s.contains("anthropicclaude")
-                || s.contains("\\.local\\bin\\")
-                || s.contains("/.local/bin/")
-            {
-                "native"
-            } else {
-                "unknown"
-            }
-        }
-        None => "unknown",
-    }
 }
 
 /// Build a `tokio::process::Command` for `claude`, hiding the console window
@@ -383,6 +562,11 @@ pub struct AuthStatus {
     pub pill: String,
     /// One-line user-facing status.
     pub summary: String,
+    /// Every Claude CLI install detected on this machine (npm + native can
+    /// coexist). The `active` one drives `cli_version`/`install_method`; the
+    /// rest are surfaced so the UI can show + update all of them.
+    #[serde(default)]
+    pub installs: Vec<ClaudeInstall>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1075,34 +1259,47 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
         .map(|v| !v.is_empty())
         .unwrap_or(false);
 
-    // #134: spawn `claude --version` and `claude auth status` in parallel
-    // instead of back-to-back. The prior sequential layout opened a small
-    // TOCTOU window where the CLI on PATH could be swapped between the two
-    // resolutions (uninstall mid-probe, antivirus quarantine, etc.) and the
-    // returned `cli_version` would disagree with the auth result. `claude_command()`
-    // re-stats the cached path on each call, so a CLI removal still surfaces —
-    // it just happens to both child spawns at once now.
-    let ver_fut = async {
-        match claude_command() {
-            Some(mut c) => c.arg("--version").stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok(),
-            None => None,
-        }
-    };
+    // #134 + multi-install: enumerate EVERY Claude CLI on the box (npm, native,
+    // …) and run `auth status` on the newest one, in parallel. Enumeration runs
+    // `--version` on each candidate, so it's offloaded to a blocking task; auth
+    // status runs concurrently on the active exe (`claude_command()` resolves
+    // the same newest pick). The prior sequential layout opened a small TOCTOU
+    // window where the CLI could be swapped between the two resolutions.
+    let installs_fut = tokio::task::spawn_blocking(enumerate_claude_installs);
     let auth_fut = async {
         match claude_command() {
             Some(mut c) => c.args(["auth", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok(),
             None => None,
         }
     };
-    let (ver, auth_opt) = tokio::join!(ver_fut, auth_fut);
+    let (installs_res, auth_opt) = tokio::join!(installs_fut, auth_fut);
+    let mut installs = installs_res.unwrap_or_default();
+    let active = select_active_index(&installs);
+    if let Some(i) = active {
+        installs[i].active = true;
+    }
+    log::info!(
+        "auth-probe: {} claude install(s){}",
+        installs.len(),
+        active
+            .map(|i| format!(
+                ", active = {} ({}, v{})",
+                installs[i].path,
+                installs[i].method,
+                installs[i].version.as_deref().unwrap_or("?")
+            ))
+            .unwrap_or_default()
+    );
 
-    match ver {
-        Some(o) if o.status.success() => {
+    match active.and_then(|i| installs[i].version.clone()) {
+        Some(v) => {
             out.cli_present = true;
-            out.cli_version = Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
-            out.install_method = Some(claude_install_method().to_string());
+            out.cli_version = Some(v);
+            out.install_method = active.map(|i| installs[i].method.clone());
+            out.installs = installs;
         }
-        _ => {
+        None => {
+            out.installs = installs;
             out.cli_present = false;
             out.pill = if out.api_key_configured { "yellow".into() } else { "red".into() };
             out.summary = if out.api_key_configured {
@@ -1196,83 +1393,161 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CliUpdateResult {
+    /// The active install's method ("npm" | "native" | "unknown") — back-compat.
     pub method: String,
+    /// Human-readable per-install summary (one line each).
     pub output: String,
+    /// Freshly re-enumerated installs after the update, with new versions.
+    pub installs: Vec<ClaudeInstall>,
 }
 
-/// Update the local Claude Code CLI in place, using the command that matches
-/// how it was installed:
-///   * npm     → `npm install -g @anthropic-ai/claude-code@latest`
-///   * native  → `claude update` (native installs also auto-update in the
-///               background; this just applies it immediately)
-///   * unknown → best-effort `claude update`
+/// Update EVERY Claude Code CLI on this machine, each by the command that
+/// matches how it was installed:
+///   * npm     → `npm install -g @anthropic-ai/claude-code@latest` (once)
+///   * native  → `<exe> update` against that exact binary
+///   * unknown → best-effort `<exe> update`
 ///
-/// Buffered (no streaming) — npm -g can take ~30-60s, so the frontend shows a
-/// spinner and re-probes the version on success. Returns the tail of the
-/// updater's output on success, or its stderr on failure (fail-loud).
+/// Updating all of them (not just the one Rift happens to spawn) is the whole
+/// point: on a box with BOTH an npm and a native install, the version Rift
+/// reads and the version the user's shell reads can drift apart, so updating a
+/// single copy leaves the banner stuck "out of date". Buffered (no streaming) —
+/// npm -g can take ~30-60s; the frontend shows a spinner and re-probes on
+/// return. Returns a per-install summary + the post-update enumeration. Errors
+/// only if EVERY install's update failed (partial failures surface in `output`).
 #[tauri::command]
 pub async fn assistant_update_cli() -> Result<CliUpdateResult, String> {
-    let method = claude_install_method();
-    let output = if method == "npm" {
-        // npm's launcher on Windows is `npm.cmd` (Rust won't resolve a .cmd by
-        // bare name). This command is fully static — no user input, no newlines
-        // — so the Rust 1.77 batch-arg validator + `cmd /C` are safe here.
-        let mut cmd;
-        #[cfg(windows)]
-        {
-            cmd = Command::new("cmd");
-            cmd.args([
-                "/C",
-                "npm",
-                "install",
-                "-g",
-                "@anthropic-ai/claude-code@latest",
-            ]);
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        #[cfg(not(windows))]
-        {
-            cmd = Command::new("npm");
-            cmd.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
-        }
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| {
-                format!("Couldn't launch npm — is Node.js/npm installed and on PATH? ({e})")
-            })?
-    } else {
-        // native / unknown → `claude update`. `claude_command()` resolves the
-        // .exe (never a .cmd in these branches), hides the console window, and
-        // strips any stray ANTHROPIC_API_KEY.
-        let mut cmd = claude_command().ok_or_else(|| "Claude CLI not found on PATH.".to_string())?;
-        cmd.arg("update")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| format!("Couldn't run `claude update`: {e}"))?
-    };
+    let installs = tokio::task::spawn_blocking(enumerate_claude_installs)
+        .await
+        .map_err(|e| format!("install scan failed: {e}"))?;
+    if installs.is_empty() {
+        return Err("Claude CLI not found on PATH.".into());
+    }
+    let active_method = select_active_index(&installs)
+        .map(|i| installs[i].method.clone())
+        .unwrap_or_else(|| "unknown".into());
+    log::info!("cli-update: updating {} install(s)", installs.len());
 
+    let mut reports: Vec<String> = Vec::new();
+    let mut any_ok = false;
+    let mut any_err = false;
+    let mut npm_done = false;
+
+    for inst in &installs {
+        let (label, res) = if inst.method == "npm" {
+            // npm-global is location-independent (npm resolves its own prefix),
+            // so one run covers every npm copy.
+            if npm_done {
+                continue;
+            }
+            npm_done = true;
+            ("npm".to_string(), run_npm_update().await)
+        } else {
+            // native / unknown → update THIS binary specifically.
+            (
+                format!("{} ({})", inst.method, inst.path),
+                run_exe_update(&inst.path).await,
+            )
+        };
+        match res {
+            Ok(o) => {
+                any_ok = true;
+                let line = o.lines().last().map(str::trim).filter(|l| !l.is_empty()).unwrap_or("updated");
+                reports.push(format!("{label}: {line}"));
+                log::info!("cli-update: {label} OK");
+            }
+            Err(e) => {
+                any_err = true;
+                reports.push(format!("{label}: FAILED — {e}"));
+                log::warn!("cli-update: {label} FAILED — {e}");
+            }
+        }
+    }
+
+    // Drop the cached active exe so the next resolve re-stats the relinked
+    // binaries, then re-enumerate to report fresh versions back to the UI.
+    if let Ok(mut g) = CLAUDE_EXE.lock() {
+        *g = None;
+    }
+    let mut after = tokio::task::spawn_blocking(enumerate_claude_installs)
+        .await
+        .unwrap_or_default();
+    if let Some(i) = select_active_index(&after) {
+        after[i].active = true;
+    }
+    log::info!(
+        "cli-update: post-update = {:?}",
+        after.iter().map(|i| (i.method.as_str(), i.version.as_deref())).collect::<Vec<_>>()
+    );
+
+    let summary = if reports.is_empty() {
+        "Update complete.".to_string()
+    } else {
+        reports.join("\n")
+    };
+    if any_err && !any_ok {
+        Err(summary)
+    } else {
+        Ok(CliUpdateResult {
+            method: active_method,
+            output: summary,
+            installs: after,
+        })
+    }
+}
+
+/// `npm install -g @anthropic-ai/claude-code@latest`. Static args (no user
+/// input, no newlines) so the Rust 1.77 batch-arg validator + `cmd /C` are safe.
+async fn run_npm_update() -> Result<String, String> {
+    let mut cmd;
+    #[cfg(windows)]
+    {
+        cmd = Command::new("cmd");
+        cmd.args(["/C", "npm", "install", "-g", "@anthropic-ai/claude-code@latest"]);
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        cmd = Command::new("npm");
+        cmd.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
+    }
+    let output = cmd
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Couldn't launch npm — is Node.js/npm installed and on PATH? ({e})"))?;
+    finish_update(output)
+}
+
+/// `<exe> update` for a native/script install, run against that exact binary so
+/// the right copy is bumped on a multi-install box. Hides the window + strips a
+/// stray ANTHROPIC_API_KEY like every other spawn.
+async fn run_exe_update(exe: &str) -> Result<String, String> {
+    let mut cmd = Command::new(exe);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.env_remove("ANTHROPIC_API_KEY");
+    let output = cmd
+        .arg("update")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("Couldn't run `claude update`: {e}"))?;
+    finish_update(output)
+}
+
+/// Shared success/failure shaping for an updater's buffered output.
+fn finish_update(output: std::process::Output) -> Result<String, String> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     if output.status.success() {
-        // Drop the cached exe path so the next auth probe re-resolves the
-        // (possibly relinked) binary and reports the new version.
-        if let Ok(mut g) = CLAUDE_EXE.lock() {
-            *g = None;
-        }
         let tail = tail_lines(&stdout, 6);
-        Ok(CliUpdateResult {
-            method: method.to_string(),
-            output: if tail.is_empty() {
-                "Update complete.".into()
-            } else {
-                tail
-            },
-        })
+        Ok(if tail.is_empty() { "Update complete.".into() } else { tail })
     } else {
         let msg = tail_lines(&stderr, 8);
         Err(if msg.is_empty() {
