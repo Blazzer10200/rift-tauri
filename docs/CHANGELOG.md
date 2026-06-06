@@ -2,6 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.6.2 — 2026-06-06 — fix: in-app update could never apply (child-process file lock)
+
+> **Why.** Clicking **Update** in the app downloaded fine but the new version never took — the app would relaunch on the *same* build. Auto-update was effectively dead from inside the app, even though the Velopack machinery itself was sound.
+
+**Root cause.** Velopack applies an update by renaming the whole `current/` directory, and its `Update.exe` waits only for the *main* process to exit before doing so. But each turn the Claude CLI spawns `rift-tauri.exe` as its MCP server (`RIFT_MCP_SERVER=1`), and *any* live `rift-tauri.exe` holds an exclusive lock on `current/` (a rename fails with a sharing violation). `app.exit(0)` is `std::process::exit`, which skips `Drop`, so `kill_on_drop` never reaped those children — they orphaned and kept the directory locked, so the swap silently no-op'd and the relaunch brought back the old build.
+
+**Fix.** On the apply path, reap the lockers before exiting: tree-kill every tracked `claude` child first (so none can respawn an MCP child in the exit window), then sweep any stray `rift-tauri.exe` MCP child orphaned from an earlier turn. Now `current/` is unlocked the instant the main PID dies and Velopack's swap + relaunch land on the new version. New `kill_all_session_children()` helper. Files: `update_service.rs`, `assistant/mod.rs`.
+
+> **One-time note.** Clients on v0.6.1 or earlier still run the old apply path, so updating *to* this build may not stick from inside the app — download **Rift-win-Setup.exe** from the release and run it once. Every in-app update from v0.6.2 onward applies cleanly.
+
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0 (4062 files) · root cause proven directly: a live `rift-tauri.exe` blocks renaming `current/`, and the standalone Velopack download+apply path was confirmed working end-to-end.
+
 ## v0.6.1 — 2026-06-06 — feat: CLI multi-install awareness + unified update UI
 
 > **Why.** A box with both an npm-global and a native `claude` install (they drift to different versions) could show "out of date" while **Update** did nothing — Rift only ever resolved and bumped *one* install. Now Rift sees every install, runs the newest, and updates them all. The surfaces that report this were also unified so they can no longer drift apart.
