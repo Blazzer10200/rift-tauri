@@ -137,6 +137,37 @@ impl UpdateService {
         // after swap), no extra restart args.
         mgr.wait_exit_then_apply_updates(&info, true, true, Vec::<&str>::new())
             .map_err(|e| format!("wait_exit_then_apply_updates: {e}"))?;
+
+        // Velopack's Update.exe waits only for THIS (main) PID, then renames
+        // `current/`. But each per-turn `claude` CLI spawns a `rift-tauri.exe`
+        // MCP child (`RIFT_MCP_SERVER=1`), and any live `rift-tauri.exe` holds an
+        // exclusive lock on `current/` (a rename fails with a sharing violation).
+        // `app.exit(0)` below is `std::process::exit` — it skips `Drop`, so
+        // `kill_on_drop` never reaps those children. Left alive they block the
+        // swap and the update silently no-ops (the "can't update from the app"
+        // bug). Reap them before exiting: tracked claude trees first (so none can
+        // respawn an MCP child in the exit window), then any stray
+        // `rift-tauri.exe` MCP child orphaned from an earlier turn.
+        crate::assistant::kill_all_session_children();
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let me = std::process::id();
+            let _ = std::process::Command::new("taskkill")
+                .args([
+                    "/F",
+                    "/FI",
+                    "IMAGENAME eq rift-tauri.exe",
+                    "/FI",
+                    &format!("PID ne {me}"),
+                ])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
         // Hand control to Velopack: exit so Update.exe can take the file lock.
         app.exit(0);
         Ok(())

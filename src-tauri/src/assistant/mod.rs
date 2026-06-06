@@ -94,6 +94,42 @@ fn get_session_pid(session_id: &str) -> Option<u32> {
     with_session_pids(|m| m.get(session_id).copied()).flatten()
 }
 
+/// Tree-kill every tracked streaming `claude` child, draining the registry.
+/// Best-effort + blocking: errors are logged, never returned. Used on the
+/// update-apply path — each `claude` parents a `rift-tauri.exe` MCP child
+/// (`RIFT_MCP_SERVER=1`) that holds an exclusive lock on `current/`, so a
+/// `/T` tree-kill is required to release Velopack's swap target. `app.exit(0)`
+/// is `std::process::exit` (skips `Drop`), so `kill_on_drop` never reaps these.
+pub(crate) fn kill_all_session_children() {
+    let pids: Vec<u32> = with_session_pids(|m| {
+        let v: Vec<u32> = m.values().copied().collect();
+        m.clear();
+        v
+    })
+    .unwrap_or_default();
+    for pid in pids {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+        #[cfg(unix)]
+        {
+            let _ = std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
+    }
+}
+
 fn mark_session_stopped(session_id: &str) {
     with_session_stopped(|s| { s.insert(session_id.to_string()); });
 }
