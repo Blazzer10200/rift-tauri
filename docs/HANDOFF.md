@@ -4,10 +4,7 @@
 
 ## Session 2026-06-06 (cont. 63) — SHIPPED v0.6.1: CLI multi-install + unified update UI
 
-Shipped the cont.62 CLI multi-install backend plus this session's update-UI redesign as **v0.6.1**.
-- **CLI multi-install (cont.62):** `enumerate_claude_installs()` ([assistant/mod.rs](../src-tauri/src/assistant/mod.rs)) finds EVERY claude (PATH + native sites + npm bundled exe + `.cmd` shims, deduped shim→exe), newest wins, `assistant_update_cli` updates ALL (npm once, native per-exe). `ClaudeInstall` DTO on `AuthStatus.installs`. Settings lists installs w/ active/behind tags + per-row method-aware copy; "still behind" hint on a native no-op.
-- **Update UI redesign (this session):** one `cliUpdate.summary(installs)` source ([cliUpdate.svelte.ts](../src/lib/state/cliUpdate.svelte.ts)) feeds the contextual line (npm/native/multi/stuck/error) across Home banner + tab-bar popover + Settings — was hand-authored 3× and drifted. Home + popover now share a tone-aware treatment (`data-tone` = accent/warn/danger). `UpdateDialog.svelte` status tints fixed `oklch`→`oklab` (warm-hue purple-wrap bug, per CRITICAL rule). A temp `UpdatePreview.svelte` dev panel drove all states/tones for live CDP verification, then was removed (file + AppShell mount).
-- **Verified:** `cargo check` 0/0 · `npm run check` 0/0 (4063 files) · every surface (banner, popover, Settings row, Velopack dialog across all states+tones) CDP-verified live.
+Shipped cont.62 (CLI multi-install: `enumerate_claude_installs()` runs the newest + `assistant_update_cli` updates all; `ClaudeInstall` DTO on `AuthStatus.installs`; Settings per-install list) **plus** this session's update-UI redesign (one `cliUpdate.summary()` feeds Home banner + tab-bar popover + Settings, tone-aware; `UpdateDialog` `oklch`→`oklab` warm-hue fix). Temp `UpdatePreview.svelte` drove a CDP state/tone sweep, then removed. Full detail in CHANGELOG/git. `cargo check` + `npm run check` 0/0; all surfaces CDP-verified.
 
 ### RESUME HERE (cont.63)
 - **v0.6.1 SHIPPED** (feat commit + published to `rift-releases` via `release.ps1`). PENDING live-verify on a real dual-install box: banner clears after Update-all; if a native copy truly won't bump, the "still behind" hint + DiagBus logs name the culprit.
