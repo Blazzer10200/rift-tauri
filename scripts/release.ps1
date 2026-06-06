@@ -215,6 +215,17 @@ if (Test-Path $splashPath) {
 & vpk @packArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 
+# --- Drop the portable zip before upload ---------------------------------
+# vpk always emits a *-Portable.zip alongside Setup.exe. We publish Setup.exe
+# only so a new user has one obvious "download + run" path; the portable build
+# just adds a "which one do I click?" fork. Safe to delete -- it's standalone,
+# not referenced by releases.win.json / the Velopack update manifest.
+$portable = Get-ChildItem -Path 'Releases' -Filter '*-Portable.zip' -ErrorAction SilentlyContinue
+foreach ($p in $portable) {
+    Write-Host "  dropping portable build: $($p.Name)" -ForegroundColor DarkGray
+    Remove-Item -Force $p.FullName
+}
+
 # --- Upload to GitHub ----------------------------------------------------
 # vpk uploads Setup.exe + .nupkg + delta + releases.win.json as release assets
 # and creates/publishes the release. --channel win matches the pack channel +

@@ -10,7 +10,7 @@
 //!   * `read_file(path)` — UTF-8 text, capped at 500 KB.
 //!   * `list_dir(path)` — non-recursive directory listing.
 //!   * `grep(pattern, path?, glob?)` — regex over the workspace,
-//!      walkdir+regex (no ripgrep dep, works on Trey's box).
+//!     walkdir+regex (no ripgrep dep).
 //!
 //! Path safety: every requested path is canonicalized and checked to live
 //! under one of the workspace roots passed in via `RIFT_MCP_ROOTS` (newline-
@@ -494,10 +494,7 @@ fn tools_list_payload() -> Value {
 
 fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
     // Notifications (no id) get no response.
-    let id = match req.id {
-        Some(v) => v,
-        None => return None,
-    };
+    let id = req.id?;
 
     let result = match req.method.as_str() {
         "initialize" => Ok(json!({

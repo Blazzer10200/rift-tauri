@@ -56,3 +56,23 @@ pub async fn browser_current_url(app: AppHandle) -> Result<String, String> {
 pub async fn browser_close(app: AppHandle) -> Result<(), String> {
     crate::browser::close(&app)
 }
+
+#[tauri::command]
+pub async fn browser_back(app: AppHandle) -> Result<(), String> {
+    crate::browser::go_back(&app)
+}
+
+#[tauri::command]
+pub async fn browser_forward(app: AppHandle) -> Result<(), String> {
+    crate::browser::go_forward(&app)
+}
+
+#[tauri::command]
+pub async fn browser_reload(app: AppHandle) -> Result<(), String> {
+    crate::browser::reload(&app)
+}
+
+#[tauri::command]
+pub async fn browser_read_page(app: AppHandle) -> Result<crate::browser::PageContent, String> {
+    crate::browser::read_page(&app).await
+}
