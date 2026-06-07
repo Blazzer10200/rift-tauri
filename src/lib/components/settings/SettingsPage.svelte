@@ -136,6 +136,23 @@
   const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
   $effect(() => { if (!asstApiKeyDraft) asstApiKeyVisible = false; });
 
+  let asstBaseUrlDraft = $state("");
+  let asstProviderModelDraft = $state("");
+  let asstProviderSaving = $state(false);
+  let asstProviderMsg = $state<string | null>(null);
+  const asstProviderDirty = $derived(
+    asstBaseUrlDraft.trim() !== (assistantStore.baseUrl ?? "") ||
+    asstProviderModelDraft.trim() !== (assistantStore.providerModel ?? ""),
+  );
+  let asstProviderSeeded = false;
+  $effect(() => {
+    if (assistantStore.providerConfigLoaded && !asstProviderSeeded) {
+      asstProviderSeeded = true;
+      asstBaseUrlDraft = assistantStore.baseUrl ?? "";
+      asstProviderModelDraft = assistantStore.providerModel ?? "";
+    }
+  });
+
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
   // always shows the true status even after the toolbar badge was dismissed.
@@ -170,6 +187,24 @@
     } finally {
       asstApiKeySaving = false;
     }
+  }
+  async function saveAsstProvider() {
+    asstProviderSaving = true;
+    asstProviderMsg = null;
+    try {
+      await assistantStore.setBaseUrl(asstBaseUrlDraft);
+      await assistantStore.setProviderModel(asstProviderModelDraft);
+      asstProviderMsg = assistantStore.baseUrl ? "Saved." : "Cleared.";
+    } catch (e) {
+      asstProviderMsg = `Failed: ${e}`;
+    } finally {
+      asstProviderSaving = false;
+    }
+  }
+  function clearAsstProvider() {
+    asstBaseUrlDraft = "";
+    asstProviderModelDraft = "";
+    void saveAsstProvider();
   }
   async function saveAsstMaxBudget() {
     asstMaxBudgetSaving = true;
@@ -597,6 +632,38 @@
               {#if asstApiKeyMsg}<div class="st-note">{asstApiKeyMsg}</div>{/if}
               {#if assistantStore.auth?.envApiKeyPresent && !assistantStore.auth?.apiKeyConfigured}
                 <div class="st-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it above; otherwise remove it from your environment.</div>
+              {/if}
+            </div>
+          </div>
+
+          <div class="st-block">
+            <div class="st-block-label">Custom provider (advanced)</div>
+            <div class="st-card">
+              <div class="st-row">
+                <div class="st-row-body">
+                  <label class="st-row-label" for="asst-baseurl">API base URL</label>
+                  <div class="st-row-desc">Route turns to an Anthropic-compatible endpoint (e.g. DeepSeek <code>https://api.deepseek.com/anthropic</code>) using the API key above. Blank = Anthropic. Lets headless turns draw on a cheaper provider instead of the metered subscription credits (June 15 change).</div>
+                </div>
+                <div class="st-row-ctl">
+                  <input id="asst-baseurl" class="st-input mono" type="text" placeholder="https://api.deepseek.com/anthropic" style="width:248px;" bind:value={asstBaseUrlDraft} autocomplete="off" spellcheck="false" />
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <label class="st-row-label" for="asst-provider-model">Provider model</label>
+                  <div class="st-row-desc">Model id passed to <code>--model</code> (e.g. <code>deepseek-chat</code>). Required for direct providers; gateways may map Rift's tiers.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <input id="asst-provider-model" class="st-input mono" type="text" placeholder="deepseek-chat" style="width:188px;" bind:value={asstProviderModelDraft} autocomplete="off" spellcheck="false" />
+                  <button class="st-btn primary" type="button" onclick={saveAsstProvider} disabled={asstProviderSaving || !asstProviderDirty}>{asstProviderSaving ? "Saving…" : "Save"}</button>
+                  {#if assistantStore.baseUrl}
+                    <button class="st-btn" type="button" disabled={asstProviderSaving} onclick={clearAsstProvider}>Clear</button>
+                  {/if}
+                </div>
+              </div>
+              {#if asstProviderMsg}<div class="st-note">{asstProviderMsg}</div>{/if}
+              {#if assistantStore.baseUrl}
+                <div class="st-note">Active — turns route to <code>{assistantStore.baseUrl}</code>{assistantStore.providerModel ? ` · ${assistantStore.providerModel}` : ""}.</div>
               {/if}
             </div>
           </div>

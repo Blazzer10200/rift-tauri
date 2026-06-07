@@ -692,6 +692,12 @@ struct AssistantConfig {
     /// $0.91 at 900K vs $2.73 on sonnet.
     #[serde(default)]
     compact_model: Option<String>,
+    /// Custom Anthropic-compatible endpoint (DeepSeek/GLM/proxy) → ANTHROPIC_BASE_URL. None = Anthropic.
+    #[serde(default)]
+    base_url: Option<String>,
+    /// Model id for `--model` when `base_url` is set (e.g. "deepseek-chat"). Ignored otherwise.
+    #[serde(default)]
+    provider_model: Option<String>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -1761,6 +1767,46 @@ pub fn assistant_set_compact_model(value: String) -> Result<(), String> {
     save_config(&cfg)
 }
 
+#[tauri::command]
+pub fn assistant_get_base_url() -> Result<Option<String>, String> {
+    Ok(load_config().base_url.filter(|s| !s.trim().is_empty()))
+}
+
+/// Custom Anthropic-compatible endpoint; routes headless `-p` turns off the metered pool (June-15).
+#[tauri::command]
+pub fn assistant_set_base_url(value: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let v = value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref u) = v {
+        if !(u.starts_with("http://") || u.starts_with("https://")) {
+            return Err("base_url must start with http:// or https://".into());
+        }
+    }
+    let mut cfg = load_config();
+    cfg.base_url = v;
+    save_config(&cfg)
+}
+
+#[tauri::command]
+pub fn assistant_get_provider_model() -> Result<Option<String>, String> {
+    Ok(load_config().provider_model.filter(|s| !s.trim().is_empty()))
+}
+
+/// Model id passed to `--model` when a custom base_url is set (e.g. "deepseek-chat").
+#[tauri::command]
+pub fn assistant_set_provider_model(value: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let v = value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref m) = v {
+        if !is_valid_model_name(m) {
+            return Err(format!("invalid provider_model: {m}"));
+        }
+    }
+    let mut cfg = load_config();
+    cfg.provider_model = v;
+    save_config(&cfg)
+}
+
 /// Output of a one-shot summarize call. Mirrors the design doc Phase B
 /// shape — caller uses `summary` as the seed for the next CLI session
 /// after a compaction remint, and surfaces the cost/token figures in the
@@ -2817,7 +2863,20 @@ pub async fn assistant_send(
     let cfg = load_config();
     let api_key = current_api_key();
     let use_api_key = api_key.is_some();
+    // June-15 hedge: a custom endpoint routes this turn to a cheaper provider, off the metered pool.
+    let custom_base: Option<String> = cfg
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let mut model = model.unwrap_or_else(|| "sonnet".to_string());
+    // Custom endpoints use their own model ids; provider_model overrides the Rift tier.
+    if custom_base.is_some() {
+        if let Some(pm) = cfg.provider_model.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            model = pm.to_string();
+        }
+    }
     if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
     }
@@ -2825,7 +2884,9 @@ pub async fn assistant_send(
     // resuming under a switched model 400s on the replayed prior turn (see
     // session_model_path). On resume, the model the session was created with wins
     // over a live picker change; the new model only takes effect in a new chat.
-    if !is_first_turn {
+    // Pin is Anthropic-only (thinking-signature preservation); a custom endpoint
+    // must keep its own provider_model, not a stale Anthropic tier.
+    if !is_first_turn && custom_base.is_none() {
         if let Some(pinned) = load_session_model(&session_id) {
             if pinned != model {
                 log::info!(
@@ -3091,6 +3152,10 @@ pub async fn assistant_send(
         cmd.arg("--tools").arg("");
     }
 
+    // June-15 hedge: route this turn to a custom Anthropic-compatible endpoint when set.
+    if let Some(ref base) = custom_base {
+        cmd.env("ANTHROPIC_BASE_URL", base);
+    }
     if use_api_key {
         // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly. The
         // builder stripped any inherited env key; this re-adds the sanctioned
@@ -3098,6 +3163,10 @@ pub async fn assistant_send(
         // it stripped so a stray system env key can't shadow `claude login`.
         cmd.arg("--bare");
         if let Some(k) = api_key.as_deref() {
+            // Custom endpoints want a bearer token (ANTHROPIC_AUTH_TOKEN); set both for gateway compat.
+            if custom_base.is_some() {
+                cmd.env("ANTHROPIC_AUTH_TOKEN", k);
+            }
             cmd.env("ANTHROPIC_API_KEY", k);
         }
     }
@@ -3121,7 +3190,7 @@ pub async fn assistant_send(
         "ultra" => "xhigh",
         _ /* "quick" or unknown */ => "medium",
     };
-    if model != "haiku" {
+    if model != "haiku" && custom_base.is_none() {
         cmd.arg("--effort").arg(effort_level);
         // Ultracode tier: xhigh effort + autonomous dynamic-workflow
         // orchestration. The workflow behavior rides the CLI's `ultracode`

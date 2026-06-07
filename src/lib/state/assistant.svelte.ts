@@ -1187,6 +1187,12 @@ class AssistantStore {
   // Phase D: model alias used by summarize call. "haiku" default ($0.91 vs
   // $2.73 on sonnet for a 900K-token summarize).
   compactModel = $state<"haiku" | "sonnet">("haiku");
+  // June-15 hedge: custom Anthropic-compatible endpoint + its model id. null = Anthropic.
+  baseUrl = $state<string | null>(null);
+  providerModel = $state<string | null>(null);
+  // Flips true after baseUrl/providerModel are fetched — distinct from
+  // configLoaded (set earlier), so the Settings draft-seed waits for real values.
+  providerConfigLoaded = $state<boolean>(false);
 
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
@@ -1458,6 +1464,18 @@ class AssistantStore {
       this.compactModel = m === "sonnet" ? "sonnet" : "haiku";
     } catch (e) {
       console.warn("assistant_get_compact_model failed", e);
+    }
+    try {
+      this.baseUrl = await invoke<string | null>("assistant_get_base_url");
+    } catch (e) {
+      console.warn("assistant_get_base_url failed", e);
+    }
+    try {
+      this.providerModel = await invoke<string | null>("assistant_get_provider_model");
+    } catch (e) {
+      console.warn("assistant_get_provider_model failed", e);
+    } finally {
+      this.providerConfigLoaded = true;
     }
     this.unlistens.push(
       await listen<{ session_id: string; prompt: string }>(
@@ -1828,6 +1846,28 @@ class AssistantStore {
     try {
       await invoke("assistant_set_compact_model", { value });
       this.compactModel = value;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
+  }
+
+  async setBaseUrl(value: string | null) {
+    const v = value && value.trim().length > 0 ? value.trim() : null;
+    try {
+      await invoke("assistant_set_base_url", { value: v });
+      this.baseUrl = v;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
+  }
+
+  async setProviderModel(value: string | null) {
+    const v = value && value.trim().length > 0 ? value.trim() : null;
+    try {
+      await invoke("assistant_set_provider_model", { value: v });
+      this.providerModel = v;
     } catch (e) {
       this.lastNotice = String(e);
       throw e;
