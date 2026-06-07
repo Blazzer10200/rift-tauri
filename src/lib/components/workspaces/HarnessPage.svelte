@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle, Gauge } from "lucide-svelte";
+  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle, Gauge, Boxes } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import CostPage from "./CostPage.svelte";
+  import SwarmPage from "./SwarmPage.svelte";
   import { effortToFlag } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
   import { SessionTelemetry } from "../../state/assistant/telemetry";
@@ -83,7 +84,7 @@
   // Harness sub-tab: live telemetry dashboard vs the cross-session cost cockpit
   // (idea-phase-plan §1e). Kept here (not a 5th workspace) to preserve the
   // 4-workspace IA invariant.
-  let subtab = $state<"telemetry" | "cost">("telemetry");
+  let subtab = $state<"telemetry" | "cost" | "swarm">("telemetry");
 
   // ── Active-conversation context (the hero gauge is intentionally per-tab:
   //    it measures how full the CURRENT conversation is, not the session).
@@ -377,9 +378,12 @@
   <nav class="hsubtabs">
     <button class="hsub" class:on={subtab === "telemetry"} type="button" onclick={() => (subtab = "telemetry")}><Zap size={14} /> Telemetry</button>
     <button class="hsub" class:on={subtab === "cost"} type="button" onclick={() => (subtab = "cost")}><Gauge size={14} /> Cost</button>
+    <button class="hsub" class:on={subtab === "swarm"} type="button" onclick={() => (subtab = "swarm")}><Boxes size={14} /> Swarm</button>
   </nav>
   {#if subtab === "cost"}
     <CostPage />
+  {:else if subtab === "swarm"}
+    <SwarmPage />
   {:else}
 <div class="dash" data-live={live && isLive}>
   <!-- ── Header strip ── -->

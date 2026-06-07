@@ -20,6 +20,7 @@ pub mod diagnostics;
 pub mod secrets;
 pub mod state;
 pub mod stt;
+pub mod swarm;
 pub mod update_service;
 pub mod usage;
 
@@ -222,6 +223,8 @@ pub fn run() {
             usage::budget::usage_set_budget,
             usage::budget::usage_budget_status,
             usage::insights::usage_insights,
+            swarm::swarm_env_check,
+            swarm::swarm_run,
             commands::browser_open,
             commands::browser_navigate,
             commands::browser_set_bounds,
