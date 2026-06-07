@@ -32,6 +32,8 @@
   // workspace-hop collapse animation, can't remove it).
   function portal(node: HTMLElement) {
     document.body.appendChild(node);
+    // Focus first interactive descendant so keyboard users enter the popover immediately.
+    (node.querySelector('button, [href], input, [tabindex="0"]') as HTMLElement | null)?.focus();
     return { destroy() { node.remove(); } };
   }
 
@@ -339,12 +341,16 @@
     assistant.draggingTabId = null;
   }
 
-  // Window-level dragend safety net + unmount cleanup. Workspace-switch
-  // collapses the rail mid-drag; some browsers swallow the per-element
-  // dragend in that case. (#208)
+  // Window-level dragend safety net + Escape-cancel guard + unmount cleanup.
+  // WebView2 can miss 'dragend' on Escape, leaving drag state stuck. (#208)
   $effect(() => {
+    const onEsc = (e: KeyboardEvent) => { if (e.key === "Escape" && dragFromIdx !== null) onDragEnd(); };
     window.addEventListener("dragend", onDragEnd);
-    return () => window.removeEventListener("dragend", onDragEnd);
+    window.addEventListener("keydown", onEsc);
+    return () => {
+      window.removeEventListener("dragend", onDragEnd);
+      window.removeEventListener("keydown", onEsc);
+    };
   });
   onDestroy(onDragEnd);
 
@@ -609,8 +615,7 @@
         data-tone={ctxTone}
         type="button"
         onclick={() => {
-          const cost = ctxPct >= 70 ? "≈ $0.91" : "≈ $0.30";
-          if (!confirm(`Compact conversation? ${cost} on Haiku · drops context to ~5-10% · next turn carries the summary forward.`)) return;
+          if (!confirm(`Compact conversation? Cost varies by model · drops context to ~5-10% · next turn carries the summary forward.`)) return;
           void assistant.compactConversation();
         }}
         use:tooltip={"Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."}
@@ -671,6 +676,7 @@
   <div
     class="history-popover"
     role="dialog"
+    aria-modal="true"
     aria-label="Conversation history"
     bind:this={historyPopover}
     use:portal
@@ -693,6 +699,7 @@
   <div
     class="ctx-panel"
     role="dialog"
+    aria-modal="true"
     aria-label="Context window details"
     bind:this={ctxPanel}
     use:portal
@@ -759,6 +766,7 @@
   <div
     class="cli-panel"
     role="dialog"
+    aria-modal="true"
     aria-label="Claude Code CLI update"
     bind:this={cliPanel}
     use:portal

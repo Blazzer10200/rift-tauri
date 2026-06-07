@@ -50,8 +50,9 @@ export type CompactionHost = {
 export async function summarizeCurrentSession(
   host: CompactionHost,
   focus?: string,
+  sessionId?: string,
 ): Promise<SummarizeResult | null> {
-  const sid = host.currentCliSessionId;
+  const sid = sessionId ?? host.currentCliSessionId;
   if (!sid) {
     host.lastError = "No active session yet — send a message first.";
     return null;
@@ -167,7 +168,7 @@ export async function compactConversation(
       if (e.payload.session_id !== oldSid) return;
       patchBoundary({ summary: e.payload.summary_so_far });
     });
-    const res = await summarizeCurrentSession(host, focus);
+    const res = await summarizeCurrentSession(host, focus, oldSid);
     if (!res) {
       // summarizeCurrentSession already set lastError. Drop the staged
       // boundary so the chat doesn't keep a half-rendered pill.

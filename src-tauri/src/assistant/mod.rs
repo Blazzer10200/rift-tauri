@@ -433,7 +433,14 @@ fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
     for inst in raw {
         if let Some(dup) = deduped
             .iter_mut()
-            .find(|e| e.method == inst.method && e.version == inst.version && inst.version.is_some())
+            .find(|e| {
+                e.method == inst.method
+                    && e.version == inst.version
+                    && inst.version.is_some()
+                    // Only fold a shim into its real exe (or vice-versa) — never
+                    // collapse two distinct real installs that share a version.
+                    && (is_shim(&e.path) || is_shim(&inst.path))
+            })
         {
             dup.on_path = dup.on_path || inst.on_path;
             if is_shim(&dup.path) && !is_shim(&inst.path) {
@@ -529,11 +536,22 @@ fn resolve_claude_exe() -> Option<PathBuf> {
             }
         }
     }
-    // Slow path: re-resolve, then cache.
+    // Slow path: re-resolve, then cache. Re-check under the write lock so a
+    // concurrent slow-path that already cached a usable value wins (avoids a
+    // conflicting double-write when two callers race the empty/stale cache).
     let resolved = resolve_claude_exe_uncached();
-    if let Ok(mut g) = CLAUDE_EXE.lock() {
-        *g = Some(resolved.clone());
+    let mut g = match CLAUDE_EXE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    if let Some(existing) = g.as_ref() {
+        match existing {
+            Some(p) if p.is_file() => return Some(p.clone()),
+            None => return None,
+            _ => {} // stale → overwrite with our fresh resolve
+        }
     }
+    *g = Some(resolved.clone());
     resolved
 }
 
@@ -953,6 +971,15 @@ pub fn assistant_load_conversation(id: String) -> Result<Conversation, String> {
 /// arbitrary-path write is the intended user action.
 #[tauri::command]
 pub fn assistant_export_save(dest: String, contents: String) -> Result<(), String> {
+    // Defense-in-depth: this command is IPC-reachable. Reject malformed paths.
+    // `dest` normally comes from the native save dialog (any drive is valid, so
+    // we deliberately do NOT clamp to a root — that would break save-to-USB etc.).
+    if dest.contains('\0') {
+        return Err("dest contains a null byte".into());
+    }
+    if !std::path::Path::new(&dest).is_absolute() {
+        return Err("dest must be an absolute path".into());
+    }
     std::fs::write(&dest, contents.as_bytes()).map_err(|e| format!("write {dest}: {e}"))
 }
 
@@ -1144,13 +1171,18 @@ fn write_mcp_config(
             // /inheritance:r — strip inherited ACEs; /grant:r — replace user grant.
             // Output discarded; failure is non-fatal (file is still delete-on-exit
             // and the embedded token rotates each app launch).
-            let _ = std::process::Command::new("icacls")
+            let icacls_status = std::process::Command::new("icacls")
                 .arg(&path)
-                .args(["/inheritance:r", "/grant:r", &format!("{user}:(F)")])
+                // Quote the principal: domain usernames can contain spaces, which
+                // icacls would otherwise parse as separate ACL tokens.
+                .args(["/inheritance:r", "/grant:r", &format!("\"{user}\":(F)")])
                 .creation_flags(CREATE_NO_WINDOW)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
+            if !matches!(icacls_status, Ok(s) if s.success()) {
+                log::warn!("icacls failed to lock down {} for user {user}", path.display());
+            }
         }
     }
 
@@ -1623,8 +1655,15 @@ pub fn assistant_get_use_full_config() -> Result<bool, String> {
     Ok(load_config().use_full_config.unwrap_or(true))
 }
 
+/// Serializes every `assistant_set_*` config write. Each setter does a
+/// load→modify→save read-modify-write; without this, two concurrent setters
+/// (the Settings page can fire several `invoke`s in one render) read the same
+/// on-disk state and the second save silently clobbers the first's change.
+static CONFIG_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[tauri::command]
 pub fn assistant_set_use_full_config(value: bool) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut cfg = load_config();
     cfg.use_full_config = Some(value);
     save_config(&cfg)
@@ -1637,6 +1676,7 @@ pub fn assistant_get_max_budget_usd() -> Result<Option<f64>, String> {
 
 #[tauri::command]
 pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut cfg = load_config();
     cfg.max_budget_usd = value.filter(|v| v.is_finite() && *v > 0.0);
     save_config(&cfg)
@@ -1678,6 +1718,7 @@ pub fn assistant_get_trust_level() -> Result<String, String> {
 
 #[tauri::command]
 pub fn assistant_set_trust_level(value: String) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     if !is_valid_trust_level(&value) {
         return Err(format!("invalid trust_level: {value}"));
     }
@@ -1695,6 +1736,7 @@ pub fn assistant_get_auto_compact_threshold() -> Result<Option<f32>, String> {
 
 #[tauri::command]
 pub fn assistant_set_auto_compact_threshold(value: Option<f32>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut cfg = load_config();
     cfg.auto_compact_threshold = value.filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0);
     save_config(&cfg)
@@ -1710,6 +1752,7 @@ pub fn assistant_get_compact_model() -> Result<String, String> {
 
 #[tauri::command]
 pub fn assistant_set_compact_model(value: String) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     if !matches!(value.as_str(), "haiku" | "sonnet" | "opus") {
         return Err(format!("invalid compact_model: {value}"));
     }
@@ -2435,6 +2478,7 @@ pub fn assistant_remint_session(
 
 #[tauri::command]
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     // Phase 6 (#37): write the API key to the OS keychain, not config.json.
     // Empty/None → delete the keychain entry. Also clears any lingering
     // legacy plaintext field (load_config's migration handles the read side,
@@ -2477,6 +2521,7 @@ pub fn assistant_get_workspace() -> Result<WorkspaceState, String> {
 /// (dedup, capped at RECENT_ROOTS_MAX), and persists.
 #[tauri::command]
 pub fn assistant_set_root(path: String) -> Result<WorkspaceState, String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let raw = PathBuf::from(&path);
     if !raw.is_dir() {
         return Err(format!("not a directory: {path}"));
@@ -3176,6 +3221,9 @@ pub async fn assistant_send(
     // fail loudly + kill so the wait loop unblocks.
     if child.stdin.is_none() {
         let _ = child.start_kill();
+        // #39: the pid was registered above; clear it so a later assistant_stop
+        // can't taskkill a since-recycled pid.
+        clear_session_pid(&session_id);
         return Err("claude stdin unavailable — process killed".into());
     }
     let stdin = child.stdin.take().expect("stdin checked is_some above");
@@ -3351,7 +3399,14 @@ pub async fn assistant_send(
             Some(msg) = steer_rx.recv() => {
                 if !user_sent {
                     // Init handshake not yet acked — buffer until the turn is sent.
-                    steer_pending.push(msg);
+                    // Cap the buffer: the window is ~100ms, so a flood here can only
+                    // be a frontend bug; drop extras rather than grow unbounded.
+                    const STEER_PENDING_CAP: usize = 8;
+                    if steer_pending.len() < STEER_PENDING_CAP {
+                        steer_pending.push(msg);
+                    } else {
+                        log::warn!("steer_pending cap reached — dropping steer during init handshake");
+                    }
                 } else {
                     match build_user_envelope(&msg.text, &msg.attachments) {
                         Ok(env) => {
@@ -3611,6 +3666,9 @@ pub async fn assistant_send(
 /// only its own stream — never another tab's.
 #[tauri::command]
 pub async fn assistant_stop(session_id: String) -> Result<(), String> {
+    if !is_valid_session_id(&session_id) {
+        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+    }
     let Some(pid) = get_session_pid(&session_id) else {
         return Ok(());
     };

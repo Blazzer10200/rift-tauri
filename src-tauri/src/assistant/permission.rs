@@ -38,9 +38,11 @@ impl PermissionRegistry {
     /// command thread.
     pub fn register(&self, request_id: String) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
-        if let Ok(mut g) = self.inner.lock() {
-            g.insert(request_id, tx);
-        }
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => { log::error!("PermissionRegistry mutex poisoned — recovering"); p.into_inner() }
+        };
+        g.insert(request_id, tx);
         rx
     }
 
@@ -60,9 +62,11 @@ impl PermissionRegistry {
     /// Drop a pending ask without resolving — used after a timeout / turn end
     /// so a later answer submission for this id is a no-op.
     pub fn cancel(&self, request_id: &str) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.remove(request_id);
-        }
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => { log::error!("PermissionRegistry mutex poisoned — recovering"); p.into_inner() }
+        };
+        g.remove(request_id);
     }
 }
 

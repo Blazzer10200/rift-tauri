@@ -34,13 +34,12 @@
       if (!menuEl) return;
       if (!menuEl.contains(e.target as Node)) onClose();
     };
+    // Register keydown immediately so Escape during the 0ms gap is not missed.
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
     let destroyed = false;
     const tid = setTimeout(() => {
-      if (!destroyed) {
-        document.addEventListener("mousedown", onDocClick);
-        document.addEventListener("keydown", onKey);
-      }
+      if (!destroyed) document.addEventListener("mousedown", onDocClick);
     }, 0);
     return () => {
       destroyed = true;

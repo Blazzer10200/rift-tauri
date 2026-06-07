@@ -28,6 +28,7 @@ use crate::assistant::git_local;
 
 const PROTOCOL_VERSION: &str = "2025-03-26";
 const MAX_READ_BYTES: u64 = 500 * 1024;
+const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_LIST_ENTRIES: usize = 500;
 const MAX_GREP_MATCHES: usize = 200;
 const MAX_GREP_FILES: usize = 5000;
@@ -151,7 +152,21 @@ fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             MAX_READ_BYTES
         ));
     }
-    let bytes = std::fs::read(&resolved).map_err(|e| format!("read: {e}"))?;
+    // Capped read: open + take to avoid TOCTOU races where the file grows
+    // between the metadata check and the read.
+    use std::io::Read as _;
+    let f = std::fs::File::open(&resolved).map_err(|e| format!("read: {e}"))?;
+    let mut bytes = Vec::new();
+    f.take(MAX_READ_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("read: {e}"))?;
+    if bytes.len() > MAX_READ_BYTES as usize {
+        return Err(format!(
+            "file is {} bytes; limit is {} bytes — paste a smaller excerpt or grep for the specific section",
+            meta.len(),
+            MAX_READ_BYTES
+        ));
+    }
     match String::from_utf8(bytes) {
         Ok(s) => Ok(s),
         Err(_) => Err("file is not valid UTF-8 (binary or non-UTF8 encoding not supported)".into()),
@@ -165,7 +180,8 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     if !meta.is_dir() {
         return Err(format!("{} is not a directory", resolved.display()));
     }
-    let mut entries: Vec<(String, bool, u64)> = Vec::new();
+    // (name, is_dir, is_symlink, size)
+    let mut entries: Vec<(String, bool, bool, u64)> = Vec::new();
     let iter = std::fs::read_dir(&resolved).map_err(|e| format!("read_dir: {e}"))?;
     for de in iter {
         let de = match de {
@@ -173,16 +189,18 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             Err(_) => continue,
         };
         let name = de.file_name().to_string_lossy().to_string();
+        // file_type() does NOT follow symlinks — accurate for symlink detection.
         let ft = match de.file_type() {
             Ok(f) => f,
             Err(_) => continue,
         };
+        let is_symlink = ft.is_symlink();
         let size = if ft.is_file() {
             de.metadata().map(|m| m.len()).unwrap_or(0)
         } else {
             0
         };
-        entries.push((name, ft.is_dir(), size));
+        entries.push((name, ft.is_dir(), is_symlink, size));
         if entries.len() >= MAX_LIST_ENTRIES {
             break;
         }
@@ -192,8 +210,10 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     // #258: `write!` directly into the String — skips the intermediate
     // allocation `push_str(&format!(...))` would create for each line.
     let _ = writeln!(out, "{}", resolved.display());
-    for (name, is_dir, size) in &entries {
-        if *is_dir {
+    for (name, is_dir, is_symlink, size) in &entries {
+        if *is_symlink {
+            let _ = writeln!(out, "  {} -> (symlink)", name);
+        } else if *is_dir {
             let _ = writeln!(out, "  {}/", name);
         } else {
             let _ = writeln!(out, "  {} ({} bytes)", name, size);
@@ -207,12 +227,17 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
 
 fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("missing `pattern`")?;
+    if pattern.len() > 4096 {
+        return Err("grep pattern too long (max 4096 bytes)".into());
+    }
     let path_arg = args.get("path").and_then(|v| v.as_str());
     let glob_arg = args.get("glob").and_then(|v| v.as_str());
 
     let re = regex::RegexBuilder::new(pattern)
         .case_insensitive(args.get("case_insensitive").and_then(|v| v.as_bool()).unwrap_or(false))
         .multi_line(true)
+        .size_limit(1 << 20)
+        .dfa_size_limit(1 << 20)
         .build()
         .map_err(|e| format!("invalid regex `{pattern}`: {e}"))?;
 
@@ -224,7 +249,12 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     // keep the relpath-match semantics.
     let glob_filename_only = glob_arg.is_some_and(|g| !g.contains('/'));
     let glob_matcher = match glob_arg {
-        Some(g) => Some(glob_to_regex(g)?),
+        Some(g) => {
+            if g.len() > 512 {
+                return Err("glob too long (max 512 bytes)".into());
+            }
+            Some(glob_to_regex(g)?)
+        }
         None => None,
     };
 
@@ -562,6 +592,10 @@ pub fn run_stdio() {
             Ok(0) => return,
             Ok(_) => {}
             Err(_) => return,
+        }
+        if buf.len() > MAX_LINE_BYTES {
+            buf.clear();
+            continue;
         }
         let line = buf.trim();
         if line.is_empty() {

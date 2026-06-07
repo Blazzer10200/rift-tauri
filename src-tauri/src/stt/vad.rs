@@ -7,6 +7,7 @@
 //!      transcript (e.g. "Thank you for watching", "Subtitles by …" — the
 //!      135-phrase corpus catalogued by r/LocalLLaMA Mar 2026).
 
+use std::sync::OnceLock;
 use webrtc_vad::{SampleRate, Vad, VadMode};
 
 /// 30 ms @ 16 kHz = 480 samples — webrtc-vad's largest supported frame size.
@@ -71,17 +72,22 @@ const HALLUCINATION_PHRASES: &[&str] = &[
     "(no audio)",
 ];
 
+fn hallucination_re() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        let alts = HALLUCINATION_PHRASES
+            .iter()
+            .map(|p| regex::escape(p))
+            .collect::<Vec<_>>()
+            .join("|");
+        regex::Regex::new(&format!("(?i)(?:{alts})")).expect("hallucination regex")
+    })
+}
+
 /// Strip known hallucination artifacts from a transcript. Case-insensitive,
 /// handles multiple occurrences per phrase. Idempotent. Collapses whitespace.
 pub fn strip_hallucinations(text: &str) -> String {
-    let mut out = text.to_string();
-    for phrase in HALLUCINATION_PHRASES {
-        // `regex::escape` so phrases w/ punctuation/brackets are literal-matched.
-        let pat = format!("(?i){}", regex::escape(phrase));
-        if let Ok(re) = regex::Regex::new(&pat) {
-            out = re.replace_all(&out, "").to_string();
-        }
-    }
+    let out = hallucination_re().replace_all(text, "");
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 

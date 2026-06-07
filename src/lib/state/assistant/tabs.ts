@@ -33,13 +33,13 @@ export type TabsHost = {
   convoCreatedAt: number | null;
   convoTitle: string | null;
   composerDraft: string;
-  composerAttachments: { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[];
+  composerAttachments: { id: string; mime: string; dataBase64: string; sizeBytes: number }[];
   telemetry: { event(name: string, data?: unknown): void };
   // ── methods that stay on store / live in other modules ──
   loadConversation(id: string): Promise<void>;
   persistTabs(): void;
   scheduleSave(flush?: boolean): void;
-  stop(): Promise<void>;
+  stop(tabId?: string | null): Promise<void>;
   ensureTab(convoId: string, cliSessionId: string): unknown;
   dropTab(convoId: string): void;
   pruneTabUi(id: string): void;
@@ -328,6 +328,10 @@ export async function closeTab(host: TabsHost, id: string) {
   host.openTabs = next;
   // Drop the closing tab's UI scratch + TabState. The convo itself stays
   // on disk via scheduleSave below; only in-memory streaming state is retired.
+  const closingTab = host.tabs.get(id) as { queue?: { id: string; text: string }[] } | undefined;
+  if (closingTab?.queue?.length) {
+    host.lastNotice = `${closingTab.queue.length} queued message(s) were discarded when the tab was closed.`;
+  }
   host.pruneTabUi(id);
   scrubTabFromPanes(host, id);
   if (wasActive) {
@@ -468,6 +472,8 @@ export async function closeOtherTabs(host: TabsHost, keepId: string) {
   // #144: tear down per-tab state for removed tabs so tabs Map +
   // tabDrafts/tabAttachments/tabScroll don't accumulate over long sessions.
   for (const id of others) {
+    const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
+    if (t?.streaming) await host.stop(id);
     host.dropTab(id);
     host.pruneTabUi(id);
   }
@@ -510,6 +516,8 @@ export async function closeTabsToRight(host: TabsHost, anchorId: string) {
   const removedActive = host.currentConvoId && !kept.includes(host.currentConvoId);
   // #144
   for (const id of removed) {
+    const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
+    if (t?.streaming) await host.stop(id);
     host.dropTab(id);
     host.pruneTabUi(id);
   }

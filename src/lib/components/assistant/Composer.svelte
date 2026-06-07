@@ -93,7 +93,7 @@
 
   function setDraft(v: string) { if (tab) tab.draft = v; }
   function setAttachments(
-    v: { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[],
+    v: { id: string; mime: string; dataBase64: string; sizeBytes: number }[],
   ) {
     if (tab) tab.attachments = v;
   }
@@ -249,7 +249,6 @@
     for (const f of files) {
       const s = fuzzyScore(f, q);
       if (s !== null) scored.push({ path: f, score: s });
-      if (scored.length >= 800) break;
     }
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, 12).map((r) => r.path);
@@ -375,7 +374,7 @@
     if (!effortTrackEl) return effortIdx;
     const r = effortTrackEl.getBoundingClientRect();
     const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-    return Math.round(frac * (EFFORT_OPTIONS.length - 1));
+    return Math.round(frac * Math.max(0, effortStops.length - 1));
   }
   function startEffortDrag(e: PointerEvent) {
     e.preventDefault();
@@ -688,7 +687,6 @@
         const ok = assistant.addAttachment({
           mime: file.type || "image/png",
           dataBase64,
-          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
           sizeBytes: file.size,
         }, tabId);
         if (!ok) {
@@ -712,6 +710,7 @@
   function resetRecall() { recallOffset = -1; }
 
   function onKey(e: KeyboardEvent) {
+    if (e.isComposing) return;
     // Shift+Tab cycles permission mode (mock affordance), regardless of menus.
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
@@ -941,7 +940,6 @@
         const ok = assistant.addAttachment({
           mime: file.type || "image/png",
           dataBase64,
-          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
           sizeBytes: file.size,
         }, tabId);
         if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
@@ -973,7 +971,6 @@
         const ok = assistant.addAttachment({
           mime: file.type || "image/png",
           dataBase64,
-          previewUrl: `data:${file.type || "image/png"};base64,${dataBase64}`,
           sizeBytes: file.size,
         }, tabId);
         if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
@@ -1018,7 +1015,7 @@
     <div class="attachments">
       {#each attachments as a (a.id)}
         <div class="attach-chip" use:tooltip={`${a.mime} · ${fmtSize(a.sizeBytes)}`}>
-          <img class="attach-thumb" src={a.previewUrl} alt="pasted attachment" />
+          <img class="attach-thumb" src={`data:${a.mime};base64,${a.dataBase64}`} alt="pasted attachment" />
           <span class="attach-meta">
             <span class="attach-name">image</span>
             <span class="attach-size">{fmtSize(a.sizeBytes)}</span>

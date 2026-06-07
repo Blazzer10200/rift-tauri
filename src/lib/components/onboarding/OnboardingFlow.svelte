@@ -37,9 +37,15 @@
   function back() {
     if (step > 1) step -= 1;
   }
+
+  function onEscape(e: KeyboardEvent) {
+    if (e.key === "Escape") { e.preventDefault(); onDone(); }
+  }
 </script>
 
-<div class="ob-overlay">
+<svelte:window onkeydown={onEscape} />
+
+<div class="ob-overlay" role="dialog" aria-modal="true" aria-label="Rift first-run setup">
   <!-- ── Left rail: brand + vertical stepper ── -->
   <aside class="ob-rail">
     <div class="ob-brand">

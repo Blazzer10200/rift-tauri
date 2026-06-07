@@ -108,9 +108,9 @@ class CliUpdate {
       const raw = localStorage.getItem(LS_KEY);
       if (raw) {
         const p = JSON.parse(raw) as Persisted;
-        this.latest = p.latest ?? null;
-        this.checkedAt = p.checkedAt ?? null;
-        this.dismissed = p.dismissed ?? null;
+        this.latest    = typeof p.latest    === "string" ? p.latest    : null;
+        this.checkedAt = typeof p.checkedAt === "number" ? p.checkedAt : null;
+        this.dismissed = typeof p.dismissed === "string" ? p.dismissed : null;
       }
     } catch {
       /* corrupt cache — ignore, a fresh check rebuilds it */
@@ -310,6 +310,16 @@ class CliUpdate {
       /* clipboard blocked — the command stays visible to copy manually */
     }
   }
+
+  /** Clear copy timers (HMR teardown). */
+  dispose() {
+    if (this._copyTimer != null) { clearTimeout(this._copyTimer); this._copyTimer = null; }
+    if (this._rowCopyTimer != null) { clearTimeout(this._rowCopyTimer); this._rowCopyTimer = null; }
+  }
 }
 
 export const cliUpdate = new CliUpdate();
+
+// HMR teardown — prevents stale timers across hot-reloads.
+const _hmrHot = (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot;
+if (_hmrHot) _hmrHot.dispose(() => cliUpdate.dispose());

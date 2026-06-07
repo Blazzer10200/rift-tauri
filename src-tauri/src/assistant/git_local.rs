@@ -87,6 +87,16 @@ fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
         // the process CWD on that drive — outside the workspace.
         return Err(format!("path `{raw}` must be workspace-relative (no drive or UNC prefix)"));
     }
+    // Symlink guard: if the path already exists, canonicalize and confirm it
+    // remains under root. Non-existent paths (new files) skip this block.
+    let joined = root.join(&p);
+    if joined.symlink_metadata().is_ok() {
+        match std::fs::canonicalize(&joined) {
+            Ok(real) if real.starts_with(root) => {}
+            Ok(_) => return Err(format!("path `{raw}` resolves outside the workspace root (symlink)")),
+            Err(e) => return Err(format!("path `{raw}`: canonicalize failed: {e}")),
+        }
+    }
     Ok(raw.to_string())
 }
 
@@ -146,26 +156,67 @@ fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
         // be explicit so a future switch to `spawn()` keeps the guarantee.
         .stdin(std::process::Stdio::null())
         // Fail fast instead of blocking on a credential prompt; suppress GUI
-        // credential-manager popups; don't inherit a foreign GIT_DIR. PATH /
-        // HOME / SSH_AUTH_SOCK / GIT_SSH are intentionally preserved — Windows
+        // credential-manager popups; strip all git-override and layout env vars
+        // that could cause git to operate outside the workspace. PATH / HOME /
+        // SSH_AUTH_SOCK / GIT_SSH are intentionally preserved — Windows
         // credential helpers are shell scripts that need `sh.exe` on PATH.
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "never")
         .env("GIT_ASKPASS", "")
-        .env_remove("GIT_DIR");
+        // Force non-interactive SSH and suppress pager output.
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new")
+        .env("GIT_PAGER", "cat")
+        // Strip git layout/namespace overrides that could redirect object storage
+        // or index outside the workspace root.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .env_remove("GIT_NAMESPACE")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_EXEC_PATH")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let out = cmd.output().map_err(|e| {
+    let child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             "git is not installed or not on PATH. Install Git for Windows (or your OS package) and relaunch Rift from a shell that has it.".to_string()
         } else {
             format!("failed to run git: {e}")
         }
     })?;
+    let pid = child.id();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+    let out = match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(result) => result.map_err(|e| format!("failed to run git: {e}"))?,
+        Err(_) => {
+            // Kill the whole process tree; ignore result — already timed out.
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .creation_flags(0x08000000)
+                    .status();
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = std::process::Command::new("kill")
+                    .args(["-9", &pid.to_string()])
+                    .status();
+            }
+            return Err("git timed out after 30s and was terminated".into());
+        }
+    };
     Ok(GitOut {
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),

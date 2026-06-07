@@ -33,9 +33,11 @@ impl AskUserRegistry {
     /// returned Receiver; `resolve` fires it from the Tauri command thread.
     pub fn register(&self, request_id: String) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
-        if let Ok(mut g) = self.inner.lock() {
-            g.insert(request_id, tx);
-        }
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => { log::error!("AskUserRegistry mutex poisoned — recovering"); p.into_inner() }
+        };
+        g.insert(request_id, tx);
         rx
     }
 
@@ -56,9 +58,11 @@ impl AskUserRegistry {
     /// next answer submission for this id is a no-op rather than a panic on
     /// the channel.
     pub fn cancel(&self, request_id: &str) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.remove(request_id);
-        }
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => { log::error!("AskUserRegistry mutex poisoned — recovering"); p.into_inner() }
+        };
+        g.remove(request_id);
     }
 }
 

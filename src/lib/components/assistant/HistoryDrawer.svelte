@@ -33,6 +33,7 @@
   let detailRecord = $state<ConversationRecord | null>(null);
   let detailLoading = $state(false);
   let detailError = $state<string | null>(null);
+  let exportError = $state<string | null>(null);
   let previewExpanded = $state(false);
 
   function onRowContext(e: MouseEvent, id: string) {
@@ -81,6 +82,13 @@
       .map((k) => ({ key: k, label: BUCKET_LABELS[k], items: groups[k] }));
   });
 
+  // Auto-clear confirmDeleteId when the row scrolls out of the filtered list
+  $effect(() => {
+    if (confirmDeleteId && !filteredConversations.find(c => c.id === confirmDeleteId)) {
+      confirmDeleteId = null;
+    }
+  });
+
   // The ConversationMeta for the currently selected detail entry
   const selectedMeta = $derived(
     selectedId ? assistant.conversations.find((c) => c.id === selectedId) ?? null : null
@@ -94,12 +102,15 @@
     previewExpanded = false;
     detailLoading = true;
     try {
-      detailRecord = await invoke<ConversationRecord>("assistant_load_conversation", { id });
+      const rec = await invoke<ConversationRecord>("assistant_load_conversation", { id });
+      if (selectedId !== id) return; // newer click won
+      detailRecord = rec;
     } catch (e) {
+      if (selectedId !== id) return; // newer click won
       detailRecord = null;
       detailError = e instanceof Error ? e.message : "Failed to load conversation.";
     } finally {
-      detailLoading = false;
+      if (selectedId === id) detailLoading = false;
     }
   }
 
@@ -254,6 +265,7 @@
 
   async function exportConvo(format: "md" | "json") {
     exportMenuOpen = false;
+    exportError = null;
     if (!detailRecord || exporting) return;
     const rec = detailRecord;
     exporting = true;
@@ -268,7 +280,7 @@
       const contents = format === "md" ? buildMarkdown(rec) : JSON.stringify(rec, null, 2);
       await invoke("assistant_export_save", { dest, contents });
     } catch (e) {
-      detailError = e instanceof Error ? e.message : "Export failed.";
+      exportError = e instanceof Error ? e.message : "Export failed.";
     } finally {
       exporting = false;
     }
@@ -593,6 +605,9 @@
               <ExternalLink size={13} /> Open
             </button>
             <div class="hp-export">
+              {#if exportError}
+                <span class="hp-export-err">{exportError}</span>
+              {/if}
               {#if exportMenuOpen}
                 <button class="hp-export-scrim" type="button" aria-label="Close export menu" onclick={() => (exportMenuOpen = false)}></button>
                 <div class="hp-export-menu" role="menu">
@@ -1225,7 +1240,15 @@
   }
 
   /* Export menu */
-  .hp-export { position: relative; }
+  .hp-export { position: relative; display: flex; align-items: center; gap: 6px; }
+  .hp-export-err {
+    font-size: var(--fs-xs);
+    color: var(--danger);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+  }
   .hp-export-scrim {
     position: fixed; inset: 0;
     z-index: 1;

@@ -88,7 +88,8 @@ export function highlightSync(code: string, lang: string | undefined): string | 
       lang: norm,
       theme: "github-dark-dimmed",
     });
-  } catch {
+  } catch (err) {
+    console.warn("[shiki] highlight failed", norm, err);
     return null;
   }
 }

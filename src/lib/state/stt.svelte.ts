@@ -405,6 +405,7 @@ class SttStore {
       this.finalText = "";
       this.recording = false;
       this.transcribing = false;
+      this.whisperStartInvoked = false;
       this.clearTranscribeTimer();
       return;
     }
@@ -472,14 +473,14 @@ class SttStore {
   // ---- Event handlers (backend) -------------------------------------------
 
   private onBackendPartial(text: string) {
-    if (this.consumed) return;
+    if (this.consumed || this.cancelRequested) return;
     if (!this.config.show_interim) return;
     this.lastTranscript = text;
     assistant.composerDraft = this.composeDraft(text, "");
   }
 
   private onBackendFinal(text: string) {
-    if (this.consumed) return;
+    if (this.consumed || this.cancelRequested) return;
     this.finalText = text;
     this.lastTranscript = text;
     assistant.composerDraft = this.composeDraft(text, "");
