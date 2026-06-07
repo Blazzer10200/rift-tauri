@@ -48,6 +48,9 @@ struct Inner {
     /// Held between `check`/`download` and `apply` so the same plan is reused
     /// without a second roundtrip + re-download.
     pending: Option<UpdateInfo>,
+    /// True only after `download_updates` succeeds; guards `apply` from running
+    /// without a downloaded package.
+    downloaded: bool,
 }
 
 pub struct UpdateService {
@@ -64,7 +67,7 @@ impl UpdateService {
             }
         };
         Self {
-            inner: Mutex::new(Inner { mgr, pending: None }),
+            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false }),
         }
     }
 
@@ -86,10 +89,12 @@ impl UpdateService {
                     notes_markdown: asset.NotesMarkdown.clone(),
                 };
                 g.pending = Some(*info);
+                g.downloaded = false;
                 Ok(Some(dto))
             }
             Ok(_) => {
                 g.pending = None;
+                g.downloaded = false;
                 Ok(None)
             }
             Err(e) => {
@@ -115,7 +120,11 @@ impl UpdateService {
             (mgr, info)
         };
         mgr.download_updates(&info, Some(progress))
-            .map_err(|e| format!("download_updates: {e}"))
+            .map_err(|e| format!("download_updates: {e}"))?;
+        // Mark downloaded under lock so apply() can guard against skipped download.
+        let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        g.downloaded = true;
+        Ok(())
     }
 
     /// Schedule the downloaded update to apply once this process exits, then
@@ -131,6 +140,9 @@ impl UpdateService {
                 .pending
                 .clone()
                 .ok_or_else(|| "no pending update — call check first".to_string())?;
+            if !g.downloaded {
+                return Err("update not downloaded — call download_update first".to_string());
+            }
             (mgr, info)
         };
         // silent = true (no Velopack UI → unattended), restart = true (relaunch
@@ -186,12 +198,14 @@ fn resolve_manager() -> Result<Option<UpdateManager>, String> {
     // an attacker-controlled local feed via env var.
     #[cfg(debug_assertions)]
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
-        let p = std::path::Path::new(&local);
-        if p.is_dir() {
-            let src = velopack::sources::FileSource::new(p);
-            return UpdateManager::new(src, None, None)
-                .map(Some)
-                .map_err(|e| format!("UpdateManager(local feed): {e}"));
+        let p = std::path::PathBuf::from(&local);
+        if let Ok(canon) = p.canonicalize() {
+            if canon.is_absolute() && canon.is_dir() {
+                let src = velopack::sources::FileSource::new(&canon);
+                return UpdateManager::new(src, None, None)
+                    .map(Some)
+                    .map_err(|e| format!("UpdateManager(local feed): {e}"));
+            }
         }
     }
     // `None` access token → unauthenticated (60 req/hr per IP, fine for the

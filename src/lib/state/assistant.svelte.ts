@@ -192,7 +192,7 @@ class TabState {
   draft = $state<string>("");
   /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
    *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
-  attachments = $state<{ id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]>([]);
+  attachments = $state<{ id: string; mime: string; dataBase64: string; sizeBytes: number }[]>([]);
   /** Compaction Phase C: summary seeded by compactConversation() that the
    *  next send() drains into the `prior_context_summary` invoke arg. Null
    *  outside of the one-turn post-compaction window. Per-tab so concurrent
@@ -855,6 +855,7 @@ class TabState {
   }
 
   onDone() {
+    if (!this.streaming) return;
     this.flushPendingText();
     let envelopeFallback = false;
     let blankTurn = false;
@@ -898,6 +899,8 @@ class TabState {
     // Drop any unanswered permission asks — the backend auto-denies on turn
     // end, so a lingering Allow/Deny chip would be dead.
     if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
+    this.unboundAskUserRequestIds = [];
+    this.unboundAskUserToolUseIds = [];
     this.activity = { ...this.activity, currentLabel: null };
     // Finalize telemetry for this turn.
     if (this.currentTurnRecord) {
@@ -929,6 +932,8 @@ class TabState {
     this.streamingMsgIdx = null;
     this.seenToolUseIds.clear();
     if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
+    this.unboundAskUserRequestIds = [];
+    this.unboundAskUserToolUseIds = [];
     // Finalize telemetry.
     if (this.currentTurnRecord) {
       this.currentTurnRecord.doneAt = Date.now();
@@ -1205,10 +1210,10 @@ class AssistantStore {
   // directly so each pane composes into its own tab concurrently.
   get composerDraft(): string { return this.activeTab?.draft ?? ""; }
   set composerDraft(v: string) { if (this.activeTab) this.activeTab.draft = v; }
-  get composerAttachments(): { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[] {
+  get composerAttachments(): { id: string; mime: string; dataBase64: string; sizeBytes: number }[] {
     return this.activeTab?.attachments ?? [];
   }
-  set composerAttachments(v: { id: string; mime: string; dataBase64: string; previewUrl: string; sizeBytes: number }[]) {
+  set composerAttachments(v: { id: string; mime: string; dataBase64: string; sizeBytes: number }[]) {
     if (this.activeTab) this.activeTab.attachments = v;
   }
   // queue moved to TabState (S105 follow-up) — per-tab so a queued msg in
@@ -1997,7 +2002,7 @@ class AssistantStore {
   // M4 split (2026-05-26): per-tab attachment logic in `./assistant/attachments`.
   // Store methods stay as thin tab-resolving thunks routing to active/specified tab.
   addAttachment(
-    att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number },
+    att: { mime: string; dataBase64: string; sizeBytes: number },
     tabId?: string | null,
   ): boolean {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
@@ -2107,7 +2112,7 @@ class AssistantStore {
    *  so returning to the tab must re-trigger it or the queue strands forever.
    *  Bails unless `tab` is the active tab and idle. */
   private drainQueue(tab: TabState | null) {
-    if (!tab || tab !== this.activeTab || tab.streaming || tab.queue.length === 0) return;
+    if (!tab || tab !== this.activeTab || tab.streaming || tab.queue.length === 0 || tab.lastError) return;
     const [next, ...rest] = tab.queue;
     tab.queue = rest;
     // #148: capture the active convo at pop time; if the user switches tabs OR
@@ -2139,6 +2144,8 @@ class AssistantStore {
     tab.streaming = false;
     tab.streamingMsgId = null;
     tab.streamingMsgIdx = null;
+    tab.deltaCount = 0;
+    tab.envelopeTextBuffer = '';
     tab.seenToolUseIds.clear();
     tab.activity = { ...tab.activity, currentLabel: null };
     // Telemetry finalize as user-stop before the late done event lands.
@@ -2376,7 +2383,8 @@ class AssistantStore {
           this.lastError = "No active session yet — send a message first.";
           return true;
         }
-        const cmd = ws ? `cd "${ws}" && claude --resume ${sid}` : `claude --resume ${sid}`;
+        const safeWs = ws ? ws.replace(/'/g, "'\\''") : null;
+        const cmd = safeWs ? `cd '${safeWs}' && claude --resume ${sid}` : `claude --resume ${sid}`;
         navigator.clipboard
           .writeText(cmd)
           .then(() => { this.lastNotice = `Copied to clipboard: ${cmd}`; })

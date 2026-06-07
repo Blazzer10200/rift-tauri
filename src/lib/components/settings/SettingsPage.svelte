@@ -134,6 +134,7 @@
   let asstMaxBudgetMsg = $state<string | null>(null);
   const asstMaxBudgetDirty = $derived(asstMaxBudgetDraft !== assistantStore.maxBudgetUsd);
   const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
+  $effect(() => { if (!asstApiKeyDraft) asstApiKeyVisible = false; });
 
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
@@ -162,7 +163,8 @@
     try {
       await assistantStore.setApiKey(asstApiKeyDraft);
       asstApiKeyMsg = asstApiKeyDraft.trim() ? "Saved." : "Cleared.";
-      asstApiKeyDraft = ""; // F159: clear so the Save button disables after a successful save
+      asstApiKeyDraft = "";
+      asstApiKeyVisible = false;
     } catch (e) {
       asstApiKeyMsg = `Failed: ${e}`;
     } finally {

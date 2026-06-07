@@ -39,12 +39,14 @@ pub fn run() {
             .location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "<unknown>".into());
-        let payload = info
+        let payload_raw = info
             .payload()
             .downcast_ref::<&str>()
             .copied()
             .or_else(|| info.payload().downcast_ref::<String>().map(|s| s.as_str()))
             .unwrap_or("<non-string panic payload>");
+        let payload = diagnostics::scrub_log_message(payload_raw);
+        let location = diagnostics::scrub_log_message(&location);
         log::error!("panic at {location}: {payload}");
         diagnostics::emit_with_fields(
             diagnostics::DiagStage::System,

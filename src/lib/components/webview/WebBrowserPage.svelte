@@ -130,7 +130,8 @@
     menuOpen = false;
     try {
       const live = (await invoke<string>("browser_current_url")) || normalizeUrl(address);
-      if (live) await openUrl(live);
+      if (!live || !/^https?:\/\//i.test(live)) return;
+      await openUrl(live);
     } catch (e) { console.warn("openExternal:", e); }
   }
 
@@ -157,7 +158,10 @@
       const p = await invoke<PageSnapshot>("browser_read_page");
       const body = (p.text || "").trim();
       if (!body) { flash("fail"); return; }
-      const head = `[Page context: ${p.title || "untitled"} — ${p.url}]`;
+      // Sanitize title/url to prevent ] or newlines from breaking the delimiter.
+      const safeTitle = (p.title || "untitled").replace(/[\]\r\n]/g, " ").slice(0, 200);
+      const safeUrl = (p.url || "").replace(/[\]\r\n]/g, " ");
+      const head = `[Page context: ${safeTitle} — ${safeUrl}]`;
       const tail = p.truncated ? `\n[…truncated — full page is ${p.full_len.toLocaleString()} chars]` : "";
       const block = `${head}\n${body}${tail}\n[End page context]`;
       const cur = assistant.composerDraft;
@@ -216,7 +220,9 @@
   let ro: ResizeObserver | null = null;
   let urlPoll: ReturnType<typeof setInterval> | null = null;
   let unlistenLoad: UnlistenFn | null = null;
-  onMount(() => {
+  let mounted = true;
+  onDestroy(() => { mounted = false; });
+  onMount(async () => {
     if (stageEl && "ResizeObserver" in window) {
       ro = new ResizeObserver(() => syncBounds());
       ro.observe(stageEl);
@@ -227,7 +233,7 @@
     }, 1200);
     // Native page-load phases → drive the spinner + keep the address honest on
     // link clicks / redirects / back-forward (faster than the 1.2s poll).
-    void listen<{ phase: string; url: string }>("browser://load", (e) => {
+    const u = await listen<{ phase: string; url: string }>("browser://load", (e) => {
       const { phase, url } = e.payload;
       if (phase === "started") {
         loading = true;
@@ -237,7 +243,9 @@
         if (loadWatchdog) { clearTimeout(loadWatchdog); loadWatchdog = null; }
       }
       if (!inputFocused && url) address = url;
-    }).then((u) => (unlistenLoad = u));
+    });
+    if (!mounted) { u(); return; }
+    unlistenLoad = u;
   });
 
   onDestroy(() => {

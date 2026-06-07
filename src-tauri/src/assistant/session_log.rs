@@ -54,9 +54,7 @@ pub fn assistant_save_session_log(record: Value) -> Result<(), String> {
         .ok_or("session log record missing id")?;
     let p = session_log_path(id)?;
     let s = serde_json::to_string(&record).map_err(|e| e.to_string())?;
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, s).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &p).map_err(|e| format!("rename {}: {e}", p.display()))?;
+    crate::state::paths::atomic_write_json(&p, &s).map_err(|e| e.to_string())?;
     Ok(())
 }
 

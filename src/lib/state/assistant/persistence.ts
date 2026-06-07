@@ -310,12 +310,15 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
     // Wipe to a clean slate — drop every open tab + reset active-convo fields.
     // dropTab (not closeTab) since there's no neighbor worth picking after a purge.
     for (const id of [...host.openTabs]) host.dropTab(id);
+    host.openTabs = [];
     host.currentConvoId = null;
     host.currentCliSessionId = null;
     host.convoCreatedAt = null;
     host.convoTitle = null;
     host.queue = [];
     host.lastNotice = null;
+    host.panes = [{ tabId: null }];
+    host.focusedPaneIdx = 0;
     await refreshConversations(host);
   } catch (e) {
     host.lastError = `Failed to delete all conversations: ${String(e)}`;

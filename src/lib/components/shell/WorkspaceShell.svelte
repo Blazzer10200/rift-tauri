@@ -15,10 +15,12 @@
   // dur-rise(460) + MAX_STAGGER*stagger(5*62=310) + 40ms buffer
   const SETTLE_MS = 810;
 
-  let prevActiveId = workspace.activeId;
+  let prevActiveId: string | null = null;
 
   $effect(() => {
     const id = workspace.activeId;
+    // Skip first run to avoid spurious .rising on init/HMR.
+    if (prevActiveId === null) { prevActiveId = id; return; }
     if (id === prevActiveId) return;
     prevActiveId = id;
     if (!id) return;

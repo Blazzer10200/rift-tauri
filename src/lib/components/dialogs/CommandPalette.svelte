@@ -27,6 +27,7 @@
   };
 
   let input: HTMLInputElement | undefined = $state();
+  let panelEl: HTMLDivElement | undefined = $state();
   let query = $state("");
   let activeIdx = $state(0);
   let listEl: HTMLDivElement | undefined = $state();
@@ -196,6 +197,25 @@
       commandPalette.hide();
       return;
     }
+    if (e.key === "Tab") {
+      // Cycle focus within the panel: input + enabled buttons
+      if (!panelEl) return;
+      e.preventDefault();
+      const focusable = Array.from(
+        panelEl.querySelectorAll<HTMLElement>("input, button:not([disabled])")
+      );
+      if (!focusable.length) return;
+      const cur = document.activeElement as HTMLElement;
+      const idx = focusable.indexOf(cur);
+      if (e.shiftKey) {
+        const prev = idx <= 0 ? focusable[focusable.length - 1] : focusable[idx - 1];
+        prev.focus();
+      } else {
+        const next = idx < 0 || idx >= focusable.length - 1 ? focusable[0] : focusable[idx + 1];
+        next.focus();
+      }
+      return;
+    }
     if (e.key === "ArrowDown") {
       e.preventDefault();
       if (flat.length) activeIdx = (activeIdx + 1) % flat.length;
@@ -244,7 +264,9 @@
     <div
       class="cp-panel"
       role="dialog"
+      aria-modal="true"
       aria-label="Command palette"
+      bind:this={panelEl}
       transition:fly={{ y: -8, duration: 160, easing: quintOut }}
     >
       <div class="cp-search">

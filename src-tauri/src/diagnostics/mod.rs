@@ -170,6 +170,12 @@ impl DiagBus {
         // entirely. Idempotent — homedir replacement is a no-op on already-
         // scrubbed strings, key-body redaction is a no-op on `[REDACTED ...]`.
         event.message = scrub_log_message(&event.message);
+        if !event.fields.is_null() {
+            let raw = event.fields.to_string();
+            let scrubbed = scrub_log_message(&raw);
+            event.fields = serde_json::from_str(&scrubbed)
+                .unwrap_or(serde_json::Value::String(scrubbed));
+        }
         event.seq = self.seq.fetch_add(1, Ordering::Relaxed);
         self.events_emitted_total.fetch_add(1, Ordering::Relaxed);
         match event.stage {
@@ -335,7 +341,7 @@ impl LogForwarder {
 ///   2. Lines containing OpenSSH/RSA `BEGIN ... PRIVATE KEY` markers →
 ///      full-message redaction (safer than per-line — a single leaked body
 ///      line is enough to compromise the key, so drop the whole message).
-fn scrub_log_message(msg: &str) -> String {
+pub fn scrub_log_message(msg: &str) -> String {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     let enabled = *ENABLED
         .get_or_init(|| !matches!(std::env::var("RIFT_LOG_SCRUB").as_deref(), Ok("0")));

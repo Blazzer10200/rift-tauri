@@ -298,6 +298,8 @@
     if (!a) return;
     const href = a.getAttribute("href");
     if (!href || href.startsWith("#")) return;
+    const safe = /^https?:\/\//i.test(href) || href.startsWith("mailto:");
+    if (!safe) return;
     e.preventDefault();
     void openUrl(href).catch((err) => console.warn("openUrl failed", err));
   }

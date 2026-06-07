@@ -8,7 +8,6 @@ export type Attachment = {
   id: string;
   mime: string;
   dataBase64: string;
-  previewUrl: string;
   sizeBytes: number;
 };
 
@@ -21,7 +20,7 @@ const CAP_BYTES = 20 * 1024 * 1024;
  *  the backend guard. Returns false on overflow. */
 export function addAttachment(
   tab: AttachmentHost,
-  att: { mime: string; dataBase64: string; previewUrl: string; sizeBytes: number },
+  att: { mime: string; dataBase64: string; sizeBytes: number },
 ): boolean {
   const current = tab.attachments.reduce((s, a) => s + a.sizeBytes, 0);
   if (current + att.sizeBytes > CAP_BYTES) return false;

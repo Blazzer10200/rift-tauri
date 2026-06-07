@@ -7,6 +7,7 @@
   import { untrack, onDestroy } from "svelte";
   import { slide } from "svelte/transition";
   import { diffArrays } from "diff";
+  import DOMPurify from "dompurify";
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
@@ -147,7 +148,8 @@
     if (!html) return null;
     // Extract just the inner tokens of shiki's single `.line` span.
     const m = html.match(/<span class="line">([\s\S]*?)<\/span><\/code>/);
-    return m ? m[1] : null;
+    if (!m) return null;
+    return DOMPurify.sanitize(m[1], { ALLOWED_TAGS: ["span"], ALLOWED_ATTR: ["style", "class"] });
   }
 
   const counts = $derived.by(() => {
@@ -179,6 +181,8 @@
       // decide auto-expand; the precise +N/-M still comes from `counts`.
       const oldStr = typeof input.old_string === "string" ? input.old_string : "";
       const newStr = typeof input.new_string === "string" ? input.new_string : "";
+      // Skip diffing huge blocks — default collapsed to avoid mount-time cost.
+      if (oldStr.length + newStr.length > 200_000) return false;
       const _chunks = diffArrays(oldStr.split("\n"), newStr.split("\n"));
       const changed = _chunks.reduce((n, c) => n + (c.added || c.removed ? c.value.length : 0), 0);
       return changed <= SMALL_DIFF;

@@ -38,12 +38,41 @@
     }
   }
 
+  let shellEl: HTMLDivElement | undefined = $state();
+
+  $effect(() => {
+    if (updates.dialogOpen) {
+      void Promise.resolve().then(() => shellEl?.focus());
+    }
+  });
+
+  const busy = $derived(
+    updates.state === "downloading" || updates.state === "installing"
+  );
+
   function onBackdrop(e: MouseEvent) {
-    if (e.target === e.currentTarget) updates.close();
+    if (e.target === e.currentTarget && !busy) updates.close();
   }
   function onKey(e: KeyboardEvent) {
     if (!updates.dialogOpen) return;
-    if (e.key === "Escape") updates.close();
+    if (e.key === "Escape" && !busy) { updates.close(); return; }
+    if (e.key === "Tab") {
+      if (!shellEl) return;
+      e.preventDefault();
+      const focusable = Array.from(
+        shellEl.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input, [tabindex]:not([tabindex='-1'])")
+      );
+      if (!focusable.length) return;
+      const cur = document.activeElement as HTMLElement;
+      const idx = focusable.indexOf(cur);
+      if (e.shiftKey) {
+        const prev = idx <= 0 ? focusable[focusable.length - 1] : focusable[idx - 1];
+        prev.focus();
+      } else {
+        const next = idx < 0 || idx >= focusable.length - 1 ? focusable[0] : focusable[idx + 1];
+        next.focus();
+      }
+    }
   }
 
   // Render the markdown body as plain text w/ light formatting. We control
@@ -90,6 +119,8 @@
       role="dialog"
       aria-modal="true"
       aria-label="Updates"
+      tabindex="-1"
+      bind:this={shellEl}
       transition:fly={{ y: 8, duration: 180 }}
     >
       <!-- Gradient header -->
@@ -112,6 +143,7 @@
             type="button"
             onclick={() => updates.close()}
             aria-label="Close"
+            disabled={busy}
           >
             <X size={14}/>
           </button>

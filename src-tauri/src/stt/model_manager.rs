@@ -94,8 +94,7 @@ pub fn known_models() -> Vec<ModelInfo> {
             let on_disk_bytes = md.as_ref().map(|x| x.len());
             // Completion-check is "the final filename exists and is non-empty"
             // — the downloader only renames `.partial → final` on success, so
-            // file presence implies a clean download. Strict integrity will
-            // come once we pin sha256 (catalogue entries are `None` today).
+            // file presence implies a clean download.
             let downloaded = on_disk_bytes.map(|b| b > 0).unwrap_or(false);
             ModelInfo {
                 id: m.id.to_string(),
@@ -167,6 +166,14 @@ pub async fn download(
         .await
         .map_err(|e| format!("download request failed: {e}"))?;
     let status = resp.status();
+    // 416 = Range Not Satisfiable: .partial already covers the full file.
+    if status.as_u16() == 416 {
+        let on_disk = partial_path.metadata().map(|m| m.len()).unwrap_or(0);
+        std::fs::rename(&partial_path, &final_path)
+            .map_err(|e| format!("promote partial -> final (416 path): {e}"))?;
+        emit_progress(&app, entry.id, on_disk, on_disk, "done", None);
+        return Ok(());
+    }
     if !status.is_success() && status.as_u16() != 206 {
         return Err(format!("HF returned HTTP {status} for {url}"));
     }
@@ -200,6 +207,7 @@ pub async fn download(
     } else {
         None
     };
+    // For resumed downloads sha256 will be verified post-rename (full-file pass below).
 
     while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
@@ -233,9 +241,8 @@ pub async fn download(
         .map(|m| m.len())
         .map_err(|e| format!("stat partial: {e}"))?;
 
-    // SHA256 verify (only when we hashed the whole stream — fresh download,
-    // not a resume). Catalogue entries have `sha256: None` today, so this
-    // branch is dormant until we pin upstream hashes.
+    // SHA256 verify (only when we hashed the whole stream — fresh download, not a resume).
+    let was_hashed = hasher.is_some();
     if let (Some(expected), Some(h)) = (entry.sha256, hasher) {
         let got = format!("{:x}", h.finalize());
         if got != expected {
@@ -252,6 +259,29 @@ pub async fn download(
 
     std::fs::rename(&partial_path, &final_path)
         .map_err(|e| format!("promote partial → final: {e}"))?;
+
+    // Post-rename full-file verify for resumed downloads (hasher was None).
+    if !was_hashed {
+        if let Some(expected) = entry.sha256 {
+            let mut h = Sha256::new();
+            let mut f = std::fs::File::open(&final_path)
+                .map_err(|e| format!("open for post-rename verify: {e}"))?;
+            std::io::copy(&mut f, &mut h)
+                .map_err(|e| format!("hash read: {e}"))?;
+            let got = format!("{:x}", h.finalize());
+            if got != expected {
+                let _ = std::fs::rename(
+                    &final_path,
+                    dir.join(format!("{}.badhash", entry.filename)),
+                );
+                return Err(format!(
+                    "sha256 mismatch (resumed) for {}: got {got}, expected {expected}",
+                    entry.filename
+                ));
+            }
+        }
+    }
+
     emit_progress(&app, entry.id, on_disk, on_disk, "done", None);
     Ok(())
 }

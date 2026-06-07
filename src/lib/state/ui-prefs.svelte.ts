@@ -53,11 +53,15 @@ class UiPrefs {
 
     try {
       const c = JSON.parse(localStorage.getItem(CODE_KEY) ?? "null");
-      if (c && typeof c === "object") this.code = {
-        fontSize:  typeof c.fontSize  === "number"  ? c.fontSize  : DEFAULT_CODE.fontSize,
-        tabWidth:  typeof c.tabWidth  === "number"  ? c.tabWidth  : DEFAULT_CODE.tabWidth,
-        ligatures: typeof c.ligatures === "boolean" ? c.ligatures : DEFAULT_CODE.ligatures,
-      };
+      if (c && typeof c === "object") {
+        const rawFs = typeof c.fontSize === "number" && Number.isFinite(c.fontSize) ? c.fontSize : DEFAULT_CODE.fontSize;
+        const rawTw = typeof c.tabWidth === "number" && Number.isFinite(c.tabWidth) ? c.tabWidth : DEFAULT_CODE.tabWidth;
+        this.code = {
+          fontSize:  Math.min(32, Math.max(6, rawFs)),
+          tabWidth:  Math.min(8,  Math.max(1, rawTw)),
+          ligatures: typeof c.ligatures === "boolean" ? c.ligatures : DEFAULT_CODE.ligatures,
+        };
+      }
     } catch {
       /* malformed code prefs — fall back to defaults */
     }

@@ -51,11 +51,10 @@ pub async fn download_update(
         }
     });
 
-    let result = tokio::task::spawn_blocking(move || svc.download(tx))
-        .await
-        .map_err(|e| format!("download task: {e}"))?;
-
+    let result = tokio::task::spawn_blocking(move || svc.download(tx)).await;
     let _ = pump.join();
+    let result = result
+        .map_err(|e| format!("download task: {e}"))?;
 
     match result {
         Ok(()) => {

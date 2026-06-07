@@ -210,21 +210,24 @@ pub struct ActiveSession {
 }
 
 impl ActiveSession {
-    fn shutdown_capture(&mut self) {
+    /// Signal capture to stop; returns the thread handle so the caller can
+    /// join it without blocking a Tokio worker (see `stt_stop_recording`).
+    fn shutdown_capture(&mut self) -> Option<std::thread::JoinHandle<()>> {
         self.rolling_cancel.cancel();
         if let Some(tx) = self.capture_stop.take() {
             let _ = tx.send(());
             drop(tx);
         }
-        if let Some(h) = self.capture_handle.take() {
-            let _ = h.join();
-        }
+        self.capture_handle.take()
     }
 }
 
 impl Drop for ActiveSession {
     fn drop(&mut self) {
-        self.shutdown_capture();
+        // Drop-path is off the async runtime; blocking join is safe here.
+        if let Some(h) = self.shutdown_capture() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -385,9 +388,15 @@ pub async fn stt_start_recording(
         drop(capture);
     });
 
-    let ring = cap_ready_rx
-        .recv()
-        .map_err(|e| format!("capture init channel: {e}"))??;
+    // recv() would block the Tokio worker — offload to a blocking thread.
+    let ring = tokio::task::spawn_blocking(move || {
+        cap_ready_rx
+            .recv()
+            .map_err(|e| format!("capture init channel: {e}"))
+            .and_then(|r| r)
+    })
+    .await
+    .map_err(|e| format!("capture init join: {e}"))??;
 
     // Fold the workspace context into the vocab slot so it biases the decoder
     // toward project filenames/symbols; user vocab follows (trimmed first if
@@ -405,15 +414,32 @@ pub async fn stt_start_recording(
     let beam_size = cfg.beam_size;
     let cleanup_enabled = cfg.cleanup_enabled;
     let rolling_cancel = CancellationToken::new();
+    // Clone for the spawn before moving rolling_cancel into the session slot.
+    let task_cancel = rolling_cancel.clone();
 
-    // Spawn rolling-window transcribe task.
+    // Store session BEFORE spawning — any racing stop call can now cancel.
+    {
+        let mut slot = session.0.lock().await;
+        *slot = Some(ActiveSession {
+            ring: ring.clone(),
+            initial_prompt: initial_prompt.clone(),
+            language: language.clone(),
+            beam_size,
+            workspace_ctx,
+            cleanup_enabled,
+            rolling_cancel,
+            capture_stop: Some(cap_stop_tx),
+            capture_handle: Some(capture_handle),
+        });
+    }
+
+    // Spawn rolling-window transcribe task after session is visible.
     if cfg.show_interim {
         let task_app = app.clone();
-        let task_ring = ring.clone();
+        let task_ring = ring;
         let task_engine = engine.clone();
         let task_prompt = initial_prompt.clone();
         let task_lang = language.clone();
-        let task_cancel = rolling_cancel.clone();
         tokio::spawn(async move {
             rolling_window_loop(
                 task_app,
@@ -428,20 +454,6 @@ pub async fn stt_start_recording(
         });
     }
 
-    {
-        let mut slot = session.0.lock().await;
-        *slot = Some(ActiveSession {
-            ring,
-            initial_prompt,
-            language,
-            beam_size,
-            workspace_ctx,
-            cleanup_enabled,
-            rolling_cancel,
-            capture_stop: Some(cap_stop_tx),
-            capture_handle: Some(capture_handle),
-        });
-    }
     emit_state(&app, "recording", None);
     Ok(())
 }
@@ -458,7 +470,10 @@ pub async fn stt_stop_recording(
     }
     .ok_or_else(|| "no stt session active".to_string())?;
 
-    active.shutdown_capture();
+    // Join the capture thread off the Tokio runtime to avoid blocking a worker.
+    if let Some(h) = active.shutdown_capture() {
+        tokio::task::spawn_blocking(move || { let _ = h.join(); }).await.ok();
+    }
     emit_state(&app, "transcribing", None);
 
     // Drain final buffer, transcribe.

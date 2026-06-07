@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, onDestroy } from "svelte";
   import { ChevronDown, Plus, X } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import MessageBubble from "./MessageBubble.svelte";
@@ -61,6 +61,7 @@
   // (the dock is right-anchored). Width is app-global (assistant.ui.dockWidth),
   // clamped + persisted on release.
   let resizing = $state(false);
+  let _resizeCleanup: (() => void) | null = null;
   function startResize(e: PointerEvent) {
     e.preventDefault();
     resizing = true;
@@ -70,15 +71,21 @@
       const next = startW + (startX - ev.clientX);
       assistant.ui.dockWidth = Math.min(DOCK_MAX, Math.max(DOCK_MIN, next));
     };
-    const onUp = () => {
+    const cleanup = () => {
+      if (!_resizeCleanup) return; // idempotent
       resizing = false;
       saveDockWidth(assistant.ui.dockWidth);
       window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointerup", cleanup);
+      window.removeEventListener("pointercancel", cleanup);
+      _resizeCleanup = null;
     };
+    _resizeCleanup = cleanup;
     window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointerup", cleanup);
+    window.addEventListener("pointercancel", cleanup);
   }
+  onDestroy(() => _resizeCleanup?.());
   function resetDockWidth() {
     assistant.ui.dockWidth = 300;
     saveDockWidth(300);

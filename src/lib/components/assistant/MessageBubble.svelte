@@ -339,6 +339,10 @@
   // is an honest recap + mode consequence, not a fake turn-level Apply/Undo.
   function lineDelta(oldS: unknown, newS: unknown): { adds: number; dels: number } {
     if (typeof oldS !== "string" || typeof newS !== "string") return { adds: 0, dels: 0 };
+    // Skip exact diff for very large strings; return approx line counts instead.
+    if (oldS.length + newS.length > 200_000) {
+      return { adds: newS.split("\n").length, dels: oldS.split("\n").length };
+    }
     let adds = 0, dels = 0;
     for (const c of diffArrays(oldS.split("\n"), newS.split("\n"))) {
       if (c.added) adds += c.count ?? c.value.length;
@@ -659,15 +663,16 @@
     <div class="content">
       {#snippet renderBlock(b: Block, bi: string, caption: string | null = null, revealing: boolean = false)}
         {#if b.type === "image"}
+          {@const safeMime = /^image\/(png|jpeg|gif|webp|svg\+xml|avif|bmp)$/.test(b.mime ?? "") ? b.mime : "image/png"}
           <button
             type="button"
             class="user-image-thumb"
             aria-label="View full size image"
             use:tooltip={"Click to view full size"}
-            onclick={() => window.open(`data:${b.mime};base64,${b.dataBase64}`, "_blank")}
+            onclick={() => window.open(`data:${safeMime};base64,${b.dataBase64}`, "_blank")}
           >
             <img
-              src={`data:${b.mime};base64,${b.dataBase64}`}
+              src={`data:${safeMime};base64,${b.dataBase64}`}
               alt=""
               loading="lazy"
             />
