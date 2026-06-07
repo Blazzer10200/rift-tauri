@@ -4,6 +4,22 @@
 > inherits zero chat history, so the prompt names every doc to read and every guardrail up front.
 > Plan of record: [idea-phase-plan.md](idea-phase-plan.md). Mark a session done here when you finish it.
 
+## STATUS — at a glance (verified against the tree 2026-06-07)
+
+> Single source of truth for arc progress. Update this block the moment a phase lands — the per-session
+> prompts below are HTML-commented (already used), so this table is what you read first.
+
+| Session | Phase | State | Evidence |
+|---|---|---|---|
+| A | 0 — ship insurance | ☑ | v0.6.5 released (`ca5e083`) |
+| B | 1a–1b — SQLite store + pricing | ☑ | `usage/{store,pricing}.rs`, `model-prices.json`, `rusqlite` bundled (`1205f12`) |
+| C | 1c–1e — aggregation + gauge + cockpit | ☑ | `usage/{aggregate,budget}.rs`, `CostPage.svelte`, `usage.svelte.ts` (`1205f12`) |
+| D | 2a–2b — multi-provider + insights | ☑ | `ProviderProfile`/`active_provider_id` route turns (`mod.rs:3091`→`ANTHROPIC_BASE_URL` `:3390`); presets DeepSeek/GLM/Bedrock; `usage/insights.rs` + `usage_insights` (`1205f12`) |
+| E | 3 — multi-agent + compression | ◐ | **3a done** — sandbox eval + worktree-harness prototype ([edit-swarm-safety-layer.md](edit-swarm-safety-layer.md), `scripts/proto/swarm-harness.ps1`). **3b, 3c remain.** |
+
+> **Ship debt:** Phase 1+2 are committed but **not released** — still on v0.6.5. A version bump (THREE files +
+> `Cargo.lock` + CHANGELOG → `release.ps1`) is owed before the next public build.
+
 ---
 
 ## Session A — Phase 0: ship the insurance  ☑ (v0.6.5)
@@ -76,7 +92,7 @@
 
 ---
 
-## Session D — Phase 2: escape hatch v2 + grows-with-you v1  ☐
+## Session D — Phase 2: escape hatch v2 + grows-with-you v1  ☑ (`1205f12`)
 **Paste this:**
 
 <!-- > Read `docs/HANDOFF.md`, then `docs/design/idea-phase-plan.md` (§2 Phase 2). Two builds:
@@ -98,19 +114,68 @@
 
 ---
 
-## Session E+ — Phase 3: multi-agent + compression (later)  ☐
-**Paste this:**
+## Session E+ — Phase 3: multi-agent + compression (later)  ◐ (3a done; 3b/3c remain)
 
-<!-- > Read `docs/HANDOFF.md`, then `docs/design/idea-phase-plan.md` (§2 Phase 3). Sequence loosely:
-> 3a — Evaluate `anthropic-experimental/sandbox-runtime` (TS, OS-level FS/net limits, no container) vs
->   `NVIDIA/OpenShell` (Rust) as the write-mode safety layer. Prototype one.
-> 3b — Edit-applying swarm (parked seed in `docs/IDEAS.md`): worktree isolation + one-file-one-agent +
->   `oh-my-pi`-style hash-anchored edits + verify gate (`cargo check`/`npm run check`) + adversarial diff
->   review. Feed it the audit-swarm's confirmed-findings list.
-> 3c — Optional compression toggle: `headroom` local proxy in front of the CLI via the existing
->   `ANTHROPIC_BASE_URL` seam. Opt-in only (Python-primary = runtime dep).
+**3a — DONE 2026-06-07.** Evaluated both candidates: **neither is a native-Windows sandbox** —
+`anthropic-experimental/sandbox-runtime` has no Windows support (Seatbelt/bubblewrap only); `NVIDIA/OpenShell`
+is a Linux-only K3s/Docker control-plane (Landlock/seccomp), alpha, WSL2-only. **Decision:** the write-mode
+safety layer = a cross-platform **worktree + verify-gate + adversarial-diff harness** (also the spine of 3b);
+OS-level FS/net sandboxing is deferred to an **optional WSL2/Linux/macOS tier** (`sandbox-runtime` /
+`claude --sandbox`). Prototype proven on Windows: `scripts/proto/swarm-harness.ps1` (worktree isolate →
+node_modules junction → gate discriminates pass/fail → main tree untouched). Full writeup +
+open questions: [edit-swarm-safety-layer.md](edit-swarm-safety-layer.md). **Next: 3b** (build the swarm on the
+harness; feed it the audit-swarm's confirmed-findings list) or **3c** (headroom compression toggle).
+
+**Paste this (for 3b/3c):**
+
+> Read `docs/HANDOFF.md`, `docs/design/session-kickoffs.md` (STATUS block), `docs/design/idea-phase-plan.md`
+> (§2 Phase 3), `docs/design/edit-swarm-safety-layer.md` (the 3a decision), and the 3b seed in `docs/IDEAS.md`.
+> This session FINISHES the idea-phase arc: ship the owed release, build Phase 3b, then optional 3c.
 >
-> This phase is exploratory — scope tightly per prototype, don't commit to all three at once. -->
+> Verified starting state: Phases 0/1/2 are committed (`1205f12`) but UNSHIPPED — repo is on v0.6.5. Phase 3a
+> is done — decision: a cross-platform **worktree + verify-gate + adversarial-diff harness** (prototype at
+> `scripts/proto/swarm-harness.ps1`); OS-level FS/net sandboxing is deferred to an optional WSL2/Linux/macOS
+> tier (`sandbox-runtime` / `claude --sandbox`). DON'T redo 3a.
+>
+> STEP 1 — Ship the owed release (clears the debt; do first, it's low-risk).
+> - Live smoke-test via CDP (start dev with `scripts/run-dev.bat`, `npm run cdp:serve`, drive `scripts/cdp/c.sh`):
+>   Harness→Cost cockpit renders real history across a restart; provider switch routes a turn; insights show ≥3.
+> - Update `docs/CHANGELOG.md` (≤600 words) with the Phase 1+2 summary. Bump ALL THREE version files
+>   (`package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`) + commit the `Cargo.lock` update; `/git-ship`.
+> - Guardrails: quit `rift-tauri.exe` (dev binary, EXACT name — NEVER a `rift*` glob; prod app is `rift.exe`)
+>   before build. Don't `cargo check` while dev is alive. Version lockstep is the #1 ship failure: all three +
+>   Cargo.lock or `release.ps1` bails. Clean tree or `-Force`; Setup.exe-only; vpk CLI ver == velopack crate ver;
+>   no stderr redirect in PS5.1 (NativeCommandError trap).
+> - Done-when: tagged release on `Blazzer10200/rift-releases`; cockpit + provider switch confirmed in the prod build.
+>
+> STEP 2 — Phase 3b: productionize the edit-applying swarm on the 3a harness.
+> - Decide the open questions from `edit-swarm-safety-layer.md §7` (delegated): (a) cargo gate during dev
+>   (shared `CARGO_TARGET_DIR`+quit-dev, or skip Rust gate when dev alive); (b) merge-on-accept (`git cherry-pick`
+>   worktree commit vs apply-patch); (c) module home (new `src-tauri/src/swarm/` vs fold into `assistant/`);
+>   (d) adversarial reviewer (reuse audit reviewer vs dedicated diff-vs-finding prompt).
+> - Build a Rust orchestrator over a confirmed-findings list `{file,line,evidence,suggested_fix}`: group by file
+>   (one-file-one-agent, serialized within file); per agent → `git worktree add --detach` → junction
+>   `node_modules`/shared cargo target → claude-CLI child applies hash-anchored (`oh-my-pi`-style) edits →
+>   verify gate (`cargo check`/`npm run check`) → fail = auto-revert+flag → pass = adversarial diff-vs-finding
+>   review → accept = merge back, reject = discard → SAFE cleanup (rmdir junction THEN worktree remove; never
+>   recursive-delete through the junction — design §4.2). Findings source: chain from the audit swarm if it
+>   exists, else a hand-supplied array for v1.
+> - Minimal UI: a swarm-run panel (per-agent progress, gate verdict, accept/reject) reusing Harness bento
+>   language; honor the 4-workspace IA + "Harness fits ONE viewport" invariants (HANDOFF CRITICAL DON'T-TOUCH).
+> - Verify: backend `cargo check` 0 err (quit dev first); frontend `npm run check` 0/0; run the swarm against a
+>   real 2-3 finding list end-to-end; confirm a build-breaking fix auto-reverts and a good fix merges; main tree intact.
+> - Done-when: a findings list drives parallel worktree-isolated edits that each pass gate + diff review before
+>   merging, main tree never corrupted, demonstrated live.
+>
+> STEP 3 — Phase 3c (OPTIONAL — skip if Steps 1-2 fill the session): compression toggle.
+> - `headroom`-style local proxy in front of the CLI via the existing `ANTHROPIC_BASE_URL` seam (the same seam
+>   the provider router uses, `mod.rs:3390`). Opt-in setting only — the Python runtime is a soft dep, must NOT
+>   become mandatory. Off by default.
+> - Done-when: a toggle routes turns through the local compressor when on, bypasses it when off; off by default.
+>
+> Close: update CHANGELOG + `/handoff`; in this STATUS block tick D as shipped and E → ☑ once 3b lands. If you
+> ship again after 3b, repeat the Step-1 release guardrails. Scope honestly — a clean stop after Step 1 or Step 2
+> is fine; 3c can be its own session.
 
 ---
 
