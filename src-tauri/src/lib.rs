@@ -21,6 +21,7 @@ pub mod secrets;
 pub mod state;
 pub mod stt;
 pub mod update_service;
+pub mod usage;
 
 use tauri::Manager;
 
@@ -117,6 +118,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(std::sync::Arc::new(update_service::UpdateService::new()))
+        .manage(usage::UsageDb::new())
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
         .manage(stt::WhisperCache(tokio::sync::Mutex::new(None)))
         .manage(stt::WhisperSession(tokio::sync::Mutex::new(None)))
@@ -140,6 +142,17 @@ pub fn run() {
                 if deleted > 0 {
                     log::info!("assistant: startup sweep deleted {} retired JSONL(s)", deleted);
                 }
+            });
+            // Cost cockpit: one-shot backfill of existing session-logs into the
+            // SQLite usage store on its own connection (idempotent upsert), so
+            // day-one history isn't blank. Best-effort — logs a warning on err.
+            tauri::async_runtime::spawn_blocking(|| match usage::store::open() {
+                Ok(conn) => match usage::backfill(&conn) {
+                    Ok(n) if n > 0 => log::info!("usage: backfilled {n} turn row(s) from session-logs"),
+                    Ok(_) => {}
+                    Err(e) => log::warn!("usage: backfill failed: {e}"),
+                },
+                Err(e) => log::warn!("usage: backfill skipped, open failed: {e}"),
             });
             Ok(())
         })
@@ -168,6 +181,10 @@ pub fn run() {
             commands::assistant_set_base_url,
             commands::assistant_get_provider_model,
             commands::assistant_set_provider_model,
+            commands::assistant_list_providers,
+            commands::assistant_save_provider,
+            commands::assistant_delete_provider,
+            commands::assistant_set_active_provider,
             commands::assistant_summarize_session,
             commands::assistant_remint_session,
             commands::assistant_send,
@@ -193,6 +210,18 @@ pub fn run() {
             commands::assistant_remove_recent_root,
             commands::assistant_list_workspace_files,
             commands::assistant_workspace_branch,
+            usage::usage_ingest_turn,
+            usage::usage_backfill_from_logs,
+            usage::aggregate::usage_daily,
+            usage::aggregate::usage_monthly,
+            usage::aggregate::usage_by_model,
+            usage::aggregate::usage_by_workspace,
+            usage::aggregate::usage_blocks,
+            usage::aggregate::usage_session,
+            usage::budget::usage_get_budget,
+            usage::budget::usage_set_budget,
+            usage::budget::usage_budget_status,
+            usage::insights::usage_insights,
             commands::browser_open,
             commands::browser_navigate,
             commands::browser_set_bounds,

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle } from "lucide-svelte";
+  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle, Gauge } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import CostPage from "./CostPage.svelte";
   import { effortToFlag } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
   import { SessionTelemetry } from "../../state/assistant/telemetry";
@@ -78,6 +79,11 @@
   }
 
   const live = $derived(assistant.streaming);
+
+  // Harness sub-tab: live telemetry dashboard vs the cross-session cost cockpit
+  // (idea-phase-plan §1e). Kept here (not a 5th workspace) to preserve the
+  // 4-workspace IA invariant.
+  let subtab = $state<"telemetry" | "cost">("telemetry");
 
   // ── Active-conversation context (the hero gauge is intentionally per-tab:
   //    it measures how full the CURRENT conversation is, not the session).
@@ -367,6 +373,14 @@
   });
 </script>
 
+<div class="hwrap">
+  <nav class="hsubtabs">
+    <button class="hsub" class:on={subtab === "telemetry"} type="button" onclick={() => (subtab = "telemetry")}><Zap size={14} /> Telemetry</button>
+    <button class="hsub" class:on={subtab === "cost"} type="button" onclick={() => (subtab = "cost")}><Gauge size={14} /> Cost</button>
+  </nav>
+  {#if subtab === "cost"}
+    <CostPage />
+  {:else}
 <div class="dash" data-live={live && isLive}>
   <!-- ── Header strip ── -->
   <header class="dhead">
@@ -756,8 +770,18 @@
     </div>
   {/if}
 </div>
+  {/if}
+</div>
 
 <style>
+  /* ── Sub-tab shell (Telemetry | Cost) ── */
+  .hwrap { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .hsubtabs { display: flex; align-items: center; gap: 6px; padding: 10px 22px 0; flex: none; }
+  .hsub { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--fg-muted); font-size: var(--fs-xs); font-weight: 650; cursor: pointer; transition: border-color var(--dur-fast) var(--ease-soft), background var(--dur-fast) var(--ease-soft), color var(--dur-fast) var(--ease-soft); }
+  .hsub:hover { border-color: var(--border-strong); color: var(--fg); }
+  .hsub.on { border-color: var(--ghost-border); background: var(--accent-soft); color: var(--accent); }
+  .hsub :global(svg) { opacity: 0.85; }
+
   .dash { position: relative; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; background:
       radial-gradient(circle, color-mix(in oklab, var(--fg) 3%, transparent) 1px, transparent 1px) 0 0 / 26px 26px,
       radial-gradient(130% 90% at 50% -25%, color-mix(in oklab, var(--accent) 5%, transparent), transparent 52%),

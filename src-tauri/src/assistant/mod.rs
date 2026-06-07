@@ -692,12 +692,66 @@ struct AssistantConfig {
     /// $0.91 at 900K vs $2.73 on sonnet.
     #[serde(default)]
     compact_model: Option<String>,
-    /// Custom Anthropic-compatible endpoint (DeepSeek/GLM/proxy) → ANTHROPIC_BASE_URL. None = Anthropic.
-    #[serde(default)]
+    /// LEGACY single-provider escape hatch (pre-2a). Migrated into `providers`
+    /// on first `load_config()` and then cleared. Still parsed so old on-disk
+    /// configs migrate cleanly; never re-written once `providers` is populated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     base_url: Option<String>,
-    /// Model id for `--model` when `base_url` is set (e.g. "deepseek-chat"). Ignored otherwise.
-    #[serde(default)]
+    /// LEGACY companion to `base_url`. Migrated + cleared alongside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     provider_model: Option<String>,
+    /// 2a multi-provider list (cc-switch pattern). Each profile is an
+    /// Anthropic-compatible endpoint; the active one routes `assistant_send`.
+    /// Empty = Anthropic only. Secrets live in the keychain (`key_ref`), never here.
+    #[serde(default)]
+    providers: Vec<ProviderProfile>,
+    /// `id` of the provider that routes turns. `None` = Anthropic (no custom endpoint).
+    #[serde(default)]
+    active_provider_id: Option<String>,
+}
+
+/// One saved custom-provider endpoint. `key_ref` is the keychain entry name
+/// holding this provider's API key — the secret itself is never serialized to
+/// `config.json`. `model` (optional) overrides Rift's tier via `--model`;
+/// gateways that map Rift's tiers can leave it blank.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderProfile {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub key_ref: String,
+}
+
+/// Outward shape for `assistant_list_providers` — the profile plus derived
+/// flags the UI needs (`has_key` so it can show "key set" without exposing it,
+/// `active` for the one-click toggle). The secret + raw `key_ref` are still
+/// withheld from the renderer beyond what it needs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDto {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: Option<String>,
+    pub has_key: bool,
+    pub active: bool,
+}
+
+/// Renderer-supplied profile for `assistant_save_provider`. `id` empty/None on
+/// create (server mints a stable slug); set on edit. The API key rides a
+/// separate arg so it can be omitted on edit without clobbering the stored one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInput {
+    #[serde(default)]
+    pub id: Option<String>,
+    pub name: String,
+    pub base_url: String,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 const RECENT_ROOTS_MAX: usize = 10;
@@ -1060,7 +1114,44 @@ fn load_config() -> AssistantConfig {
             Err(e) => log::warn!("assistant: keychain migration for api_key failed: {e}"),
         }
     }
+    // 2a: migrate the legacy single `base_url`/`provider_model` into the
+    // `providers` list once. The legacy escape hatch reused the main Anthropic
+    // key, so the migrated profile points `key_ref` at ASSISTANT_API_KEY — the
+    // user keeps routing without re-entering anything. Gated on empty list so it
+    // runs at most once; clears the legacy fields after so it never re-fires.
+    if cfg.providers.is_empty() {
+        if let Some(b) = cfg.base_url.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            cfg.providers.push(ProviderProfile {
+                id: "legacy".into(),
+                name: "Custom".into(),
+                base_url: b.to_string(),
+                model: cfg.provider_model.clone().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                key_ref: crate::secrets::ASSISTANT_API_KEY.into(),
+            });
+            cfg.active_provider_id = Some("legacy".into());
+            cfg.base_url = None;
+            cfg.provider_model = None;
+            if let Err(e) = save_config(&cfg) {
+                log::warn!("assistant: provider migration save_config failed: {e}");
+            } else {
+                log::info!("assistant: migrated legacy base_url into providers list");
+            }
+        }
+    }
     cfg
+}
+
+/// Keychain entry name for a provider's API key. Stable across renames since
+/// it's keyed on the immutable `id`. The legacy migrated provider is the lone
+/// exception — it reuses `ASSISTANT_API_KEY`.
+fn provider_key_ref(id: &str) -> String {
+    format!("assistant.provider.{id}")
+}
+
+/// The provider that should route turns, or `None` for plain Anthropic.
+fn resolve_active_provider(cfg: &AssistantConfig) -> Option<ProviderProfile> {
+    let id = cfg.active_provider_id.as_deref()?;
+    cfg.providers.iter().find(|p| p.id == id).cloned()
 }
 
 /// Phase 6 (#37): the live API key. Reads the keychain first; falls back to
@@ -1805,6 +1896,139 @@ pub fn assistant_set_provider_model(value: Option<String>) -> Result<(), String>
     let mut cfg = load_config();
     cfg.provider_model = v;
     save_config(&cfg)
+}
+
+// ── 2a multi-provider escape hatch (cc-switch pattern) ──
+
+/// List saved custom providers with derived flags. Secrets are never returned —
+/// only `has_key` so the UI can show "key set" without exposing the value.
+#[tauri::command]
+pub fn assistant_list_providers() -> Result<Vec<ProviderDto>, String> {
+    let cfg = load_config();
+    let active = cfg.active_provider_id.as_deref();
+    Ok(cfg
+        .providers
+        .iter()
+        .map(|p| ProviderDto {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            base_url: p.base_url.clone(),
+            model: p.model.clone(),
+            has_key: crate::secrets::get(&p.key_ref).is_some(),
+            active: active == Some(p.id.as_str()),
+        })
+        .collect())
+}
+
+/// Create or update a provider. Empty/None `id` → create (server mints a stable
+/// slug from the name); otherwise update in place. `api_key`, when present and
+/// non-empty, is written to the keychain under the profile's `key_ref`; omit it
+/// on edit to leave the stored key untouched. Returns the profile id.
+#[tauri::command]
+pub fn assistant_save_provider(profile: ProviderInput, api_key: Option<String>) -> Result<String, String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let name = profile.name.trim().to_string();
+    if name.is_empty() {
+        return Err("provider name is required".into());
+    }
+    let base_url = profile.base_url.trim().to_string();
+    if !(base_url.starts_with("http://") || base_url.starts_with("https://")) {
+        return Err("base_url must start with http:// or https://".into());
+    }
+    let model = profile.model.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref m) = model {
+        if !is_valid_model_name(m) {
+            return Err(format!("invalid provider model: {m}"));
+        }
+    }
+
+    let mut cfg = load_config();
+    let id = profile
+        .id
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| mint_provider_id(&name, &cfg.providers));
+
+    // key_ref is stable per id; the legacy migrated provider keeps reusing the
+    // main key, so don't reassign its key_ref to the provider-scoped slot.
+    let key_ref = cfg
+        .providers
+        .iter()
+        .find(|p| p.id == id)
+        .map(|p| p.key_ref.clone())
+        .unwrap_or_else(|| provider_key_ref(&id));
+
+    if let Some(k) = api_key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        crate::secrets::set(&key_ref, k)?;
+    }
+
+    let prof = ProviderProfile { id: id.clone(), name, base_url, model, key_ref };
+    match cfg.providers.iter_mut().find(|p| p.id == id) {
+        Some(existing) => *existing = prof,
+        None => cfg.providers.push(prof),
+    }
+    save_config(&cfg)?;
+    Ok(id)
+}
+
+/// Delete a provider + its keychain entry. Clears `active_provider_id` if it
+/// pointed here. The legacy provider's shared `ASSISTANT_API_KEY` is preserved
+/// (it's also the Anthropic key) — only provider-scoped keys are removed.
+#[tauri::command]
+pub fn assistant_delete_provider(id: String) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut cfg = load_config();
+    if let Some(pos) = cfg.providers.iter().position(|p| p.id == id) {
+        let removed = cfg.providers.remove(pos);
+        if removed.key_ref != crate::secrets::ASSISTANT_API_KEY {
+            if let Err(e) = crate::secrets::delete(&removed.key_ref) {
+                log::warn!("assistant: delete provider key {} failed: {e}", removed.key_ref);
+            }
+        }
+        if cfg.active_provider_id.as_deref() == Some(id.as_str()) {
+            cfg.active_provider_id = None;
+        }
+        save_config(&cfg)?;
+    }
+    Ok(())
+}
+
+/// Set the active provider (`None` = Anthropic). Rejects an unknown id.
+#[tauri::command]
+pub fn assistant_set_active_provider(id: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut cfg = load_config();
+    let id = id.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref want) = id {
+        if !cfg.providers.iter().any(|p| &p.id == want) {
+            return Err(format!("unknown provider id: {want}"));
+        }
+    }
+    cfg.active_provider_id = id;
+    save_config(&cfg)
+}
+
+/// Mint a stable, filesystem/keychain-safe id from the provider name, deduped
+/// against existing ids. No uuid dep — a slug + numeric suffix is stable enough
+/// (ids are immutable once created).
+fn mint_provider_id(name: &str, existing: &[ProviderProfile]) -> String {
+    let base: String = name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .collect::<String>()
+        .trim_matches('-')
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    let base = if base.is_empty() { "provider".to_string() } else { base };
+    if !existing.iter().any(|p| p.id == base) {
+        return base;
+    }
+    (2..)
+        .map(|n| format!("{base}-{n}"))
+        .find(|cand| !existing.iter().any(|p| &p.id == cand))
+        .unwrap_or(base)
 }
 
 /// Output of a one-shot summarize call. Mirrors the design doc Phase B
@@ -2862,18 +3086,27 @@ pub async fn assistant_send(
     }
     let cfg = load_config();
     let api_key = current_api_key();
-    let use_api_key = api_key.is_some();
-    // June-15 hedge: a custom endpoint routes this turn to a cheaper provider, off the metered pool.
-    let custom_base: Option<String> = cfg
-        .base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string);
+    // June-15 hedge: the active custom provider routes this turn to a cheaper
+    // endpoint, off the metered pool. None = plain Anthropic.
+    let active_provider = resolve_active_provider(&cfg);
+    let custom_base: Option<String> = active_provider.as_ref().map(|p| p.base_url.clone());
+    // Custom-provider auth: its own keychain key, falling back to the main
+    // Anthropic key (covers gateways that reuse it + the legacy migrated profile).
+    let provider_key: Option<String> = active_provider
+        .as_ref()
+        .and_then(|p| crate::secrets::get(&p.key_ref))
+        .or_else(|| api_key.clone());
+    // Spawn with `--bare` + injected key whenever we have credentials for the
+    // route: the provider key in custom mode, the Anthropic key otherwise.
+    let use_api_key = if custom_base.is_some() {
+        provider_key.is_some()
+    } else {
+        api_key.is_some()
+    };
     let mut model = model.unwrap_or_else(|| "sonnet".to_string());
-    // Custom endpoints use their own model ids; provider_model overrides the Rift tier.
-    if custom_base.is_some() {
-        if let Some(pm) = cfg.provider_model.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    // Custom endpoints use their own model ids; the profile's model overrides the Rift tier.
+    if let Some(ref p) = active_provider {
+        if let Some(pm) = p.model.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             model = pm.to_string();
         }
     }
@@ -3162,7 +3395,9 @@ pub async fn assistant_send(
         // Rift-configured one (the only API-key path). OAuth/login turns leave
         // it stripped so a stray system env key can't shadow `claude login`.
         cmd.arg("--bare");
-        if let Some(k) = api_key.as_deref() {
+        // Custom routes use the active provider's key; Anthropic uses the main key.
+        let auth = if custom_base.is_some() { provider_key.as_deref() } else { api_key.as_deref() };
+        if let Some(k) = auth {
             // Custom endpoints want a bearer token (ANTHROPIC_AUTH_TOKEN); set both for gateway compat.
             if custom_base.is_some() {
                 cmd.env("ANTHROPIC_AUTH_TOKEN", k);

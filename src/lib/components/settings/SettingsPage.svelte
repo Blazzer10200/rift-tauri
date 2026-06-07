@@ -10,7 +10,7 @@
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
-  import { assistant as assistantStore } from "../../state/assistant.svelte";
+  import { assistant as assistantStore, type ProviderDto } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
@@ -136,22 +136,67 @@
   const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
   $effect(() => { if (!asstApiKeyDraft) asstApiKeyVisible = false; });
 
-  let asstBaseUrlDraft = $state("");
-  let asstProviderModelDraft = $state("");
-  let asstProviderSaving = $state(false);
-  let asstProviderMsg = $state<string | null>(null);
-  const asstProviderDirty = $derived(
-    asstBaseUrlDraft.trim() !== (assistantStore.baseUrl ?? "") ||
-    asstProviderModelDraft.trim() !== (assistantStore.providerModel ?? ""),
-  );
-  let asstProviderSeeded = false;
-  $effect(() => {
-    if (assistantStore.providerConfigLoaded && !asstProviderSeeded) {
-      asstProviderSeeded = true;
-      asstBaseUrlDraft = assistantStore.baseUrl ?? "";
-      asstProviderModelDraft = assistantStore.providerModel ?? "";
+  // ── Custom-provider list (2a) ──
+  type ProviderPreset = { id: string; label: string; baseUrl: string; model: string };
+  const PROVIDER_PRESETS: ProviderPreset[] = [
+    { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-chat" },
+    { id: "glm", label: "GLM / Zhipu", baseUrl: "https://open.bigmodel.cn/api/anthropic", model: "glm-4.6" },
+    { id: "bedrock", label: "AWS Bedrock (gateway)", baseUrl: "https://your-bedrock-gateway/anthropic", model: "" },
+    { id: "openai-compat", label: "OpenAI-compat gateway", baseUrl: "", model: "" },
+  ];
+  let provName = $state("");
+  let provBaseUrl = $state("");
+  let provModel = $state("");
+  let provKey = $state("");
+  let provKeyVisible = $state(false);
+  let provEditingId = $state<string | null>(null);
+  let provSaving = $state(false);
+  let provMsg = $state<string | null>(null);
+  const provFormValid = $derived(provName.trim().length > 0 && /^https?:\/\//.test(provBaseUrl.trim()));
+  $effect(() => { if (!provKey) provKeyVisible = false; });
+
+  function applyProviderPreset(id: string) {
+    const p = PROVIDER_PRESETS.find((x) => x.id === id);
+    if (!p) return;
+    if (!provName.trim()) provName = p.label;
+    provBaseUrl = p.baseUrl;
+    provModel = p.model;
+  }
+  function editProvider(p: ProviderDto) {
+    provEditingId = p.id;
+    provName = p.name;
+    provBaseUrl = p.baseUrl;
+    provModel = p.model ?? "";
+    provKey = "";
+    provMsg = null;
+  }
+  function resetProviderForm() {
+    provEditingId = null;
+    provName = ""; provBaseUrl = ""; provModel = ""; provKey = ""; provKeyVisible = false; provMsg = null;
+  }
+  async function saveProviderForm() {
+    provSaving = true;
+    provMsg = null;
+    try {
+      await assistantStore.saveProvider(
+        { id: provEditingId ?? undefined, name: provName, baseUrl: provBaseUrl, model: provModel.trim() || null },
+        provKey || null,
+      );
+      resetProviderForm();
+    } catch (e) {
+      provMsg = `Failed: ${e}`;
+    } finally {
+      provSaving = false;
     }
-  });
+  }
+  async function deleteProviderRow(id: string) {
+    try {
+      await assistantStore.deleteProvider(id);
+      if (provEditingId === id) resetProviderForm();
+    } catch (e) {
+      provMsg = `Failed: ${e}`;
+    }
+  }
 
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
@@ -187,24 +232,6 @@
     } finally {
       asstApiKeySaving = false;
     }
-  }
-  async function saveAsstProvider() {
-    asstProviderSaving = true;
-    asstProviderMsg = null;
-    try {
-      await assistantStore.setBaseUrl(asstBaseUrlDraft);
-      await assistantStore.setProviderModel(asstProviderModelDraft);
-      asstProviderMsg = assistantStore.baseUrl ? "Saved." : "Cleared.";
-    } catch (e) {
-      asstProviderMsg = `Failed: ${e}`;
-    } finally {
-      asstProviderSaving = false;
-    }
-  }
-  function clearAsstProvider() {
-    asstBaseUrlDraft = "";
-    asstProviderModelDraft = "";
-    void saveAsstProvider();
   }
   async function saveAsstMaxBudget() {
     asstMaxBudgetSaving = true;
@@ -637,34 +664,73 @@
           </div>
 
           <div class="st-block">
-            <div class="st-block-label">Custom provider (advanced)</div>
+            <div class="st-block-label">Custom providers (advanced)</div>
             <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <label class="st-row-label" for="asst-baseurl">API base URL</label>
-                  <div class="st-row-desc">Route turns to an Anthropic-compatible endpoint (e.g. DeepSeek <code>https://api.deepseek.com/anthropic</code>) using the API key above. Blank = Anthropic. Lets headless turns draw on a cheaper provider instead of the metered subscription credits (June 15 change).</div>
-                </div>
-                <div class="st-row-ctl">
-                  <input id="asst-baseurl" class="st-input mono" type="text" placeholder="https://api.deepseek.com/anthropic" style="width:248px;" bind:value={asstBaseUrlDraft} autocomplete="off" spellcheck="false" />
-                </div>
+              <div class="st-row-desc" style="margin-bottom:10px;">
+                Route turns to any Anthropic-compatible endpoint (DeepSeek, GLM/Zhipu, a Bedrock or OpenAI-compat gateway). Pick one to make it active; turns then draw on that provider instead of the metered subscription (June 15 change). Each provider's key is stored in your OS keychain.
               </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <label class="st-row-label" for="asst-provider-model">Provider model</label>
-                  <div class="st-row-desc">Model id passed to <code>--model</code> (e.g. <code>deepseek-chat</code>). Required for direct providers; gateways may map Rift's tiers.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <input id="asst-provider-model" class="st-input mono" type="text" placeholder="deepseek-chat" style="width:188px;" bind:value={asstProviderModelDraft} autocomplete="off" spellcheck="false" />
-                  <button class="st-btn primary" type="button" onclick={saveAsstProvider} disabled={asstProviderSaving || !asstProviderDirty}>{asstProviderSaving ? "Saving…" : "Save"}</button>
-                  {#if assistantStore.baseUrl}
-                    <button class="st-btn" type="button" disabled={asstProviderSaving} onclick={clearAsstProvider}>Clear</button>
-                  {/if}
-                </div>
+
+              <!-- Active selector: Anthropic (default) + each saved provider -->
+              <div class="prov-list">
+                <button
+                  class="prov-row"
+                  class:active={assistantStore.activeProvider === null}
+                  type="button"
+                  onclick={() => assistantStore.setActiveProvider(null)}
+                >
+                  <span class="prov-radio" class:on={assistantStore.activeProvider === null}></span>
+                  <span class="prov-main">
+                    <span class="prov-name">Anthropic <span class="prov-sub">default · metered subscription</span></span>
+                  </span>
+                </button>
+
+                {#each assistantStore.providers as p (p.id)}
+                  <div class="prov-row" class:active={p.active}>
+                    <button class="prov-pick" type="button" onclick={() => assistantStore.setActiveProvider(p.id)} aria-label={`Activate ${p.name}`}>
+                      <span class="prov-radio" class:on={p.active}></span>
+                      <span class="prov-main">
+                        <span class="prov-name">
+                          {p.name}
+                          {#if p.active}<span class="st-pill ok"><span class="dot"></span>Active</span>{/if}
+                          {#if !p.hasKey}<span class="st-pill warn">no key</span>{/if}
+                        </span>
+                        <span class="prov-sub mono">{p.baseUrl}{p.model ? ` · ${p.model}` : ""}</span>
+                      </span>
+                    </button>
+                    <span class="prov-actions">
+                      <button class="st-btn" type="button" onclick={() => editProvider(p)} aria-label={`Edit ${p.name}`}>Edit</button>
+                      <button class="st-btn danger-btn" type="button" onclick={() => deleteProviderRow(p.id)} aria-label={`Delete ${p.name}`}><Trash2 size={13} /></button>
+                    </span>
+                  </div>
+                {/each}
               </div>
-              {#if asstProviderMsg}<div class="st-note">{asstProviderMsg}</div>{/if}
-              {#if assistantStore.baseUrl}
-                <div class="st-note">Active — turns route to <code>{assistantStore.baseUrl}</code>{assistantStore.providerModel ? ` · ${assistantStore.providerModel}` : ""}.</div>
-              {/if}
+
+              <!-- Add / edit form -->
+              <div class="prov-form">
+                <div class="prov-form-head">
+                  <span class="st-row-label">{provEditingId ? "Edit provider" : "Add provider"}</span>
+                  <Select
+                    value=""
+                    options={[{ value: "", label: "Preset…" }, ...PROVIDER_PRESETS.map((p) => ({ value: p.id, label: p.label }))]}
+                    onChange={(v) => { if (v) applyProviderPreset(v); }}
+                    ariaLabel="Provider preset"
+                  />
+                </div>
+                <div class="prov-grid">
+                  <input class="st-input" type="text" placeholder="Name (e.g. DeepSeek)" bind:value={provName} autocomplete="off" spellcheck="false" />
+                  <input class="st-input mono" type="text" placeholder="https://api.deepseek.com/anthropic" bind:value={provBaseUrl} autocomplete="off" spellcheck="false" />
+                  <input class="st-input mono" type="text" placeholder="Model id (optional, e.g. deepseek-chat)" bind:value={provModel} autocomplete="off" spellcheck="false" />
+                  <span class="st-secret">
+                    <input class="st-input mono" type={provKeyVisible ? "text" : "password"} placeholder={provEditingId ? "API key (leave blank to keep)" : "API key"} bind:value={provKey} autocomplete="off" spellcheck="false" />
+                    <button class="st-eye" type="button" onclick={() => (provKeyVisible = !provKeyVisible)} aria-label={provKeyVisible ? "Hide key" : "Show key"}>{#if provKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
+                  </span>
+                </div>
+                <div class="prov-form-actions">
+                  <button class="st-btn primary" type="button" onclick={saveProviderForm} disabled={provSaving || !provFormValid}>{provSaving ? "Saving…" : provEditingId ? "Update" : "Add provider"}</button>
+                  {#if provEditingId}<button class="st-btn" type="button" onclick={resetProviderForm}>Cancel</button>{/if}
+                </div>
+                {#if provMsg}<div class="st-note">{provMsg}</div>{/if}
+              </div>
             </div>
           </div>
 
@@ -1089,6 +1155,27 @@
   .st-pill.warn .dot { background: var(--warn); }
   .st-pill.accent { background: color-mix(in oklab, var(--accent) 12%, transparent); border-color: color-mix(in oklab, var(--accent) 38%, var(--border)); color: var(--accent); font-variant-numeric: tabular-nums; }
   .st-pill.accent .dot { background: var(--accent); }
+
+  /* ── Custom-provider list (2a) ── */
+  .prov-list { display: flex; flex-direction: column; gap: 6px; }
+  .prov-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg-inset); cursor: pointer; transition: border-color 120ms, background 120ms; }
+  button.prov-row:hover, .prov-row:hover { border-color: var(--border-strong); }
+  .prov-row.active { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); background: color-mix(in oklab, var(--accent) 8%, var(--bg-inset)); }
+  .prov-pick { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border: 0; background: none; color: inherit; cursor: pointer; padding: 0; text-align: left; }
+  .prov-radio { flex-shrink: 0; width: 14px; height: 14px; border-radius: 999px; border: 2px solid var(--fg-faint); transition: border-color 120ms, box-shadow 120ms; }
+  .prov-radio.on { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--accent); }
+  .prov-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .prov-name { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
+  .prov-sub { font-size: 11px; color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prov-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+  .prov-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .prov-form-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+  .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .prov-grid .st-input { width: 100%; }
+  .prov-grid .st-secret { display: flex; }
+  .prov-grid .st-secret .st-input { flex: 1; }
+  .prov-form-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 
   /* CLI update command line — copyable npm install command. */
   .st-cli-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; max-width: 360px; background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 7px 6px 10px; }
