@@ -462,10 +462,26 @@ fn is_shim(path: &str) -> bool {
     s.ends_with(".cmd") || s.ends_with(".bat")
 }
 
-/// True if `a` is the better "active" pick than `b`: newest version wins; a
-/// working (versioned) install beats a broken one; a real binary beats a shim;
-/// ties break toward the on-PATH copy (what the user's shell uses) then method.
+/// True if `a` is the better "active" pick than `b`. Priority order:
+///   1. a real binary beats a `.cmd`/`.bat` shim (shims mangle stream-json args);
+///   2. an on-PATH copy beats an off-PATH one — this is the install the user's
+///      shell uses and ran `claude login` against, so its OAuth/subscription
+///      session is the one that authenticates;
+///   3. newest version wins among equally-reachable installs;
+///   4. method rank breaks final ties.
+///
+/// on_path outranks version deliberately (#auth): a newer copy sitting off-PATH
+/// (e.g. a native install under LOCALAPPDATA the user never logged into) would
+/// otherwise be spawned and 401 even while the terminal `claude` works fine —
+/// the exact "works in my terminal, not in Rift" trap a fresh collaborator hit.
 fn install_is_better(a: &ClaudeInstall, b: &ClaudeInstall) -> bool {
+    let (a_shim, b_shim) = (is_shim(&a.path), is_shim(&b.path));
+    if a_shim != b_shim {
+        return !a_shim;
+    }
+    if a.on_path != b.on_path {
+        return a.on_path;
+    }
     match (
         a.version.as_deref().and_then(parse_semver),
         b.version.as_deref().and_then(parse_semver),
@@ -474,13 +490,6 @@ fn install_is_better(a: &ClaudeInstall, b: &ClaudeInstall) -> bool {
         (Some(_), None) => return true,
         (None, Some(_)) => return false,
         _ => {}
-    }
-    let (a_shim, b_shim) = (is_shim(&a.path), is_shim(&b.path));
-    if a_shim != b_shim {
-        return !a_shim;
-    }
-    if a.on_path != b.on_path {
-        return a.on_path;
     }
     method_rank(&a.method) > method_rank(&b.method)
 }
@@ -3268,6 +3277,33 @@ pub async fn assistant_send(
                         // for process exit, which a background child can defer for
                         // minutes), then break so stdin drops (EOF).
                         if ty == Some("result") {
+                            // An auth rejection (401) surfaces as an error result
+                            // frame carrying the raw "API Error: 401 Invalid
+                            // authentication credentials" — forwarded verbatim it's
+                            // a dead-end. Detect it and emit an actionable error too,
+                            // mirroring the stderr-exit remap below, so a genuine
+                            // auth failure always tells the user what to do.
+                            let res_is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
+                                || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);
+                            let res_text = v.get("result").and_then(|s| s.as_str()).unwrap_or("");
+                            if res_is_err
+                                && (res_text.contains("401")
+                                    || res_text.contains("authentication_error")
+                                    || res_text.contains("Invalid authentication")
+                                    || res_text.contains("invalid x-api-key"))
+                            {
+                                let friendly = if current_api_key().is_some() {
+                                    "Your configured API key was rejected (401). Clear it in Settings → CLI session to fall back to your `claude login`, or paste a valid key.".to_string()
+                                } else {
+                                    format!(
+                                        "Authentication failed (401). Rift is using the Claude CLI at {} — sign in there by running `claude login` in a terminal, or switch installs in Settings → CLI session, then retry.",
+                                        resolve_claude_exe().map(|p| p.display().to_string()).unwrap_or_else(|| "your active install".into())
+                                    )
+                                };
+                                let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                    "session_id": stream_sid, "message": friendly,
+                                }));
+                            }
                             let _ = app_out.emit(STREAM_EVENT, serde_json::json!({
                                 "session_id": stream_sid, "line": trimmed,
                             }));

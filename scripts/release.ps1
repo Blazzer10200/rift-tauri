@@ -200,6 +200,10 @@ $packArgs = @(
     '--packTitle', 'Rift',
     '--packAuthors', 'Blazzer',
     '--icon', "$staging/icon.ico",
+    # No delta packages: keeps the release asset list lean (one fewer .nupkg per
+    # release). Clients just download the full package -- a non-issue at this
+    # app size + user base. Revert to the default by dropping this flag.
+    '--delta', 'None',
     '-o', 'Releases'
 )
 if ($releaseNotesFile) {
@@ -216,7 +220,7 @@ if (Test-Path $splashPath) {
 if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 
 # --- Upload to GitHub ----------------------------------------------------
-# vpk uploads Setup.exe + .nupkg + delta + releases.win.json as release assets
+# vpk uploads Setup.exe + full .nupkg + releases.win.json as release assets
 # and creates/publishes the release. --channel win matches the pack channel +
 # the client manifest. --pre for alpha/beta/rc: the client's
 # GithubSource(prerelease:true) reads the prerelease list, so pre-releases are
