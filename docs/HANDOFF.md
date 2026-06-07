@@ -2,27 +2,27 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-07 (cont. 69) — SHIPPED v0.6.5 (Phase 0 / Session A): escape hatch + hardening
+## Session 2026-06-07 (cont. 71) — CHECKPOINT: Phase 1 + Phase 2 committed (review of Session D)
 
-**Done — Phase 0 ✅.** Custom-provider escape hatch + cont.66 hardening shipped as **v0.6.5**, tagged release live on `Blazzer10200/rift-releases` (Setup.exe + full.nupkg + releases.win.json). Commits on origin/main: escape hatch `a230565`, hardening `c1cc817`, version bump `ca5e083`, planning docs `4831e4c`.
+**Phases 1 & 2 committed `1205f12`** (were 3 phases of uncommitted work stacked on v0.6.5 — now checkpointed before Session E). All green: `cargo check` 0 err, `npm run check` 0/0 (4064 files). **NOT shipped — no version bump yet** (still owed; bump THREE files + Cargo.lock + CHANGELOG → release.ps1).
 
-**Smoke-test (CDP, dev) all green:** *Custom provider (advanced)* card renders; Save persists to `~/.rift/assistant/config.json` (`base_url`+`provider_model`); routed turn confirmed CLI POSTs `/v1/messages` to the custom endpoint w/ bearer auth (not api.anthropic.com). Clear works; **config restored to `null` (dev+prod share that file — left clean).**
+**Reviewed Session D (Phase 2), verdict = ships-worthy:**
+- **2a multi-provider (cc-switch):** `AssistantConfig.providers: Vec<ProviderProfile>{id,name,base_url,model,key_ref}` + `active_provider_id`. Legacy single `base_url`/`provider_model` (the shipped v0.6.5 hatch) **migrates once** into the list (gated on empty, clears legacy fields, reuses `ASSISTANT_API_KEY`) — backward-compatible. Keys keychain-scoped (`assistant.provider.<id>`), never serialized; `ProviderDto.has_key` only. Cmds `assistant_{list,save,delete,set_active}_provider` (all under `CONFIG_WRITE_LOCK`). `assistant_send` routes `resolve_active_provider`; model-pin + `--effort` skips still gate on `custom_base.is_none()`.
+- **2b insights (`usage/insights.rs`):** deterministic, observational-only "Rift noticed…" probes (dominant-model, cost-sink-ws, peak-window, cache-trend, tool-intensity, custom-provider-spend) w/ real corpus gates (bail <10 turns). Wired into CostPage. No auto-action.
 
-**Routing (mod.rs `assistant_send`):** `base_url` set → `ANTHROPIC_BASE_URL`+`ANTHROPIC_AUTH_TOKEN`, `provider_model` overrides tier, skips Anthropic-only model-pin + `--effort`. Cmds: `assistant_{get,set}_{base_url,provider_model}`.
+**Not done by me:** no CDP live-verify of Phase 2 (compile + type-check only); the legacy-config→providers migration deserves a live "old hatch still routes" test before/at ship.
 
-**Ship traps hit:** (1) `@'...'@` is a PS here-string — in **Git Bash** it injects a literal `@` into the commit subject; use `-F file`/multiple `-m`. (2) `& .\release.ps1 *>&1 | Tee` under PS5.1 turns cargo-tauri stderr "Info" into terminating `NativeCommandError` (script `$EAP='Stop'`) → **run release.ps1 with NO redirect.**
+### RESUME HERE (next = Session E, Phase 3 — final)
+- **Dev STOPPED** (quit `rift-tauri.exe` exact for verification) — restart via `scripts/run-dev.bat` + `npm run cdp:serve`. Never `rift*` glob.
+- Open [session-kickoffs.md](design/session-kickoffs.md) → **Session E** (Phase 3: 3a sandbox primitive, 3b edit-applying swarm, 3c compression toggle). Plan = [idea-phase-plan.md](design/idea-phase-plan.md) §2 Phase 3.
+- **Owed ship:** after E (or before, as a Phase 1+2 release) — bump + CHANGELOG + release.ps1. Consider a CDP pass on the provider migration first.
 
-### RESUME HERE (next session = Session B, Phase 1a–1b)
-- **Dev/cdp stopped for the build** — restart via `scripts/run-dev.bat` + `npm run cdp:serve`. Kill targets `rift-tauri` EXACTLY, never `rift*`.
-- **Optional prod-confirm:** in-app updater pulls v0.6.5 on next launch/6h; routing already behavior-verified in dev (same spawn code).
-- Open [session-kickoffs.md](design/session-kickoffs.md) → **Session B** (SQLite usage store + pricing). Plan of record = [idea-phase-plan.md](design/idea-phase-plan.md) §1 (SQLite at `~/.rift/rift.db`, `rusqlite`) + §2 Phase 1. Re-anchor line numbers by snippet. Don't re-plan.
-
-## Prior — cont.68 (planning)
-Plan of record: [idea-phase-plan.md](design/idea-phase-plan.md) (+ [session-kickoffs.md](design/session-kickoffs.md), roadmap, [IDEAS.md](IDEAS.md)). **Key finding:** Rift already persists per-turn `TurnRecord[]` to `~/.rift/assistant/session-logs/<id>.json` → Pillar 2 = aggregate+price (NOT instrument); Pillar 3 = read-layer. Holes: logs ring-buffered (`session_log.rs:138-168`, lossy) → durable store; CLI `total_cost_usd` wrong for custom providers → price table. **Decided:** D1 SQLite `~/.rift/rift.db` · D5 cockpit = Harness sub-tab · order store→price→aggregate→gauge→UI.
+## Prior — cont.70 (C) / 69 (A) / 68 (planning)
+cont.70 Phase 1 cost cockpit (CDP-verified: 58 turns backfilled survived restart, gauge/budget round-trip). cont.69 v0.6.5 shipped (escape hatch + hardening `c1cc817`). Plan of record = [idea-phase-plan.md](design/idea-phase-plan.md). **Key finding:** Rift already persists per-turn `TurnRecord[]` → Pillars 2/3 = aggregate+price+read-layer, not instrument. Decided: D1 SQLite `~/.rift/rift.db` · D5 cockpit = Harness sub-tab.
 
 ## Shipped + prior arcs — detail in `git log`
-- **v0.6.5** (cont.69) escape hatch + cont.66 hardening (74 fixes, 36 files, `c1cc817`). · **v0.6.4** (cont.65, `3d89538`) collaborator 401 fix.
-- **release.ps1 gotchas:** bump THREE files + `Cargo.lock` BEFORE; clean tree or `-Force`; quit `rift-tauri.exe` (dev) before build; Setup.exe-only; vpk CLI ver == velopack crate ver; run with NO stderr redirect (PS5.1 NativeCommandError trap).
+- **v0.6.5** (cont.69) escape hatch + hardening (`c1cc817`). · **v0.6.4** (cont.65) 401 fix.
+- **release.ps1 gotchas:** bump THREE files + `Cargo.lock` BEFORE; clean tree or `-Force`; quit `rift-tauri.exe` (dev) before build; Setup.exe-only; vpk CLI ver == velopack crate ver; NO stderr redirect (PS5.1 NativeCommandError trap).
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step** before working; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.
