@@ -107,7 +107,7 @@ import {
   deleteConversation as persistDelete,
   deleteAllConversations as persistDeleteAll,
 } from "./assistant/persistence";
-import { saveSessionLog, pruneSessionLogs } from "./assistant/sessionLog";
+import { saveSessionLog, pruneSessionLogs, ingestUsage } from "./assistant/sessionLog";
 // M6 split (2026-05-27): tab lifecycle + split-pane management in
 // `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
 // tabByCliSession) + scroll cache stay on the class; only the lifecycle
@@ -949,6 +949,17 @@ class TabState {
   }
 }
 
+// 2a: one saved custom-provider endpoint. Secret stays in the OS keychain on
+// the Rust side; `hasKey` is the only signal the renderer gets about it.
+export type ProviderDto = {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string | null;
+  hasKey: boolean;
+  active: boolean;
+};
+
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
@@ -1157,11 +1168,15 @@ class AssistantStore {
     const write = () => {
       this.sessionLogTimer = null;
       const snap = this.telemetry.snapshot();
-      void saveSessionLog({
+      const payload = {
         ...snap,
         model: this.model,
         workspace: this.workspace.current,
-      });
+      };
+      void saveSessionLog(payload);
+      // Mirror finalized turns into the durable SQLite usage store before the
+      // session-log ring buffer can prune them (cost cockpit, §1a).
+      void ingestUsage(payload);
     };
     if (this.sessionLogTimer) {
       clearTimeout(this.sessionLogTimer);
@@ -1187,10 +1202,15 @@ class AssistantStore {
   // Phase D: model alias used by summarize call. "haiku" default ($0.91 vs
   // $2.73 on sonnet for a 900K-token summarize).
   compactModel = $state<"haiku" | "sonnet">("haiku");
-  // June-15 hedge: custom Anthropic-compatible endpoint + its model id. null = Anthropic.
+  // June-15 hedge (legacy single-provider — superseded by `providers`; kept so
+  // any pre-2a config still reads). null = Anthropic.
   baseUrl = $state<string | null>(null);
   providerModel = $state<string | null>(null);
-  // Flips true after baseUrl/providerModel are fetched — distinct from
+  // 2a multi-provider list (cc-switch pattern). Empty = Anthropic only. The
+  // `active` one routes turns; secrets live in the keychain (see ProviderDto).
+  providers = $state<ProviderDto[]>([]);
+  activeProvider = $derived(this.providers.find((p) => p.active) ?? null);
+  // Flips true after providers (+ legacy fields) are fetched — distinct from
   // configLoaded (set earlier), so the Settings draft-seed waits for real values.
   providerConfigLoaded = $state<boolean>(false);
 
@@ -1474,6 +1494,11 @@ class AssistantStore {
       this.providerModel = await invoke<string | null>("assistant_get_provider_model");
     } catch (e) {
       console.warn("assistant_get_provider_model failed", e);
+    }
+    try {
+      this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
+    } catch (e) {
+      console.warn("assistant_list_providers failed", e);
     } finally {
       this.providerConfigLoaded = true;
     }
@@ -1868,6 +1893,50 @@ class AssistantStore {
     try {
       await invoke("assistant_set_provider_model", { value: v });
       this.providerModel = v;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
+  }
+
+  // ── 2a multi-provider list ──
+  async refreshProviders() {
+    this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
+  }
+
+  /** Create (empty id) or update a provider. `apiKey` omitted on edit keeps the stored key. */
+  async saveProvider(
+    profile: { id?: string; name: string; baseUrl: string; model: string | null },
+    apiKey: string | null,
+  ): Promise<string> {
+    try {
+      const id = await invoke<string>("assistant_save_provider", {
+        profile: { id: profile.id ?? null, name: profile.name, baseUrl: profile.baseUrl, model: profile.model },
+        apiKey: apiKey && apiKey.trim().length > 0 ? apiKey.trim() : null,
+      });
+      await this.refreshProviders();
+      return id;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
+  }
+
+  async deleteProvider(id: string) {
+    try {
+      await invoke("assistant_delete_provider", { id });
+      await this.refreshProviders();
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
+  }
+
+  /** Set the routing provider (`null` = Anthropic). */
+  async setActiveProvider(id: string | null) {
+    try {
+      await invoke("assistant_set_active_provider", { id });
+      await this.refreshProviders();
     } catch (e) {
       this.lastNotice = String(e);
       throw e;

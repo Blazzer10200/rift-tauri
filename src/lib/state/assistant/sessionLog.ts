@@ -63,6 +63,18 @@ export async function saveSessionLog(record: unknown): Promise<void> {
   }
 }
 
+/** Append this session's finalized turns into the durable SQLite usage store
+ *  (cost cockpit). Takes the same snapshot payload as saveSessionLog; the Rust
+ *  side does an idempotent upsert keyed on (session_id, turn_index), so calling
+ *  it on every debounce is safe. Best-effort — swallows IPC errors to a warn. */
+export async function ingestUsage(record: unknown): Promise<void> {
+  try {
+    await invoke("usage_ingest_turn", { record });
+  } catch (e) {
+    console.warn("usage_ingest_turn failed", e);
+  }
+}
+
 export async function deleteSessionLog(id: string): Promise<void> {
   try {
     await invoke("assistant_delete_session_log", { id });
