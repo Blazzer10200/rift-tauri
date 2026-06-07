@@ -103,9 +103,19 @@ one type-error edit (gate FAIL → auto-revert) — to prove the gate discrimina
 Run: `pwsh -File scripts/proto/swarm-harness.ps1` (or `powershell -NoProfile -File ...`). Read-only against
 the main checkout; safe to run while dev is alive (frontend gate only).
 
-## 7. Open questions for next session
-- Cargo gate during dev: shared `CARGO_TARGET_DIR` + quit-dev, or skip Rust gate when dev alive?
-- Merge strategy on accept: `git cherry-pick` the worktree commit vs apply-patch to main. Cherry-pick is
-  cleaner but needs the agent to commit in its worktree.
-- Where does the swarm live in the backend — new `src-tauri/src/swarm/` module, or fold into `assistant/`?
-- Adversarial diff review: reuse the audit-swarm's reviewer, or a dedicated diff-vs-finding prompt?
+## 7. Open questions — RESOLVED + built (cont.71, 2026-06-07, `db01c70`)
+- **Cargo gate during dev → dedicated target dir.** The worktree `cargo check` uses a DEDICATED, persistent
+  `CARGO_TARGET_DIR` (`%TEMP%/rift-swarm-target`) disjoint from dev/main, so it never collides with a running
+  `tauri dev` — no quit-dev, no fragile process detection. (Third option, cleaner than either original.)
+- **Merge on accept → `git cherry-pick`.** The orchestrator commits the single-file diff (`commit --only -- <file>`)
+  in the worktree, then cherry-picks that sha onto main. One-file-one-agent ⇒ no conflict; aborts on the rare clash.
+- **Module home → new `src-tauri/src/swarm/`.** assistant/mod.rs is already the largest file; the swarm reuses
+  `assistant::claude_command()` but lives separately.
+- **Adversarial review → dedicated diff-vs-finding prompt.** Pure reasoning over the diff text (no tools);
+  verdict `{accept,reason}`, unparseable → reject (fail-safe).
+
+**Built + verified:** Rust orchestrator + `swarm_run`/`swarm_env_check` commands + Harness→Swarm UI sub-tab.
+Proven: `cargo check` 0/0, `npm run check` 0/0, a deterministic `#[ignore]` mechanics test
+(`swarm_mechanics_discriminates_and_isolates`: gate discrimination + main-tree isolation + no worktree leak),
+AND a live end-to-end LLM run (edit agent → review accept → cherry-pick → `merged:true`, main tree intact, zero
+leak). **Not yet shipped** (committed only). **3c (compression toggle) is the remaining Phase-3 item.**

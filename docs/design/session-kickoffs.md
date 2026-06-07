@@ -15,10 +15,11 @@
 | B | 1a–1b — SQLite store + pricing | ☑ | `usage/{store,pricing}.rs`, `model-prices.json`, `rusqlite` bundled (`1205f12`) |
 | C | 1c–1e — aggregation + gauge + cockpit | ☑ | `usage/{aggregate,budget}.rs`, `CostPage.svelte`, `usage.svelte.ts` (`1205f12`) |
 | D | 2a–2b — multi-provider + insights | ☑ | `ProviderProfile`/`active_provider_id` route turns (`mod.rs:3091`→`ANTHROPIC_BASE_URL` `:3390`); presets DeepSeek/GLM/Bedrock; `usage/insights.rs` + `usage_insights` (`1205f12`) |
-| E | 3 — multi-agent + compression | ◐ | **3a done** — sandbox eval + worktree-harness prototype ([edit-swarm-safety-layer.md](edit-swarm-safety-layer.md), `scripts/proto/swarm-harness.ps1`). **3b, 3c remain.** |
+| E | 3 — multi-agent + compression | ◐ | **3a + 3b done** — 3a sandbox eval + harness ([edit-swarm-safety-layer.md](edit-swarm-safety-layer.md)); **3b edit-applying swarm BUILT + live-verified** (`src-tauri/src/swarm/`, Harness→Swarm sub-tab, `db01c70`) — committed, UNSHIPPED. **3c (compression toggle) remains.** |
 
-> **Ship debt:** Phase 1+2 are committed but **not released** — still on v0.6.5. A version bump (THREE files +
-> `Cargo.lock` + CHANGELOG → `release.ps1`) is owed before the next public build.
+> **Ship debt:** CLEARED — **v0.7.0 shipped** 2026-06-07 (Phase 1+2: cost cockpit + multi-provider + insights;
+> tag `v0.7.0` on `Blazzer10200/rift-releases`, `f687873`). Phase 3b is committed (`db01c70`) but **not yet
+> released** — ship next session after a soak, or fold into the 3c release.
 
 ---
 
