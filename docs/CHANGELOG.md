@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.6.5 — 2026-06-07 — feat: custom-provider escape hatch + hardening pass
+
+> **Why.** On June 15 the Claude subscription stops covering programmatic/headless turns. Rift drives the CLI headless (`-p`), so every turn would draw on metered credits. The escape hatch lets you route turns to a cheaper Anthropic-compatible provider instead.
+
+**Custom provider (advanced).** Settings → Assistant → *Custom provider* takes an **API base URL** (e.g. DeepSeek `https://api.deepseek.com/anthropic`) + a **provider model** id (e.g. `deepseek-chat`). When set, `assistant_send` points the turn at that endpoint via `ANTHROPIC_BASE_URL` and authenticates with the API key as a bearer token (`ANTHROPIC_AUTH_TOKEN`, for gateway compat) — off the metered pool. Blank = Anthropic as before. The provider model overrides the Rift tier; the Anthropic-only model pin and `--effort` flag are skipped for custom endpoints. Live-verified end-to-end (render → save → on-disk persist → a routed turn confirmed hitting the endpoint).
+
+**Hardening.** Folds in the cont.66 pass — 70+ adversarially-verified robustness/security fixes across 36 files, no behavior or version change of its own.
+
+**Verify.** `cargo check` 0/0.
+
 ## v0.6.4 — 2026-06-07 — fix: collaborator 401 (wrong Claude install spawned) + leaner releases
 
 > **Why.** A collaborator with a Claude Pro/Max subscription, signed in and working in their terminal, still got `401 Invalid authentication credentials` in Rift — and the in-app CLI update sat stuck "still behind after update." Auth worked everywhere *except* Rift.
