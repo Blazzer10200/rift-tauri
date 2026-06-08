@@ -82,6 +82,17 @@ class UpdateStore {
   private autoTimer: ReturnType<typeof setInterval> | null = null;
   private readonly AUTO_MS = 6 * 60 * 60 * 1000; // every 6h
 
+  /** Static "latest release" page — usable even when a check failed (so we have
+   *  no `info.releaseUrl`), e.g. a corrupted install that needs a manual Setup.exe. */
+  readonly latestReleaseUrl = `${RELEASES_REPO_URL}/releases/latest`;
+
+  /** The current `error` is a "not properly installed" failure (Velopack can't
+   *  locate its manifest). Distinct from a transient feed/network error — the
+   *  only fix is a clean reinstall, so the UI must say so instead of "try again". */
+  get installBroken(): boolean {
+    return /properly installed|reinstall/i.test(this.error);
+  }
+
   /** True when there's an unsnoozed update waiting for user action. */
   get pillVisible(): boolean {
     return (
@@ -189,6 +200,17 @@ class UpdateStore {
       await openUrl(url);
     } catch (e) {
       toast.push({ severity: "danger", title: "Couldn't open the release page", detail: String(e) });
+    }
+  }
+
+  /** Open the GitHub "latest release" page — the manual recovery path when the
+   *  in-app updater is dead (corrupted install). Always a real https URL. */
+  async openLatestRelease() {
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(this.latestReleaseUrl);
+    } catch (e) {
+      toast.push({ severity: "danger", title: "Couldn't open the releases page", detail: String(e) });
     }
   }
 
