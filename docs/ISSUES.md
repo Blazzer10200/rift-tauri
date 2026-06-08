@@ -14,6 +14,7 @@
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
 | #21 | Test coverage thin after the pure-assistant rip | T1 | 🚧 open |
+| Auth-Rec | In-app sign-in recovery for 401 failures | T2 | ✅ resolved in-tree |
 | Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🧪 live-verify |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
@@ -37,6 +38,12 @@
 - **Fix sketch (remaining):** build a conversation-playback harness (feed recorded NDJSON frames through the reader + store) — also the unblocker for the #20 M8/M9 extractions. ~~Then cover the git_local MCP tools against a throwaway repo.~~ (done 2026-06-07)
 
 ### Tier 2 — code-complete, needs live-verify
+
+#### Auth-Rec — in-app sign-in recovery for 401 failures (✅ resolved in-tree, cont.74)
+
+- **Symptom (from a collaborator's screenshot 2026-06-08):** a 401 banner that dead-ended at "open a terminal and run `claude login`." Root cause: `claude auth status` reports `loggedIn:true` for a stale OAuth token the API later rejects, so the send-gate ([assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) ~1995) passes but the turn 401s.
+- **Fix (`9c468a4`+`2d72af8`):** backend `assistant_open_login(console)` spawns `<active claude> auth login` in its own console (creds land in the CLI's shared store → real fix, not just UI); `startLogin()` polls the probe then clears; `recheckAuth()` clears on Re-check; [AssistantPane.svelte](../src/lib/components/assistant/AssistantPane.svelte) renders an actionable banner — [Sign in] (login 401) / [Open Settings] (key 401) / [Re-check]. CDP-verified all states + nav (not the live login spawn).
+- **Remaining:** confirm an end-to-end real sign-in on a genuinely-logged-out machine (the dev box stays authed, so the spawn path itself is compile/registration-verified only). **Strategic follow-ups** (not built): proactive re-probe before first send; auto-prefer an authed install when multiple exist; collapse the scattered 401 string-matching into one `AuthError` enum + DiagBus telemetry so failure frequency is measurable.
 
 #### Steer — mid-turn redirect on a tool-using turn
 

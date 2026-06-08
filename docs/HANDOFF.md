@@ -2,21 +2,19 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-07 (cont. 74) — Test-coverage stabilization (ISSUES #21, autonomous)
+## Session 2026-06-08 (cont. 74) — Auth-recovery feature + test-coverage stabilization (autonomous)
 
-Pure additive tests — **no production logic touched, no version bump, no UI launched.** 6 commits (`756c95b`→`d929408`), unshipped. **Rust suite 15 → 61; vitest 22 → 27.** Covered the ZERO-test surfaces (`mcp_server.rs` path-containment/glob/trust, `mod.rs` validators), `git_local` (12 integration tests vs temp repos incl. force-push/dirty-pull gates; `tempfile` now dev-dep), usage budget/insights, `browser::parse_url`, `state::paths`, `stt::cleanup`, `utils/redact`. **#21 half DONE; stream-pump + store-orchestrator still open** — frame-classify is inline in async loops (`mod.rs` ~2374/2685/3750), no pure seam → needs the conversation-playback harness (also unblocks #20 M8/M9), a deliberate refactor not a blind one.
+**Auth recovery (BUILT + CDP-verified, UNSHIPPED).** Fixes the dead-end 401 a collaborator hit. Root cause: `claude auth status` can report `loggedIn:true` for a stale OAuth token the API rejects — send-gate passes, turn 401s, only fix offered was "open a terminal." Backend `assistant_open_login(console)` (`mod.rs`, reg. `lib.rs`) spawns `<active claude> auth login` in its OWN console (`CREATE_NEW_CONSOLE`), strips `ANTHROPIC_API_KEY`; creds land in the CLI's store → real fix. Store `startLogin()` polls probe→green then clears; `recheckAuth()` clears on Re-check. `AssistantPane.svelte` → actionable banner: **[Sign in]** (login 401) / **[Open Settings]** (key 401) / **[Re-check]**. Commits `9c468a4`+`2d72af8`; CDP-verified all states + nav live (not the real login spawn).
 
-## Session 2026-06-07 (cont. 73) — BUILT Phase 3c compression toggle (idea-phase arc COMPLETE)
-
-**Phase 3c — BUILT + live-verified, committed `0c34161`, NOT shipped.** Opt-in context-compression toggle via the `ANTHROPIC_BASE_URL` seam; off by default, `headroom` Python proxy is a SOFT dep Rift never bundles. Backend `resolve_compression()` + `assistant_get/set_compression`/`compression_env_check` in `mod.rs`; custom provider wins the seam. Frontend card in `SettingsPage.svelte`. **Completes the idea-phase arc** (3a+3b+3c done).
+**Test coverage (6 commits `756c95b`→`d929408`, UNSHIPPED).** Rust suite 15→61, vitest 22→27 — covered the ZERO-test MCP/git/validator/usage/browser/paths/stt/redact surfaces (`tempfile` now dev-dep). **#21 half DONE; stream-pump still open** (frame-classify inline in async loops `mod.rs` ~2374/2685/3750 → needs playback harness, also unblocks #20 M8/M9).
 
 ### RESUME HERE (next session)
-- **SHIP: HOLDING FOR A SOAK (user decision, cont.73).** 3b (`db01c70`) + 3c (`0c34161`) committed + verified + UNSHIPPED; repo on v0.7.0. Ship as a bundle (suggest **v0.8.0**) in a later dedicated session once they've soaked.
+- **SHIP: HOLDING FOR A SOAK.** 3b (`db01c70`) + 3c (`0c34161`) + **auth-recovery (`9c468a4`,`2d72af8`)** + test coverage committed + verified + UNSHIPPED; repo on v0.7.0. Ship as a bundle (**v0.8.0**) — auth recovery is the headline user-facing change.
 - **To ship:** `pwsh scripts/bump.ps1 0.8.0` → write `docs/CHANGELOG.md` top entry (≤600w, must match version) + commit `Cargo.lock` → quit `rift-tauri.exe` (EXACT, never `rift*` glob) → `pwsh scripts/release.ps1`. Guardrails: THREE files + Cargo.lock lockstep or preflight bails; clean tree or `-Force`; vpk ver == velopack crate ver (`=1.2.0`); no PS5.1 stderr redirect.
 - Dev + cdp wrapper were stopped at session end.
 
 ## Prior arcs — detail in `git log`
-cont.72 SHIPPED v0.7.0 (`f687873`, cost cockpit + multi-provider + insights) + BUILT Phase 3b edit-swarm (`db01c70`, `swarm/mod.rs` + Harness→Swarm sub-tab, UNSHIPPED). cont.71 Phase 1+2 (`1205f12`). 3b SAFE cleanup = rmdir junction THEN worktree remove (never recurse the junction; [edit-swarm-safety-layer.md](design/edit-swarm-safety-layer.md) §4+§7). v0.6.5 (cont.69) `c1cc817`; v0.6.4 (cont.65) 401 fix. release.ps1 gotchas → project CLAUDE.md.
+cont.73 BUILT Phase 3c compression toggle (`0c34161`, UNSHIPPED) via the `ANTHROPIC_BASE_URL` seam — completes the idea-phase arc (3a+3b+3c). cont.72 SHIPPED v0.7.0 (`f687873`, cost cockpit + multi-provider + insights) + BUILT Phase 3b edit-swarm (`db01c70`, `swarm/mod.rs` + Harness→Swarm sub-tab, UNSHIPPED). cont.71 Phase 1+2 (`1205f12`); 3b cleanup safety in [edit-swarm-safety-layer.md](design/edit-swarm-safety-layer.md) §4+§7. v0.6.5 (cont.69) `c1cc817`; v0.6.4 (cont.65) 401 fix. release.ps1 gotchas → project CLAUDE.md.
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step** before working; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.
