@@ -2,20 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-07 (cont. 72) — SHIPPED v0.7.0 + BUILT Phase 3b edit-swarm
+## Session 2026-06-07 (cont. 73) — BUILT Phase 3c compression toggle (idea-phase arc COMPLETE)
 
-**v0.7.0 SHIPPED** (`f687873`, tag on `Blazzer10200/rift-releases`, Setup.exe + full.nupkg). Cleared the Phase 1+2 ship debt: cost cockpit + multi-provider + insights. CDP-smoke-tested live first (real history, 3 insight patterns, provider list). Bumped via `bump.ps1`; `release.ps1` clean.
+**Phase 3c — BUILT + live-verified, committed `0c34161`, NOT shipped.** Opt-in context-compression toggle: routes turns through a local compression proxy via the existing `ANTHROPIC_BASE_URL` seam (same seam the provider router uses). Off by default; the Python proxy runtime (`headroom`) is a SOFT dep Rift never bundles or spawns — user runs it, Rift owns only the env seam + a reachability check.
+- **Backend** (`assistant/mod.rs`): `compression_enabled`/`compression_proxy_url` config; `resolve_compression()`; `assistant_get/set_compression` + `compression_env_check` (TCP probe + headroom/python PATH detect); `assistant_send` injects `ANTHROPIC_BASE_URL`→proxy when enabled AND no custom provider active (custom provider wins the seam). Registered `lib.rs`.
+- **Frontend:** state+setter+env-check in `assistant.svelte.ts`; "Context compression (advanced)" card in `SettingsPage.svelte` (between provider list + compaction).
+- **Verified:** `cargo check` 0 err · `npm run check` 0/0 (4066) · **LIVE via CDP** — toggle off by default, persists to disk (`compression_enabled`), env-check honestly reported no-proxy + python-found, then reset to off.
 
-**Phase 3b edit-applying swarm — BUILT + live-verified, committed `db01c70`, NOT shipped.** New `src-tauri/src/swarm/mod.rs` orchestrator + `swarm_run`/`swarm_env_check` (registered `lib.rs`) + Harness→**Swarm** sub-tab (`SwarmPage.svelte` + `swarm.svelte.ts`). Flow + §7 decisions (dedicated cargo target / cherry-pick merge / own module / diff-vs-finding review) fully in [edit-swarm-safety-layer.md](design/edit-swarm-safety-layer.md) §4+§7. SAFE cleanup = rmdir junction THEN worktree remove (never recurse the junction).
-- **Verified:** `cargo check` 0/0 · `npm run check` 0/0 (4066) · deterministic `#[ignore]` mechanics test (`cargo test ... swarm -- --ignored`: gate discrimination + main-tree isolation + no leak) · **LIVE end-to-end** (throwaway repo: real edit agent → review ACCEPT → cherry-pick → `merged:true`, main intact, zero leak).
+This **completes the idea-phase arc** (Phases 0–3 all built). 3a+3b+3c done.
 
 ### RESUME HERE (next session)
-- **Dev was running this session; quit it (`rift-tauri.exe` EXACT) before any `cargo`/build. Never `rift*` glob.** Restart: `scripts/run-dev.bat` + `npm run cdp:serve`.
-- **3c (compression toggle) is the LAST idea-phase item** — `headroom`-style local proxy via the `ANTHROPIC_BASE_URL` seam (`mod.rs:~3390`); opt-in only, Python soft-dep, off by default. See [session-kickoffs.md](design/session-kickoffs.md) Session E STEP 3.
-- **Optional:** ship Phase 3b (committed, unshipped) as its own release after a soak, or bundle with 3c. Repeat the release guardrails (THREE files + Cargo.lock + CHANGELOG → `release.ps1`).
+- **SHIP DECISION PENDING (asked user, awaiting answer):** bundle 3b (`db01c70`) + 3c (`0c34161`) as one release (suggest **v0.8.0**), or leave for a soak. Both committed + verified, repo clean, UNSHIPPED. Repo on v0.7.0.
+- **To ship:** `pwsh scripts/bump.ps1 0.8.0` → write `docs/CHANGELOG.md` top entry (≤600w, must match version) + commit `Cargo.lock` → quit `rift-tauri.exe` (EXACT, never `rift*` glob) → `pwsh scripts/release.ps1`. Guardrails: THREE files + Cargo.lock lockstep or preflight bails; clean tree or `-Force`; vpk ver == velopack crate ver (`=1.2.0`); no PS5.1 stderr redirect.
+- Dev + cdp wrapper were stopped at session end.
 
-## Prior — cont.71/70/69
-cont.71 checkpointed Phase 1+2 (`1205f12`). cont.70 cost cockpit. cont.69 v0.6.5 escape hatch. **Key finding:** Rift persists per-turn `TurnRecord[]` → Pillars 2/3 = aggregate+price+read-layer. D1 SQLite `~/.rift/rift.db`.
+## Prior — cont.72/71/70
+cont.72 SHIPPED v0.7.0 (`f687873`, cost cockpit + multi-provider + insights) + BUILT Phase 3b edit-swarm (`db01c70`, `swarm/mod.rs` + Harness→Swarm sub-tab, live end-to-end verified, UNSHIPPED). cont.71 checkpointed Phase 1+2 (`1205f12`). **Key finding:** Rift persists per-turn `TurnRecord[]`; D1 SQLite `~/.rift/rift.db`. 3b SAFE cleanup = rmdir junction THEN worktree remove (never recurse the junction). Detail in [edit-swarm-safety-layer.md](design/edit-swarm-safety-layer.md) §4+§7.
 
 ## Shipped + prior arcs — detail in `git log`
 - **v0.6.5** (cont.69) escape hatch + hardening (`c1cc817`). · **v0.6.4** (cont.65) 401 fix.

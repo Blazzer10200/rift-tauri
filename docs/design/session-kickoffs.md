@@ -15,11 +15,12 @@
 | B | 1a–1b — SQLite store + pricing | ☑ | `usage/{store,pricing}.rs`, `model-prices.json`, `rusqlite` bundled (`1205f12`) |
 | C | 1c–1e — aggregation + gauge + cockpit | ☑ | `usage/{aggregate,budget}.rs`, `CostPage.svelte`, `usage.svelte.ts` (`1205f12`) |
 | D | 2a–2b — multi-provider + insights | ☑ | `ProviderProfile`/`active_provider_id` route turns (`mod.rs:3091`→`ANTHROPIC_BASE_URL` `:3390`); presets DeepSeek/GLM/Bedrock; `usage/insights.rs` + `usage_insights` (`1205f12`) |
-| E | 3 — multi-agent + compression | ◐ | **3a + 3b done** — 3a sandbox eval + harness ([edit-swarm-safety-layer.md](edit-swarm-safety-layer.md)); **3b edit-applying swarm BUILT + live-verified** (`src-tauri/src/swarm/`, Harness→Swarm sub-tab, `db01c70`) — committed, UNSHIPPED. **3c (compression toggle) remains.** |
+| E | 3 — multi-agent + compression | ☑ | **3a + 3b + 3c all done.** 3a sandbox eval + harness ([edit-swarm-safety-layer.md](edit-swarm-safety-layer.md)); **3b edit-applying swarm** (`src-tauri/src/swarm/`, Harness→Swarm sub-tab, `db01c70`); **3c compression toggle** (`assistant/mod.rs` `resolve_compression`/`compression_env_check` + Settings card, `0c34161`) — both BUILT + live-verified, committed, UNSHIPPED. **Idea-phase arc COMPLETE.** |
 
-> **Ship debt:** CLEARED — **v0.7.0 shipped** 2026-06-07 (Phase 1+2: cost cockpit + multi-provider + insights;
-> tag `v0.7.0` on `Blazzer10200/rift-releases`, `f687873`). Phase 3b is committed (`db01c70`) but **not yet
-> released** — ship next session after a soak, or fold into the 3c release.
+> **Ship debt:** v0.7.0 shipped 2026-06-07 (Phase 1+2: cost cockpit + multi-provider + insights; `f687873`).
+> **Phase 3b (`db01c70`) + 3c (`0c34161`) are committed + verified but UNSHIPPED** — bundle as one release
+> (suggest **v0.8.0**) or leave for a soak. Ship path: `bump.ps1 0.8.0` → CHANGELOG top entry + commit
+> `Cargo.lock` → quit `rift-tauri.exe` → `release.ps1`.
 
 ---
 
