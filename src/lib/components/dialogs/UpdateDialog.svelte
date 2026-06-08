@@ -243,11 +243,24 @@
           <div class="err-card">
             <AlertTriangle size={16}/>
             <div class="err-text">
-              <div class="err-title">Couldn't reach the update feed.</div>
-              <div class="err-detail mono">{updates.error}</div>
-              <div class="err-hint">GitHub unreachable or rate-limited. Try again shortly.</div>
+              {#if updates.installBroken}
+                <div class="err-title">Auto-update is unavailable on this install.</div>
+                <div class="err-detail mono">{updates.error}</div>
+                <div class="err-hint">Rift can't locate its install manifest — usually from a manual file swap or launching the wrong copy. Reinstall once with the latest Setup.exe to restore auto-updates, and launch from the Start Menu shortcut.</div>
+              {:else}
+                <div class="err-title">Couldn't reach the update feed.</div>
+                <div class="err-detail mono">{updates.error}</div>
+                <div class="err-hint">GitHub unreachable or rate-limited. Try again shortly.</div>
+              {/if}
             </div>
           </div>
+
+          {#if updates.installBroken}
+            <button class="link-row" type="button" onclick={() => updates.openLatestRelease()}>
+              <ExternalLink size={11}/>
+              <span>Get the latest Setup.exe on GitHub</span>
+            </button>
+          {/if}
 
         {:else}
           <p class="lead">No update info yet. Click "Check now" to query GitHub.</p>

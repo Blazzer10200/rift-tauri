@@ -51,6 +51,12 @@ struct Inner {
     /// True only after `download_updates` succeeds; guards `apply` from running
     /// without a downloaded package.
     downloaded: bool,
+    /// Why `mgr` is None, if it is. A failed `UpdateManager::new` (e.g. Velopack
+    /// "not properly installed: could not auto-locate app manifest" — a
+    /// corrupted/hand-modified install) leaves no manager. We keep the reason so
+    /// `check` can surface "updater unavailable — reinstall" instead of a false
+    /// "up to date" that hides a dead updater.
+    init_error: Option<String>,
 }
 
 pub struct UpdateService {
@@ -59,15 +65,16 @@ pub struct UpdateService {
 
 impl UpdateService {
     pub fn new() -> Self {
-        let mgr = match resolve_manager() {
-            Ok(m) => m,
+        let (mgr, init_error) = match resolve_manager() {
+            Ok(Some(m)) => (Some(m), None),
+            Ok(None) => (None, Some("no update source configured".to_string())),
             Err(e) => {
                 log::warn!("UpdateService init: {e}");
-                None
+                (None, Some(e))
             }
         };
         Self {
-            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false }),
+            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, init_error }),
         }
     }
 
@@ -81,12 +88,39 @@ impl UpdateService {
         // check — the "click Check and it spins forever" bug. `download()`/
         // `apply()` already clone out; `check()` must match.
         let mgr = {
-            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
             match g.mgr.as_ref() {
                 Some(m) => m.clone(),
                 None => {
-                    log::info!("update check: no source configured");
-                    return Ok(None);
+                    // No manager — the install layout was unreadable at startup
+                    // (corrupted/hand-modified Velopack install: manifest missing).
+                    // Retry once in case the environment recovered; otherwise
+                    // surface a clear, actionable error rather than a false "up to
+                    // date" that silently hides a dead updater (the "it says I'm
+                    // current but never updates" failure on a broken install).
+                    match resolve_manager() {
+                        Ok(Some(m)) => {
+                            log::info!("update check: manager recovered on retry");
+                            g.mgr = Some(m.clone());
+                            g.init_error = None;
+                            m
+                        }
+                        recheck => {
+                            let reason = match recheck {
+                                Err(e) => e,
+                                _ => g
+                                    .init_error
+                                    .clone()
+                                    .unwrap_or_else(|| "update source unavailable".to_string()),
+                            };
+                            g.init_error = Some(reason.clone());
+                            log::error!("update check: updater unavailable — {reason}");
+                            return Err(format!(
+                                "Rift isn't properly installed for auto-update ({reason}). \
+                                 Reinstall from the latest Setup.exe to restore updates."
+                            ));
+                        }
+                    }
                 }
             }
         };
