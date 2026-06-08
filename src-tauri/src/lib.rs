@@ -165,6 +165,7 @@ pub fn run() {
             commands::download_update,
             commands::apply_pending_update,
             commands::assistant_auth_probe,
+            commands::assistant_open_login,
             commands::assistant_update_cli,
             commands::assistant_get_api_key_present,
             commands::assistant_set_api_key,

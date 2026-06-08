@@ -1576,6 +1576,45 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     Ok(out)
 }
 
+/// Open the Claude CLI's interactive sign-in in its OWN console window so a user
+/// who just hit a 401 can re-authenticate without leaving Rift. Spawns
+/// `<active claude> auth login` — subscription by default, `--console` for an
+/// Anthropic API (per-token) account — which opens the browser OAuth flow and
+/// prints progress in that console. Returns as soon as it's spawned; the
+/// frontend then polls `assistant_auth_probe` until the session flips. The new
+/// credentials land in the CLI's own store — the same one the probe reads and
+/// every turn spawns against — so a successful login clears the failure for
+/// real, not just in the UI. This is the in-app replacement for "go open a
+/// terminal and run `claude login`".
+#[tauri::command]
+pub fn assistant_open_login(console: bool) -> Result<(), String> {
+    let exe = resolve_claude_exe().ok_or(
+        "No Claude CLI found on this machine. Install Claude Code first, or add an API key in Settings → CLI session.",
+    )?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("auth").arg("login");
+    cmd.arg(if console { "--console" } else { "--claudeai" });
+    // Real OAuth flow — strip any inherited system key so login can't be
+    // shadowed into a different identity than the one turns run under (the same
+    // trap `claude_command()` guards against).
+    cmd.env_remove("ANTHROPIC_API_KEY");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Give the child its OWN console: the OAuth flow prints a URL + status
+        // the user may need to see. CREATE_NO_WINDOW (used for headless turns)
+        // would hide it with no way to follow along.
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        cmd.creation_flags(CREATE_NEW_CONSOLE);
+    }
+    // Detached on purpose: drop the Child handle. std's `Child::drop` does NOT
+    // kill the process (unlike tokio's kill_on_drop), so the sign-in keeps
+    // running in its console while Rift polls auth status.
+    cmd.spawn()
+        .map(|_| ())
+        .map_err(|e| format!("failed to start sign-in: {e}"))
+}
+
 /// Result of an in-app Claude CLI update attempt.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
