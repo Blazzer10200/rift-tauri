@@ -198,6 +198,41 @@
     }
   }
 
+  // ── Context compression (3c) ──
+  let compProxyDraft = $state("");
+  let compChecking = $state(false);
+  let compEnv = $state<{ proxyUrl: string; proxyReachable: boolean; headroomPresent: boolean; pythonPresent: boolean } | null>(null);
+  let compMsg = $state<string | null>(null);
+
+  async function toggleCompression(enabled: boolean) {
+    compMsg = null;
+    try {
+      await assistantStore.setCompression(enabled, compProxyDraft.trim() || null);
+    } catch (e) {
+      compMsg = `Failed: ${e}`;
+    }
+  }
+  async function saveCompressionProxy() {
+    compMsg = null;
+    try {
+      await assistantStore.setCompression(assistantStore.compressionEnabled, compProxyDraft.trim() || null);
+      compMsg = "Saved.";
+    } catch (e) {
+      compMsg = `Failed: ${e}`;
+    }
+  }
+  async function checkCompressionEnv() {
+    compChecking = true;
+    compMsg = null;
+    try {
+      compEnv = await assistantStore.compressionEnvCheck(compProxyDraft.trim() || null);
+    } catch (e) {
+      compMsg = `Check failed: ${e}`;
+    } finally {
+      compChecking = false;
+    }
+  }
+
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
   // always shows the true status even after the toolbar badge was dismissed.
@@ -271,6 +306,7 @@
     void assistantStore.init().then(() => {
       asstApiKeyDraft = "";
       asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
+      compProxyDraft = assistantStore.compressionProxyUrl ?? "";
     }).catch((e) => console.warn("assistantStore.init failed", e)); // F160: no unhandled rejection
     void stt.init();
     void loadAboutPaths();
@@ -731,6 +767,43 @@
                 </div>
                 {#if provMsg}<div class="st-note">{provMsg}</div>{/if}
               </div>
+            </div>
+          </div>
+
+          <div class="st-block">
+            <div class="st-block-label">Context compression (advanced)</div>
+            <div class="st-card">
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Route turns through a local compression proxy</div>
+                  <div class="st-row-desc">
+                    When on, Rift points <code>ANTHROPIC_BASE_URL</code> at a local proxy (e.g. <a href="https://github.com/chopratejas/headroom" target="_blank" rel="noreferrer">headroom</a>) that deterministically shrinks context before forwarding upstream — cutting tokens, and spend. The proxy is a <strong>soft dependency you run yourself</strong>; Rift never bundles or launches it. An active custom provider overrides this (both use the same routing seam).
+                  </div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={assistantStore.compressionEnabled} role="switch" aria-checked={assistantStore.compressionEnabled} aria-label="Enable context compression proxy" type="button" onclick={() => void toggleCompression(!assistantStore.compressionEnabled)}></button>
+                </div>
+              </div>
+              {#if assistantStore.compressionEnabled}
+                <div class="st-row">
+                  <div class="st-row-body">
+                    <div class="st-row-label">Proxy URL</div>
+                    <div class="st-row-desc">Leave blank for the headroom default (<code>{assistantStore.compressionDefaultUrl}</code>).</div>
+                  </div>
+                  <div class="st-row-ctl" style="gap:6px;">
+                    <input class="st-input mono" type="text" placeholder={assistantStore.compressionDefaultUrl} style="width:208px;" bind:value={compProxyDraft} autocomplete="off" spellcheck="false" />
+                    <button class="st-btn" type="button" onclick={() => void saveCompressionProxy()}>Save</button>
+                    <button class="st-btn" type="button" disabled={compChecking} onclick={() => void checkCompressionEnv()}>{compChecking ? "Testing…" : "Test"}</button>
+                  </div>
+                </div>
+                {#if compEnv}
+                  <div class="st-note">
+                    {#if compEnv.proxyReachable}<span class="st-pill ok"><span class="dot"></span>Proxy reachable</span>{:else}<span class="st-pill warn">No proxy at {compEnv.proxyUrl} — start it, then turns won't route until it's up</span>{/if}
+                    {#if compEnv.headroomPresent}<span class="st-pill ok"><span class="dot"></span>headroom on PATH</span>{:else if compEnv.pythonPresent}<span class="st-pill">Python found · install headroom to use it</span>{:else}<span class="st-pill warn">No headroom or Python on PATH</span>{/if}
+                  </div>
+                {/if}
+              {/if}
+              {#if compMsg}<div class="st-note">{compMsg}</div>{/if}
             </div>
           </div>
 
