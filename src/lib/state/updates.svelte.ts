@@ -158,6 +158,18 @@ class UpdateStore {
     } catch (e) {
       this.state = "available";
       this.downloadError = String(e);
+      // Never let an update failure look like "nothing happened": force the
+      // dialog open so the error card is visible, AND raise a sticky toast with
+      // the always-available manual fallback (grab it from GitHub directly).
+      this.dialogOpen = true;
+      this.clearToast();
+      toast.push({
+        severity: "danger",
+        title: "Update couldn't install",
+        detail: String(e),
+        sticky: true,
+        action: { label: "Get it on GitHub", onClick: () => void this.openReleasePage() },
+      });
     } finally {
       if (unlisten) unlisten();
     }
@@ -165,6 +177,20 @@ class UpdateStore {
 
   /** Back-compat alias — any "Install" caller routes through the same flow. */
   async applyNow() { await this.download(); }
+
+  /** Open the GitHub release page in the OS browser — the always-available
+   *  manual fallback when the in-app Velopack path fails on a given machine.
+   *  Only ever hands a real https URL to the opener (F47). */
+  async openReleasePage() {
+    const url = this.info?.releaseUrl;
+    if (!url || !/^https:\/\//i.test(url)) return;
+    try {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } catch (e) {
+      toast.push({ severity: "danger", title: "Couldn't open the release page", detail: String(e) });
+    }
+  }
 
   /** Snooze the current available version — toast + pill stay quiet until a
    *  newer version ships. Closes the dialog if open. */
