@@ -12,7 +12,7 @@
 This **completes the idea-phase arc** (Phases 0–3 all built). 3a+3b+3c done.
 
 ### RESUME HERE (next session)
-- **SHIP DECISION PENDING (asked user, awaiting answer):** bundle 3b (`db01c70`) + 3c (`0c34161`) as one release (suggest **v0.8.0**), or leave for a soak. Both committed + verified, repo clean, UNSHIPPED. Repo on v0.7.0.
+- **SHIP: HOLDING FOR A SOAK (user decision, cont.73).** 3b (`db01c70`) + 3c (`0c34161`) committed + verified + UNSHIPPED; repo on v0.7.0. Ship as a bundle (suggest **v0.8.0**) in a later dedicated session once they've soaked.
 - **To ship:** `pwsh scripts/bump.ps1 0.8.0` → write `docs/CHANGELOG.md` top entry (≤600w, must match version) + commit `Cargo.lock` → quit `rift-tauri.exe` (EXACT, never `rift*` glob) → `pwsh scripts/release.ps1`. Guardrails: THREE files + Cargo.lock lockstep or preflight bails; clean tree or `-Force`; vpk ver == velopack crate ver (`=1.2.0`); no PS5.1 stderr redirect.
 - Dev + cdp wrapper were stopped at session end.
 
