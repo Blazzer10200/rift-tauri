@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.8.6 — 2026-06-08 — chore: in-app updater apply-path test
+
+> **Why.** The full in-app `download → apply → relaunch` chain has never executed on any machine — every prior "update" was a manual Setup.exe install. This is a clean version-only bump so a client on a *freshly-installed* v0.8.5 (clean Velopack layout, launched from the Start Menu shortcut) can finally exercise the real path end-to-end against the live feed. No functional code change.
+
+**What's new.** Version bump only (0.8.5 → 0.8.6).
+
+**How to verify.** On a clean v0.8.5: open the update dialog, click **Download installer**, and let it run untouched. Expect progress → app closes → Velopack swaps files → relaunches onto v0.8.6. The rotating `rift.log` should show `update download: starting` → `update apply: scheduling swap` for the first time.
+
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
+
 ## v0.8.5 — 2026-06-08 — fix: corrupted install no longer masquerades as "up to date"
 
 > **Why.** Diagnosing a real "it detects the version but won't update" report (via the v0.8.1 `rift.log`), the root cause was a corrupted Velopack layout: `VelopackApp — NotInstalled("Could not auto-locate app manifest")`, so `UpdateManager::new` failed and the service held no manager. The old `check()` then returned `Ok(None)` — which the UI rendered as **"You're up to date."** A dead updater was lying that everything was fine. (The corruption itself comes from manual file swaps / launching a loose exe outside the managed `current\` dir — but the updater must *report* it, not hide it.)
