@@ -123,3 +123,43 @@ pub fn atomic_write_json(path: &std::path::Path, json: &str) -> std::io::Result<
         std::io::Error::other("atomic_write_json: rename failed")
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn safe_profile_key_keeps_safe_chars_and_strips_separators() {
+        // Allowed: alphanumerics + - _ . (the #126 dot fix keeps `foo` and
+        // `foo.v2` distinct).
+        assert_eq!(safe_profile_key("foo.v2"), "foo.v2");
+        assert_eq!(safe_profile_key("My-Profile_1"), "My-Profile_1");
+        assert_ne!(safe_profile_key("foo"), safe_profile_key("foo.v2"));
+        // Path separators + traversal chars are stripped, so the result can
+        // never escape its directory or carry a separator.
+        let cleaned = safe_profile_key("../../etc/passwd");
+        assert!(!cleaned.contains('/') && !cleaned.contains('\\'));
+        assert_eq!(safe_profile_key("a/b\\c d:e"), "abcde");
+        // Sanitizes-to-empty → sentinel, never an empty filename component.
+        assert_eq!(safe_profile_key("///"), "_empty");
+        assert_eq!(safe_profile_key(""), "_empty");
+    }
+
+    #[test]
+    fn atomic_write_json_round_trips_and_overwrites() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("snap.json");
+        atomic_write_json(&path, "{\"a\":1}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+        // Overwrite in place — readers must see the new content, no temp leak.
+        atomic_write_json(&path, "{\"b\":2}").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"b\":2}");
+        // No orphaned *.json.tmp left behind in the dir.
+        let leftover: Vec<_> = std::fs::read_dir(td.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftover.is_empty(), "temp files leaked: {leftover:?}");
+    }
+}

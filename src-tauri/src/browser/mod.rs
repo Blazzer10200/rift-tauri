@@ -231,3 +231,30 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
         full_len: raw.full_len,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_url_allows_only_web_schemes() {
+        assert!(parse_url("https://example.com").is_ok());
+        assert!(parse_url("http://example.com/path?q=1").is_ok());
+        assert!(parse_url("about:blank").is_ok());
+    }
+
+    #[test]
+    fn parse_url_blocks_dangerous_schemes() {
+        // file:// (disk exposure), javascript:/data: (script execution in the
+        // embedded webview) — all reachable from AI-generated links, all blocked.
+        for bad in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "data:text/html,<script>alert(1)</script>",
+        ] {
+            assert!(parse_url(bad).is_err(), "{bad} should be blocked");
+        }
+        // Not a URL at all → parse error, never silently accepted.
+        assert!(parse_url("not a url").is_err());
+    }
+}
