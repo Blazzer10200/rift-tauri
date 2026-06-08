@@ -395,7 +395,7 @@
                 class="recovery-btn"
                 type="button"
                 disabled={assistant.authChecking || assistant.loginInProgress}
-                onclick={() => assistant.refreshAuth()}
+                onclick={() => assistant.recheckAuth()}
               >
                 Re-check
               </button>

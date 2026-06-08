@@ -1871,6 +1871,19 @@ class AssistantStore {
     }
   }
 
+  /** Re-probe auth from the recovery banner. Unlike the bare `refreshAuth`, this
+   *  clears the error banner when the session comes back usable — so a user who
+   *  fixed auth out-of-band (or via the in-app sign-in) sees the wall disappear
+   *  instead of a stale 401 lingering until their next send. */
+  async recheckAuth() {
+    await this.refreshAuth();
+    const pill = this.auth?.pill;
+    if (pill === "green" || pill === "yellow") {
+      this.lastError = null;
+      this.lastNotice = "Auth looks good now — resend your message to continue.";
+    }
+  }
+
   async setApiKey(key: string | null) {
     const v = key && key.trim().length > 0 ? key.trim() : null;
     try {
