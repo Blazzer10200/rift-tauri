@@ -964,6 +964,9 @@ class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
   authError = $state<string | null>(null);
+  /** True while an in-app `claude auth login` is running + being polled. Drives
+   *  the recovery banner's "Signing in…" state. */
+  loginInProgress = $state(false);
   /** Epoch ms of the last completed auth probe (success or failure). Drives the
    *  "last checked Xm ago" freshness label in Settings → Assistant. */
   authLastProbed = $state<number | null>(null);
@@ -1827,6 +1830,44 @@ class AssistantStore {
     } finally {
       this.authChecking = false;
       this.authLastProbed = Date.now();
+    }
+  }
+
+  /** In-app sign-in recovery. Opens the Claude CLI's `auth login` in its own
+   *  console (browser OAuth), then polls the auth probe until the session flips
+   *  green — at which point the auth error is cleared and the user is told they
+   *  can retry. The credentials land in the CLI's own store, so this fixes the
+   *  401 for real (probe + every turn read the same store). `useConsole` picks
+   *  an Anthropic API account instead of the default claude.ai subscription. */
+  async startLogin(useConsole = false) {
+    if (this.loginInProgress) return;
+    this.loginInProgress = true;
+    try {
+      await invoke("assistant_open_login", { console: useConsole });
+    } catch (e) {
+      this.lastError = `Couldn't start sign-in: ${String(e)}`;
+      this.loginInProgress = false;
+      return;
+    }
+    // Poll the probe until the session is usable, or give up after ~3 min so a
+    // user who closes the login window without finishing isn't stuck "Signing
+    // in…" forever.
+    const deadline = Date.now() + 180_000;
+    try {
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 2500));
+        await this.refreshAuth();
+        const pill = this.auth?.pill;
+        if (pill === "green" || pill === "yellow") {
+          this.lastError = null;
+          this.lastNotice = "Signed in — you're good to go. Resend your message to continue.";
+          return;
+        }
+      }
+      this.lastNotice =
+        "Sign-in didn't complete. Finish in the console window that opened (or close it and try again), then resend.";
+    } finally {
+      this.loginInProgress = false;
     }
   }
 

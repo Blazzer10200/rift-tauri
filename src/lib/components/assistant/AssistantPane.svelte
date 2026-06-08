@@ -2,6 +2,7 @@
   import { tick, onDestroy } from "svelte";
   import { ChevronDown, Plus, X } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
@@ -27,6 +28,19 @@
   // Per-tab error renders in whichever pane owns the erroring tab, focused or
   // not — otherwise a background-pane send-failure is silent until refocus.
   const showError = $derived(!!lastError);
+  // Auth-class errors become an *actionable* recovery banner instead of a dead
+  // wall of text. A rejected API key routes to Settings (where it's cleared);
+  // a rejected/expired `claude login` routes to in-app sign-in.
+  const isKeyError = $derived(
+    !!lastError && /api key was rejected|configured api key/i.test(lastError),
+  );
+  const isAuthError = $derived(
+    !!lastError &&
+      (isKeyError ||
+        /\b401\b|authentication failed|not logged in|claude login|session was rejected|sign in there/i.test(
+          lastError,
+        )),
+  );
   // Open whenever the user toggled the panel and a tab exists — the panel now
   // has an Activity tab that always has something to show (live + empty-state),
   // so the old "only if there are context signals" gate no longer applies.
@@ -357,7 +371,38 @@
           <span class="notice-text">{assistant.lastNotice}</span>
         </button>
       {/if}
-      {#if showError}
+      {#if showError && isAuthError}
+        <div class="alert error recovery">
+          <span class="notice-icon">⚠</span>
+          <div class="recovery-body">
+            <span class="notice-text">{lastError}</span>
+            <div class="recovery-actions">
+              {#if isKeyError}
+                <button class="recovery-btn primary" type="button" onclick={() => workspace.setActive("settings")}>
+                  Open Settings
+                </button>
+              {:else}
+                <button
+                  class="recovery-btn primary"
+                  type="button"
+                  disabled={assistant.loginInProgress}
+                  onclick={() => assistant.startLogin()}
+                >
+                  {assistant.loginInProgress ? "Signing in…" : "Sign in"}
+                </button>
+              {/if}
+              <button
+                class="recovery-btn"
+                type="button"
+                disabled={assistant.authChecking || assistant.loginInProgress}
+                onclick={() => assistant.refreshAuth()}
+              >
+                Re-check
+              </button>
+            </div>
+          </div>
+        </div>
+      {:else if showError}
         <div class="alert error">
           <span class="notice-icon">⚠</span>
           <span class="notice-text">{lastError}</span>
@@ -853,6 +898,35 @@
     flex-shrink: 0;
   }
   .notice-text { flex: 1; line-height: 1.45; }
+  /* Auth recovery: error text stacked over an action row. */
+  .alert.error.recovery { align-items: flex-start; }
+  .recovery-body { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .recovery-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .recovery-btn {
+    font: inherit;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+    padding: 4px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
+    background: color-mix(in oklab, var(--danger) 12%, var(--surface));
+    color: oklch(0.92 0.05 22);
+    transition: background 140ms ease-out, border-color 140ms ease-out, opacity 140ms ease-out;
+  }
+  .recovery-btn:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--danger) 20%, var(--surface));
+    border-color: color-mix(in oklab, var(--danger) 60%, transparent);
+  }
+  .recovery-btn.primary {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: oklch(0.99 0.01 22);
+  }
+  .recovery-btn.primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--danger) 88%, white);
+  }
+  .recovery-btn:disabled { opacity: 0.6; cursor: default; }
   @media (prefers-reduced-motion: reduce) {
     .alert { animation: none; }
   }
