@@ -645,3 +645,169 @@ pub fn run_stdio() {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Temp workspace with a small fixture tree:
+    ///   a.txt ("hello world\n"), sub/b.txt ("nested\n"),
+    ///   node_modules/skip.txt ("hello\n"), bin (NUL byte + "hello").
+    /// Returns the guard (drop = cleanup) and the canonicalized root — matching
+    /// the form `load_roots` produces.
+    fn workspace() -> (tempfile::TempDir, PathBuf) {
+        let td = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(td.path()).expect("canonicalize");
+        std::fs::write(root.join("a.txt"), "hello world\n").unwrap();
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub").join("b.txt"), "nested\n").unwrap();
+        std::fs::create_dir(root.join("node_modules")).unwrap();
+        std::fs::write(root.join("node_modules").join("skip.txt"), "hello\n").unwrap();
+        std::fs::write(root.join("bin"), b"\0\0hello").unwrap();
+        (td, root)
+    }
+
+    // ─── resolve_under_roots — the path-containment boundary ──────────────────
+
+    #[test]
+    fn resolve_relative_and_absolute_under_root() {
+        let (_td, root) = workspace();
+        let roots = vec![root.clone()];
+        assert!(resolve_under_roots("a.txt", &roots).is_ok());
+        assert!(resolve_under_roots("sub/b.txt", &roots).is_ok());
+        let abs = root.join("a.txt");
+        assert!(resolve_under_roots(abs.to_str().unwrap(), &roots).is_ok());
+    }
+
+    #[test]
+    fn resolve_rejects_outside_root() {
+        let (_td, root) = workspace();
+        let roots = vec![root.clone()];
+        // Parent-dir escape: `..` resolves to the temp parent, which is not under
+        // root — the canonicalize-then-starts_with guard must reject it.
+        assert!(resolve_under_roots("..", &roots).is_err());
+        // An absolute path in a *different* temp dir is outside every root.
+        let (_other_td, other) = workspace();
+        let outside = other.join("a.txt");
+        assert!(resolve_under_roots(outside.to_str().unwrap(), &roots).is_err());
+    }
+
+    #[test]
+    fn resolve_errors_on_empty_roots_and_missing_path() {
+        let (_td, root) = workspace();
+        assert!(resolve_under_roots("a.txt", &[]).is_err());
+        // Non-existent path can't be canonicalized → error (never silently OK).
+        assert!(resolve_under_roots("nope.txt", &[root]).is_err());
+    }
+
+    // ─── read_file ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn read_file_returns_contents() {
+        let (_td, root) = workspace();
+        let out = tool_read_file(&json!({ "path": "a.txt" }), &[root]).unwrap();
+        assert_eq!(out, "hello world\n");
+    }
+
+    #[test]
+    fn read_file_rejects_directory_and_oversize() {
+        let (_td, root) = workspace();
+        let roots = vec![root.clone()];
+        assert!(tool_read_file(&json!({ "path": "sub" }), &roots).unwrap_err().contains("not a regular file"));
+        // > 500 KB → rejected with a size message.
+        std::fs::write(root.join("big.bin"), vec![b'x'; (MAX_READ_BYTES as usize) + 10]).unwrap();
+        let err = tool_read_file(&json!({ "path": "big.bin" }), &roots).unwrap_err();
+        assert!(err.contains("limit"), "got: {err}");
+    }
+
+    #[test]
+    fn read_file_rejects_outside_root() {
+        let (_td, root) = workspace();
+        assert!(tool_read_file(&json!({ "path": ".." }), &[root]).is_err());
+    }
+
+    // ─── list_dir ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn list_dir_lists_entries() {
+        let (_td, root) = workspace();
+        let out = tool_list_dir(&json!({ "path": "." }), &[root]).unwrap();
+        assert!(out.contains("a.txt"), "got: {out}");
+        assert!(out.contains("sub/"), "dirs should carry a trailing slash: {out}");
+    }
+
+    #[test]
+    fn list_dir_rejects_file() {
+        let (_td, root) = workspace();
+        let err = tool_list_dir(&json!({ "path": "a.txt" }), &[root]).unwrap_err();
+        assert!(err.contains("not a directory"), "got: {err}");
+    }
+
+    // ─── grep ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn grep_finds_match_and_reports_path() {
+        let (_td, root) = workspace();
+        let out = tool_grep(&json!({ "pattern": "hello world" }), &[root]).unwrap();
+        assert!(out.contains("a.txt"), "got: {out}");
+    }
+
+    #[test]
+    fn grep_skips_skip_dirs_and_binary() {
+        let (_td, root) = workspace();
+        // "hello" lives in a.txt, node_modules/skip.txt, and the binary `bin`.
+        // Only a.txt should match: node_modules is skipped, bin is NUL-probed out.
+        let out = tool_grep(&json!({ "pattern": "hello" }), &[root]).unwrap();
+        assert!(out.contains("a.txt"), "got: {out}");
+        assert!(!out.contains("node_modules"), "SKIP_DIRS leaked: {out}");
+        assert!(!out.contains("bin:"), "binary file matched: {out}");
+    }
+
+    #[test]
+    fn grep_glob_filters_by_extension() {
+        let (_td, root) = workspace();
+        let roots = vec![root];
+        // `*.txt` keeps a.txt; `*.rs` matches nothing in the fixture.
+        assert!(tool_grep(&json!({ "pattern": "hello", "glob": "*.txt" }), &roots).unwrap().contains("a.txt"));
+        let none = tool_grep(&json!({ "pattern": "hello", "glob": "*.rs" }), &roots).unwrap();
+        assert!(none.contains("no matches"), "got: {none}");
+    }
+
+    #[test]
+    fn grep_rejects_bad_regex_and_long_pattern() {
+        let (_td, root) = workspace();
+        let roots = vec![root];
+        assert!(tool_grep(&json!({ "pattern": "(" }), &roots).is_err());
+        let long = "a".repeat(4097);
+        assert!(tool_grep(&json!({ "pattern": long }), &roots).unwrap_err().contains("too long"));
+    }
+
+    // ─── glob_to_regex (pure) ─────────────────────────────────────────────────
+
+    #[test]
+    fn glob_compiles_expected_semantics() {
+        let star = glob_to_regex("*.rs").unwrap();
+        assert!(star.is_match("foo.rs"));
+        assert!(!star.is_match("foo.txt"));
+        assert!(!star.is_match("a/foo.rs"), "single * must not cross '/'");
+        let double = glob_to_regex("src/**/*.svelte").unwrap();
+        assert!(double.is_match("src/lib/x.svelte"), "** must cross '/'");
+        let q = glob_to_regex("?.rs").unwrap();
+        assert!(q.is_match("a.rs"));
+        assert!(!q.is_match("ab.rs"));
+        // `.` is a literal, not a wildcard.
+        let dot = glob_to_regex("a.txt").unwrap();
+        assert!(!dot.is_match("axtxt"), "'.' must be escaped to a literal");
+    }
+
+    // ─── trust_rank (pure, security-relevant ordering) ────────────────────────
+
+    #[test]
+    fn trust_rank_orders_and_floors() {
+        assert!(trust_rank("full") > trust_rank("standard"));
+        assert!(trust_rank("standard") > trust_rank("readonly"));
+        // Unknown / unset must floor to readonly (0), never escalate.
+        assert_eq!(trust_rank("garbage"), trust_rank("readonly"));
+        assert_eq!(trust_rank("readonly"), 0);
+    }
+}

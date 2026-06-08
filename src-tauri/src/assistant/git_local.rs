@@ -468,4 +468,160 @@ mod tests {
         let big = "x".repeat(MAX_MSG_BYTES + 1);
         assert!(validate_message(&big).is_err());
     }
+
+    // ─── integration: real `git` against a throwaway repo ─────────────────────
+    //
+    // These exercise the tool entrypoints end-to-end (run_git, output parsing,
+    // staging logic, dirty/branch helpers, and the security gates) — the surface
+    // the validator unit tests above can't reach. All offline; each test owns its
+    // own temp repo. Skipped if `git` isn't on PATH so the suite stays green on a
+    // machine without it.
+
+    use serde_json::json;
+
+    fn git_available() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
+    /// Init a temp repo with one commit (`README.md`). Returns the TempDir guard
+    /// (drop = cleanup, must stay in scope) and the canonicalized root — matching
+    /// the form `validate_path`'s canonicalize check produces on Windows.
+    fn init_repo() -> (tempfile::TempDir, PathBuf) {
+        let td = tempfile::tempdir().expect("tempdir");
+        let root = std::fs::canonicalize(td.path()).expect("canonicalize");
+        run_git(&root, &["init", "-q"]).expect("git init");
+        // Local identity + no signing so commits succeed regardless of the host's
+        // global git config (a machine that forces gpgsign would otherwise fail).
+        run_git(&root, &["config", "user.email", "test@rift.local"]).unwrap();
+        run_git(&root, &["config", "user.name", "Rift Test"]).unwrap();
+        run_git(&root, &["config", "commit.gpgsign", "false"]).unwrap();
+        std::fs::write(root.join("README.md"), "hello\n").unwrap();
+        run_git(&root, &["add", "-A"]).unwrap();
+        run_git(&root, &["commit", "-q", "-m", "init"]).unwrap();
+        (td, root)
+    }
+
+    #[test]
+    fn status_reports_clean_then_dirty() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let roots = vec![root.clone()];
+        let clean = tool_git_status(&json!({}), &roots).unwrap();
+        assert!(clean.contains("clean"), "expected clean tree, got: {clean}");
+        std::fs::write(root.join("new.txt"), "x").unwrap();
+        let dirty = tool_git_status(&json!({}), &roots).unwrap();
+        assert!(dirty.contains("changed file"), "expected change, got: {dirty}");
+        assert!(dirty.contains("new.txt"), "expected new.txt, got: {dirty}");
+    }
+
+    #[test]
+    fn log_lists_the_initial_commit() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let out = tool_git_log(&json!({}), &vec![root]).unwrap();
+        assert!(out.contains("init"), "log missing initial commit: {out}");
+    }
+
+    #[test]
+    fn log_max_zero_rejected() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let err = tool_git_log(&json!({ "max": 0 }), &vec![root]).unwrap_err();
+        assert!(err.contains("max must be"), "got: {err}");
+    }
+
+    #[test]
+    fn commit_all_stages_everything() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let roots = vec![root.clone()];
+        std::fs::write(root.join("f2.txt"), "two\n").unwrap();
+        let out = tool_git_commit(&json!({ "all": true, "message": "add f2" }), &roots).unwrap();
+        assert!(!out.is_empty());
+        assert!(!is_dirty(&root).unwrap(), "tree should be clean after commit -A");
+        let log = tool_git_log(&json!({}), &roots).unwrap();
+        assert!(log.contains("add f2"), "log missing new commit: {log}");
+    }
+
+    #[test]
+    fn commit_explicit_paths_leaves_others_unstaged() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let roots = vec![root.clone()];
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        std::fs::write(root.join("b.txt"), "b\n").unwrap();
+        // Commit only a.txt — exercises validate_path on a real (existing) file.
+        tool_git_commit(&json!({ "paths": ["a.txt"], "message": "add a" }), &roots).unwrap();
+        // b.txt is still untracked → tree dirty.
+        assert!(is_dirty(&root).unwrap(), "b.txt should remain unstaged");
+        let status = tool_git_status(&json!({}), &roots).unwrap();
+        assert!(status.contains("b.txt"), "b.txt should still show: {status}");
+    }
+
+    #[test]
+    fn commit_with_nothing_staged_errors() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let err = tool_git_commit(&json!({ "all": true, "message": "noop" }), &vec![root]).unwrap_err();
+        assert!(err.contains("nothing to commit"), "got: {err}");
+    }
+
+    #[test]
+    fn diff_shows_unstaged_then_nothing() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let roots = vec![root.clone()];
+        let none = tool_git_diff(&json!({}), &roots).unwrap();
+        assert!(none.contains("No unstaged"), "expected no diff, got: {none}");
+        std::fs::write(root.join("README.md"), "hello\nworld\n").unwrap();
+        let diff = tool_git_diff(&json!({}), &roots).unwrap();
+        assert!(diff.contains("+world"), "diff missing addition: {diff}");
+    }
+
+    #[test]
+    fn pull_refuses_dirty_tree() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        std::fs::write(root.join("dirty.txt"), "x").unwrap();
+        let err = tool_git_pull(&json!({}), &vec![root]).unwrap_err();
+        assert!(err.contains("dirty"), "expected dirty refusal, got: {err}");
+    }
+
+    #[test]
+    fn push_force_is_refused() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let err = tool_git_push(&json!({ "force": true }), &vec![root]).unwrap_err();
+        assert!(err.contains("force push is not permitted"), "got: {err}");
+    }
+
+    #[test]
+    fn push_without_remote_fails_cleanly() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        // No `origin` configured → push fails fast (GIT_TERMINAL_PROMPT=0, no
+        // network hang). Exercises current_branch() + the push arg path.
+        let err = tool_git_push(&json!({}), &vec![root]).unwrap_err();
+        assert!(err.contains("git push failed"), "got: {err}");
+    }
+
+    #[test]
+    fn current_branch_is_valid() {
+        if !git_available() { return; }
+        let (_td, root) = init_repo();
+        let b = current_branch(&root).unwrap();
+        assert!(!b.is_empty() && b != "HEAD", "unexpected branch: {b}");
+    }
+
+    #[test]
+    fn no_workspace_root_errors() {
+        let err = tool_git_status(&json!({}), &[]).unwrap_err();
+        assert!(err.contains("no workspace root"), "got: {err}");
+    }
 }
