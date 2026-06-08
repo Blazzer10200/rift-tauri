@@ -32,9 +32,9 @@
 
 #### 21. Test coverage — thin after the pure-assistant rip
 
-- **Where (2026-06-04):** ~9 Rust tests remain (`assistant/git_local.rs`, `stt/vad.rs`, `stt/whisper.rs`) + 1 vitest file (`src/lib/state/assistant.test.ts`, mocks Tauri IPC over the assistant store). The former 115-test lib suite + 7 live-SFTP `#[ignore]` integration tests + the `DriftScanner`/`SftpOps` mock layer were all removed with the sync engine.
-- **Symptom:** the surviving high-risk surface — the per-turn stream/reader in `assistant/mod.rs` and the store orchestrator in `assistant.svelte.ts` — has no end-to-end coverage. A regression in the stream pump or the send/queue/steer path can break a turn silently.
-- **Fix sketch:** build a conversation-playback harness (feed recorded NDJSON frames through the reader + store) — also the unblocker for the #20 M8/M9 extractions. Then cover the git_local MCP tools against a throwaway repo.
+- **Where (re-measured 2026-06-07):** Rust lib suite now **47 tests** (was ~9). Added 2026-06-07 (`756c95b`, `6d3efc2`): 12 `git_local` integration tests (real `git` against throwaway temp repos — status/log/diff/commit + force-push/dirty-pull gates), 14 `mcp_server` tests (was **zero** — `resolve_under_roots` containment, read_file/list_dir/grep incl. SKIP_DIRS+binary+glob, `glob_to_regex`, `trust_rank`), 4 `mod.rs` pure-validator tests (semver/trust/perm-mode/compression). Plus the pre-existing `stt/*`, `swarm`, `usage::pricing` tests + 1 vitest file (`assistant.test.ts`).
+- **Symptom (remaining):** the **per-turn stream/reader in `assistant/mod.rs`** and the **store orchestrator in `assistant.svelte.ts`** still have no end-to-end coverage. A regression in the stream pump or the send/queue/steer path can still break a turn silently. (The MCP tool surface + security gates are now covered — that half is done.)
+- **Fix sketch (remaining):** build a conversation-playback harness (feed recorded NDJSON frames through the reader + store) — also the unblocker for the #20 M8/M9 extractions. ~~Then cover the git_local MCP tools against a throwaway repo.~~ (done 2026-06-07)
 
 ### Tier 2 — code-complete, needs live-verify
 
