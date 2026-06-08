@@ -2,17 +2,18 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-08 (cont. 74) — SHIPPED v0.8.0 (auth-recovery + edit-swarm + compression + test coverage)
+## Session 2026-06-08 (cont. 75) — SHIPPED v0.8.1 (app-update observability hotfix)
 
-**Auth recovery (SHIPPED v0.8.0, `9c468a4`+`2d72af8`).** Root cause of the collaborator's dead-end 401: `claude auth status` reports `loggedIn:true` for a stale OAuth token the API rejects → send-gate passes, turn 401s. Fix: backend `assistant_open_login(console)` (`mod.rs`/`lib.rs`) spawns `claude auth login` in its OWN console (`CREATE_NEW_CONSOLE`); creds land in the CLI's store → real fix. `AssistantPane.svelte` actionable banner [Sign in]/[Open Settings]/[Re-check]; `startLogin()` polls probe→green + clears. CDP-verified (not the real login spawn).
+**Update-click "does nothing" report (user on v0.7.0).** Exhaustively cleared the update *infrastructure*: v0.8.0 nupkg byte-perfect (size+SHA1+SHA256 == feed), engine+apply both work (velopack_Rift.log shows clean 0.6.3 apply), and every update-flow file is **byte-identical v0.7.0→HEAD** + reads correct (commands registered/managed, capabilities fine). No 0.8.0 nupkg ever staged in `packages/` → failure is at check/download, never reached apply. Couldn't repro (prod exposes no CDP; **no persistent app log** — in-process Velopack logs go to stderr = `/dev/null` in GUI prod). **That invisibility WAS the bug** → recurred undiagnosed.
 
-**Test coverage (`756c95b`→`d929408`, shipped v0.8.0).** Rust 15→61, vitest 22→27 — covered ZERO-test MCP/git/validator/usage/browser/paths/stt surfaces. **#21 half done; stream-pump open** (`mod.rs` ~2374/2685/3750, needs playback harness → also unblocks #20 M8/M9).
+**Fix (SHIPPED v0.8.1, `5845487`, pushed origin + published rift-releases).** (1) `diagnostics::LogForwarder` now has a rotating file sink → `<appLogDir>/rift.log` (5MB roll), captures Velopack internals + all `log` records. (2) `update_service` explicit info/error markers around check/download/apply. (3) `updates.svelte.ts` download failure forces dialog open + sticky toast w/ **[Get it on GitHub]** manual-install fallback → never silent, never stuck.
 
 ### RESUME HERE (next session)
-- **SHIPPED v0.8.0 (2026-06-08, release commit `5a4a2d5`):** auth-recovery + 3b edit-swarm + 3c compression + test coverage, published to `rift-releases` (Setup.exe + `Rift-0.8.0-full.nupkg`). Clients auto-update on next launch / 6h Velopack check. Repo now on v0.8.0.
-- **⚠️ Killed the user's PROD app TWICE this arc** (name collision: post-Velopack the installed app AND dev binary are BOTH `rift-tauri.exe`). Rule fixed in project CLAUDE.md → **kill dev by PID only, never `taskkill /IM rift-tauri.exe`.** v0.8.0 build ran fine alongside the running app (build → `target/`, not `%LOCALAPPDATA%`), so no quit needed.
-- **Release gotcha (new):** never wrap `release.ps1` with `*>&1`/`Tee` under PS5.1 — `tauri build`'s informational stderr wraps as `NativeCommandError` and `$ErrorActionPreference='Stop'` aborts it. Run bare; tool captures stderr. (No `pwsh` on PATH — use the PowerShell 5.1 tool.)
-- **Open:** #21 stream-pump playback harness (also unblocks #20 M8/M9); the in-app `[Sign in]` spawn path is only compile/CDP-verified, not a real logged-out round-trip.
+- **SHIPPED v0.8.1 (release `5845487`, tag v0.8.1):** Setup.exe + `Rift-0.8.1-full.nupkg` on `rift-releases`. **User will manually run Setup.exe** (broken v0.7.0 updater can't self-deliver). After they're on v0.8.1: if any future update fails, `rift.log` in Settings→Logs has the exact error — **ask them for it to root-cause the real download failure** (still unknown; only made observable).
+- **Open thread:** the actual v0.7.0→v0.8.0 download failure cause is NOT yet found — v0.8.1 only instruments it. Next datapoint = the user's `rift.log` after a failed click on v0.8.1+.
+- **Release gotcha (reconfirmed this session):** never redirect `release.ps1` streams (`*>`/`*>&1`/`Tee`) under PS5.1 — `tauri build`'s stderr wraps as `NativeCommandError` + `Stop` aborts at first cargo line. **Run bare; the background runner captures output itself.** (Re-tripped it via `*> file`, then succeeded bare.)
+- **⚠️ Kill dev by PID only** (post-Velopack prod app + dev binary both `rift-tauri.exe`). Build ran fine alongside running prod (→`target/`, not `%LOCALAPPDATA%`).
+- **Carried open:** #21 stream-pump playback harness (unblocks #20 M8/M9); in-app `[Sign in]` only compile/CDP-verified.
 
 ## Prior arcs — detail in `git log`
 cont.73 Phase 3c compression toggle (`0c34161`) via the `ANTHROPIC_BASE_URL` seam — completes the idea-phase arc (3a+3b+3c), all shipped in v0.8.0. cont.72 SHIPPED v0.7.0 (`f687873`, cost cockpit + multi-provider + insights) + Phase 3b edit-swarm (`db01c70`, `swarm/mod.rs` + Harness→Swarm sub-tab). cont.71 Phase 1+2 (`1205f12`); 3b cleanup safety in [edit-swarm-safety-layer.md](design/edit-swarm-safety-layer.md) §4+§7. v0.6.5 (cont.69) `c1cc817`; v0.6.4 (cont.65) 401 fix. release.ps1 gotchas → project CLAUDE.md.
