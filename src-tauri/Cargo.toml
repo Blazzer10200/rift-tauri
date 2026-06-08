@@ -32,6 +32,11 @@ whisper-cuda = ["whisper-rs", "whisper-rs/cuda"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+# Throwaway temp dirs for git_local integration tests (real `git` against a
+# scratch repo). Already in the lock tree transitively; pinned to that version.
+tempfile = "3.27"
+
 [dependencies]
 # `unstable` gates the multiwebview API (Window::add_child) used to embed the
 # in-app browser as a native child webview docked beside the chat. Non-semver-
