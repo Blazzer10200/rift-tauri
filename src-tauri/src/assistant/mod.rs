@@ -708,6 +708,19 @@ struct AssistantConfig {
     /// `id` of the provider that routes turns. `None` = Anthropic (no custom endpoint).
     #[serde(default)]
     active_provider_id: Option<String>,
+    /// 3c compression toggle (headroom-style local proxy). When `true`,
+    /// `assistant_send` points `ANTHROPIC_BASE_URL` at a local compression proxy
+    /// that deterministically shrinks context before forwarding upstream. Opt-in,
+    /// OFF by default. The Python proxy runtime is a SOFT dependency Rift never
+    /// bundles or spawns — the user runs it (e.g. `headroom serve`); Rift only
+    /// owns the env seam + a reachability check. An active custom provider wins
+    /// the same seam, so compression is bypassed for custom-provider turns.
+    #[serde(default)]
+    compression_enabled: Option<bool>,
+    /// Local compression proxy URL. `None` = the headroom default
+    /// (`http://127.0.0.1:8787`). Only consulted when `compression_enabled`.
+    #[serde(default)]
+    compression_proxy_url: Option<String>,
 }
 
 /// One saved custom-provider endpoint. `key_ref` is the keychain entry name
@@ -2006,6 +2019,141 @@ pub fn assistant_set_active_provider(id: Option<String>) -> Result<(), String> {
     }
     cfg.active_provider_id = id;
     save_config(&cfg)
+}
+
+// ── 3c compression toggle (headroom-style local proxy) ──
+
+/// Default local compression proxy URL — headroom's `serve` port. The user can
+/// override it (any Anthropic-compatible compressing proxy works on this seam).
+const DEFAULT_COMPRESSION_PROXY: &str = "http://127.0.0.1:8787";
+
+/// The effective proxy URL when the compression toggle is on, else `None`.
+/// Resolution: explicit `compression_proxy_url` (trimmed, non-empty) → default.
+fn resolve_compression(cfg: &AssistantConfig) -> Option<String> {
+    if cfg.compression_enabled != Some(true) {
+        return None;
+    }
+    Some(
+        cfg.compression_proxy_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(DEFAULT_COMPRESSION_PROXY)
+            .to_string(),
+    )
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressionConfig {
+    pub enabled: bool,
+    /// `None` = use the default proxy URL (surfaced separately as `default_url`).
+    pub proxy_url: Option<String>,
+    pub default_url: String,
+}
+
+#[tauri::command]
+pub fn assistant_get_compression() -> Result<CompressionConfig, String> {
+    let cfg = load_config();
+    Ok(CompressionConfig {
+        enabled: cfg.compression_enabled == Some(true),
+        proxy_url: cfg.compression_proxy_url.filter(|s| !s.trim().is_empty()),
+        default_url: DEFAULT_COMPRESSION_PROXY.to_string(),
+    })
+}
+
+/// Persist the compression toggle + optional custom proxy URL. Empty/blank
+/// `proxy_url` clears the override (falls back to the default at send time).
+#[tauri::command]
+pub fn assistant_set_compression(enabled: bool, proxy_url: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let v = proxy_url.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref u) = v {
+        if !(u.starts_with("http://") || u.starts_with("https://")) {
+            return Err("proxy_url must start with http:// or https://".into());
+        }
+    }
+    let mut cfg = load_config();
+    cfg.compression_enabled = Some(enabled);
+    cfg.compression_proxy_url = v;
+    save_config(&cfg)
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompressionEnv {
+    /// The URL that was probed (resolved override → default).
+    pub proxy_url: String,
+    /// A TCP listener answered at the proxy host:port.
+    pub proxy_reachable: bool,
+    /// `headroom` resolves on PATH (the reference compressor runtime).
+    pub headroom_present: bool,
+    /// A Python interpreter resolves on PATH (headroom's soft runtime dep).
+    pub python_present: bool,
+}
+
+/// Probe whether a local compression proxy is reachable + whether the headroom
+/// runtime looks installed. Pure observation — never spawns or installs anything.
+#[tauri::command]
+pub async fn compression_env_check(proxy_url: Option<String>) -> CompressionEnv {
+    let url = proxy_url
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| DEFAULT_COMPRESSION_PROXY.to_string());
+    let probe_url = url.clone();
+    let reachable = tokio::task::spawn_blocking(move || probe_tcp(&probe_url))
+        .await
+        .unwrap_or(false);
+    CompressionEnv {
+        proxy_reachable: reachable,
+        headroom_present: which_on_path("headroom"),
+        python_present: which_on_path("python") || which_on_path("python3"),
+        proxy_url: url,
+    }
+}
+
+/// Best-effort TCP connect to the host:port of an http(s) URL with a short
+/// timeout. Used only as a reachability hint for the compression proxy.
+fn probe_tcp(url: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    let https = url.starts_with("https://");
+    let rest = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .unwrap_or(url);
+    let authority = rest.split('/').next().unwrap_or(rest);
+    if authority.is_empty() {
+        return false;
+    }
+    let addr = if authority.contains(':') {
+        authority.to_string()
+    } else {
+        format!("{authority}:{}", if https { 443 } else { 80 })
+    };
+    match addr.to_socket_addrs() {
+        Ok(mut addrs) => addrs.next().is_some_and(|a| {
+            std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(600)).is_ok()
+        }),
+        Err(_) => false,
+    }
+}
+
+/// `true` if `program` resolves via `where`/`which` (PATHEXT-aware on Windows).
+fn which_on_path(program: &str) -> bool {
+    let (cmd_name, args): (&str, &[&str]) = if cfg!(windows) {
+        ("where.exe", &[program])
+    } else {
+        ("which", &[program])
+    };
+    let mut cmd = std::process::Command::new(cmd_name);
+    cmd.args(args).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd.status().map(|s| s.success()).unwrap_or(false)
 }
 
 /// Mint a stable, filesystem/keychain-safe id from the provider name, deduped
@@ -3386,8 +3534,15 @@ pub async fn assistant_send(
     }
 
     // June-15 hedge: route this turn to a custom Anthropic-compatible endpoint when set.
+    // 3c: with no custom provider active, an enabled compression toggle routes the turn
+    // through the local compression proxy instead (it forwards upstream to Anthropic).
+    // Both can't own ANTHROPIC_BASE_URL — the custom provider wins the seam.
+    let compression_base = if custom_base.is_none() { resolve_compression(&cfg) } else { None };
     if let Some(ref base) = custom_base {
         cmd.env("ANTHROPIC_BASE_URL", base);
+    } else if let Some(ref base) = compression_base {
+        cmd.env("ANTHROPIC_BASE_URL", base);
+        log::info!("assistant_send: routing turn through compression proxy {base}");
     }
     if use_api_key {
         // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly. The

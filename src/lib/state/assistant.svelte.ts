@@ -1213,6 +1213,13 @@ class AssistantStore {
   // Flips true after providers (+ legacy fields) are fetched — distinct from
   // configLoaded (set earlier), so the Settings draft-seed waits for real values.
   providerConfigLoaded = $state<boolean>(false);
+  // 3c compression toggle (headroom-style local proxy). Off by default; the
+  // Python proxy runtime is a soft dep Rift never bundles or spawns. When on
+  // AND no custom provider is active, turns route through the proxy via
+  // ANTHROPIC_BASE_URL. `compressionProxyUrl` null = use `compressionDefaultUrl`.
+  compressionEnabled = $state<boolean>(false);
+  compressionProxyUrl = $state<string | null>(null);
+  compressionDefaultUrl = $state<string>("http://127.0.0.1:8787");
 
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
@@ -1501,6 +1508,16 @@ class AssistantStore {
       console.warn("assistant_list_providers failed", e);
     } finally {
       this.providerConfigLoaded = true;
+    }
+    try {
+      const c = await invoke<{ enabled: boolean; proxyUrl: string | null; defaultUrl: string }>(
+        "assistant_get_compression",
+      );
+      this.compressionEnabled = c.enabled;
+      this.compressionProxyUrl = c.proxyUrl;
+      this.compressionDefaultUrl = c.defaultUrl;
+    } catch (e) {
+      console.warn("assistant_get_compression failed", e);
     }
     this.unlistens.push(
       await listen<{ session_id: string; prompt: string }>(
@@ -1941,6 +1958,27 @@ class AssistantStore {
       this.lastNotice = String(e);
       throw e;
     }
+  }
+
+  // ── 3c compression toggle ──
+  async setCompression(enabled: boolean, proxyUrl: string | null) {
+    const v = proxyUrl && proxyUrl.trim().length > 0 ? proxyUrl.trim() : null;
+    try {
+      await invoke("assistant_set_compression", { enabled, proxyUrl: v });
+      this.compressionEnabled = enabled;
+      this.compressionProxyUrl = v;
+    } catch (e) {
+      this.lastNotice = String(e);
+      throw e;
+    }
+  }
+
+  /** Probe proxy reachability + headroom runtime presence. Pure observation. */
+  async compressionEnvCheck(
+    proxyUrl: string | null,
+  ): Promise<{ proxyUrl: string; proxyReachable: boolean; headroomPresent: boolean; pythonPresent: boolean }> {
+    const v = proxyUrl && proxyUrl.trim().length > 0 ? proxyUrl.trim() : null;
+    return await invoke("compression_env_check", { proxyUrl: v });
   }
 
   async send(prompt: string) {
