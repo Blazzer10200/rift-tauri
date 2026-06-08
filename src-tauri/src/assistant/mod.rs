@@ -4193,3 +4193,57 @@ pub async fn assistant_steer(session_id: String, text: String) -> Result<String,
         Err(_) => Ok("no_active_turn".into()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn semver_parses_and_tolerates_prefixes() {
+        assert_eq!(parse_semver("1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_semver("v0.7.0"), Some((0, 7, 0)));
+        // Embedded in a longer string (e.g. `--version` banner output).
+        assert_eq!(parse_semver("claude 1.10.0 (Claude Code)"), Some((1, 10, 0)));
+        assert_eq!(parse_semver("not a version"), None);
+        assert_eq!(parse_semver("1.2"), None, "needs all three components");
+    }
+
+    #[test]
+    fn trust_level_allowlist_and_resolution() {
+        assert!(is_valid_trust_level("readonly"));
+        assert!(is_valid_trust_level("standard"));
+        assert!(is_valid_trust_level("full"));
+        assert!(!is_valid_trust_level("admin"));
+        assert!(!is_valid_trust_level(""));
+        // Unset or garbage must floor to readonly — never escalate.
+        assert_eq!(effective_trust_level(&None), "readonly");
+        assert_eq!(effective_trust_level(&Some("garbage".into())), "readonly");
+        assert_eq!(effective_trust_level(&Some("standard".into())), "standard");
+    }
+
+    #[test]
+    fn permission_mode_allowlist_excludes_dontask() {
+        for ok in ["default", "acceptEdits", "plan", "auto", "bypassPermissions"] {
+            assert!(is_valid_permission_mode(ok), "{ok} should be valid");
+        }
+        // `dontAsk` is the CLI's auto-DENY mode — must NOT be exposed.
+        assert!(!is_valid_permission_mode("dontAsk"));
+        assert!(!is_valid_permission_mode(""));
+    }
+
+    #[test]
+    fn compression_resolution() {
+        // Off (default) → None, regardless of any stored URL.
+        let mut cfg = AssistantConfig::default();
+        assert_eq!(resolve_compression(&cfg), None);
+        // On, no custom URL → the default proxy.
+        cfg.compression_enabled = Some(true);
+        assert_eq!(resolve_compression(&cfg).as_deref(), Some(DEFAULT_COMPRESSION_PROXY));
+        // On, custom URL → trimmed custom URL wins.
+        cfg.compression_proxy_url = Some("  http://127.0.0.1:9999  ".into());
+        assert_eq!(resolve_compression(&cfg).as_deref(), Some("http://127.0.0.1:9999"));
+        // On, blank URL → falls back to default (not the empty string).
+        cfg.compression_proxy_url = Some("   ".into());
+        assert_eq!(resolve_compression(&cfg).as_deref(), Some(DEFAULT_COMPRESSION_PROXY));
+    }
+}
