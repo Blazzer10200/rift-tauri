@@ -218,3 +218,53 @@ pub fn usage_budget_status(db: tauri::State<UsageDb>) -> Result<BudgetStatus, St
         days_remaining,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg(plan: &str, custom: Option<f64>) -> BudgetConfig {
+        BudgetConfig { plan: plan.into(), custom_limit_usd: custom, cadence: "monthly".into() }
+    }
+
+    #[test]
+    fn plan_limits_map_to_caps() {
+        assert_eq!(cfg("pro", None).limit(), 20.0);
+        assert_eq!(cfg("max5x", None).limit(), 100.0);
+        assert_eq!(cfg("max20x", None).limit(), 200.0);
+        assert_eq!(cfg("custom", Some(42.0)).limit(), 42.0);
+        // Unknown plan → safe default (max5x cap).
+        assert_eq!(cfg("garbage", None).limit(), 100.0);
+        // Custom with no/blank value → 0; negative is clamped up to 0.
+        assert_eq!(cfg("custom", None).limit(), 0.0);
+        assert_eq!(cfg("custom", Some(-5.0)).limit(), 0.0);
+    }
+
+    #[test]
+    fn window_bounds_ordered_and_contain_now() {
+        let now = chrono::Local::now().timestamp_millis();
+        for cadence in ["daily", "weekly", "monthly"] {
+            let (start, end) = window_bounds(cadence);
+            assert!(start < end, "{cadence}: start !< end");
+            assert!(start <= now && now < end, "{cadence}: now outside window");
+        }
+    }
+
+    #[test]
+    fn window_sizes_grow_with_cadence() {
+        let len = |c| { let (s, e) = window_bounds(c); e - s };
+        let (day, week, month) = (len("daily"), len("weekly"), len("monthly"));
+        // Robust against DST (a local day may be 23-25h): just assert ordering.
+        assert!(day < week, "daily {day} !< weekly {week}");
+        assert!(week < month, "weekly {week} !< monthly {month}");
+        // Sanity bands: daily ~24h, monthly ≥ 28 days.
+        assert!((23..=25).contains(&(day / 3_600_000)), "daily hours = {}", day / 3_600_000);
+        assert!(month / 86_400_000 >= 28, "monthly days = {}", month / 86_400_000);
+    }
+
+    #[test]
+    fn unknown_cadence_falls_back_to_monthly() {
+        // The `_` arm handles "monthly" and anything unrecognized identically.
+        assert_eq!(window_bounds("garbage"), window_bounds("monthly"));
+    }
+}
