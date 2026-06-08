@@ -2,6 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.8.8 — 2026-06-08 — chore: updater end-to-end test (post toast fix)
+
+> **Why.** v0.8.7 made the update toast clickable again (z-index fix). This clean version-only bump lets a client on v0.8.7 finally run the whole loop — clickable toast → Download → apply → relaunch — against the live feed. No functional code change.
+
+**How to verify.** On v0.8.7: the "Update available" toast's **View** should open the dialog; **Download installer** should show progress, close Rift, swap, and relaunch onto v0.8.8. `rift.log` should show `download_update: command invoked` → `update download: starting` → `update apply: scheduling swap` for the first time ever.
+
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
+
 ## v0.8.7 — 2026-06-08 — fix: update toast was unclickable ("just for show")
 
 > **Why.** The "Update available" toast rendered but neither **View** nor the **×** responded — the whole notification was inert, so the in-app `download` path could never be triggered from it (the backend confirmed zero download invocations ever). Root cause: the toast host sat at **z-index 60**, below every transient overlay — the browser overflow scrim (`z-999`, fully transparent), `Select` menus (`z-1200`), dialogs (`z-200`). Any one of those lingering blankets the toast invisibly and swallows its clicks while it still shows.
