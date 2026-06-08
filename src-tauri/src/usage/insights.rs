@@ -364,3 +364,42 @@ pub fn usage_insights(db: tauri::State<UsageDb>) -> Result<Vec<Insight>, String>
     out.extend(custom_provider_spend(&conn, cost));
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usd_picks_precision_by_magnitude() {
+        assert_eq!(usd(250.4), "$250"); // >=100 → no decimals
+        assert_eq!(usd(100.0), "$100"); // boundary inclusive
+        assert_eq!(usd(12.5), "$12.50"); // >=1 → 2 decimals
+        assert_eq!(usd(1.0), "$1.00"); // boundary inclusive
+        assert_eq!(usd(0.0123), "$0.012"); // <1 → 3 decimals
+        assert_eq!(usd(0.0), "$0.000");
+    }
+
+    #[test]
+    fn pct_guards_zero_and_rounds() {
+        assert_eq!(pct(5.0, 0.0), 0, "div-by-zero must yield 0, never NaN/panic");
+        assert_eq!(pct(1.0, -3.0), 0, "negative whole → 0");
+        assert_eq!(pct(1.0, 4.0), 25);
+        assert_eq!(pct(2.0, 3.0), 67, "rounds to nearest");
+        assert_eq!(pct(0.0, 10.0), 0);
+    }
+
+    #[test]
+    fn short_model_strips_prefix_and_collapses_date() {
+        assert_eq!(short_model("claude-opus-4-8"), "opus-4-8");
+        assert_eq!(short_model("claude-3-5-sonnet-20241022"), "3-5-sonnet");
+        // No `claude-` prefix → base id passes through unchanged.
+        assert_eq!(short_model("gpt-4o"), "gpt-4o");
+    }
+
+    #[test]
+    fn workspace_leaf_takes_final_component() {
+        assert_eq!(workspace_leaf("/home/user/project"), "project");
+        assert_eq!(workspace_leaf("C:\\dev\\rift\\"), "rift"); // trailing sep trimmed
+        assert_eq!(workspace_leaf("solo"), "solo");
+    }
+}
