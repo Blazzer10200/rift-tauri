@@ -72,7 +72,12 @@
     position: fixed;
     bottom: 28px;
     right: 16px;
-    z-index: 60;
+    /* Toasts must outrank every transient overlay or they render but can't be
+       clicked (e.g. the browser overflow scrim at z-999, Select menus at z-1200
+       blanket the old z-60 toast invisibly — the "update toast is just for show"
+       bug). Sit above interactive layers; tooltips/splash (9999, pointer-events
+       none) stay clear. */
+    z-index: 2000;
     display: flex;
     flex-direction: column;
     align-items: flex-end;

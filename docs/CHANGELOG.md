@@ -2,6 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.8.7 — 2026-06-08 — fix: update toast was unclickable ("just for show")
+
+> **Why.** The "Update available" toast rendered but neither **View** nor the **×** responded — the whole notification was inert, so the in-app `download` path could never be triggered from it (the backend confirmed zero download invocations ever). Root cause: the toast host sat at **z-index 60**, below every transient overlay — the browser overflow scrim (`z-999`, fully transparent), `Select` menus (`z-1200`), dialogs (`z-200`). Any one of those lingering blankets the toast invisibly and swallows its clicks while it still shows.
+
+**What's fixed.**
+- **Toast host raised to `z-index: 2000`** — above all interactive overlays, so a notification can never render-but-not-click again. (Tooltips/splash at `9999` are `pointer-events: none`, so they stay clear.)
+- **Download self-heal.** If the pending update plan is missing when Download is clicked, the service re-checks first instead of dead-ending.
+- **Bisection logging.** `download_update`/`apply_pending_update` now log on entry, so any future "click does nothing" is instantly traceable in `rift.log`.
+
+**How to verify.** On v0.8.7+, the update toast's **View**/**×** click; the dialog's **Download installer** runs the real download → apply → relaunch. (This fix can't reach a machine via the broken toast it fixes — one manual Setup.exe gets you onto v0.8.7, then in-app updates work.)
+
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
+
 ## v0.8.6 — 2026-06-08 — chore: in-app updater apply-path test
 
 > **Why.** The full in-app `download → apply → relaunch` chain has never executed on any machine — every prior "update" was a manual Setup.exe install. This is a clean version-only bump so a client on a *freshly-installed* v0.8.5 (clean Velopack layout, launched from the Start Menu shortcut) can finally exercise the real path end-to-end against the live feed. No functional code change.

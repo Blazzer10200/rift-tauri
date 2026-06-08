@@ -57,6 +57,12 @@ pub async fn download_update(
     // a slow connection legitimately takes minutes for ~15 MB.
     const STALL_SECS: u64 = 90;
 
+    // Bisection marker: proves the frontend `invoke("download_update")` actually
+    // reached the backend. If this line is absent from rift.log after a click,
+    // the click never invoked (frontend/UI bug); if present without a following
+    // "update download: starting", the failure is in the service (no pending/mgr).
+    log::info!("download_update: command invoked (frontend → backend OK)");
+
     let svc = svc.inner().clone();
     let (tx, rx) = std::sync::mpsc::channel::<i16>();
 
@@ -114,6 +120,7 @@ pub async fn apply_pending_update(
     app: tauri::AppHandle,
     svc: tauri::State<'_, Arc<UpdateService>>,
 ) -> Result<(), String> {
+    log::info!("apply_pending_update: command invoked (frontend → backend OK)");
     let svc = svc.inner().clone();
     tokio::task::spawn_blocking(move || svc.apply(&app))
         .await
