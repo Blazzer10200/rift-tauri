@@ -2,16 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.8.2 — 2026-06-08 — chore: live update-path validation release
+## v0.8.3 — 2026-06-08 — fix: updater can no longer hang forever
 
-> **Why.** v0.8.1 made update failures visible + always recoverable, but that fix can only be proven by watching a real update flow through the live Velopack feed. This release is a clean version bump cut for exactly that: a genuine higher version published to `rift-releases` so a client on v0.8.1 exercises the full check → download → apply → relaunch path against GitHub. No functional code change — the v0.8.1 logging/recovery surface is what's under test.
+> **Why.** Update checks could spin indefinitely on other users' machines — "click Check, it just loads" — and a stalled download had the same dead-end. Root cause: `check()` held the update mutex across the blocking GitHub network call (which has no timeout), so one slow/hung check wedged the lock and every later command deadlocked behind it. The failure was invisible: the UI sat on a spinner instead of surfacing an error.
 
-**What's new.** Version bump only (0.8.1 → 0.8.2). The embedded version string differs, so this is a distinct binary the updater treats as a real upgrade — not a byte-identical no-op.
+**What's fixed.**
+- **`check()` releases the mutex before the network call** — mirrors `download()`/`apply()`, which already cloned the manager out. Kills the compounding deadlock where one hung check blocks all later commands.
+- **30s hard timeout on `check_for_updates`** — reqwest-under-Velopack has no default timeout; now an unreachable/blocked GitHub surfaces an error instead of an infinite spinner.
+- **90s stall watchdog on `download_update`** — a wedged transfer (half-open socket, dead proxy) now aborts with an error instead of stranding the UI on "downloading".
 
-**How to verify the updater.** On v0.8.1, trigger an update check: the dialog should report 0.8.2, download with progress, then apply-on-exit and relaunch onto 0.8.2. If anything fails, the new rotating `rift.log` (Settings → Help & diagnostics → Logs) now captures the Velopack internals — grab it to root-cause.
+Every updater failure mode now **terminates and surfaces** (and writes Velopack internals to the rotating `rift.log`) instead of hanging dark — so the next real-world failure is finally diagnosable.
 
 **Verify.** `cargo check` 0/0 · `npm run check` 0/0.
 
 ## Older versions
 
-v0.8.1 visible + always-recoverable app-update failures (rotating `rift.log` + sticky failure toast w/ [Get it on GitHub]) · v0.8.0 one-click 401 recovery + edit-swarm + opt-in context compression · v0.7.0 cost cockpit + multi-provider list + "Rift noticed…" insights · v0.6.5 custom-provider escape hatch · v0.6.4 collaborator-401 install-selection fix · v0.6.3 auto-update hotfix verify · v0.6.2 in-app-update child-lock fix · v0.6.1 CLI multi-install awareness · v0.6.0 in-app browser dock + harness redesign · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
+v0.8.2 live update-path validation release (version bump to exercise the v0.8.1 logging/recovery surface through the live feed) · v0.8.1 visible + always-recoverable app-update failures (rotating `rift.log` + sticky failure toast w/ [Get it on GitHub]) · v0.8.0 one-click 401 recovery + edit-swarm + opt-in context compression · v0.7.0 cost cockpit + multi-provider list + "Rift noticed…" insights · v0.6.5 custom-provider escape hatch · v0.6.4 collaborator-401 install-selection fix · v0.6.3 auto-update hotfix verify · v0.6.2 in-app-update child-lock fix · v0.6.1 CLI multi-install awareness · v0.6.0 in-app browser dock + harness redesign · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.

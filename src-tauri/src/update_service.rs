@@ -75,10 +75,20 @@ impl UpdateService {
     /// newer is available. Velopack's `check_for_updates` is blocking I/O —
     /// call from a `spawn_blocking` context.
     pub fn check(&self) -> Result<Option<UpdateInfoDto>, String> {
-        let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
-        let Some(mgr) = g.mgr.as_ref() else {
-            log::info!("update check: no source configured");
-            return Ok(None);
+        // Clone the manager out under a SHORT lock, then release it before the
+        // blocking GitHub call. Holding the mutex across the network roundtrip
+        // (which has no timeout) wedges every later command behind a single hung
+        // check — the "click Check and it spins forever" bug. `download()`/
+        // `apply()` already clone out; `check()` must match.
+        let mgr = {
+            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            match g.mgr.as_ref() {
+                Some(m) => m.clone(),
+                None => {
+                    log::info!("update check: no source configured");
+                    return Ok(None);
+                }
+            }
         };
         match mgr.check_for_updates() {
             // UpdateAvailable wraps a Box<UpdateInfo>; the full target release
@@ -92,12 +102,14 @@ impl UpdateService {
                     size_bytes: asset.Size,
                     notes_markdown: asset.NotesMarkdown.clone(),
                 };
+                let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
                 g.pending = Some(*info);
                 g.downloaded = false;
                 Ok(Some(dto))
             }
             Ok(_) => {
                 log::info!("update check: up to date");
+                let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
                 g.pending = None;
                 g.downloaded = false;
                 Ok(None)
