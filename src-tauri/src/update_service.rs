@@ -161,6 +161,17 @@ impl UpdateService {
     /// through `progress`. Call `check` first to populate the pending plan.
     /// Blocking I/O — must run on `spawn_blocking`.
     pub fn download(&self, progress: Sender<i16>) -> Result<(), String> {
+        // Self-heal: if there's no pending plan (cleared/never set), re-check
+        // before giving up — the user sees an "available" UI, so a missing
+        // pending should resolve transparently, not dead-end the download.
+        let needs_recheck = {
+            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            g.pending.is_none()
+        };
+        if needs_recheck {
+            log::info!("update download: no pending plan — re-checking first");
+            self.check()?;
+        }
         // Clone out under lock so the mutex isn't held across blocking I/O.
         let (mgr, info) = {
             let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
@@ -168,7 +179,7 @@ impl UpdateService {
             let info = g
                 .pending
                 .clone()
-                .ok_or_else(|| "no pending update — call check first".to_string())?;
+                .ok_or_else(|| "no pending update — nothing newer available".to_string())?;
             (mgr, info)
         };
         log::info!("update download: starting v{}", info.TargetFullRelease.Version);
