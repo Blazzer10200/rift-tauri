@@ -76,12 +76,16 @@ impl UpdateService {
     /// call from a `spawn_blocking` context.
     pub fn check(&self) -> Result<Option<UpdateInfoDto>, String> {
         let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
-        let Some(mgr) = g.mgr.as_ref() else { return Ok(None) };
+        let Some(mgr) = g.mgr.as_ref() else {
+            log::info!("update check: no source configured");
+            return Ok(None);
+        };
         match mgr.check_for_updates() {
             // UpdateAvailable wraps a Box<UpdateInfo>; the full target release
             // asset is `TargetFullRelease`.
             Ok(velopack::UpdateCheck::UpdateAvailable(info)) => {
                 let asset = &info.TargetFullRelease;
+                log::info!("update check: available v{}", asset.Version);
                 let dto = UpdateInfoDto {
                     version: asset.Version.clone(),
                     release_name: asset.FileName.clone(),
@@ -93,6 +97,7 @@ impl UpdateService {
                 Ok(Some(dto))
             }
             Ok(_) => {
+                log::info!("update check: up to date");
                 g.pending = None;
                 g.downloaded = false;
                 Ok(None)
@@ -100,6 +105,7 @@ impl UpdateService {
             Err(e) => {
                 // Network/parse failures are surfaced so the UI can show an
                 // error card rather than a false "up to date".
+                log::error!("update check FAILED: {e}");
                 Err(format!("check_for_updates: {e}"))
             }
         }
@@ -119,8 +125,13 @@ impl UpdateService {
                 .ok_or_else(|| "no pending update — call check first".to_string())?;
             (mgr, info)
         };
+        log::info!("update download: starting v{}", info.TargetFullRelease.Version);
         mgr.download_updates(&info, Some(progress))
-            .map_err(|e| format!("download_updates: {e}"))?;
+            .map_err(|e| {
+                log::error!("update download FAILED: {e}");
+                format!("download_updates: {e}")
+            })?;
+        log::info!("update download: complete v{}", info.TargetFullRelease.Version);
         // Mark downloaded under lock so apply() can guard against skipped download.
         let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
         g.downloaded = true;
@@ -147,8 +158,13 @@ impl UpdateService {
         };
         // silent = true (no Velopack UI → unattended), restart = true (relaunch
         // after swap), no extra restart args.
+        log::info!("update apply: scheduling swap for v{}", info.TargetFullRelease.Version);
         mgr.wait_exit_then_apply_updates(&info, true, true, Vec::<&str>::new())
-            .map_err(|e| format!("wait_exit_then_apply_updates: {e}"))?;
+            .map_err(|e| {
+                log::error!("update apply FAILED: {e}");
+                format!("wait_exit_then_apply_updates: {e}")
+            })?;
+        log::info!("update apply: swap scheduled, reaping children + exiting");
 
         // Velopack's Update.exe waits only for THIS (main) PID, then renames
         // `current/`. But each per-turn `claude` CLI spawns a `rift-tauri.exe`

@@ -17,7 +17,8 @@
 //! * Frontend rate-limits emits at 200/sec to avoid overwhelming Svelte
 //!   reactivity on a webpack-rebuild-style burst.
 
-use std::sync::OnceLock;
+use std::io::Write as _;
+use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
@@ -309,10 +310,60 @@ pub fn emit_with_fields(
     });
 }
 
+// ─── Persistent file sink ───────────────────────────────────────────────────
+
+/// Rotating file sink for every `log` record. env_logger's stderr is /dev/null
+/// in a GUI prod build, so in-process Velopack check/download/apply logs (and
+/// their failures) vanished — the root cause of undiagnosable "update won't
+/// install" reports. This persists them to `<appLogDir>/rift.log` so the next
+/// failure is always traceable. Resolved lazily on the first record.
+static FILE_LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+
+/// Mirror Tauri's `appLogDir()` for identifier `com.blazzer.rift`. Computed
+/// from env (no AppHandle needed — `LogForwarder::install()` runs before the
+/// Tauri app is built).
+fn app_log_path() -> Option<std::path::PathBuf> {
+    #[cfg(windows)]
+    let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
+    #[cfg(not(windows))]
+    let base = std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"));
+    let dir = base?.join("com.blazzer.rift").join("logs");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("rift.log"))
+}
+
+fn init_file_log() -> Option<Mutex<std::fs::File>> {
+    let path = app_log_path()?;
+    // Size-based rotation so a long-lived install can't grow the file unbounded.
+    const MAX_BYTES: u64 = 5 * 1024 * 1024;
+    if std::fs::metadata(&path).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
+        let _ = std::fs::rename(&path, path.with_extension("log.old"));
+    }
+    let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    Some(Mutex::new(file))
+}
+
+fn file_log_write(level: log::Level, target: &str, msg: &str) {
+    if let Some(m) = FILE_LOG.get_or_init(init_file_log) {
+        if let Ok(mut f) = m.lock() {
+            let _ = writeln!(
+                f,
+                "{} [{:<5}] {} — {}",
+                Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ"),
+                level,
+                target,
+                msg
+            );
+            let _ = f.flush();
+        }
+    }
+}
+
 // ─── Log forwarder ──────────────────────────────────────────────────────────
 
 /// `log::Log` impl that mirrors every log macro into the diagnostics bus AND
-/// delegates to env_logger for stderr. Installed once during `lib::run()`.
+/// a persistent file sink, and delegates to env_logger for stderr. Installed
+/// once during `lib::run()`.
 pub struct LogForwarder {
     inner: env_logger::Logger,
 }
@@ -389,14 +440,18 @@ impl log::Log for LogForwarder {
             return;
         }
         self.inner.log(record);
+        let target = record.target();
+        let message = scrub_log_message(&format!("{}", record.args()));
+        // Persist to the rotating file sink (captures Velopack's in-process
+        // check/download/apply logs that stderr discards in GUI prod). Done for
+        // every record, including our own forwarder target — no loop risk here.
+        file_log_write(record.level(), target, &message);
         // Mirror into the bus. Skip our own log-forwarder records (would loop
         // if any subscriber path called log::*). We tag stage=Log so the UI
         // can filter generic log lines vs structured pipeline events.
-        let target = record.target();
         if target.starts_with("rift_tauri_lib::diagnostics") {
             return;
         }
-        let message = scrub_log_message(&format!("{}", record.args()));
         bus().publish(DiagEvent {
             at: Utc::now(),
             seq: 0,
