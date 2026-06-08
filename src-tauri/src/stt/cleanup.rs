@@ -156,3 +156,26 @@ fn build_system_prompt(ctx: &str) -> String {
          these project terms verbatim if they appear: {capped}"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_context_yields_bare_prompt() {
+        assert_eq!(build_system_prompt(""), CLEANUP_PROMPT);
+        assert_eq!(build_system_prompt("   \n  "), CLEANUP_PROMPT);
+    }
+
+    #[test]
+    fn context_is_appended_and_capped_at_300() {
+        let p = build_system_prompt("rift-tauri on branch main");
+        assert!(p.starts_with(CLEANUP_PROMPT));
+        assert!(p.contains("rift-tauri on branch main"));
+        // Oversized context is truncated to 300 chars before injection.
+        let long = "x".repeat(400);
+        let capped = build_system_prompt(&long);
+        assert!(capped.contains(&"x".repeat(300)));
+        assert!(!capped.contains(&"x".repeat(301)), "context exceeded the 300-char cap");
+    }
+}
