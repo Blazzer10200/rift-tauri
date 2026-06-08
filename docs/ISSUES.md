@@ -13,7 +13,7 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
-| #21 | Test coverage thin after the pure-assistant rip | T1 | 🚧 open |
+| #21 | Test coverage thin after the pure-assistant rip | T1 | ✅ resolved in-tree |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | ✅ resolved in-tree |
 | Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🧪 live-verify |
@@ -31,11 +31,13 @@
 
 ### Tier 1 — ship-blocker / data-safety
 
-#### 21. Test coverage — thin after the pure-assistant rip
+#### 21. Test coverage — thin after the pure-assistant rip (✅ resolved in-tree, cont.76)
 
 - **Where (re-measured 2026-06-07):** Rust lib suite now **47 tests** (was ~9). Added 2026-06-07 (`756c95b`, `6d3efc2`): 12 `git_local` integration tests (real `git` against throwaway temp repos — status/log/diff/commit + force-push/dirty-pull gates), 14 `mcp_server` tests (was **zero** — `resolve_under_roots` containment, read_file/list_dir/grep incl. SKIP_DIRS+binary+glob, `glob_to_regex`, `trust_rank`), 4 `mod.rs` pure-validator tests (semver/trust/perm-mode/compression). Plus the pre-existing `stt/*`, `swarm`, `usage::pricing` tests + 1 vitest file (`assistant.test.ts`).
-- **Symptom (remaining):** the **per-turn stream/reader in `assistant/mod.rs`** and the **store orchestrator in `assistant.svelte.ts`** still have no end-to-end coverage. A regression in the stream pump or the send/queue/steer path can still break a turn silently. (The MCP tool surface + security gates are now covered — that half is done.)
-- **Fix sketch (remaining):** build a conversation-playback harness (feed recorded NDJSON frames through the reader + store) — also the unblocker for the #20 M8/M9 extractions. ~~Then cover the git_local MCP tools against a throwaway repo.~~ (done 2026-06-07)
+- **RESOLVED in-tree 2026-06-08 (cont.76) — `assistant.playback.test.ts`, 24 tests.** Conversation-playback harness covering both halves the rip left bare:
+  - **Stream pump** — reuses the real `TabState.beginTurn()` + drives the real `onStream`/`onDone`/`onError` with recorded NDJSON frames (the exact wire shapes the backend forwards verbatim). rAF is backed by a pumped queue so text paints between frames like real animation frames — inter-frame block ordering is faithful. Covers text-delta coalescing, non-JSON dribble fallback, tool_use→tool_result lifecycle (incl. error + array-content flatten + id de-dupe), thinking blocks, envelope-vs-result usage split + cost + model attribution, onDone finalization (success/blank/envelope-fallback/tool-only/no-op), onError (placeholder drop vs keep), and a full system→think→text→tool→text→result replay.
+  - **Send/queue/steer orchestrator** — drives the real `send()` entry point with a mocked `invoke`: turn-init (user+assistant messages, turn record, backend args), the auth chokepoint (red pill → no turn + notice), empty-prompt drop, queue-while-streaming + drain-on-completion (incl. the `lastError`-blocks-drain rule a blank turn trips), and `steer()` (live-inject while streaming / queue fallback when idle / re-queue on `no_active_turn`).
+- **Suite now 51 vitest tests** (was 27). The Rust per-turn reader in `assistant/mod.rs` is a verbatim line-forwarder (no parse/accumulate logic) — deliberately not given its own harness; all turn logic lives in the store, which is now covered. Block stays until `/git-ship` so `git log` keeps it.
 
 ### Tier 2 — code-complete, needs live-verify
 
@@ -70,7 +72,7 @@
   - [src/lib/state/assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) — ~2479L (M0-M7 carved from 3356L; M8/M9 open).
 - **Symptom:** targeted edits become brittle, LSP slows, agents bail mid-emit on audit-shaped prompts.
 - **Fix sketch:** `assistant.svelte.ts` next — design brief in [docs/design/assistant-svelte-split.md](design/assistant-svelte-split.md) (9-module extraction, ranked by blast radius). Then continue `assistant/mod.rs` extraction.
-- **Status:** M0-M7 SHIPPED (`assistant.svelte.ts` 3356L → ~2479L). M8 (streaming pump) + M9 (send orchestrator) open — the two highest-blast-radius extractions; deferred until a conversation-playback test harness exists (see #21).
+- **Status:** M0-M7 SHIPPED (`assistant.svelte.ts` 3356L → ~2479L). M8 (streaming pump) + M9 (send orchestrator) open — the two highest-blast-radius extractions. **Both now have their regression net** (`assistant.playback.test.ts`, 2026-06-08, see #21): the stream pump AND the send/queue/steer orchestrator are covered end-to-end, so either extraction can proceed safely.
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
 
