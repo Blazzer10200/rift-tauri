@@ -2,6 +2,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { Minus, Square, X, Search, Settings as SettingsIcon } from "lucide-svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
+  import { updates } from "$lib/state/updates.svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { WORKSPACES } from "../workspaces";
   import RiftLogo from "./RiftLogo.svelte";
@@ -66,11 +67,17 @@
       type="button"
       data-active={workspace.activeId === "settings"}
       onclick={() => workspace.setActive("settings")}
-      use:tooltip={`Settings · Ctrl+${WORKSPACES.settings.kbd} · Ctrl+,`}
-      aria-label="Settings"
+      use:tooltip={updates.hasUpdate
+        ? `Update available — v${updates.info?.version} · Settings · Ctrl+${WORKSPACES.settings.kbd}`
+        : `Settings · Ctrl+${WORKSPACES.settings.kbd} · Ctrl+,`}
+      aria-label={updates.hasUpdate ? "Settings — update available" : "Settings"}
       aria-pressed={workspace.activeId === "settings"}
     >
       <SettingsIcon size={15}/>
+      <!-- Snooze-proof affordance: a snoozed update hides the pill, never this dot. -->
+      {#if updates.hasUpdate}
+        <span class="upd-dot" aria-hidden="true"></span>
+      {/if}
     </button>
     <div class="winctl">
       <button class="wb" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} type="button" aria-label="Minimize">
@@ -172,7 +179,15 @@
   .navtoggle:disabled {
     opacity: 0.3; cursor: default; background: transparent; border-color: transparent;
   }
-  .settings-btn { margin-right: 2px; }
+  .settings-btn { margin-right: 2px; position: relative; }
+  .upd-dot {
+    position: absolute; top: 2px; right: 2px;
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 1.5px solid var(--bg-elev-1, var(--bg));
+    box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 60%, transparent);
+  }
 
   /* Horizontal workspace nav — replaced the vertical activity column. */
   /* Hairline between the brand cluster and workspace nav — reads as two zones. */

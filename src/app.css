@@ -361,20 +361,19 @@ body {
 }
 
 /* ─── dialog shell ─── */
+/* No backdrop-filter anywhere in the dialog stack — WebView2 mis-composites it
+   on fixed elements (garbage green/black rects, collapsed layout boxes; same
+   measured bug class the update pill avoids). Opaque dim + opaque shell. */
 .dialog-overlay {
   position: fixed; inset: 0;
-  background: color-mix(in oklch, var(--bg) 35%, rgba(0,0,0,0.65));
-  backdrop-filter: blur(6px) saturate(120%);
-  -webkit-backdrop-filter: blur(6px) saturate(120%);
+  background: color-mix(in oklch, var(--bg) 30%, rgba(0,0,0,0.72));
   display: flex; align-items: center; justify-content: center;
   z-index: 200;
   animation: overlay-in 120ms ease-out both;
 }
 .dialog-shell {
   position: relative;
-  background: color-mix(in oklch, var(--bg-elev-1) 94%, transparent);
-  backdrop-filter: blur(20px) saturate(135%);
-  -webkit-backdrop-filter: blur(20px) saturate(135%);
+  background: var(--bg-elev-1);
   border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border-strong));
   border-radius: 14px;
   box-shadow:

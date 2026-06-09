@@ -25,8 +25,11 @@
 // used for the transient install-FAILURE path, which can't move-target because
 // it forces the dialog open at the same time (pill hidden).
 //
-// `dismissedVersion` is persisted in localStorage so a snoozed version doesn't
-// pop the pill again next launch; a NEWER version supersedes.
+// Snooze is TIME-BASED (24h), persisted as {version, until} in localStorage.
+// It was version-permanent until 2026-06-09: one stray click on the pill's ×
+// silenced that version forever with no visible recovery — the user sat on
+// v0.8.10 while v0.8.11 was "available" on every launch. Now a snooze expires
+// after a day, and a newer version always supersedes it immediately.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -59,13 +62,25 @@ export type UpdateState =
   | "error";
 
 const DISMISSED_KEY = "rift.updates.dismissed-version";
+const SNOOZE_MS = 24 * 60 * 60 * 1000; // 24h — snooze is a delay, never a kill switch
 
-function loadDismissed(): string | null {
-  try { return localStorage.getItem(DISMISSED_KEY); } catch { return null; }
-}
-function saveDismissed(v: string | null) {
+type Snooze = { version: string; until: number };
+
+function loadSnooze(): Snooze | null {
   try {
-    if (v) localStorage.setItem(DISMISSED_KEY, v);
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Snooze;
+    // Legacy bare-version strings fail JSON.parse → catch discards them (that
+    // format meant "silenced forever", which is exactly the bug being removed).
+    if (typeof parsed?.version !== "string" || typeof parsed?.until !== "number") return null;
+    if (Date.now() >= parsed.until) { localStorage.removeItem(DISMISSED_KEY); return null; }
+    return parsed;
+  } catch { return null; }
+}
+function saveSnooze(v: Snooze | null) {
+  try {
+    if (v) localStorage.setItem(DISMISSED_KEY, JSON.stringify(v));
     else   localStorage.removeItem(DISMISSED_KEY);
   } catch { /* private mode etc — non-fatal */ }
 }
@@ -78,7 +93,9 @@ class UpdateStore {
   /** Download progress 0..100, streamed from Velopack via `update-progress`. */
   progress = $state(0);
   dialogOpen = $state(false);
-  dismissedVersion = $state<string | null>(loadDismissed());
+  snoozed = $state<Snooze | null>(loadSnooze());
+  /** Wakes the pill when an active snooze expires mid-session. */
+  private snoozeTimer: ReturnType<typeof setTimeout> | null = null;
   /** Error from the most recent `download()`/apply attempt. Distinct from
    *  `error` (feed/check failures) — keeps `state` on "available" so the user
    *  can retry the Download button or grab it manually from GitHub. */
@@ -99,16 +116,28 @@ class UpdateStore {
     return /properly installed|reinstall/i.test(this.error);
   }
 
+  /** An update exists and is waiting on user action — true even while snoozed.
+   *  Drives the always-visible titlebar dot so a snoozed update is never
+   *  invisible. */
+  get hasUpdate(): boolean {
+    return this.state === "available" && !!this.info;
+  }
+
+  /** The current available version is under an unexpired snooze. */
+  get snoozeActive(): boolean {
+    return (
+      !!this.snoozed &&
+      !!this.info &&
+      this.snoozed.version === this.info.version &&
+      Date.now() < this.snoozed.until
+    );
+  }
+
   /** True when there's an unsnoozed update waiting for user action — drives the
    *  stable update pill. Hidden once the dialog is open (the dialog IS the
-   *  detail view) or the user has snoozed this exact version. */
+   *  detail view) or while this version is snoozed (24h max — never permanent). */
   get pillVisible(): boolean {
-    return (
-      this.state === "available" &&
-      !!this.info &&
-      this.info.version !== this.dismissedVersion &&
-      !this.dialogOpen
-    );
+    return this.hasUpdate && !this.snoozeActive && !this.dialogOpen;
   }
 
   /** Human-readable "12.4 MB" style. */
@@ -222,20 +251,41 @@ class UpdateStore {
     }
   }
 
-  /** Snooze the current available version — the pill stays quiet until a newer
-   *  version ships. Closes the dialog if open. */
+  /** Snooze the current available version for 24h — the pill goes quiet, the
+   *  titlebar dot stays, and the pill returns on expiry (or sooner if a newer
+   *  version ships). NEVER permanent. Closes the dialog if open. */
   snooze() {
     if (this.info?.version) {
-      this.dismissedVersion = this.info.version;
-      saveDismissed(this.info.version);
+      const s: Snooze = { version: this.info.version, until: Date.now() + SNOOZE_MS };
+      this.snoozed = s;
+      saveSnooze(s);
+      this.armSnoozeTimer(SNOOZE_MS);
     }
     this.dialogOpen = false;
+  }
+
+  /** Clear any snooze immediately (titlebar dot click → show everything now). */
+  unsnooze() {
+    this.snoozed = null;
+    saveSnooze(null);
+    if (this.snoozeTimer != null) { clearTimeout(this.snoozeTimer); this.snoozeTimer = null; }
+  }
+
+  private armSnoozeTimer(ms: number) {
+    if (this.snoozeTimer != null) clearTimeout(this.snoozeTimer);
+    this.snoozeTimer = setTimeout(() => {
+      this.snoozeTimer = null;
+      this.snoozed = null; // state write → pillVisible recomputes → pill returns
+      saveSnooze(null);
+    }, ms);
   }
 
   /** Called once on app launch from AppShell.onMount. The pill surfaces itself
    *  reactively via `pillVisible` once `refresh()` resolves — no imperative
    *  notification needed. */
   async checkOnLaunch() {
+    // A snooze restored from a previous launch still expires on time.
+    if (this.snoozed) this.armSnoozeTimer(Math.max(0, this.snoozed.until - Date.now()));
     await this.refresh();
     this.startAutoCheck();
   }
@@ -254,11 +304,15 @@ class UpdateStore {
   open()  { this.dialogOpen = true; }
   close() { this.dialogOpen = false; }
 
-  /** Clear the periodic re-check timer (HMR teardown / app teardown). */
+  /** Clear timers (HMR teardown / app teardown). */
   dispose() {
     if (this.autoTimer != null) {
       clearInterval(this.autoTimer);
       this.autoTimer = null;
+    }
+    if (this.snoozeTimer != null) {
+      clearTimeout(this.snoozeTimer);
+      this.snoozeTimer = null;
     }
   }
 }

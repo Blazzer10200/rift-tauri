@@ -7,7 +7,8 @@
   //
   // This is a singleton fixed element: it never reflows, animates only its own
   // enter/leave, and owns its corner — so the click always lands. Click the
-  // body → open the dialog; click × → snooze this version.
+  // body → open the dialog; click × → snooze for 24h (time-based, never
+  // version-permanent — a stray × must not silence an update forever).
   import { Sparkles, ArrowRight, X } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { updates } from "../state/updates.svelte";
@@ -39,7 +40,7 @@
       class="snooze"
       type="button"
       onclick={(e) => { e.stopPropagation(); updates.snooze(); }}
-      aria-label="Remind me later"
+      aria-label="Snooze for a day"
     >
       <X size={12} />
     </button>
