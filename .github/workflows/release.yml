@@ -1,0 +1,77 @@
+# Tag-driven release. Push a `v*` tag -> this builds, packs with Velopack, and
+# publishes to the public `Blazzer10200/rift-releases` repo. Replaces running
+# `scripts/release.ps1` by hand on a dev machine.
+#
+# Ship flow:
+#   pwsh scripts/bump.ps1 X.Y.Z   # writes the 3 lockstep files
+#   <edit docs/CHANGELOG.md top entry to vX.Y.Z>
+#   git commit -am "release vX.Y.Z"
+#   git tag vX.Y.Z && git push origin main --tags
+#
+# Auth: needs a fine-grained PAT scoped to `rift-releases` with contents:write,
+# stored as the repo secret RELEASES_TOKEN. The default GITHUB_TOKEN only scopes
+# THIS (source) repo, so it cannot publish to the separate releases repo.
+#
+# vpk pin: the vpk CLI version MUST equal the `velopack` crate version (=1.2.0).
+# Bump both together (this file + src-tauri/Cargo.toml).
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: build + pack + publish
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Setup .NET (for vpk)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install vpk (pinned to velopack crate version)
+        run: dotnet tool install -g vpk --version 1.2.0
+
+      - name: npm ci
+        run: npm ci
+
+      # release.ps1 -Ci: skips the dirty-tree refusal, asserts GITHUB_REF_NAME
+      # matches the bumped version, then build + pack + publish to rift-releases
+      # using the PAT.
+      - name: Release
+        run: pwsh scripts/release.ps1 -Ci -Token $env:RELEASES_TOKEN
+        env:
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}

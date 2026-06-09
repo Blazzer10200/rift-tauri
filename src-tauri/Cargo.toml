@@ -28,6 +28,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 default = []
 whisper-rs = ["dep:whisper-rs"]
 whisper-cuda = ["whisper-rs", "whisper-rs/cuda"]
+# Enables the RIFT_UPDATE_FEED local-feed escape hatch in a RELEASE build, so
+# the full auto-update apply chain (download -> swap -> relaunch) can be tested
+# locally against a packed local feed without burning a real GitHub release.
+# Production releases (release.ps1 / release.yml) build WITHOUT this, so a
+# shipped binary can never be pointed at a local/attacker feed. See
+# scripts/test-update.ps1.
+update-test-feed = []
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

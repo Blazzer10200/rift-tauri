@@ -24,15 +24,29 @@
 #
 # Usage:  pwsh ./scripts/release.ps1
 #         pwsh ./scripts/release.ps1 -Force   # bypass dirty-tree refusal
+#         pwsh ./scripts/release.ps1 -Ci      # CI mode (tag-driven, see release.yml)
+#
+# CI mode (-Ci): driven by `.github/workflows/release.yml` on a `v*` tag push.
+# Skips the interactive dirty-tree refusal (a fresh checkout is clean) and, when
+# `GITHUB_REF_NAME` is set, asserts the pushed tag matches the bumped version --
+# a half-bumped tag can never produce a broken release. Auth comes from -Token
+# (the RELEASES_TOKEN PAT scoped to rift-releases) instead of `gh auth token`.
 
 param(
-    [switch]$Force
+    [switch]$Force,
+    [switch]$Ci,
+    [string]$Token
 )
 
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
+
+# In CI, gh + vpk authenticate against rift-releases via the passed PAT. Export
+# it as GH_TOKEN so the `gh release view`/`delete-asset` preflight calls below
+# pick it up without a separate `gh auth login`.
+if ($Token) { $env:GH_TOKEN = $Token }
 
 Write-Host '=== Rift release pipeline (Velopack) ===' -ForegroundColor Cyan
 
@@ -50,6 +64,19 @@ if ($pkg.version -ne $cargoVer -or $pkg.version -ne $tauriCfg.version) {
 $version = $pkg.version
 $tag = "v$version"
 Write-Host "Version: $version (tag $tag)" -ForegroundColor Green
+
+# --- Preflight: pushed tag must match the bumped version (CI guard) -------
+# In a tag-driven CI release the trigger is `git push --tags`. If the tag was
+# cut before the three version files were bumped (the classic lockstep miss),
+# the build would publish under a tag that disagrees with its own binary. Fail
+# fast here instead of shipping a mismatched release.
+if ($env:GITHUB_REF_NAME) {
+    $tagVer = $env:GITHUB_REF_NAME -replace '^v', ''
+    if ($tagVer -ne $version) {
+        throw "Tag mismatch: pushed tag $($env:GITHUB_REF_NAME) (v$tagVer) != bumped version v$version. Re-bump (scripts/bump.ps1 $tagVer) or re-tag."
+    }
+    Write-Host "Tag guard: $($env:GITHUB_REF_NAME) matches bumped version" -ForegroundColor Green
+}
 
 # --- Preflight: vpk version == velopack crate version --------------------
 # Velopack requires the packing CLI and the linked runtime to match exactly.
@@ -143,15 +170,19 @@ foreach ($t in @('npm', 'vpk', 'gh')) {
 }
 
 # --- Preflight: clean git ------------------------------------------------
-$dirty = git status --porcelain
-if ($dirty) {
-    Write-Host 'Working tree dirty:' -ForegroundColor Yellow
-    Write-Host $dirty
-    if (-not $Force) {
-        Write-Host 'Refusing to ship from a dirty working tree. Re-run with -Force to override.' -ForegroundColor Red
-        throw 'release.ps1: working tree dirty (pass -Force to override)'
+# Skipped in CI: a tag-push checkout is clean by definition, and the build step
+# may have already written node_modules/build artifacts before this runs.
+if (-not $Ci) {
+    $dirty = git status --porcelain
+    if ($dirty) {
+        Write-Host 'Working tree dirty:' -ForegroundColor Yellow
+        Write-Host $dirty
+        if (-not $Force) {
+            Write-Host 'Refusing to ship from a dirty working tree. Re-run with -Force to override.' -ForegroundColor Red
+            throw 'release.ps1: working tree dirty (pass -Force to override)'
+        }
+        Write-Host '  -Force: continuing despite dirty tree' -ForegroundColor Yellow
     }
-    Write-Host '  -Force: continuing despite dirty tree' -ForegroundColor Yellow
 }
 
 # --- Preflight: tag does not already exist ------------------------------
@@ -226,8 +257,10 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 # GithubSource(prerelease:true) reads the prerelease list, so pre-releases are
 # visible (unlike the old GH-release-API `/latest` path, which excluded them).
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
-$ghToken = (gh auth token).Trim()
-if (-not $ghToken) { throw 'gh auth token returned empty -- run `gh auth login` first' }
+# In CI, -Token carries the rift-releases PAT; locally, fall back to the gh
+# session token.
+$ghToken = if ($Token) { $Token.Trim() } else { (gh auth token).Trim() }
+if (-not $ghToken) { throw 'no GitHub token -- pass -Token <pat> (CI) or run `gh auth login` (local)' }
 
 $uploadArgs = @(
     'upload', 'github',
