@@ -2,20 +2,19 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 97) — #20 TS split COMPLETE (M8+M9) + UI-drift fixed + mod.rs split brief (unshipped, autonomous session)
+## Session 2026-06-09 (cont. 97) — #20 BOTH splits: TS COMPLETE (M8+M9) + mod.rs 5/8 + UI-drift fixed (autonomous, unshipped)
 
-Three commits on `main`, **source-verified only** (svelte-check 0/0, vitest 51/51; no dev launch — user was gaming):
+Eight code commits on `main`, **source-verified only** (svelte-check 0/0 · vitest 51/51 · cargo test 95/95 + zero warnings per Rust commit; no dev launch — user gaming):
 
-- **`b4ea421` M8:** stream pump → `assistant/streaming.ts` (verbatim bodies; TabState = fields + hooks + 1-line thunks; playback suite exercises the moved pump end-to-end).
-- **`ea514e8` M9:** send orchestrator → `assistant/send.ts` (send/slash/queue/steer/stop/retry). **`assistant.svelte.ts` 2709 → 1700L — under the 2000L threshold; M0-M9 ALL DONE.** M8/M9 use type-only parent imports, not structural host types (documented in file headers + brief).
-- **`6e7cb21` UI-drift fixed:** Settings hero chip hard-coded "up to date"; now renders from new `updates.summary` (one derived `{kind,label}`).
-- **NEW `docs/design/assistant-mod-split.md`** — R1-R8 child-module plan for `assistant/mod.rs` (4331L; `assistant_send` alone 917L); commands re-exported so the lib.rs registry never churns.
+- **TS split DONE:** `b4ea421` M8 stream pump → `assistant/streaming.ts`; `ea514e8` M9 send orchestrator → `assistant/send.ts`. **`assistant.svelte.ts` 2709 → 1700L; M0-M9 ALL DONE.** (M8/M9 use type-only parent imports — documented in headers + brief.)
+- **`6e7cb21` UI-drift fixed:** Settings chip now renders from new `updates.summary` (one derived `{kind,label}`), never hard-coded.
+- **mod.rs split 5/8** per new `docs/design/assistant-mod-split.md`: `9338179` R1 `cli_install` · `3602312` R5 `env_checks` · `a8a2c0b` R7 `workspace` · `e091890` R4 `auth_update` · `99864c4` R3 `convo_store`. **mod.rs 4331 → 2917L.** Lessons IN THE BRIEF: tauri commands need GLOB re-exports (`__cmd__*` items); `pub(super)` covers the whole assistant subtree.
 
 ### RESUME HERE (cont.97)
-- **User on v0.8.12 still needs ONE manual `Setup.exe`** (rift-releases/releases/latest) — in-app Download unreachable until 0.8.14+; permanent after.
-- M8/M9 + UI-drift are **runtime-unverified** — next dev session: send a real turn (stream/tools/thinking render), steer mid-turn, stop, /retry, queue drain; check the Settings chip states. Then ship as v0.8.15.
-- Next #20 bite: execute mod.rs brief R1 (`cli_install.rs`) — remember `cargo check` rules (never while dev alive; kill by PID only).
-- Parked from cont.96: optional SEC-1 live pass · #29 CSP-nonce (app-wide, verify every transition first).
+- **User on v0.8.12 still needs ONE manual `Setup.exe`** (rift-releases/releases/latest) — in-app Download unreachable until 0.8.14+.
+- **Ready to push** (user signed off pending) → CI check on runner, then v0.8.15 ship AFTER a CDP runtime pass: real turn (stream/tools/thinking), steer, stop, /retry, queue drain, Settings update-chip states, auth pill, History list/load/delete (convo_store moved!).
+- Remaining #20: mod.rs R2 (config) → R6 (oneshot) → R8 (turn, last). Then `Composer.svelte` brief.
+- Parked: SEC-1 live pass · #29 CSP-nonce (app-wide).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 cont.96 v0.8.14 SHIPPED — update-dialog crash root-caused (`each_key_duplicate` on blank-line notes keys; keyed by index now) + SEC-1 hardening bundled; saga over.

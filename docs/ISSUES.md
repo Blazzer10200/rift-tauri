@@ -61,10 +61,10 @@
 #### 20. Hot files exceeding the 2000-line agent-split threshold
 
 - **Where:** per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Open targets (re-measured 2026-06-09):
-  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — **4331L (worst)**: Claude CLI spawn + auth + workspace + config + per-turn stream. **Design brief ready:** [docs/design/assistant-mod-split.md](design/assistant-mod-split.md) (R1-R8 child modules, blast-radius-ascending, commands re-exported so the registry never churns).
+  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — **2917L** (was 4331L): R1/R3/R4/R5/R7 extracted 2026-06-09 per [docs/design/assistant-mod-split.md](design/assistant-mod-split.md). **Remaining: R2 config · R6 oneshot · R8 turn** (`assistant_send` 917L — last).
   - [src/lib/components/assistant/Composer.svelte](../src/lib/components/assistant/Composer.svelte) — 2957L, next frontend target (needs its own brief).
 - **Symptom:** targeted edits become brittle, LSP slows, agents bail mid-emit on audit-shaped prompts.
-- **Status:** `assistant.svelte.ts` split **COMPLETE** — M0-M9 all shipped; M8 `streaming.ts` + M9 `send.ts` landed 2026-06-09 (`b4ea421`, `ea514e8`) under the playback regression net, file now **1700L** (was 3356L). Next: execute the mod.rs brief (R1 `cli_install.rs` first).
+- **Status:** `assistant.svelte.ts` split **COMPLETE** (M0-M9, now 1700L — was 3356L; playback net held). mod.rs split **5/8 shipped** (`cli_install` · `convo_store` · `auth_update` · `env_checks` · `workspace`), each cargo-check zero-warnings + cargo test 95/95 per commit. Next bite: R2 (config) — biggest import surface, do before R6/R8.
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
 

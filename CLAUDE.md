@@ -28,7 +28,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/assistant/mod.rs` | 4331 | claude CLI integration + auth + workspace + config + per-turn spawn. Largest backend file — split brief ready: `docs/design/assistant-mod-split.md` (R1-R8) |
+| `src-tauri/src/assistant/mod.rs` | 2917 | claude CLI per-turn spawn + config + oneshots. Split 5/8 done (cont.97: `cli_install/convo_store/auth_update/env_checks/workspace` carved out); R2/R6/R8 remain — brief: `docs/design/assistant-mod-split.md` |
 | `src-tauri/src/assistant/mcp_server.rs` | 813 | stdio JSON-RPC MCP server — exposes `read_file/list_dir/grep` + `git_*` only (all sync/bridge/remote_bash/ask_user tools ripped) |
 | `src-tauri/src/swarm/mod.rs` | 792 | edit-swarm orchestrator (v0.7.0) — parallel sub-agent edit batching + safety layer |
 | `src-tauri/src/assistant/git_local.rs` | 627 | local-git MCP tools (git_status/diff/log/pull/commit/push) |
