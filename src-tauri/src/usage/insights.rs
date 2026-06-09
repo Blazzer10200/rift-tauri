@@ -402,4 +402,118 @@ mod tests {
         assert_eq!(workspace_leaf("C:\\dev\\rift\\"), "rift"); // trailing sep trimmed
         assert_eq!(workspace_leaf("solo"), "solo");
     }
+
+    // --- Probe tests: seed an in-memory corpus and assert the threshold
+    // contract (a probe fires only when a real, non-trivial pattern exists). ---
+
+    use crate::usage::store::{self, TurnRow};
+    use rusqlite::Connection;
+
+    fn mem() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        store::init_schema(&c).unwrap();
+        c
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn push(c: &Connection, idx: i64, model: &str, provider: &str, cost: f64, ws: &str, tools: i64) {
+        store::upsert_turn(
+            c,
+            &TurnRow {
+                session_id: "s".into(),
+                turn_index: idx,
+                ts: 1_700_000_000_000,
+                model_id: Some(model.into()),
+                provider: Some(provider.into()),
+                input: 1000,
+                output: 100,
+                cache_read: 0,
+                cache_write: 0,
+                cost_usd_cli: None,
+                cost_usd_calc: Some(cost),
+                ttfp_ms: None,
+                duration_ms: None,
+                workspace: Some(ws.into()),
+                tool_count: tools,
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn corpus_size_counts_and_sums_cost() {
+        let c = mem();
+        push(&c, 0, "claude-opus-4-8", "anthropic", 2.0, "/a", 0);
+        push(&c, 1, "claude-opus-4-8", "anthropic", 3.0, "/a", 0);
+        let (n, cost) = corpus_size(&c);
+        assert_eq!(n, 2);
+        assert!((cost - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn dominant_model_fires_only_past_55pct() {
+        // Opus = 80% of spend → fires, warn severity.
+        let c = mem();
+        push(&c, 0, "claude-opus-4-8", "anthropic", 8.0, "/a", 0);
+        push(&c, 1, "claude-haiku-4-5", "anthropic", 2.0, "/a", 0);
+        let ins = dominant_model(&c, 10.0).expect("80% share should fire");
+        assert_eq!(ins.id, "dominant-model");
+        assert_eq!(ins.severity, "warn", "opus dominance is a warn");
+
+        // 50/50 split → top model is below the 55% gate → silent.
+        let c2 = mem();
+        push(&c2, 0, "claude-opus-4-8", "anthropic", 5.0, "/a", 0);
+        push(&c2, 1, "claude-haiku-4-5", "anthropic", 5.0, "/a", 0);
+        assert!(dominant_model(&c2, 10.0).is_none(), "50% must not fire");
+    }
+
+    #[test]
+    fn cost_sink_workspace_needs_two_workspaces() {
+        // Single workspace → "sink" is meaningless → silent even at 100%.
+        let c1 = mem();
+        push(&c1, 0, "claude-opus-4-8", "anthropic", 9.0, "/only", 0);
+        assert!(cost_sink_workspace(&c1, 9.0).is_none());
+
+        // Two workspaces, /a = 90% → fires.
+        let c2 = mem();
+        push(&c2, 0, "claude-opus-4-8", "anthropic", 9.0, "/a", 0);
+        push(&c2, 1, "claude-opus-4-8", "anthropic", 1.0, "/b", 0);
+        let ins = cost_sink_workspace(&c2, 10.0).expect("90% sink should fire");
+        assert_eq!(ins.id, "cost-sink-workspace");
+        assert!(ins.title.contains('a'));
+    }
+
+    #[test]
+    fn custom_provider_spend_fires_on_off_pool_turns() {
+        let c = mem();
+        push(&c, 0, "my-llm", "openrouter", 3.0, "/a", 0);
+        push(&c, 1, "claude-opus-4-8", "anthropic", 7.0, "/a", 0);
+        let ins = custom_provider_spend(&c, 10.0).expect("off-pool spend should fire");
+        assert_eq!(ins.id, "custom-provider-spend");
+        assert_eq!(ins.severity, "good");
+
+        // All-anthropic corpus → nothing off the metered pool → silent.
+        let c2 = mem();
+        push(&c2, 0, "claude-opus-4-8", "anthropic", 5.0, "/a", 0);
+        assert!(custom_provider_spend(&c2, 5.0).is_none());
+    }
+
+    #[test]
+    fn tool_intensity_flags_an_outlier_workspace() {
+        let c = mem();
+        // 20 light turns (1 tool) + 10 heavy turns (6 tools). Overall avg ≈2.67;
+        // heavy avg 6 ≥ 1.6× overall and ≥3 → fires for /heavy.
+        for i in 0..20 {
+            push(&c, i, "claude-opus-4-8", "anthropic", 0.1, "/light", 1);
+        }
+        for i in 20..30 {
+            push(&c, i, "claude-opus-4-8", "anthropic", 0.1, "/heavy", 6);
+        }
+        let ins = tool_intensity(&c, 30).expect("a 6-vs-2.67 outlier should fire");
+        assert_eq!(ins.id, "tool-intensity");
+        assert!(ins.title.contains("heavy"));
+
+        // Below the 30-turn corpus gate → silent regardless of pattern.
+        assert!(tool_intensity(&c, 29).is_none());
+    }
 }

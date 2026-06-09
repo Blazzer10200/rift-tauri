@@ -524,7 +524,7 @@ mod tests {
     fn log_lists_the_initial_commit() {
         if !git_available() { return; }
         let (_td, root) = init_repo();
-        let out = tool_git_log(&json!({}), &vec![root]).unwrap();
+        let out = tool_git_log(&json!({}), &[root]).unwrap();
         assert!(out.contains("init"), "log missing initial commit: {out}");
     }
 
@@ -532,7 +532,7 @@ mod tests {
     fn log_max_zero_rejected() {
         if !git_available() { return; }
         let (_td, root) = init_repo();
-        let err = tool_git_log(&json!({ "max": 0 }), &vec![root]).unwrap_err();
+        let err = tool_git_log(&json!({ "max": 0 }), &[root]).unwrap_err();
         assert!(err.contains("max must be"), "got: {err}");
     }
 
@@ -568,7 +568,7 @@ mod tests {
     fn commit_with_nothing_staged_errors() {
         if !git_available() { return; }
         let (_td, root) = init_repo();
-        let err = tool_git_commit(&json!({ "all": true, "message": "noop" }), &vec![root]).unwrap_err();
+        let err = tool_git_commit(&json!({ "all": true, "message": "noop" }), &[root]).unwrap_err();
         assert!(err.contains("nothing to commit"), "got: {err}");
     }
 
@@ -589,7 +589,7 @@ mod tests {
         if !git_available() { return; }
         let (_td, root) = init_repo();
         std::fs::write(root.join("dirty.txt"), "x").unwrap();
-        let err = tool_git_pull(&json!({}), &vec![root]).unwrap_err();
+        let err = tool_git_pull(&json!({}), &[root]).unwrap_err();
         assert!(err.contains("dirty"), "expected dirty refusal, got: {err}");
     }
 
@@ -597,7 +597,7 @@ mod tests {
     fn push_force_is_refused() {
         if !git_available() { return; }
         let (_td, root) = init_repo();
-        let err = tool_git_push(&json!({ "force": true }), &vec![root]).unwrap_err();
+        let err = tool_git_push(&json!({ "force": true }), &[root]).unwrap_err();
         assert!(err.contains("force push is not permitted"), "got: {err}");
     }
 
@@ -607,7 +607,7 @@ mod tests {
         let (_td, root) = init_repo();
         // No `origin` configured → push fails fast (GIT_TERMINAL_PROMPT=0, no
         // network hang). Exercises current_branch() + the push arg path.
-        let err = tool_git_push(&json!({}), &vec![root]).unwrap_err();
+        let err = tool_git_push(&json!({}), &[root]).unwrap_err();
         assert!(err.contains("git push failed"), "got: {err}");
     }
 

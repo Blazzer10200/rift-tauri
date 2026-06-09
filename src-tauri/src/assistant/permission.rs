@@ -75,3 +75,70 @@ impl Default for PermissionRegistry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn register_then_resolve_delivers_value() {
+        let reg = PermissionRegistry::new();
+        let mut rx = reg.register("req-1".into());
+        assert!(reg.resolve("req-1", json!({ "behavior": "allow" })));
+        assert_eq!(rx.try_recv().unwrap(), json!({ "behavior": "allow" }));
+    }
+
+    #[test]
+    fn resolve_unknown_id_is_false() {
+        let reg = PermissionRegistry::new();
+        assert!(!reg.resolve("nope", json!({ "behavior": "deny" })));
+    }
+
+    #[test]
+    fn double_resolve_second_is_false() {
+        let reg = PermissionRegistry::new();
+        let _rx = reg.register("req-2".into());
+        assert!(reg.resolve("req-2", json!(1)));
+        // entry was removed on first resolve — second is a no-op.
+        assert!(!reg.resolve("req-2", json!(2)));
+    }
+
+    #[test]
+    fn cancel_then_resolve_is_false() {
+        let reg = PermissionRegistry::new();
+        let _rx = reg.register("req-3".into());
+        reg.cancel("req-3");
+        assert!(!reg.resolve("req-3", json!({ "behavior": "allow" })));
+    }
+
+    #[test]
+    fn resolve_after_receiver_dropped_is_false() {
+        let reg = PermissionRegistry::new();
+        let rx = reg.register("req-4".into());
+        drop(rx); // UI gone / turn ended before the answer lands
+        assert!(!reg.resolve("req-4", json!({ "behavior": "allow" })));
+    }
+
+    #[test]
+    fn distinct_ids_do_not_alias() {
+        let reg = PermissionRegistry::new();
+        let mut a = reg.register("a".into());
+        let mut b = reg.register("b".into());
+        assert!(reg.resolve("b", json!("B")));
+        assert!(reg.resolve("a", json!("A")));
+        assert_eq!(a.try_recv().unwrap(), json!("A"));
+        assert_eq!(b.try_recv().unwrap(), json!("B"));
+    }
+
+    #[test]
+    fn reregister_same_id_overwrites_sender() {
+        let reg = PermissionRegistry::new();
+        let mut first = reg.register("dup".into());
+        let mut second = reg.register("dup".into());
+        // Only the latest sender is kept; the first can never be resolved.
+        assert!(reg.resolve("dup", json!("second")));
+        assert_eq!(second.try_recv().unwrap(), json!("second"));
+        assert!(first.try_recv().is_err());
+    }
+}

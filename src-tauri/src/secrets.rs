@@ -56,3 +56,17 @@ pub fn delete(key: &str) -> Result<(), String> {
 
 /// Single-tenant key for the Anthropic API key.
 pub const ASSISTANT_API_KEY: &str = "assistant.api_key";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The empty-value guard returns before touching the OS keychain, so this is
+    // hermetic — no platform credential backend required.
+    #[test]
+    fn set_rejects_empty_value() {
+        let err = set("some.key", "").unwrap_err();
+        assert!(err.contains("refusing to store empty value"), "got: {err}");
+        assert!(err.contains("delete"), "should point callers at delete(): {err}");
+    }
+}
