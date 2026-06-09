@@ -28,7 +28,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/assistant/mod.rs` | 4288 | claude CLI integration + auth + workspace + config + per-turn spawn. Largest backend file, overdue split candidate |
+| `src-tauri/src/assistant/mod.rs` | 4331 | claude CLI integration + auth + workspace + config + per-turn spawn. Largest backend file — split brief ready: `docs/design/assistant-mod-split.md` (R1-R8) |
 | `src-tauri/src/assistant/mcp_server.rs` | 813 | stdio JSON-RPC MCP server — exposes `read_file/list_dir/grep` + `git_*` only (all sync/bridge/remote_bash/ask_user tools ripped) |
 | `src-tauri/src/swarm/mod.rs` | 792 | edit-swarm orchestrator (v0.7.0) — parallel sub-agent edit batching + safety layer |
 | `src-tauri/src/assistant/git_local.rs` | 627 | local-git MCP tools (git_status/diff/log/pull/commit/push) |
@@ -38,7 +38,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 
 Backend dirs (current): `assistant/ browser/ commands/ diagnostics/ state/ stt/ swarm/ usage/` + `lib.rs main.rs secrets.rs update_service.rs`. `swarm/`+`usage/` added in the v0.7.0 cost-cockpit/edit-swarm arc. The entire `sftp/ sync/ bootstrap/ edit/ tunnel/ transport/ bridge/ rcon/ profile/` set is gone (pure-assistant rip), plus `local_fs.rs path_guard.rs` and the `remote_state`/`sync_snapshot` state caches.
 
-Frontend hot files: `Composer.svelte` 2957L (largest frontend file — split candidate), `assistant.svelte.ts` 2698L, `ChatTabsBar.svelte` 1761L, `MessageBubble.svelte` 1702L, `ToolChip.svelte` 1554L, `SettingsPage.svelte` ~1340L (cont.88: hero + pill-tabs + single-column titled cards — `.st-block`=card w/ header band inside, `.st-card`=body; was 12-col bento), `HistoryDrawer.svelte` 1292L, `Markdown.svelte` 1120L, `HarnessPage.svelte` 1050L, `AssistantPane.svelte` 981L. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
+Frontend hot files: `Composer.svelte` 2957L (largest frontend file — next split candidate, needs own brief), `assistant.svelte.ts` 1700L (split COMPLETE cont.97 — M0-M9 carved into `src/lib/state/assistant/`, incl. `streaming.ts` stream pump + `send.ts` orchestrator; regression net = `assistant.playback.test.ts`), `ChatTabsBar.svelte` 1761L, `MessageBubble.svelte` 1702L, `ToolChip.svelte` 1554L, `SettingsPage.svelte` ~1340L (cont.88: hero + pill-tabs + single-column titled cards — `.st-block`=card w/ header band inside, `.st-card`=body; was 12-col bento), `HistoryDrawer.svelte` 1292L, `Markdown.svelte` 1120L, `HarnessPage.svelte` 1050L, `AssistantPane.svelte` 981L. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
 
 ## Agent routing
 
