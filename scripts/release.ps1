@@ -259,8 +259,18 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
 # In CI, -Token carries the rift-releases PAT; locally, fall back to the gh
 # session token.
-$ghToken = if ($Token) { $Token.Trim() } else { (gh auth token).Trim() }
+$rawToken = if ($Token) { $Token } else { (gh auth token) }
+if ($null -eq $rawToken) { $rawToken = '' }
+# A GitHub PAT is pure printable ASCII. A stray non-ASCII/control char (BOM,
+# zero-width space, NBSP, smart-quote) pasted into the RELEASES_TOKEN secret
+# survives .Trim() and makes Octokit throw "Request headers must contain only
+# ASCII characters" at upload (v0.8.8 ship). Strip to printable ASCII + warn.
+$ghToken = ($rawToken -replace '[^\x21-\x7E]', '')
 if (-not $ghToken) { throw 'no GitHub token -- pass -Token <pat> (CI) or run `gh auth login` (local)' }
+$stripped = $rawToken.Length - $ghToken.Length
+if ($stripped -gt 0) {
+    Write-Host "  WARNING: stripped $stripped non-ASCII/whitespace char(s) from the token -- re-set the RELEASES_TOKEN secret cleanly if upload still fails (likely a copy-paste artifact)." -ForegroundColor Yellow
+}
 
 $uploadArgs = @(
     'upload', 'github',
