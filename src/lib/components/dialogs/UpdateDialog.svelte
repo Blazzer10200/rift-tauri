@@ -271,7 +271,7 @@
       <div class="upd-foot">
         {#if updates.state === "available"}
           <button class="btn ghost" type="button" onclick={() => updates.snooze()}>
-            <Clock size={11}/> Remind me later
+            <Clock size={11}/> Remind me tomorrow
           </button>
           <div class="foot-spacer"></div>
           <button class="btn primary glow" type="button" onclick={() => updates.download()}>

@@ -88,9 +88,10 @@
   .toast {
     pointer-events: auto;
     --tone: var(--info);
-    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
+    /* Opaque, NO backdrop-filter — WebView2 mis-composites it on bottom-anchored
+       fixed elements (garbage rects + collapsed box; same measured bug class
+       fixed on the update pill in v0.8.10). */
+    background: var(--bg-elev-1);
     border: 1px solid color-mix(in oklch, var(--tone) 18%, var(--border-strong));
     border-left: 2px solid var(--tone);
     border-radius: 8px;

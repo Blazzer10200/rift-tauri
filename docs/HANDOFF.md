@@ -2,6 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-09 (cont. 93) — update-flow root cause FOUND + FIXED
+
+**User report:** update to v0.8.11 "nothing popped up; UI scuffed out, couldn't click." **Root cause:** prod localStorage held `rift.updates.dismissed-version=0.8.11` — pill `×` (flush next to "View") version-permanently silenced it; prod `rift.log` shows "available v0.8.11" on 3 launches but ZERO `download_update` invokes ever on GitHub path. Scuff = WebView2 backdrop-filter mis-composite class (toast blur14 bottom-anchored + `.dialog-overlay`/`.dialog-shell`).
+
+**FIX APPLIED (verified svelte-check 0/0 + CDP DOM+pixels):**
+1. `updates.svelte.ts` — snooze now **time-based 24h** (`{version,until}` JSON in same key; legacy bare-string discarded by JSON.parse catch — self-heals). `snoozeTimer` wakes pill on expiry mid-session; re-armed on launch; `unsnooze()` added; `hasUpdate`/`snoozeActive` getters.
+2. `Titlebar.svelte` — **snooze-proof accent dot** on settings gear when `hasUpdate` (tooltip says "Update available — vX"). A snoozed update is never invisible.
+3. Stripped backdrop-filter (measured WebView2 garbage class): `.dialog-overlay`+`.dialog-shell` (app.css, shell now opaque `--bg-elev-1`), `.toast` (ToastHost). `.slideover`+`.tip` still carry blur — same class, NOT update-path, flagged not fixed.
+4. Labels: dialog "Remind me tomorrow", pill × aria "Snooze for a day".
+
+CDP-verified: pill→snooze(pill hides, dot stays, 24h JSON)→unsnooze(pill back)→dialog (overlay backdrop=none, opaque shell, clean shot). Download invoke chain unchanged (proven earlier this session).
+
+**User unblock on prod 0.8.10 NOW:** Settings→About→Check for updates→Download (ignores snooze). Next release (0.8.12) supersedes the stale snooze anyway (version mismatch → pill shows).
+
+**Env state:** tauri dev RUNNING (bg task bdhzwnz3v) + cdp:serve 9223 (b4u1m52mb); prod = 0.8.10 (PID-only kills). v0.8.11 live on rift-releases.
+
 ## Session 2026-06-09 (cont. 92) — workflow debug sweep + push
 
 Multi-agent Workflow sweep (18 agents, find→adversarial-verify): 13 raw findings → **3 confirmed, 10 refuted**. All 3 fixed + verified (cargo check green via isolated `CARGO_TARGET_DIR` — dodges dev-lock collision, dev stayed alive; svelte-check 0/0):
