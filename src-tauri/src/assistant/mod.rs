@@ -1099,10 +1099,7 @@ pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
 }
 
 fn dirs_home() -> Result<PathBuf, String> {
-    std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .ok_or_else(|| "no USERPROFILE/HOME env var".to_string())
+    crate::state::paths::dirs_home().map_err(|e| e.to_string())
 }
 
 fn load_config() -> AssistantConfig {
