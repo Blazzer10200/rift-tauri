@@ -900,6 +900,19 @@ fn is_valid_model_name(s: &str) -> bool {
     s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
+/// Claude Fable 5 — limited run Rift offers only through 2026-06-22. Past
+/// sunset a stale pref/session pin falls back to `opus` instead of firing at
+/// a retired model id.
+const FABLE_MODEL: &str = "claude-fable-5";
+const FABLE_SUNSET_EPOCH_SECS: u64 = 1_782_172_800; // 2026-06-23T00:00:00Z
+
+fn fable_sunset_passed() -> bool {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() >= FABLE_SUNSET_EPOCH_SECS)
+        .unwrap_or(false)
+}
+
 fn save_session_cwd(id: &str, cwd: &Path) {
     if let Ok(p) = session_cwd_path(id) {
         let s = cwd.to_string_lossy();
@@ -3358,6 +3371,12 @@ pub async fn assistant_send(
                 model = pinned;
             }
         }
+    }
+    // Fable sunset guard — after pin resolution so a pinned Fable session also
+    // falls back once the limited run ends. Anthropic route only.
+    if custom_base.is_none() && model == FABLE_MODEL && fable_sunset_passed() {
+        log::info!("assistant_send: {FABLE_MODEL} sunset passed — falling back to opus");
+        model = "opus".to_string();
     }
     // Effort tier: per-turn override wins, else stored default, else "quick".
     let effort = thinking_effort

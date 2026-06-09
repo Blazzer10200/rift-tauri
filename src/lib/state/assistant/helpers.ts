@@ -6,8 +6,15 @@ import type { ChatMessage, ModelFamily, ModelSel, PermissionMode, ThinkingEffort
 import { captionForTool } from "$lib/components/assistant/toolCaption";
 
 const MODEL_SELS: readonly ModelSel[] = [
-  "sonnet", "opus", "claude-opus-4-7", "haiku",
+  "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
 ] as const;
+
+// Claude Fable 5 — limited run, offered only through Jun 22 2026 (EOD UTC).
+// After sunset the picker hides it and a stored pref self-heals to the default.
+export const FABLE_SUNSET_MS = Date.UTC(2026, 5, 23);
+export function fableAvailable(): boolean {
+  return Date.now() < FABLE_SUNSET_MS;
+}
 
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
@@ -40,7 +47,10 @@ export function loadModel(ws?: string | null): ModelSel {
     if (typeof localStorage !== "undefined") {
       const k = wsKey(MODEL_KEY, ws);
       const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
-      if (v && (MODEL_SELS as readonly string[]).includes(v)) return v as ModelSel;
+      if (v && (MODEL_SELS as readonly string[]).includes(v)) {
+        if (v === "claude-fable-5" && !fableAvailable()) return "sonnet";
+        return v as ModelSel;
+      }
     }
   } catch {
     /* SSR or storage disabled */
@@ -62,7 +72,7 @@ export function saveModel(v: ModelSel, ws?: string | null) {
 /** Map a selected model to its visual family for the aurora hue. */
 export function modelFamily(model: ModelSel): ModelFamily {
   if (model === "haiku") return "haiku";
-  if (model === "opus" || model.includes("opus")) return "opus";
+  if (model === "opus" || model.includes("opus") || model === "claude-fable-5") return "opus";
   return "sonnet";
 }
 

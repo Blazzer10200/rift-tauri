@@ -213,7 +213,7 @@ export type ThinkingEffort = "none" | "quick" | "deep" | "ultra";
  *  that always resolves to the newest Opus (currently 4.8) with the 1M-ctx
  *  beta; `claude-opus-4-7` pins the prior Opus. `sonnet`/`haiku` stay aliases.
  *  Must satisfy the Rust `is_valid_model_name` validator (no brackets). */
-export type ModelSel = "sonnet" | "opus" | "claude-opus-4-7" | "haiku";
+export type ModelSel = "sonnet" | "opus" | "claude-opus-4-7" | "haiku" | "claude-fable-5";
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,
  *  haiku=teal). Both Opus versions collapse to "opus". */
