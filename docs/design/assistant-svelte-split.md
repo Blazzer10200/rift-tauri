@@ -2,7 +2,7 @@
 
 > Brief for the #20 hot-file split. Authoritative state in [src/lib/state/assistant.svelte.ts](../../src/lib/state/assistant.svelte.ts) — **2314 lines** as of 2026-05-28 (down from 3356L). Split lands one module per PR. This file enumerates concerns, lifts cleanly-detachable subsystems, and ranks extraction order by blast-radius.
 >
-> **STATUS 2026-05-28: M0–M7 SHIPPED** (v0.4.31–v0.4.33) — `types`, `helpers`, `telemetry`, `workspace`, `attachments`, `persistence`, `tabs`, `compaction` all carved into `src/lib/state/assistant/`. **M8 (streaming) + M9 (send) remain open** — the highest-blast-radius extractions. All per-module line ranges below are pre-extraction (2026-05-26) and now stale for the shipped M0–M7; re-grep before extracting M8/M9.
+> **STATUS 2026-06-09: COMPLETE — M0–M9 ALL SHIPPED.** M0–M7 (v0.4.31–v0.4.33); M8 `streaming.ts` + M9 `send.ts` landed 2026-06-09 (`b4ea421`, `ea514e8`) under the `assistant.playback.test.ts` regression net. `assistant.svelte.ts` 3356L → **1700L** — under the 2000-line hot-file threshold. Note: M8/M9 deviate from the M3-M7 structural-host-type pattern — they `import type { TabState/AssistantStore }` from the parent directly (type-only, erased, no runtime cycle) b/c their surface (~30 fields + self-referential IoC hooks) would drift as a shape copy. The residual file is the store shell (auth/settings/getters/init wiring) — bigger than the ≤500L guess below, but every enumerated concern is out. Backend follow-on: [assistant-mod-split.md](assistant-mod-split.md).
 
 ## Invariants (carry forward)
 
@@ -143,8 +143,8 @@ Below: each candidate module names a concern, lists the line ranges in the curre
 6. **M5** persistence → save/load/list path, debounced; needs M0 + M4 first to compile cleanly. ✅ DONE
 7. **M6** tabs+panes → biggest UI-facing surface; needs M5 in place so close/save can route. ✅ DONE
 8. **M7** compaction → tight contract w/ M8 ctx readings + M5 save; do AFTER both. ✅ DONE
-9. **M8** streaming → the rest of TabState; extract method bodies as free fns, leave TabState class as thin shell. ← NEXT
-10. **M9** send → orchestrator across M2/M4/M7/M8; last. ← after M8
+9. **M8** streaming → the rest of TabState; extract method bodies as free fns, leave TabState class as thin shell. ✅ DONE (2026-06-09)
+10. **M9** send → orchestrator across M2/M4/M7/M8; last. ✅ DONE (2026-06-09)
 
 At each step, the size reduction target is ~10–15% of file. After M9 the residual `assistant.svelte.ts` should be ≤500 lines containing only:
 - AssistantStore class shell (auth + settings + the `getXxx` getters that delegate to controllers).

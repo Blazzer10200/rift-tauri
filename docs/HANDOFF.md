@@ -2,18 +2,23 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 96) — v0.8.14 SHIPPED: update-dialog crash fixed (the real "can't click update" root cause)
+## Session 2026-06-09 (cont. 97) — #20 TS split COMPLETE (M8+M9) + UI-drift fixed + mod.rs split brief (unshipped, autonomous session)
 
-**End of the v0.8.3→v0.8.12 "can't click update" saga.** Never a click/layout/z-index bug. The pill handler fired + set `dialogOpen=true`, then `UpdateDialog` **threw on render** so the overlay never committed → looked like a dead button. Root cause: notes `{#each}` keyed on `kind+'|'+text`; every blank line → same `blank|` key → `each_key_duplicate` aborts render (data-dependent; dev "worked" w/o consecutive-blank notes). Fix = key on index (`{#each notes as ln, i (i)}`) — this WAS the dirty edit cont.95 flagged "left for user". CDP-proven: reproduced the throw live on the installed v0.8.12 prod build, confirmed clean render in dev w/ multi-blank notes. `npm run check` 0/0.
+Three commits on `main`, **source-verified only** (svelte-check 0/0, vitest 51/51; no dev launch — user was gaming):
 
-- **v0.8.14 also bundles cont.95 SEC-1 backend hardening** (swarm worktree-escape guard + 6 fixes). CI green 3m1s → published to `rift-releases`.
-- **NEW open #29** (rewritten): runtime CSP `nonce` nullifies `'unsafe-inline'` → Svelte inline transition styles + download progress-bar fill blocked. **Cosmetic** (download/apply/clicks all work). Kept OUT of v0.8.14 — app-wide blast radius.
+- **`b4ea421` M8:** stream pump → `assistant/streaming.ts` (verbatim bodies; TabState = fields + IoC hooks + 1-line thunks; `recordTurnUsage` exported as the test seam). Playback suite exercises the moved pump end-to-end.
+- **`ea514e8` M9:** send orchestrator → `assistant/send.ts` (send + slash + queue drain + steer + stop + retry/copy/recall; `AssistantStore` type-only export; `retrying` now public). **`assistant.svelte.ts` 2709 → 1700L — under the 2000L threshold; M0-M9 ALL DONE.** Note: M8/M9 use type-only parent imports, not structural host types (surface too wide — documented in both file headers + brief).
+- **`6e7cb21` UI-drift fixed:** Settings hero chip hard-coded "up to date"; now renders from new `updates.summary` (one derived `{kind,label}`) + warn/danger chip variants.
+- **NEW: `docs/design/assistant-mod-split.md`** — R1-R8 child-module plan for `assistant/mod.rs` (4331L; `assistant_send` alone is 917L). Commands re-exported from mod.rs so the lib.rs registry never churns. R1 `cli_install.rs` is the easy first bite.
 
-### RESUME HERE (cont.96)
-- **User on v0.8.12 must update via manual `Setup.exe` ONCE** (rift-releases/releases/latest) — 0.8.12's dialog still crashes so the in-app Download button is unreachable until they're on 0.8.14; in-app updates work permanently after.
-- Optional: CDP/live pass on SEC-1 (shipped source-only) · #29 CSP-nonce fix when ready (app-wide — verify every transition + `style:` binding first).
+### RESUME HERE (cont.97)
+- **User on v0.8.12 still needs ONE manual `Setup.exe`** (rift-releases/releases/latest) — in-app Download unreachable until 0.8.14+; permanent after.
+- M8/M9 + UI-drift are **runtime-unverified** — next dev session: send a real turn (stream/tools/thinking render), steer mid-turn, stop, /retry, queue drain; check the Settings chip states. Then ship as v0.8.15.
+- Next #20 bite: execute mod.rs brief R1 (`cli_install.rs`) — remember `cargo check` rules (never while dev alive; kill by PID only).
+- Parked from cont.96: optional SEC-1 live pass · #29 CSP-nonce (app-wide, verify every transition first).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
+cont.96 v0.8.14 SHIPPED — update-dialog crash root-caused (`each_key_duplicate` on blank-line notes keys; keyed by index now) + SEC-1 hardening bundled; saga over.
 cont.95 SEC-1 backend security review (shipped in v0.8.14). cont.94 v0.8.13 Claude Fable 5 limited-run model (`claude-fable-5` front+back; **Jun 22 Rift-side sunset gate** — `FABLE_SUNSET_EPOCH_SECS=1_782_172_800`; self-heals to Sonnet/Opus after). cont.93 v0.8.12 SHIPPED (`feea28f` — pill `×` → 24h `{version,until}` snooze; blur stripped from dialog/toasts). cont.92 18-agent sweep → 3 fixed. cont.90 v0.8.11 (first tag-driven release on VM 100 `rift-runner`). cont.88 self-hosted runner LIVE: **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.72 v0.7.0 + edit-swarm. **Latest release = v0.8.14; user's prod = 0.8.12 until they run Setup.exe (PID-only kills, NEVER by image name).**
 [carried] `.slideover`/`.tip` blur (fix on new scuff only) · runner perf roadmap · drag-reorder verify · `RELEASES_TOKEN` re-set.
 

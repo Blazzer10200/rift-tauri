@@ -22,7 +22,7 @@
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
 | CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
 | #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
-| UI-drift | App-update surfaces disagree (toast vs card) | T4 | 🚧 open |
+| UI-drift | App-update surfaces disagree (toast vs card) | T4 | ✅ resolved in-tree |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -61,11 +61,10 @@
 #### 20. Hot files exceeding the 2000-line agent-split threshold
 
 - **Where:** per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Open targets (re-measured 2026-06-09):
-  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — **4331L (worst)**: Claude CLI spawn + auth + workspace + config + per-turn stream. Next backend split candidate.
-  - [src/lib/state/assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) — 2709L (M0-M7 carved from 3356L; M8/M9 open).
+  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — **4331L (worst)**: Claude CLI spawn + auth + workspace + config + per-turn stream. **Design brief ready:** [docs/design/assistant-mod-split.md](design/assistant-mod-split.md) (R1-R8 child modules, blast-radius-ascending, commands re-exported so the registry never churns).
+  - [src/lib/components/assistant/Composer.svelte](../src/lib/components/assistant/Composer.svelte) — 2957L, next frontend target (needs its own brief).
 - **Symptom:** targeted edits become brittle, LSP slows, agents bail mid-emit on audit-shaped prompts.
-- **Fix sketch:** `assistant.svelte.ts` next — design brief in [docs/design/assistant-svelte-split.md](design/assistant-svelte-split.md) (9-module extraction, ranked by blast radius). Then continue `assistant/mod.rs` extraction.
-- **Status:** M0-M7 SHIPPED (`assistant.svelte.ts` 3356L → ~2479L). M8 (streaming pump) + M9 (send orchestrator) open — the two highest-blast-radius extractions. **Both now have their regression net** (`assistant.playback.test.ts`, 2026-06-08, see #21): the stream pump AND the send/queue/steer orchestrator are covered end-to-end, so either extraction can proceed safely.
+- **Status:** `assistant.svelte.ts` split **COMPLETE** — M0-M9 all shipped; M8 `streaming.ts` + M9 `send.ts` landed 2026-06-09 (`b4ea421`, `ea514e8`) under the playback regression net, file now **1700L** (was 3356L). Next: execute the mod.rs brief (R1 `cli_install.rs` first).
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
 
@@ -87,11 +86,10 @@
 - **Symptom (observed v0.8.14, prod CDP):** per CSP spec, **a nonce makes `'unsafe-inline'` be ignored** — so Svelte's dynamically-applied inline styles get blocked. Console spams `Applying inline style violates ... style-src 'self' 'unsafe-inline' 'nonce-…'`. Real impact: Svelte transition styles (fly/fade) and `style="width:{progress}%"` on the update download progress-bar don't apply. **Cosmetic** — download/apply and all clicks still work; animations snap and the progress fill stays empty.
 - **Fix sketch:** make the static CSP and SvelteKit's nonce agree. Either (a) configure SvelteKit `kit.csp` so the nonce also covers the styles Svelte injects, or (b) drop the nonce path so `'unsafe-inline'` actually takes effect, or (c) move the affected inline styles to classes. **App-wide blast radius** — verify every transition + `style:` binding across the app before shipping; deliberately kept out of the v0.8.14 update-fix release to avoid re-breaking the updater.
 
-#### UI-drift. App-update surfaces disagree (🚧 open)
+#### UI-drift. App-update surfaces disagree (✅ resolved in-tree, unshipped)
 
-- **Where:** the Velopack app-update surfaces — toast (`updates.svelte.ts`), Home/Settings status card(s). User screenshot (cont.64) showed the toast saying "update available v0.5.0 → v0.6.1" while another card read "Rift 0.5.0 · up to date" at the same time.
-- **Symptom:** the surfaces read different slices of update state, so one can show "available" while another shows "up to date" — looks broken even when the updater is fine. (Functional bug was the apply file-lock, fixed in v0.6.2; this is the remaining *cosmetic* drift.)
-- **Fix sketch:** mirror the cont.63 CLI-update unification — drive every app-update surface from one derived summary off the `updates` store so they can't diverge.
+- **Was:** the Settings hero chip hard-coded `{version} · up to date` (green, unconditional) while the pill/titlebar derived from live state — the cont.64 "available vs up to date" screenshot.
+- **Fix (2026-06-09, `6e7cb21`):** `UpdateStore.summary` — ONE derived `{kind,label}` (available/downloading/installing → warn `vX available` · checking → busy · error → danger · uptodate → ok · idle → neutral version-only) — and the chip renders exclusively from it (warn/danger `sb-chip` variants added). Pill/titlebar/dialog already derived from store state. Delete this block at next ship.
 
 > Also parked: **Wave-1 LOWs #91–#134** — clippy/doc/perf nits, in `docs/archive/audit-history.md` (not tracked live here).
 
@@ -114,7 +112,8 @@
 
 ## Active design briefs
 
-- `docs/design/assistant-svelte-split.md` (#20 — M0-M7 shipped; M8 streaming + M9 send open)
+- `docs/design/assistant-mod-split.md` (#20 backend — R1-R8 ready to execute)
+- `docs/design/assistant-svelte-split.md` (#20 frontend — COMPLETE, M0-M9 all shipped; kept until mod.rs split adopts its lessons)
 - `docs/design/steer-and-queue.md` (steer/queue three-tier model — steer shipped; queue improvements + inline-bubble follow-ups open)
 
 ---
