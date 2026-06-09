@@ -68,8 +68,6 @@ import {
   loadPermissionMode,
   savePermissionMode,
   loadDockWidth,
-  flattenToolResult,
-  previewToolInput,
   messagesHaveContextSignals,
   effortToFlag,
 } from "./assistant/helpers";
@@ -135,6 +133,19 @@ import {
   summarizeCurrentSession as compactSummarize,
   compactConversation as compactRun,
 } from "./assistant/compaction";
+// M8 split (2026-06-09): the stream pump (envelope/delta parsing, thinking
+// timing, tool→activity routing, ask_user FIFO binding, usage accounting,
+// rAF text pacer) in `./assistant/streaming`. TabState keeps the $state
+// fields + IoC hooks; its methods below are thin thunks onto these.
+import {
+  beginTurn as streamBeginTurn,
+  drainTick as streamDrainTick,
+  flushPendingText as streamFlushPendingText,
+  tryBindAskUser as streamTryBindAskUser,
+  onStreamLine as streamOnLine,
+  onStreamDone as streamOnDone,
+  onStreamError as streamOnError,
+} from "./assistant/streaming";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -146,7 +157,7 @@ import {
  *  Cross-cutting effects (dock open, tasksUpdatedAt bump, queue drain,
  *  scheduleSave) reach back into AssistantStore via the callback hooks
  *  set when the tab is created. */
-class TabState {
+export class TabState {
   /** CLI session UUID — every assistant://stream|done|error event carries
    *  this so the store can dispatch to the right tab. Mutable: compaction
    *  remints it without destroying the TabState.
@@ -299,653 +310,37 @@ class TabState {
   }
 
   /** Called at the start of every send(). Clears per-turn pacer / thinking
-   *  / dedupe state and flips streaming on. */
+   *  / dedupe state and flips streaming on. M8: body in ./assistant/streaming. */
   beginTurn() {
-    this.lastError = null;
-    this.seenToolUseIds.clear();
-    this.deltaCount = 0;
-    this.envelopeTextBuffer = "";
-    this.rawLineLog = [];
-    if (this.drainHandle !== null) {
-      cancelAnimationFrame(this.drainHandle);
-      this.drainHandle = null;
-    }
-    this.pendingText = "";
-    this.thinkingByIndex.clear();
-    this.activeThinkingIndex = null;
-    this.lastStreamEventAt = null;
-    this.activity = { currentLabel: null, turnStartedAt: Date.now() };
-    this.streaming = true;
+    streamBeginTurn(this);
   }
 
-  // ── streaming pipeline ────────────────────────────────────────────────
-
-  private mutateStreaming(fn: (m: ChatMessage) => ChatMessage) {
-    if (!this.streamingMsgId) return;
-    const idx = this.streamingMsgIdx;
-    if (idx !== null && idx >= 0 && idx < this.messages.length) {
-      const m = this.messages[idx];
-      if (m && m.id === this.streamingMsgId) {
-        this.messages[idx] = fn(m);
-        return;
-      }
-    }
-    this.messages = this.messages.map((m) => (m.id === this.streamingMsgId ? fn(m) : m));
-  }
-
-  private beginThinking(index: number) {
-    if (this.thinkingByIndex.has(index)) return;
-    this.activeThinkingIndex = index;
-    const startedAt = Date.now();
-    this.mutateStreaming((m) => {
-      const blocks = m.blocks.slice();
-      this.thinkingByIndex.set(index, { blockOffset: blocks.length, startedAt });
-      blocks.push({
-        type: "thinking",
-        text: "",
-        hasSignature: false,
-        startedAt,
-        durationMs: null,
-        status: "active",
-      });
-      return { ...m, blocks };
-    });
-    this.activity = { ...this.activity, currentLabel: "Thinking…" };
-    if (this.currentTurnRecord) this.currentTurnRecord.thinkingCount += 1;
-  }
-
-  private mutateThinking(index: number, fn: (b: ThinkingBlock) => ThinkingBlock) {
-    const entry = this.thinkingByIndex.get(index);
-    if (!entry) return;
-    this.mutateStreaming((m) => {
-      const blocks = m.blocks.slice();
-      const target = blocks[entry.blockOffset];
-      if (target && target.type === "thinking") {
-        blocks[entry.blockOffset] = fn(target);
-      }
-      return { ...m, blocks };
-    });
-  }
-
-  private appendThinkingText(index: number, chunk: string) {
-    if (!chunk) return;
-    this.mutateThinking(index, (b) => ({ ...b, text: b.text + chunk }));
-  }
-
-  private markThinkingSignature(index: number) {
-    this.mutateThinking(index, (b) => (b.hasSignature ? b : { ...b, hasSignature: true }));
-  }
-
-  private endThinking(index: number) {
-    const entry = this.thinkingByIndex.get(index);
-    if (!entry) return;
-    const durationMs = Date.now() - entry.startedAt;
-    if (this.currentTurnRecord) {
-      this.currentTurnRecord.thinkingTotalMs += durationMs;
-      // Capture per-block detail. `charCount` stays 0 in -p mode (encrypted)
-      // but is wired in case a future API version emits plaintext deltas;
-      // `hasSignature` is the truthier "real thinking happened" signal today.
-      let charCount = 0;
-      let hasSignature = false;
-      const msg = this.streamingMsgId ? this.messages.find((m) => m.id === this.streamingMsgId) : null;
-      if (msg) {
-        const block = msg.blocks[entry.blockOffset];
-        if (block && block.type === "thinking") {
-          charCount = block.text.length;
-          hasSignature = block.hasSignature;
-        }
-      }
-      this.currentTurnRecord.thinkingBlocks.push({
-        startedAt: entry.startedAt,
-        durationMs,
-        charCount,
-        hasSignature,
-      });
-    }
-    this.mutateThinking(index, (b) => ({ ...b, status: "done", durationMs }));
-    if (this.activeThinkingIndex === index) {
-      this.activeThinkingIndex = null;
-      if (this.activity.currentLabel === "Thinking…") {
-        this.activity = { ...this.activity, currentLabel: null };
-      }
-    }
-    // Drop the entry so the CLI's agentic loop — which reuses `index=0` for
-    // each new thinking block after a tool round-trip — can re-`beginThinking`
-    // cleanly. Without this, `thinkingCount` stays at 1 and `thinkingBlocks`
-    // double-counts the same block w/ ever-growing cumulative durations.
-    this.thinkingByIndex.delete(index);
-  }
-
-  private ensureThinkingFromEnvelope(block: { thinking?: string; signature?: string }) {
-    if (!this.streamingMsgId) return;
-    const msg = this.messages.find((m) => m.id === this.streamingMsgId);
-    if (!msg) return;
-    const existing = msg.blocks.find((b) => b.type === "thinking") as ThinkingBlock | undefined;
-    const envText = typeof block.thinking === "string" ? block.thinking : "";
-    const envSig = !!block.signature && block.signature.length > 0;
-    if (existing) {
-      if (envText.length > existing.text.length || (envSig && !existing.hasSignature)) {
-        // #147: $state proxies aren't referentially equal across read sites,
-        // so `b === existing` was always false → every call appended a new
-        // block. Match by stable startedAt instead.
-        const key = existing.startedAt;
-        this.mutateStreaming((m) => ({
-          ...m,
-          blocks: m.blocks.map((b) =>
-            b.type === "thinking" && b.startedAt === key
-              ? { ...b, text: envText.length > b.text.length ? envText : b.text, hasSignature: b.hasSignature || envSig }
-              : b,
-          ),
-        }));
-      }
-      return;
-    }
-    this.mutateStreaming((m) => ({
-      ...m,
-      blocks: [
-        ...m.blocks,
-        {
-          type: "thinking",
-          text: envText,
-          hasSignature: envSig,
-          startedAt: Date.now(),
-          durationMs: null,
-          status: "done",
-        },
-      ],
-    }));
-  }
-
-  private appendText(chunk: string) {
-    if (!chunk) return;
-    this.mutateStreaming((m) => {
-      const blocks = m.blocks.slice();
-      const last = blocks[blocks.length - 1];
-      if (last && last.type === "text") {
-        blocks[blocks.length - 1] = { type: "text", text: last.text + chunk };
-      } else {
-        blocks.push({ type: "text", text: chunk });
-      }
-      return { ...m, blocks };
-    });
-  }
-
-  private enqueueText(chunk: string) {
-    if (!chunk) return;
-    this.pendingText += chunk;
-    if (this.drainHandle === null) {
-      this.lastDrainAt = performance.now();
-      this.drainHandle = requestAnimationFrame(this.drainTick);
-    }
-  }
-
-  private drainTick = () => {
-    if (this.pendingText.length === 0) {
-      this.drainHandle = null;
-      return;
-    }
-    const now = performance.now();
-    const dt = Math.min(now - this.lastDrainAt, 100);
-    this.lastDrainAt = now;
-    const rate = Math.max(120, this.pendingText.length / 0.4);
-    const n = Math.min(this.pendingText.length, Math.max(1, Math.round((rate * dt) / 1000)));
-    const chunk = this.pendingText.slice(0, n);
-    this.pendingText = this.pendingText.slice(n);
-    this.appendText(chunk);
-    this.drainHandle = requestAnimationFrame(this.drainTick);
+  /** rAF pacer callback — a stable per-tab arrow so enqueue/re-arm target one
+   *  identity across frames. Public b/c the streaming module re-arms via
+   *  `requestAnimationFrame(tab.drainTick)`. */
+  drainTick = () => {
+    streamDrainTick(this);
   };
 
   flushPendingText() {
-    if (this.drainHandle !== null) {
-      cancelAnimationFrame(this.drainHandle);
-      this.drainHandle = null;
-    }
-    if (this.pendingText.length > 0) {
-      this.appendText(this.pendingText);
-      this.pendingText = "";
-    }
+    streamFlushPendingText(this);
   }
 
-  private applyTodoWrite(input: Record<string, unknown> | undefined): boolean {
-    const raw = (input?.todos ?? []) as Array<{ content?: string; status?: string }>;
-    // #178: content-keyed ids so a reorder/insert in the model's TodoWrite
-    // doesn't force every downstream {#each} to destroy + remount. Existing
-    // ids are reused when content matches; new content gets a fresh id.
-    const byContent = new Map(this.tasks.map((t) => [t.content, t.id]));
-    const used = new Set<string>();
-    const next = raw
-      .filter((t) => typeof t?.content === "string")
-      .map((t) => {
-        const content = t.content!;
-        let id = byContent.get(content);
-        if (id && !used.has(id)) {
-          used.add(id);
-        } else {
-          let candidate = `todo-${content.slice(0, 24)}`;
-          let n = 1;
-          while (used.has(candidate)) candidate = `todo-${content.slice(0, 24)}-${n++}`;
-          id = candidate;
-          used.add(id);
-        }
-        return {
-          id,
-          content,
-          status: (t.status === "in_progress" || t.status === "completed" ? t.status : "pending") as
-            | "pending"
-            | "in_progress"
-            | "completed",
-        };
-      });
-    this.tasks = next;
-    if (next.length > 0 && !this.dockAutoOpenedThisConvo) {
-      this.dockAutoOpenedThisConvo = true;
-      return true;
-    }
-    return false;
-  }
-
-  // Newer Claude CLI task API: TaskCreate adds one task at a time (subject +
-  // description + activeForm); TaskUpdate flips status by 1-based creation index
-  // (taskId "1".."N"). Both feed the same dock Plan card as TodoWrite.
-  private applyTaskCreate(input: Record<string, unknown> | undefined): boolean {
-    const subject = typeof input?.subject === "string" ? (input.subject as string) : null;
-    if (!subject) return false;
-    this.taskCreateCount += 1;
-    const id = String(this.taskCreateCount);
-    this.tasks = [...this.tasks, { id, content: subject, status: "pending" }];
-    if (!this.dockAutoOpenedThisConvo) {
-      this.dockAutoOpenedThisConvo = true;
-      return true;
-    }
-    return false;
-  }
-
-  private applyTaskUpdate(input: Record<string, unknown> | undefined): void {
-    const taskId = input?.taskId != null ? String(input.taskId) : null;
-    if (!taskId) return;
-    const raw = input?.status;
-    const status = (raw === "in_progress" || raw === "completed" ? raw : "pending") as
-      | "pending"
-      | "in_progress"
-      | "completed";
-    this.tasks = this.tasks.map((t) => (t.id === taskId ? { ...t, status } : t));
-  }
-
-  private appendToolUse(block: { id: string; name: string; input?: Record<string, unknown> }) {
-    if (this.seenToolUseIds.has(block.id)) return;
-    this.seenToolUseIds.add(block.id);
-    if (this.currentTurnRecord) {
-      this.currentTurnRecord.toolUses.push({
-        name: block.name,
-        id: block.id,
-        startedAt: Date.now(),
-        completedAt: null,
-        durationMs: null,
-        isError: null,
-        inputPreview: previewToolInput(block.name, block.input),
-      });
-    }
-    if (block.name === "TodoWrite") {
-      const opensDock = this.applyTodoWrite(block.input);
-      this.onTodoApplied?.(this, opensDock);
-      return;
-    }
-    if (block.name === "TaskCreate") {
-      const opensDock = this.applyTaskCreate(block.input);
-      this.onTodoApplied?.(this, opensDock);
-      return;
-    }
-    if (block.name === "TaskUpdate") {
-      this.applyTaskUpdate(block.input);
-      this.onTodoApplied?.(this, false);
-      return;
-    }
-    if (block.name === "Task" || block.name === "Agent") {
-      const subagentType = String(block.input?.subagent_type ?? "fork");
-      const description = String(block.input?.description ?? "(no description)");
-      this.agentSpawns = [
-        ...this.agentSpawns,
-        { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false },
-      ];
-      return;
-    }
-    const DENY = new Set(["ToolSearch"]);
-    if (DENY.has(block.name)) return;
-    this.activity = {
-      ...this.activity,
-      currentLabel: this.shortToolLabel ? this.shortToolLabel(block.name, block.input) : block.name,
-    };
-    this.mutateStreaming((m) => ({
-      ...m,
-      blocks: [
-        ...m.blocks,
-        {
-          type: "tool",
-          id: block.id,
-          name: block.name,
-          input: block.input ?? {},
-          result: null,
-          isError: false,
-          status: "pending",
-          startedAt: Date.now(),
-        },
-      ],
-    }));
-    // ask_user pairing — see TabState.askUserBindings doc.
-    if (block.name === "mcp__rift__ask_user") {
-      this.unboundAskUserToolUseIds.push(block.id);
-      this.tryBindAskUser();
-    }
-  }
-
-  /** Drain the two ask_user FIFOs as long as both have entries. Each pair
-   *  binds a toolUseId to a requestId in `askUserBindings`, making the chip
-   *  in MessageBubble able to invoke the answer-submit command. */
+  /** Drain the two ask_user FIFOs — see ./assistant/streaming. */
   tryBindAskUser() {
-    while (
-      this.unboundAskUserToolUseIds.length > 0 &&
-      this.unboundAskUserRequestIds.length > 0
-    ) {
-      const toolUseId = this.unboundAskUserToolUseIds.shift()!;
-      const requestId = this.unboundAskUserRequestIds.shift()!;
-      const next = new Map(this.askUserBindings);
-      next.set(toolUseId, requestId);
-      this.askUserBindings = next;
-    }
-  }
-
-  private recordTurnUsage(u: Record<string, unknown>, accumulate: boolean) {
-    const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
-    const turn = {
-      input: num(u.input_tokens),
-      output: num(u.output_tokens),
-      cacheRead: num(u.cache_read_input_tokens),
-      cacheCreate: num(u.cache_creation_input_tokens),
-    };
-    if (turn.input + turn.output + turn.cacheRead + turn.cacheCreate === 0) return;
-    // Telemetry capture into the in-flight turn record. Both envelope +
-    // result land here so S106's `byModel` / divergence metrics keep their
-    // signal -- the pill below is the only thing that ignores envelope.
-    if (this.currentTurnRecord) {
-      if (accumulate) this.currentTurnRecord.resultUsage = turn;
-      else this.currentTurnRecord.envelopeUsage = turn;
-    }
-    // The ctx pill must reflect point-in-time window occupancy, NOT cumulative
-    // task usage. The `assistant` envelope (accumulate=false) carries one
-    // request's usage — its input + cache_read is exactly how full the window
-    // is right now. The `result` event (accumulate=true) sums usage across
-    // every step of the agentic loop, so one long task reports >1M cache_read
-    // (confirmed: anthropics/claude-agent-sdk-python#548). Driving the pill off
-    // `result` spiked it to ~full the instant a task finished and tripped
-    // auto-compact for no reason. So: the last envelope drives the pill; the
-    // result feeds session totals + cost only. Mid-turn envelopes climb the
-    // pill live, which is fine — the auto-compact effect is gated on !streaming.
-    if (accumulate) {
-      // result = cumulative-per-task → session stats only (intentionally summed).
-      this.sessionUsage = {
-        totalInput: this.sessionUsage.totalInput + turn.input,
-        totalOutput: this.sessionUsage.totalOutput + turn.output,
-        totalCacheRead: this.sessionUsage.totalCacheRead + turn.cacheRead,
-        totalCacheCreate: this.sessionUsage.totalCacheCreate + turn.cacheCreate,
-        turns: this.sessionUsage.turns + 1,
-      };
-    } else {
-      // assistant envelope = point-in-time window occupancy → drives the pill.
-      this.lastTurnUsage = turn;
-    }
-  }
-
-  private fillToolResult(toolUseId: string, content: string, isError: boolean) {
-    if (this.currentTurnRecord) {
-      const rec = this.currentTurnRecord.toolUses.find((t) => t.id === toolUseId);
-      if (rec) {
-        const now = Date.now();
-        rec.completedAt = now;
-        rec.durationMs = now - rec.startedAt;
-        rec.isError = isError;
-      }
-    }
-    // S124: mark matching agent spawn done.
-    const agentIdx = this.agentSpawns.findIndex((a) => a.id === toolUseId);
-    if (agentIdx !== -1) {
-      const next = this.agentSpawns.slice();
-      next[agentIdx] = { ...next[agentIdx], completedAt: Date.now(), isError };
-      this.agentSpawns = next;
-    }
-    const now = Date.now();
-    this.mutateStreaming((m) => ({
-      ...m,
-      blocks: m.blocks.map((b) => {
-        if (b.type !== "tool" || b.id !== toolUseId) return b;
-        const durationMs = typeof b.startedAt === "number" ? now - b.startedAt : undefined;
-        return { ...b, result: content, isError, status: isError ? "error" : "done", durationMs };
-      }),
-    }));
+    streamTryBindAskUser(this);
   }
 
   onStream(raw: string) {
-    if (this.rawLineLog.length >= 200) this.rawLineLog.shift();
-    this.rawLineLog.push(raw);
-    let env: StreamEnvelope;
-    try {
-      env = JSON.parse(raw) as StreamEnvelope;
-    } catch {
-      if (this.streaming && this.streamingMsgId && raw.length > 0) {
-        const prefix = this.deltaCount > 0 ? "\n" : "";
-        this.deltaCount++;
-        if (this.currentTurnRecord) {
-          this.currentTurnRecord.deltaCount = this.deltaCount;
-          if (this.currentTurnRecord.firstPaintAt == null) {
-            this.currentTurnRecord.firstPaintAt = Date.now();
-          }
-        }
-        this.enqueueText(prefix + raw);
-      } else if (raw.length > 0) {
-        // #182: post-done CLI dribble was silently dropped — surface in console
-        // for observability so we know if a known CLI bug regresses.
-        console.debug("[assistant] orphaned non-JSON line (post-done)", raw.slice(0, 80));
-      }
-      return;
-    }
-    switch (env.type) {
-      case "stream_event": {
-        if (this.currentTurnRecord) {
-          this.currentTurnRecord.streamEventCount += 1;
-          const now = Date.now();
-          // Anchor against last event arrival, falling back to first-paint or
-          // turn-start so the metric is defined even on the first stream_event.
-          const last = this.lastStreamEventAt ?? this.currentTurnRecord.firstPaintAt ?? this.currentTurnRecord.ts;
-          const gap = now - last;
-          if (gap > this.currentTurnRecord.maxStreamGapMs) {
-            this.currentTurnRecord.maxStreamGapMs = gap;
-          }
-          this.lastStreamEventAt = now;
-        }
-        const ev = env.event;
-        const evType = ev?.type;
-        const idx = typeof ev?.index === "number" ? ev.index : null;
-        if (evType === "content_block_start" && ev?.content_block?.type === "thinking" && idx !== null) {
-          this.beginThinking(idx);
-        } else if (evType === "content_block_delta") {
-          const d = ev?.delta;
-          if (d?.type === "text_delta" && d.text) {
-            this.deltaCount++;
-            if (this.currentTurnRecord) {
-              this.currentTurnRecord.deltaCount = this.deltaCount;
-              if (this.currentTurnRecord.firstPaintAt == null) {
-                this.currentTurnRecord.firstPaintAt = Date.now();
-              }
-            }
-            this.enqueueText(d.text);
-          } else if (d?.type === "thinking_delta" && typeof d.thinking === "string" && idx !== null) {
-            this.appendThinkingText(idx, d.thinking);
-          } else if (d?.type === "signature_delta" && idx !== null) {
-            this.markThinkingSignature(idx);
-          }
-        } else if (evType === "content_block_stop" && idx !== null) {
-          this.endThinking(idx);
-        }
-        break;
-      }
-      case "assistant": {
-        if (this.currentTurnRecord) this.currentTurnRecord.assistantEnvCount += 1;
-        const msgUsage = env.message?.usage;
-        if (msgUsage) this.recordTurnUsage(msgUsage, false);
-        for (const block of env.message?.content ?? []) {
-          if (block.type === "tool_use") {
-            this.appendToolUse(block);
-          } else if (block.type === "text" && typeof block.text === "string") {
-            this.envelopeTextBuffer += block.text;
-          } else if (block.type === "thinking") {
-            this.ensureThinkingFromEnvelope(block);
-          }
-        }
-        break;
-      }
-      case "user": {
-        for (const block of env.message?.content ?? []) {
-          if (block.type === "tool_result") {
-            this.fillToolResult(
-              block.tool_use_id,
-              flattenToolResult(block.content),
-              block.is_error === true,
-            );
-          }
-        }
-        break;
-      }
-      case "result": {
-        if (typeof env.total_cost_usd === "number") {
-          this.totalCostUsd = (this.totalCostUsd ?? 0) + env.total_cost_usd;
-          const turnCost = env.total_cost_usd;
-          this.mutateStreaming((m) => ({ ...m, costUsd: turnCost }));
-          if (this.currentTurnRecord) this.currentTurnRecord.costUsd = turnCost;
-        }
-        const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
-        if (resultUsage) this.recordTurnUsage(resultUsage, true);
-        if (env.subtype && env.subtype !== "success") {
-          // Whitelist (S105 A3): known CLI error subtypes surface as user-visible
-          // errors; anything else logs but doesn't false-alarm. Pre-emptive guard
-          // for post-compaction CLI subtypes we haven't seen yet.
-          const KNOWN_ERRORS = new Set([
-            "error_max_turns",
-            "error_during_execution",
-            "error_max_thinking_tokens",
-          ]);
-          if (KNOWN_ERRORS.has(env.subtype)) {
-            this.lastError = `Run ended with subtype: ${env.subtype}`;
-          } else {
-            console.warn("[assistant] unrecognized result.subtype", env.subtype, env);
-          }
-        }
-        break;
-      }
-      case "system": {
-        const sysModel = typeof env.model === "string" ? env.model : null;
-        if (sysModel) {
-          this.lastModelId = sysModel;
-          this.mutateStreaming((m) => ({ ...m, model: sysModel }));
-          if (this.currentTurnRecord) this.currentTurnRecord.modelId = sysModel;
-        }
-        break;
-      }
-      default:
-        break;
-    }
+    streamOnLine(this, raw);
   }
 
   onDone() {
-    if (!this.streaming) return;
-    this.flushPendingText();
-    let envelopeFallback = false;
-    let blankTurn = false;
-    if (this.deltaCount === 0 && this.envelopeTextBuffer.length > 0) {
-      this.appendText(this.envelopeTextBuffer);
-      envelopeFallback = true;
-    } else if (this.deltaCount === 0 && this.envelopeTextBuffer.length === 0) {
-      const msg = this.streamingMsgId
-        ? this.messages.find((m) => m.id === this.streamingMsgId)
-        : null;
-      const hadTools = !!msg && msg.blocks.some((b) => b.type === "tool");
-      if (!hadTools) blankTurn = true;
-      if (!hadTools) {
-        const lines = this.rawLineLog.slice();
-        console.warn("[assistant] turn ended with no text and no tools. Raw stream lines:", lines);
-        const types: string[] = [];
-        const nonJsonSamples: string[] = [];
-        for (const ln of lines) {
-          try {
-            const parsed = JSON.parse(ln) as { type?: string; subtype?: string };
-            types.push(parsed.subtype ? `${parsed.type}:${parsed.subtype}` : (parsed.type ?? "?"));
-          } catch {
-            types.push("non-json");
-            if (nonJsonSamples.length < 3) {
-              nonJsonSamples.push(ln.length > 240 ? ln.slice(0, 240) + "…" : ln);
-            }
-          }
-        }
-        const fingerprint = `[${types.join(", ")}]`;
-        const tail =
-          nonJsonSamples.length > 0
-            ? ` Non-JSON output: ${nonJsonSamples.map((s) => `"${s}"`).join(" | ")}`
-            : " Full NDJSON in DevTools console.";
-        this.lastError = `Blank response — CLI emitted ${lines.length} line(s): ${fingerprint}.${tail}`;
-      }
-    }
-    this.streaming = false;
-    this.streamingMsgId = null;
-    this.streamingMsgIdx = null;
-    this.seenToolUseIds.clear();
-    // Drop any unanswered permission asks — the backend auto-denies on turn
-    // end, so a lingering Allow/Deny chip would be dead.
-    if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
-    this.unboundAskUserRequestIds = [];
-    this.unboundAskUserToolUseIds = [];
-    this.activity = { ...this.activity, currentLabel: null };
-    // Finalize telemetry for this turn.
-    if (this.currentTurnRecord) {
-      this.currentTurnRecord.doneAt = Date.now();
-      this.currentTurnRecord.envelopeFallback = envelopeFallback;
-      this.currentTurnRecord.blankTurn = blankTurn;
-      if (!this.currentTurnRecord.endKind) {
-        this.currentTurnRecord.endKind = blankTurn ? "error" : "success";
-        if (blankTurn) this.currentTurnRecord.errorMsg = this.lastError ?? "blank turn";
-      }
-      this.currentTurnRecord = null;
-    }
-    this.onTurnComplete?.(this);
+    streamOnDone(this);
   }
 
   onError(msg: string) {
-    this.lastError = msg;
-    this.streaming = false;
-    if (this.drainHandle !== null) {
-      cancelAnimationFrame(this.drainHandle);
-      this.drainHandle = null;
-    }
-    this.pendingText = "";
-    if (this.streamingMsgId) {
-      const id = this.streamingMsgId;
-      this.messages = this.messages.filter((m) => !(m.id === id && m.blocks.length === 0));
-      this.streamingMsgId = null;
-    }
-    this.streamingMsgIdx = null;
-    this.seenToolUseIds.clear();
-    if (this.permissionPrompts.size > 0) this.permissionPrompts = new Map();
-    this.unboundAskUserRequestIds = [];
-    this.unboundAskUserToolUseIds = [];
-    // Finalize telemetry.
-    if (this.currentTurnRecord) {
-      this.currentTurnRecord.doneAt = Date.now();
-      this.currentTurnRecord.endKind = "error";
-      this.currentTurnRecord.errorMsg = msg;
-      this.currentTurnRecord = null;
-    }
-    // Mirror onDone: a turn that ends in error (or partial-stream-then-error,
-    // which the user perceives as "completed") is still terminal — fire the
-    // completion hook so the store drains any queued message instead of
-    // leaving the chat stuck in queue mode.
-    this.onTurnComplete?.(this);
+    streamOnError(this, msg);
   }
 }
 
