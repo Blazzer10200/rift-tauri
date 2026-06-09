@@ -108,7 +108,16 @@ export type ImageBlock = {
   sizeBytes: number;
 };
 
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
+/** A mid-turn steer: the user's interjection injected into the RUNNING turn's
+ *  stdin (assistant_steer). Rendered inline in the assistant bubble at the point
+ *  it landed so the steer is *visible* in the transcript, not just a toast. */
+export type SteerBlock = {
+  type: "steer";
+  text: string;
+  at: number;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | SteerBlock;
 
 export type ChatMessage = {
   id: string;

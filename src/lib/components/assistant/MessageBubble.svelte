@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, User, Wrench, Loader2, CheckCircle2, AlertCircle } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, User, Wrench, Loader2, CheckCircle2, AlertCircle, Navigation } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -143,10 +143,11 @@
     if (b.type === "thinking") return b.status === "active" ? "pending" : "done";
     return "neutral";
   }
-  function nodeKind(b: Block): "thinking" | "prose" | "tool" | "edit" | "image" {
+  function nodeKind(b: Block): "thinking" | "prose" | "tool" | "edit" | "image" | "steer" {
     if (b.type === "thinking") return "thinking";
     if (b.type === "text") return "prose";
     if (b.type === "image") return "image";
+    if (b.type === "steer") return "steer";
     if (b.type === "tool") return isInlineDiffTool(b.name) ? "edit" : "tool";
     return "prose";
   }
@@ -712,6 +713,12 @@
             {#if hasText && isOpen}
               <div class="tn-think-body"><Markdown text={b.text} /></div>
             {/if}
+          </div>
+        {:else if b.type === "steer"}
+          <div class="steer-marker">
+            <Navigation size={11} class="steer-marker-icon" />
+            <span class="steer-marker-label">You steered</span>
+            <span class="steer-marker-text">{b.text}</span>
           </div>
         {:else if b.type === "tool" && isInlineDiffTool(b.name)}
           {#if b.name === "MultiEdit" && Array.isArray(b.input.edits)}
@@ -1443,6 +1450,39 @@
   }
   .tl-divider-label {
     padding-right: 2px;
+  }
+
+  /* Mid-turn steer marker — the user's interjection, shown inline in the
+     assistant timeline at the point it landed. Accent-tinted so it reads as
+     a user action breaking into the agent's flow, distinct from prose. */
+  .steer-marker {
+    display: flex; align-items: baseline; gap: 6px;
+    margin: 6px 0;
+    padding: 5px 10px;
+    background: color-mix(in oklab, var(--accent) 9%, transparent);
+    border-left: 2px solid color-mix(in oklab, var(--accent) 60%, var(--border));
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  :global(.steer-marker-icon) {
+    color: color-mix(in oklab, var(--accent) 85%, var(--fg));
+    flex: none;
+    transform: translateY(1px);
+  }
+  .steer-marker-label {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: color-mix(in oklab, var(--accent) 70%, var(--fg-muted));
+    flex: none;
+  }
+  .steer-marker-text {
+    color: var(--fg);
+    overflow-wrap: anywhere;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .steer-marker { animation: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {

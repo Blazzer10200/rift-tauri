@@ -413,7 +413,7 @@ fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
             let method = classify_install_method(&p);
             // on_path: the exe itself is a `where` hit, OR (npm) its prefix's
             // `.cmd` shim is — the bundled exe lives one dir deeper than PATH.
-            let on_path = where_norm.iter().any(|w| *w == pn)
+            let on_path = where_norm.contains(&pn)
                 || (method == "npm"
                     && where_norm.iter().any(|w| w.contains("\\npm\\") || w.contains("/npm/")));
             ClaudeInstall {
@@ -1188,7 +1188,12 @@ fn save_config(cfg: &AssistantConfig) -> Result<(), String> {
     Ok(())
 }
 
-/// RAII guard that deletes the per-session MCP config file when dropped.
+/// Monotonic per-turn nonce for MCP config filenames. Prevents an outgoing
+/// turn's cleanup guard from deleting the file a same-session resume just wrote
+/// (the queue-drain race). Process-lifetime counter — uniqueness, not ordering.
+static MCP_CFG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// RAII guard that deletes the per-turn MCP config file when dropped.
 /// Ensures cleanup on normal exit, early-return errors, and panics alike.
 struct McpConfigGuard(PathBuf);
 
@@ -1220,11 +1225,19 @@ fn write_mcp_config(
     let home = dirs_home()?;
     let dir = home.join(".rift").join("assistant");
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir ~/.rift/assistant: {e}"))?;
-    // Per-session filename prevents concurrent assistant_send calls (multi-tab)
-    // from racing over a single shared file. sanitize: replace path-unsafe
-    // chars so the session UUID is a valid filename component on all OSes.
+    // Per-TURN filename, not per-session. A queued message drains into a fresh
+    // `assistant_send` that --resumes the SAME session_id the instant the prior
+    // turn's `result` lands — but that prior turn's McpConfigGuard hasn't dropped
+    // yet (it waits on child.wait(), up to REAP_GRACE later). A shared per-session
+    // name let the OUTGOING guard delete the file the INCOMING turn just wrote,
+    // so claude2 read `--mcp-config` and found nothing → "exited with 1 — config
+    // file not found". The monotonic nonce gives each turn its own file; the guard
+    // deletes by the returned PathBuf, so it only ever removes its own. The
+    // exit-time glob `mcp-config-*.json` still sweeps every variant. sanitize:
+    // replace path-unsafe chars so the session UUID is a valid filename component.
     let safe_id = session_id.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-    let path = dir.join(format!("mcp-config-{safe_id}.json"));
+    let nonce = MCP_CFG_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = dir.join(format!("mcp-config-{safe_id}-{nonce}.json"));
 
     let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
     // RIFT_MCP_ROOTS is newline-separated, so a root path containing an embedded
@@ -2193,6 +2206,36 @@ fn which_on_path(program: &str) -> bool {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd.status().map(|s| s.success()).unwrap_or(false)
+}
+
+/// Which optional host tools resolve on PATH. Rift works without these, but
+/// individual features need them: git tools + edit-swarm need `git`; the swarm
+/// gates need `npm`/`cargo`; the "Open in VS Code" affordance needs `code`.
+/// Surfaced in Settings → About → Local tools and used to hide dead affordances.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentInfo {
+    pub git: bool,
+    pub node: bool,
+    pub npm: bool,
+    pub cargo: bool,
+    pub code: bool,
+}
+
+/// Probe optional host tools. Pure observation — never spawns a tool, only asks
+/// `where`/`which` whether each is resolvable. Blocking probes are offloaded so
+/// the UI thread never stalls on a slow PATH scan.
+#[tauri::command]
+pub async fn environment_check() -> EnvironmentInfo {
+    tokio::task::spawn_blocking(|| EnvironmentInfo {
+        git: which_on_path("git"),
+        node: which_on_path("node"),
+        npm: which_on_path("npm"),
+        cargo: which_on_path("cargo"),
+        code: which_on_path("code"),
+    })
+    .await
+    .unwrap_or(EnvironmentInfo { git: false, node: false, npm: false, cargo: false, code: false })
 }
 
 /// Mint a stable, filesystem/keychain-safe id from the provider name, deduped
@@ -3250,6 +3293,9 @@ async fn handle_permission_request(
 /// `attachments`: optional inline images. When present, the spawn switches to
 /// `--input-format stream-json` and writes a structured user-message envelope
 /// (text + image content blocks) to stdin instead of the bare prompt text.
+// Arg count is driven by the frontend `invoke` payload, not a refactorable
+// smell — bundling would change the IPC contract.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn assistant_send(
     app: AppHandle,

@@ -8,6 +8,7 @@
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { invoke } from "@tauri-apps/api/core";
   import { portal } from "$lib/actions/portal";
+  import { environment } from "$lib/state/environment.svelte";
 
   let { path, x, y, onClose }: { path: string; x: number; y: number; onClose: () => void } = $props();
 
@@ -18,6 +19,7 @@
   const baseName = $derived(path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path);
 
   onMount(() => {
+    void environment.ensureLoaded(); // hide "Open in VS Code" if `code` isn't on PATH
     requestAnimationFrame(() => {
       if (!menuEl) return;
       const r = menuEl.getBoundingClientRect();
@@ -52,10 +54,12 @@
 </script>
 
 <div bind:this={menuEl} use:portal class="rift-menu menu" role="menu" style="left: {pos.x}px; top: {pos.y}px;">
-  <button type="button" class="rift-menu-row" role="menuitem" onclick={openInVscode}>
-    <Code2 size={14} class="rift-menu-row-ic" />
-    <span class="rift-menu-row-t">Open in VS Code</span>
-  </button>
+  {#if environment.code}
+    <button type="button" class="rift-menu-row" role="menuitem" onclick={openInVscode}>
+      <Code2 size={14} class="rift-menu-row-ic" />
+      <span class="rift-menu-row-t">Open in VS Code</span>
+    </button>
+  {/if}
   <button type="button" class="rift-menu-row" role="menuitem" onclick={openDefault}>
     <ExternalLink size={14} class="rift-menu-row-ic" />
     <span class="rift-menu-row-t">Open in default app</span>
