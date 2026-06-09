@@ -5,6 +5,15 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+# Rapid push bursts (docs condenses etc.) were queueing full runs back-to-back
+# on the single self-hosted VM; keep only the latest per ref.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust:
