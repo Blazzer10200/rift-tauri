@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
 import { assistant } from "./assistant.svelte.js";
+import { recordTurnUsage } from "./assistant/streaming.js";
 
 // Minimal turn record. TurnRecord is a private type so we build a structural
 // stand-in and cast — the accumulator only reads the fields below.
@@ -135,14 +136,16 @@ describe("recordTurnUsage — ctx pill reads point-in-time, not cumulative task 
   it("the assistant envelope drives lastTurnUsage; the result event must not inflate it", () => {
     const tab = assistant.ensureTab("ctx-regression-convo", "ctx-regression-sess") as any;
     // Final assistant envelope of a long task = the true window occupancy now.
-    tab.recordTurnUsage(
+    recordTurnUsage(
+      tab,
       { input_tokens: 120, cache_read_input_tokens: 198_000, cache_creation_input_tokens: 2_000, output_tokens: 540 },
       false,
     );
     // Result event sums usage across EVERY loop step — a >1M cache_read is normal
     // on a long task (anthropics/claude-agent-sdk-python#548). It must NOT drive
     // the pill, or auto-compact false-fires the instant a task finishes.
-    tab.recordTurnUsage(
+    recordTurnUsage(
+      tab,
       { input_tokens: 1_792, cache_read_input_tokens: 1_346_549, cache_creation_input_tokens: 53_078, output_tokens: 20_027 },
       true,
     );
