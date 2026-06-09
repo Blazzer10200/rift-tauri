@@ -72,9 +72,11 @@ jobs:
           Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v$ver/gh_${ver}_windows_amd64.zip" -OutFile $zip
           $dest = Join-Path $env:RUNNER_TEMP 'gh'
           Expand-Archive -Path $zip -DestinationPath $dest -Force
-          $bin = Join-Path $dest "gh_${ver}_windows_amd64\bin"
+          $ghExe = Get-ChildItem -Path $dest -Recurse -Filter 'gh.exe' | Select-Object -First 1
+          if (-not $ghExe) { throw "gh.exe not found after extracting $zip" }
+          $bin = $ghExe.Directory.FullName
           Add-Content -Path $env:GITHUB_PATH -Value $bin
-          & "$bin\gh.exe" --version
+          & $ghExe.FullName --version
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
