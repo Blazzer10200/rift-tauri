@@ -4,17 +4,11 @@
 
 ## Session 2026-06-09 (cont. 93) — update-flow root cause FIXED + v0.8.12 SHIPPED
 
-**User report:** update to v0.8.11 "nothing popped up; UI scuffed out, couldn't click." **Root cause:** prod localStorage held `rift.updates.dismissed-version=0.8.11` — pill `×` (flush next to "View") version-permanently silenced it; prod `rift.log` shows "available v0.8.11" on 3 launches but ZERO `download_update` invokes ever on GitHub path. Scuff = WebView2 backdrop-filter mis-composite class (toast blur14 bottom-anchored + `.dialog-overlay`/`.dialog-shell`).
+**User report:** v0.8.11 update "nothing popped up; UI scuffed; couldn't click." **Root cause:** pill `×` had version-permanently written `dismissed-version=0.8.11` to prod localStorage (backend logged "available" 3 launches, ZERO `download_update` invokes ever); scuff = WebView2 backdrop-filter mis-composite class on `.dialog-overlay`/`.dialog-shell`/`.toast`.
 
-**FIX APPLIED (verified svelte-check 0/0 + CDP DOM+pixels):**
-1. `updates.svelte.ts` — snooze now **time-based 24h** (`{version,until}` JSON in same key; legacy bare-string discarded by JSON.parse catch — self-heals). `snoozeTimer` wakes pill on expiry mid-session; re-armed on launch; `unsnooze()` added; `hasUpdate`/`snoozeActive` getters.
-2. `Titlebar.svelte` — **snooze-proof accent dot** on settings gear when `hasUpdate` (tooltip says "Update available — vX"). A snoozed update is never invisible.
-3. Stripped backdrop-filter (measured WebView2 garbage class): `.dialog-overlay`+`.dialog-shell` (app.css, shell now opaque `--bg-elev-1`), `.toast` (ToastHost). `.slideover`+`.tip` still carry blur — same class, NOT update-path, flagged not fixed.
-4. Labels: dialog "Remind me tomorrow", pill × aria "Snooze for a day".
+**FIXED (`feea28f`, svelte-check 0/0 + CDP DOM+pixel verified):** snooze now 24h `{version,until}` JSON (legacy bare-string self-discards; expiry timer mid-session + on launch; `unsnooze()`/`hasUpdate`/`snoozeActive`) · snooze-proof accent dot on settings gear · backdrop-filter stripped from dialog overlay/shell + toasts (opaque) · dialog says "Remind me tomorrow". `.slideover`+`.tip` still carry blur — same class, NOT update-path, flagged only.
 
-CDP-verified: pill→snooze(pill hides, dot stays, 24h JSON)→unsnooze(pill back)→dialog (overlay backdrop=none, opaque shell, clean shot). Download invoke chain unchanged (proven earlier this session).
-
-**SHIPPED:** user manually updated 0.8.10→0.8.11 (Settings→About path, ignores snooze), then **v0.8.12 tagged + CI green** (run 27229063633, publish 19:05Z, all 4 assets on rift-releases). Commits `feea28f` (fix) + `1ce83e7` (bump) + `905c08c` (changelog trim). This release VALIDATED the vpk-idempotency fix (2nd run, warm runner) + `--no-bundle`. Prod = 0.8.11 (PID-only kills, NEVER by image name).
+**SHIPPED:** user manually went 0.8.10→0.8.11 (Settings→About, ignores snooze), then **v0.8.12 tagged + CI green** (publish 19:05Z, 4 assets on rift-releases; commits `feea28f`+`1ce83e7`+`905c08c`). Release VALIDATED vpk-idempotency (2nd warm-runner run) + `--no-bundle`. Prod = 0.8.11 (PID-only kills, NEVER by image name).
 
 ## cont.92/91 (same day, earlier) — debug sweep + autonomous sweep
 
