@@ -10,7 +10,8 @@ on:
 jobs:
   rust:
     name: rust (cargo check + test + audit + machete)
-    runs-on: windows-latest
+    # Self-hosted WS2022 runner (Proxmox blazzer-labs); persistent warm target/.
+    runs-on: [self-hosted, windows, tauri-build]
     defaults:
       run:
         shell: bash
@@ -19,17 +20,6 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked || true
@@ -51,7 +41,9 @@ jobs:
 
   frontend:
     name: frontend (svelte-check + vitest + npm audit)
-    runs-on: ubuntu-latest
+    # Also self-hosted: GitHub-hosted minutes are exhausted (free tier), so an
+    # ubuntu-latest job would insta-fail. The WS2022 runner has Node (choco).
+    runs-on: [self-hosted, windows, tauri-build]
     steps:
       - uses: actions/checkout@v4
 

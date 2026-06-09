@@ -28,9 +28,9 @@ permissions:
 jobs:
   release:
     name: build + pack + publish
-    runs-on: windows-latest
-    # Cold Tauri release build runs ~18-22 min on windows-latest; 40 makes a
-    # genuine hang fail loud instead of burning the 6h default.
+    # Self-hosted WS2022 runner on Proxmox (blazzer-labs). Free + warm target/ +
+    # sccache make this faster than the metered windows-latest it replaced.
+    runs-on: [self-hosted, windows, tauri-build]
     timeout-minutes: 40
     defaults:
       run:
@@ -47,20 +47,9 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      # Swatinem/rust-cache over a hand-rolled actions/cache: it keys on
-      # Cargo.lock + rustc + features (correctly invalidating only when deps
-      # change), compresses better, and deliberately does NOT cache the final
-      # `rift-tauri` crate — which recompiles every version bump anyway, so
-      # caching it just bloated the upload. Net: smaller, faster cache round-trip
-      # and reliable dep restore. `workspaces` points at the crate dir (target/
-      # lives in src-tauri/target on CI; CARGO_TARGET_DIR is unset there).
-      - name: Cache cargo deps (rust-cache)
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-          # Release builds; keep a distinct cache from any debug job.
-          key: release
-
+      # No GitHub cache step: the self-hosted runner has a persistent warm
+      # CARGO_TARGET_DIR (D:\cargo-target) + sccache, so restoring/uploading a
+      # multi-GB GitHub cache would only waste the 0.5 GB Actions storage cap.
       - name: Setup .NET (for vpk)
         uses: actions/setup-dotnet@v4
         with:
