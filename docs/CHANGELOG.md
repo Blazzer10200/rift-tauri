@@ -2,60 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.8.9 — 2026-06-09 — chore: first tag-driven CI release
+## v0.8.10 — 2026-06-09 — fix: update button no longer 50/50 — stable pill replaces the flaky toast
 
-> **Why.** The tag-push CI pipeline (`.github/workflows/release.yml` → `release.ps1 -Ci`) had never produced a release — every prior version was packed + published by hand on a dev machine. This is the first version shipped end-to-end by Actions: tag push → build → `vpk pack` → publish to `rift-releases`. No functional code change.
-
-> **Fix folded in.** The CI upload was choking on `Request headers must contain only ASCII characters` — a stray non-ASCII char in the `RELEASES_TOKEN` secret survived `.Trim()` and corrupted the `Authorization` header. `release.ps1` now strips the token to printable ASCII before use and warns when it does.
-
-**What's new.** Version bump only (0.8.8 → 0.8.9) + the release-script token hardening.
-
-**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
-
-## v0.8.8 — 2026-06-08 — chore: updater end-to-end test (post toast fix)
-
-> **Why.** v0.8.7 made the update toast clickable again (z-index fix). This clean version-only bump lets a client on v0.8.7 finally run the whole loop — clickable toast → Download → apply → relaunch — against the live feed. No functional code change.
-
-**How to verify.** On v0.8.7: the "Update available" toast's **View** should open the dialog; **Download installer** should show progress, close Rift, swap, and relaunch onto v0.8.8. `rift.log` should show `download_update: command invoked` → `update download: starting` → `update apply: scheduling swap` for the first time ever.
-
-**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
-
-## v0.8.7 — 2026-06-08 — fix: update toast was unclickable ("just for show")
-
-> **Why.** The "Update available" toast rendered but neither **View** nor the **×** responded — the whole notification was inert, so the in-app `download` path could never be triggered from it (the backend confirmed zero download invocations ever). Root cause: the toast host sat at **z-index 60**, below every transient overlay — the browser overflow scrim (`z-999`, fully transparent), `Select` menus (`z-1200`), dialogs (`z-200`). Any one of those lingering blankets the toast invisibly and swallows its clicks while it still shows.
+> **Why.** The "Update available" affordance was a *sticky toast* in the shared toast stack, and it accepted clicks only about half the time — the long-running "update button won't click" bug that v0.8.7's z-index raise only partly tamed. Real cause: the toast host is bottom-anchored and grows upward, so the launch-pushed update toast sat at the top of the stack and **slid** every time any other toast appeared or expired (`animate:flip`, 180ms). You were clicking a target that kept moving out from under the cursor.
 
 **What's fixed.**
-- **Toast host raised to `z-index: 2000`** — above all interactive overlays, so a notification can never render-but-not-click again. (Tooltips/splash at `9999` are `pointer-events: none`, so they stay clear.)
-- **Download self-heal.** If the pending update plan is missing when Download is clicked, the service re-checks first instead of dead-ending.
-- **Bisection logging.** `download_update`/`apply_pending_update` now log on entry, so any future "click does nothing" is instantly traceable in `rift.log`.
+- **Dedicated `UpdatePill` replaces the update toast.** A singleton fixed pill that never reflows — stable click target, opaque background, scoped class. The toast stack now carries only the transient install-*failure* notice (which can't move-target: it opens the dialog simultaneously, hiding the pill).
+- **Two render bugs caught in live verification.** The pill's generic `.pill` class collided with a global status-pill rule (`height: 20px`), collapsing it to a 20px sliver; and `backdrop-filter` on a bottom-anchored fixed element triggers WebView2 compositing garbage. Both fixed (unique `.upd-pill` class + solid background).
+- **Snooze persists** — dismissing a version hides the pill until a newer one ships (localStorage), unchanged.
 
-**How to verify.** On v0.8.7+, the update toast's **View**/**×** click; the dialog's **Download installer** runs the real download → apply → relaunch. (This fix can't reach a machine via the broken toast it fixes — one manual Setup.exe gets you onto v0.8.7, then in-app updates work.)
+**How to verify.** With an update available, the bottom-right pill is clickable on the first try, every time; **View** opens the dialog; **×** snoozes. Verified live via CDP — render, click→dialog, snooze→persist.
 
-**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
-
-## v0.8.6 — 2026-06-08 — chore: in-app updater apply-path test
-
-> **Why.** The full in-app `download → apply → relaunch` chain has never executed on any machine — every prior "update" was a manual Setup.exe install. This is a clean version-only bump so a client on a *freshly-installed* v0.8.5 (clean Velopack layout, launched from the Start Menu shortcut) can finally exercise the real path end-to-end against the live feed. No functional code change.
-
-**What's new.** Version bump only (0.8.5 → 0.8.6).
-
-**How to verify.** On a clean v0.8.5: open the update dialog, click **Download installer**, and let it run untouched. Expect progress → app closes → Velopack swaps files → relaunches onto v0.8.6. The rotating `rift.log` should show `update download: starting` → `update apply: scheduling swap` for the first time.
-
-**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
-
-## v0.8.5 — 2026-06-08 — fix: corrupted install no longer masquerades as "up to date"
-
-> **Why.** Diagnosing a real "it detects the version but won't update" report (via the v0.8.1 `rift.log`), the root cause was a corrupted Velopack layout: `VelopackApp — NotInstalled("Could not auto-locate app manifest")`, so `UpdateManager::new` failed and the service held no manager. The old `check()` then returned `Ok(None)` — which the UI rendered as **"You're up to date."** A dead updater was lying that everything was fine. (The corruption itself comes from manual file swaps / launching a loose exe outside the managed `current\` dir — but the updater must *report* it, not hide it.)
-
-**What's fixed.**
-- **`check()` surfaces a broken install instead of faking "up to date."** When no manager is available it now returns an actionable error ("Rift isn't properly installed for auto-update … reinstall from the latest Setup.exe"), and the service records the init failure reason.
-- **Self-heal retry.** If the manager was absent at startup, `check()` re-resolves once — so an install that recovers no longer needs a relaunch to update.
-- **Update dialog adapts.** A "not properly installed" error shows reinstall guidance + a **"Get the latest Setup.exe on GitHub"** link (works even when the failed check left no release info), distinct from the transient "feed unreachable, try again" path.
-
-**How to verify.** On a *clean* install (Setup.exe, launched from the Start Menu shortcut), a check should find the newer version, download with progress, apply-on-exit, and relaunch. A hand-broken install now shows the reinstall card rather than a false "up to date."
-
-**Verify.** `cargo check` 0/0 · `npm run check` 0/0 (4068).
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0 (4070).
 
 ## Older versions
 
-v0.8.4 updater delivery test (clean version bump to exercise the v0.8.3 hardening through the live feed) · v0.8.3 fix: updater can no longer hang forever (check() releases mutex before the network call + 30s check timeout + 90s download stall watchdog — every failure surfaces instead of hanging dark) · v0.8.2 live update-path validation release (version bump to exercise the v0.8.1 logging/recovery surface through the live feed) · v0.8.1 visible + always-recoverable app-update failures (rotating `rift.log` + sticky failure toast w/ [Get it on GitHub]) · v0.8.0 one-click 401 recovery + edit-swarm + opt-in context compression · v0.7.0 cost cockpit + multi-provider list + "Rift noticed…" insights · v0.6.5 custom-provider escape hatch · v0.6.4 collaborator-401 install-selection fix · v0.6.3 auto-update hotfix verify · v0.6.2 in-app-update child-lock fix · v0.6.1 CLI multi-install awareness · v0.6.0 in-app browser dock + harness redesign · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
+v0.8.9 first tag-driven CI release (Actions builds + packs + publishes to `rift-releases` end-to-end; `release.ps1` strips a non-ASCII `RELEASES_TOKEN` that was corrupting the upload `Authorization` header) · v0.8.8 updater end-to-end test (clean version bump post toast fix) · v0.8.7 fix: update toast was unclickable — host z-index raised 60→2000 above transient overlays + download self-heal + bisection logging · v0.8.6 in-app updater apply-path test · v0.8.5 fix: corrupted install no longer masquerades as "up to date" (`check()` surfaces a broken Velopack layout w/ reinstall card + self-heal retry, instead of faking "up to date") · v0.8.4 updater delivery test · v0.8.3 fix: updater can no longer hang forever (mutex released before network + 30s check timeout + 90s download stall watchdog) · v0.8.2 live update-path validation release · v0.8.1 visible + always-recoverable app-update failures (rotating `rift.log` + sticky failure toast w/ [Get it on GitHub]) · v0.8.0 one-click 401 recovery + edit-swarm + opt-in context compression · v0.7.0 cost cockpit + multi-provider list + "Rift noticed…" insights · v0.6.5 custom-provider escape hatch · v0.6.4 collaborator-401 install-selection fix · v0.6.3 auto-update hotfix verify · v0.6.2 in-app-update child-lock fix · v0.6.1 CLI multi-install awareness · v0.6.0 in-app browser dock + harness redesign · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
