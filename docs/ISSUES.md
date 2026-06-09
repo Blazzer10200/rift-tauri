@@ -38,6 +38,7 @@
   - **Stream pump** — reuses the real `TabState.beginTurn()` + drives the real `onStream`/`onDone`/`onError` with recorded NDJSON frames (the exact wire shapes the backend forwards verbatim). rAF is backed by a pumped queue so text paints between frames like real animation frames — inter-frame block ordering is faithful. Covers text-delta coalescing, non-JSON dribble fallback, tool_use→tool_result lifecycle (incl. error + array-content flatten + id de-dupe), thinking blocks, envelope-vs-result usage split + cost + model attribution, onDone finalization (success/blank/envelope-fallback/tool-only/no-op), onError (placeholder drop vs keep), and a full system→think→text→tool→text→result replay.
   - **Send/queue/steer orchestrator** — drives the real `send()` entry point with a mocked `invoke`: turn-init (user+assistant messages, turn record, backend args), the auth chokepoint (red pill → no turn + notice), empty-prompt drop, queue-while-streaming + drain-on-completion (incl. the `lastError`-blocks-drain rule a blank turn trips), and `steer()` (live-inject while streaming / queue fallback when idle / re-queue on `no_active_turn`).
 - **Suite now 51 vitest tests** (was 27). The Rust per-turn reader in `assistant/mod.rs` is a verbatim line-forwarder (no parse/accumulate logic) — deliberately not given its own harness; all turn logic lives in the store, which is now covered. Block stays until `/git-ship` so `git log` keeps it.
+- **cont.80 backend coverage (uncommitted, additive):** Rust lib suite **60 → 95** (+35). New `#[cfg(test)]` modules: `permission` (oneshot registry, 7), `usage::store` (schema/upsert idempotency, 4), `usage::mod` (`rows_from_snapshot` parse + fallback chains, 8), `session_log` (path-traversal id guard, 4), `secrets` (empty-value guard, 1), `usage::insights` (probe thresholds, 5), `usage::aggregate` (rollups, 6). To test the cost-cockpit rollups (previously zero coverage), extracted 6 behavior-preserving `&Connection` helpers in `aggregate.rs` — `#[tauri::command]` signatures + IPC unchanged. Clippy `--all-targets` driven to 0 actionable warnings. Not committed — review/commit independently of the cont.78/79 frontend WIP.
 
 ### Tier 2 — code-complete, needs live-verify
 
@@ -51,6 +52,17 @@
 
 - **Status:** mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`).
 - **Remaining:** confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
+
+#### Queue — MCP-config drain race (✅ fixed in-tree, cont.82)
+
+- **Symptom:** queuing a message then letting the turn finish popped "claude exited with 1 — Invalid MCP configuration: MCP config file not found: `mcp-config-<sid>.json`" — "every time I queue" (intermittent in practice; it's a race).
+- **Root cause:** `write_mcp_config` keyed the per-turn temp config by `session_id`, so a queued msg draining into a same-session `--resume` rewrote the SAME filename the OUTGOING turn's `McpConfigGuard` (Drop deletes the file, fires up to 5s post-`result` on `child.wait()`) then deleted out from under the incoming spawn → claude2 read `--mcp-config`, found nothing.
+- **Fix (`assistant/mod.rs`):** monotonic per-turn nonce → `mcp-config-<sid>-<n>.json` (`MCP_CFG_SEQ: AtomicU64` ~1196; filename ~1227). Guard deletes only its returned path; `RIFT_SESSION_ID` env stays the real sid (ask-user pairing). Isolated `cargo check` 0/0; live dev log confirmed `-0` suffix + clean turn (TTFT 985ms, no error). **Not committed** — review/commit w/ the Pending Rail.
+
+#### Pending Rail v1 — queue UX (✅ shipped in-tree, cont.82); v2 OPEN
+
+- **v1 (done, frontend):** flat `.queue` strip (`Composer.svelte:986`) → ChatGPT-style rail fused to the composer top lip — accent border, "N queued" caption, chips w/ inline edit (pencil) + remove + Clear, spring-up entry + one-time accent sweep + downward drain anim, `prefers-reduced-motion` guarded. svelte-check 0/0, CDP-verified. Design: `docs/design/steer-and-queue.md` §6.
+- **v2 (open):** steer chips + per-chip steer/queue mode toggle + pulse-on-inject — unifies the three-tier surface (steer-and-queue.md §6 #1). Makes steer discoverable (currently keyboard-only Alt+Enter).
 
 #### Permission — Allow/Deny round-trip bar
 

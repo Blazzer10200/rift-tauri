@@ -28,15 +28,17 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 
 | File | Lines | Notes |
 |---|---|---|
-| `src-tauri/src/assistant/mod.rs` | 2991 | claude CLI integration + auth + workspace + config + per-turn spawn. Largest backend file, next split candidate |
-| `src-tauri/src/assistant/mcp_server.rs` | 605 | stdio JSON-RPC MCP server — exposes `read_file/list_dir/grep` + `git_*` only (all sync/bridge/remote_bash/ask_user tools ripped) |
-| `src-tauri/src/diagnostics/mod.rs` | 487 | DiagBus + LogForwarder + panic hook + frontend pump (`diag://event`). Sync-only `diag_state` DTO/pump removed |
-| `src-tauri/src/assistant/git_local.rs` | 404 | local-git MCP tools (git_status/diff/log/pull/commit/push) |
-| `src-tauri/src/lib.rs` | 203 | tauri command registry (per-domain handlers in `commands/*.rs`) |
+| `src-tauri/src/assistant/mod.rs` | 4288 | claude CLI integration + auth + workspace + config + per-turn spawn. Largest backend file, overdue split candidate |
+| `src-tauri/src/assistant/mcp_server.rs` | 813 | stdio JSON-RPC MCP server — exposes `read_file/list_dir/grep` + `git_*` only (all sync/bridge/remote_bash/ask_user tools ripped) |
+| `src-tauri/src/swarm/mod.rs` | 792 | edit-swarm orchestrator (v0.7.0) — parallel sub-agent edit batching + safety layer |
+| `src-tauri/src/assistant/git_local.rs` | 627 | local-git MCP tools (git_status/diff/log/pull/commit/push) |
+| `src-tauri/src/diagnostics/mod.rs` | 548 | DiagBus + LogForwarder + panic hook + frontend pump (`diag://event`). Sync-only `diag_state` DTO/pump removed |
+| `src-tauri/src/usage/*.rs` | ~1440 | cost cockpit (v0.7.0) — aggregate·budget·insights·pricing·store·mod |
+| `src-tauri/src/lib.rs` | 265 | tauri command registry (per-domain handlers in `commands/*.rs`) |
 
-Backend dirs after the rip: `assistant/ browser/ commands/ diagnostics/ state/ stt/` + `lib.rs main.rs secrets.rs update_service.rs`. The entire `sftp/ sync/ bootstrap/ edit/ tunnel/ transport/ bridge/ rcon/ profile/` set is gone, plus `local_fs.rs path_guard.rs` and the `remote_state`/`sync_snapshot` state caches.
+Backend dirs (current): `assistant/ browser/ commands/ diagnostics/ state/ stt/ swarm/ usage/` + `lib.rs main.rs secrets.rs update_service.rs`. `swarm/`+`usage/` added in the v0.7.0 cost-cockpit/edit-swarm arc. The entire `sftp/ sync/ bootstrap/ edit/ tunnel/ transport/ bridge/ rcon/ profile/` set is gone (pure-assistant rip), plus `local_fs.rs path_guard.rs` and the `remote_state`/`sync_snapshot` state caches.
 
-Frontend hot files: `assistant.svelte.ts` 2356L, `ToolChip.svelte` 1552L, `SettingsPage.svelte` 1040L (gutted of Server/RCON/SSH), `AssistantPane.svelte` 878L, `ChatTabsBar.svelte`. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
+Frontend hot files: `Composer.svelte` 2957L (largest frontend file — split candidate), `assistant.svelte.ts` 2698L, `ChatTabsBar.svelte` 1761L, `MessageBubble.svelte` 1702L, `ToolChip.svelte` 1554L, `SettingsPage.svelte` ~1340L (Bento redesign cont.78: hero + pill-tabs + 12-col bento, NOT sidebar), `HistoryDrawer.svelte` 1292L, `Markdown.svelte` 1120L, `HarnessPage.svelte` 1050L, `AssistantPane.svelte` 981L. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
 
 ## Agent routing
 
@@ -65,8 +67,8 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 
 1. `scripts/run-dev.bat` already sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Always start dev via this batch (not raw `npm run tauri dev`) so CDP is exposed.
 2. Start the wrapper once per dev session: `npm run cdp:serve` (background). It holds one persistent ws to WebView2 and exposes `127.0.0.1:9223`. ~40-60ms per call.
-3. Drive via `bash scripts/cdp/c.sh {health|state|page|eval|type|click|wait|shot|shot-sel|batch|key|shutdown}`. Full docs: `scripts/cdp/README.md`.
-4. **`shot` workflow** — `bash scripts/cdp/c.sh shot` prints just the path on stdout (use `--json` for `{path,bytes}`). `f=$(bash scripts/cdp/c.sh shot)` → `Read` $f; image renders inline (multimodal). `shot-sel "<selector>"` clips to a bounding rect. Server auto-prunes `.tmp/snap-*` to last 20 on boot. ~$0.07/shot at Opus 4.7 rates.
+3. Drive via `bash scripts/cdp/c.sh {look|health|state|page|eval|type|click|wait|shot|shot-sel|batch|key|shutdown}`. Full docs: `scripts/cdp/README.md`.
+4. **`look` = the verify primitive (fast path, 2026-06-09).** To check "did my change work," run `bash scripts/cdp/c.sh look` — ONE call returns page/assistant state + console **errors** + a screenshot with the path on the **last line**; then `Read` that path. Two turns, not the old 5-turn `wait→shot→Read→state→console` dance. `look "<selector>"` clips the shot. Use bare `state`/`eval` only for DOM facts WITHOUT pixels. **`shot` workflow** — `bash scripts/cdp/c.sh shot` prints just the path on stdout (use `--json` for `{path,bytes}`). `f=$(bash scripts/cdp/c.sh shot)` → `Read` $f; image renders inline (multimodal). `shot-sel "<selector>"` clips to a bounding rect. Server auto-prunes `.tmp/snap-*` to last 20 on boot. ~$0.07/shot at Opus 4.7 rates.
 5. **DOM vs shot decision table — DON'T skip the shot when these triggers fire:**
 
    | Trigger | Tool | Why |
@@ -90,7 +92,8 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 3. **Doc size cap** — `CHANGELOG.md` + `HANDOFF.md` ≤600 words each. Truncate older entries when extending — `git log` preserves history. (Raised 300 → 600 on 2026-05-12 after the v0.2.46 → v0.2.48 arc; 300 was too tight for an arc summary + RESUME HERE + CRITICAL DON'T-TOUCH inline.)
 4. **Build = batch only** — dev server (`npm run dev` or `scripts/run-dev.bat`) is the default loop. The full "build" pipeline (bump → changelog → check → build → install → shortcut → iconcache → commit) only runs when a batch is ready to ship. Never trigger mid-session.
 5. **Version lockstep — THREE files** — `package.json`, `Cargo.toml`, AND `src-tauri/tauri.conf.json` must all match. `scripts/release.ps1` preflight bails on any mismatch. Bumping only two is the most common failure mode (2026-05-12: v0.2.49 first ship attempt died here). All three, always. **Plus `Cargo.lock`** — the workspace version bump auto-updates it; `release.ps1` dirty-tree refusal will catch this if you forget to commit (happened on v0.4.34 ship).
-6. **Releases repo is gitignored locally** — `Releases/` is a scratch dir for `release.ps1`'s SHA256 round-trip verify (writes `verify-<ver>/` then cleans). Don't track its contents.
+6. **Releases repo is gitignored locally** — `Releases/` is a scratch dir for `release.ps1`'s SHA256 round-trip verify (writes `verify-<ver>/` then cleans). Don't track its contents. (`test-update.ps1` also stages `Releases/test-feed` + `test-stage` here.)
+7. **Releases are tag-driven CI now (cont.83)** — push a `v*` tag → `.github/workflows/release.yml` builds + packs + publishes to `rift-releases` via `release.ps1 -Ci`. Ship = `bump.ps1 X.Y.Z` → edit CHANGELOG → commit → `git tag vX.Y.Z && git push --tags`. No local `tauri build`, no self-replace dance. **Needs repo secret `RELEASES_TOKEN`** (fine-grained PAT, `rift-releases` Contents:write) — see velopack design doc §7. `release.ps1` still works locally unchanged. To validate the in-app update apply chain locally without shipping: `scripts/test-update.ps1` (isolated `RiftUpdateTest` install + `update-test-feed` feature; design doc §7.2).
 
 ## Don't-do
 
