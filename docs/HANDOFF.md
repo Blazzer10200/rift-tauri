@@ -2,26 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 90) — v0.8.11 SHIPPED + release pipeline hardened; model-swap blocked
+## Session 2026-06-09 (cont. 91) — autonomous detect-and-fix sweep (new CC model trial)
 
-**v0.8.11 shipped green** via the self-hosted runner — the **first real tag-driven release on VM 100 `rift-runner`**. Bundles the cont.88 Settings redesign + cont.89 Harness one-viewport overhaul (both now RELEASED, not "unreleased"). Published to `rift-releases` w/ full Velopack feed. Warm runner did build+pack+publish in ~3.5 min.
+Full autonomy granted. **Commits local only — NOT pushed** (no push auth assumed; runner VM 100 OFFLINE — pushed CI would queue). Baselines green before+after: Rust 95, vitest 51, svelte-check 0/0.
 
-**Runner needed 3 provisioning fixes** — the cont.88 runner flip was never exercised by a real release (v0.8.10 shipped on the old GH-hosted runner just before the flip):
-- `pwsh`→`powershell` — WS2022 has Windows PS 5.1 only (`b49ca40`)
-- gh CLI absent → added a download-latest-zip step (`5ba1967`)
-- gh-zip layout (`bin/` at archive root, not nested) → recursive `gh.exe` find (`15ddce7`)
+- **`dirs_home` deduped** (`4bbc805`) — `assistant/mod.rs` delegates to `state::paths`; `stt/` infallible variants untouched (behavior change).
+- **GH Actions Node-20 bump** (`062bc3b`) — checkout@v6, setup-node@v6, setup-dotnet@v5; runner 2.335.1 compatible.
+- **Settings polish** (`a825cb6`) — hero banner = single auth+CLI surface (version inline, pill+stamp+Re-probe right, update CTA conditional); CLI row deleted; ` (Claude Code)` suffix stripped; proxy copy −40%. CDP-verified.
+- **ISSUES.md pruned** (`cd9cbf9`) — #21/Queue/Rail-v1 deleted (shipped); Auth-Rec → live-verify stub; Rail-v2 filed T3.
+- **Model probe:** `claude -p --model claude-fable-5` answered live — ID valid on this Max sub; swap still held (see RESUME).
 
-**`--no-bundle` perf fix committed** this session: release.ps1 ran a full `tauri build` then **discarded** the NSIS installer (Velopack makes its own Setup.exe) — ~11s/release of wasted makensis + NSIS downloads. Now skipped. **Untested in CI — validates on the NEXT release.** Build is **codegen-bound ~2m14s** (the real cost; rust-lld already rejected).
-
-### RESUME HERE (cont.90)
-- **Update test PENDING** — prod still **0.8.10**; awaiting a user click on the "Update available" pill to verify the full Velopack download→apply→relaunch. Pill is one-click by design (won't auto-install). Prod exe: `%LOCALAPPDATA%\Rift\current\rift-tauri.exe`.
-- **`--no-bundle` validation** — confirm green + measure timing on the next real release.
-- **MODEL SWAP BLOCKED — do NOT fabricate an ID.** The "new model" hype (Claude **Fable**/Mythos, Project Glasswing, dropped Jun 9) is a **defensive-cyber** model, ~2× Opus, **invitation-only, NO documented self-serve API model ID** — not in the official models table, not a coding-assistant model. Rift stays on **Opus 4.8** (`claude-opus-4-8`, newest GA). Wire a new model ONLY given a verified `claude-...` ID from official docs or live API access; then also update cost-cockpit pricing.
-- **Perf roadmap (documented, NOT applied — needs benchmark):** `CARGO_INCREMENTAL=1` on the persistent runner (conflicts w/ sccache — biggest potential win on the 2m14s build); `[profile.release] opt-level=2`; pre-bake gh+vpk into the `toolchain-ready` snapshot (~19s); vpk `--noPortable` (skip create→upload→delete, ~5s).
-- [carried] Settings polish (merge green banner + "Claude Code CLI" row; compression-proxy copy; strip `(Claude Code)` from CLI chip); drag-reorder verify; dedupe `dirs_home` (`assistant/mod.rs:1101`); ISSUES #100 hero-pill; `RELEASES_TOKEN` non-ASCII (strip works; re-set cleanly); Node-20 action deprecation Jun 16 (`actions/*@v4`).
+### RESUME HERE (cont.91)
+- **Push the 6 local commits** when user OKs (runner was offline — verify it's back, jobs will queue otherwise).
+- **Update test PENDING** — prod still **0.8.10**; user click on "Update available" pill verifies Velopack download→apply→relaunch.
+- **`--no-bundle` validation** — confirm green + timing on next real release.
+- **MODEL SWAP half-unblocked:** `claude-fable-5` live-verified 2026-06-09 (the "live API access" path). Still DO NOT wire until pricing + ctx + effort tiers publish — picker/cost-cockpit metadata would be fabricated. Rift stays on `opus` alias (auto-tracks newest Opus on GA).
+- **Perf roadmap (NOT applied):** runner `CARGO_INCREMENTAL=1` (vs sccache); `opt-level=2`; pre-bake gh+vpk; vpk `--noPortable`.
+- [carried] drag-reorder verify; `RELEASES_TOKEN` non-ASCII (strip works; re-set cleanly). Dropped: "ISSUES #100 hero-pill" — dangling ref, no #100 was ever filed; re-file if still real.
 
 ## Prior arcs — detail in `git log`
-cont.88/89 Settings + Harness redesigns → SHIPPED in v0.8.11. cont.88 self-hosted runner LIVE (`docs/design/self-hosted-runner.md`): VM 100 @ blazzer-labs, **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.87 v0.8.10 (stable UpdatePill). cont.72 v0.7.0 + edit-swarm.
+cont.90 v0.8.11 SHIPPED — first real tag-driven release on VM 100 `rift-runner` (3 provisioning fixes: PS5.1, gh CLI, gh-zip layout) + `--no-bundle` perf fix. cont.88/89 Settings + Harness redesigns → in v0.8.11. cont.88 self-hosted runner LIVE (`docs/design/self-hosted-runner.md`): **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.87 v0.8.10. cont.72 v0.7.0 + edit-swarm.
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step**; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.
