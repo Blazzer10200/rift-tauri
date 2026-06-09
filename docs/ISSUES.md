@@ -13,7 +13,6 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
-| SEC-1 | Backend security review — swarm path-traversal + 6 hardening fixes | T1/T4 | ✅ resolved in-tree |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
 | Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
 | Rail-v2 | Pending rail v2 — steer chips + mode toggle | T3 | 🚧 open |
@@ -22,22 +21,11 @@
 | #20 | Hot files over the 2000-line split threshold | T3 | 🚧 open |
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
 | CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
-| #29 | CSP allows `style-src 'unsafe-inline'` | T4 | 🔒 blocked |
+| #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
 | UI-drift | App-update surfaces disagree (toast vs card) | T4 | 🚧 open |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
-
-## ✅ Resolved in-tree (awaiting ship)
-
-#### SEC-1 — backend security review (cont.95, 2026-06-09)
-
-Full `src-tauri/src/` defensive review (5 parallel finders by subsystem → adversarial false-positive verification of every load-bearing candidate). **One real bug + 6 hardening fixes, all in-tree; `cargo check` green.**
-
-- **T1 (the bug) — swarm worktree escape** ([swarm/mod.rs](../src-tauri/src/swarm/mod.rs)): `Finding.file` from the `swarm_run` IPC was unvalidated and flowed into git ops **and** an edit agent running under `--permission-mode bypassPermissions` + `current_dir(wt)` — a `../`/absolute path escaped the worktree sandbox. Fix: `validate_rel_path()` rejects absolute/drive-relative/`..`/newline paths before any finding is dispatched (also kills the commit-message trailer-injection).
-- **T4 hardening:** `about:` scheme tightened to exact `about:blank` + `read_page` returns trusted `wv.url()` not page-spoofable `location.href` ([browser/mod.rs](../src-tauri/src/browser/mod.rs)) · STT model re-verifies SHA256 of a pre-existing file before trusting it ([stt/model_manager.rs](../src-tauri/src/stt/model_manager.rs)) · `GIT_SSH_COMMAND` → `StrictHostKeyChecking=yes` ([git_local.rs](../src-tauri/src/assistant/git_local.rs)) · `trust_level()` frozen via `OnceLock` ([mcp_server.rs](../src-tauri/src/assistant/mcp_server.rs)) · non-finite cost values filtered from the usage IPC payload ([usage/mod.rs](../src-tauri/src/usage/mod.rs)) · `usage_set_budget` uses shared `atomic_write_json` ([usage/budget.rs](../src-tauri/src/usage/budget.rs)).
-- **Refuted (no change):** `apply_pending_update` IPC (browser dock has no IPC access — capability `windows:["main"]`; DoS-only anyway) · unsigned update binary (Velopack verifies internally). MCP fs boundary, git arg allowlist, secrets handling, SQL parameterization all already solid.
-- **Note:** review is source-only; not yet runtime/CDP-exercised. Delete this block at `/git-ship`.
 
 ## 🚧 Open issues
 
@@ -93,11 +81,11 @@ Full `src-tauri/src/` defensive review (5 parallel finders by subsystem → adve
 
 ### Tier 4 — LOW / cosmetic
 
-#### 29. CSP allows `style-src 'unsafe-inline'` (🔒 blocked)
+#### 29. CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime (🚧 open)
 
-- **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `csp`.
-- **Symptom:** inline styles permitted — required by current Tailwind output, weakens CSP.
-- **Fix sketch:** switch to nonce/strict-dynamic once Tailwind supports hashed inline styles end-to-end. Blocked on Tailwind.
+- **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `csp` (`style-src 'self' 'unsafe-inline'`). At runtime SvelteKit injects a `nonce-…` into the served CSP.
+- **Symptom (observed v0.8.14, prod CDP):** per CSP spec, **a nonce makes `'unsafe-inline'` be ignored** — so Svelte's dynamically-applied inline styles get blocked. Console spams `Applying inline style violates ... style-src 'self' 'unsafe-inline' 'nonce-…'`. Real impact: Svelte transition styles (fly/fade) and `style="width:{progress}%"` on the update download progress-bar don't apply. **Cosmetic** — download/apply and all clicks still work; animations snap and the progress fill stays empty.
+- **Fix sketch:** make the static CSP and SvelteKit's nonce agree. Either (a) configure SvelteKit `kit.csp` so the nonce also covers the styles Svelte injects, or (b) drop the nonce path so `'unsafe-inline'` actually takes effect, or (c) move the affected inline styles to classes. **App-wide blast radius** — verify every transition + `style:` binding across the app before shipping; deliberately kept out of the v0.8.14 update-fix release to avoid re-breaking the updater.
 
 #### UI-drift. App-update surfaces disagree (🚧 open)
 
