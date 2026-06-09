@@ -2,23 +2,25 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 91) — autonomous detect-and-fix sweep (new CC model trial)
+## Session 2026-06-09 (cont. 92) — workflow debug sweep + push
 
-Full autonomy granted. **Commits local only — NOT pushed** (no push auth assumed; runner VM 100 OFFLINE — pushed CI would queue). Baselines green before+after: Rust 95, vitest 51, svelte-check 0/0.
+Multi-agent Workflow sweep (18 agents, find→adversarial-verify): 13 raw findings → **3 confirmed, 10 refuted**. All 3 fixed + verified (cargo check green via isolated `CARGO_TARGET_DIR` — dodges dev-lock collision, dev stayed alive; svelte-check 0/0):
 
-- **`dirs_home` deduped** (`4bbc805`) — `assistant/mod.rs` delegates to `state::paths`; `stt/` infallible variants untouched (behavior change).
-- **GH Actions Node-20 bump** (`062bc3b`) — checkout@v6, setup-node@v6, setup-dotnet@v5; runner 2.335.1 compatible.
-- **Settings polish** (`a825cb6`) — hero banner = single auth+CLI surface (version inline, pill+stamp+Re-probe right, update CTA conditional); CLI row deleted; ` (Claude Code)` suffix stripped; proxy copy −40%. CDP-verified.
-- **ISSUES.md pruned** (`cd9cbf9`) — #21/Queue/Rail-v1 deleted (shipped); Auth-Rec → live-verify stub; Rail-v2 filed T3.
-- **Model probe:** `claude -p --model claude-fable-5` answered live — ID valid on this Max sub; swap still held (see RESUME).
+- **vpk install idempotent** (`b78f2c5`) — `release.yml` bare `dotnet tool install` FAILS 2nd+ release on persistent runner; Get-Command guard → update|install.
+- **stt lock-across-await** (`7cc2ce2`) — whisper model load moved OUTSIDE cache mutex; stop no longer hangs during load. Concurrent starts may double-load (benign).
+- **composer enhance race** (`d0821fd`) — `enhanceSeq` token; dismissed preview can't reappear from in-flight stream.
 
-### RESUME HERE (cont.91)
-- **Push the 6 local commits** when user OKs (runner was offline — verify it's back, jobs will queue otherwise).
+**All 9 commits PUSHED** (`f7ac754..d0821fd`) — runner VM 100 back online, CI check run 27226306670 **GREEN** (1m30s, @v6 actions confirmed live).
+
+### cont.91 (same day, earlier) — autonomous sweep
+`dirs_home` dedupe (`4bbc805`) · Actions Node-20 bump (`062bc3b`) · Settings hero polish (`a825cb6`, CDP-verified) · ISSUES prune (`cd9cbf9`) · `claude-fable-5` probe answered live.
+
+### RESUME HERE (cont.92)
 - **Update test PENDING** — prod still **0.8.10**; user click on "Update available" pill verifies Velopack download→apply→relaunch.
-- **`--no-bundle` validation** — confirm green + timing on next real release.
-- **MODEL SWAP half-unblocked:** `claude-fable-5` live-verified 2026-06-09 (the "live API access" path). Still DO NOT wire until pricing + ctx + effort tiers publish — picker/cost-cockpit metadata would be fabricated. Rift stays on `opus` alias (auto-tracks newest Opus on GA).
+- **Next release validates:** `--no-bundle` green + timing AND the vpk-idempotency fix (2nd run on warm runner).
+- **MODEL SWAP half-unblocked:** `claude-fable-5` live-verified. DO NOT wire until pricing + ctx + effort tiers publish — picker/cost-cockpit metadata would be fabricated. Rift stays on `opus` alias.
 - **Perf roadmap (NOT applied):** runner `CARGO_INCREMENTAL=1` (vs sccache); `opt-level=2`; pre-bake gh+vpk; vpk `--noPortable`.
-- [carried] drag-reorder verify; `RELEASES_TOKEN` non-ASCII (strip works; re-set cleanly). Dropped: "ISSUES #100 hero-pill" — dangling ref, no #100 was ever filed; re-file if still real.
+- [carried] drag-reorder verify; `RELEASES_TOKEN` non-ASCII (strip works; re-set cleanly).
 
 ## Prior arcs — detail in `git log`
 cont.90 v0.8.11 SHIPPED — first real tag-driven release on VM 100 `rift-runner` (3 provisioning fixes: PS5.1, gh CLI, gh-zip layout) + `--no-bundle` perf fix. cont.88/89 Settings + Harness redesigns → in v0.8.11. cont.88 self-hosted runner LIVE (`docs/design/self-hosted-runner.md`): **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.87 v0.8.10. cont.72 v0.7.0 + edit-swarm.
