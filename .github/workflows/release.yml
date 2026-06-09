@@ -58,7 +58,8 @@ jobs:
           dotnet-version: '8.0.x'
 
       - name: Install vpk (pinned to velopack crate version)
-        run: dotnet tool install -g vpk --version 1.2.0
+        run: |
+          if (Get-Command vpk -ErrorAction SilentlyContinue) { dotnet tool update -g vpk --version 1.2.0 } else { dotnet tool install -g vpk --version 1.2.0 }
 
       # The self-hosted runner doesn't ship the gh CLI (release.ps1 uses it for
       # the rift-releases existence check + asset cleanup). Download the latest
