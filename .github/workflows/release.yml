@@ -47,17 +47,19 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
+      # Swatinem/rust-cache over a hand-rolled actions/cache: it keys on
+      # Cargo.lock + rustc + features (correctly invalidating only when deps
+      # change), compresses better, and deliberately does NOT cache the final
+      # `rift-tauri` crate — which recompiles every version bump anyway, so
+      # caching it just bloated the upload. Net: smaller, faster cache round-trip
+      # and reliable dep restore. `workspaces` points at the crate dir (target/
+      # lives in src-tauri/target on CI; CARGO_TARGET_DIR is unset there).
+      - name: Cache cargo deps (rust-cache)
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-release-
-            ${{ runner.os }}-cargo-
+          workspaces: src-tauri
+          # Release builds; keep a distinct cache from any debug job.
+          key: release
 
       - name: Setup .NET (for vpk)
         uses: actions/setup-dotnet@v4
