@@ -16,18 +16,9 @@ CDP-verified: pill→snooze(pill hides, dot stays, 24h JSON)→unsnooze(pill bac
 
 **SHIPPED:** user manually updated 0.8.10→0.8.11 (Settings→About path, ignores snooze), then **v0.8.12 tagged + CI green** (run 27229063633, publish 19:05Z, all 4 assets on rift-releases). Commits `feea28f` (fix) + `1ce83e7` (bump) + `905c08c` (changelog trim). This release VALIDATED the vpk-idempotency fix (2nd run, warm runner) + `--no-bundle`. Prod = 0.8.11 (PID-only kills, NEVER by image name).
 
-## Session 2026-06-09 (cont. 92) — workflow debug sweep + push
+## cont.92/91 (same day, earlier) — debug sweep + autonomous sweep
 
-Multi-agent Workflow sweep (18 agents, find→adversarial-verify): 13 raw findings → **3 confirmed, 10 refuted**. All 3 fixed + verified (cargo check green via isolated `CARGO_TARGET_DIR` — dodges dev-lock collision, dev stayed alive; svelte-check 0/0):
-
-- **vpk install idempotent** (`b78f2c5`) — `release.yml` bare `dotnet tool install` FAILS 2nd+ release on persistent runner; Get-Command guard → update|install.
-- **stt lock-across-await** (`7cc2ce2`) — whisper model load moved OUTSIDE cache mutex; stop no longer hangs during load. Concurrent starts may double-load (benign).
-- **composer enhance race** (`d0821fd`) — `enhanceSeq` token; dismissed preview can't reappear from in-flight stream.
-
-**All 9 commits PUSHED** (`f7ac754..d0821fd`) — runner VM 100 back online, CI check run 27226306670 **GREEN** (1m30s, @v6 actions confirmed live).
-
-### cont.91 (same day, earlier) — autonomous sweep
-`dirs_home` dedupe (`4bbc805`) · Actions Node-20 bump (`062bc3b`) · Settings hero polish (`a825cb6`, CDP-verified) · ISSUES prune (`cd9cbf9`) · `claude-fable-5` probe answered live.
+cont.92: 18-agent Workflow sweep, 13 findings → 3 confirmed + fixed (`b78f2c5` vpk-install idempotent · `7cc2ce2` stt lock-across-await · `d0821fd` composer enhance race); all pushed, CI green. cont.91: `dirs_home` dedupe · Actions @v6 bump · Settings hero polish · ISSUES prune. Detail: `git log -- docs/HANDOFF.md`.
 
 ### RESUME HERE (cont.93)
 - **End-to-end pill update test:** user's prod 0.8.11 → pill should show v0.8.12 on next launch (old snooze was for 0.8.11, doesn't gate it). Awaiting user report — if anything scuffs/fails, get the exact surface.
