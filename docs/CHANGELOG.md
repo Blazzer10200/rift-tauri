@@ -18,15 +18,7 @@
 
 ## v0.8.11 — 2026-06-09 — Settings redesign + Harness one-viewport overhaul
 
-**Harness.** All three sub-pages reorganized to fit one viewport with zero scroll. The Telemetry strip's hidden 4193px horizontal pill river is gone — replaced by `Live · recent-4 · All 40→`, with full session browsing in the All view. The archived-session hero splits its lone cost figure into a left identity block + a 2×2 stats grid. SwarmPage was brought in line with the shared visual system (title/card sizing, radius, icon buttons, empty state, dotted-grid background); CostPage tightened to a single-viewport bento.
-
-**UI system.** Settings moved from a ragged 12-col bento to a **single centered column of titled cards** — section titles are now header bands *inside* each card (sentence-case), not labels floating over flat slabs. Inline code in descriptions de-boxed to a calm wash; descriptions capped at 60ch so they no longer collide with their controls.
-
-**Assistant tab reorganized.** "Budget & billing" → **Cost guard** (per-turn cap only); API-key fallback + custom providers merged into one **Model & routing** card with an explicit precedence note (API key → custom provider → compression proxy); "Context compression" → **Compression proxy (advanced)**.
-
-**Audit + cleanup.** Traced every setting end-to-end — all wired, nothing decorative. Removed the **Accent presence (Calm/Bold)** toggle (imperceptible: only nudged one ghost-fill opacity) incl. its store field/CSS/persistence, plus a dead `data-ligatures` DOM write. Fixed code-preview copy to its true scope ("diffs/previews/file browser" → "code blocks in chat replies").
-
-**Verify.** `npm run check` 0/0 (4070).
+Harness sub-pages (Telemetry · Cost · Swarm) reorganized to one viewport, zero scroll — session browsing via `Live · recent-4 · All 40→` instead of the hidden 4193px pill river. Settings rebuilt as a single centered column of titled cards (header bands inside cards); Assistant tab regrouped into **Cost guard** / **Model & routing** (w/ precedence note) / **Compression proxy (advanced)**. Settings audit: every control traced end-to-end; imperceptible Accent-presence toggle + dead `data-ligatures` write removed. `npm run check` 0/0.
 
 ## Older versions
 
