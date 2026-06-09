@@ -226,7 +226,8 @@
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
   // always shows the true status even after the toolbar badge was dismissed.
-  const cliInstalled = $derived(assistantStore.auth?.cliVersion ?? null);
+  const fmtCliVer = (v: string | null | undefined) => v?.replace(/\s*\(claude code\)\s*$/i, "") ?? null;
+  const cliInstalled = $derived(fmtCliVer(assistantStore.auth?.cliVersion));
   const cliInstalls = $derived(assistantStore.auth?.installs ?? []);
   const cliNewer = $derived(cliUpdate.isAnyStale(assistantStore.auth?.installs, cliInstalled));
   const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
@@ -234,6 +235,10 @@
   async function runCliUpdate() {
     const ok = await cliUpdate.runUpdate();
     if (ok) await assistantStore.refreshAuth();
+  }
+  function reprobeAll() {
+    void assistantStore.refreshAuth();
+    void cliUpdate.maybeCheck(true);
   }
   function fmtAgo(ts: number, now: number): string {
     const s = Math.max(0, Math.round((now - ts) / 1000));
@@ -509,7 +514,7 @@
       {/if}
 
       {#if activeSec === "assistant"}
-        <!-- session status promoted to a hero banner -->
+        <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
         <div class="sb-status {assistantDot ?? 'ok'}">
           <div class="sb-status-l">
             <div class="sb-status-ic">
@@ -517,88 +522,71 @@
             </div>
             <div class="sb-status-main">
               <b>{assistantStore.auth ? assistantStore.auth.summary : assistantStore.authChecking ? "Checking session…" : "Session unknown"}</b>
-              <div class="sub">Rift uses your local <code>claude</code> CLI session by default. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
+              <div class="sub">Rift runs your local <code>claude</code> install{#if cliInstalled}{' — '}<code>{cliInstalled}</code>{/if}. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
             </div>
           </div>
           <div class="sb-status-r">
+            {#if cliUpdate.status === "checking"}
+              <span class="st-pill"><span class="dot"></span>Checking…</span>
+            {:else if cliNewer}
+              <span class="st-pill accent"><span class="dot"></span>Update → {cliUpdate.latest}</span>
+            {:else if cliUpdate.status === "error"}
+              <span class="st-pill warn" use:tooltip={cliUpdate.error ?? "Check failed"}><span class="dot"></span>Check failed</span>
+            {:else if cliUpdate.latest}
+              <span class="st-pill ok" use:tooltip={cliIsNative ? "Native install — auto-updates in the background; Rift can also apply updates on demand" : "Rift checks npm for newer releases and can update it for you"}><span class="dot"></span>CLI up to date</span>
+            {/if}
             {#if assistantStore.authLastProbed && !assistantStore.authChecking}
               <span class="st-stamp" use:tooltip={"Time since the last CLI session probe"}>checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
             {/if}
-            <button class="st-btn" type="button" onclick={() => assistantStore.refreshAuth()} disabled={assistantStore.authChecking}><RefreshCw size={14} /> Re-probe</button>
+            <button class="st-btn" type="button" onclick={reprobeAll} disabled={assistantStore.authChecking}><RefreshCw size={14} /> Re-probe</button>
           </div>
+          {#if cliInstalls.length > 1}
+            <div class="st-cli-installs" use:tooltip={"Multiple Claude CLIs found — Rift runs the newest and updates them all so their versions can't drift apart."}>
+              {#each cliInstalls as inst (inst.path)}
+                {@const stale = cliUpdate.isAnyStale([inst], null)}
+                {@const cmd = cliUpdate.commandFor(inst.method)}
+                <div class="st-cli-inst" class:active={inst.active}>
+                  <span class="st-cli-inst-method">{inst.method}</span>
+                  <code>{fmtCliVer(inst.version) ?? "?"}</code>
+                  {#if inst.active}<span class="st-cli-inst-tag">active</span>{/if}
+                  {#if stale}<span class="st-cli-inst-tag stale">behind</span>{/if}
+                  <span class="st-cli-inst-path" use:tooltip={inst.path}>{inst.path}</span>
+                  {#if stale}
+                    <button class="st-cli-copy sm" class:done={cliUpdate.copiedCmd === cmd} type="button" onclick={() => void cliUpdate.copyValue(cmd)} use:tooltip={"Copy: " + cmd} aria-label="Copy this install's update command">
+                      {#if cliUpdate.copiedCmd === cmd}<Check size={12} />{:else}<Copy size={12} />{/if}
+                    </button>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#if cliNewer}
+            <div class="st-cli-act">
+              <button class="st-btn primary" type="button" disabled={cliUpdate.updating} onclick={runCliUpdate}>
+                {#if cliUpdate.updating}<Loader2 size={14} class="st-spin" /> Updating…{:else}<ArrowUpCircle size={14} /> Update now{/if}
+              </button>
+              <div class="st-cli-cmd">
+                <code>{cliUpdate.updateCommand}</code>
+                <button class="st-cli-copy" class:done={cliUpdate.copied} type="button" onclick={() => void cliUpdate.copyCommand()} use:tooltip={"Copy update command"} aria-label="Copy update command">
+                  {#if cliUpdate.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
+                </button>
+              </div>
+            </div>
+            {#if cliUpdate.updateError}
+              <div class="st-cli-err">{cliUpdate.updateError}</div>
+            {:else if cliUpdate.updateOutput}
+              <div class="st-cli-ok">{cliUpdate.updateOutput}</div>
+            {/if}
+            {#if cliUpdate.updateStuck}
+              <div class="st-cli-warn">Update ran, but a copy is still behind. A native install sometimes reports success without bumping — copy its command above and run it in a terminal, or reinstall it.</div>
+            {/if}
+          {/if}
         </div>
 
         <div class="sb-bento">
           <div class="st-block sb-s7">
             <div class="st-block-label">Claude session</div>
             <div class="st-card">
-              <div class="st-row st-srow">
-                <div class="st-srow-top">
-                  <div class="st-row-label">Claude Code CLI</div>
-                  <div class="st-srow-ctl">
-                    {#if cliUpdate.status === "checking"}
-                      <span class="st-pill"><span class="dot"></span>Checking…</span>
-                    {:else if cliNewer}
-                      <span class="st-pill accent"><span class="dot"></span>Update → {cliUpdate.latest}</span>
-                    {:else if cliUpdate.status === "error"}
-                      <span class="st-pill warn" use:tooltip={cliUpdate.error ?? "Check failed"}><span class="dot"></span>Check failed</span>
-                    {:else if cliUpdate.latest}
-                      <span class="st-pill ok"><span class="dot"></span>Up to date</span>
-                    {:else}
-                      <span class="st-pill"><span class="dot"></span>{cliInstalled ?? "—"}</span>
-                    {/if}
-                    {#if cliUpdate.checkedAt && cliUpdate.status !== "checking"}
-                      <span class="st-stamp" use:tooltip={"Time since the last npm registry check"}>checked {fmtAgo(cliUpdate.checkedAt, asstNowTick)}</span>
-                    {/if}
-                    <button class="st-btn" type="button" onclick={() => void cliUpdate.maybeCheck(true)} disabled={cliUpdate.status === "checking"}><RefreshCw size={14} /> Check</button>
-                  </div>
-                </div>
-                <div class="st-row-desc">
-                  Rift runs your local <code>claude</code> install{#if cliInstalled}{' — currently '}<code>{cliInstalled}</code>{/if}.
-                  {#if cliIsNative}It auto-updates in the background — Rift can also apply updates on demand.{:else}Rift checks npm for newer releases and can update it for you.{/if}
-                </div>
-                {#if cliInstalls.length > 1}
-                  <div class="st-cli-installs" use:tooltip={"Multiple Claude CLIs found — Rift runs the newest and updates them all so their versions can't drift apart."}>
-                    {#each cliInstalls as inst (inst.path)}
-                      {@const stale = cliUpdate.isAnyStale([inst], null)}
-                      {@const cmd = cliUpdate.commandFor(inst.method)}
-                      <div class="st-cli-inst" class:active={inst.active}>
-                        <span class="st-cli-inst-method">{inst.method}</span>
-                        <code>{inst.version ?? "?"}</code>
-                        {#if inst.active}<span class="st-cli-inst-tag">active</span>{/if}
-                        {#if stale}<span class="st-cli-inst-tag stale">behind</span>{/if}
-                        <span class="st-cli-inst-path" use:tooltip={inst.path}>{inst.path}</span>
-                        {#if stale}
-                          <button class="st-cli-copy sm" class:done={cliUpdate.copiedCmd === cmd} type="button" onclick={() => void cliUpdate.copyValue(cmd)} use:tooltip={"Copy: " + cmd} aria-label="Copy this install's update command">
-                            {#if cliUpdate.copiedCmd === cmd}<Check size={12} />{:else}<Copy size={12} />{/if}
-                          </button>
-                        {/if}
-                      </div>
-                    {/each}
-                  </div>
-                {/if}
-                {#if cliNewer}
-                  <div class="st-cli-act">
-                    <button class="st-btn primary" type="button" disabled={cliUpdate.updating} onclick={runCliUpdate}>
-                      {#if cliUpdate.updating}<Loader2 size={14} class="st-spin" /> Updating…{:else}<ArrowUpCircle size={14} /> Update now{/if}
-                    </button>
-                    <div class="st-cli-cmd">
-                      <code>{cliUpdate.updateCommand}</code>
-                      <button class="st-cli-copy" class:done={cliUpdate.copied} type="button" onclick={() => void cliUpdate.copyCommand()} use:tooltip={"Copy update command"} aria-label="Copy update command">
-                        {#if cliUpdate.copied}<Check size={13} />{:else}<Copy size={13} />{/if}
-                      </button>
-                    </div>
-                  </div>
-                  {#if cliUpdate.updateError}
-                    <div class="st-cli-err">{cliUpdate.updateError}</div>
-                  {:else if cliUpdate.updateOutput}
-                    <div class="st-cli-ok">{cliUpdate.updateOutput}</div>
-                  {/if}
-                  {#if cliUpdate.updateStuck}
-                    <div class="st-cli-warn">Update ran, but a copy is still behind. A native install sometimes reports success without bumping — copy its command above and run it in a terminal, or reinstall it.</div>
-                  {/if}
-                {/if}
-              </div>
               <div class="st-row">
                 <div class="st-row-body">
                   <div class="st-row-label">Use my full Claude Code config</div>
@@ -744,7 +732,7 @@
                 <div class="st-row-body">
                   <div class="st-row-label">Route turns through a local compression proxy</div>
                   <div class="st-row-desc">
-                    When on, Rift points <code>ANTHROPIC_BASE_URL</code> at a local proxy (e.g. <a href="https://github.com/chopratejas/headroom" target="_blank" rel="noreferrer">headroom</a>) that deterministically shrinks context before forwarding upstream — cutting tokens, and spend. The proxy is a <strong>soft dependency you run yourself</strong>; Rift never bundles or launches it. An active custom provider overrides this (both use the same routing seam).
+                    Points <code>ANTHROPIC_BASE_URL</code> at a local proxy (e.g. <a href="https://github.com/chopratejas/headroom" target="_blank" rel="noreferrer">headroom</a>) that shrinks context before forwarding — cutting tokens and spend. <strong>You run the proxy yourself</strong>; Rift never launches it. An active custom provider takes priority.
                   </div>
                 </div>
                 <div class="st-row-ctl">
@@ -1177,12 +1165,8 @@
   .env-stat.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 28%, transparent); }
   .env-stat.warn .env-dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
   /* Status rows: label + status-cluster on the top line, description full-width below. */
-  .st-srow { flex-direction: column; align-items: stretch; gap: 10px; }
-  .st-srow-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
-  .st-srow-top .st-row-label { flex: 1 1 auto; }
-  .st-srow-ctl { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-left: auto; justify-content: flex-end; }
-  .st-srow .st-row-desc { margin-top: 0; }
-  .st-srow .st-cli-cmd { margin-top: 0; }
+  /* CLI install list + update CTA live inside the hero banner — span its full width. */
+  .sb-status > .st-cli-installs, .sb-status > .st-cli-act, .sb-status > .st-cli-err, .sb-status > .st-cli-ok, .sb-status > .st-cli-warn { flex: 1 1 100%; margin-top: 0; }
   .st-note { padding: 10px 17px; font-size: var(--fs-xs); color: var(--fg-muted); border-top: 1px solid var(--border); }
   .st-note code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
