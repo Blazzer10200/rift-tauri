@@ -212,9 +212,11 @@ try {
 # --- Build ---------------------------------------------------------------
 # `npm run tauri build` builds the frontend (vite) + the release exe (which
 # embeds those assets). Velopack wraps the self-contained exe directly and
-# produces its own Setup.exe, so Tauri's NSIS bundle output is unused here.
+# produces its own Setup.exe, so Tauri's NSIS bundle output is unused here --
+# `--no-bundle` skips the makensis step (and its per-run NSIS downloads), which
+# only ever produced a discarded installer. vpk packs release/rift-tauri.exe.
 Write-Host '=== tauri build ===' -ForegroundColor Cyan
-& npm run tauri build
+& npm run tauri build -- --no-bundle
 if ($LASTEXITCODE -ne 0) { throw 'tauri build failed' }
 
 $targetRoot = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { 'src-tauri/target' }
