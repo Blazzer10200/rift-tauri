@@ -15,7 +15,7 @@
 
 ### RESUME HERE (cont.94)
 - **Ship release w/ Fable** (user queued post-compaction): bump → CHANGELOG → commit → tag `vX.Y.Z` → push --tags.
-- [carried] prod 0.8.11→0.8.12 pill update test awaiting user report · `.slideover`/`.tip` backdrop-filter (fix only on new scuff reports) · perf roadmap (CARGO_INCREMENTAL/opt-level-2/pre-bake/--noPortable) · drag-reorder verify · `RELEASES_TOKEN` non-ASCII re-set.
+- [carried] 0.8.11→0.8.12 pill update test awaiting user report · `.slideover`/`.tip` blur (fix on new scuff only) · runner perf roadmap · drag-reorder verify · `RELEASES_TOKEN` re-set.
 
 ## cont.93 (same day) — update-flow root cause FIXED + v0.8.12 SHIPPED
 
