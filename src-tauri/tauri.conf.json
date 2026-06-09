@@ -15,7 +15,7 @@
         "title": "Rift",
         "width": 1600,
         "height": 1000,
-        "minWidth": 1280,
+        "minWidth": 1100,
         "minHeight": 800,
         "decorations": false,
         "dragDropEnabled": false,

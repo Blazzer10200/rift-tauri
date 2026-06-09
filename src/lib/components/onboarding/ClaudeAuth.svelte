@@ -1,7 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { Terminal, UserCheck, BadgeCheck, CheckCircle2, AlertCircle, Loader2, RefreshCw } from "lucide-svelte";
+
+  const CLI_DOCS_URL = "https://docs.claude.com/en/docs/claude-code";
 
   type AuthStatus = {
     cliPresent: boolean;
@@ -72,7 +75,7 @@
   </div>
 
   {#if !status.cliPresent}
-    <p class="ob-hint"><span>Install the CLI from <code class="ob-mono-i">docs.claude.com/en/docs/claude-code</code>, then re-check. Or skip — you can do this anytime.</span></p>
+    <p class="ob-hint"><span>Install the CLI from <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>, then re-check. Or skip — you can do this anytime.</span></p>
   {:else if !status.loggedIn}
     <p class="ob-hint"><span>Run <code class="ob-mono-i">claude</code> once in a terminal to log in, then re-check.</span></p>
   {/if}

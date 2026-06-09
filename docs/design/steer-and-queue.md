@@ -221,6 +221,15 @@ advertise **Alt+Enter to steer**.
 
 ## 6. Queue improvements (independent of steer)
 
+> **v1 SHIPPED in-tree (cont.82, 2026-06-08): the Pending Rail.** The flat
+> `.queue` strip became a ChatGPT-style rail fused to the composer's top lip —
+> accent border wrapping both, "N queued" caption, chips w/ inline **edit-before-
+> fire** (#2 below, done) + remove + Clear, spring-up entry + one-time accent
+> sweep + downward drain animation, `prefers-reduced-motion` guarded. Pure
+> frontend (`Composer.svelte`), no backend change. svelte-check 0/0, CDP-verified.
+> **v2 (open):** steer chips + per-item mode toggle (#1) + pulse-on-inject — the
+> unification that turns the rail into the full three-tier surface.
+
 The queue stays — for additive follow-ups it's the right tool. Neglected-debt
 items, in rough priority:
 

@@ -19,11 +19,13 @@ type WorkspaceHost = {
   workspaceBranch: string | null;
   lastError: string | null;
   lastNotice: string | null;
+  applyWorkspacePrefs: () => void;
 };
 
 export async function refreshWorkspace(host: WorkspaceHost): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_get_workspace");
+    host.applyWorkspacePrefs();
   } catch (e) {
     console.warn("assistant_get_workspace failed", e);
   }
@@ -48,6 +50,7 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
     host.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
     host.workspaceFiles = [];
     host.workspaceBranch = null;
+    host.applyWorkspacePrefs();
     host.lastNotice = `Workspace: ${path}`;
   } catch (e) {
     const msg = String(e);
@@ -67,6 +70,7 @@ export async function clearRoot(host: WorkspaceHost): Promise<void> {
     host.workspace = await invoke<WorkspaceState>("assistant_clear_root");
     host.workspaceFiles = [];
     host.workspaceBranch = null;
+    host.applyWorkspacePrefs();
   } catch (e) {
     console.warn("assistant_clear_root failed", e);
   }

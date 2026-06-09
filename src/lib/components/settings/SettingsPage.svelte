@@ -17,6 +17,7 @@
   import { uiPrefs, ACCENTS } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
+  import { environment } from "../../state/environment.svelte";
   import { scrubUser } from "$lib/utils/redact";
   import { tooltip } from "$lib/actions/tooltip";
   import Select from "../Select.svelte";
@@ -35,41 +36,21 @@
 
   let activeSec = $state<Section>("appearance");
   let scrollEl = $state<HTMLDivElement>();
-  // Per-section anchor elements for scroll-spy + jump().
-  let secEls = $state<Partial<Record<Section, HTMLElement>>>({});
+  const activeMeta = $derived(ST_SECTIONS.find((s) => s.id === activeSec) ?? ST_SECTIONS[0]);
+  const HeroIcon = $derived(activeMeta.icon);
 
-  function onScroll() {
-    const sc = scrollEl;
-    if (!sc) return;
-    // Bottom-of-scroll: the last (often short) section can't reach the 140px
-    // threshold before the container bottoms out, so spy it explicitly.
-    if (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 2) {
-      activeSec = ST_SECTIONS[ST_SECTIONS.length - 1].id;
-      return;
-    }
-    const scTop = sc.getBoundingClientRect().top;
-    let cur: Section = ST_SECTIONS[0].id;
-    for (const s of ST_SECTIONS) {
-      const el = secEls[s.id];
-      if (el && el.getBoundingClientRect().top - scTop <= 140) cur = s.id;
-    }
-    activeSec = cur;
-  }
-  function jump(id: Section) {
-    const el = secEls[id];
-    const sc = scrollEl;
-    if (!el || !sc) return;
-    const delta = el.getBoundingClientRect().top - sc.getBoundingClientRect().top;
-    sc.scrollTo({ top: sc.scrollTop + delta - 24, behavior: "smooth" });
+  // Bento layout shows one section per tab — switching resets the scroll.
+  function selectSec(id: Section) {
+    activeSec = id;
+    scrollEl?.scrollTo({ top: 0 });
   }
 
-  // Command-palette deep-link: pull to the requested section, then clear (one-shot).
+  // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
     const req = commandPalette.targetSettingsSection;
     if (req) {
       activeSec = req as Section;
-      // wait a frame so anchors are mounted before scrolling
-      requestAnimationFrame(() => jump(req as Section));
+      requestAnimationFrame(() => scrollEl?.scrollTo({ top: 0 }));
       untrack(() => commandPalette.clearSettingsSection());
     }
   });
@@ -118,6 +99,16 @@
     { id: "ko-KR", label: "Korean" },
     { id: "zh-CN", label: "Chinese (Mandarin)" },
   ];
+  // Optional host tools surfaced in About → Local tools. `use` = what breaks
+  // without it; `hint` = how to get it (shown only when missing).
+  const LOCAL_TOOLS: { key: "git" | "node" | "npm" | "cargo" | "code"; label: string; use: string; hint: string }[] = [
+    { key: "git",   label: "Git",     use: "Version control — powers the assistant's git tools and the edit swarm.", hint: "install Git for Windows (git-scm.com)" },
+    { key: "node",  label: "Node.js", use: "JavaScript runtime for project tooling.", hint: "install from nodejs.org" },
+    { key: "npm",   label: "npm",     use: "The edit swarm's frontend gate runs npm run check.", hint: "ships with Node.js" },
+    { key: "cargo", label: "Cargo",   use: "The edit swarm's Rust gate runs cargo check.", hint: "install via rustup.rs" },
+    { key: "code",  label: "VS Code", use: "Enables “Open in VS Code” on file paths.", hint: "install VS Code and enable the ‘code’ command in PATH" },
+  ];
+
   const STT_ENGINES: { id: "web_speech" | "whisper"; label: string; sub: string }[] = [
     { id: "web_speech", label: "Web Speech", sub: "Edge · Azure when online" },
     { id: "whisper",    label: "Whisper",    sub: "On-device · accent-tuned" },
@@ -311,6 +302,7 @@
     void stt.init();
     void loadAboutPaths();
     void cliUpdate.maybeCheck();
+    void environment.refresh(); // fresh probe each time Settings opens — tools may have just been installed
 
     asstNowTick = Date.now();
     const iv = setInterval(() => { asstNowTick = Date.now(); }, 30_000);
@@ -321,51 +313,46 @@
   });
 </script>
 
-<div class="st-main">
-  <div class="st-inner">
-    <!-- ── Sticky section index ── -->
-    <nav class="st-index">
-      <div class="st-index-head">
-        <div class="st-index-title">Settings</div>
-        <div class="st-index-sub">
-          Workspace · <span class="mono">local</span>
+<div class="sb-main">
+  <!-- ── Hero + sticky tab bar ── -->
+  <div class="sb-topbar">
+    <div class="sb-hero">
+      <div class="sb-hero-l">
+        <div class="sb-hero-ic"><HeroIcon size={22} strokeWidth={1.75} /></div>
+        <div class="sb-hero-tx">
+          <div class="sb-eyebrow">Settings</div>
+          <div class="sb-hero-tt">{activeMeta.label}</div>
+          <div class="sb-hero-sub">{activeMeta.sub}</div>
         </div>
       </div>
-      <div class="st-index-list">
-        {#each ST_SECTIONS as s (s.id)}
-          {@const Icon = s.icon}
-          {@const dot = s.id === "assistant" ? assistantDot : s.dot}
-          <button class="st-index-row" class:on={activeSec === s.id} onclick={() => jump(s.id)} type="button">
-            <span class="st-index-ic"><Icon size={16} strokeWidth={1.75} /></span>
-            <span class="lbl">{s.label}</span>
-            {#if dot}<span class="st-index-dot {dot}"></span>{/if}
-          </button>
-        {/each}
-      </div>
-      <div class="st-index-foot">
-        <button class="st-version" type="button" onclick={() => updates.open()} use:tooltip={"Check for updates"}>
-          <CircleCheck size={16} />
-          <div style="flex:1; min-width:0; text-align:left;">
-            <div class="st-version-t">Rift</div>
-            <div class="st-version-s">{appVersion} · up to date</div>
-          </div>
-          <RefreshCw size={13} />
+      <div class="sb-hero-r">
+        <span class="sb-chip"><span class="mono">local workspace</span></span>
+        <button class="sb-chip ok" type="button" onclick={() => updates.open()} use:tooltip={"Check for updates"}>
+          <CircleCheck size={14} /> {appVersion} · up to date
         </button>
       </div>
-    </nav>
+    </div>
+    <div class="sb-tabs" role="tablist">
+      {#each ST_SECTIONS as s (s.id)}
+        {@const Icon = s.icon}
+        {@const dot = s.id === "assistant" ? assistantDot : s.dot}
+        <button class="sb-tab" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
+          <Icon size={16} strokeWidth={1.75} />
+          <span>{s.label}</span>
+          {#if dot}<span class="sb-tab-dot {dot}"></span>{/if}
+        </button>
+      {/each}
+    </div>
+  </div>
 
-    <!-- ── Scroll document ── -->
-    <div class="st-scroll" bind:this={scrollEl} onscroll={onScroll}>
-      <div class="st-doc">
+  <!-- ── Scrolling bento canvas ── -->
+  <div class="sb-scroll" bind:this={scrollEl}>
+    <div class="sb-wrap">
 
-        <!-- ── APPEARANCE ── -->
-        <section class="st-sec" bind:this={secEls.appearance}>
-          <div class="st-sec-head">
-            <div class="st-sec-ic"><Palette size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Appearance</div><div class="st-sec-sub">{ST_SECTIONS[0].sub}</div></div>
-          </div>
+      {#if activeSec === "appearance"}
+        <div class="sb-bento">
 
-          <div class="st-block">
+          <div class="st-block sb-s7">
             <div class="st-block-label">Accent color</div>
             <div class="st-card">
               <div class="st-swatch-grid">
@@ -384,7 +371,7 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s5">
             <div class="st-block-label">Interface</div>
             <div class="st-card">
               <div class="st-row">
@@ -416,7 +403,7 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s5">
             <div class="st-block-label">Code preview</div>
             <div class="st-card">
               <div class="st-row">
@@ -458,7 +445,7 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s7">
             <div class="st-block-label">Keyboard shortcuts</div>
             <div class="st-card">
               <div class="kbd-grid">
@@ -483,15 +470,12 @@
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      {/if}
 
-        <!-- ── ACCESSIBILITY ── -->
-        <section class="st-sec" bind:this={secEls.accessibility}>
-          <div class="st-sec-head">
-            <div class="st-sec-ic"><A11yIcon size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Accessibility</div><div class="st-sec-sub">{ST_SECTIONS[1].sub}</div></div>
-          </div>
-          <div class="st-block">
+      {#if activeSec === "accessibility"}
+        <div class="sb-bento">
+          <div class="st-block sb-s8">
             <div class="st-block-label">Reading comfort</div>
             <div class="st-card">
               <div class="st-row">
@@ -535,37 +519,33 @@
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      {/if}
 
-        <!-- ── ASSISTANT ── -->
-        <section class="st-sec" bind:this={secEls.assistant}>
-          <div class="st-sec-head">
-            <div class="st-sec-ic"><Sparkles size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Assistant</div><div class="st-sec-sub">{ST_SECTIONS[2].sub}</div></div>
+      {#if activeSec === "assistant"}
+        <!-- session status promoted to a hero banner -->
+        <div class="sb-status {assistantDot ?? 'ok'}">
+          <div class="sb-status-l">
+            <div class="sb-status-ic">
+              {#if assistantStore.auth}<CircleCheck size={18} />{:else}<Loader2 size={18} class="st-spin" />{/if}
+            </div>
+            <div class="sb-status-main">
+              <b>{assistantStore.auth ? assistantStore.auth.summary : assistantStore.authChecking ? "Checking session…" : "Session unknown"}</b>
+              <div class="sub">Rift uses your local <code>claude</code> CLI session by default. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
+            </div>
           </div>
+          <div class="sb-status-r">
+            {#if assistantStore.authLastProbed && !assistantStore.authChecking}
+              <span class="st-stamp" use:tooltip={"Time since the last CLI session probe"}>checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
+            {/if}
+            <button class="st-btn" type="button" onclick={() => assistantStore.refreshAuth()} disabled={assistantStore.authChecking}><RefreshCw size={14} /> Re-probe</button>
+          </div>
+        </div>
 
-          <div class="st-block">
+        <div class="sb-bento">
+          <div class="st-block sb-s7">
             <div class="st-block-label">Claude session</div>
             <div class="st-card">
-              <div class="st-row st-srow">
-                <div class="st-srow-top">
-                  <div class="st-row-label">Status</div>
-                  <div class="st-srow-ctl">
-                    {#if assistantStore.auth}
-                      <span class="st-pill" class:ok={assistantStore.auth.pill === "green"} class:warn={assistantStore.auth.pill === "yellow" || assistantStore.auth.pill === "red"}><span class="dot"></span>{assistantStore.auth.summary}</span>
-                    {:else if assistantStore.authChecking}
-                      <span class="st-pill"><span class="dot"></span>Checking…</span>
-                    {:else}
-                      <span class="st-pill"><span class="dot"></span>Unknown</span>
-                    {/if}
-                    {#if assistantStore.authLastProbed && !assistantStore.authChecking}
-                      <span class="st-stamp" use:tooltip={"Time since the last CLI session probe"}>checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
-                    {/if}
-                    <button class="st-btn" type="button" onclick={() => assistantStore.refreshAuth()} disabled={assistantStore.authChecking}><RefreshCw size={14} /> Re-probe</button>
-                  </div>
-                </div>
-                <div class="st-row-desc">Rift uses your local <code>claude</code> CLI session by default. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
-              </div>
               <div class="st-row st-srow">
                 <div class="st-srow-top">
                   <div class="st-row-label">Claude Code CLI</div>
@@ -657,7 +637,7 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s5">
             <div class="st-block-label">Budget &amp; billing</div>
             <div class="st-card">
               <div class="st-row">
@@ -699,7 +679,7 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s12">
             <div class="st-block-label">Custom providers (advanced)</div>
             <div class="st-card">
               <div class="st-row-desc" style="margin-bottom:10px;">
@@ -847,16 +827,12 @@
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      {/if}
 
-        <!-- ── SPEECH ── -->
-        <section class="st-sec" bind:this={secEls.speech}>
-          <div class="st-sec-head">
-            <div class="st-sec-ic"><Mic size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">Speech</div><div class="st-sec-sub">{ST_SECTIONS[3].sub}</div></div>
-          </div>
-
-          <div class="st-block">
+      {#if activeSec === "speech"}
+        <div class="sb-bento">
+          <div class="st-block sb-s7">
             <div class="st-block-label">Engine</div>
             <div class="st-card">
               <div class="st-row">
@@ -889,7 +865,7 @@
           </div>
 
           {#if stt.config.engine === "web_speech"}
-            <div class="st-block">
+            <div class="st-block sb-s5">
               <div class="st-block-label">Web Speech</div>
               <div class="st-card">
                 <div class="st-row st-row-stack">
@@ -920,7 +896,7 @@
           {/if}
 
           {#if stt.config.engine === "whisper"}
-            <div class="st-block">
+            <div class="st-block sb-s12">
               <div class="st-block-label">Whisper model</div>
               <div class="st-card">
                 <div class="set-model-list">
@@ -1026,7 +1002,7 @@
             </div>
           {/if}
 
-          <div class="st-block">
+          <div class="st-block sb-s12">
             <div class="st-block-label">Composer integration</div>
             <div class="st-card">
               <div class="st-row">
@@ -1051,19 +1027,15 @@
           </div>
 
           {#if stt.config.engine === "web_speech" && !stt.supported}
-            <div class="st-warn">Your WebView does not expose <code>SpeechRecognition</code>; Web Speech is unavailable — switch to Whisper or install LLVM and rebuild.</div>
+            <div class="st-warn sb-s12">Your WebView does not expose <code>SpeechRecognition</code>; Web Speech is unavailable — switch to Whisper or install LLVM and rebuild.</div>
           {/if}
-          {#if stt.lastError}<div class="st-warn">{stt.lastError}</div>{/if}
-        </section>
+          {#if stt.lastError}<div class="st-warn sb-s12">{stt.lastError}</div>{/if}
+        </div>
+      {/if}
 
-        <!-- ── ABOUT ── -->
-        <section class="st-sec" bind:this={secEls.about}>
-          <div class="st-sec-head">
-            <div class="st-sec-ic"><Info size={19} strokeWidth={1.75} /></div>
-            <div><div class="st-sec-tt">About</div><div class="st-sec-sub">{ST_SECTIONS[4].sub}</div></div>
-          </div>
-
-          <div class="st-block">
+      {#if activeSec === "about"}
+        <div class="sb-bento">
+          <div class="st-block sb-s4">
             <div class="st-block-label">Build</div>
             <div class="st-card">
               {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "MIT · github.com/Blazzer10200/rift"]] as kv (kv[0])}
@@ -1072,7 +1044,7 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s8">
             <div class="st-block-label">Paths</div>
             <div class="st-card">
               <div class="st-row">
@@ -1092,7 +1064,27 @@
             </div>
           </div>
 
-          <div class="st-block">
+          <div class="st-block sb-s12">
+            <div class="st-block-label">Local tools</div>
+            <div class="st-card">
+              {#each LOCAL_TOOLS as t (t.key)}
+                {@const present = environment[t.key]}
+                <div class="st-row">
+                  <div class="st-row-body">
+                    <div class="st-row-label">{t.label}</div>
+                    <div class="st-row-desc">{t.use}{present ? "" : ` · ${t.hint}`}</div>
+                  </div>
+                  <div class="st-row-ctl">
+                    <span class="env-stat" class:ok={present} class:warn={!present}>
+                      <span class="env-dot"></span>{present ? "Installed" : "Not found"}
+                    </span>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+
+          <div class="st-block sb-s12">
             <div class="st-block-label">Help &amp; diagnostics</div>
             <div class="st-card">
               <button class="st-about-row" type="button" onclick={() => updates.open()}>
@@ -1109,52 +1101,68 @@
               </button>
             </div>
           </div>
-        </section>
+        </div>
+      {/if}
 
-      </div>
     </div>
   </div>
 </div>
 
 <style>
-  .st-main { position: relative; overflow: hidden; display: flex; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
-  .st-inner { flex: 1; min-width: 0; min-height: 0; display: flex; }
+  .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
 
-  /* ── Sticky section index ── */
-  .st-index { width: 232px; flex: none; min-height: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg); padding: 20px 14px 14px; }
-  .st-index-head { padding: 0 8px 16px; }
-  .st-index-title { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
-  .st-index-sub { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
-  .st-index-sub .mono { font-family: var(--font-mono); color: var(--fg-muted); }
-  .st-index-list { display: flex; flex-direction: column; gap: 1px; }
-  .st-index-row { display: flex; align-items: center; gap: 11px; position: relative; height: 36px; padding: 0 11px; border: 0; border-radius: var(--radius); background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-md); font-weight: 550; cursor: pointer; text-align: left; width: 100%; transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft); }
-  .st-index-row:hover { background: var(--surface); color: var(--fg-2); }
-  .st-index-row.on { background: var(--accent-soft); color: var(--fg); font-weight: 600; }
-  .st-index-row.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 45%, transparent); }
-  .st-index-row.on .st-index-ic :global(svg) { color: var(--accent); }
-  .st-index-ic { color: var(--fg-subtle); display: inline-flex; flex: none; }
-  .st-index-ic :global(svg) { transition: color 120ms; }
-  .st-index-row .lbl { flex: 1; }
-  .st-index-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; }
-  .st-index-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
-  .st-index-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
-  .st-index-foot { margin-top: auto; padding: 12px 4px 0; }
-  .st-version { display: flex; align-items: center; gap: 9px; width: 100%; padding: 9px 11px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); cursor: pointer; font: inherit; color: var(--fg-2); transition: background 120ms, border-color 120ms; }
-  .st-version:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-  .st-version :global(svg:first-child) { color: var(--accent); flex: none; }
-  .st-version :global(svg:last-child) { color: var(--fg-subtle); flex: none; }
-  .st-version-t { font-size: var(--fs-xs); color: var(--fg-2); font-weight: 600; }
-  .st-version-s { font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint); }
+  /* ── Hero + sticky tab bar ── */
+  .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 3%, var(--bg)), var(--bg) 120px); border-bottom: 1px solid var(--border); }
+  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 1180px; margin: 0 auto; }
+  .sb-hero-l { display: flex; align-items: center; gap: 14px; min-width: 0; }
+  .sb-hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .sb-hero-ic :global(svg) { color: var(--accent); }
+  .sb-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-subtle); }
+  .sb-hero-tt { font-size: 24px; font-weight: 760; letter-spacing: -0.025em; line-height: 1.1; margin-top: 1px; }
+  .sb-hero-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; line-height: 1.45; max-width: 64ch; }
+  .sb-hero-r { display: flex; align-items: center; gap: 8px; flex: none; }
+  .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
+  button.sb-chip { cursor: pointer; transition: background 120ms, border-color 120ms; }
+  button.sb-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+  .sb-chip.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
+  .sb-chip.ok :global(svg) { color: var(--ok); }
+  .sb-chip .mono { font-family: var(--font-mono); }
 
-  /* ── Scroll document ── */
-  .st-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
-  .st-doc { max-width: 760px; margin: 0; padding: 32px 56px 96px; display: flex; flex-direction: column; gap: 40px; }
-  .st-sec { display: flex; flex-direction: column; gap: 16px; scroll-margin-top: 24px; }
-  .st-sec-head { display: flex; align-items: center; gap: 13px; }
-  .st-sec-ic { width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
-  .st-sec-ic :global(svg) { color: var(--accent); }
-  .st-sec-tt { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
-  .st-sec-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; line-height: 1.45; }
+  .sb-tabs { display: flex; gap: 4px; max-width: 1180px; margin: 22px auto 0; }
+  .sb-tab { display: inline-flex; align-items: center; gap: 9px; height: 42px; padding: 0 15px; border: 0; background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-md); font-weight: 600; cursor: pointer; position: relative; border-radius: 8px 8px 0 0; transition: color 120ms; }
+  .sb-tab:hover { color: var(--fg-2); }
+  .sb-tab.on { color: var(--fg); }
+  .sb-tab.on::after { content: ""; position: absolute; left: 9px; right: 9px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 55%, transparent); }
+  .sb-tab :global(svg) { flex: none; color: var(--fg-subtle); transition: color 120ms; }
+  .sb-tab.on :global(svg) { color: var(--accent); }
+  .sb-tab-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; }
+  .sb-tab-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+  .sb-tab-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+
+  /* ── Scrolling bento canvas ── */
+  .sb-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
+  .sb-wrap { max-width: 1180px; margin: 0 auto; padding: 26px 40px 90px; }
+  .sb-bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; align-items: start; }
+  .sb-bento > .st-block { min-width: 0; grid-column: span 6; }
+  .sb-bento > .sb-s4 { grid-column: span 4; }
+  .sb-bento > .sb-s5 { grid-column: span 5; }
+  .sb-bento > .sb-s7 { grid-column: span 7; }
+  .sb-bento > .sb-s8 { grid-column: span 8; }
+  .sb-bento > .sb-s12 { grid-column: 1 / -1; }
+  @media (max-width: 940px) {
+    .sb-bento > .st-block, .sb-bento > .st-warn { grid-column: 1 / -1; }
+  }
+
+  /* ── Session status banner ── */
+  .sb-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 18px; border-radius: var(--r-card); background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 6%, var(--surface)), var(--surface)); border: 1px solid color-mix(in oklab, var(--ok) 20%, var(--border)); }
+  .sb-status.warn { background: linear-gradient(180deg, color-mix(in oklab, var(--warn) 7%, var(--surface)), var(--surface)); border-color: color-mix(in oklab, var(--warn) 24%, var(--border)); }
+  .sb-status-l { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1 1 360px; }
+  .sb-status-ic { width: 38px; height: 38px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--ok-soft); color: var(--ok); }
+  .sb-status.warn .sb-status-ic { background: var(--warn-soft); color: var(--warn); }
+  .sb-status-main { min-width: 0; }
+  .sb-status-main b { font-size: var(--fs-md); font-weight: 680; }
+  .sb-status-main .sub { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
+  .sb-status-r { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
   .st-block { display: flex; flex-direction: column; gap: 9px; }
   .st-block-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); padding: 0 2px; }
@@ -1171,6 +1179,13 @@
   .st-row-desc .mono, .st-row-desc code { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
   .st-row-ctl { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .st-row[data-disabled="true"] { opacity: 0.55; }
+  /* Tool-presence pill (About → Local tools). Dot + label, tinted by status. */
+  .env-stat { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
+  .env-stat .env-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; }
+  .env-stat.ok { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); }
+  .env-stat.ok .env-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+  .env-stat.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 28%, transparent); }
+  .env-stat.warn .env-dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
   /* Status rows: label + status-cluster on the top line, description full-width below. */
   .st-srow { flex-direction: column; align-items: stretch; gap: 10px; }
   .st-srow-top { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
@@ -1244,6 +1259,7 @@
 
   .prov-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
   .prov-form-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+  .prov-form-head .st-row-label { white-space: nowrap; flex: none; }
   .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
   .prov-grid .st-input { width: 100%; }
   .prov-grid .st-secret { display: flex; }

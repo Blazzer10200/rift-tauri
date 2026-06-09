@@ -15,6 +15,18 @@ const PERMISSION_KEY = "rift.assistant.permissionMode";
 const DOCK_WIDTH_KEY = "rift.assistant.dockWidth";
 const DOCK_COLLAPSE_KEY = "rift.assistant.dockCollapsed";
 
+// Per-workspace override keys for model + effort. A `base::<root>` key holds a
+// workspace's pinned choice; the bare global key is the baseline default for
+// workspaces that have never been pinned. A per-workspace save writes ONLY the
+// `base::<root>` key — it must NOT touch the global, or pinning a heavy project
+// (e.g. a WPF repo with rebuild-on-chat loops) to Sonnet would drag the baseline
+// to Sonnet and bleed into every unpinned project — the exact "one global
+// setting dragging every project to the same cost" this feature exists to stop.
+// The global baseline is updated only on a no-workspace save (ws null).
+function wsKey(base: string, ws: string | null | undefined): string | null {
+  return ws ? `${base}::${ws}` : null;
+}
+
 export const DOCK_MIN = 260;
 export const DOCK_MAX = 520;
 const DOCK_DEFAULT = 300;
@@ -23,19 +35,25 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
   "default", "acceptEdits", "plan", "auto", "bypassPermissions",
 ] as const;
 
-export function loadModel(): ModelSel {
+export function loadModel(ws?: string | null): ModelSel {
   try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(MODEL_KEY) : null;
-    if (v && (MODEL_SELS as readonly string[]).includes(v)) return v as ModelSel;
+    if (typeof localStorage !== "undefined") {
+      const k = wsKey(MODEL_KEY, ws);
+      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
+      if (v && (MODEL_SELS as readonly string[]).includes(v)) return v as ModelSel;
+    }
   } catch {
     /* SSR or storage disabled */
   }
   return "sonnet";
 }
 
-export function saveModel(v: ModelSel) {
+export function saveModel(v: ModelSel, ws?: string | null) {
   try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(MODEL_KEY, v);
+    if (typeof localStorage === "undefined") return;
+    const k = wsKey(MODEL_KEY, ws);
+    if (k) localStorage.setItem(k, v); // per-workspace pin — never touches the global baseline
+    else localStorage.setItem(MODEL_KEY, v); // no workspace → set the baseline default
   } catch {
     /* storage disabled */
   }
@@ -48,19 +66,25 @@ export function modelFamily(model: ModelSel): ModelFamily {
   return "sonnet";
 }
 
-export function loadEffort(): ThinkingEffort {
+export function loadEffort(ws?: string | null): ThinkingEffort {
   try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(EFFORT_KEY) : null;
-    if (v === "none" || v === "quick" || v === "deep" || v === "ultra") return v;
+    if (typeof localStorage !== "undefined") {
+      const k = wsKey(EFFORT_KEY, ws);
+      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(EFFORT_KEY);
+      if (v === "none" || v === "quick" || v === "deep" || v === "ultra") return v;
+    }
   } catch {
     /* SSR or storage disabled */
   }
   return "quick";
 }
 
-export function saveEffort(v: ThinkingEffort) {
+export function saveEffort(v: ThinkingEffort, ws?: string | null) {
   try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(EFFORT_KEY, v);
+    if (typeof localStorage === "undefined") return;
+    const k = wsKey(EFFORT_KEY, ws);
+    if (k) localStorage.setItem(k, v); // per-workspace pin — never touches the global baseline
+    else localStorage.setItem(EFFORT_KEY, v); // no workspace → set the baseline default
   } catch {
     /* storage disabled */
   }

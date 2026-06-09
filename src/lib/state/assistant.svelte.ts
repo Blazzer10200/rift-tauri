@@ -1342,7 +1342,7 @@ class AssistantStore {
     if (this.model === v) return;
     const prev = this.model;
     this.model = v;
-    saveModel(v);
+    saveModel(v, this.workspace.current);
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("model.change", { from: prev, to: v, midConvo });
     if (midConvo) this.cacheBustHint("model");
@@ -1352,7 +1352,7 @@ class AssistantStore {
     if (this.thinkingEffort === v) return;
     const prev = this.thinkingEffort;
     this.thinkingEffort = v;
-    saveEffort(v);
+    saveEffort(v, this.workspace.current);
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("effort.change", { from: prev, to: v, midConvo });
     if (midConvo) this.cacheBustHint("effort");
@@ -1735,6 +1735,15 @@ class AssistantStore {
   // Fields stay on Store; methods become thunks routing to free fns.
   refreshWorkspace() { return wsRefresh(this); }
   pickFolder() { return wsPickFolder(this); }
+  /** Re-apply the active workspace's saved model + effort. Called after the
+   *  workspace root resolves/changes so each project keeps its own choice
+   *  (heavy repo → Sonnet/none; everything else → whatever you last used).
+   *  Direct $state writes — no telemetry/cache-bust; this is not a user flip. */
+  applyWorkspacePrefs() {
+    const ws = this.workspace.current;
+    this.model = loadModel(ws);
+    this.thinkingEffort = loadEffort(ws);
+  }
   setRoot(path: string) { return wsSetRoot(this, path); }
   clearRoot() { return wsClearRoot(this); }
   removeRecentRoot(path: string) { return wsRemoveRecentRoot(this, path); }
@@ -1849,6 +1858,9 @@ class AssistantStore {
       this.loginInProgress = false;
       return;
     }
+    // A separate console window opens for the OAuth flow — it can surface behind
+    // Rift, so tell the user where to look immediately rather than only on timeout.
+    this.lastNotice = "A sign-in window opened — complete the login there, then come back. Rift will detect it automatically.";
     // Poll the probe until the session is usable, or give up after ~3 min so a
     // user who closes the login window without finishing isn't stuck "Signing
     // in…" forever.
@@ -2390,6 +2402,14 @@ class AssistantStore {
         return;
       }
       this.telemetry.event("turn.steer", { convoId: sid });
+      // Make the steer VISIBLE: drop an inline marker into the streaming
+      // assistant bubble at the point it landed, so the user sees their
+      // interjection in the transcript instead of it vanishing into stdin.
+      tab.messages = tab.messages.map((m) =>
+        m.id === tab.streamingMsgId
+          ? { ...m, blocks: [...m.blocks, { type: "steer", text: trimmed, at: Date.now() }] }
+          : m,
+      );
       toast.push({
         severity: "info",
         title: "Steering",

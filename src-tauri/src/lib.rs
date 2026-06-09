@@ -190,6 +190,7 @@ pub fn run() {
             commands::assistant_get_compression,
             commands::assistant_set_compression,
             commands::compression_env_check,
+            commands::environment_check,
             commands::assistant_summarize_session,
             commands::assistant_remint_session,
             commands::assistant_send,
