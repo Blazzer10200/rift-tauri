@@ -3,7 +3,12 @@
 > Goal: stop renting GitHub `windows-latest` minutes (2× billed, ~30-40 min/release, hit the spending wall on 2026-06-09). Run releases on `blazzer-labs` (Proxmox) for free + faster. Researched 2026-06-09 (cont.87).
 
 ## Host reality (`blazzer-labs`)
-Single node · ~13.5 GB RAM total (~11.5 GB free; `web-search-mcp` LXC uses 2 GB) · CPU idle · 1.65 TB free on `local-lvm`. **RAM is the binding constraint.** Disk/CPU abundant.
+Single node · ~13.5 GB RAM total (~11.5 GB free; `web-search-mcp` LXC uses 2 GB) · **12 cores** · 1.65 TB free on `local-lvm`. **RAM is the binding constraint.** CPU/disk abundant (12 cores → fast builds vs windows-latest's 2-4).
+
+## Verified access (cont.87) — I can drive this nearly solo
+- **SSH to host works:** `ssh blazzer-labs` (192.168.1.150, key auth, BatchMode) → **Proxmox VE 9.1.1**, `qm` CLI present. So the whole hypervisor side is scriptable from the host shell (not just the read-only MCP).
+- This **closes the Windows-install gap**: download WS2022 Core + virtio-win ISOs to `/var/lib/vz/template/iso/`, `qm create` the VM, attach an **`autounattend.xml` ISO** (unattended install + VirtIO driver paths) as a 2nd CD, and a `FirstLogonCommands`/`SetupComplete.cmd` that installs guest-agent + Rust/Node/.NET/VS-BuildTools + registers the runner service. Fully headless, driven from host SSH + `qm`.
+- **Autonomy split (revised):** I can do VM create, ISO fetch, autounattend authoring, in-guest toolchain + runner registration, and the repo workflow edits. **Human-only bits:** (a) GitHub billing must be cleared first; (b) likely babysit 1-2 autounattend iterations (XML is finicky); (c) a GitHub runner registration token (I mint via `gh api`). Do in a FRESH session — it's long + multi-step.
 
 ## Decisions (researched)
 1. **Guest OS = Windows Server 2022 Core, 8 GB RAM.** Core is headless (no Desktop Experience), idles ~1 GB. Rust release **link** peaks ~3-4 GB; + MSVC tools/Node/.NET baseline → ~5.5-6.5 GB under load. **7 GB floor, 8 GB safe.** 8 GB leaves ~3.5 GB for host + LXC — tight but viable. (GitHub's own windows-latest = WS2022 @ 7 GB.) NOT Tiny11 (strips serviceability; CI-risky), NOT full Win11 (heavier).
