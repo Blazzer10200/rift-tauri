@@ -201,3 +201,51 @@ real Velopack releases.
 - **R4 — no signing.** Velopack supports optional Authenticode signing of the
   installer; not required and not in scope. (This is distinct from the
   tauri-updater mandatory-key model — its absence does not brick clients.)
+
+---
+
+## 7. Release-workflow redesign (cont.83, 2026-06-09)
+
+The apply chain was *correct* but **untestable by construction**, so it never got
+validated end-to-end (T9 — every "test" burned a real GitHub release, e.g.
+v0.8.6/v0.8.8). Two changes fix the workflow:
+
+### 7.1 Tag-driven CI release — `.github/workflows/release.yml`
+Push a `v*` tag → a Windows runner builds + packs + publishes to `rift-releases`.
+Ship flow collapses to:
+
+```
+pwsh scripts/bump.ps1 X.Y.Z      # 3 lockstep files
+<edit docs/CHANGELOG.md top entry to vX.Y.Z>
+git commit -am "release vX.Y.Z" && git tag vX.Y.Z && git push origin main --tags
+```
+
+CI runs `scripts/release.ps1 -Ci -Token $RELEASES_TOKEN` (one source of truth —
+no forked pack/upload logic). `-Ci` skips the dirty-tree refusal and, via
+`GITHUB_REF_NAME`, asserts the pushed tag == the bumped version (kills the
+half-bumped-tag failure mode). `release.ps1` still runs locally unchanged.
+
+**One-time setup (manual, GitHub UI):** create a **fine-grained PAT** scoped to
+`Blazzer10200/rift-releases` only, with **Contents: read & write**, and add it as
+secret **`RELEASES_TOKEN`** on the `rift-tauri` repo. The default `GITHUB_TOKEN`
+can't reach the separate releases repo. Until that secret exists, the workflow's
+publish step fails (build/pack still run).
+
+### 7.2 Local apply test — `update-test-feed` feature + `scripts/test-update.ps1`
+The `RIFT_UPDATE_FEED` → `FileSource` hatch was `#[cfg(debug_assertions)]`, but
+`apply()` needs a real Velopack `current/` layout that only a *release* build
+has — so the test path was compiled out of the only build that can apply. Now
+gated `#[cfg(any(debug_assertions, feature = "update-test-feed"))]`. Production
+builds (release.ps1/CI) omit the feature, so a shipped binary still can't be
+pointed at a local feed.
+
+`scripts/test-update.ps1` drives the full chain locally under the **isolated**
+pack id `RiftUpdateTest` (installs to `%LocalAppData%\RiftUpdateTest`, never
+touches the real `Rift` install): build-with-feature → pack at current + at
+`-ToVersion` → install baseline → launch with the feed → poll for the swap →
+PASS/FAIL. `-Cleanup` uninstalls. This is how T9 gets validated without burning
+a release. **Status: VALIDATED cont.83 (2026-06-09) — first real run PASSed.**
+Baseline v0.8.8 installed to the isolated `RiftUpdateTest` location, saw v0.8.9
+from the local feed, downloaded + applied + relaunched; `current\` nuspec
+confirmed `<version>0.8.9</version>` post-swap, real `Rift` install untouched.
+**T9 resolved — the v0.6.2 child-reap apply path works end-to-end.**

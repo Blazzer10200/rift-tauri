@@ -266,10 +266,13 @@ impl Default for UpdateService {
 }
 
 fn resolve_manager() -> Result<Option<UpdateManager>, String> {
-    // Local FileSource (RIFT_UPDATE_FEED) is dev-only — gated behind
-    // `debug_assertions` so a release build can't be tricked into pointing at
-    // an attacker-controlled local feed via env var.
-    #[cfg(debug_assertions)]
+    // Local FileSource (RIFT_UPDATE_FEED) — never compiled into a production
+    // release, so a shipped binary can't be pointed at an attacker-controlled
+    // local feed. Available in `debug_assertions` (normal `tauri dev`) AND in a
+    // release build explicitly opted into the `update-test-feed` feature, which
+    // is the only release build that can exercise the full apply chain locally
+    // (apply needs a real Velopack `current/` layout — see scripts/test-update.ps1).
+    #[cfg(any(debug_assertions, feature = "update-test-feed"))]
     if let Ok(local) = std::env::var("RIFT_UPDATE_FEED") {
         let p = std::path::PathBuf::from(&local);
         if let Ok(canon) = p.canonicalize() {
