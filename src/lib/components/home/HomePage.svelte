@@ -66,6 +66,7 @@
   // Default model the composer opens a new chat with — display-only mirror.
   const MODEL_LABELS: Record<string, string> = {
     sonnet: "Sonnet 4.6", haiku: "Haiku 4.5", "claude-opus-4-7": "Opus 4.7", opus: "Opus 4.8",
+    "claude-fable-5": "Fable 5",
   };
   const modelLabel = $derived(MODEL_LABELS[assistant.model] ?? String(assistant.model));
 

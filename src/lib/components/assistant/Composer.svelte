@@ -9,7 +9,7 @@
   import type { ModelSel, PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
-  import { modelFamily, liveActivity } from "../../state/assistant/helpers";
+  import { modelFamily, liveActivity, fableAvailable } from "../../state/assistant/helpers";
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
@@ -192,6 +192,7 @@
     ctx: string;
     suffix: string;   // muted inline tag beside the name (e.g. "1M context")
     legacy: boolean;   // previous-generation — grouped under a "Legacy" subhead
+    limited?: boolean; // limited-run — accent name + "until" badge (Fable)
     // ── Capability matrix (source of truth for what each model can actually do).
     // Drives every affordance gate so the panel never offers a mode the model
     // ignores server-side. Grounded in the model capability docs:
@@ -209,7 +210,10 @@
   // legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
   // 1M-ctx beta); `claude-opus-4-7` pins the prior generation. The CLI takes
   // the alias / pinned id; name + suffix are display-only.
+  // Fable 5 is a limited run — row exists only while fableAvailable() (through
+  // Jun 22 2026); after sunset the list collapses back to the standard four.
   const MODEL_OPTIONS: ModelOpt[] = [
+    ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: "ultra" as EffortId, fastMode: false }] : []),
     { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "ultra", fastMode: true  },
     { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "deep",  fastMode: false },
     { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: "none",  fastMode: false },
@@ -1339,7 +1343,8 @@
             use:tooltip={m.tagline}
             onmousedown={(e) => { e.preventDefault(); pickModel(m); }}
           >
-            <span class="rift-menu-row-t model-row-name">{m.label} {m.version}</span>
+            <span class="rift-menu-row-t model-row-name" class:limited={m.limited}>{m.label} {m.version}</span>
+            {#if m.limited}<span class="model-badge">Until Jun 22</span>{/if}
             {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
             {#if m.id === assistant.model}
               <Check size={14} class="rift-menu-row-chk" />
@@ -3026,6 +3031,16 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .model-suffix.legacy { color: var(--fg-faint); }
+  /* Limited-run row (Fable) — accent name + uppercase "until" chip. */
+  .model-row-name.limited { color: var(--accent); }
+  .model-badge {
+    flex-shrink: 0;
+    font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    line-height: 1; padding: 3px 6px; border-radius: 999px;
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+  }
   .model-row.current .model-suffix { color: color-mix(in oklab, var(--accent) 65%, var(--fg-muted)); }
   .model-num {
     flex-shrink: 0;
