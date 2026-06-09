@@ -2,25 +2,24 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 86) — First tag-driven CI release SHIPPED (v0.8.9)
+## Session 2026-06-09 (cont. 87) — v0.8.10 SHIPPED (stable update pill) + CI build-speed probe
 
-**The CI tag-push pipeline is now PROVEN end-to-end.** `v0.8.9` is published in `rift-releases` (Setup.exe + full.nupkg + releases.win.json + RELEASES; portable dropped). First release ever produced by Actions, not a hand-run `release.ps1`.
+**v0.8.10 shipped + CI-verified** (run 27204770581, success 33m). Fixes the *real* root cause of the 4-attempt "update button won't click" bug: the update affordance was a sticky toast at the top of an upward-growing, FLIP-animated stack → it slid out from under the cursor (~50/50). Replaced with a dedicated singleton **`UpdatePill.svelte`** (never reflows). Two render bugs caught in live CDP verify: generic `.pill` class collided with global `app.css:264 .pill{height:20px}` (renamed `.upd-pill`); `backdrop-filter` on a bottom-anchored fixed el → WebView2 garbage (solid bg). `updates.svelte.ts` drops the available-toast machinery; `pillVisible` drives it. Toast kept only for install-FAILURE. Verified live: render·click→dialog·snooze→persist.
 
-**Two real bugs the test exposed + fixed (both in `release.ps1`):**
-1. **Dirty `RELEASES_TOKEN` secret** — a non-ASCII char (BOM/zero-width/smart-quote from paste) in the PAT survived `.Trim()` → Octokit threw `Request headers must contain only ASCII characters` at `vpk upload`, AND silently broke `gh` CLI auth (which masked the "already exists" preflight + no-op'd the portable-drop). **Fix:** strip token to printable ASCII `[^\x21-\x7E]` ONCE up-front (commit `a4fbbce`), shared by both `gh` (GH_TOKEN) and `vpk`. Strip fired + upload succeeded → junk was leading/trailing.
-2. **Targeted an already-shipped version** — v0.8.8 was already live in `rift-releases` (separate repo; source-repo had no tag, which misled me). **Fix:** bumped to v0.8.9.
-- Also added `timeout-minutes: 40` to `release.yml` so a genuine hang fails loud (was 6h default).
+**CI efficiency work (commit `a2af532`):**
+- **Shipped:** `actions/cache` → `Swatinem/rust-cache@v2` (`workspaces: src-tauri`, key `release`). Old cache churned every version bump (Cargo.lock-keyed) + re-uploaded multi-GB target/. Modest win (cache round-trip, not compile). Validates on next release.
+- **Probed + REJECTED:** opt-level=1 release profile. Measured root-crate rebuild (warm deps, the per-release cost): **opt-3=28.6s · opt-1/cu256=32.2s · opt-1/cu16=30.1s**. The build is **LINK-bound, not opt-bound** — lowering opt-level buys nothing, cu=256 hurts (more objects to link). Reverted.
 
-**Timing reality (for next time):** cold Tauri release build = ~18 min in the Release step on `windows-latest`, cache or not (the rift crate's own opt+link dominates, recompiles every version bump). NOT a hang — felt long but normal.
-
-### RESUME HERE (cont.86)
-- **`RELEASES_TOKEN` secret is still dirty at source** — the strip fix self-heals it, but re-set the secret cleanly (`gh secret set RELEASES_TOKEN --repo Blazzer10200/rift-tauri`) to kill the root cause + the warning.
-- **Node 20 action deprecation** — `actions/*@v4` forced to Node 24 on **June 16**; bump action majors before then.
-- Carried from cont.85: drag-reorder manual-verify pending; dedupe `dirs_home` (`assistant/mod.rs:1101` vs `state::paths`); decide Whisper-in-release; ISSUES #100 hero-pill hardcode (`SettingsPage.svelte:318`).
+### RESUME HERE (cont.87) — make releases fast
+- **REAL lever = the Windows linker.** MSVC `link.exe` dominates the rift-crate rebuild. Switch to **`rust-lld`** via `.cargo/config.toml`: `[target.x86_64-pc-windows-msvc] linker="rust-lld"` (bundled w/ rustup; typically 2-5× faster link). MUST measure locally (touch `src/lib.rs`→`cargo build --release` warm) AND confirm `lld-link` works on `windows-latest` CI before shipping. This is THE follow-up.
+- Higher-ceiling: self-hosted Windows runner on Proxmox w/ persistent warm `target/` (near-incremental builds, kills cache up/download). Or GitHub 8-core larger runner (paid, one-line `runs-on:`).
+- **`RELEASES_TOKEN` still dirty at source** — re-set: `gh secret set RELEASES_TOKEN --repo Blazzer10200/rift-tauri`.
+- **Node 20 action deprecation — June 16** — bump `actions/*@v4` (checkout/setup-node/setup-dotnet) majors before then.
+- Carried: drag-reorder manual-verify; dedupe `dirs_home` (`assistant/mod.rs:1101` vs `state::paths`); Whisper-in-release; ISSUES #100 hero-pill hardcode (`SettingsPage.svelte:318`).
 - Local = Win PowerShell 5.1 (no `pwsh`).
 
 ## Prior arcs — detail in `git log`
-cont.85 committed all WIP (4 logical groups) + standalone hardening (env_check cmd + Local-tools card, per-workspace model fix). cont.84 tag-driven CI scaffolding. cont.83 steer/queue (CDP-verified). cont.82 MCP-nonce + Rail v1. cont.72 v0.7.0 + edit-swarm.
+cont.86 first tag-driven CI release SHIPPED (v0.8.9); fixed 2 `release.ps1` bugs — dirty `RELEASES_TOKEN` (non-ASCII char broke Octokit+gh auth; strip to `[^\x21-\x7E]`, commit `a4fbbce`) + already-shipped-version targeting; `timeout-minutes:40` added. cont.85 committed all WIP + standalone hardening (env_check cmd + Local-tools card, per-workspace model fix). cont.84 tag-driven CI scaffolding. cont.83 steer/queue (CDP-verified). cont.82 MCP-nonce + Rail v1. cont.72 v0.7.0 + edit-swarm.
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step** before working; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.
