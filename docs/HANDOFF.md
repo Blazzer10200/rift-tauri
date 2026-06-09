@@ -12,13 +12,13 @@ Eight code commits on `main`, **source-verified only** (svelte-check 0/0 · vite
 
 ### RESUME HERE (cont.97)
 - **User on v0.8.12 still needs ONE manual `Setup.exe`** (rift-releases/releases/latest) — in-app Download unreachable until 0.8.14+.
-- **Ready to push** (user signed off pending) → CI check on runner, then v0.8.15 ship AFTER a CDP runtime pass: real turn (stream/tools/thinking), steer, stop, /retry, queue drain, Settings update-chip states, auth pill, History list/load/delete (convo_store moved!).
+- **PUSHED + RELEASED as v0.8.15** (runtime smoke pass SKIPPED on user call) — next dev session still do the CDP pass: real turn (stream/tools/thinking), steer, stop, /retry, queue drain, Settings update-chip states, auth pill, History list/load/delete (convo_store moved!).
 - Remaining #20: mod.rs R2 (config) → R6 (oneshot) → R8 (turn, last). Then `Composer.svelte` brief.
 - Parked: SEC-1 live pass · #29 CSP-nonce (app-wide).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 cont.96 v0.8.14 SHIPPED — update-dialog crash root-caused (`each_key_duplicate` on blank-line notes keys; keyed by index now) + SEC-1 hardening bundled; saga over.
-cont.94 v0.8.13 Claude Fable 5 limited-run model (**Jun 22 Rift-side sunset gate** — `FABLE_SUNSET_EPOCH_SECS=1_782_172_800`; self-heals to Sonnet/Opus after). cont.93 v0.8.12 (pill `×` → 24h snooze). cont.90 first tag-driven release on VM 100 `rift-runner`; cont.88 runner LIVE: **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. **Latest release = v0.8.14; user's prod = 0.8.12 until they run Setup.exe (PID-only kills, NEVER by image name).**
+cont.94 v0.8.13 Claude Fable 5 limited-run model (**Jun 22 Rift-side sunset gate** — `FABLE_SUNSET_EPOCH_SECS=1_782_172_800`; self-heals to Sonnet/Opus after). cont.93 v0.8.12 (pill `×` → 24h snooze). cont.90 first tag-driven release on VM 100 `rift-runner`; cont.88 runner LIVE: **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. **Latest release = v0.8.15 (shipped cont.97, CI 3m25s); user prod = 0.8.12 until they run Setup.exe ONCE (PID-only kills, NEVER by image name).**
 [carried] `.slideover`/`.tip` blur (fix on new scuff only) · runner perf roadmap · drag-reorder verify · `RELEASES_TOKEN` re-set.
 
 ## CRITICAL DON'T-TOUCH
@@ -30,4 +30,4 @@ cont.94 v0.8.13 Claude Fable 5 limited-run model (**Jun 22 Rift-side sunset gate
 - **AssistantPane drop handlers on `.pane` outer only**; `tauri.conf.json dragDropEnabled:false`; `.shell` `position:fixed; inset:0`.
 - **Blur-reveal** (`Markdown.svelte`): `shownCount` is the ONLY `$state`, written ONLY by the rAF loop — never inside a derived.
 - **Activity panel split:** Steps = settled ACTIONS only (`logSteps` drops `cat==="write"`); Outputs owns writes/edits → Session Diff (`assistant.ui.diffOpen/diffTarget`).
-- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at ship. **v0.8.14 stands** (shipped 2026-06-09, cont.96). Harness has THREE sub-tabs (Telemetry · Cost · Swarm) — still one workspace, IA unchanged.
+- **Versions lockstep** `package.json`+`Cargo.toml`+`tauri.conf.json` (+`Cargo.lock`) — only at ship. **v0.8.15 stands** (shipped 2026-06-09, cont.97). Harness has THREE sub-tabs (Telemetry · Cost · Swarm) — still one workspace, IA unchanged.
