@@ -28,7 +28,11 @@ fn parse_url(raw: &str) -> Result<Url, String> {
     // local disk, `javascript:`/`data:` would execute attacker-controlled script
     // in the embedded webview — both reachable from AI-generated links.
     match u.scheme() {
-        "http" | "https" | "about" => Ok(u),
+        "http" | "https" => Ok(u),
+        // `about:` is allowed ONLY for the exact blank page. Broader `about:`
+        // targets (`about:srcdoc`, `about:newtab`, …) can render attacker HTML
+        // or privileged browser UI in the embedded webview.
+        "about" if u.as_str() == "about:blank" => Ok(u),
         other => Err(format!("blocked URL scheme '{other}:' — only http/https are allowed")),
     }
 }
@@ -186,7 +190,6 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
             var cap = {EXTRACT_CAP};
             return {{
                 title: document.title || "",
-                url: location.href,
                 text: full > cap ? b.slice(0, cap) : b,
                 truncated: full > cap,
                 fullLen: full
@@ -215,7 +218,6 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
     #[derive(serde::Deserialize)]
     struct Raw {
         title: String,
-        url: String,
         text: String,
         truncated: bool,
         #[serde(rename = "fullLen")]
@@ -223,9 +225,14 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
     }
     let raw: Raw =
         serde_json::from_str(&json).map_err(|e| format!("decode page snapshot: {e}"))?;
+    // Use the webview-reported URL (trusted navigation state), NOT the page's
+    // own `location.href` — a hostile page can spoof the latter to a
+    // `javascript:`/`data:` string that downstream consumers might treat as a
+    // real navigable URL.
+    let url = wv.url().map(|u| u.to_string()).unwrap_or_default();
     Ok(PageContent {
         title: raw.title,
-        url: raw.url,
+        url,
         text: raw.text,
         truncated: raw.truncated,
         full_len: raw.full_len,

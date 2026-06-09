@@ -171,10 +171,10 @@ pub fn usage_set_budget(config: BudgetConfig) -> Result<(), String> {
         custom_limit_usd: config.custom_limit_usd,
     };
     let p = config_path()?;
-    let body = serde_json::to_vec_pretty(&clean).map_err(|e| e.to_string())?;
-    let tmp = p.with_extension("json.tmp");
-    std::fs::write(&tmp, &body).map_err(|e| format!("write budget tmp: {e}"))?;
-    std::fs::rename(&tmp, &p).map_err(|e| format!("rename budget: {e}"))
+    let body = serde_json::to_string_pretty(&clean).map_err(|e| e.to_string())?;
+    // Shared atomic writer: unique per-call temp name (no fixed `.json.tmp`
+    // collision / symlink-follow), fsync before rename, tmp cleanup on failure.
+    crate::state::paths::atomic_write_json(&p, &body).map_err(|e| format!("write budget: {e}"))
 }
 
 /// Fuel-gauge status: current-window spend, % remaining, and a burn-rate

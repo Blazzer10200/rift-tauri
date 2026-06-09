@@ -71,6 +71,34 @@ fn gate_for(file: &str) -> Gate {
     }
 }
 
+/// Reject any finding path that isn't a safe workspace-relative path. Guards
+/// the edit agent (runs under bypassPermissions) and the git ops from escaping
+/// the worktree via `..`, absolute/drive-relative paths, or embedded newlines.
+fn validate_rel_path(file: &str) -> Result<(), String> {
+    if file.is_empty() {
+        return Err("finding has an empty file path".into());
+    }
+    if file.contains('\n') || file.contains('\r') || file.contains('\0') {
+        return Err(format!("finding file path contains control characters: {file:?}"));
+    }
+    let p = Path::new(file);
+    if p.is_absolute() {
+        return Err(format!("finding file path must be workspace-relative: {file}"));
+    }
+    for c in p.components() {
+        match c {
+            std::path::Component::ParentDir => {
+                return Err(format!("finding file path escapes the workspace with '..': {file}"));
+            }
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {
+                return Err(format!("finding file path must be workspace-relative: {file}"));
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 /// The outcome for one file (= one agent).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -635,6 +663,10 @@ pub async fn swarm_run(
     }
     if findings.is_empty() {
         return Err("no findings to fix".into());
+    }
+    // Reject path-traversal before any finding reaches the edit agent or git.
+    for f in &findings {
+        validate_rel_path(&f.file)?;
     }
 
     let before_head = head_sha(&root_path).await;
