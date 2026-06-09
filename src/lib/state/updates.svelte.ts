@@ -140,6 +140,31 @@ class UpdateStore {
     return this.hasUpdate && !this.snoozeActive && !this.dialogOpen;
   }
 
+  /** UI-drift fix: the ONE derived status summary every passive update
+   *  surface renders from (Settings chip, future Home card, …), so a chip
+   *  can't claim "up to date" while the pill says an update is available.
+   *  `label` is empty while idle — surfaces show just the version instead of
+   *  asserting a freshness we haven't checked yet. */
+  get summary(): { kind: "ok" | "warn" | "busy" | "danger"; label: string } {
+    switch (this.state) {
+      case "available":
+      case "downloading":
+      case "installing":
+        // Download/install states still mean "an update exists" to a passive
+        // chip — the dialog owns the in-flight progress detail.
+        return { kind: "warn", label: `v${this.info?.version ?? "?"} available` };
+      case "checking":
+        return { kind: "busy", label: "checking…" };
+      case "error":
+        return { kind: "danger", label: this.installBroken ? "reinstall needed" : "update check failed" };
+      case "uptodate":
+        return { kind: "ok", label: "up to date" };
+      case "idle":
+      default:
+        return { kind: "busy", label: "" };
+    }
+  }
+
   /** Human-readable "12.4 MB" style. */
   get sizeLabel(): string {
     const b = this.info?.sizeBytes ?? 0;
