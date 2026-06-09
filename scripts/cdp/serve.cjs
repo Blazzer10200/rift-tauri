@@ -24,6 +24,7 @@
 //   POST /click    { selector }                 -> { ok }
 //   POST /wait     { js, timeoutMs?, intervalMs? } -> { value, polls, elapsedMs }
 //   POST /screenshot { format?, quality?, clip?, selector? } -> { path, bytes }
+//   POST /look     { selector?, level?, noShot? } -> { page, errors, errorCount, shot } (verify primitive)
 //   POST /key      { key, modifiers? }          -> { ok, key }
 //   GET  /state                                 -> assistant-state snapshot
 //   GET  /page                                  -> generic page snapshot
@@ -363,7 +364,14 @@ async function assistantState(target = 'main') {
                     textPreview: text?.textContent?.slice(0, 200) || null,
                 };
             });
-            const modelPill = document.querySelector('.assistant .model-pill, [class*=model-pill]');
+            // Composer active-model pill (.settings-pill .pill-label) preferred — but
+            // a sibling .settings-pill is the permission-mode toggle, so match by
+            // model name to avoid grabbing "Bypass permissions". Fall back to the
+            // last bubble's .head-model label.
+            // NB: this string is a JS template literal — \\b keeps a regex word
+            // boundary (a bare \b would become a backspace char and never match).
+            const modelPill = Array.from(document.querySelectorAll('.settings-pill .pill-label, .head-model'))
+                .find(e => /\\b(Sonnet|Opus|Haiku|Claude|GPT)\\b/.test(e.textContent || ''));
             const streaming = !!document.querySelector('[data-streaming], .assistant [class*=streaming]');
             // workspace.svelte.ts stores ACTIVE_KEY as a bare string, not JSON.
             const workspaceActiveId = localStorage.getItem('rift.ui.workspace.v1');
@@ -406,6 +414,21 @@ function consoleLogs({ clear, level, limit } = {}, target = 'main') {
     if (n > 0) logs = logs.slice(-n);
     if (clear === '1' || clear === true || clear === 'true') c.logs = [];
     return { target, total, count: logs.length, logs };
+}
+
+// /look — the verify primitive (2026-06-09). One round-trip returns everything
+// needed to judge a UI change: page/assistant state + any console ERRORS + a
+// screenshot. Collapses the old wait→shot→read→state→console dance (5 turns) to
+// one server call. state + screenshot run in parallel (independent reads); the
+// console buffer is read in-process. c.sh prints the shot path on the last line
+// so the agent's whole loop is `c.sh look` then Read <path>.
+async function look({ selector, level = 'error', limit = 20, format = 'jpeg', quality = 65, noShot } = {}, target = 'main') {
+    const [state, shot] = await Promise.all([
+        assistantState(target),
+        noShot ? Promise.resolve(null) : screenshot({ selector, format, quality }, target).catch(e => ({ error: e.message })),
+    ]);
+    const c = consoleLogs({ level, limit }, target);
+    return { page: state.value || { error: state.error }, errors: c.logs, errorCount: c.count, shot };
 }
 
 // Trusted key dispatch via CDP Input domain. Synthetic JS KeyboardEvent
@@ -463,6 +486,7 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'state': return assistantState(t);
         case 'page': return pageState(t);
         case 'console': return consoleLogs(params, t);
+        case 'look': return look(params, t);
         default: return { error: `unknown op: ${op}` };
     }
 }
@@ -501,6 +525,7 @@ const routes = {
     'POST /click': async (body, target) => click(body.selector, target),
     'POST /wait': async (body, target) => waitFor(body, target),
     'POST /screenshot': async (body, target) => screenshot(body, target),
+    'POST /look': async (body, target) => look(body, target),
     'POST /key': async (body, target) => pressKey(body, target),
     'GET /state': async (body, target) => assistantState(target),
     'GET /page': async (body, target) => pageState(target),

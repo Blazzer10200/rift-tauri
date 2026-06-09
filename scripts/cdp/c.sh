@@ -2,6 +2,8 @@
 # c.sh - thin curl wrapper for the CDP server. Usage:
 #   bash scripts/cdp/c.sh health
 #   bash scripts/cdp/c.sh targets                        # list main + browser targets
+#   bash scripts/cdp/c.sh look                           # VERIFY PRIMITIVE: state+errors+shot in ONE call
+#   bash scripts/cdp/c.sh look ".chat"                   # same, screenshot clipped to a selector
 #   bash scripts/cdp/c.sh eval "document.title"
 #   bash scripts/cdp/c.sh type ".assistant textarea" "hello world" Enter
 #   bash scripts/cdp/c.sh click "button.sendbtn"
@@ -15,6 +17,11 @@
 #   bash scripts/cdp/c.sh shot-sel ".chat" jpeg 65
 #   bash scripts/cdp/c.sh batch '<json>'                 # raw batch body
 #   bash scripts/cdp/c.sh shutdown
+#
+# FAST PATH — to verify a UI change in 2 turns instead of 5:
+#   bash scripts/cdp/c.sh look      ->  prints page summary + console errors, path on LAST line
+#   Read <that path>                ->  pixels render inline
+# `look` is the default for "did my change work" — it folds state + errors + shot together.
 #
 # TARGET SELECTION — observe/drive the in-app browser dock's child webview:
 #   bash scripts/cdp/c.sh -t browser shot                # screenshot the embedded page
@@ -30,6 +37,13 @@ cmd="${1:-}"; shift || true
 # Target is carried as a query param (server reads query before body), so it
 # applies uniformly to GET and POST without touching each JSON body.
 qs=""; [ -n "$TARGET" ] && qs="?target=$TARGET"
+
+# JSON encoding is jq, not a per-call `node -e` spawn (~37ms vs ~76ms cold).
+# jq --arg/--argjson handle arbitrary quotes/newlines in JS expressions safely.
+command -v jq >/dev/null 2>&1 || { echo "c.sh requires jq (winget install jqlang.jq)" >&2; exit 3; }
+
+# POST a JSON body to $API/$path$qs and stream the response.
+post() { curl -fsS -X POST "$API/$1$qs" -H 'Content-Type: application/json' --data "$2"; }
 
 case "$cmd" in
   health|state|page|targets)
@@ -47,61 +61,65 @@ case "$cmd" in
     [ -n "$clr" ] && { cq="$cq${sep}clear=$clr"; sep="&"; }
     curl -fsS "$API/console$cq"
     ;;
+  look)
+    # The verify primitive: page/assistant state + console errors + a screenshot,
+    # one round-trip. Prints a human summary then the shot path on the LAST line.
+    sel="${1:-}"
+    body="$(jq -nc --arg s "$sel" 'if $s=="" then {} else {selector:$s} end')"
+    resp="$(post look "$body")"
+    printf '%s' "$resp" | jq -r '
+      "[look] " + (.page.location // .page.pathname // "?")
+        + " · ws=" + (.page.workspaceActiveId // "?")
+        + (if .page.model then " · model=" + .page.model else "" end)
+        + " · bubbles=" + ((.page.bubbleCount // 0)|tostring)
+        + " · streaming=" + ((.page.streaming // false)|tostring),
+      "[errors] " + (.errorCount|tostring),
+      (.errors[]? | "  ✗ " + (.text // "?")),
+      (.shot.path // (.shot.error // "(no shot)"))'
+    ;;
   eval)
     js="$1"
-    curl -fsS -X POST "$API/eval$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({js: process.argv[1]}))" -- "$js")"
+    post eval "$(jq -nc --arg js "$js" '{js:$js}')"
     ;;
   type)
     sel="$1"; text="$2"; key="${3:-}"
-    curl -fsS -X POST "$API/type$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({selector:process.argv[1],text:process.argv[2],key:process.argv[3]||undefined}))" -- "$sel" "$text" "$key")"
+    post type "$(jq -nc --arg s "$sel" --arg t "$text" --arg k "$key" \
+      '{selector:$s,text:$t} + (if $k=="" then {} else {key:$k} end)')"
     ;;
   click)
     sel="$1"
-    curl -fsS -X POST "$API/click$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({selector:process.argv[1]}))" -- "$sel")"
+    post click "$(jq -nc --arg s "$sel" '{selector:$s}')"
     ;;
   wait)
     js="$1"; t="${2:-60000}"
-    curl -fsS -X POST "$API/wait$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({js:process.argv[1],timeoutMs:Number(process.argv[2])}))" -- "$js" "$t")"
+    post wait "$(jq -nc --arg js "$js" --argjson t "$t" '{js:$js,timeoutMs:$t}')"
     ;;
   shot)
     fmt="${1:-jpeg}"; q="${2:-65}"; mode="${3:-path}"
-    resp="$(curl -sS -X POST "$API/screenshot$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({format:process.argv[1],quality:Number(process.argv[2])||undefined}))" -- "$fmt" "$q")")"
-    if [ "$mode" = "--json" ]; then
-      printf '%s' "$resp"
-    else
-      printf '%s' "$resp" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{let o;try{o=JSON.parse(d)}catch{process.stderr.write(d);process.exit(2)}if(o.path)process.stdout.write(o.path);else{process.stderr.write(JSON.stringify(o));process.exit(2)}})"
-    fi
+    resp="$(post screenshot "$(jq -nc --arg f "$fmt" --argjson q "$q" '{format:$f,quality:$q}')")"
+    if [ "$mode" = "--json" ]; then printf '%s' "$resp"
+    else printf '%s' "$resp" | jq -r '.path // (.error | "ERROR: " + .)'; fi
     ;;
   shot-sel)
     sel="$1"; fmt="${2:-jpeg}"; q="${3:-65}"; mode="${4:-path}"
-    resp="$(curl -sS -X POST "$API/screenshot$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({selector:process.argv[1],format:process.argv[2],quality:Number(process.argv[3])||undefined}))" -- "$sel" "$fmt" "$q")")"
-    if [ "$mode" = "--json" ]; then
-      printf '%s' "$resp"
-    else
-      printf '%s' "$resp" | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{let o;try{o=JSON.parse(d)}catch{process.stderr.write(d);process.exit(2)}if(o.path)process.stdout.write(o.path);else{process.stderr.write(JSON.stringify(o));process.exit(2)}})"
-    fi
+    resp="$(post screenshot "$(jq -nc --arg s "$sel" --arg f "$fmt" --argjson q "$q" '{selector:$s,format:$f,quality:$q}')")"
+    if [ "$mode" = "--json" ]; then printf '%s' "$resp"
+    else printf '%s' "$resp" | jq -r '.path // (.error | "ERROR: " + .)'; fi
     ;;
   batch)
     body="${1:-}"
     if [ -z "$body" ]; then echo "usage: $0 batch '<json-body>'" >&2; exit 2; fi
-    curl -fsS -X POST "$API/batch$qs" -H 'Content-Type: application/json' --data "$body"
+    post batch "$body"
     ;;
   key)
     k="$1"; mods="${2:-0}"
-    curl -fsS -X POST "$API/key$qs" -H 'Content-Type: application/json' \
-      --data "$(node -e "process.stdout.write(JSON.stringify({key:process.argv[1],modifiers:Number(process.argv[2])||0}))" -- "$k" "$mods")"
+    post key "$(jq -nc --arg k "$k" --argjson m "${mods:-0}" '{key:$k,modifiers:$m}')"
     ;;
   shutdown)
     curl -fsS -X POST "$API/shutdown"
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
     exit 2
     ;;
 esac
