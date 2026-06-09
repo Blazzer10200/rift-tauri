@@ -128,7 +128,10 @@
       {/if}
 
       {#if !swarm.report && !swarm.running && Object.keys(swarm.live).length === 0}
-        <div class="empty">Paste a findings list and run — one agent per file, isolated in its own worktree.</div>
+        <div class="results-empty">
+          <Boxes size={26} strokeWidth={1.6} />
+          <span>Paste a findings list and run — one agent per file, isolated in its own worktree.</span>
+        </div>
       {/if}
 
       <!-- live stages while running -->
@@ -178,12 +181,15 @@
 </div>
 
 <style>
-  .swarm { display: flex; flex-direction: column; gap: 12px; padding: 14px 22px 18px; height: 100%; min-height: 0; overflow: hidden; }
+  .swarm { display: flex; flex-direction: column; gap: 12px; padding: 14px 22px 18px; height: 100%; min-height: 0; overflow: hidden; background:
+      radial-gradient(circle, color-mix(in oklab, var(--fg) 3%, transparent) 1px, transparent 1px) 0 0 / 26px 26px,
+      radial-gradient(130% 90% at 50% -25%, color-mix(in oklab, var(--accent) 5%, transparent), transparent 52%),
+      var(--bg); }
   .shead { display: flex; align-items: flex-start; justify-content: space-between; flex: none; }
-  .shead-title { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-lg); font-weight: 750; color: var(--fg); }
+  .shead-title { display: inline-flex; align-items: center; gap: 9px; font-size: 23px; font-weight: 750; letter-spacing: -0.02em; color: var(--fg); }
   .shead-spark :global(svg) { color: var(--accent); }
-  .shead-sub { margin-top: 2px; font-size: var(--fs-xs); color: var(--fg-muted); }
-  .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; }
+  .shead-sub { margin-top: 3px; font-size: var(--fs-xs); color: var(--fg-subtle); }
+  .icon-btn { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; }
   .icon-btn:hover { color: var(--fg); border-color: var(--border-strong); }
 
   .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: none; }
@@ -193,9 +199,9 @@
   .chip.muted { opacity: 0.7; }
 
   .bento { display: grid; grid-template-columns: minmax(280px, 0.85fr) 1.15fr; gap: 12px; flex: 1; min-height: 0; }
-  .card { display: flex; flex-direction: column; min-height: 0; gap: 8px; padding: 14px; border-radius: 14px; border: 1px solid var(--border); background: var(--surface); }
-  .card-head { display: flex; align-items: center; justify-content: space-between; flex: none; }
-  .card-title { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.02em; text-transform: uppercase; color: var(--fg-muted); }
+  .card { display: flex; flex-direction: column; min-height: 0; gap: 8px; padding: 14px; border-radius: 16px; border: 1px solid var(--border); background: var(--surface); }
+  .card-head { display: flex; align-items: center; justify-content: space-between; flex: none; margin-bottom: 2px; }
+  .card-title { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
   .link-btn, .summary { font-size: var(--fs-2xs); }
   .link-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-weight: 600; }
   .summary.ok { color: var(--ok); }
@@ -211,6 +217,8 @@
 
   .results-card { overflow-y: auto; }
   .empty { font-size: var(--fs-xs); color: var(--fg-muted); padding: 16px 4px; }
+  .results-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 11px; text-align: center; color: var(--fg-subtle); padding: 20px; max-width: 320px; margin: 0 auto; font-size: var(--fs-xs); line-height: 1.5; }
+  .results-empty :global(svg) { color: var(--accent); opacity: 0.8; }
   .agent { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-inset); overflow: hidden; }
   .agent.live { padding: 8px 12px; }
   .agent-top { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; background: none; border: none; color: var(--fg); cursor: pointer; text-align: left; font-size: var(--fs-xs); }
