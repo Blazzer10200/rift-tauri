@@ -598,30 +598,39 @@
   );
   // `directive` steers a refine pass (Concise / More detail / + Acceptance);
   // omitted for the first run + plain Regenerate.
+  // Generation token: accept/dismiss bumps it so a still-in-flight enhance
+  // can't write its stream/result back into a closed preview.
+  let enhanceSeq = 0;
   async function runEnhance(directive?: string) {
     const text = (enhanceOriginal ?? draft).trim();
     if (!text || enhancing) return;
     if (enhanceOriginal === null) enhanceOriginal = text;
+    const seq = ++enhanceSeq;
     enhancing = true;
     enhanceError = null;
     enhancedPreview = "";
     try {
       // Stream: deltas fill the preview live; the resolved value is the
       // authoritative final text. Grounded mode passes the workspace cwd.
-      enhancedPreview = await assistant.enhancePrompt(
+      const result = await assistant.enhancePrompt(
         text,
-        (full) => { enhancedPreview = full; },
+        (full) => { if (seq === enhanceSeq) enhancedPreview = full; },
         { directive, cwd: groundEnhance ? (assistant.workspace.current ?? undefined) : undefined },
       );
+      if (seq === enhanceSeq) enhancedPreview = result;
     } catch (e) {
-      enhanceError = String(e);
-      enhancedPreview = null;
+      if (seq === enhanceSeq) {
+        enhanceError = String(e);
+        enhancedPreview = null;
+      }
     } finally {
-      enhancing = false;
+      if (seq === enhanceSeq) enhancing = false;
     }
   }
   function acceptEnhanced() {
     if (!enhancedPreview) return;
+    enhanceSeq++;
+    enhancing = false;
     setDraft(enhancedPreview);
     enhancedPreview = null;
     enhanceError = null;
@@ -630,6 +639,8 @@
     void tick().then(() => { autosize(); ta?.focus(); });
   }
   function dismissEnhanced() {
+    enhanceSeq++;
+    enhancing = false;
     enhancedPreview = null;
     enhanceError = null;
     enhanceOriginal = null;
