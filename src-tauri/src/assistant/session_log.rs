@@ -131,6 +131,46 @@ pub fn assistant_delete_session_log(id: String) -> Result<(), String> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The rejection cases short-circuit before any filesystem touch, so these
+    // exercise the path-traversal guard hermetically.
+    #[test]
+    fn rejects_empty_id() {
+        assert!(session_log_path("").is_err());
+    }
+
+    #[test]
+    fn rejects_overlong_id() {
+        let id = "a".repeat(65);
+        assert!(session_log_path(&id).is_err());
+    }
+
+    #[test]
+    fn rejects_path_traversal_and_separators() {
+        for bad in ["../etc", "a/b", "a\\b", "a.json", "foo/../bar", "a b", "a:b"] {
+            assert!(
+                session_log_path(bad).is_err(),
+                "should reject unsafe id: {bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_alnum_and_hyphen_ids() {
+        // 64 chars is the inclusive upper bound.
+        for ok in ["s1", "session-123-abc", "A1B2", &"x".repeat(64)] {
+            let p = session_log_path(ok).expect("valid id should resolve");
+            assert!(
+                p.to_string_lossy().ends_with(&format!("{ok}.json")),
+                "path should end with <id>.json"
+            );
+        }
+    }
+}
+
 /// Ring-buffer trim: keep the `keep` most-recent sessions (by `startedAt`),
 /// delete the rest. Called once on launch so a long-running install doesn't
 /// accumulate thousands of session files. Returns the count removed.

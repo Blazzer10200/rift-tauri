@@ -189,3 +189,127 @@ pub fn backfill(conn: &Connection) -> Result<u32, String> {
     }
     Ok(n)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn prices() -> pricing::PriceTable {
+        pricing::PriceTable::load()
+    }
+
+    #[test]
+    fn empty_id_yields_no_rows() {
+        let rec = json!({ "turns": [{ "ts": 1 }] });
+        assert!(rows_from_snapshot(&rec, &prices()).is_empty());
+    }
+
+    #[test]
+    fn missing_turns_array_yields_no_rows() {
+        let rec = json!({ "id": "s1" });
+        assert!(rows_from_snapshot(&rec, &prices()).is_empty());
+    }
+
+    #[test]
+    fn parses_tokens_timing_and_tool_count() {
+        let rec = json!({
+            "id": "s1",
+            "workspace": "/ws",
+            "turns": [{
+                "ts": 1000,
+                "modelId": "claude-opus-4-8",
+                "firstPaintAt": 1150,
+                "doneAt": 1900,
+                "costUsd": 0.05,
+                "resultUsage": { "input": 100, "output": 200, "cacheRead": 5, "cacheCreate": 7 },
+                "toolUses": [{}, {}, {}]
+            }]
+        });
+        let rows = rows_from_snapshot(&rec, &prices());
+        assert_eq!(rows.len(), 1);
+        let r = &rows[0];
+        assert_eq!(r.session_id, "s1");
+        assert_eq!(r.turn_index, 0);
+        assert_eq!(r.input, 100);
+        assert_eq!(r.output, 200);
+        assert_eq!(r.cache_read, 5);
+        assert_eq!(r.cache_write, 7);
+        assert_eq!(r.ttfp_ms, Some(150)); // firstPaintAt - ts
+        assert_eq!(r.duration_ms, Some(900)); // doneAt - ts
+        assert_eq!(r.tool_count, 3);
+        assert_eq!(r.workspace.as_deref(), Some("/ws"));
+        assert_eq!(r.cost_usd_cli, Some(0.05));
+        assert_eq!(r.provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn envelope_usage_is_fallback_when_result_usage_absent() {
+        let rec = json!({
+            "id": "s1",
+            "turns": [{
+                "ts": 1,
+                "modelId": "claude-opus-4-8",
+                "envelopeUsage": { "input": 42, "output": 9 }
+            }]
+        });
+        let rows = rows_from_snapshot(&rec, &prices());
+        assert_eq!(rows[0].input, 42);
+        assert_eq!(rows[0].output, 9);
+    }
+
+    #[test]
+    fn null_result_usage_falls_back_to_envelope() {
+        let rec = json!({
+            "id": "s1",
+            "turns": [{
+                "ts": 1,
+                "modelId": "claude-opus-4-8",
+                "resultUsage": null,
+                "envelopeUsage": { "input": 7 }
+            }]
+        });
+        assert_eq!(rows_from_snapshot(&rec, &prices())[0].input, 7);
+    }
+
+    #[test]
+    fn model_id_falls_back_to_session_model() {
+        let rec = json!({
+            "id": "s1",
+            "model": "claude-sonnet-4-6",
+            "turns": [{ "ts": 1 }] // turn carries no modelId/model
+        });
+        let rows = rows_from_snapshot(&rec, &prices());
+        assert_eq!(rows[0].model_id.as_deref(), Some("claude-sonnet-4-6"));
+    }
+
+    #[test]
+    fn custom_model_is_unpriced_and_non_anthropic() {
+        let rec = json!({
+            "id": "s1",
+            "turns": [{
+                "ts": 1,
+                "modelId": "my-local-llm-7b",
+                "resultUsage": { "input": 100, "output": 100 }
+            }]
+        });
+        let rows = rows_from_snapshot(&rec, &prices());
+        assert!(rows[0].cost_usd_calc.is_none(), "unknown model has no computed cost");
+        assert_ne!(rows[0].provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn turn_indices_increment_in_order() {
+        let rec = json!({
+            "id": "s1",
+            "turns": [
+                { "ts": 1, "modelId": "claude-opus-4-8" },
+                { "ts": 2, "modelId": "claude-opus-4-8" },
+                { "ts": 3, "modelId": "claude-opus-4-8" }
+            ]
+        });
+        let rows = rows_from_snapshot(&rec, &prices());
+        let idx: Vec<i64> = rows.iter().map(|r| r.turn_index).collect();
+        assert_eq!(idx, vec![0, 1, 2]);
+    }
+}

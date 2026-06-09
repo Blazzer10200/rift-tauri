@@ -122,11 +122,15 @@ fn collect<T>(
 /// `ts/1000` feeds SQLite's `unixepoch`; grouping is by LOCAL calendar day.
 #[tauri::command]
 pub fn usage_daily(db: tauri::State<UsageDb>, days: Option<i64>) -> Result<Vec<DailyRow>, String> {
-    let days = days.unwrap_or(30).max(1);
-    let cutoff_ms = now_ms() - days * 86_400_000;
     let conn = lock(&db)?;
+    daily_rows(&conn, days.unwrap_or(30), now_ms())
+}
+
+fn daily_rows(conn: &Connection, days: i64, now: i64) -> Result<Vec<DailyRow>, String> {
+    let days = days.max(1);
+    let cutoff_ms = now - days * 86_400_000;
     collect(
-        &conn,
+        conn,
         &format!(
             "SELECT strftime('%Y-%m-%d', ts/1000, 'unixepoch', 'localtime') AS d,
                     SUM({COST}), COUNT(*), SUM(input), SUM(output),
@@ -153,8 +157,12 @@ pub fn usage_daily(db: tauri::State<UsageDb>, days: Option<i64>) -> Result<Vec<D
 #[tauri::command]
 pub fn usage_monthly(db: tauri::State<UsageDb>) -> Result<Vec<MonthlyRow>, String> {
     let conn = lock(&db)?;
+    monthly_rows(&conn)
+}
+
+fn monthly_rows(conn: &Connection) -> Result<Vec<MonthlyRow>, String> {
     collect(
-        &conn,
+        conn,
         &format!(
             "SELECT strftime('%Y-%m', ts/1000, 'unixepoch', 'localtime') AS m,
                     SUM({COST}), COUNT(*), SUM(input), SUM(output),
@@ -181,8 +189,12 @@ pub fn usage_monthly(db: tauri::State<UsageDb>) -> Result<Vec<MonthlyRow>, Strin
 #[tauri::command]
 pub fn usage_by_model(db: tauri::State<UsageDb>) -> Result<Vec<ModelRow>, String> {
     let conn = lock(&db)?;
+    by_model_rows(&conn)
+}
+
+fn by_model_rows(conn: &Connection) -> Result<Vec<ModelRow>, String> {
     collect(
-        &conn,
+        conn,
         &format!(
             "SELECT COALESCE(model_id,'unknown'), provider,
                     SUM({COST}), COUNT(*), SUM(input), SUM(output),
@@ -211,8 +223,12 @@ pub fn usage_by_model(db: tauri::State<UsageDb>) -> Result<Vec<ModelRow>, String
 #[tauri::command]
 pub fn usage_by_workspace(db: tauri::State<UsageDb>) -> Result<Vec<WorkspaceRow>, String> {
     let conn = lock(&db)?;
+    by_workspace_rows(&conn)
+}
+
+fn by_workspace_rows(conn: &Connection) -> Result<Vec<WorkspaceRow>, String> {
     collect(
-        &conn,
+        conn,
         &format!(
             "SELECT workspace, SUM({COST}), COUNT(*), SUM(input), SUM(output)
              FROM turns GROUP BY workspace ORDER BY SUM({COST}) DESC"
@@ -238,11 +254,14 @@ pub fn usage_blocks(
     db: tauri::State<UsageDb>,
     window: Option<i64>,
 ) -> Result<Vec<BlockRow>, String> {
-    let win_ms = window.unwrap_or(5).clamp(1, 24) * 3_600_000;
-    let now = now_ms();
     let conn = lock(&db)?;
+    block_rows(&conn, window.unwrap_or(5), now_ms())
+}
+
+fn block_rows(conn: &Connection, window: i64, now: i64) -> Result<Vec<BlockRow>, String> {
+    let win_ms = window.clamp(1, 24) * 3_600_000;
     collect(
-        &conn,
+        conn,
         &format!(
             "SELECT (ts / ?1) * ?1 AS blk,
                     SUM({COST}), COUNT(*), SUM(input), SUM(output),
@@ -274,8 +293,12 @@ pub fn usage_session(
     id: String,
 ) -> Result<Vec<SessionTurnRow>, String> {
     let conn = lock(&db)?;
+    session_rows(&conn, &id)
+}
+
+fn session_rows(conn: &Connection, id: &str) -> Result<Vec<SessionTurnRow>, String> {
     collect(
-        &conn,
+        conn,
         &format!(
             "SELECT turn_index, ts, model_id, {COST}, input, output,
                     cache_read, cache_write, ttfp_ms, duration_ms, tool_count
@@ -307,4 +330,123 @@ pub fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::usage::store::{self, TurnRow};
+
+    fn mem() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        store::init_schema(&c).unwrap();
+        c
+    }
+
+    fn base(idx: i64, ts: i64) -> TurnRow {
+        TurnRow {
+            session_id: "s1".into(),
+            turn_index: idx,
+            ts,
+            model_id: None,
+            provider: None,
+            input: 0,
+            output: 0,
+            cache_read: 0,
+            cache_write: 0,
+            cost_usd_cli: None,
+            cost_usd_calc: None,
+            ttfp_ms: None,
+            duration_ms: None,
+            workspace: None,
+            tool_count: 0,
+        }
+    }
+
+    fn put(c: &Connection, r: TurnRow) {
+        store::upsert_turn(c, &r).unwrap();
+    }
+
+    #[test]
+    fn by_model_priced_flag_and_cost_fallback() {
+        let c = mem();
+        // Priced model: computed cost present.
+        put(&c, TurnRow { model_id: Some("claude-opus-4-8".into()), cost_usd_calc: Some(3.0), ..base(0, 1) });
+        // Unpriced model: only CLI cost — COST falls back to it, priced=false.
+        put(&c, TurnRow { model_id: Some("custom-x".into()), cost_usd_cli: Some(1.0), ..base(1, 1) });
+
+        let rows = by_model_rows(&c).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Sorted by COST desc → opus (3.0) first.
+        assert_eq!(rows[0].model_id, "claude-opus-4-8");
+        assert!(rows[0].priced, "computed-cost model is priced");
+        assert!((rows[0].cost - 3.0).abs() < 1e-9);
+        assert_eq!(rows[1].model_id, "custom-x");
+        assert!(!rows[1].priced, "cli-only model is unpriced");
+        assert!((rows[1].cost - 1.0).abs() < 1e-9, "COST falls back to cli cost");
+    }
+
+    #[test]
+    fn cost_prefers_calc_over_cli() {
+        let c = mem();
+        // calc and cli disagree → COALESCE(calc, cli) must pick calc.
+        put(&c, TurnRow { model_id: Some("m".into()), cost_usd_calc: Some(2.0), cost_usd_cli: Some(99.0), ..base(0, 1) });
+        let rows = by_model_rows(&c).unwrap();
+        assert!((rows[0].cost - 2.0).abs() < 1e-9, "calc cost must win over cli");
+    }
+
+    #[test]
+    fn blocks_anchor_to_window_and_flag_active() {
+        let c = mem();
+        let win_ms = 5 * 3_600_000; // 5h
+        // A turn whose ts is the "now" → its block must be the active one.
+        let now = 100 * win_ms + 1234; // mid-block offset
+        put(&c, TurnRow { cost_usd_calc: Some(1.0), ..base(0, now) });
+        // A turn three windows earlier → a different, inactive block.
+        put(&c, TurnRow { cost_usd_calc: Some(1.0), ..base(1, now - 3 * win_ms) });
+
+        let rows = block_rows(&c, 5, now).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Newest first; each block start is window-aligned.
+        for r in &rows {
+            assert_eq!(r.start % win_ms, 0, "block start must be window-aligned");
+            assert_eq!(r.end - r.start, win_ms);
+        }
+        let active: Vec<bool> = rows.iter().map(|r| r.active).collect();
+        assert_eq!(active, vec![true, false], "only the now-containing block is active");
+    }
+
+    #[test]
+    fn daily_excludes_turns_before_cutoff() {
+        let c = mem();
+        let now = 30 * 86_400_000_i64 + 500;
+        put(&c, TurnRow { cost_usd_calc: Some(1.0), ..base(0, now) }); // today
+        put(&c, TurnRow { cost_usd_calc: Some(9.0), ..base(1, now - 40 * 86_400_000) }); // 40d ago
+        let rows = daily_rows(&c, 30, now).unwrap();
+        let total: f64 = rows.iter().map(|r| r.cost).sum();
+        assert!((total - 1.0).abs() < 1e-9, "40-day-old turn must fall outside a 30-day window");
+    }
+
+    #[test]
+    fn by_workspace_groups_null_and_sorts_by_cost() {
+        let c = mem();
+        put(&c, TurnRow { workspace: Some("/a".into()), cost_usd_calc: Some(5.0), ..base(0, 1) });
+        put(&c, TurnRow { workspace: None, cost_usd_calc: Some(3.0), ..base(1, 1) });
+        let rows = by_workspace_rows(&c).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].workspace.as_deref(), Some("/a")); // costliest first
+        assert_eq!(rows[1].workspace, None); // null workspace kept as its own group
+    }
+
+    #[test]
+    fn session_rows_filter_and_order_by_turn_index() {
+        let c = mem();
+        put(&c, TurnRow { turn_index: 2, ..base(2, 3) });
+        put(&c, TurnRow { turn_index: 0, ..base(0, 1) });
+        put(&c, TurnRow { turn_index: 1, ..base(1, 2) });
+        put(&c, TurnRow { session_id: "other".into(), ..base(0, 1) });
+        let rows = session_rows(&c, "s1").unwrap();
+        let idx: Vec<i64> = rows.iter().map(|r| r.turn_index).collect();
+        assert_eq!(idx, vec![0, 1, 2], "only s1, ordered by turn_index");
+    }
 }
