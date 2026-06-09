@@ -331,8 +331,22 @@
       </div>
       <div class="sb-hero-r">
         <span class="sb-chip"><span class="mono">local workspace</span></span>
-        <button class="sb-chip ok" type="button" onclick={() => updates.open()} use:tooltip={"Check for updates"}>
-          <CircleCheck size={14} /> {appVersion} · up to date
+        <!-- UI-drift fix: status derives from updates.summary — never hard-coded,
+             so this chip can't say "up to date" while the pill offers an update. -->
+        <button
+          class="sb-chip {updates.summary.kind}"
+          type="button"
+          onclick={() => updates.open()}
+          use:tooltip={"Check for updates"}
+        >
+          {#if updates.summary.kind === "warn"}
+            <ArrowUpCircle size={14} />
+          {:else if updates.summary.kind === "busy"}
+            <Loader2 size={14} class="spin" />
+          {:else}
+            <CircleCheck size={14} />
+          {/if}
+          {appVersion}{updates.summary.label ? ` · ${updates.summary.label}` : ""}
         </button>
       </div>
     </div>
@@ -1101,6 +1115,11 @@
   button.sb-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
   .sb-chip.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
   .sb-chip.ok :global(svg) { color: var(--ok); }
+  .sb-chip.warn { background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 28%, transparent); color: var(--warn); }
+  .sb-chip.warn :global(svg) { color: var(--warn); }
+  .sb-chip.danger { background: var(--danger-soft); border-color: color-mix(in oklch, var(--danger) 28%, transparent); color: var(--danger); }
+  .sb-chip.danger :global(svg) { color: var(--danger); }
+  /* busy = neutral chip, spinner only — no status color while unknown */
   .sb-chip .mono { font-family: var(--font-mono); }
 
   .sb-tabs { display: flex; gap: 4px; max-width: 820px; margin: 22px auto 0; }
