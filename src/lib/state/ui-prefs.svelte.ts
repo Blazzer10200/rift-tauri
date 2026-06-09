@@ -1,11 +1,9 @@
 type Density = "compact" | "regular" | "comfy";
-type Presence = "calm" | "bold";
 type CodePrefs = { fontSize: number; tabWidth: number; ligatures: boolean };
 
 const STORAGE_KEY = "rift.ui.density.v1";
 const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
-const PRESENCE_KEY = "rift.ui.presence.v1";
 const CODE_KEY = "rift.ui.code.v1";
 const FAST_MODE_KEY = "rift.ui.fast-mode.v1";
 
@@ -28,7 +26,6 @@ class UiPrefs {
   density = $state<Density>("compact");
   railPinned = $state(false);
   accentHue = $state(163);
-  presence = $state<Presence>("calm");
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
   // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
   // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
@@ -47,9 +44,6 @@ class UiPrefs {
       const hue = Number(accentRaw);
       if (Number.isFinite(hue) && hue >= 0 && hue <= 360) this.accentHue = hue;
     }
-
-    const pres = localStorage.getItem(PRESENCE_KEY);
-    if (pres === "calm" || pres === "bold") this.presence = pres;
 
     try {
       const c = JSON.parse(localStorage.getItem(CODE_KEY) ?? "null");
@@ -89,12 +83,6 @@ class UiPrefs {
     this.applyAccent();
   }
 
-  setPresence(p: Presence) {
-    this.presence = p;
-    localStorage.setItem(PRESENCE_KEY, p);
-    this.applyPresence();
-  }
-
   setCode(patch: Partial<CodePrefs>) {
     this.code = { ...this.code, ...patch };
     localStorage.setItem(CODE_KEY, JSON.stringify(this.code));
@@ -112,7 +100,6 @@ class UiPrefs {
     document.documentElement.dataset.density = this.density;
     this.applyRail();
     this.applyAccent();
-    this.applyPresence();
     this.applyCode();
   }
 
@@ -128,19 +115,12 @@ class UiPrefs {
     }
   }
 
-  private applyPresence() {
-    if (typeof document !== "undefined") {
-      document.documentElement.dataset.presence = this.presence;
-    }
-  }
-
   private applyCode() {
     if (typeof document === "undefined") return;
     const r = document.documentElement;
     r.style.setProperty("--code-fs", `${this.code.fontSize}px`);
     r.style.setProperty("--code-tab", String(this.code.tabWidth));
     r.style.setProperty("--code-liga", this.code.ligatures ? "normal" : "none");
-    r.dataset.ligatures = this.code.ligatures ? "on" : "off";
   }
 }
 

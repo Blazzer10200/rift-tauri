@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Settings page redesign + dead-setting audit
+
+**UI system.** Settings moved from a ragged 12-col bento to a **single centered column of titled cards** — section titles are now header bands *inside* each card (sentence-case), not labels floating over flat slabs. Inline code in descriptions de-boxed to a calm wash; descriptions capped at 60ch so they no longer collide with their controls.
+
+**Assistant tab reorganized.** "Budget & billing" → **Cost guard** (per-turn cap only); API-key fallback + custom providers merged into one **Model & routing** card with an explicit precedence note (API key → custom provider → compression proxy); "Context compression" → **Compression proxy (advanced)**.
+
+**Audit + cleanup.** Traced every setting end-to-end — all wired, nothing decorative. Removed the **Accent presence (Calm/Bold)** toggle (imperceptible: only nudged one ghost-fill opacity) incl. its store field/CSS/persistence, plus a dead `data-ligatures` DOM write. Fixed code-preview copy to its true scope ("diffs/previews/file browser" → "code blocks in chat replies").
+
+**Verify.** `npm run check` 0/0 (4070).
+
 ## v0.8.10 — 2026-06-09 — fix: update button no longer 50/50 — stable pill replaces the flaky toast
 
 > **Why.** The "Update available" affordance was a *sticky toast* in the shared toast stack, and it accepted clicks only about half the time — the long-running "update button won't click" bug that v0.8.7's z-index raise only partly tamed. Real cause: the toast host is bottom-anchored and grows upward, so the launch-pushed update toast sat at the top of the stack and **slid** every time any other toast appeared or expired (`animate:flip`, 180ms). You were clicking a target that kept moving out from under the cursor.

@@ -420,17 +420,12 @@
       <span class="sesh-pill-l">Live</span>
       <span class="sesh-pill-meta">{liveSnap.summary.totalTurns}t · {fmtUsd(liveSnap.summary.totalCostUsd)}</span>
     </button>
-    <button class="sesh-pill" class:on={isAll} type="button" onclick={() => (view = "all")}>
-      <Layers size={12} />
-      <span class="sesh-pill-l">All</span>
-      <span class="sesh-pill-meta">{sessions.length}</span>
-    </button>
     <span class="sesh-div"></span>
-    <div class="sesh-scroll">
+    <div class="sesh-recent">
       {#if pastSessions.length === 0}
         <span class="sesh-none">Only this session so far — past sessions appear here as you go.</span>
       {:else}
-        {#each pastSessions as s (s.id)}
+        {#each pastSessions.slice(0, 4) as s (s.id)}
           <button class="sesh-pill ses" class:on={view === s.id} type="button" onclick={() => (view = s.id)}
             use:tooltip={`${fmtDate(s.startedAt)} · ${shortModel(s.model || "—")}\n${s.totalTurns} turns · ${s.toolCallTotal} tools · ${fmtUsd(s.totalCostUsd)} · ${fmtDur(s.durationMs)}`}>
             <span class="sesh-dot" style="--mH:{modelHue(s.model || '')}"></span>
@@ -440,6 +435,12 @@
         {/each}
       {/if}
     </div>
+    <button class="sesh-pill sesh-all" class:on={isAll} type="button" onclick={() => (view = "all")} use:tooltip={"Browse all sessions"}>
+      <Layers size={12} />
+      <span class="sesh-pill-l">All</span>
+      <span class="sesh-pill-meta">{sessions.length}</span>
+      <span class="sesh-all-arrow">→</span>
+    </button>
     <button class="sesh-refresh" type="button" onclick={refreshSessions} use:tooltip={"Refresh sessions"}><RotateCw size={13} /></button>
   </div>
 
@@ -593,17 +594,25 @@
           {/if}
         </section>
       {:else}
-        <!-- HERO (archived): session overview -->
+        <!-- HERO (archived): session overview — headline + at-a-glance stats
+             that complement (don't duplicate) the KPI rail above. -->
         <section class="cell hero ov">
           <div class="hero-glow"></div>
-          <div class="hero-tag">session overview</div>
-          <div class="ov-head">
-            <span class="ov-mdl-dot" style="--mH:{modelHue(source.model || resolvedModelId || '')}"></span>
-            <span class="ov-mdl">{source.model ? shortModel(source.model) : (resolvedModelId ? shortModel(resolvedModelId) : "—")}</span>
+          <div class="ov-main">
+            <div class="ov-head">
+              <span class="ov-mdl-dot" style="--mH:{modelHue(source.model || resolvedModelId || '')}"></span>
+              <span class="ov-mdl">{source.model ? shortModel(source.model) : (resolvedModelId ? shortModel(resolvedModelId) : "—")}</span>
+            </div>
+            <div class="ov-cost">{fmtUsd(sum.totalCostUsd)}</div>
+            <div class="ov-cap">session cost</div>
+            <div class="ov-when">{fmtDate(source.startedAt)} · {fmtDur(source.durationMs)}</div>
           </div>
-          <div class="ov-cost">{fmtUsd(sum.totalCostUsd)}</div>
-          <div class="ov-cap">session cost</div>
-          <div class="ov-when">{fmtDate(source.startedAt)} · {fmtDur(source.durationMs)}</div>
+          <div class="ov-stats">
+            <div class="ov-stat"><span class="ov-stat-v mono">{fmtTok(tokTotal)}</span><span class="ov-stat-k">total tokens</span></div>
+            <div class="ov-stat"><span class="ov-stat-v mono">{fmtMs(thinkMsTotal || null)}</span><span class="ov-stat-k">reasoning</span></div>
+            <div class="ov-stat"><span class="ov-stat-v mono">{fmtMs(sum.avgDoneMs)}</span><span class="ov-stat-k">avg turn</span></div>
+            <div class="ov-stat"><span class="ov-stat-v mono">{sum.mostParallelTurn ? sum.mostParallelTurn.maxConcurrentTools + "×" : "—"}</span><span class="ov-stat-k">peak parallel</span></div>
+          </div>
         </section>
       {/if}
 
@@ -811,7 +820,14 @@
 
   /* ── Session selector strip ── */
   .sesh { display: flex; align-items: center; gap: 7px; margin-bottom: 18px; min-width: 0; }
-  .sesh-scroll { display: flex; align-items: center; gap: 7px; overflow-x: auto; overflow-y: hidden; flex: 1; min-width: 0; padding-bottom: 2px; scrollbar-width: thin; }
+  /* Recent sessions — fixed strip, NO horizontal scroll. Caps to what fits the
+     width (responsive count below); the rest live in the All view. */
+  .sesh-recent { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; overflow: hidden; }
+  @media (max-width: 1280px) { .sesh-recent .ses:nth-child(n + 4) { display: none; } }
+  @media (max-width: 1080px) { .sesh-recent .ses:nth-child(n + 3) { display: none; } }
+  .sesh-all { flex: none; }
+  .sesh-all-arrow { font-size: 12px; color: var(--fg-faint); margin-left: 1px; }
+  .sesh-all.on .sesh-all-arrow { color: color-mix(in oklab, var(--accent) 70%, var(--fg)); }
   .sesh-div { width: 1px; height: 22px; background: var(--border); flex: none; }
   .sesh-pill { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in oklab, var(--surface) 60%, transparent); color: var(--fg-muted); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; flex: none; white-space: nowrap; transition: border-color var(--dur-fast) var(--ease-soft), background var(--dur-fast) var(--ease-soft), color var(--dur-fast) var(--ease-soft); }
   .sesh-pill:hover { border-color: var(--border-strong); color: var(--fg); }
@@ -903,13 +919,20 @@
   .hero-last-k { font-size: 10px; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.04em; }
 
   /* ── Hero (archived) session overview ── */
-  .ov { gap: 6px; }
-  .ov-head { display: inline-flex; align-items: center; gap: 8px; z-index: 1; margin-bottom: 4px; }
+  /* Archived overview = horizontal split: headline (left) + at-a-glance grid
+     (right), filling the span-2 cell instead of a lone centered number. */
+  .ov { flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 22px; }
+  .ov-main { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; z-index: 1; min-width: 0; }
+  .ov-head { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 4px; }
   .ov-mdl-dot { width: 10px; height: 10px; border-radius: 50%; background: oklch(0.74 0.16 var(--mH)); box-shadow: 0 0 9px oklch(0.74 0.16 var(--mH) / 0.6); }
   .ov-mdl { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-2); font-family: var(--font-mono); }
-  .ov-cost { font-size: 50px; font-weight: 760; letter-spacing: -0.03em; line-height: 1; color: var(--fg); font-variant-numeric: tabular-nums; z-index: 1; }
-  .ov-cap { font-size: var(--fs-xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; z-index: 1; }
-  .ov-when { font-size: var(--fs-xs); color: var(--fg-subtle); font-family: var(--font-mono); margin-top: 4px; z-index: 1; }
+  .ov-cost { font-size: 46px; font-weight: 760; letter-spacing: -0.03em; line-height: 1; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .ov-cap { font-size: var(--fs-xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+  .ov-when { font-size: var(--fs-xs); color: var(--fg-subtle); font-family: var(--font-mono); margin-top: 4px; }
+  .ov-stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 11px 26px; z-index: 1; padding-left: 22px; border-left: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+  .ov-stat { display: flex; flex-direction: column; gap: 2px; }
+  .ov-stat-v { font-size: 17px; font-weight: 680; color: var(--fg); font-variant-numeric: tabular-nums; }
+  .ov-stat-k { font-size: 10.5px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 
   /* ── KPI rail (session-wide headline metrics) ── */
   .kpi-rail { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; padding: 0; }

@@ -38,7 +38,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 
 Backend dirs (current): `assistant/ browser/ commands/ diagnostics/ state/ stt/ swarm/ usage/` + `lib.rs main.rs secrets.rs update_service.rs`. `swarm/`+`usage/` added in the v0.7.0 cost-cockpit/edit-swarm arc. The entire `sftp/ sync/ bootstrap/ edit/ tunnel/ transport/ bridge/ rcon/ profile/` set is gone (pure-assistant rip), plus `local_fs.rs path_guard.rs` and the `remote_state`/`sync_snapshot` state caches.
 
-Frontend hot files: `Composer.svelte` 2957L (largest frontend file — split candidate), `assistant.svelte.ts` 2698L, `ChatTabsBar.svelte` 1761L, `MessageBubble.svelte` 1702L, `ToolChip.svelte` 1554L, `SettingsPage.svelte` ~1340L (Bento redesign cont.78: hero + pill-tabs + 12-col bento, NOT sidebar), `HistoryDrawer.svelte` 1292L, `Markdown.svelte` 1120L, `HarnessPage.svelte` 1050L, `AssistantPane.svelte` 981L. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
+Frontend hot files: `Composer.svelte` 2957L (largest frontend file — split candidate), `assistant.svelte.ts` 2698L, `ChatTabsBar.svelte` 1761L, `MessageBubble.svelte` 1702L, `ToolChip.svelte` 1554L, `SettingsPage.svelte` ~1340L (cont.88: hero + pill-tabs + single-column titled cards — `.st-block`=card w/ header band inside, `.st-card`=body; was 12-col bento), `HistoryDrawer.svelte` 1292L, `Markdown.svelte` 1120L, `HarnessPage.svelte` 1050L, `AssistantPane.svelte` 981L. Deleted in the conversion: `SyncPage`, `ActivityFeed`, the `diagnostics`/`connection`/`sync-*` stores, all server/onboarding dialogs.
 
 ## Agent routing
 

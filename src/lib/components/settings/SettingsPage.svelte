@@ -23,7 +23,6 @@
   import Select from "../Select.svelte";
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
-  const PRESENCES = ["calm", "bold"] as const;
 
   type Section = "appearance" | "accessibility" | "assistant" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
@@ -376,19 +375,6 @@
             <div class="st-card">
               <div class="st-row">
                 <div class="st-row-body">
-                  <div class="st-row-label">Accent presence</div>
-                  <div class="st-row-desc">How strongly the accent tints panels, highlights, and selected rows.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <div class="st-seg">
-                    {#each PRESENCES as p (p)}
-                      <button class="st-seg-btn" class:on={uiPrefs.presence === p} type="button" onclick={() => uiPrefs.setPresence(p)}>{p === "calm" ? "Calm" : "Bold"}</button>
-                    {/each}
-                  </div>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
                   <div class="st-row-label">Density</div>
                   <div class="st-row-desc">Spacing of rows and cards across the app.</div>
                 </div>
@@ -409,7 +395,7 @@
               <div class="st-row">
                 <div class="st-row-body">
                   <div class="st-row-label">Font size</div>
-                  <div class="st-row-desc">Size of code in diffs, previews, and the file browser.</div>
+                  <div class="st-row-desc">Size of code blocks in Claude's chat replies.</div>
                 </div>
                 <div class="st-row-ctl" style="min-width:150px;">
                   <Select
@@ -568,7 +554,7 @@
                   </div>
                 </div>
                 <div class="st-row-desc">
-                  Rift spawns your local <code>claude</code> install{#if cliInstalled} (currently <code>{cliInstalled}</code>){/if}{#if cliIsNative} via the native installer{:else if cliUpdate.method === "npm"} via npm{/if}.
+                  Rift runs your local <code>claude</code> install{#if cliInstalled}{' — currently '}<code>{cliInstalled}</code>{/if}.
                   {#if cliIsNative}It auto-updates in the background — Rift can also apply updates on demand.{:else}Rift checks npm for newer releases and can update it for you.{/if}
                 </div>
                 {#if cliInstalls.length > 1}
@@ -638,12 +624,12 @@
           </div>
 
           <div class="st-block sb-s5">
-            <div class="st-block-label">Budget &amp; billing</div>
+            <div class="st-block-label">Cost guard</div>
             <div class="st-card">
               <div class="st-row">
                 <div class="st-row-body">
                   <label class="st-row-label" for="asst-budget">Per-turn cost cap</label>
-                  <div class="st-row-desc">Passes <code>--max-budget-usd</code> to the CLI. If a turn would exceed this cap, the CLI exits with an error. Leave blank for no cap.</div>
+                  <div class="st-row-desc">Stops a turn before it spends more than this dollar amount. Leave blank for no cap.</div>
                 </div>
                 <div class="st-row-ctl">
                   <input id="asst-budget" class="st-input mono" type="number" min="0" step="0.01" placeholder="5.00" style="width:88px; text-align:right;" bind:value={asstMaxBudgetDraft} />
@@ -654,10 +640,19 @@
                 </div>
               </div>
               {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
+            </div>
+          </div>
+
+          <div class="st-block sb-s12">
+            <div class="st-block-label">Model &amp; routing</div>
+            <div class="st-card">
+              <div class="st-row-desc" style="padding:14px 17px 0;">
+                By default, turns run on your Claude session above. The options here override <em>where</em> each turn is sent, in priority order: <strong>API key</strong>, then an active <strong>custom provider</strong>, then the <strong>compression proxy</strong> below. Keys are stored in your OS keychain.
+              </div>
               <div class="st-row">
                 <div class="st-row-body">
                   <label class="st-row-label" for="asst-apikey">API-key fallback</label>
-                  <div class="st-row-desc">Pay-per-token via console.anthropic.com. When set, overrides the CLI session (forces <code>--bare</code>). Stored in the OS keychain.</div>
+                  <div class="st-row-desc">Bill pay-per-token through the Anthropic Console instead of your Claude session. Overrides the session whenever a key is set.</div>
                 </div>
                 <div class="st-row-ctl">
                   {#if assistantStore.hasApiKey}
@@ -676,15 +671,7 @@
               {#if assistantStore.auth?.envApiKeyPresent && !assistantStore.auth?.apiKeyConfigured}
                 <div class="st-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it above; otherwise remove it from your environment.</div>
               {/if}
-            </div>
-          </div>
-
-          <div class="st-block sb-s12">
-            <div class="st-block-label">Custom providers (advanced)</div>
-            <div class="st-card">
-              <div class="st-row-desc" style="margin-bottom:10px;">
-                Route turns to any Anthropic-compatible endpoint (DeepSeek, GLM/Zhipu, a Bedrock or OpenAI-compat gateway). Pick one to make it active; turns then draw on that provider instead of the metered subscription (June 15 change). Each provider's key is stored in your OS keychain.
-              </div>
+              <div class="st-subhead">Custom providers</div>
 
               <!-- Active selector: Anthropic (default) + each saved provider -->
               <div class="prov-list">
@@ -751,7 +738,7 @@
           </div>
 
           <div class="st-block">
-            <div class="st-block-label">Context compression (advanced)</div>
+            <div class="st-block-label">Compression proxy (advanced)</div>
             <div class="st-card">
               <div class="st-row">
                 <div class="st-row-body">
@@ -1113,7 +1100,7 @@
 
   /* ── Hero + sticky tab bar ── */
   .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 3%, var(--bg)), var(--bg) 120px); border-bottom: 1px solid var(--border); }
-  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 1180px; margin: 0 auto; }
+  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 820px; margin: 0 auto; }
   .sb-hero-l { display: flex; align-items: center; gap: 14px; min-width: 0; }
   .sb-hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .sb-hero-ic :global(svg) { color: var(--accent); }
@@ -1128,7 +1115,7 @@
   .sb-chip.ok :global(svg) { color: var(--ok); }
   .sb-chip .mono { font-family: var(--font-mono); }
 
-  .sb-tabs { display: flex; gap: 4px; max-width: 1180px; margin: 22px auto 0; }
+  .sb-tabs { display: flex; gap: 4px; max-width: 820px; margin: 22px auto 0; }
   .sb-tab { display: inline-flex; align-items: center; gap: 9px; height: 42px; padding: 0 15px; border: 0; background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-md); font-weight: 600; cursor: pointer; position: relative; border-radius: 8px 8px 0 0; transition: color 120ms; }
   .sb-tab:hover { color: var(--fg-2); }
   .sb-tab.on { color: var(--fg); }
@@ -1141,17 +1128,10 @@
 
   /* ── Scrolling bento canvas ── */
   .sb-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
-  .sb-wrap { max-width: 1180px; margin: 0 auto; padding: 26px 40px 90px; }
-  .sb-bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; align-items: start; }
-  .sb-bento > .st-block { min-width: 0; grid-column: span 6; }
-  .sb-bento > .sb-s4 { grid-column: span 4; }
-  .sb-bento > .sb-s5 { grid-column: span 5; }
-  .sb-bento > .sb-s7 { grid-column: span 7; }
-  .sb-bento > .sb-s8 { grid-column: span 8; }
-  .sb-bento > .sb-s12 { grid-column: 1 / -1; }
-  @media (max-width: 940px) {
-    .sb-bento > .st-block, .sb-bento > .st-warn { grid-column: 1 / -1; }
-  }
+  .sb-wrap { max-width: 820px; margin: 0 auto; padding: 26px 40px 90px; }
+  /* Single readable column — cards stack vertically; no ragged bento bottoms. */
+  .sb-bento { display: flex; flex-direction: column; gap: 16px; }
+  .sb-bento > .st-block { min-width: 0; }
 
   /* ── Session status banner ── */
   .sb-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 18px; border-radius: var(--r-card); background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 6%, var(--surface)), var(--surface)); border: 1px solid color-mix(in oklab, var(--ok) 20%, var(--border)); }
@@ -1164,19 +1144,29 @@
   .sb-status-main .sub { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
   .sb-status-r { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
-  .st-block { display: flex; flex-direction: column; gap: 9px; }
-  .st-block-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); padding: 0 2px; }
-  .st-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); }
+  /* Titled-card container system: the section title is a header band inside the card,
+     not a label floating above a slab. .st-block IS the card; .st-card is its body. */
+  .st-block { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent), var(--shadow-sm); }
+  .st-block-label { font-size: var(--fs-sm); font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--fg); padding: 13px 17px; border-bottom: 1px solid var(--border); }
+  .st-card { background: transparent; border: 0; border-radius: 0; }
+  /* Loose (non-row) content sits flush to the body edge — give it the row/header inset. */
+  .st-card > .st-row-desc { padding: 14px 17px 0; }
+  .st-card > .prov-list { padding: 0 17px; }
+  .st-card > .prov-form { padding-left: 17px; padding-right: 17px; }
+  .st-card > .st-warn { margin: 4px 17px 14px; }
+  /* In-card sub-section heading (e.g. "Custom providers" within Model & routing). */
+  .st-subhead { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-subtle); padding: 13px 17px 9px; border-top: 1px solid var(--border); }
 
   /* ── Rows ── */
   .st-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 17px; }
-  .st-row + .st-row, .st-card .st-note + .st-row, .st-row + .st-note { border-top: 1px solid var(--border); }
+  .st-row + .st-row, .st-row + .st-note { border-top: 1px solid var(--border); }
   .st-row-stack { flex-direction: column; align-items: stretch; gap: 10px; }
   .st-row-stack > .st-row-body { flex: 0 0 auto; }
   .st-row-body { flex: 1 1 300px; min-width: 0; }
   .st-row-label { font-size: var(--fs-md); font-weight: 600; color: var(--fg); display: block; }
-  .st-row-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
-  .st-row-desc .mono, .st-row-desc code { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
+  .st-row-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; max-width: 60ch; }
+  /* Calm inline code: monospace + faint wash, no boxed border — keeps descriptions readable, not noisy. */
+  .st-row-desc .mono, .st-row-desc code { font-family: var(--font-mono); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 6%, transparent); padding: 0 4px; border-radius: 4px; font-size: 0.9em; }
   .st-row-ctl { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .st-row[data-disabled="true"] { opacity: 0.55; }
   /* Tool-presence pill (About → Local tools). Dot + label, tinted by status. */

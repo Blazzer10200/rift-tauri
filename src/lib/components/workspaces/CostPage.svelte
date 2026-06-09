@@ -267,7 +267,7 @@
 </div>
 
 <style>
-  .cost { position: relative; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; color: var(--fg); padding: 4px 22px 14px; background:
+  .cost { position: relative; flex: 1; min-height: 0; min-width: 0; overflow-y: auto; overflow-x: hidden; color: var(--fg); padding: 8px 22px 8px; background:
       radial-gradient(circle, color-mix(in oklab, var(--fg) 3%, transparent) 1px, transparent 1px) 0 0 / 26px 26px,
       radial-gradient(130% 90% at 50% -25%, color-mix(in oklab, var(--accent) 5%, transparent), transparent 52%),
       var(--bg); }
@@ -362,7 +362,7 @@
 
   /* ── KPI rail ── */
   .kpi-rail { display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; padding: 0; }
-  .kpi { flex: 1 1 120px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 12px 18px; }
+  .kpi { flex: 1 1 120px; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 10px 18px; }
   .kpi + .kpi { border-left: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
   .kpi-v { font-size: 22px; font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
   .kpi-v.nodata { color: var(--fg-faint); }
