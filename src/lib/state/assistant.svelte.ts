@@ -7,7 +7,6 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { accessibility } from "./accessibility.svelte";
 import { toast } from "./toast.svelte";
 
 // M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
@@ -69,7 +68,6 @@ import {
   savePermissionMode,
   loadDockWidth,
   messagesHaveContextSignals,
-  effortToFlag,
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
 
@@ -146,6 +144,19 @@ import {
   onStreamDone as streamOnDone,
   onStreamError as streamOnError,
 } from "./assistant/streaming";
+// M9 split (2026-06-09): send orchestrator (turn dispatch + slash commands +
+// queue drain + steer + stop + retry/copy/recall) in `./assistant/send`.
+// enhancePrompt + the turn-complete hook wiring stay on the store.
+import {
+  send as sendImpl,
+  drainQueue as sendDrainQueue,
+  stop as sendStop,
+  steer as sendSteer,
+  removeQueued as sendRemoveQueued,
+  retryLast as sendRetryLast,
+  copyLastAssistant as sendCopyLastAssistant,
+  recallPrompt as sendRecallPrompt,
+} from "./assistant/send";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -728,7 +739,8 @@ class AssistantStore {
   private beforeUnloadHandler: (() => void) | null = null;
   // #185: re-entrance latch for retryLast — fast double-click would
   // otherwise pop two user+assistant pairs.
-  private retrying = false;
+  /** #185 retry re-entrance guard — public so the M9 send module can gate on it. */
+  retrying = false;
   // streamingMsgId / seenToolUseIds / dockAutoOpenedThisConvo / deltaCount /
   // envelopeTextBuffer / rawLineLog / pendingText / drainHandle / lastDrainAt /
   // thinkingByIndex / activeThinkingIndex now live on TabState.
@@ -1442,164 +1454,9 @@ class AssistantStore {
     return await invoke("compression_env_check", { proxyUrl: v });
   }
 
+  /** Turn dispatch (incl. client-side slash commands). M9: body in ./assistant/send. */
   async send(prompt: string) {
-    const trimmed = prompt.trim();
-    // Empty prompts are allowed when attachments are staged (paste-and-go).
-    // Drop only if BOTH the prompt and attachments are empty.
-    if (!trimmed && this.composerAttachments.length === 0) return;
-    // Try-handle as a slash command first; if it matched, we're done.
-    if (trimmed.startsWith("/") && this.runSlash(trimmed)) return;
-    // Auth chokepoint — every send path funnels here (composer Enter/button,
-    // queue drains, programmatic retries). A turn with no usable Claude session
-    // dies as "claude exited with 1"; block it, re-probe (state may be stale),
-    // and surface the reason. Slash commands above are local, so they still run.
-    if (!(this.auth?.pill === "green" || this.auth?.pill === "yellow")) {
-      this.lastNotice =
-        this.auth?.summary ??
-        "Claude isn't set up on this machine — open Settings to sign in or add an API key.";
-      void this.refreshAuth();
-      return;
-    }
-    // Already streaming on this tab → queue instead of dropping.
-    if (this.streaming) {
-      this.queue = [...this.queue, { id: crypto.randomUUID(), text: trimmed }];
-      return;
-    }
-    // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
-    // UUID and passes `--session-id`; subsequent turns pass `--resume`.
-    // v0.4: newTab() mints currentConvoId up-front so the tab can render
-    // before send() — gate isFirstTurn on convoCreatedAt instead so the very
-    // first send still passes --session-id, not --resume.
-    if (!this.currentConvoId) {
-      this.currentConvoId = crypto.randomUUID();
-    }
-    // #143: per-tab fields live on TabState now — ensureTab BEFORE touching
-    // them so the writes don't no-op via the store's activeTab=null setter
-    // path. ensureTab seeds cliSessionId to convoId for fresh tabs; compaction
-    // remints it later without recreating the tab.
-    const tab = this.ensureTab(this.currentConvoId, this.currentConvoId);
-    const isFirstTurn = !tab.convoCreatedAt || tab.forceNextFirstTurn;
-    tab.forceNextFirstTurn = false;
-    if (!tab.cliSessionId) {
-      tab.cliSessionId = this.currentConvoId;
-    }
-    if (!tab.convoCreatedAt) {
-      tab.convoCreatedAt = Date.now();
-      tab.convoTitle = null;
-    }
-    // v0.4: catches the raw newConversation→send path (slash /new) so tabs
-    // never drift out of sync with the streaming convo.
-    if (!this.openTabs.includes(this.currentConvoId)) {
-      this.openTabs = [...this.openTabs, this.currentConvoId];
-      this.persistTabs();
-    }
-    tab.beginTurn();
-    this.lastNotice = null;
-    // #184: clear stale error banner so it doesn't bleed into the new turn.
-    // Setter routes to tab.lastError when activeTab is set, store-level otherwise.
-    this.lastError = null;
-    // Telemetry: build the turn record + attach to tab. TabState fills it as
-    // envelopes arrive; finalized in onDone/onError.
-    const attachBytes = this.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
-    const turnRecord: TurnRecord = {
-      ts: Date.now(),
-      convoId: this.currentConvoId,
-      cliSessionId: tab.cliSessionId,
-      isFirstTurn,
-      model: this.model,
-      effort: this.thinkingEffort,
-      effortFlag: effortToFlag(this.thinkingEffort, this.model),
-      promptLen: trimmed.length,
-      promptPreview: trimmed.length > 120 ? trimmed.slice(0, 120) + "…" : trimmed,
-      attachmentsCount: this.composerAttachments.length,
-      attachmentsBytes: attachBytes,
-      envelopeUsage: null,
-      resultUsage: null,
-      modelId: null,
-      costUsd: null,
-      deltaCount: 0,
-      streamEventCount: 0,
-      assistantEnvCount: 0,
-      maxStreamGapMs: 0,
-      toolUses: [],
-      thinkingCount: 0,
-      thinkingTotalMs: 0,
-      thinkingBlocks: [],
-      envelopeFallback: false,
-      blankTurn: false,
-      firstPaintAt: null,
-      doneAt: null,
-      endKind: null,
-    };
-    this.telemetry.turns.push(turnRecord);
-    tab.currentTurnRecord = turnRecord;
-    // Track for /retry and Up-arrow recall. De-dupe consecutive identicals.
-    if (tab.promptHistory[tab.promptHistory.length - 1] !== trimmed) {
-      tab.promptHistory = [...tab.promptHistory, trimmed].slice(-50);
-    }
-    // User bubble text: when paste-and-go with no text, show an attachment
-    // marker so the bubble isn't blank.
-    const attachCount = this.composerAttachments.length;
-    const bubbleText =
-      trimmed.length > 0
-        ? trimmed
-        : attachCount === 1
-        ? "📎 1 image"
-        : `📎 ${attachCount} images`;
-    // Build the user message blocks — image blocks (one per attachment) first,
-    // then the text block. Order matches the visual stack (thumbs above text)
-    // in MessageBubble's user-side render path.
-    const userBlocks: Block[] = [];
-    for (const a of this.composerAttachments) {
-      userBlocks.push({
-        type: "image",
-        mime: a.mime,
-        dataBase64: a.dataBase64,
-        sizeBytes: a.sizeBytes,
-      });
-    }
-    userBlocks.push({ type: "text", text: bubbleText });
-    tab.messages = [
-      ...tab.messages,
-      { id: crypto.randomUUID(), role: "user", blocks: userBlocks },
-    ];
-    const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [] };
-    tab.messages = [...tab.messages, asst];
-    tab.streamingMsgId = asst.id;
-    // #146: asst placeholder is at the tail of messages; cache its index so
-    // mutateStreaming can index-replace instead of scanning the full array.
-    tab.streamingMsgIdx = tab.messages.length - 1;
-    // Snapshot attachments for this turn + clear the composer so a fast retype
-    // doesn't accidentally re-attach.
-    const turnAttachments = this.composerAttachments.map((a) => ({
-      mime: a.mime,
-      dataBase64: a.dataBase64,
-    }));
-    this.composerAttachments = [];
-    // Phase C: drain pendingCompactionSummary onto THIS turn only.
-    // The new CLI session was minted at compactConversation() but is
-    // empty — this summary is the model's only context for what came
-    // before. Cleared immediately after dispatch; never persists across
-    // turns. If the invoke itself fails the summary is lost (next send
-    // starts cold) — acceptable since the boundary message stays in the
-    // UI for the user to copy out if they need to manually re-seed.
-    const priorSummary = tab.pendingCompactionSummary ?? null;
-    tab.pendingCompactionSummary = null;
-    try {
-      await invoke("assistant_send", {
-        prompt: trimmed,
-        sessionId: tab.cliSessionId,
-        isFirstTurn,
-        model: this.model,
-        attachments: turnAttachments.length > 0 ? turnAttachments : null,
-        dyslexiaMode: accessibility.dyslexiaMode,
-        thinkingEffort: this.thinkingEffort,
-        permissionMode: this.permissionMode,
-        priorContextSummary: priorSummary,
-      });
-    } catch (e) {
-      tab.onError(String(e));
-    }
+    return sendImpl(this, prompt);
   }
 
   /** Stage a binary attachment for the next send. Returns false if the size
@@ -1713,113 +1570,23 @@ class AssistantStore {
     this.drainQueue(tab);
   }
 
-  /** Fire the next queued message on `tab`, if any. Idempotent + guarded so
-   *  it's safe to call from every terminal turn path (onDone / onError /
-   *  session-lost) AND on tab activation — backgrounded completions defer the
-   *  drain (auto-sending into a tab the user isn't looking at is surprising),
-   *  so returning to the tab must re-trigger it or the queue strands forever.
-   *  Bails unless `tab` is the active tab and idle. */
+  /** Fire the next queued message on the tab, if any — see ./assistant/send. */
   private drainQueue(tab: TabState | null) {
-    if (!tab || tab !== this.activeTab || tab.streaming || tab.queue.length === 0 || tab.lastError) return;
-    const [next, ...rest] = tab.queue;
-    tab.queue = rest;
-    // #148: capture the active convo at pop time; if the user switches tabs OR
-    // a new turn starts before the microtask fires, re-queue the head and bail.
-    // The next completion or tab activation re-drains — never a silent strand.
-    const capturedConvoId = this.currentConvoId;
-    queueMicrotask(() => {
-      if (this.currentConvoId !== capturedConvoId || tab.streaming) {
-        if ([...this.tabs.values()].includes(tab)) {
-          tab.queue = [next, ...tab.queue];
-        }
-        return;
-      }
-      this.send(next.text).catch(e => tab.onError(String(e)));
-    });
+    sendDrainQueue(this, tab);
   }
 
-  /** Stop a tab's in-flight stream. Defaults to the focused-pane tab when
-   *  `tabId` is omitted. Pre-clears the tab's streaming flag synchronously
-   *  so any late `done` event for this session is idempotent. Other tabs
-   *  keep streaming. */
+  /** Stop a tab's in-flight stream — see ./assistant/send. */
   async stop(tabId?: string | null) {
-    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab || !tab.streaming) return;
-    const sid = tab.cliSessionId;
-    // #179: flush pacer-buffered text into the message BEFORE clearing
-    // streamingMsgId — otherwise mutateStreaming's early-return drops it.
-    tab.flushPendingText();
-    tab.streaming = false;
-    tab.streamingMsgId = null;
-    tab.streamingMsgIdx = null;
-    tab.deltaCount = 0;
-    tab.envelopeTextBuffer = '';
-    tab.seenToolUseIds.clear();
-    tab.activity = { ...tab.activity, currentLabel: null };
-    // Telemetry finalize as user-stop before the late done event lands.
-    if (tab.currentTurnRecord) {
-      tab.currentTurnRecord.doneAt = Date.now();
-      tab.currentTurnRecord.endKind = "user-stop";
-      tab.currentTurnRecord = null;
-    }
-    this.telemetry.event("turn.stop", { convoId: tab.cliSessionId });
-    try {
-      await invoke("assistant_stop", { sessionId: sid });
-    } catch (e) {
-      console.warn("assistant_stop failed", e);
-    }
+    return sendStop(this, tabId);
   }
 
-  /** Steer the RUNNING turn: inject `text` into the live CLI stdin so the agent
-   *  course-corrects at its next loop step (no restart, no lost work). Unlike
-   *  the queue, this does NOT wait for the turn to finish. Falls back to the
-   *  queue if the turn already ended (or the tab isn't streaming). Defaults to
-   *  the focused-pane tab when `tabId` is omitted. */
+  /** Steer the RUNNING turn via live CLI stdin — see ./assistant/send. */
   async steer(text: string, tabId?: string | null) {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (!tab) return;
-    const enqueue = () => {
-      tab.queue = [...tab.queue, { id: crypto.randomUUID(), text: trimmed }];
-    };
-    // No active turn locally → nothing to steer; queue as a normal follow-up.
-    if (!tab.streaming) {
-      enqueue();
-      return;
-    }
-    const sid = tab.cliSessionId;
-    try {
-      const res = await invoke<string>("assistant_steer", { sessionId: sid, text: trimmed });
-      if (res === "no_active_turn") {
-        // Turn ended between keypress and IPC — don't lose the message.
-        enqueue();
-        return;
-      }
-      this.telemetry.event("turn.steer", { convoId: sid });
-      // Make the steer VISIBLE: drop an inline marker into the streaming
-      // assistant bubble at the point it landed, so the user sees their
-      // interjection in the transcript instead of it vanishing into stdin.
-      tab.messages = tab.messages.map((m) =>
-        m.id === tab.streamingMsgId
-          ? { ...m, blocks: [...m.blocks, { type: "steer", text: trimmed, at: Date.now() }] }
-          : m,
-      );
-      toast.push({
-        severity: "info",
-        title: "Steering",
-        detail: trimmed.length > 60 ? trimmed.slice(0, 60) + "…" : trimmed,
-        timeoutMs: 2500,
-      });
-    } catch (e) {
-      console.warn("assistant_steer failed", e);
-      enqueue();
-    }
+    return sendSteer(this, text, tabId);
   }
 
   removeQueued(id: string, tabId?: string) {
-    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
-    if (tab) tab.queue = tab.queue.filter((q) => q.id !== id);
+    sendRemoveQueued(this, id, tabId);
   }
 
   /** Composer wand: rewrite a rough draft into a clearer prompt. Stateless —
@@ -1888,194 +1655,19 @@ class AssistantStore {
     return compactRun(this, focus, tabId);
   }
 
-  /** Client-side slash commands. Returns true if input was consumed. */
-  private runSlash(input: string): boolean {
-    const [cmd, ...rest] = input.slice(1).split(/\s+/);
-    const arg = rest.join(" ").trim();
-    switch (cmd.toLowerCase()) {
-      case "clear":
-        void this.clearConversation();
-        return true;
-      case "new":
-        void this.newTab();
-        return true;
-      case "history":
-        this.ui.historyOpen = !this.ui.historyOpen;
-        return true;
-      case "stop":
-        void this.stop();
-        return true;
-      case "model": {
-        const v = arg.toLowerCase();
-        if (v === "sonnet" || v === "opus" || v === "haiku") {
-          this.setModel(v);
-          this.lastNotice = `Model switched to ${v}.`;
-        } else {
-          this.lastError = `Unknown model "${arg}". Use sonnet, opus, or haiku.`;
-        }
-        return true;
-      }
-      case "retry":
-        void this.retryLast();
-        return true;
-      case "copy":
-        void this.copyLastAssistant();
-        return true;
-      case "cost":
-        this.lastNotice =
-          this.totalCostUsd != null
-            ? `Session cost: $${this.totalCostUsd.toFixed(4)} USD across ${this.messages.filter((m) => m.role === "assistant").length} turn(s).`
-            : "No cost recorded yet — send a message first.";
-        return true;
-      case "tools":
-        this.lastNotice =
-          "Tools available this turn: " +
-          "Read / Write / Edit (files); Bash (shell, in workspace cwd); " +
-          "Glob (filename patterns); Grep (content search); " +
-          "WebFetch / WebSearch (open web); " +
-          "TodoWrite (multi-step plans → Tasks dock). " +
-          "Rift MCP: read_file / list_dir / grep (workspace-scoped helpers); " +
-          "git_status / git_diff / git_log (and pull/commit/push when trust permits).";
-        return true;
-      case "diag": {
-        const snap = this.telemetry.snapshot();
-        const json = JSON.stringify(snap, null, 2);
-        const sizeKb = Math.round(json.length / 102.4) / 10;
-        navigator.clipboard
-          .writeText(json)
-          .then(() => {
-            this.lastNotice = `Telemetry copied — ${snap.turnCount} turn(s), ${snap.events.length} event(s), ${sizeKb}KB. Paste into a code block here.`;
-          })
-          .catch((e) => { this.lastError = `Clipboard write failed: ${String(e)}`; });
-        return true;
-      }
-      case "diag-clear":
-        this.telemetry.reset();
-        this.lastNotice = "Telemetry buffer cleared — fresh capture starting now.";
-        return true;
-      case "stats": {
-        // Inline-readable session summary — same data as /diag's `summary`
-        // block but rendered as a short notice line so you can pattern-hunt
-        // without dumping JSON. Cheap to fire repeatedly mid-session.
-        const snap = this.telemetry.snapshot();
-        const s = snap.summary;
-        if (s.totalTurns === 0) {
-          this.lastNotice = "No turns captured yet this session — send a message first.";
-          return true;
-        }
-        const slowT = s.slowestTurn ? ` slowest turn #${s.slowestTurn.idx} ${(s.slowestTurn.durationMs / 1000).toFixed(1)}s` : "";
-        const costT = s.costliestTurn ? ` costliest #${s.costliestTurn.idx} $${s.costliestTurn.costUsd.toFixed(3)}` : "";
-        const slowTool = s.slowestTool ? ` slowest tool ${s.slowestTool.name} ${(s.slowestTool.durationMs / 1000).toFixed(1)}s` : "";
-        const stale = s.staleCacheTurns > 0 ? ` ⚠ ${s.staleCacheTurns} stale-cache turn(s)` : "";
-        const tps = s.outputTokensPerSec != null ? `, ${s.outputTokensPerSec} tok/s` : "";
-        this.lastNotice =
-          `${s.totalTurns} turn(s), $${s.totalCostUsd.toFixed(3)}, ` +
-          `avg TTFP ${s.avgTtfpMs ?? "—"}ms, ${s.toolCallTotal} tool call(s)${tps}.` +
-          slowT + costT + slowTool + stale;
-        return true;
-      }
-      case "compact": {
-        // Phase C: full compact action. arg becomes the focus hint.
-        void this.compactConversation(arg || undefined);
-        return true;
-      }
-      case "summarize": {
-        // Compaction Phase B debug — dry-runs the summarize primitive
-        // and renders the result as a notice. No state mutation; the
-        // actual compaction flow lands in Phase C.
-        this.lastNotice = "Summarizing… (cheap model, no state change)";
-        void this.summarizeCurrentSession(arg || undefined).then((res) => {
-          if (!res) return; // error already on lastError
-          const tk = res.inputTokens + res.cacheReadTokens + res.cacheCreateTokens;
-          this.lastNotice =
-            `Summary ($${res.costUsd.toFixed(4)} · ${tk.toLocaleString()} in / ${res.outputTokens.toLocaleString()} out · ${res.model}):\n\n${res.summary}`;
-        });
-        return true;
-      }
-      case "openincli": {
-        const sid = this.currentCliSessionId;
-        const ws = this.workspace.current;
-        if (!sid) {
-          this.lastError = "No active session yet — send a message first.";
-          return true;
-        }
-        const safeWs = ws ? ws.replace(/'/g, "'\\''") : null;
-        const cmd = safeWs ? `cd '${safeWs}' && claude --resume ${sid}` : `claude --resume ${sid}`;
-        navigator.clipboard
-          .writeText(cmd)
-          .then(() => { this.lastNotice = `Copied to clipboard: ${cmd}`; })
-          .catch((e) => { this.lastError = `Clipboard write failed: ${String(e)}`; });
-        return true;
-      }
-      case "help":
-        this.lastNotice =
-          "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
-          "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
-          "/compact summarizes the current session + remints the CLI session id; the next turn carries the summary forward. " +
-          "/summarize dry-runs Phase-B compaction summarize (no state change). " +
-          "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  /** Re-send the most recent user prompt. Drops the prior user+assistant
-   *  pair from the visible history so the retry looks like a redo, not a
-   *  duplicate. Aborts an in-flight stream first. */
+  /** Re-send the most recent user prompt — see ./assistant/send. */
   async retryLast() {
-    // #185: re-entrance guard so a fast double-click only strips one pair.
-    if (this.retrying) return;
-    this.retrying = true;
-    try {
-      const tab = this.activeTab;
-      const last = tab?.promptHistory[tab.promptHistory.length - 1];
-      if (!last || !tab) {
-        this.lastError = "No previous prompt to retry.";
-        return;
-      }
-      if (tab.streaming) {
-        await this.stop();
-      }
-      // Strip the trailing assistant turn (if any) and the matching user turn
-      // so the replayed history doesn't double-include the prompt.
-      const msgs = tab.messages.slice();
-      if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
-      if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
-      tab.messages = msgs;
-      await this.send(last);
-    } finally {
-      this.retrying = false;
-    }
+    return sendRetryLast(this);
   }
 
-  /** Copy the latest assistant message's text content to the clipboard. */
+  /** Copy the latest assistant message's text to the clipboard. */
   async copyLastAssistant() {
-    const last = [...this.messages].reverse().find((m) => m.role === "assistant");
-    if (!last) {
-      this.lastError = "No assistant response to copy.";
-      return;
-    }
-    const text = last.blocks
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim();
-    if (!text) {
-      this.lastError = "Last response had no text content.";
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      this.lastNotice = `Copied ${text.length.toLocaleString()} chars to clipboard.`;
-    } catch (e) {
-      this.lastError = `Clipboard write failed: ${String(e)}`;
-    }
+    return sendCopyLastAssistant(this);
   }
 
   /** Up-arrow recall. Returns the n-th-most-recent prompt, or null. */
   recallPrompt(offsetFromEnd: number): string | null {
-    const idx = this.promptHistory.length - 1 - offsetFromEnd;
-    return idx >= 0 ? this.promptHistory[idx] : null;
+    return sendRecallPrompt(this, offsetFromEnd);
   }
 
   dismissNotice() {
@@ -2100,5 +1692,9 @@ class AssistantStore {
     this.queue = [];
   }
 }
+
+// Type-only export for the M9 send module (and future extractions) — the
+// runtime singleton below stays the only constructed instance.
+export type { AssistantStore };
 
 export const assistant = new AssistantStore();
