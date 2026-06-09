@@ -2,27 +2,31 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 93) — update-flow root cause FIXED + v0.8.12 SHIPPED
+## Session 2026-06-09 (cont. 94) — Claude Fable 5 wired (limited run, until Jun 22)
 
-**User report:** v0.8.11 update "nothing popped up; UI scuffed; couldn't click." **Root cause:** pill `×` had version-permanently written `dismissed-version=0.8.11` to prod localStorage (backend logged "available" 3 launches, ZERO `download_update` invokes ever); scuff = WebView2 backdrop-filter mis-composite class on `.dialog-overlay`/`.dialog-shell`/`.toast`.
+**`claude-fable-5` added front+back** (supersedes cont.93's "don't wire" hold — user override; specs live-confirmed from anthropic.com/claude/fable + platform docs: 1M ctx, 128k out, $10/$50 MTok, adaptive thinking always-on, no fast mode. Docs publish NO sunset — **Jun 22 cutoff is a Rift-side gate per user instruction**, easy to bump if a real date lands).
 
-**FIXED (`feea28f`, svelte-check 0/0 + CDP DOM+pixel verified):** snooze now 24h `{version,until}` JSON (legacy bare-string self-discards; expiry timer mid-session + on launch; `unsnooze()`/`hasUpdate`/`snoozeActive`) · snooze-proof accent dot on settings gear · backdrop-filter stripped from dialog overlay/shell + toasts (opaque) · dialog says "Remind me tomorrow". `.slideover`+`.tip` still carry blur — same class, NOT update-path, flagged only.
+- `types.ts`/`helpers.ts` — ModelSel += fable; `FABLE_SUNSET_MS = Date.UTC(2026,5,23)` + `fableAvailable()`; stored pref self-heals → sonnet post-sunset; modelFamily → opus hue.
+- `Composer.svelte` — Fable 5 top row, accent name + "UNTIL JUN 22" badge (`limited` flag; `.model-badge` tints via `color-mix(in oklab, var(--accent)…)`). Row vanishes after sunset, shortcuts renumber. effort→ultra, fastMode false.
+- `mod.rs` — `FABLE_SUNSET_EPOCH_SECS = 1_782_172_800` (=2026-06-23T00:00Z, verified); `assistant_send` guard AFTER pin resolution → stale pref/pinned session falls back to `opus` (Anthropic route only).
+- `model-prices.json` fable 10/50, cache 12.5/1.0 · HomePage label "Fable 5".
 
-**SHIPPED:** user manually went 0.8.10→0.8.11 (Settings→About, ignores snooze), then **v0.8.12 tagged + CI green** (publish 19:05Z, 4 assets on rift-releases; commits `feea28f`+`1ce83e7`+`905c08c`). Release VALIDATED vpk-idempotency (2nd warm-runner run) + `--no-bundle`. Prod = 0.8.11 (PID-only kills, NEVER by image name).
+**Verified:** svelte-check 0/0 · cargo check green · CDP pixels (picker selected+unselected, pill "Fable 5 · Smart", per-ws key stores `claude-fable-5`, 0 console errors).
 
-## cont.92/91 (same day, earlier) — debug sweep + autonomous sweep
+### RESUME HERE (cont.94)
+- **Ship release w/ Fable** (user queued post-compaction): bump → CHANGELOG → commit → tag `vX.Y.Z` → push --tags.
+- [carried] prod 0.8.11→0.8.12 pill update test awaiting user report · `.slideover`/`.tip` backdrop-filter (fix only on new scuff reports) · perf roadmap (CARGO_INCREMENTAL/opt-level-2/pre-bake/--noPortable) · drag-reorder verify · `RELEASES_TOKEN` non-ASCII re-set.
 
-cont.92: 18-agent Workflow sweep, 13 findings → 3 confirmed + fixed (`b78f2c5` vpk-install idempotent · `7cc2ce2` stt lock-across-await · `d0821fd` composer enhance race); all pushed, CI green. cont.91: `dirs_home` dedupe · Actions @v6 bump · Settings hero polish · ISSUES prune. Detail: `git log -- docs/HANDOFF.md`.
+## cont.93 (same day) — update-flow root cause FIXED + v0.8.12 SHIPPED
 
-### RESUME HERE (cont.93)
-- **End-to-end pill update test:** user's prod 0.8.11 → pill should show v0.8.12 on next launch (old snooze was for 0.8.11, doesn't gate it). Awaiting user report — if anything scuffs/fails, get the exact surface.
-- **0.8.12 onward:** snooze = 24h `{version,until}` JSON; gear dot = snooze-proof affordance; dialog/toasts blur-free. `.slideover` + `.tip` (app.css) still carry backdrop-filter — same WebView2 bug class, not update-path, fix if scuff reports continue.
-- **MODEL SWAP half-unblocked:** `claude-fable-5` live-verified. DO NOT wire until pricing + ctx + effort tiers publish. Rift stays on `opus` alias.
-- **Perf roadmap (NOT applied):** runner `CARGO_INCREMENTAL=1` (vs sccache); `opt-level=2`; pre-bake gh+vpk; vpk `--noPortable`.
-- [carried] drag-reorder verify; `RELEASES_TOKEN` non-ASCII (strip works; re-set cleanly).
+Pill `×` had version-permanently silenced updates (`dismissed-version` in prod localStorage); scuff = WebView2 backdrop-filter mis-composite. Fixed (`feea28f`): 24h `{version,until}` snooze JSON (legacy string self-discards) · snooze-proof gear dot · blur stripped from dialog/toasts. **v0.8.12 tagged + CI green** (4 assets; validated vpk-idempotency + `--no-bundle`). Prod = 0.8.11 (PID-only kills, NEVER by image name).
+
+## cont.92/91 (same day, earlier) — sweeps
+
+cont.92: 18-agent Workflow sweep → 3 fixed (`b78f2c5` vpk idempotent · `7cc2ce2` stt lock · `d0821fd` enhance race), pushed, CI green. cont.91: `dirs_home` dedupe · Actions @v6 · Settings hero polish · ISSUES prune.
 
 ## Prior arcs — detail in `git log`
-cont.90 v0.8.11 SHIPPED — first real tag-driven release on VM 100 `rift-runner` (3 provisioning fixes: PS5.1, gh CLI, gh-zip layout) + `--no-bundle` perf fix. cont.88/89 Settings + Harness redesigns → in v0.8.11. cont.88 self-hosted runner LIVE (`docs/design/self-hosted-runner.md`): **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.87 v0.8.10. cont.72 v0.7.0 + edit-swarm.
+cont.90 v0.8.11 SHIPPED — first tag-driven release on VM 100 `rift-runner`. cont.88 self-hosted runner LIVE (`docs/design/self-hosted-runner.md`): **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.88/89 Settings+Harness redesigns. cont.72 v0.7.0 + edit-swarm.
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step**; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.
