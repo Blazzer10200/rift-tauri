@@ -21,6 +21,8 @@ Already wired:
 `scripts/cdp/c.sh` — thin curl wrapper. Examples:
 
 ```bash
+bash scripts/cdp/c.sh look                                     # VERIFY PRIMITIVE: state+errors+shot, path on last line
+bash scripts/cdp/c.sh look ".chat"                             # same, screenshot clipped to a selector
 bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs)
 bash scripts/cdp/c.sh state                                    # assistant snapshot (incl. workspaceActiveId)
 bash scripts/cdp/c.sh page                                     # generic "where am I" (every workspace)
@@ -40,6 +42,23 @@ bash scripts/cdp/c.sh shutdown                                 # stop the server
 ```
 
 `shot` prints just the path on stdout — `f=$(bash scripts/cdp/c.sh shot)` then `Read` $f.
+
+## /look — the verify primitive (2026-06-09, the fast path)
+
+The default for "did my change work." ONE server call folds together what used to be a 5-turn dance (`wait` → `shot` → `Read` → `state` → `console error`): assistant/page state + console **errors** + a screenshot, all in one round-trip (state and shot run in parallel server-side). It prints a human summary first, then the screenshot path on the **last line**, so the whole loop is two turns:
+
+```bash
+bash scripts/cdp/c.sh look          # -> [look] /…  [errors] 0  <path-on-last-line>
+# Read <that path>                  # pixels render inline
+```
+
+```
+[look] / · ws=chat · model=Sonnet 4.6 · bubbles=2 · streaming=false
+[errors] 0
+/c/AI Workflow/projects/rift-tauri/scripts/cdp/.tmp/snap-2026-...-3.jpeg
+```
+
+`look ".chat"` clips the shot to a selector. `look` is also a `/batch` op and a `POST /look` route (`{selector?, level?, noShot?}` — `noShot:true` skips the screenshot for a fast state+errors peek). Encoding is `jq` now, not a per-call `node -e` spawn (~37ms vs ~76ms cold), so every `eval`/`type`/`click`/`shot` is a touch snappier too.
 
 ## /state — the swiss army snapshot
 
