@@ -11,8 +11,9 @@
 - **Probed + REJECTED:** opt-level=1 release profile. Measured root-crate rebuild (warm deps, the per-release cost): **opt-3=28.6s · opt-1/cu256=32.2s · opt-1/cu16=30.1s**. The build is **LINK-bound, not opt-bound** — lowering opt-level buys nothing, cu=256 hurts (more objects to link). Reverted.
 
 ### RESUME HERE (cont.87) — make releases fast
-- **REAL lever = the Windows linker.** MSVC `link.exe` dominates the rift-crate rebuild. Switch to **`rust-lld`** via `.cargo/config.toml`: `[target.x86_64-pc-windows-msvc] linker="rust-lld"` (bundled w/ rustup; typically 2-5× faster link). MUST measure locally (touch `src/lib.rs`→`cargo build --release` warm) AND confirm `lld-link` works on `windows-latest` CI before shipping. This is THE follow-up.
-- Higher-ceiling: self-hosted Windows runner on Proxmox w/ persistent warm `target/` (near-incremental builds, kills cache up/download). Or GitHub 8-core larger runner (paid, one-line `runs-on:`).
+- **GitHub Actions BILLING wall hit (2026-06-09)** — jobs since ~12:43 fail in 2s: "payments have failed / spending limit". Windows runners bill 2× + ~30-40min/build burned the pool. USER must clear it (Settings→Billing) to unblock current GitHub-hosted runs. v0.8.10 published BEFORE the wall — release is fine.
+- **THE fix = self-hosted Windows runner on Proxmox `blazzer-labs`** (free + faster, no metered minutes). Full researched plan in **`docs/design/self-hosted-runner.md`**: WS2022 Core VM @ 8GB · persistent runner + warm `target/` + sccache · cross-compile is a dead end (Velopack vpk needs Windows). Next-session build task.
+- **rust-lld linker** (stacks on the runner): release build is LINK-bound (opt-level a no-op, measured); `.cargo/config.toml` `[target.x86_64-pc-windows-msvc] linker="rust-lld"` attacks link directly. Measure on the VM.
 - **`RELEASES_TOKEN` still dirty at source** — re-set: `gh secret set RELEASES_TOKEN --repo Blazzer10200/rift-tauri`.
 - **Node 20 action deprecation — June 16** — bump `actions/*@v4` (checkout/setup-node/setup-dotnet) majors before then.
 - Carried: drag-reorder manual-verify; dedupe `dirs_home` (`assistant/mod.rs:1101` vs `state::paths`); Whisper-in-release; ISSUES #100 hero-pill hardcode (`SettingsPage.svelte:318`).
