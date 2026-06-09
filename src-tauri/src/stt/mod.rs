@@ -348,23 +348,28 @@ pub async fn stt_start_recording(
         .ok_or_else(|| "model path missing".to_string())?;
 
     // Load or reuse engine. Reload only when the requested model differs.
+    // Load happens OUTSIDE the cache lock so stt_stop_recording isn't blocked
+    // for the whole multi-second model load.
     let engine = {
-        let mut slot = cache.0.lock().await;
-        let need_reload = match slot.as_ref() {
-            Some(e) => e.model_id != model_id,
-            None => true,
+        let cached = {
+            let slot = cache.0.lock().await;
+            slot.as_ref().filter(|e| e.model_id == model_id).cloned()
         };
-        if need_reload {
-            emit_state(&app, "loading_model", Some(model_id.clone()));
-            let model_id_owned = model_id.clone();
-            let loaded = tokio::task::spawn_blocking(move || {
-                whisper::WhisperEngine::load(&model_path, &model_id_owned)
-            })
-            .await
-            .map_err(|e| format!("model load task join: {e}"))??;
-            *slot = Some(loaded);
+        match cached {
+            Some(e) => e,
+            None => {
+                emit_state(&app, "loading_model", Some(model_id.clone()));
+                let model_id_owned = model_id.clone();
+                let loaded = tokio::task::spawn_blocking(move || {
+                    whisper::WhisperEngine::load(&model_path, &model_id_owned)
+                })
+                .await
+                .map_err(|e| format!("model load task join: {e}"))??;
+                let engine = loaded.clone();
+                *cache.0.lock().await = Some(loaded);
+                engine
+            }
         }
-        slot.as_ref().expect("engine just loaded").clone()
     };
 
     // Start mic capture (off the tokio runtime — cpal::Stream is !Send).
