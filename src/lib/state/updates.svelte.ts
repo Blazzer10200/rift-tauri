@@ -15,12 +15,21 @@
 //                  ↘ uptodate                ↘ (error → back to available)
 //                  ↘ error
 //
+// The "an update is available" affordance is a dedicated, stable pill
+// (`UpdatePill.svelte`, driven by `pillVisible`) — NOT a toast. A sticky toast
+// in the shared stack was a moving target: it sat at the top of an
+// upward-growing, bottom-anchored, FLIP-animated stack, so every other toast
+// that appeared/expired slid it out from under the cursor → ~50/50 misclicks
+// (the long-standing "update button won't click" bug). The pill is a singleton
+// fixed element: it never reflows, so the click always lands. Toasts are still
+// used for the transient install-FAILURE path, which can't move-target because
+// it forces the dialog open at the same time (pill hidden).
+//
 // `dismissedVersion` is persisted in localStorage so a snoozed version doesn't
-// pop the toast again next launch; a NEWER version supersedes.
+// pop the pill again next launch; a NEWER version supersedes.
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { Sparkles } from "lucide-svelte";
 import { toast } from "./toast.svelte";
 
 /** Public release repo — used only to synthesize the human "View release on
@@ -69,14 +78,11 @@ class UpdateStore {
   /** Download progress 0..100, streamed from Velopack via `update-progress`. */
   progress = $state(0);
   dialogOpen = $state(false);
-  toastVisible = $state(false);
   dismissedVersion = $state<string | null>(loadDismissed());
   /** Error from the most recent `download()`/apply attempt. Distinct from
    *  `error` (feed/check failures) — keeps `state` on "available" so the user
    *  can retry the Download button or grab it manually from GitHub. */
   downloadError = $state("");
-  /** Active toast id when an update notification is on screen. */
-  private toastId: number | null = null;
   /** Periodic re-check timer — Rift can stay open for days, so launch-only
    *  checking would never surface a release shipped mid-session. */
   private autoTimer: ReturnType<typeof setInterval> | null = null;
@@ -93,11 +99,14 @@ class UpdateStore {
     return /properly installed|reinstall/i.test(this.error);
   }
 
-  /** True when there's an unsnoozed update waiting for user action. */
+  /** True when there's an unsnoozed update waiting for user action — drives the
+   *  stable update pill. Hidden once the dialog is open (the dialog IS the
+   *  detail view) or the user has snoozed this exact version. */
   get pillVisible(): boolean {
     return (
       this.state === "available" &&
-      !this.toastVisible &&
+      !!this.info &&
+      this.info.version !== this.dismissedVersion &&
       !this.dialogOpen
     );
   }
@@ -173,7 +182,6 @@ class UpdateStore {
       // dialog open so the error card is visible, AND raise a sticky toast with
       // the always-available manual fallback (grab it from GitHub directly).
       this.dialogOpen = true;
-      this.clearToast();
       toast.push({
         severity: "danger",
         title: "Update couldn't install",
@@ -214,69 +222,22 @@ class UpdateStore {
     }
   }
 
-  /** Snooze the current available version — toast + pill stay quiet until a
-   *  newer version ships. Closes the dialog if open. */
+  /** Snooze the current available version — the pill stays quiet until a newer
+   *  version ships. Closes the dialog if open. */
   snooze() {
     if (this.info?.version) {
       this.dismissedVersion = this.info.version;
       saveDismissed(this.info.version);
     }
-    this.clearToast();
     this.dialogOpen = false;
   }
 
-  dismissToast() { this.clearToast(); }
-
-  private clearToast() {
-    if (this.toastId != null) {
-      const id = this.toastId;
-      this.toastId = null;
-      toast.dismiss(id, /* callHandler */ false);
-    }
-    this.toastVisible = false;
-  }
-
-  private showToast() {
-    if (!this.info) return;
-    if (this.toastId != null) return;
-    this.toastVisible = true;
-    const target = this.info.version;
-    const cur = this.currentVersion;
-    const size = this.sizeLabel ? ` · ${this.sizeLabel}` : "";
-    this.toastId = toast.push({
-      severity: "info",
-      icon: Sparkles,
-      title: "Update available",
-      detail: `v${cur} → v${target}${size}`,
-      mono: true,
-      sticky: true,
-      action: { label: "View", onClick: () => this.open() },
-      onDismiss: () => {
-        // Close button → snooze this version (matches prior UpdateToast × behavior).
-        this.toastId = null;
-        this.toastVisible = false;
-        this.snooze();
-      },
-    });
-  }
-
-  /** Called once on app launch from AppShell.onMount. Pops the toast if a
-   *  newer release exists and the user hasn't snoozed that exact version. */
+  /** Called once on app launch from AppShell.onMount. The pill surfaces itself
+   *  reactively via `pillVisible` once `refresh()` resolves — no imperative
+   *  notification needed. */
   async checkOnLaunch() {
     await this.refresh();
-    this.maybeToast();
     this.startAutoCheck();
-  }
-
-  /** Pop the toast iff a newer-than-dismissed release is available. */
-  private maybeToast() {
-    if (
-      this.state === "available" &&
-      this.info &&
-      this.info.version !== this.dismissedVersion
-    ) {
-      this.showToast();
-    }
   }
 
   private startAutoCheck() {
@@ -288,10 +249,9 @@ class UpdateStore {
   private async autoTick() {
     if (this.state === "downloading" || this.state === "installing" || this.dialogOpen) return;
     await this.refresh();
-    this.maybeToast();
   }
 
-  open()  { this.dialogOpen = true; this.clearToast(); }
+  open()  { this.dialogOpen = true; }
   close() { this.dialogOpen = false; }
 
   /** Clear the periodic re-check timer (HMR teardown / app teardown). */

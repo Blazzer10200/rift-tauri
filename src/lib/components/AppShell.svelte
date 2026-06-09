@@ -3,6 +3,7 @@
   import CommandPalette from "./dialogs/CommandPalette.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import ToastHost from "./ToastHost.svelte";
+  import UpdatePill from "./UpdatePill.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import ChatTabsBar from "./shell/ChatTabsBar.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
@@ -153,6 +154,7 @@
 
   <UpdateDialog />
 
+  <UpdatePill />
 
   <ToastHost />
 
