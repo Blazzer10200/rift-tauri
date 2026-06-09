@@ -2,24 +2,25 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 85) — Committed all WIP + standalone hardening
+## Session 2026-06-09 (cont. 86) — First tag-driven CI release SHIPPED (v0.8.9)
 
-**Tree was multi-arc + entangled in shared files → committed as 4 logical groups (NOT one sweep):** `1810c2e` chore housekeeping · `8076bc7` ci release-workflow+test-harness (cont.84) · `dbb3c31` backend tests (cont.80) · `2c02632` feat assistant-UX (cont.78 Bento + cont.82 Rail/nonce + cont.83 steer/queue + per-workspace fix) + standalone hardening. Tree clean.
+**The CI tag-push pipeline is now PROVEN end-to-end.** `v0.8.9` is published in `rift-releases` (Setup.exe + full.nupkg + releases.win.json + RELEASES; portable dropped). First release ever produced by Actions, not a hand-run `release.ps1`.
 
-**Done:**
-1. **cont.83 steer/queue VERIFIED live (CDP)** — steer marker renders, Pending Rail send-now/edit/rail-Steer-flash/queue-drain all work, 0 console errors. Drag-reorder NOT CDP-driveable → manual confirm pending.
-2. **Per-workspace model pollution FIXED** (`helpers.ts` `saveModel`/`saveEffort`) — per-workspace save writes ONLY `base::<root>`, never clobbers the global baseline. Verified: pinning exfil-v1→Opus wrote only the `::root` key.
-3. **Standalone hardening** — audit (Explore agent) then verified each finding. **Built:** `environment_check` cmd (git/node/npm/cargo/code) + `environment.svelte.ts` store → Settings→About→**Local tools** card (pixel-verified Installed/Not-found); gate "Open in VS Code" on `code` (F3); clickable onboarding install link (F5); immediate OAuth notice (F12); `minWidth` 1280→1100 (F10).
-4. **DEBUNKED agent findings** (verify-before-act): F1 (Tauri 2 auto-bootstraps WebView2), F7 (Whisper already gated via `stt.backendAvailable`), F12-orig (3-min timeout already existed).
+**Two real bugs the test exposed + fixed (both in `release.ps1`):**
+1. **Dirty `RELEASES_TOKEN` secret** — a non-ASCII char (BOM/zero-width/smart-quote from paste) in the PAT survived `.Trim()` → Octokit threw `Request headers must contain only ASCII characters` at `vpk upload`, AND silently broke `gh` CLI auth (which masked the "already exists" preflight + no-op'd the portable-drop). **Fix:** strip token to printable ASCII `[^\x21-\x7E]` ONCE up-front (commit `a4fbbce`), shared by both `gh` (GH_TOKEN) and `vpk`. Strip fired + upload succeeded → junk was leading/trailing.
+2. **Targeted an already-shipped version** — v0.8.8 was already live in `rift-releases` (separate repo; source-repo had no tag, which misled me). **Fix:** bumped to v0.8.9.
+- Also added `timeout-minutes: 40` to `release.yml` so a genuine hang fails loud (was 6h default).
 
-### RESUME HERE (cont.85)
-- **First CI release still UNtested** — ship via `v*` tag-push, watch Actions publish to rift-releases (`RELEASES_TOKEN` secret in place).
-- **NOT pixel-verified:** drag-reorder (manual), F10 `minWidth` 1100 (needs app restart), F12 notice (needs real OAuth).
-- **Optional follow-ups:** surface git/npm/cargo inline at swarm trigger (deeper F2); dedupe duplicate `dirs_home` (`assistant/mod.rs:1101` vs `state::paths`); decide whether to ship Whisper in release; ISSUES #100 hero-pill hardcode (`SettingsPage.svelte:318`) — needs `updates`-store wiring.
-- Dev server LEFT RUNNING. Local = Win PowerShell 5.1 (no `pwsh`).
+**Timing reality (for next time):** cold Tauri release build = ~18 min in the Release step on `windows-latest`, cache or not (the rift crate's own opt+link dominates, recompiles every version bump). NOT a hang — felt long but normal.
+
+### RESUME HERE (cont.86)
+- **`RELEASES_TOKEN` secret is still dirty at source** — the strip fix self-heals it, but re-set the secret cleanly (`gh secret set RELEASES_TOKEN --repo Blazzer10200/rift-tauri`) to kill the root cause + the warning.
+- **Node 20 action deprecation** — `actions/*@v4` forced to Node 24 on **June 16**; bump action majors before then.
+- Carried from cont.85: drag-reorder manual-verify pending; dedupe `dirs_home` (`assistant/mod.rs:1101` vs `state::paths`); decide Whisper-in-release; ISSUES #100 hero-pill hardcode (`SettingsPage.svelte:318`).
+- Local = Win PowerShell 5.1 (no `pwsh`).
 
 ## Prior arcs — detail in `git log`
-cont.84 tag-driven CI + T9 update-test harness (RESOLVED). cont.83 steer/queue. cont.82 MCP-config nonce + Rail v1. cont.79 v0.8.3→v0.8.8 updater. cont.72 v0.7.0 + edit-swarm.
+cont.85 committed all WIP (4 logical groups) + standalone hardening (env_check cmd + Local-tools card, per-workspace model fix). cont.84 tag-driven CI scaffolding. cont.83 steer/queue (CDP-verified). cont.82 MCP-nonce + Rail v1. cont.72 v0.7.0 + edit-swarm.
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step** before working; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.
