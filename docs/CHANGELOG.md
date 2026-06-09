@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.8.9 — 2026-06-09 — chore: first tag-driven CI release
+
+> **Why.** The tag-push CI pipeline (`.github/workflows/release.yml` → `release.ps1 -Ci`) had never produced a release — every prior version was packed + published by hand on a dev machine. This is the first version shipped end-to-end by Actions: tag push → build → `vpk pack` → publish to `rift-releases`. No functional code change.
+
+> **Fix folded in.** The CI upload was choking on `Request headers must contain only ASCII characters` — a stray non-ASCII char in the `RELEASES_TOKEN` secret survived `.Trim()` and corrupted the `Authorization` header. `release.ps1` now strips the token to printable ASCII before use and warns when it does.
+
+**What's new.** Version bump only (0.8.8 → 0.8.9) + the release-script token hardening.
+
+**Verify.** `cargo check` 0/0 · `npm run check` 0/0.
+
 ## v0.8.8 — 2026-06-08 — chore: updater end-to-end test (post toast fix)
 
 > **Why.** v0.8.7 made the update toast clickable again (z-index fix). This clean version-only bump lets a client on v0.8.7 finally run the whole loop — clickable toast → Download → apply → relaunch — against the live feed. No functional code change.
