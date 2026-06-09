@@ -13,9 +13,9 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
-| #21 | Test coverage thin after the pure-assistant rip | T1 | ✅ resolved in-tree |
-| Auth-Rec | In-app sign-in recovery for 401 failures | T2 | ✅ resolved in-tree |
+| Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
 | Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
+| Rail-v2 | Pending rail v2 — steer chips + mode toggle | T3 | 🚧 open |
 | Permission | Allow/Deny round-trip bar | T2 | 🧪 live-verify |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
 | #20 | Hot files over the 2000-line split threshold | T3 | 🚧 open |
@@ -29,40 +29,17 @@
 
 ## 🚧 Open issues
 
-### Tier 1 — ship-blocker / data-safety
-
-#### 21. Test coverage — thin after the pure-assistant rip (✅ resolved in-tree, cont.76)
-
-- **Where (re-measured 2026-06-07):** Rust lib suite now **47 tests** (was ~9). Added 2026-06-07 (`756c95b`, `6d3efc2`): 12 `git_local` integration tests (real `git` against throwaway temp repos — status/log/diff/commit + force-push/dirty-pull gates), 14 `mcp_server` tests (was **zero** — `resolve_under_roots` containment, read_file/list_dir/grep incl. SKIP_DIRS+binary+glob, `glob_to_regex`, `trust_rank`), 4 `mod.rs` pure-validator tests (semver/trust/perm-mode/compression). Plus the pre-existing `stt/*`, `swarm`, `usage::pricing` tests + 1 vitest file (`assistant.test.ts`).
-- **RESOLVED in-tree 2026-06-08 (cont.76) — `assistant.playback.test.ts`, 24 tests.** Conversation-playback harness covering both halves the rip left bare:
-  - **Stream pump** — reuses the real `TabState.beginTurn()` + drives the real `onStream`/`onDone`/`onError` with recorded NDJSON frames (the exact wire shapes the backend forwards verbatim). rAF is backed by a pumped queue so text paints between frames like real animation frames — inter-frame block ordering is faithful. Covers text-delta coalescing, non-JSON dribble fallback, tool_use→tool_result lifecycle (incl. error + array-content flatten + id de-dupe), thinking blocks, envelope-vs-result usage split + cost + model attribution, onDone finalization (success/blank/envelope-fallback/tool-only/no-op), onError (placeholder drop vs keep), and a full system→think→text→tool→text→result replay.
-  - **Send/queue/steer orchestrator** — drives the real `send()` entry point with a mocked `invoke`: turn-init (user+assistant messages, turn record, backend args), the auth chokepoint (red pill → no turn + notice), empty-prompt drop, queue-while-streaming + drain-on-completion (incl. the `lastError`-blocks-drain rule a blank turn trips), and `steer()` (live-inject while streaming / queue fallback when idle / re-queue on `no_active_turn`).
-- **Suite now 51 vitest tests** (was 27). The Rust per-turn reader in `assistant/mod.rs` is a verbatim line-forwarder (no parse/accumulate logic) — deliberately not given its own harness; all turn logic lives in the store, which is now covered. Block stays until `/git-ship` so `git log` keeps it.
-- **cont.80 backend coverage (uncommitted, additive):** Rust lib suite **60 → 95** (+35). New `#[cfg(test)]` modules: `permission` (oneshot registry, 7), `usage::store` (schema/upsert idempotency, 4), `usage::mod` (`rows_from_snapshot` parse + fallback chains, 8), `session_log` (path-traversal id guard, 4), `secrets` (empty-value guard, 1), `usage::insights` (probe thresholds, 5), `usage::aggregate` (rollups, 6). To test the cost-cockpit rollups (previously zero coverage), extracted 6 behavior-preserving `&Connection` helpers in `aggregate.rs` — `#[tauri::command]` signatures + IPC unchanged. Clippy `--all-targets` driven to 0 actionable warnings. Not committed — review/commit independently of the cont.78/79 frontend WIP.
-
 ### Tier 2 — code-complete, needs live-verify
 
-#### Auth-Rec — in-app sign-in recovery for 401 failures (✅ resolved in-tree, cont.74)
+#### Auth-Rec — in-app sign-in recovery for 401 failures (🧪 live-verify)
 
-- **Symptom (from a collaborator's screenshot 2026-06-08):** a 401 banner that dead-ended at "open a terminal and run `claude login`." Root cause: `claude auth status` reports `loggedIn:true` for a stale OAuth token the API later rejects, so the send-gate ([assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) ~1995) passes but the turn 401s.
-- **Fix (`9c468a4`+`2d72af8`):** backend `assistant_open_login(console)` spawns `<active claude> auth login` in its own console (creds land in the CLI's shared store → real fix, not just UI); `startLogin()` polls the probe then clears; `recheckAuth()` clears on Re-check; [AssistantPane.svelte](../src/lib/components/assistant/AssistantPane.svelte) renders an actionable banner — [Sign in] (login 401) / [Open Settings] (key 401) / [Re-check]. CDP-verified all states + nav (not the live login spawn).
-- **Remaining:** confirm an end-to-end real sign-in on a genuinely-logged-out machine (the dev box stays authed, so the spawn path itself is compile/registration-verified only). **Strategic follow-ups** (not built): proactive re-probe before first send; auto-prefer an authed install when multiple exist; collapse the scattered 401 string-matching into one `AuthError` enum + DiagBus telemetry so failure frequency is measurable.
+- **Status:** shipped in v0.8.9+ (`9c468a4`+`2d72af8`) — `assistant_open_login(console)` spawn + actionable 401 banner ([Sign in]/[Open Settings]/[Re-check]). CDP-verified all banner states; the live login spawn itself is compile/registration-verified only.
+- **Remaining:** confirm an end-to-end real sign-in on a genuinely-logged-out machine (dev box stays authed). **Strategic follow-ups** (not built): proactive re-probe before first send; auto-prefer an authed install when multiple exist; collapse scattered 401 string-matching into one `AuthError` enum + DiagBus telemetry.
 
 #### Steer — mid-turn redirect on a tool-using turn
 
 - **Status:** mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`).
 - **Remaining:** confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
-
-#### Queue — MCP-config drain race (✅ fixed in-tree, cont.82)
-
-- **Symptom:** queuing a message then letting the turn finish popped "claude exited with 1 — Invalid MCP configuration: MCP config file not found: `mcp-config-<sid>.json`" — "every time I queue" (intermittent in practice; it's a race).
-- **Root cause:** `write_mcp_config` keyed the per-turn temp config by `session_id`, so a queued msg draining into a same-session `--resume` rewrote the SAME filename the OUTGOING turn's `McpConfigGuard` (Drop deletes the file, fires up to 5s post-`result` on `child.wait()`) then deleted out from under the incoming spawn → claude2 read `--mcp-config`, found nothing.
-- **Fix (`assistant/mod.rs`):** monotonic per-turn nonce → `mcp-config-<sid>-<n>.json` (`MCP_CFG_SEQ: AtomicU64` ~1196; filename ~1227). Guard deletes only its returned path; `RIFT_SESSION_ID` env stays the real sid (ask-user pairing). Isolated `cargo check` 0/0; live dev log confirmed `-0` suffix + clean turn (TTFT 985ms, no error). **Not committed** — review/commit w/ the Pending Rail.
-
-#### Pending Rail v1 — queue UX (✅ shipped in-tree, cont.82); v2 OPEN
-
-- **v1 (done, frontend):** flat `.queue` strip (`Composer.svelte:986`) → ChatGPT-style rail fused to the composer top lip — accent border, "N queued" caption, chips w/ inline edit (pencil) + remove + Clear, spring-up entry + one-time accent sweep + downward drain anim, `prefers-reduced-motion` guarded. svelte-check 0/0, CDP-verified. Design: `docs/design/steer-and-queue.md` §6.
-- **v2 (open):** steer chips + per-chip steer/queue mode toggle + pulse-on-inject — unifies the three-tier surface (steer-and-queue.md §6 #1). Makes steer discoverable (currently keyboard-only Alt+Enter).
 
 #### Permission — Allow/Deny round-trip bar
 
@@ -70,6 +47,10 @@
 - **Remaining:** live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
 
 ### Tier 3 — strategic / longer-term
+
+#### Rail-v2 — pending rail v2: steer chips + mode toggle (🚧 open)
+
+- **Scope:** steer chips + per-chip steer/queue mode toggle + pulse-on-inject — unifies the three-tier surface ([steer-and-queue.md](design/steer-and-queue.md) §6 #1). Makes steer discoverable (currently keyboard-only Alt+Enter). v1 rail shipped in v0.8.11.
 
 #### 4. UI/UX consistency + navigability sweep (app-wide)
 
@@ -79,9 +60,9 @@
 
 #### 20. Hot files exceeding the 2000-line agent-split threshold
 
-- **Where:** per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Open targets (re-measured 2026-06-04):
-  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — **~3331L (worst)**: Claude CLI spawn + auth + workspace + config + per-turn stream. Next backend split candidate.
-  - [src/lib/state/assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) — ~2479L (M0-M7 carved from 3356L; M8/M9 open).
+- **Where:** per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Open targets (re-measured 2026-06-09):
+  - [src-tauri/src/assistant/mod.rs](../src-tauri/src/assistant/mod.rs) — **4331L (worst)**: Claude CLI spawn + auth + workspace + config + per-turn stream. Next backend split candidate.
+  - [src/lib/state/assistant.svelte.ts](../src/lib/state/assistant.svelte.ts) — 2709L (M0-M7 carved from 3356L; M8/M9 open).
 - **Symptom:** targeted edits become brittle, LSP slows, agents bail mid-emit on audit-shaped prompts.
 - **Fix sketch:** `assistant.svelte.ts` next — design brief in [docs/design/assistant-svelte-split.md](design/assistant-svelte-split.md) (9-module extraction, ranked by blast radius). Then continue `assistant/mod.rs` extraction.
 - **Status:** M0-M7 SHIPPED (`assistant.svelte.ts` 3356L → ~2479L). M8 (streaming pump) + M9 (send orchestrator) open — the two highest-blast-radius extractions. **Both now have their regression net** (`assistant.playback.test.ts`, 2026-06-08, see #21): the stream pump AND the send/queue/steer orchestrator are covered end-to-end, so either extraction can proceed safely.
