@@ -43,10 +43,23 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
 
-# In CI, gh + vpk authenticate against rift-releases via the passed PAT. Export
-# it as GH_TOKEN so the `gh release view`/`delete-asset` preflight calls below
-# pick it up without a separate `gh auth login`.
-if ($Token) { $env:GH_TOKEN = $Token }
+# In CI, gh + vpk authenticate against rift-releases via the passed PAT. A GitHub
+# PAT is pure printable ASCII; a stray non-ASCII/control char (BOM, zero-width
+# space, NBSP, smart-quote) pasted into the RELEASES_TOKEN secret survives .Trim()
+# and (a) makes Octokit throw "Request headers must contain only ASCII characters"
+# at vpk upload AND (b) silently breaks `gh` CLI auth -- which masks the "already
+# exists" preflight and no-ops the portable-asset drop (both seen on the v0.8.8
+# ship). Strip to printable ASCII ONCE here so EVERY downstream auth path (gh +
+# vpk) is clean. Export as GH_TOKEN so the `gh release view`/`delete-asset` calls
+# below pick it up without a separate `gh auth login`.
+if ($Token) {
+    $clean = ($Token -replace '[^\x21-\x7E]', '')
+    if ($clean.Length -ne $Token.Length) {
+        Write-Host "  WARNING: stripped $($Token.Length - $clean.Length) non-ASCII/whitespace char(s) from RELEASES_TOKEN (copy-paste artifact) -- re-set the secret cleanly." -ForegroundColor Yellow
+    }
+    $Token = $clean
+    $env:GH_TOKEN = $Token
+}
 
 Write-Host '=== Rift release pipeline (Velopack) ===' -ForegroundColor Cyan
 
@@ -259,18 +272,10 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
 # In CI, -Token carries the rift-releases PAT; locally, fall back to the gh
 # session token.
-$rawToken = if ($Token) { $Token } else { (gh auth token) }
-if ($null -eq $rawToken) { $rawToken = '' }
-# A GitHub PAT is pure printable ASCII. A stray non-ASCII/control char (BOM,
-# zero-width space, NBSP, smart-quote) pasted into the RELEASES_TOKEN secret
-# survives .Trim() and makes Octokit throw "Request headers must contain only
-# ASCII characters" at upload (v0.8.8 ship). Strip to printable ASCII + warn.
-$ghToken = ($rawToken -replace '[^\x21-\x7E]', '')
+# $Token was already stripped to printable ASCII up top (shared with GH_TOKEN);
+# locally, fall back to the gh session token.
+$ghToken = if ($Token) { $Token } else { (gh auth token).Trim() }
 if (-not $ghToken) { throw 'no GitHub token -- pass -Token <pat> (CI) or run `gh auth login` (local)' }
-$stripped = $rawToken.Length - $ghToken.Length
-if ($stripped -gt 0) {
-    Write-Host "  WARNING: stripped $stripped non-ASCII/whitespace char(s) from the token -- re-set the RELEASES_TOKEN secret cleanly if upload still fails (likely a copy-paste artifact)." -ForegroundColor Yellow
-}
 
 $uploadArgs = @(
     'upload', 'github',
