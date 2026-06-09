@@ -2,6 +2,19 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-09 (cont. 95) — backend security review + fixes
+
+Full `src-tauri/src/` defensive review (5 parallel subsystem finders → adversarial false-positive verify). **1 real bug + 6 hardening fixes in-tree, `cargo check` green (EXIT=0, 0 warn). Full block: ISSUES.md → SEC-1.**
+
+- **T1 — swarm worktree escape** (`swarm/mod.rs`): unvalidated `Finding.file` from `swarm_run` IPC reached git ops + a `bypassPermissions` edit agent w/ `current_dir(wt)` → `../`/absolute path escaped the sandbox. Fix: `validate_rel_path()` (rejects absolute/drive-rel/`..`/newlines) before dispatch.
+- **T4:** `about:`→exact `about:blank` + `read_page` uses trusted `wv.url()` (`browser/mod.rs`) · STT re-verifies SHA256 of pre-existing model file (`model_manager.rs`) · SSH `StrictHostKeyChecking=yes` (`git_local.rs`) · `trust_level()` `OnceLock`-frozen (`mcp_server.rs`) · non-finite cost filtered (`usage/mod.rs`) · budget uses `atomic_write_json` (`budget.rs`).
+- **Refuted:** `apply_pending_update` IPC (dock has no IPC; DoS-only) · unsigned update (Velopack verifies). **Not runtime-verified — source-only.**
+- **Untouched, not mine:** `UpdateDialog.svelte` `{#each}` keyed→indexed change was already dirty in the tree pre-session — left for user.
+
+### RESUME HERE (cont.95)
+- SEC-1 fixes are **source-only** — consider a CDP/live pass on swarm + browser dock before ship.
+- Ship still queued (cont.94): bump → CHANGELOG → commit → tag → push.
+
 ## Session 2026-06-09 (cont. 94) — Claude Fable 5 wired (limited run, until Jun 22)
 
 **`claude-fable-5` added front+back** (supersedes cont.93's "don't wire" hold — user override; specs live-confirmed from anthropic.com/claude/fable + platform docs: 1M ctx, 128k out, $10/$50 MTok, adaptive thinking always-on, no fast mode. Docs publish NO sunset — **Jun 22 cutoff is a Rift-side gate per user instruction**, easy to bump if a real date lands).
@@ -13,20 +26,10 @@
 
 **Verified:** svelte-check 0/0 · cargo check green · CDP pixels (picker selected+unselected, pill "Fable 5 · Smart", per-ws key stores `claude-fable-5`, 0 console errors).
 
-### RESUME HERE (cont.94)
-- **Ship release w/ Fable** (user queued post-compaction): bump → CHANGELOG → commit → tag `vX.Y.Z` → push --tags.
-- [carried] 0.8.11→0.8.12 pill update test awaiting user report · `.slideover`/`.tip` blur (fix on new scuff only) · runner perf roadmap · drag-reorder verify · `RELEASES_TOKEN` re-set.
-
-## cont.93 (same day) — update-flow root cause FIXED + v0.8.12 SHIPPED
-
-Pill `×` had version-permanently silenced updates (`dismissed-version` in prod localStorage); scuff = WebView2 backdrop-filter mis-composite. Fixed (`feea28f`): 24h `{version,until}` snooze JSON (legacy string self-discards) · snooze-proof gear dot · blur stripped from dialog/toasts. **v0.8.12 tagged + CI green** (4 assets; validated vpk-idempotency + `--no-bundle`). Prod = 0.8.11 (PID-only kills, NEVER by image name).
-
-## cont.92/91 (same day, earlier) — sweeps
-
-cont.92: 18-agent Workflow sweep → 3 fixed (`b78f2c5` vpk idempotent · `7cc2ce2` stt lock · `d0821fd` enhance race), pushed, CI green. cont.91: `dirs_home` dedupe · Actions @v6 · Settings hero polish · ISSUES prune.
+[carried] ship w/ Fable queued · 0.8.12 pill test awaiting user report · `.slideover`/`.tip` blur (fix on new scuff only) · runner perf roadmap · drag-reorder verify · `RELEASES_TOKEN` re-set.
 
 ## Prior arcs — detail in `git log`
-cont.90 v0.8.11 SHIPPED — first tag-driven release on VM 100 `rift-runner`. cont.88 self-hosted runner LIVE (`docs/design/self-hosted-runner.md`): **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.88/89 Settings+Harness redesigns. cont.72 v0.7.0 + edit-swarm.
+cont.93 v0.8.12 SHIPPED (`feea28f` — pill `×` now 24h `{version,until}` snooze, not permanent; blur stripped from dialog/toasts). cont.92 18-agent sweep → 3 fixed (`b78f2c5`·`7cc2ce2`·`d0821fd`). cont.91 `dirs_home` dedupe · Actions @v6. cont.90 v0.8.11 SHIPPED (first tag-driven release on VM 100 `rift-runner`). cont.88 self-hosted runner LIVE: **`RunnerKeepAlive` startup task load-bearing — DON'T delete**. cont.88/89 Settings+Harness redesigns. cont.72 v0.7.0 + edit-swarm. Prod = 0.8.11 (PID-only kills, NEVER by image name).
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`. `configLoaded` gates timing (never flashes pre-probe). The `|| !betaNotice.acknowledged` clause makes the flow show for authed users too so everyone hits the **final beta-notice step**; `finishOnboarding()` sets both flags. Don't drop that clause or the beta ack is bypassed.

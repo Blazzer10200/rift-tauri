@@ -361,11 +361,15 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
 /// by `mod::write_mcp_config`). Gates the local git tools. Unknown/unset →
 /// `readonly` (safe floor).
 fn trust_level() -> &'static str {
-    match std::env::var("RIFT_TRUST_LEVEL").as_deref() {
+    // Frozen at first read: the env var is set once by the parent at spawn, and
+    // re-reading per call would let any in-process env mutation escalate trust
+    // mid-session without a restart.
+    static LEVEL: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    *LEVEL.get_or_init(|| match std::env::var("RIFT_TRUST_LEVEL").as_deref() {
         Ok("full") => "full",
         Ok("standard") => "standard",
         _ => "readonly",
-    }
+    })
 }
 
 fn trust_rank(level: &str) -> u8 {

@@ -164,7 +164,7 @@ fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
         .env("GCM_INTERACTIVE", "never")
         .env("GIT_ASKPASS", "")
         // Force non-interactive SSH and suppress pager output.
-        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new")
+        .env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes")
         .env("GIT_PAGER", "cat")
         // Strip git layout/namespace overrides that could redirect object storage
         // or index outside the workspace root.

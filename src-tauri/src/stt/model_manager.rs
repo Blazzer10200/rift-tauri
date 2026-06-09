@@ -124,6 +124,14 @@ struct ProgressPayload {
     message: Option<String>,
 }
 
+/// Hash an on-disk file with SHA256, hex-encoded.
+fn file_sha256(path: &std::path::Path) -> std::io::Result<String> {
+    let mut h = Sha256::new();
+    let mut f = std::fs::File::open(path)?;
+    std::io::copy(&mut f, &mut h)?;
+    Ok(format!("{:x}", h.finalize()))
+}
+
 /// Stream-downloads the model w/ `Range`-based resume. Emits
 /// `stt://download_progress` events ~10x/s throttled. Atomic via .partial +
 /// rename on success. Aborts on `cancel` flag; partial file is preserved so a
@@ -139,13 +147,29 @@ pub async fn download(
     let final_path = dir.join(entry.filename);
     let partial_path = dir.join(format!("{}.partial", entry.filename));
 
-    // Already complete? Final-filename presence is the completion marker —
-    // the downloader only renames `.partial → final` after a clean stream end.
+    // Already complete? Final-filename presence is the completion marker — the
+    // downloader only renames `.partial → final` after a clean stream end. Still
+    // re-verify SHA256 of the on-disk file before trusting it: a corrupted or
+    // foreign file planted at this path would otherwise be served forever, since
+    // the stream-hash only runs during an actual download.
     if final_path.exists() {
         if let Ok(md) = final_path.metadata() {
             if md.len() > 0 {
-                emit_progress(&app, entry.id, md.len(), md.len(), "done", None);
-                return Ok(());
+                let verified = match entry.sha256 {
+                    Some(expected) => {
+                        file_sha256(&final_path).map(|g| g == expected).unwrap_or(false)
+                    }
+                    None => true,
+                };
+                if verified {
+                    emit_progress(&app, entry.id, md.len(), md.len(), "done", None);
+                    return Ok(());
+                }
+                // Failed verification — quarantine and fall through to re-download.
+                let _ = std::fs::rename(
+                    &final_path,
+                    dir.join(format!("{}.badhash", entry.filename)),
+                );
             }
         }
     }
@@ -263,12 +287,8 @@ pub async fn download(
     // Post-rename full-file verify for resumed downloads (hasher was None).
     if !was_hashed {
         if let Some(expected) = entry.sha256 {
-            let mut h = Sha256::new();
-            let mut f = std::fs::File::open(&final_path)
-                .map_err(|e| format!("open for post-rename verify: {e}"))?;
-            std::io::copy(&mut f, &mut h)
-                .map_err(|e| format!("hash read: {e}"))?;
-            let got = format!("{:x}", h.finalize());
+            let got = file_sha256(&final_path)
+                .map_err(|e| format!("post-rename verify: {e}"))?;
             if got != expected {
                 let _ = std::fs::rename(
                     &final_path,

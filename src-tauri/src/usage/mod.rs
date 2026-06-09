@@ -88,7 +88,12 @@ fn rows_from_snapshot(record: &Value, prices: &pricing::PriceTable) -> Vec<store
             .or_else(|| turn.get("model").and_then(|v| v.as_str()))
             .or(session_model)
             .map(String::from);
-        let cost_usd_cli = turn.get("costUsd").and_then(|v| v.as_f64());
+        // Reject NaN/Infinity from the untrusted IPC payload — a non-finite cost
+        // poisons every budget/projection aggregate downstream.
+        let cost_usd_cli = turn
+            .get("costUsd")
+            .and_then(|v| v.as_f64())
+            .filter(|c| c.is_finite());
         let ttfp_ms = turn
             .get("firstPaintAt")
             .and_then(|v| v.as_i64())
@@ -108,7 +113,8 @@ fn rows_from_snapshot(record: &Value, prices: &pricing::PriceTable) -> Vec<store
             .map(String::from);
         let cost_usd_calc = model_id
             .as_deref()
-            .and_then(|m| prices.cost_for(m, input, output, cache_read, cache_write));
+            .and_then(|m| prices.cost_for(m, input, output, cache_read, cache_write))
+            .filter(|c| c.is_finite());
 
         out.push(store::TurnRow {
             session_id: session_id.clone(),
