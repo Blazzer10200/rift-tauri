@@ -2,7 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Settings page redesign + dead-setting audit
+## v0.8.11 — 2026-06-09 — Settings redesign + Harness one-viewport overhaul
+
+**Harness.** All three sub-pages reorganized to fit one viewport with zero scroll. The Telemetry strip's hidden 4193px horizontal pill river is gone — replaced by `Live · recent-4 · All 40→`, with full session browsing in the All view. The archived-session hero splits its lone cost figure into a left identity block + a 2×2 stats grid. SwarmPage was brought in line with the shared visual system (title/card sizing, radius, icon buttons, empty state, dotted-grid background); CostPage tightened to a single-viewport bento.
 
 **UI system.** Settings moved from a ragged 12-col bento to a **single centered column of titled cards** — section titles are now header bands *inside* each card (sentence-case), not labels floating over flat slabs. Inline code in descriptions de-boxed to a calm wash; descriptions capped at 60ch so they no longer collide with their controls.
 
