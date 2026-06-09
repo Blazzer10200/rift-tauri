@@ -2,7 +2,7 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 93) — update-flow root cause FOUND + FIXED
+## Session 2026-06-09 (cont. 93) — update-flow root cause FIXED + v0.8.12 SHIPPED
 
 **User report:** update to v0.8.11 "nothing popped up; UI scuffed out, couldn't click." **Root cause:** prod localStorage held `rift.updates.dismissed-version=0.8.11` — pill `×` (flush next to "View") version-permanently silenced it; prod `rift.log` shows "available v0.8.11" on 3 launches but ZERO `download_update` invokes ever on GitHub path. Scuff = WebView2 backdrop-filter mis-composite class (toast blur14 bottom-anchored + `.dialog-overlay`/`.dialog-shell`).
 
@@ -14,9 +14,7 @@
 
 CDP-verified: pill→snooze(pill hides, dot stays, 24h JSON)→unsnooze(pill back)→dialog (overlay backdrop=none, opaque shell, clean shot). Download invoke chain unchanged (proven earlier this session).
 
-**User unblock on prod 0.8.10 NOW:** Settings→About→Check for updates→Download (ignores snooze). Next release (0.8.12) supersedes the stale snooze anyway (version mismatch → pill shows).
-
-**Env state:** tauri dev RUNNING (bg task bdhzwnz3v) + cdp:serve 9223 (b4u1m52mb); prod = 0.8.10 (PID-only kills). v0.8.11 live on rift-releases.
+**SHIPPED:** user manually updated 0.8.10→0.8.11 (Settings→About path, ignores snooze), then **v0.8.12 tagged + CI green** (run 27229063633, publish 19:05Z, all 4 assets on rift-releases). Commits `feea28f` (fix) + `1ce83e7` (bump) + `905c08c` (changelog trim). This release VALIDATED the vpk-idempotency fix (2nd run, warm runner) + `--no-bundle`. Prod = 0.8.11 (PID-only kills, NEVER by image name).
 
 ## Session 2026-06-09 (cont. 92) — workflow debug sweep + push
 
@@ -31,10 +29,10 @@ Multi-agent Workflow sweep (18 agents, find→adversarial-verify): 13 raw findin
 ### cont.91 (same day, earlier) — autonomous sweep
 `dirs_home` dedupe (`4bbc805`) · Actions Node-20 bump (`062bc3b`) · Settings hero polish (`a825cb6`, CDP-verified) · ISSUES prune (`cd9cbf9`) · `claude-fable-5` probe answered live.
 
-### RESUME HERE (cont.92)
-- **Update test PENDING** — prod still **0.8.10**; user click on "Update available" pill verifies Velopack download→apply→relaunch.
-- **Next release validates:** `--no-bundle` green + timing AND the vpk-idempotency fix (2nd run on warm runner).
-- **MODEL SWAP half-unblocked:** `claude-fable-5` live-verified. DO NOT wire until pricing + ctx + effort tiers publish — picker/cost-cockpit metadata would be fabricated. Rift stays on `opus` alias.
+### RESUME HERE (cont.93)
+- **End-to-end pill update test:** user's prod 0.8.11 → pill should show v0.8.12 on next launch (old snooze was for 0.8.11, doesn't gate it). Awaiting user report — if anything scuffs/fails, get the exact surface.
+- **0.8.12 onward:** snooze = 24h `{version,until}` JSON; gear dot = snooze-proof affordance; dialog/toasts blur-free. `.slideover` + `.tip` (app.css) still carry backdrop-filter — same WebView2 bug class, not update-path, fix if scuff reports continue.
+- **MODEL SWAP half-unblocked:** `claude-fable-5` live-verified. DO NOT wire until pricing + ctx + effort tiers publish. Rift stays on `opus` alias.
 - **Perf roadmap (NOT applied):** runner `CARGO_INCREMENTAL=1` (vs sccache); `opt-level=2`; pre-bake gh+vpk; vpk `--noPortable`.
 - [carried] drag-reorder verify; `RELEASES_TOKEN` non-ASCII (strip works; re-set cleanly).
 
