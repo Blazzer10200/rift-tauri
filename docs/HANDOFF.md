@@ -6,10 +6,10 @@
 
 Three commits on `main`, **source-verified only** (svelte-check 0/0, vitest 51/51; no dev launch — user was gaming):
 
-- **`b4ea421` M8:** stream pump → `assistant/streaming.ts` (verbatim bodies; TabState = fields + IoC hooks + 1-line thunks; `recordTurnUsage` exported as the test seam). Playback suite exercises the moved pump end-to-end.
-- **`ea514e8` M9:** send orchestrator → `assistant/send.ts` (send + slash + queue drain + steer + stop + retry/copy/recall; `AssistantStore` type-only export; `retrying` now public). **`assistant.svelte.ts` 2709 → 1700L — under the 2000L threshold; M0-M9 ALL DONE.** Note: M8/M9 use type-only parent imports, not structural host types (surface too wide — documented in both file headers + brief).
-- **`6e7cb21` UI-drift fixed:** Settings hero chip hard-coded "up to date"; now renders from new `updates.summary` (one derived `{kind,label}`) + warn/danger chip variants.
-- **NEW: `docs/design/assistant-mod-split.md`** — R1-R8 child-module plan for `assistant/mod.rs` (4331L; `assistant_send` alone is 917L). Commands re-exported from mod.rs so the lib.rs registry never churns. R1 `cli_install.rs` is the easy first bite.
+- **`b4ea421` M8:** stream pump → `assistant/streaming.ts` (verbatim bodies; TabState = fields + hooks + 1-line thunks; playback suite exercises the moved pump end-to-end).
+- **`ea514e8` M9:** send orchestrator → `assistant/send.ts` (send/slash/queue/steer/stop/retry). **`assistant.svelte.ts` 2709 → 1700L — under the 2000L threshold; M0-M9 ALL DONE.** M8/M9 use type-only parent imports, not structural host types (documented in file headers + brief).
+- **`6e7cb21` UI-drift fixed:** Settings hero chip hard-coded "up to date"; now renders from new `updates.summary` (one derived `{kind,label}`).
+- **NEW `docs/design/assistant-mod-split.md`** — R1-R8 child-module plan for `assistant/mod.rs` (4331L; `assistant_send` alone 917L); commands re-exported so the lib.rs registry never churns.
 
 ### RESUME HERE (cont.97)
 - **User on v0.8.12 still needs ONE manual `Setup.exe`** (rift-releases/releases/latest) — in-app Download unreachable until 0.8.14+; permanent after.
