@@ -28,7 +28,11 @@
   any child that owns those transitions.
 - No behavior changes while moving; bodies/markup/CSS verbatim.
 
-## H0 — `bubble/helpers.ts` first (~250L, LOW)
+## H0 — `bubble/helpers.ts` first (~250L, LOW) — ✅ SHIPPED 2026-06-09
+
+Done same-day as the brief: all 17 fns + `TextSegment`/`TimelineUnit`/`NodeStatus` types moved
+verbatim; 22 vitest cases; MessageBubble 1742→1471L. `previewOf` was found DEAD in the component
+(defined, never called) — moved + tested but not imported back; drop or wire it during B-passes.
 
 The big win: this file is unusually rich in pure fns. Move (verbatim, with their types):
 `isInlineDiffTool` (L20) · `shortToolName` (L24) · `isCardTool` (L27) · `isGroupableChip` (L35) ·
