@@ -182,7 +182,7 @@
   // the alias (`sonnet`/`opus`/`haiku`); version is display-only and pulled
   // from CLAUDE.md's source-of-truth section on the current model family.
   // Effort tiers, low→high. Used by both the slider and per-model capability caps.
-  type EffortId = "none" | "quick" | "deep" | "ultra";
+  type EffortId = "none" | "quick" | "smart" | "deep" | "ultra";
   type ModelOpt = {
     id: ModelSel;
     label: string;
@@ -195,11 +195,11 @@
     // ── Capability matrix (source of truth for what each model can actually do).
     // Drives every affordance gate so the panel never offers a mode the model
     // ignores server-side. Grounded in the model capability docs:
-    //   • effort     — accepts the CLI `--effort` flag at all. Haiku skips
-    //                  extended thinking wholesale, so this is false for Haiku.
-    //   • maxEffort  — highest effort tier the model honors. Opus reaches
-    //                  "ultra" (xhigh + ultracode); Sonnet tops out at "deep"
-    //                  (high) — xhigh/ultracode are Opus-tier only.
+    //   • effort     — accepts the CLI `--effort` flag at all. The API rejects
+    //                  effort on Haiku 4.5 wholesale, so this is false for Haiku.
+    //   • maxEffort  — highest effort tier the model honors. Opus + Fable reach
+    //                  "ultra" (xhigh + ultracode); Sonnet 4.6 tops out at
+    //                  "smart" (high) — xhigh/ultracode are Opus-tier only.
     //   • fastMode   — Opus-only faster-output mode (CC's `/fast`).
     effort: boolean;
     maxEffort: EffortId;
@@ -214,7 +214,7 @@
   const MODEL_OPTIONS: ModelOpt[] = [
     ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: "ultra" as EffortId, fastMode: false }] : []),
     { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "ultra", fastMode: true  },
-    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "deep",  fastMode: false },
+    { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "smart", fastMode: false },
     { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: "none",  fastMode: false },
     { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: "ultra", fastMode: true  },
   ];
@@ -335,18 +335,20 @@
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
 
-  // Effort ladder. Haiku skips extended thinking server-side regardless, so
-  // hide the pill on Haiku to avoid implying it does something. Cycle on click:
-  // none → quick → deep → none. Names describe quality not speed — "Fast"
-  // and "Quick" were ambiguous siblings; Instant/Smart/Deep is a real ladder.
-  type EffortOpt = { id: EffortId; label: string; hint: string; level: 1 | 2 | 3 | 4 };
+  // Effort ladder — 1:1 with the CLI's `--effort` ladder (low/medium/high/xhigh)
+  // so the slider never lies about what gets sent. "smart" (high) is the API
+  // default and Rift's default; "deep" (xhigh) is Claude Code's own default for
+  // agentic coding; "ultra" rides xhigh + the ultracode workflow key. Haiku
+  // rejects effort server-side, so the slider hides entirely there.
+  type EffortOpt = { id: EffortId; label: string; hint: string; level: 1 | 2 | 3 | 4 | 5 };
   const EFFORT_OPTIONS: EffortOpt[] = [
-    { id: "none",  label: "Instant", level: 1, hint: "Instant — straight to the answer, no thinking time" },
-    { id: "quick", label: "Smart",   level: 2, hint: "Smart — thinks briefly before answering (~5s extra)" },
-    { id: "deep",  label: "Deep",    level: 3, hint: "Deep — heavy reasoning (~15s extra) for hard problems" },
-    { id: "ultra", label: "Ultracode", level: 4, hint: "Ultracode — max reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
+    { id: "none",  label: "Instant", level: 1, hint: "Instant — minimal reasoning. Fastest answers for quick lookups and small edits." },
+    { id: "quick", label: "Quick",   level: 2, hint: "Quick — light reasoning with leaner tool use. Good for routine, well-defined tasks." },
+    { id: "smart", label: "Smart",   level: 3, hint: "Smart — standard reasoning depth, the recommended default for everyday work." },
+    { id: "deep",  label: "Deep",    level: 4, hint: "Deep — extra reasoning depth and more thorough tool use. Claude Code's tier for hard agentic coding." },
+    { id: "ultra", label: "Ultracode", level: 5, hint: "Ultracode — deep reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
   ];
-  const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[1]);
+  const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
   // ── Capability gates, all derived from the current model's matrix entry. The
   // panel offers ONLY what the selected model honors server-side, so the UI
   // never promises a mode that silently does nothing.

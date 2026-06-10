@@ -38,10 +38,10 @@ pub(super) struct AssistantConfig {
     /// notice. `None` or `<= 0` = no cap.
     #[serde(default)]
     pub(super) max_budget_usd: Option<f64>,
-    /// Effort tier for extended thinking on non-Haiku models. Mirrors Claude
-    /// Code's own effort ladder. `"none"` skips extended thinking entirely
-    /// (fastest TTFT); `"quick"` ~2K thinking tokens (default — balanced);
-    /// `"deep"` 10K tokens (heavy reasoning, slowest). Haiku ignores this.
+    /// Effort tier for extended thinking on non-Haiku models, mapped to the
+    /// CLI's `--effort` flag in turn.rs: `"none"`→low · `"quick"`→medium ·
+    /// `"smart"`→high (API default) · `"deep"`→xhigh · `"ultra"`→xhigh +
+    /// ultracode workflows. Haiku rejects effort server-side and is skipped.
     /// Per-turn override rides the `assistant_send` arg; this is the default.
     #[serde(default)]
     pub(super) thinking_effort: Option<String>,

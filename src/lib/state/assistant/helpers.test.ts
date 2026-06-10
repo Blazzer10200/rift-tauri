@@ -31,14 +31,15 @@ describe("modelFamily", () => {
   });
 });
 
-describe("effortToFlag (must mirror src-tauri assistant config mapping)", () => {
+describe("effortToFlag (must mirror src-tauri assistant turn.rs mapping)", () => {
   it("suppresses effort entirely on haiku", () => {
     expect(effortToFlag("deep", "haiku")).toBeNull();
   });
-  it("maps none/quick/deep/ultra to low/medium/high/xhigh", () => {
+  it("maps none/quick/smart/deep/ultra to low/medium/high/xhigh/xhigh", () => {
     expect(effortToFlag("none", "sonnet")).toBe("low");
     expect(effortToFlag("quick", "sonnet")).toBe("medium");
-    expect(effortToFlag("deep", "opus")).toBe("high");
+    expect(effortToFlag("smart", "sonnet")).toBe("high");
+    expect(effortToFlag("deep", "opus")).toBe("xhigh");
     expect(effortToFlag("ultra", "claude-fable-5")).toBe("xhigh");
   });
 });
