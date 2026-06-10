@@ -2,24 +2,17 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-09 (cont. 98) — v0.8.16 SHIPPED: #20 backend split COMPLETE (R1-R8) + repo housekeeping
+## Session 2026-06-09 (cont. 99) — seam-reveal boot splash
 
-User said "knock out stuff, then release." Source-verified per commit (cargo check + clippy zero warnings · cargo test 95/95 · svelte-check 0/0 · vitest 51/51; no dev launch this session):
+`SplashOverlay.svelte` rewritten — "the rift opens": accent seam draws in w/ white-hot core → flares → content tears open from it (`clip-path` inset) w/ one-time light burst → `RiftLogo` mark (68px — splash finally uses the real brand mark) + R-I-F-T letter cascade (55ms stagger, blur-to-sharp) w/ tracking settling 0.34em→0.22em → drifting accent-hued bg blobs (theme-aware via `--accent`). **Fake progress bar deleted.** FLOOR 1600→1300ms; exit gained scale(1.025)+blur(3px) depth; lifecycle plumbing (sessionStorage gate, reduced-motion path, staggered glass exit, `onComplete`) untouched. **Verified live via CDP** staged frames (seam/tear/cascade/final/exit) ×2 passes · console 0 errors · svelte-check 0/0. Replay for testing: `sessionStorage.removeItem("rift.splash.seen")` + reload.
 
-- **Housekeeping (`c283f24`):** deleted spent 2026-06-08 autonomous-run docs (M1/M2 confirmed fixed via wsKey) + `session-kickoffs.md` (arc complete); fixed every stale `docs/archive/` cross-ref (archive dir is gone — git log is history); ISSUES UI-drift block dropped (shipped 0.8.15); CLAUDE.md hot-files re-measured.
-- **#20 backend DONE:** `35dd131` R2 `config` (569L) · `f201713` R6 `oneshot` (734L) · `782d3df` R8 `turn` (1372L — registry/steer/permission plumbing/`assistant_send`). **mod.rs 4331 → 303L hub.** Lesson 3 in the brief: glob re-export does NOT carry `pub(crate)`/`pub(super)` for external callers — `kill_all_session_children` needed explicit `pub(crate) use`. NOTE: R2 took two operator-agent bails (wrote config.rs, never deduped mod.rs) — finished inline w/ awk range-moves + compiler-as-checklist; that technique carried R6/R8 first-try.
-- `83f3876` clippy auto-deref nit (mcp_server) — clippy fully clean again.
-- **`composer-split.md` brief written** (C1-C7, blast-radius ascending; QueueRail before Rail-v2 lands small).
-- **`770b7fc` release: v0.8.16** tagged + pushed → CI.
-
-### RESUME HERE (cont.98)
-- **CI CONFIRMED:** v0.8.16 release run 27245762669 green (3m0s); rift-releases latest = v0.8.16 (published 2026-06-10T01:00Z).
-- **User prod = 0.8.12** → still needs ONE manual `Setup.exe`; after that, in-app update should pull 0.8.16.
-- **Runtime smoke debt now TWO releases deep** (0.8.15 + 0.8.16 both source-verified only): next dev session run the CDP pass — real turn (stream/tools/thinking), steer, stop, /retry, queue drain, **prompt enhance + title gen + summarize/remint (oneshot moved!)**, Settings config get/set + provider CRUD (config moved!), History list/load/delete, auth pill, update chip.
+### RESUME HERE (cont.99)
+- **User prod = 0.8.12** → still needs ONE manual `Setup.exe`; after that, in-app update should pull latest.
+- **Runtime smoke debt TWO releases deep** (0.8.15 + 0.8.16 source-verified only): next dev session run the CDP pass — real turn (stream/tools/thinking), steer, stop, /retry, queue drain, **prompt enhance + title gen + summarize/remint (oneshot moved!)**, Settings config get/set + provider CRUD (config moved!), History list/load/delete, auth pill, update chip.
 - Next #20: Composer C1 (helpers.ts) per `composer-split.md`. Parked: SEC-1 live pass · #29 CSP-nonce · CR-UX trust-enum (needs user call) · `.tmp/runner/` setup-scripts fate (flagged to user).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
-cont.97 v0.8.15 (TS split complete M0-M9 · mod.rs 5/8 · honest update chip). cont.96 v0.8.14 update-dialog crash root-caused. cont.94 v0.8.13 Fable 5 limited-run (**Jun 22 sunset gate** — self-heals to Sonnet/Opus). cont.90 first tag-driven release on VM 100 `rift-runner`; **`RunnerKeepAlive` startup task load-bearing — DON'T delete.** PID-only kills, NEVER by image name.
+cont.98 v0.8.16 (#20 backend split COMPLETE R1-R8 — mod.rs 4331→303L hub; `composer-split.md` brief; CI run green, rift-releases latest = v0.8.16). cont.97 v0.8.15 (TS split complete M0-M9 · mod.rs 5/8 · honest update chip). cont.96 v0.8.14 update-dialog crash root-caused. cont.94 v0.8.13 Fable 5 limited-run (**Jun 22 sunset gate** — self-heals to Sonnet/Opus). cont.90 first tag-driven release on VM 100 `rift-runner`; **`RunnerKeepAlive` startup task load-bearing — DON'T delete.** PID-only kills, NEVER by image name.
 [carried] `.slideover`/`.tip` blur (fix on new scuff only) · runner perf roadmap · drag-reorder verify · `RELEASES_TOKEN` re-set.
 
 ## CRITICAL DON'T-TOUCH
