@@ -42,11 +42,18 @@
 
   // ── lifecycle ──────────────────────────────────────────────────────
   $effect(() => {
+    // Boot lands on Home, which reads workspace/conversations off the
+    // assistant store — init here, not just on Chat/Settings mount, or the
+    // dashboard renders the empty-state lie until another workspace runs it.
+    void assistant.init();
     browserDock.init();
     void updates.checkOnLaunch();
     // Dev-only: expose the update store so CDP can drive its visual states
     // (toast + dialog) without a live feed. Stripped from prod builds.
-    if (import.meta.env.DEV) (window as unknown as { __updates?: typeof updates }).__updates = updates;
+    if (import.meta.env.DEV) {
+      (window as unknown as { __updates?: typeof updates }).__updates = updates;
+      (window as unknown as { __assistant?: typeof assistant }).__assistant = assistant;
+    }
   });
 
   // HMR-safe global keydown — $effect cleanup runs on unmount AND when the
