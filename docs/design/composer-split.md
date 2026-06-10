@@ -1,12 +1,25 @@
-# Design — `Composer.svelte` hot-file split
+# Design — `Composer.svelte` hot-file split — ✅ COMPLETE C1-C7 (2026-06-10)
 
-> Brief for the #20 frontend follow-on (queued in ISSUES #20). Authoritative state in
-> [src/lib/components/assistant/Composer.svelte](../../src/lib/components/assistant/Composer.svelte) —
-> **3131L after C1 ✅ (shipped 2026-06-09**; original map 3197L: script L1-1064 · markup L1064-1781 ·
-> style L1781-3197, ~1416L CSS — markup/CSS boundaries shifted ~-66L by C1, script-only).
-> C1 made `composer/helpers.ts` (7 pure fns + 17 vitest); `portal` later moved to canonical
-> `$lib/actions/portal.ts` (ChatTabsBar H0 dedupe). Next: C2.
-> Line numbers go stale fast — re-locate by symbol/snippet anchor before cutting.
+> **All seven cuts shipped.** Composer.svelte: 3197 → **1845L**. Kept (like assistant-mod-split.md)
+> as the component-split pattern reference — every `composer/` child header cites this brief.
+>
+> Final family: `composer/helpers.ts` (C1, 17 vitest) · `AttachmentsRow` 114L (C2) ·
+> `QueueRail` 322L (C3) · `LivePills` 212L (C4) · `EnhanceBar` 264L (C5) ·
+> `SlashMenu` 75L + `MentionPopover` 110L (C6) · `SettingsMenu` 370L + `PermMenu` 147L +
+> `modelMatrix.ts` (C7 — shared model/effort/perm option tables + pure helpers, used by both
+> the parent's onKey navigation and the children so they cannot drift).
+> Every cut: svelte-check 0/0 · vitest 116/116 · CDP pixel-verify live. History: `git log --oneline -- src/lib/components/assistant/composer/`.
+>
+> **Seam deviations from the plan (for cause, documented per commit):**
+> - C5 EnhanceBar went *presentational* — the enhance state machine stays in the parent
+>   (wired into the wand button, onKey Escape, and the `enchanting` class); `showEnhanceDiff`
+>   became child-local (unmount = the old explicit reset). Also fixed the enhance-error ✕
+>   left unstyled when C2 took `.attach-error-x`'s styles (now `.enhance-error-x`).
+> - C7 split into TWO children + a shared TS module instead of one mega-child; keyboard nav
+>   indices, pick fns, ⇧Tab cycle, and the effort-clamp `$effect` stay in the parent.
+>   PermMenu also defines the previously-missing `hint-in` keyframes (was a dead reference).
+>
+> Original plan preserved below for the pattern.
 > Pattern: **child components under `src/lib/components/assistant/composer/`** + one pure-helper TS module.
 > This is NOT the TS-module pattern from assistant-svelte-split.md — markup+CSS+state move together per child.
 

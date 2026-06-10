@@ -14,11 +14,10 @@
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
-| Steer | Mid-turn redirect on a tool-using turn | T2 | 🧪 live-verify |
 | Rail-v2 | Pending rail v2 — steer chips + mode toggle | T3 | 🚧 open |
-| Permission | Allow/Deny round-trip bar | T2 | 🧪 live-verify |
+| Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
-| #20 | Hot files over the 2000-line split threshold | T3 | 🚧 open |
+| #20 | Hot files over the 2000-line split threshold | T3 | ✅ threshold met |
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
 | CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
 | #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
@@ -35,21 +34,17 @@
 - **Status:** shipped in v0.8.9+ (`9c468a4`+`2d72af8`) — `assistant_open_login(console)` spawn + actionable 401 banner ([Sign in]/[Open Settings]/[Re-check]). CDP-verified all banner states; the live login spawn itself is compile/registration-verified only.
 - **Remaining:** confirm an end-to-end real sign-in on a genuinely-logged-out machine (dev box stays authed). **Strategic follow-ups** (not built): proactive re-probe before first send; auto-prefer an authed install when multiple exist; collapse scattered 401 string-matching into one `AuthError` enum + DiagBus telemetry.
 
-#### Steer — mid-turn redirect on a tool-using turn
-
-- **Status:** mid-turn message injection shipped end-to-end (`assistant_steer` command, `STEER_TX` registry, `tokio::select!` reader, Alt+Enter trigger; brief in `docs/design/steer-and-queue.md`). Verified: compiles, `npm run check` clean, live CDP test accepted a mid-stream steer (`steer=steered`).
-- **Remaining:** confirm a *visible* mid-turn redirect on a multi-step tool turn through the UI (pure-text turns complete before the steer lands — by design).
-
-#### Permission — Allow/Deny round-trip bar
+#### Permission — Allow/Deny round-trip bar (🔒 blocked on a trust-standard workspace)
 
 - **Status:** wired end-to-end — `--permission-prompt-tool stdio` (mod.rs) → `can_use_tool` handler → control-response write → `PermissionBar.svelte` Allow/Deny UI → `submitPermissionDecision()`.
-- **Remaining:** live-verify with a throwaway repo — a git-write op in default/acceptEdits/plan mode should surface the Allow/Deny bar.
+- **Live-verify attempt 2026-06-10 (cont.103):** switched to "Ask before edits" + asked for a `git_commit` in a derived-trust workspace — the MCP server correctly **doesn't expose git-write tools at derived trust**, so the prompt can never fire there. That confirms the trust gate works, but the bar itself remains unexercised. Verifying requires pinning `trust_level=standard` on a throwaway repo — deliberately not done unattended because the trust segment **pins one-way** (see CR-UX). Fold into the CR-UX decision: when the trust enum is reworked, verify the bar in the same pass.
 
 ### Tier 3 — strategic / longer-term
 
 #### Rail-v2 — pending rail v2: steer chips + mode toggle (🚧 open)
 
-- **Scope:** steer chips + per-chip steer/queue mode toggle + pulse-on-inject — unifies the three-tier surface ([steer-and-queue.md](design/steer-and-queue.md) §6 #1). Makes steer discoverable (currently keyboard-only Alt+Enter). v1 rail shipped in v0.8.11.
+- **Scope:** steer chips + per-chip steer/queue mode toggle + pulse-on-inject — unifies the three-tier surface ([steer-and-queue.md](design/steer-and-queue.md) §6 #1). Makes steer discoverable (currently Alt+Enter + the rail's Steer button). v1 rail shipped in v0.8.11.
+- **Unblocked 2026-06-10:** the rail now lives in its own 322L child ([composer/QueueRail.svelte](../src/lib/components/assistant/composer/QueueRail.svelte)) — Rail-v2 lands in a small file, exactly as the split brief intended. Steer itself is fully live-verified (visible mid-turn redirect on a multi-step tool turn, cont.103) — the Steer tracker block shipped and was deleted.
 
 #### 4. UI/UX consistency + navigability sweep (app-wide)
 
@@ -58,12 +53,11 @@
 - **Approach when actioned:** per-page audit checklist (control → wired? necessary? consistent?). [SettingsPage.svelte](../src/lib/components/settings/SettingsPage.svelte) 1343L — audit still non-trivial.
 - **Input:** [ui-audit-2026-06-09.md](design/ui-audit-2026-06-09.md) — live CDP audit of v0.8.14, 13 ranked findings (refinement tier, not redesign). Start there.
 
-#### 20. Hot files exceeding the 2000-line agent-split threshold
+#### 20. Hot files exceeding the 2000-line agent-split threshold (✅ threshold met 2026-06-10)
 
-- **Where:** per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Open target (re-measured 2026-06-09):
-  - [src/lib/components/assistant/Composer.svelte](../src/lib/components/assistant/Composer.svelte) — 3130L, the last >2000L file — brief: [composer-split.md](design/composer-split.md) (C1 ✅ shipped 2026-06-09; C2-C7 open, each needs a CDP visual pass).
-- **Symptom:** targeted edits become brittle, LSP slows, agents bail mid-emit on audit-shaped prompts.
-- **Status:** `assistant.svelte.ts` split **COMPLETE** (M0-M9, 1700L — was 3356L; playback net held). `assistant/mod.rs` split **COMPLETE R1-R8, shipped v0.8.16** (4331 → 303L hub; `turn.rs` 1372 · `oneshot.rs` 734 · `config.rs` 569 + R1-R7 siblings), every extraction cargo-check zero-warnings + cargo test 95/95. `assistant_send` (917L fn inside turn.rs) can split internally later — out of scope per brief. **Composer C1 ✅** (`composer/helpers.ts`, 17 vitest cases, 3197→3130L). **MessageBubble H0 ✅** (`bubble/helpers.ts`, 22 cases, 1742→1471L) + **ChatTabsBar H0 ✅** (`tabsbar/helpers.ts` + portal dedupe, 1761→1717L) — same day, per [messagebubble-split.md](design/messagebubble-split.md) (B1-B6 open) + [chattabsbar-split.md](design/chattabsbar-split.md) (T1-T6 open). Next bite: Composer C2 (AttachmentsRow) w/ dev running.
+- **The goal is achieved: no file in the repo exceeds 2000 lines.** Composer split **COMPLETE C1-C7** (cont.100-103): 3197 → **1845L**, with eight `composer/` children (QueueRail 322 · SettingsMenu 370 · EnhanceBar 264 · LivePills 212 · PermMenu 147 · AttachmentsRow 114 · MentionPopover 110 · SlashMenu 75) + `modelMatrix.ts` (shared model/effort/perm option tables) + `helpers.ts` (17 vitest). Every cut svelte-check 0/0, vitest 116/116, CDP pixel-verified live. Brief kept as the split pattern reference: [composer-split.md](design/composer-split.md).
+- **Prior completions:** `assistant.svelte.ts` M0-M9 (3356→1700L, playback net held) · `assistant/mod.rs` R1-R8 shipped v0.8.16 (4331→303L hub) · MessageBubble H0 (1742→1471L) · ChatTabsBar H0 (1761→1717L).
+- **Optional follow-ups (quality, not threshold):** [messagebubble-split.md](design/messagebubble-split.md) B1-B6 + [chattabsbar-split.md](design/chattabsbar-split.md) T1-T6 stay mapped; `assistant_send` (917L fn inside turn.rs) can split internally later.
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
 
@@ -107,8 +101,8 @@
 ## Active design briefs
 
 - `docs/design/assistant-mod-split.md` (#20 backend — COMPLETE R1-R8, shipped v0.8.16; kept as the split pattern reference)
-- `docs/design/composer-split.md` (#20 frontend follow-on — C1 shipped; C2-C7 ready to execute)
-- `docs/design/messagebubble-split.md` + `docs/design/chattabsbar-split.md` (#20 next candidates — mapped + briefed 2026-06-09, queued behind composer C2-C7)
+- `docs/design/composer-split.md` (#20 frontend — **COMPLETE C1-C7 2026-06-10**; kept as the component-split pattern reference — the `composer/` child headers cite it)
+- `docs/design/messagebubble-split.md` + `docs/design/chattabsbar-split.md` (optional quality follow-ups — both files already under threshold)
 - `docs/design/assistant-svelte-split.md` (#20 frontend — COMPLETE, M0-M9 all shipped; KEPT permanently — the `src/lib/state/assistant/*` module headers reference it)
 - `docs/design/steer-and-queue.md` (steer/queue three-tier model — steer shipped; queue improvements + inline-bubble follow-ups open)
 
@@ -116,4 +110,5 @@
 
 ## Last full-app verification
 
+- **🔍 Composer + effort live pass 2026-06-10 (cont.103) — all green.** Effort ladder retuned to mirror the CLI 1:1 (5 stops; Smart=`--effort high` default; Deep=`xhigh`; Ultracode=`xhigh`+workflows; Sonnet caps at Smart; Haiku hidden) and proven end-to-end: spawn log showed `model=sonnet effort=high` on a real turn. C3-C7 extractions each CDP pixel-verified live: queue chip mid-stream + ✓Steered flash + a visible mid-turn redirect (REDIRECTED in transcript), live pills `0:07 · 382 tok/s`, enhance panel (real Haiku rewrite, Ground/Diff toggles, Discard w/ draft intact), slash menu (15 cmds), @mention fuzzy pick, settings menu digit-pick / drag-to-Ultracode / Opus→Sonnet clamp, perm menu portal pick + outside-close. Known CDP wart: `c.sh look`'s console-error list accumulates since cdp:serve boot (mid-HMR ReferenceErrors linger) — trust the screenshot/state, not the stale error tail, or restart cdp:serve.
 - **🔍 Full-app CDP stress pass 2026-06-05 (cont.58) — app healthy.** Walked every workspace + dialog live (Home · Chat · Harness · Settings · command palette · History drawer · Web-browser panel · Panels menu). Ran a real read-only backend turn end-to-end (CLI spawn → MCP `grep`/`glob`/`list_dir`/`read_file` → stream → cost/context/activity render — all correct). Stress: 12 rapid workspace switches + a 14.8K-char emoji/unicode/`<script>` composer paste (auto-grew to the 340px cap, inert, no XSS). **Console: 0 errors / 0 warnings the whole session.** Verified live: cont.57 model/effort capability matrix (Haiku hides slider + shows the no-effort caption), #31–#35 fixes, themeable accent incl. amber warm-hue with no oklch purple-wrap, Harness no-scroll + trust-gated git tools. One new defect found → #36 (now resolved). Could NOT live-exercise: #30 update toast/dialog (app up-to-date on v0.5.0 → state never renders) and first-run onboarding (next-launch only).
