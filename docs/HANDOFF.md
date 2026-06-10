@@ -2,18 +2,16 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-10 (cont.101) — dev-window runbook executed
+## Session 2026-06-10 (cont.102) — first-run setup redesign
 
-Full CDP smoke run + 2 real bugs found & fixed + C2 shipped. All pushed-ready on main (commits `b067407`, `49349bb`), tree clean, dev + CDP servers shut down.
+Full onboarding redo, visual + functional. svelte-check 0/0, every step CDP pixel-verified live (gate re-opened via localStorage clear, flags restored by finishing the flow).
 
-**Bugs fixed (b067407):**
-1. **Home boot-empty** — `assistant.init()` only ran on Chat/Settings mount; boot lands on Home → "Open a project to begin" + "0 saved" despite live config. AppShell now inits at mount.
-2. **init() double-listen race** — same-flush init() calls both passed the `unlistens.length` guard (no push until after first await) → every tauri listener ×2 → **every stream line applied twice** ("TheThe quick brown fox…"). `initPromise` memo fixes it; `destroy()` resets. 12→6 listeners verified live.
-3. CDP `type` helper now flushes a macrotask between input + Enter (stale-textarea was harness artifact, not app bug). Dev-only `window.__assistant` handle added beside `__updates`.
-
-**Smoke results (all CDP-verified):** splash ✓ · real turn (stream/tool steps/thinking elapsed/title gen/cost chip) ✓ · steer ✓ · stop ✓ · /retry ✓ · queue+drain ✓ · enhance ✓ · compact correctly refuses <4 msgs (fail-loud) ✓ · Settings get/set (git-tools toggle round-trip) ✓ · provider CRUD (SmokeTest add→delete) ✓ · History list/load/delete ✓ · auth pill (Max sub, CLI up to date) ✓ · update chip honest "reinstall needed" (dev NotInstalled — correct) ✓ · mention fuzzy ✓ · image paste ✓ · drag-drop (target = `.composer-shell`, NOT `.pane` — pane ondrop is tab-reorder) ✓ · effort slider (Smart→Deep→Smart) ✓ · tabs-bar popovers + portalFocus (focus restores to pill) ✓. `.slideover`/`.tip` blur scuff did NOT show. Test convos deleted from history (77 = user's originals), config restored (trust readonly, workspace remotion-playground untouched).
-
-**C2 shipped (49349bb):** `composer/AttachmentsRow.svelte` — Composer 3131→3048L. svelte-check 0/0 · vitest 116 · CDP pixel-verified.
+- **OnboardingFlow** — 4 new steps: Welcome (beta notice folded in as warn row + inline accent strip) → Connect Claude → Open a project → Defaults. AppShell gate contract untouched (`onDone` = dismiss + acknowledge).
+- **ClaudeAuth → ClaudeConnect** (git mv) — active step: 4s auto-poll probe; CLI-missing → copyable `irm https://claude.ai/install.ps1 | iex`; not-signed-in → `startLogin()` CTA + API-key alt path (`setApiKey`). CLI-missing/sign-in branches logic-verified only (this machine fully authed).
+- **Step 3 Open a project** — `pickFolder()` + recent roots via `setRoot()`, skippable; `\\?\` long-path prefix stripped for display.
+- **Step 4 Defaults** — model seg (Fable gated on `fableAvailable()`), effort seg capped at model `maxEffort` (`pickModel` clamps saved effort down), git-tools trust seg — all through existing store setters.
+- **Setup chrome leak fix** — Titlebar `setupMode` prop hides workspace nav + cmdk pill + settings gear (brand + winctl stay); AppShell `onGlobalKey` early-returns while `showOnboarding` so Ctrl+K/P/1-9/, can't fire over setup. Verified: synthetic Ctrl+K/Ctrl+1 no-ops, chrome returns on finish.
+- ObStage kinds now `welcome|claude|project|defaults`; onboarding.css gained seg/copy-block/input/recent/accent-inline patterns.
 
 ### RESUME HERE — C3 QueueRail (mapped, not started)
 
@@ -28,7 +26,7 @@ Per `composer-split.md` C3, anchors re-located 2026-06-10 (valid while Composer 
 - Parked: SEC-1 live pass · #29 CSP-nonce · CR-UX trust-enum + `previewOf` wire-or-drop · `.tmp/runner/` scripts fate.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
-cont.100 C1+H0 extractions, vitest 51→116. cont.99 boot splash. cont.98 v0.8.16 (#20 backend split, mod.rs→303L hub). cont.97 v0.8.15 (TS split M0-M9). cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
+cont.101 full CDP smoke run + Home boot-empty & init() double-listen fixes (`initPromise` memo) + C2 AttachmentsRow (Composer 3131→3048L). cont.100 C1+H0 extractions, vitest 51→116. cont.99 boot splash. cont.98 v0.8.16 (#20 backend split, mod.rs→303L hub). cont.97 v0.8.15 (TS split M0-M9). cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
 - **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`.
