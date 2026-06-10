@@ -1,17 +1,16 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, HelpCircle, Wand2, Check, Paperclip,
     Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon,
-    Sparkles, Eye, ChevronUp,
-    RefreshCw, FolderSearch, GitCompare } from "lucide-svelte";
+    Sparkles, Eye, ChevronUp } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { ModelSel, PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
-  import EditDiff from "./EditDiff.svelte";
   import { modelFamily, fableAvailable, effortToFlag } from "../../state/assistant/helpers";
   import { fuzzyScore, effortIdxFromX, bytesToBase64, isFileDrag } from "./composer/helpers";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
+  import EnhanceBar from "./composer/EnhanceBar.svelte";
   import { portal } from "$lib/actions/portal";
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
@@ -471,18 +470,13 @@
   // The draft we enhanced FROM — kept so Regenerate/refine re-run on the
   // original (not the already-enhanced text) and the diff has a baseline.
   let enhanceOriginal = $state<string | null>(null);
-  // Toggle the body between the enhanced text and a diff vs the original.
-  let showEnhanceDiff = $state(false);
   // Opt-in: let the rewrite read the real workspace (read-only). Slower, more
   // specific. Preference persists across regenerates within the session.
   let groundEnhance = $state(false);
   // Draft preview (eye) — render the composer draft as Markdown before sending.
   let previewing = $state(false);
-  // Split preserving whitespace so the reveal can stagger word-by-word while
-  // keeping spacing/newlines intact. Each chunk gets its own materialize delay.
-  const enhancedWords = $derived(
-    enhancedPreview === null ? [] : enhancedPreview.split(/(\s+)/),
-  );
+  // Preview panel markup + word-stagger render live in composer/EnhanceBar.svelte
+  // (C5); the state machine stays here (wand button + onKey Escape drive it).
   // `directive` steers a refine pass (Concise / More detail / + Acceptance);
   // omitted for the first run + plain Regenerate.
   // Generation token: accept/dismiss bumps it so a still-in-flight enhance
@@ -522,7 +516,6 @@
     enhancedPreview = null;
     enhanceError = null;
     enhanceOriginal = null;
-    showEnhanceDiff = false;
     void tick().then(() => { autosize(); ta?.focus(); });
   }
   function dismissEnhanced() {
@@ -531,7 +524,6 @@
     enhancedPreview = null;
     enhanceError = null;
     enhanceOriginal = null;
-    showEnhanceDiff = false;
     void tick().then(() => ta?.focus());
   }
 
@@ -950,74 +942,18 @@
         </div>
       </div>
     {/if}
-    {#if enhancedPreview !== null || enhanceError !== null}
-      <div class="enhance-panel" role="region" aria-label="Enhanced prompt">
-        {#if enhancedPreview !== null}
-          <div class="enhance-head">
-            <Wand2 size={13} />
-            <span class="enhance-title">{enhancing ? (groundEnhance ? "Consulting workspace…" : "Enhancing…") : "Enhanced prompt"}</span>
-            <div class="enhance-head-tools">
-              {#if assistant.workspace.current}
-                <button
-                  type="button"
-                  class="enhance-toggle"
-                  class:on={groundEnhance}
-                  onclick={() => (groundEnhance = !groundEnhance)}
-                  disabled={enhancing}
-                  aria-pressed={groundEnhance}
-                  use:tooltip={"Ground the rewrite in your real code (read-only). Slower, more specific. Re-run to apply."}
-                >
-                  <FolderSearch size={12} /> Ground
-                </button>
-              {/if}
-              {#if enhanceOriginal && !enhancing}
-                <button
-                  type="button"
-                  class="enhance-toggle"
-                  class:on={showEnhanceDiff}
-                  onclick={() => (showEnhanceDiff = !showEnhanceDiff)}
-                  aria-pressed={showEnhanceDiff}
-                  use:tooltip={showEnhanceDiff ? "Show enhanced text" : "Show what changed vs your draft"}
-                >
-                  <GitCompare size={12} /> Diff
-                </button>
-              {/if}
-            </div>
-          </div>
-          {#if showEnhanceDiff && enhanceOriginal}
-            <div class="enhance-diff">
-              <EditDiff input={{ old_string: enhanceOriginal, new_string: enhancedPreview }} hideHead compact />
-            </div>
-          {:else}
-            <div class="enhance-text">
-              {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
-            </div>
-          {/if}
-          <div class="enhance-actions">
-            <button type="button" class="enhance-btn enhance-accept" onclick={acceptEnhanced} disabled={enhancing || !enhancedPreview}>
-              <Check size={13} /> Use this
-            </button>
-            <button type="button" class="enhance-btn enhance-discard" onclick={dismissEnhanced}>
-              Discard
-            </button>
-            <span class="enhance-sep" aria-hidden="true"></span>
-            <button type="button" class="enhance-refine" onclick={() => runEnhance()} disabled={enhancing} use:tooltip={"Regenerate from your original draft"}>
-              <RefreshCw size={12} /> Regenerate
-            </button>
-            <button type="button" class="enhance-refine" onclick={() => runEnhance("Make it more concise — cut to the essentials, keep every technical specific.")} disabled={enhancing}>Concise</button>
-            <button type="button" class="enhance-refine" onclick={() => runEnhance("Add more implementation detail and the edge cases worth handling.")} disabled={enhancing}>More detail</button>
-            <button type="button" class="enhance-refine" onclick={() => runEnhance("Append a short acceptance-criteria checklist of what 'done' looks like.")} disabled={enhancing}>+ Acceptance</button>
-          </div>
-        {:else if enhanceError !== null}
-          <div class="enhance-error" role="alert">
-            <span class="enhance-error-msg">{enhanceError}</span>
-            <button type="button" class="attach-error-x" onclick={dismissEnhanced} aria-label="Dismiss">
-              <X size={11} />
-            </button>
-          </div>
-        {/if}
-      </div>
-    {/if}
+    <EnhanceBar
+      {enhancing}
+      {enhancedPreview}
+      {enhanceError}
+      {enhanceOriginal}
+      {groundEnhance}
+      hasWorkspace={!!assistant.workspace.current}
+      onToggleGround={() => (groundEnhance = !groundEnhance)}
+      onAccept={acceptEnhanced}
+      onDismiss={dismissEnhanced}
+      onRefine={(directive) => void runEnhance(directive)}
+    />
 
     {#if previewing && draft.trim().length > 0}
       <div class="preview-panel" role="region" aria-label="Message preview">
@@ -1970,34 +1906,7 @@
     border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
   }
 
-  /* ── Prompt enhancer preview ─────────────────────────────────────────
-     Glass panel above the composer (mirrors .slash-menu positioning) holding
-     the Haiku-rewritten draft. Accent reads from --model-color so it matches
-     the active model's hue like the rest of the composer chrome. */
-  .enhance-panel {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    width: 100%;
-    box-sizing: border-box;
-    background: color-mix(in oklch, var(--surface) 88%, transparent);
-    backdrop-filter: blur(14px) saturate(135%);
-    -webkit-backdrop-filter: blur(14px) saturate(135%);
-    border: 1px solid color-mix(in oklch, var(--model-color) 32%, var(--border));
-    border-radius: 14px;
-    box-shadow:
-      0 18px 44px -8px oklch(0 0 0 / 0.55),
-      0 0 0 1px color-mix(in oklch, var(--model-color) 10%, transparent),
-      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
-    padding: 12px;
-    z-index: 10;
-    animation: slash-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .enhance-head {
-    display: flex; align-items: center; gap: 7px;
-    margin-bottom: 8px;
-    color: var(--model-color);
-  }
+  /* Prompt-enhancer panel styles moved to composer/EnhanceBar.svelte (C5). */
   /* Draft preview (eye) — same glass panel as enhance, neutral chrome. */
   .preview-panel {
     position: absolute;
@@ -2038,89 +1947,6 @@
     padding: 2px 4px;
   }
   .previewbtn.on { color: var(--accent); background: var(--accent-soft); }
-  .enhance-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-  .enhance-text {
-    font-size: var(--fs-md);
-    line-height: 1.55;
-    color: var(--fg);
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 220px;
-    overflow-y: auto;
-    padding: 2px 0;
-    margin-bottom: 10px;
-  }
-  .enhance-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .enhance-btn {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 5px 12px;
-    border-radius: 8px;
-    font: inherit; font-size: var(--fs-sm); font-weight: 600;
-    cursor: pointer;
-    transition: background 140ms ease-out, border-color 140ms ease-out, transform 120ms ease-out;
-  }
-  .enhance-btn:active { transform: scale(0.96); }
-  .enhance-accept {
-    background: var(--model-color);
-    color: oklch(0.16 0.02 260);
-    border: 1px solid transparent;
-  }
-  .enhance-accept:hover { background: color-mix(in oklch, var(--model-color) 88%, white 12%); }
-  .enhance-discard {
-    background: transparent;
-    color: var(--fg-muted);
-    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-  }
-  .enhance-discard:hover {
-    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    color: var(--fg);
-  }
-  /* Refine + diff/ground controls on the enhance panel. */
-  .enhance-head-tools { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
-  .enhance-toggle {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 8px; border-radius: 999px;
-    font: inherit; font-size: 10.5px; font-weight: 600;
-    color: var(--fg-muted);
-    background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    cursor: pointer;
-    transition: color 130ms, background 130ms, border-color 130ms;
-  }
-  .enhance-toggle:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
-  .enhance-toggle:disabled { opacity: 0.5; cursor: default; }
-  .enhance-toggle.on {
-    color: var(--model-color);
-    border-color: color-mix(in oklab, var(--model-color) 45%, var(--border));
-    background: color-mix(in oklab, var(--model-color) 12%, transparent);
-  }
-  .enhance-diff {
-    max-height: 240px; overflow-y: auto;
-    margin-bottom: 10px;
-    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: 10px;
-    padding: 4px;
-  }
-  .enhance-sep { width: 1px; height: 18px; background: color-mix(in oklch, var(--border) 70%, transparent); margin: 0 2px; }
-  .enhance-refine {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 4px 9px; border-radius: 8px;
-    font: inherit; font-size: 11px; font-weight: 600;
-    color: var(--fg-muted);
-    background: transparent;
-    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    cursor: pointer;
-    transition: color 130ms, background 130ms, border-color 130ms, transform 120ms;
-  }
-  .enhance-refine:hover:not(:disabled) { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
-  .enhance-refine:active:not(:disabled) { transform: scale(0.96); }
-  .enhance-refine:disabled { opacity: 0.45; cursor: default; }
-  .enhance-error {
-    display: flex; align-items: center; gap: 8px;
-    font-size: var(--fs-sm);
-    color: var(--danger);
-  }
-  .enhance-error-msg { flex: 1; }
 
   /* ── Magic "enchanting" state ─────────────────────────────────────────
      While the wand call is in flight, the effect lands on the message itself:
@@ -2216,27 +2042,11 @@
     .wandbtn.enhancing { animation: none; }
   }
 
-  /* Reveal — each chunk of the enhanced text materializes out of blur,
-     staggered. Delay capped so long outputs don't crawl in over seconds. */
-  .ew {
-    animation: word-materialize 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: min(calc(var(--i) * 14ms), 650ms);
-  }
-  /* While streaming, tokens already arrive staggered — drop the index delay so
-     each word blurs in the moment its delta lands (typewriter feel), instead of
-     queuing behind a growing per-word offset. */
-  .ew.live {
-    animation-delay: 0ms;
-  }
-  @keyframes word-materialize {
-    from { opacity: 0; filter: blur(7px); }
-    to   { opacity: 1; filter: blur(0); }
-  }
+  /* Word-materialize reveal (.ew) moved to composer/EnhanceBar.svelte (C5). */
   @media (prefers-reduced-motion: reduce) {
     .magic-text { animation: none; -webkit-text-fill-color: var(--fg-muted); }
     .magic-aura, .magic-stars i { animation: none; }
     .magic-stars i { opacity: 0.7; }
-    .ew { animation: none; }
   }
 
   /* Compose-tools (improve/preview) reveal once the draft has text — the empty
