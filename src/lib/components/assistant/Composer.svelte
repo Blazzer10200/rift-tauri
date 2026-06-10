@@ -10,6 +10,7 @@
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import { modelFamily, liveActivity, fableAvailable } from "../../state/assistant/helpers";
+  import { fmtClock, fuzzyScore, effortIdxFromX, bytesToBase64, portal, fmtSize, isFileDrag } from "./composer/helpers";
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
@@ -134,10 +135,6 @@
     return streaming ? assistant.telemetry.snapshot().summary.outputTokensPerSec : null;
   });
   const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
-  function fmtClock(ms: number): string {
-    const s = Math.max(0, Math.floor(ms / 1000));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  }
   // Toggle the Activity dock: if it's already open ON the activity tab, a
   // second click closes it; otherwise open + switch to activity (so clicking
   // from another panel tab focuses activity rather than closing).
@@ -273,36 +270,6 @@
       void assistant.loadWorkspaceFiles();
     }
   }
-  // Light fuzzy match with three tiers: literal substring in basename,
-  // fuzzy match in basename, fuzzy match anywhere. `Comp` against
-  // `lib/foo/Composer.svelte` should beat `compress.lua` because the match
-  // starts at the basename.
-  function fuzzyScore(path: string, query: string): number | null {
-    if (query.length === 0) return 0;
-    const p = path.toLowerCase();
-    const q = query.toLowerCase();
-    const basenameStart = p.lastIndexOf("/") + 1;
-    const basename = p.slice(basenameStart);
-    const subIdx = basename.indexOf(q);
-    if (subIdx !== -1) return 1000 - subIdx;
-    let pi = 0;
-    let firstHit = -1;
-    for (const ch of q) {
-      const found = basename.indexOf(ch, pi);
-      if (found === -1) { firstHit = -1; pi = -1; break; }
-      if (firstHit === -1) firstHit = found;
-      pi = found + 1;
-    }
-    if (pi !== -1 && firstHit >= 0) return 500 - firstHit;
-    pi = 0; firstHit = -1;
-    for (const ch of q) {
-      const found = p.indexOf(ch, pi);
-      if (found === -1) return null;
-      if (firstHit === -1) firstHit = found;
-      pi = found + 1;
-    }
-    return -firstHit;
-  }
   const mentionResults = $derived.by(() => {
     if (!mentionState) return [] as string[];
     const q = mentionState.query;
@@ -435,9 +402,7 @@
   let draggingEffort = $state(false);
   function effortIdxFromClientX(clientX: number): number {
     if (!effortTrackEl) return effortIdx;
-    const r = effortTrackEl.getBoundingClientRect();
-    const frac = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-    return Math.round(frac * Math.max(0, effortStops.length - 1));
+    return effortIdxFromX(clientX, effortTrackEl.getBoundingClientRect(), effortStops.length);
   }
   function startEffortDrag(e: PointerEvent) {
     e.preventDefault();
@@ -689,26 +654,6 @@
   // next send. Mixed paste (image + text) keeps the text in the textarea
   // and stages the image separately. Caps mirror backend's 20 MiB guard so
   // we reject early rather than round-trip a doomed payload.
-  function bytesToBase64(buf: ArrayBuffer): string {
-    const bytes = new Uint8Array(buf);
-    let bin = "";
-    const CHUNK = 0x8000;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-    }
-    return btoa(bin);
-  }
-
-  // Portal action — moves the node to <body> so it escapes the composer's
-  // overflow:hidden + backdrop-filter containing block (any ancestor with
-  // backdrop-filter traps `position: fixed` descendants inside it, which is
-  // exactly what we need to avoid here).
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy() { node.remove(); } };
-  }
-
-
   // Permission-mode menu — portals to <body> like the hint pop, so it escapes
   // the composer's `overflow: hidden` + backdrop-filter containing block.
   let permWrap = $state<HTMLButtonElement | null>(null);
@@ -777,12 +722,6 @@
         attachError = `Failed to read pasted image: ${String(err)}`;
       }
     }
-  }
-
-  function fmtSize(n: number): string {
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
-    return `${(n / 1024 / 1024).toFixed(1)} MB`;
   }
 
   // Up-arrow recall offset (0 = newest). Reset whenever the user types or
@@ -981,12 +920,6 @@
   // descendants without flicker.
   let dragDepth = $state(0);
   const dragOver = $derived(dragDepth > 0);
-  function isFileDrag(e: DragEvent): boolean {
-    const types = e.dataTransfer?.types;
-    if (!types) return false;
-    for (let i = 0; i < types.length; i++) if (types[i] === "Files") return true;
-    return false;
-  }
   function onDragEnter(e: DragEvent) {
     if (!isFileDrag(e)) return;
     e.preventDefault();
