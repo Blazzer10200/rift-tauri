@@ -734,6 +734,11 @@ class AssistantStore {
   private tabScroll = new Map<string, number>();
 
   private unlistens: UnlistenFn[] = [];
+  // init() is called from AppShell, AssistantPage, and SettingsPage mounts —
+  // same-flush calls must share one run. The unlistens guard alone races (no
+  // push happens until after the first await), double-registering every
+  // listener → every stream line applied twice.
+  private initPromise: Promise<void> | null = null;
   // #177: keep the beforeunload listener reachable for removal in destroy().
   // Anonymous closures used to leak across HMR cycles.
   private beforeUnloadHandler: (() => void) | null = null;
@@ -826,7 +831,12 @@ class AssistantStore {
     this.queue = [];
   }
 
-  async init() {
+  init(): Promise<void> {
+    this.initPromise ??= this.initInner();
+    return this.initPromise;
+  }
+
+  private async initInner() {
     if (this.unlistens.length > 0) return;
     // Backend tags every stream/done/error event w/ the originating CLI
     // session_id (S104). We route by session_id to the right TabState so
@@ -982,6 +992,7 @@ class AssistantStore {
       try { u(); } catch (e) { console.warn("[assistant] unlisten threw", e); }
     }
     this.unlistens = [];
+    this.initPromise = null;
     if (this.beforeUnloadHandler && typeof window !== "undefined") {
       window.removeEventListener("beforeunload", this.beforeUnloadHandler);
       this.beforeUnloadHandler = null;

@@ -249,7 +249,7 @@ async function evalJs(js, timeoutMs = 30000, target = 'main') {
 async function typeText({ selector, text, key }, target = 'main') {
     const keyCode = key === 'Enter' ? 13 : key === 'CtrlEnter' ? -1 : key === 'Tab' ? 9 : key === 'Escape' ? 27 : 0;
     const js = `
-        (() => {
+        (async () => {
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return { error: 'selector not found' };
             el.focus();
@@ -258,6 +258,10 @@ async function typeText({ selector, text, key }, target = 'main') {
             setter.call(el, ${JSON.stringify(text)});
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
+            // Let the framework flush the input before the key fires — same-task
+            // input+Enter reads as a net-unchanged value to batched reactivity
+            // (Svelte skips the DOM write-back), leaving a stale textarea.
+            await new Promise(r => setTimeout(r, 0));
             const k = ${keyCode};
             const fire = (type, ctrl) => el.dispatchEvent(new KeyboardEvent(type, {
                 key: ${JSON.stringify(key || '')},
