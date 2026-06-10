@@ -13,7 +13,7 @@ User said "knock out stuff, then release." Source-verified per commit (cargo che
 - **`770b7fc` release: v0.8.16** tagged + pushed → CI.
 
 ### RESUME HERE (cont.98)
-- **CONFIRM CI:** release.yml run for v0.8.16 (was in flight at handoff) — check Actions + rift-releases latest.
+- **CI CONFIRMED:** v0.8.16 release run 27245762669 green (3m0s); rift-releases latest = v0.8.16 (published 2026-06-10T01:00Z).
 - **User prod = 0.8.12** → still needs ONE manual `Setup.exe`; after that, in-app update should pull 0.8.16.
 - **Runtime smoke debt now TWO releases deep** (0.8.15 + 0.8.16 both source-verified only): next dev session run the CDP pass — real turn (stream/tools/thinking), steer, stop, /retry, queue drain, **prompt enhance + title gen + summarize/remint (oneshot moved!)**, Settings config get/set + provider CRUD (config moved!), History list/load/delete, auth pill, update chip.
 - Next #20: Composer C1 (helpers.ts) per `composer-split.md`. Parked: SEC-1 live pass · #29 CSP-nonce · CR-UX trust-enum (needs user call) · `.tmp/runner/` setup-scripts fate (flagged to user).
