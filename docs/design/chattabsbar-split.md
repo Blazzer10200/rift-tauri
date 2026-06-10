@@ -2,7 +2,8 @@
 
 > #20 follow-on brief (queued behind composer-split C2-C7). Authoritative state in
 > [src/lib/components/shell/ChatTabsBar.svelte](../../src/lib/components/shell/ChatTabsBar.svelte) —
-> **1761L mapped 2026-06-09**: script L1-465 · markup L467-932 · style L934-1761 (~828L CSS).
+> **1717L after H0 ✅** (mapped at 1761L: script L1-465 · markup L467-932 · style L934-1761,
+> ~828L CSS — script refs shifted ~-44L by H0; re-anchor by snippet).
 > Line numbers go stale fast — re-locate by symbol/snippet anchor before cutting.
 > Pattern: children under `src/lib/components/shell/tabsbar/` + shared helper module
 > (same shape as composer-split.md).

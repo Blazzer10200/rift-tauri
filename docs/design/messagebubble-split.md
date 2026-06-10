@@ -2,7 +2,8 @@
 
 > #20 follow-on brief (queued behind composer-split C2-C7). Authoritative state in
 > [src/lib/components/assistant/MessageBubble.svelte](../../src/lib/components/assistant/MessageBubble.svelte) —
-> **1742L mapped 2026-06-09**: script L1-541 · markup L543-843 · style L845-1742 (~898L CSS).
+> **1471L after H0 ✅** (mapped at 1742L: script L1-541 · markup L543-843 · style L845-1742,
+> ~898L CSS — script now ~270L, markup/CSS line refs shifted ~-271L; re-anchor by snippet).
 > Line numbers go stale fast — re-locate by symbol/snippet anchor before cutting.
 > Pattern: children under `src/lib/components/assistant/bubble/` + one pure-helper TS module
 > (same shape as composer-split.md).

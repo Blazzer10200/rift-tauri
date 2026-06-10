@@ -2,7 +2,10 @@
 
 > Brief for the #20 frontend follow-on (queued in ISSUES #20). Authoritative state in
 > [src/lib/components/assistant/Composer.svelte](../../src/lib/components/assistant/Composer.svelte) —
-> **3197L measured 2026-06-09**: script L1-1064 · markup L1064-1781 · style L1781-3197 (~1416L CSS).
+> **3131L after C1 ✅ (shipped 2026-06-09**; original map 3197L: script L1-1064 · markup L1064-1781 ·
+> style L1781-3197, ~1416L CSS — markup/CSS boundaries shifted ~-66L by C1, script-only).
+> C1 made `composer/helpers.ts` (7 pure fns + 17 vitest); `portal` later moved to canonical
+> `$lib/actions/portal.ts` (ChatTabsBar H0 dedupe). Next: C2.
 > Line numbers go stale fast — re-locate by symbol/snippet anchor before cutting.
 > Pattern: **child components under `src/lib/components/assistant/composer/`** + one pure-helper TS module.
 > This is NOT the TS-module pattern from assistant-svelte-split.md — markup+CSS+state move together per child.
