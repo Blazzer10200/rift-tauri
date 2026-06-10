@@ -1,9 +1,9 @@
 <script lang="ts">
   // Per-step looping explainer visual. Pure markup — all styling + keyframes
   // live in $lib/styles/onboarding.css (loaded globally by OnboardingFlow).
-  import { Sparkles, Palette, FlaskConical } from "lucide-svelte";
+  import { Sparkles, FolderOpen, SlidersHorizontal } from "lucide-svelte";
 
-  type Kind = "welcome" | "personalize" | "claude" | "beta";
+  type Kind = "welcome" | "claude" | "project" | "defaults";
   let { kind, caption }: { kind: Kind; caption?: string } = $props();
 </script>
 
@@ -19,11 +19,6 @@
         <path d="M17 3l-2 7 4 2-3 9" opacity="0.55" />
       </svg>
     </div>
-  {:else if kind === "personalize"}
-    <span class="ob-ring r1"></span>
-    <span class="ob-ring r2"></span>
-    <span class="ob-ring r3"></span>
-    <div class="ob-w-mark"><Palette size={24} /></div>
   {:else if kind === "claude"}
     <div class="ob-cl">
       <div class="ob-cl-core">
@@ -34,11 +29,16 @@
       </div>
       <div class="ob-typing"><i></i><i></i><i></i></div>
     </div>
-  {:else if kind === "beta"}
+  {:else if kind === "project"}
     <span class="ob-ring r1"></span>
     <span class="ob-ring r2"></span>
     <span class="ob-ring r3"></span>
-    <div class="ob-w-mark"><FlaskConical size={24} /></div>
+    <div class="ob-w-mark"><FolderOpen size={24} /></div>
+  {:else if kind === "defaults"}
+    <span class="ob-ring r1"></span>
+    <span class="ob-ring r2"></span>
+    <span class="ob-ring r3"></span>
+    <div class="ob-w-mark"><SlidersHorizontal size={24} /></div>
   {/if}
   {#if caption}<span class="ob-stage-cap">{caption}</span>{/if}
 </div>

@@ -177,8 +177,87 @@
 .ob-accent-dot.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in oklab, var(--sw) 80%, transparent); }
 .ob-accent-dot :global(.lucide) { stroke-width: 3; }
 
+/* inline accent strip — Welcome step (Personalize folded in) */
+.ob-accent-inline {
+  flex-direction: row; align-items: center; justify-content: space-between; gap: 14px;
+  margin-top: 2px; padding: 12px 15px;
+  background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card);
+}
+.ob-accent-inline .ob-accent-row { gap: 8px; }
+.ob-accent-inline .ob-accent-dot { width: 24px; height: 24px; }
+
+/* ── Field groups — Defaults step ─────────────────────────────────────────── */
+.ob-fields { display: flex; flex-direction: column; gap: 20px; }
+.ob-field { display: flex; flex-direction: column; gap: 9px; }
+.ob-flabel { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); }
+.ob-field-hint { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.5; }
+
+/* segmented control */
+.ob-seg {
+  display: inline-flex; align-self: flex-start; gap: 3px; padding: 3px;
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.ob-seg-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 30px; padding: 0 13px; border: 0; border-radius: calc(var(--radius) - 3px);
+  font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
+  background: none; color: var(--fg-muted);
+  transition: background 130ms ease, color 130ms ease, box-shadow 130ms ease;
+}
+.ob-seg-btn:hover { color: var(--fg); }
+.ob-seg-btn.on {
+  background: var(--bg-elev-2); color: var(--fg); font-weight: 600;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 38%, transparent), 0 1px 4px -1px oklch(0 0 0 / 0.3);
+}
+.ob-seg-ver { font-size: 10px; font-weight: 600; color: var(--fg-faint); }
+.ob-seg-btn.on .ob-seg-ver { color: var(--accent); }
+
+/* ── Copy block — CLI install command ─────────────────────────────────────── */
+.ob-copy-block {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px 9px 14px;
+  background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--r-card);
+}
+.ob-copy-cmd {
+  flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 12px; color: var(--code-fg);
+}
+.ob-copy-btn {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 10px; border-radius: var(--radius-xs);
+  font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--fg-muted);
+  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+}
+.ob-copy-btn:hover { background: var(--surface-hover); color: var(--fg); }
+.ob-copy-btn.ok { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, transparent); }
+
+/* ── API-key alternative path ─────────────────────────────────────────────── */
+.ob-input {
+  flex: 1; min-width: 0; height: 34px; padding: 0 12px;
+  font: inherit; font-size: var(--fs-sm); color: var(--fg);
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius);
+  transition: border-color 130ms ease, box-shadow 130ms ease;
+}
+.ob-input::placeholder { color: var(--fg-faint); }
+.ob-input:focus-visible { outline: none; border-color: var(--gi-ghost-border); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent); }
+
+/* ── Project step — recent roots ──────────────────────────────────────────── */
+.ob-recent { display: flex; flex-direction: column; gap: 4px; }
+.ob-recent-btn {
+  display: flex; align-items: center; gap: 9px;
+  padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--r-card);
+  font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left;
+  background: var(--bg-elev-1); color: var(--fg-2);
+  transition: background 130ms ease, border-color 130ms ease;
+}
+.ob-recent-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+.ob-recent-btn :global(.lucide) { flex: none; color: var(--fg-subtle); }
+.ob-recent-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+
 .ob-hint { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; margin: 0; }
 .ob-hint :global(.lucide) { flex: none; margin-top: 1px; color: var(--fg-subtle); }
+.ob-hint.ok { color: var(--ok); }
 
 .ob-error { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--danger); }
 .ob-error :global(.lucide) { flex: none; }

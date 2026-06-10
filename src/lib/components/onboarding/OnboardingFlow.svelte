@@ -1,17 +1,20 @@
 <script lang="ts">
-  // First-run flow. Pure-assistant build: a 3-step welcome — what Rift is,
-  // personalize (accent), connect Claude (optional). The old SSH/server/sync
-  // walkthrough was removed when Rift dropped its SFTP/sync half. Mounted by
-  // AppShell when the first-run gate is open; onDone fires on finish OR skip
-  // and persists the dismissal.
+  // First-run flow. Pure-assistant build: 4 actionable steps — welcome (w/ beta
+  // notice + accent picker folded in), guided Claude connect, open a project,
+  // and defaults (model / effort / git tools). Mounted by AppShell when the
+  // first-run gate is open; onDone fires on finish OR skip and persists the
+  // dismissal + beta acknowledgment.
   import "$lib/styles/onboarding.css";
   import ObStage from "./ObStage.svelte";
-  import ClaudeAuth from "./ClaudeAuth.svelte";
+  import ClaudeConnect from "./ClaudeConnect.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
+  import { assistant } from "$lib/state/assistant.svelte";
+  import { fableAvailable } from "$lib/state/assistant/helpers";
+  import type { ModelSel, ThinkingEffort } from "$lib/state/assistant/types";
   import {
-    Check, ChevronLeft, ChevronRight, FolderGit2, Terminal, Zap,
-    Sparkles, TriangleAlert,
+    Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen, Terminal, Zap,
+    History, Loader2, TriangleAlert,
   } from "lucide-svelte";
 
   type Props = { onDone: () => void };
@@ -19,9 +22,9 @@
 
   const steps = [
     { t: "Welcome", s: "What Rift is" },
-    { t: "Personalize", s: "Make it yours" },
-    { t: "Connect Claude", s: "Optional" },
-    { t: "Before you start", s: "A quick heads-up" },
+    { t: "Connect Claude", s: "CLI & sign-in" },
+    { t: "Open a project", s: "Pick a folder" },
+    { t: "Defaults", s: "Model & tools" },
   ];
 
   let step = $state(1);
@@ -40,6 +43,48 @@
 
   function onEscape(e: KeyboardEvent) {
     if (e.key === "Escape") { e.preventDefault(); onDone(); }
+  }
+
+  // ── Open-project step ──
+  let picking = $state(false);
+  async function chooseFolder() {
+    if (picking) return;
+    picking = true;
+    try { await assistant.pickFolder(); } finally { picking = false; }
+  }
+  const recentRoots = $derived(
+    assistant.workspace.recent.filter((r) => r !== assistant.workspace.current).slice(0, 3),
+  );
+  // strip the Windows long-path prefix (\\?\C:\…) the backend stores
+  const displayPath = (p: string) => p.replace(/^\\\\\?\\/, "");
+
+  // ── Defaults step — same matrix shape as Composer's picker, current models only ──
+  type ModelOpt = { id: ModelSel; label: string; version: string; effort: boolean; maxEffort: ThinkingEffort };
+  const MODEL_OPTIONS: ModelOpt[] = [
+    ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", effort: true, maxEffort: "ultra" as ThinkingEffort }] : []),
+    { id: "opus",   label: "Opus",   version: "4.8", effort: true,  maxEffort: "ultra" },
+    { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "deep" },
+    { id: "haiku",  label: "Haiku",  version: "4.5", effort: false, maxEffort: "none" },
+  ];
+  type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
+  const EFFORT_OPTIONS: EffortOpt[] = [
+    { id: "none",  label: "Instant",   hint: "Straight to the answer, no thinking time" },
+    { id: "quick", label: "Smart",     hint: "Thinks briefly before answering" },
+    { id: "deep",  label: "Deep",      hint: "Heavy reasoning for hard problems" },
+    { id: "ultra", label: "Ultracode", hint: "Max reasoning + multi-agent workflows" },
+  ];
+  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
+  const effortStops = $derived.by(() => {
+    if (!currentModel?.effort) return [] as EffortOpt[];
+    const cap = EFFORT_OPTIONS.findIndex((e) => e.id === currentModel.maxEffort);
+    return EFFORT_OPTIONS.slice(0, cap >= 0 ? cap + 1 : EFFORT_OPTIONS.length);
+  });
+  function pickModel(m: ModelOpt) {
+    assistant.setModel(m.id);
+    // clamp effort to the new model's ceiling so the saved pref never exceeds it
+    const idx = EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort);
+    const cap = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
+    if (m.effort && cap >= 0 && idx > cap) assistant.setThinkingEffort(EFFORT_OPTIONS[cap].id);
   }
 </script>
 
@@ -112,15 +157,15 @@
                   <span class="ob-vp"><code>read_file</code>, <code>list_dir</code>, <code>grep</code>, and local-git — exposed over stdio, no config.</span>
                 </span>
               </div>
+              <div class="ob-vrow">
+                <span class="ob-vic warn"><TriangleAlert size={18} /></span>
+                <span class="ob-vbody">
+                  <span class="ob-vt">You're testing the beta</span>
+                  <span class="ob-vp">Pre-release software, and responses are AI-generated — they can be wrong or unsafe. Review changes before relying on them; keep your work backed up.</span>
+                </span>
+              </div>
             </div>
-          {:else if step === 2}
-            <ObStage kind="personalize" caption="personalize" />
-            <header class="ob-head">
-              <span class="ob-eyebrow">Step 2 · Personalize</span>
-              <h1 class="ob-title">Make it yours</h1>
-              <p class="ob-sub">Pick an accent color — it retunes the whole interface live. Everything else lives in Settings.</p>
-            </header>
-            <div class="ob-accent">
+            <div class="ob-accent ob-accent-inline">
               <span class="ob-accent-label">Accent color</span>
               <div class="ob-accent-row">
                 {#each ACCENTS as a (a.id)}
@@ -133,35 +178,104 @@
                     aria-pressed={uiPrefs.accentHue === a.hue}
                     onclick={() => uiPrefs.setAccentHue(a.hue)}
                   >
-                    {#if uiPrefs.accentHue === a.hue}<Check size={14} strokeWidth={3} />{/if}
+                    {#if uiPrefs.accentHue === a.hue}<Check size={12} strokeWidth={3} />{/if}
                   </button>
                 {/each}
               </div>
             </div>
-          {:else if step === 3}
+          {:else if step === 2}
             <ObStage kind="claude" caption="embedded assistant" />
-            <ClaudeAuth />
-          {:else}
-            <ObStage kind="beta" caption="beta program" />
+            <ClaudeConnect />
+          {:else if step === 3}
+            <ObStage kind="project" caption="your workspace" />
             <header class="ob-head">
-              <span class="ob-eyebrow">Step 4 · Before you start</span>
-              <h1 class="ob-title">You're testing the beta</h1>
-              <p class="ob-sub">Thanks for trying Rift early. Two things to keep in mind while you use it.</p>
+              <span class="ob-eyebrow">Step 3 · Open a project</span>
+              <h1 class="ob-title">Open a project</h1>
+              <p class="ob-sub">Point Rift at a code folder so the assistant has something to work on. You can switch projects anytime from the title bar.</p>
             </header>
-            <div class="ob-vlist">
-              <div class="ob-vrow">
-                <span class="ob-vic"><Sparkles size={18} /></span>
-                <span class="ob-vbody">
-                  <span class="ob-vt">This is pre-release software</span>
-                  <span class="ob-vp">Rift is still being fine-tuned — expect rough edges, occasional bugs, and features that may change or break between updates.</span>
-                </span>
+            {#if assistant.workspace.current}
+              <div class="ob-statcard">
+                <div class="ob-statrow">
+                  <span class="k"><FolderGit2 size={15} /> Workspace</span>
+                  <span class="v ok"><Check size={14} /> {displayPath(assistant.workspace.current)}</span>
+                </div>
               </div>
-              <div class="ob-vrow">
-                <span class="ob-vic warn"><TriangleAlert size={18} /></span>
-                <span class="ob-vbody">
-                  <span class="ob-vt">AI can make mistakes</span>
-                  <span class="ob-vp">Responses and code edits are AI-generated and may be wrong, incomplete, or unsafe. Review every change before relying on it — and keep your work backed up.</span>
-                </span>
+              <div class="ob-input-row">
+                <button class="ob-btn sm" type="button" onclick={() => void chooseFolder()} disabled={picking}>
+                  {#if picking}<Loader2 size={13} class="spin" />{:else}<FolderOpen size={13} />{/if} Change folder
+                </button>
+              </div>
+            {:else}
+              <div class="ob-input-row">
+                <button class="ob-btn primary" type="button" onclick={() => void chooseFolder()} disabled={picking}>
+                  {#if picking}<Loader2 size={15} class="spin" />{:else}<FolderOpen size={15} />{/if} Choose a folder
+                </button>
+              </div>
+              {#if recentRoots.length > 0}
+                <div class="ob-field">
+                  <span class="ob-flabel">Recent</span>
+                  <div class="ob-recent">
+                    {#each recentRoots as r (r)}
+                      <button type="button" class="ob-recent-btn" onclick={() => void assistant.setRoot(r)}>
+                        <History size={14} />
+                        <span class="ob-recent-path">{displayPath(r)}</span>
+                      </button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              <p class="ob-hint"><span>Or skip — you can open a folder anytime from the title bar.</span></p>
+            {/if}
+          {:else}
+            <ObStage kind="defaults" caption="tuned to you" />
+            <header class="ob-head">
+              <span class="ob-eyebrow">Step 4 · Defaults</span>
+              <h1 class="ob-title">Pick your defaults</h1>
+              <p class="ob-sub">How the assistant runs by default. Each project remembers its own model and effort — change these anytime from the composer.</p>
+            </header>
+            <div class="ob-fields">
+              <div class="ob-field">
+                <span class="ob-flabel">Model</span>
+                <div class="ob-seg" role="radiogroup" aria-label="Default model">
+                  {#each MODEL_OPTIONS as m (m.id)}
+                    <button
+                      type="button"
+                      class="ob-seg-btn"
+                      class:on={assistant.model === m.id}
+                      role="radio"
+                      aria-checked={assistant.model === m.id}
+                      onclick={() => pickModel(m)}
+                    >
+                      {m.label} <span class="ob-seg-ver">{m.version}</span>
+                    </button>
+                  {/each}
+                </div>
+              </div>
+              {#if effortStops.length > 0}
+                <div class="ob-field">
+                  <span class="ob-flabel">Thinking effort</span>
+                  <div class="ob-seg" role="radiogroup" aria-label="Thinking effort">
+                    {#each effortStops as e (e.id)}
+                      <button
+                        type="button"
+                        class="ob-seg-btn"
+                        class:on={assistant.thinkingEffort === e.id}
+                        role="radio"
+                        aria-checked={assistant.thinkingEffort === e.id}
+                        title={e.hint}
+                        onclick={() => assistant.setThinkingEffort(e.id)}
+                      >{e.label}</button>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+              <div class="ob-field">
+                <span class="ob-flabel">Git tools</span>
+                <div class="ob-seg" role="radiogroup" aria-label="Git tools trust level">
+                  <button type="button" class="ob-seg-btn" class:on={assistant.trustLevel === "readonly"} role="radio" aria-checked={assistant.trustLevel === "readonly"} onclick={() => void assistant.setTrustLevel("readonly")}>Read-only</button>
+                  <button type="button" class="ob-seg-btn" class:on={assistant.trustLevel !== "readonly"} role="radio" aria-checked={assistant.trustLevel !== "readonly"} onclick={() => void assistant.setTrustLevel("standard")}>Standard</button>
+                </div>
+                <span class="ob-field-hint">Read-only = status, diff, log. Standard adds commit, pull, and push.</span>
               </div>
             </div>
           {/if}
