@@ -9,7 +9,7 @@
   import type { ModelSel, PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
-  import { modelFamily, liveActivity, fableAvailable } from "../../state/assistant/helpers";
+  import { modelFamily, liveActivity, fableAvailable, effortToFlag } from "../../state/assistant/helpers";
   import { fmtClock, fuzzyScore, effortIdxFromX, bytesToBase64, isFileDrag } from "./composer/helpers";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import { portal } from "$lib/actions/portal";
@@ -349,6 +349,9 @@
     { id: "ultra", label: "Ultracode", level: 5, hint: "Ultracode — deep reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
   ];
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
+  // The real CLI flag for the current tier — shown beside the tier name so the
+  // panel never hides what actually gets sent.
+  const effortFlagLabel = $derived(effortToFlag(assistant.thinkingEffort, assistant.model));
   // ── Capability gates, all derived from the current model's matrix entry. The
   // panel offers ONLY what the selected model honors server-side, so the UI
   // never promises a mode that silently does nothing.
@@ -1292,7 +1295,7 @@
         <div class="rift-menu-divider"></div>
         {#if effortApplies}
           <div class="effort-head" class:ultra={currentEffort.id === "ultra"}>
-            <span class="effort-head-l">Effort <b>{currentEffort.label}</b></span>
+            <span class="effort-head-l">Effort <b>{currentEffort.label}</b>{#if effortFlagLabel}<span class="effort-head-flag" use:tooltip={"The --effort level actually sent to Claude"}>--effort {effortFlagLabel}</span>{/if}</span>
             <button
               type="button"
               role="menuitem"
@@ -2934,6 +2937,15 @@
     transition: color 180ms ease;
   }
   .effort-head.ultra .effort-head-l b { color: var(--accent); }
+  .effort-head .effort-head-flag {
+    margin-left: 8px;
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 500;
+    color: var(--fg-faint);
+    letter-spacing: 0.02em;
+  }
+  .effort-head.ultra .effort-head-flag { color: color-mix(in oklab, var(--accent) 55%, var(--fg-faint)); }
   .effort-head .effort-help {
     margin-left: auto; display: inline-flex; padding: 2px; border: 0;
     background: transparent; color: var(--fg-faint); cursor: help;
