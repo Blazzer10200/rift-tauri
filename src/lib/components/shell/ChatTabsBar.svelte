@@ -14,6 +14,8 @@
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
+  import { portalFocus as portal } from "$lib/actions/portal";
+  import { menuKeydown, leafName, prettyPath, shortK } from "./tabsbar/helpers";
   let ctxMenu = $state<{ tabId: string; x: number; y: number } | null>(null);
   let historyOpen = $state(false);
   let historyFull = $state(false);
@@ -26,16 +28,6 @@
   let ctxAnchor = $state<HTMLButtonElement | undefined>();
   let ctxPanel = $state<HTMLDivElement | undefined>();
   let ctxPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
-
-  // Portal action — moves the node to <body> so the popover escapes the
-  // `.tabs-rail` overflow:hidden clip (that clip exists to drive the
-  // workspace-hop collapse animation, can't remove it).
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    // Focus first interactive descendant so keyboard users enter the popover immediately.
-    (node.querySelector('button, [href], input, [tabindex="0"]') as HTMLElement | null)?.focus();
-    return { destroy() { node.remove(); } };
-  }
 
   // History opens from the Panels menu now → anchor its popover off the
   // Panels button (viewAnchor).
@@ -196,25 +188,6 @@
   let projMenu = $state<HTMLDivElement | undefined>();
   let projPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
 
-  // #150: ARIA menu keyboard contract — ArrowUp/Down + Home/End move focus
-  // between the role=menuitem(checkbox) buttons. Shared by proj + view menus.
-  function menuKeydown(e: KeyboardEvent, container: HTMLElement | undefined) {
-    if (!container) return;
-    const items = [...container.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]')];
-    if (items.length === 0) return;
-    const cur = items.indexOf(document.activeElement as HTMLButtonElement);
-    let next: number;
-    switch (e.key) {
-      case "ArrowDown": next = cur < 0 ? 0 : (cur + 1) % items.length; break;
-      case "ArrowUp":   next = cur < 0 ? items.length - 1 : (cur - 1 + items.length) % items.length; break;
-      case "Home":      next = 0; break;
-      case "End":       next = items.length - 1; break;
-      default: return;
-    }
-    e.preventDefault();
-    items[next]?.focus();
-  }
-
   function openProjMenu() {
     if (!projAnchor) return;
     const r = projAnchor.getBoundingClientRect();
@@ -356,16 +329,6 @@
 
   // -------- right-side chat status chips (absorbed from AssistantHeader) -----
 
-  function leafName(p: string): string {
-    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
-    const parts = norm.split("/");
-    return parts[parts.length - 1] || norm;
-  }
-  // Cleaned path for tooltips — drops Windows extended-length `\\?\` noise.
-  function prettyPath(p: string): string {
-    return p.replace(/^\\\\\?\\/, "").replace(/^\/\/\?\//, "");
-  }
-
   const authWarn = $derived.by(() => {
     const a = assistant.auth;
     if (!a) return null;
@@ -396,13 +359,6 @@
   const tasksOpen = $derived(assistant.ui.dockOpen);
   function toggleTasks() {
     assistant.ui.dockOpen = !assistant.ui.dockOpen;
-  }
-
-  function shortK(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-    if (n >= 10_000) return `${Math.round(n / 1000)}K`;
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-    return String(n);
   }
 
   const newTokens = $derived(
