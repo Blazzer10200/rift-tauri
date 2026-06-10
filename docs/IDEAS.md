@@ -6,7 +6,7 @@ Future-reference ideas captured mid-session. Not committed work — seeds to rev
 
 ## Edit-applying swarm (write-mode, not just review) — captured 2026-06-04
 
-**Origin:** during the read-only audit swarm (`scripts/.archive/audit-swarm.workflow.js`, ~550 agents, find→verify→synthesize), the question came up: if a parallel swarm can *review* the whole codebase accurately, can a swarm safely *apply the fixes* too — not just describe them?
+**Origin:** during the read-only audit swarm (`scripts/.archive/audit-swarm.workflow.js` — deleted 2026-06-09, see `git log`; ~550 agents, find→verify→synthesize), the question came up: if a parallel swarm can *review* the whole codebase accurately, can a swarm safely *apply the fixes* too — not just describe them?
 
 **The hard part:** edit agents are riskier than review agents. A bad read just produces a wrong finding (cheap, caught by verify). A bad *edit* mutates source — and parallel editors can collide on the same file, apply half a change, or "fix" something based on a stale read. Reliability is the whole game.
 
