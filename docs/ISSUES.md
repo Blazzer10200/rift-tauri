@@ -61,9 +61,9 @@
 #### 20. Hot files exceeding the 2000-line agent-split threshold
 
 - **Where:** per CLAUDE.md agent-routing guidance, files >2000 lines are agent-bail risks. Open target (re-measured 2026-06-09):
-  - [src/lib/components/assistant/Composer.svelte](../src/lib/components/assistant/Composer.svelte) — 3197L, the last >2000L file — brief ready: [composer-split.md](design/composer-split.md) (C1-C7).
+  - [src/lib/components/assistant/Composer.svelte](../src/lib/components/assistant/Composer.svelte) — 3130L, the last >2000L file — brief: [composer-split.md](design/composer-split.md) (C1 ✅ shipped 2026-06-09; C2-C7 open, each needs a CDP visual pass).
 - **Symptom:** targeted edits become brittle, LSP slows, agents bail mid-emit on audit-shaped prompts.
-- **Status:** `assistant.svelte.ts` split **COMPLETE** (M0-M9, 1700L — was 3356L; playback net held). `assistant/mod.rs` split **COMPLETE R1-R8, shipped v0.8.16** (4331 → 303L hub; `turn.rs` 1372 · `oneshot.rs` 734 · `config.rs` 569 + R1-R7 siblings), every extraction cargo-check zero-warnings + cargo test 95/95. `assistant_send` (917L fn inside turn.rs) can split internally later — out of scope per brief. Next bite: Composer C1 (helpers.ts).
+- **Status:** `assistant.svelte.ts` split **COMPLETE** (M0-M9, 1700L — was 3356L; playback net held). `assistant/mod.rs` split **COMPLETE R1-R8, shipped v0.8.16** (4331 → 303L hub; `turn.rs` 1372 · `oneshot.rs` 734 · `config.rs` 569 + R1-R7 siblings), every extraction cargo-check zero-warnings + cargo test 95/95. `assistant_send` (917L fn inside turn.rs) can split internally later — out of scope per brief. **Composer C1 ✅** (`composer/helpers.ts`, 17 vitest cases, 3197→3130L). Follow-on briefs ready: [messagebubble-split.md](design/messagebubble-split.md) (H0+B1-B6) + [chattabsbar-split.md](design/chattabsbar-split.md) (H0+T1-T6) — section maps verified against source 2026-06-09. Next bite: Composer C2 (AttachmentsRow) w/ dev running.
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
 
@@ -107,7 +107,8 @@
 ## Active design briefs
 
 - `docs/design/assistant-mod-split.md` (#20 backend — COMPLETE R1-R8, shipped v0.8.16; kept as the split pattern reference)
-- `docs/design/composer-split.md` (#20 frontend follow-on — C1-C7 ready to execute)
+- `docs/design/composer-split.md` (#20 frontend follow-on — C1 shipped; C2-C7 ready to execute)
+- `docs/design/messagebubble-split.md` + `docs/design/chattabsbar-split.md` (#20 next candidates — mapped + briefed 2026-06-09, queued behind composer C2-C7)
 - `docs/design/assistant-svelte-split.md` (#20 frontend — COMPLETE, M0-M9 all shipped; KEPT permanently — the `src/lib/state/assistant/*` module headers reference it)
 - `docs/design/steer-and-queue.md` (steer/queue three-tier model — steer shipped; queue improvements + inline-bubble follow-ups open)
 

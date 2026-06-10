@@ -79,4 +79,4 @@ toolbar row + drag-drop shell + `onKey`/fire/steer/queue logic. Target ≤900L.
 ## Follow-on
 
 After C1-C7: `MessageBubble.svelte` 1742L and `ChatTabsBar.svelte` (shell/, 1761L) are next #20
-candidates; both need markup-section mapping passes like this one before briefing.
+candidates — mapped + briefed 2026-06-09: `messagebubble-split.md` + `chattabsbar-split.md`.
