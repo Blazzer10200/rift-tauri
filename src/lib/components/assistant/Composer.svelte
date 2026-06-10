@@ -11,6 +11,8 @@
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
   import EnhanceBar from "./composer/EnhanceBar.svelte";
+  import SlashMenu from "./composer/SlashMenu.svelte";
+  import MentionPopover from "./composer/MentionPopover.svelte";
   import { portal } from "$lib/actions/portal";
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
@@ -967,50 +969,16 @@
     {/if}
 
     {#if slashOpen && slashFiltered.length > 0}
-      <div class="rift-menu slash-menu" role="menu">
-        {#each slashFiltered as c, i (c.name)}
-          <button
-            type="button"
-            role="menuitem"
-            class="rift-menu-row slash-row"
-            class:active={i === slashIdx}
-            style="--idx: {i}"
-            onmousedown={(e) => { e.preventDefault(); pickSlash(c); }}
-          >
-            <span class="rift-menu-row-body">
-              <span class="rift-menu-row-t slash-cmd">/{c.name}</span>
-              <span class="rift-menu-row-d">{c.desc}</span>
-            </span>
-          </button>
-        {/each}
-        <div class="slash-hint">↑↓ select · Tab/Enter pick · Esc cancel</div>
-      </div>
+      <SlashMenu commands={slashFiltered} activeIdx={slashIdx} onPick={pickSlash} />
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
-      <div class="rift-menu slash-menu mention-menu" role="menu">
-        {#each mentionResults as path, i (path)}
-          {@const slash = path.lastIndexOf("/")}
-          {@const dir = slash > 0 ? path.slice(0, slash + 1) : ""}
-          {@const base = slash >= 0 ? path.slice(slash + 1) : path}
-          <button
-            type="button"
-            role="menuitem"
-            class="rift-menu-row mention-item"
-            class:active={i === mentionIdx}
-            style="--idx: {i}"
-            onmousedown={(e) => { e.preventDefault(); pickMention(path); }}
-          >
-            <span class="mention-base">{base}</span>
-            <span class="mention-dir">{dir}</span>
-          </button>
-        {/each}
-        <div class="slash-hint">
-          {assistant.workspaceFiles.length > 0
-            ? `${assistant.workspaceFiles.length} files · ↑↓ select · Tab/Enter pick · Esc cancel`
-            : "loading workspace files…"}
-        </div>
-      </div>
+      <MentionPopover
+        results={mentionResults}
+        activeIdx={mentionIdx}
+        fileCount={assistant.workspaceFiles.length}
+        onPick={pickMention}
+      />
     {/if}
 
     {#if settingsOpen}
@@ -1866,44 +1834,12 @@
 
   /* Pending-rail styles moved to composer/QueueRail.svelte (C3). */
 
-  /* Slash + mention popovers — share the .rift-menu chrome; this only carries
-     positioning (full-width, anchored above the composer) + the entry tween. */
-  .slash-menu {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    width: 100%;
-    max-height: 280px;
-    overflow-y: auto;
-    z-index: 10;
-    animation: slash-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
+  /* Slash + mention popover styles moved to composer/SlashMenu.svelte +
+     composer/MentionPopover.svelte (C6). slash-in stays — .preview-panel
+     below still uses it. */
   @keyframes slash-in {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
-  }
-  /* Per-row staggered entry — driven by inline style="--idx: {i}". */
-  .slash-row, .mention-item {
-    animation: slash-item-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    animation-delay: calc(var(--idx, 0) * 22ms);
-  }
-  @keyframes slash-item-in {
-    from { opacity: 0; transform: translateY(6px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .slash-row, .mention-item { animation: none; }
-  }
-  .slash-cmd { font-family: var(--font-mono, ui-monospace, monospace); color: var(--accent); }
-  .slash-hint {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 8px 12px 4px;
-    margin-top: 4px;
-    font-size: 10px;
-    color: var(--fg-faint);
-    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
   }
 
   /* Prompt-enhancer panel styles moved to composer/EnhanceBar.svelte (C5). */
@@ -2201,34 +2137,6 @@
   :global(.perm-menu .perm-row[data-mode="bypassPermissions"].current::before) { background: var(--warn); box-shadow: 0 0 8px color-mix(in oklab, var(--warn) 55%, transparent); }
   :global(.perm-menu .perm-row[data-mode="bypassPermissions"].current .perm-row-ic),
   :global(.perm-menu .perm-row[data-mode="bypassPermissions"].current .perm-row-chk) { color: var(--warn); }
-  .mention-menu { max-height: 280px; }
-  .mention-item {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    align-items: baseline;
-    gap: 10px;
-    padding: 5px 10px;
-  }
-  .mention-base {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: var(--fs-sm);
-    color: var(--fg);
-    font-weight: 500;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .mention-dir {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: var(--fs-xs);
-    color: var(--fg-faint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-align: right;
-  }
-  .mention-item.active .mention-base { color: var(--accent); }
 
   /* Unified settings panel — flat single-column list (Claude-Code-Desktop
      layout) on the shared .rift-menu chrome: model rows, a fast-mode toggle,
