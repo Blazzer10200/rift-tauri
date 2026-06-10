@@ -63,15 +63,16 @@
   const MODEL_OPTIONS: ModelOpt[] = [
     ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", effort: true, maxEffort: "ultra" as ThinkingEffort }] : []),
     { id: "opus",   label: "Opus",   version: "4.8", effort: true,  maxEffort: "ultra" },
-    { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "deep" },
+    { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "smart" },
     { id: "haiku",  label: "Haiku",  version: "4.5", effort: false, maxEffort: "none" },
   ];
   type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
   const EFFORT_OPTIONS: EffortOpt[] = [
-    { id: "none",  label: "Instant",   hint: "Straight to the answer, no thinking time" },
-    { id: "quick", label: "Smart",     hint: "Thinks briefly before answering" },
-    { id: "deep",  label: "Deep",      hint: "Heavy reasoning for hard problems" },
-    { id: "ultra", label: "Ultracode", hint: "Max reasoning + multi-agent workflows" },
+    { id: "none",  label: "Instant",   hint: "Minimal reasoning — fastest answers" },
+    { id: "quick", label: "Quick",     hint: "Light reasoning, leaner tool use" },
+    { id: "smart", label: "Smart",     hint: "Standard depth — the recommended default" },
+    { id: "deep",  label: "Deep",      hint: "Extra depth for hard agentic coding" },
+    { id: "ultra", label: "Ultracode", hint: "Deep reasoning + multi-agent workflows" },
   ];
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
   const effortStops = $derived.by(() => {

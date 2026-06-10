@@ -81,12 +81,12 @@ export function loadEffort(ws?: string | null): ThinkingEffort {
     if (typeof localStorage !== "undefined") {
       const k = wsKey(EFFORT_KEY, ws);
       const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(EFFORT_KEY);
-      if (v === "none" || v === "quick" || v === "deep" || v === "ultra") return v;
+      if (v === "none" || v === "quick" || v === "smart" || v === "deep" || v === "ultra") return v;
     }
   } catch {
     /* SSR or storage disabled */
   }
-  return "quick";
+  return "smart";
 }
 
 export function saveEffort(v: ThinkingEffort, ws?: string | null) {
@@ -263,16 +263,17 @@ export function liveActivity(
   return out.sort((x, y) => x.startedAt - y.startedAt);
 }
 
-/** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/mod.rs.
- *  `ultra` (ultracode) maps to xhigh effort; the autonomous-workflow behavior
- *  rides the separate `ultracode` settings key, also set in mod.rs. */
+/** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/turn.rs.
+ *  Ladder: none→low · quick→medium · smart→high (API default) · deep→xhigh
+ *  (Claude Code's own agentic default) · ultra→xhigh; ultra's autonomous-workflow
+ *  behavior rides the separate `ultracode` settings key, set in turn.rs. */
 export function effortToFlag(
   effort: ThinkingEffort,
   model: ModelSel,
 ): "low" | "medium" | "high" | "xhigh" | null {
   if (model === "haiku") return null;
   if (effort === "none") return "low";
-  if (effort === "deep") return "high";
-  if (effort === "ultra") return "xhigh";
-  return "medium";
+  if (effort === "quick") return "medium";
+  if (effort === "deep" || effort === "ultra") return "xhigh";
+  return "high"; // "smart" — the default tier
 }

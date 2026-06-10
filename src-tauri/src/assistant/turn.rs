@@ -454,10 +454,11 @@ pub async fn assistant_send(
         log::info!("assistant_send: {FABLE_MODEL} sunset passed — falling back to opus");
         model = "opus".to_string();
     }
-    // Effort tier: per-turn override wins, else stored default, else "quick".
+    // Effort tier: per-turn override wins, else stored default, else "smart"
+    // (--effort high, the API default — mirrors the frontend's loadEffort()).
     let effort = thinking_effort
         .or_else(|| cfg.thinking_effort.clone())
-        .unwrap_or_else(|| "quick".to_string());
+        .unwrap_or_else(|| "smart".to_string());
 
     // Permission mode: per-turn override wins, else stored default, else
     // "bypassPermissions" (Rift's historical behavior). Renderer-supplied —
@@ -738,11 +739,17 @@ pub async fn assistant_send(
         }
     }
 
-    // Effort-gated extended thinking via the CLI's `--effort` flag. Haiku
-    // skips wholesale. Tier mapping mirrors Claude Code's own ladder:
-    //   none  → --effort low      (minimal thinking, fastest TTFT)
-    //   quick → --effort medium   (CC's default — balanced)
-    //   deep  → --effort high     (heavy reasoning)
+    // Effort-gated extended thinking via the CLI's `--effort` flag (the CLI
+    // accepts low/medium/high/xhigh/max). Haiku skips wholesale — the API
+    // rejects effort on Haiku 4.5. Tier mapping (MUST mirror frontend
+    // `effortToFlag` in src/lib/state/assistant/helpers.ts):
+    //   none  → --effort low     (minimal reasoning, fastest TTFT)
+    //   quick → --effort medium  (light reasoning, leaner tool use)
+    //   smart → --effort high    (the API default — Rift's default tier)
+    //   deep  → --effort xhigh   (Claude Code's own default for agentic coding)
+    //   ultra → --effort xhigh + the ultracode workflow settings key
+    // `max` is deliberately not exposed — per Anthropic's guidance it shows
+    // diminishing returns and is prone to overthinking vs xhigh.
     // Earlier impl set `MAX_THINKING_TOKENS` env, but the CLI doesn't honor
     // that env directly — `--effort` is the documented API. The plaintext
     // reasoning is encrypted by the API in -p mode; what reaches us is
@@ -753,9 +760,9 @@ pub async fn assistant_send(
     // was safe (string-arg passthrough) but the log line was unredacted.
     let effort_level = match effort.as_str() {
         "none" => "low",
-        "deep" => "high",
-        "ultra" => "xhigh",
-        _ /* "quick" or unknown */ => "medium",
+        "quick" => "medium",
+        "deep" | "ultra" => "xhigh",
+        _ /* "smart" or unknown */ => "high",
     };
     if model != "haiku" && custom_base.is_none() {
         cmd.arg("--effort").arg(effort_level);
