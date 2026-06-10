@@ -64,6 +64,9 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
+    // First-run setup is modal — no palette / workspace-switch / tab shortcuts
+    // may fire over (or behind) it. Its own Escape handler still works.
+    if (showOnboarding) return;
     // Alt+1..9 → jump to chat tab N (1-indexed). Only fires inside the Chat
     // workspace so it doesn't hijack from a focused surface.
     if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && /^[1-9]$/.test(e.key)
@@ -140,7 +143,7 @@
 </script>
 
 <div class="shell">
-  <Titlebar />
+  <Titlebar setupMode={showOnboarding} />
 
   <div class="middle">
     {#if showOnboarding}

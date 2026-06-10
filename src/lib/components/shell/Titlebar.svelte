@@ -9,6 +9,11 @@
 
   import { tooltip } from "$lib/actions/tooltip";
 
+  // setupMode: first-run flow is open — only brand + window controls show, so
+  // the app chrome can't navigate away from / over the setup screen.
+  type Props = { setupMode?: boolean };
+  const { setupMode = false }: Props = $props();
+
   const win = getCurrentWindow();
 
   // Horizontal workspace nav lives in the titlebar (replaced the left activity
@@ -25,6 +30,7 @@
       <span class="app">Rift</span>
     </div>
 
+    {#if !setupMode}
     <span class="nav-sep" aria-hidden="true"></span>
 
     <nav class="topnav" aria-label="Workspaces">
@@ -45,9 +51,11 @@
         </button>
       {/each}
     </nav>
+    {/if}
   </div>
 
   <div class="center" data-tauri-drag-region>
+    {#if !setupMode}
     <button
       class="cmdk"
       type="button"
@@ -59,9 +67,11 @@
       <span class="cmdk-label">Search or run a command…</span>
       <span class="cmdk-kbd"><kbd>Ctrl</kbd><kbd>K</kbd></span>
     </button>
+    {/if}
   </div>
 
   <div class="right">
+    {#if !setupMode}
     <button
       class="navtoggle settings-btn"
       type="button"
@@ -79,6 +89,7 @@
         <span class="upd-dot" aria-hidden="true"></span>
       {/if}
     </button>
+    {/if}
     <div class="winctl">
       <button class="wb" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} type="button" aria-label="Minimize">
         <Minus size={10}/>
