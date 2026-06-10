@@ -10,7 +10,8 @@
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import { modelFamily, liveActivity, fableAvailable } from "../../state/assistant/helpers";
-  import { fmtClock, fuzzyScore, effortIdxFromX, bytesToBase64, portal, fmtSize, isFileDrag } from "./composer/helpers";
+  import { fmtClock, fuzzyScore, effortIdxFromX, bytesToBase64, fmtSize, isFileDrag } from "./composer/helpers";
+  import { portal } from "$lib/actions/portal";
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";

@@ -31,12 +31,15 @@
   `.cli-badge :global(svg)` (~L1532), view-menu icon classes (~L1603-1724).
 - No behavior changes while moving; bodies/markup/CSS verbatim.
 
-## H0 — helper hoist (~40L, LOW)
+## H0 — helper hoist (~40L, LOW) — ✅ SHIPPED 2026-06-09
 
-`leafName` (L359) · `prettyPath` (L365) · `shortK` (L401) → `tabsbar/helpers.ts` (pure, vitest).
-`menuKeydown` (L201) → same module (takes container element as arg — already DI-shaped).
-`portal` (L33) → hoist to `$lib/actions/portal.ts` and re-point Composer's copy (one-line import
-swap there; its unit test moves too). NOTE: `titleFor` (L275) reads a `$derived` — NOT pure, stays.
+`leafName`/`prettyPath`/`shortK` + `menuKeydown` → `tabsbar/helpers.ts` (formatters vitest'd;
+menuKeydown excluded — needs live DOM). Portal discovery: a canonical `$lib/actions/portal.ts`
+ALREADY existed (target param + isConnected guard; used by WebBrowserPage/FilePathMenu) — the
+Composer + ChatTabsBar copies were dupes of it. ChatTabsBar's variant focuses the first
+interactive descendant → added as `portalFocus` there; ChatTabsBar imports
+`portalFocus as portal` (markup untouched), Composer re-pointed to canonical `portal`.
+NOTE: `titleFor` (L275) reads a `$derived` — NOT pure, stays.
 
 ## Extraction order (blast-radius ascending, after H0)
 

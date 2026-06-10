@@ -57,15 +57,6 @@ export function bytesToBase64(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
-// Portal action — moves the node to <body> so it escapes the composer's
-// overflow:hidden + backdrop-filter containing block (any ancestor with
-// backdrop-filter traps `position: fixed` descendants inside it, which is
-// exactly what we need to avoid here).
-export function portal(node: HTMLElement) {
-  document.body.appendChild(node);
-  return { destroy() { node.remove(); } };
-}
-
 export function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
