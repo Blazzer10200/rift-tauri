@@ -5,152 +5,17 @@
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-  import { assistant, type Block, type ChatMessage, type ThinkingBlock } from "../../state/assistant.svelte";
-  import { diffArrays } from "diff";
+  import { assistant, type Block, type ChatMessage } from "../../state/assistant.svelte";
   import { GitCommit, Clock, FileText, RotateCcw } from "lucide-svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
   import PermissionBar from "./PermissionBar.svelte";
-  import { captionForTool, captionForGroup } from "./toolCaption";
+  import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, statusOf, nodeKind,
+    formatBoundaryAt, formatDuration, elapsedFor, summarizeGroup, shortModel, lineDelta,
+    coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
-  // Tool blocks that render inline as a full side-by-side diff (vs the
-  // compact ToolChip). Edit-family only — everything else gets a chip.
-  function isInlineDiffTool(name: string): boolean {
-    const sn = name.replace(/^mcp__rift__/, "");
-    return sn === "Edit" || sn === "MultiEdit";
-  }
-  function shortToolName(name: string): string { return name.replace(/^mcp__rift__/, ""); }
-  // Card-style tools render first-class chrome (their body IS the message) —
-  // never fold them into a collapsed tool group.
-  function isCardTool(name: string): boolean {
-    return /^(mcp__rift__)?Agent$/.test(name)
-      || /^(mcp__rift__)?TodoWrite$/.test(name)
-      || /^(mcp__rift__)?AskUserQuestion$/.test(name)
-      || /^mcp__rift__ask_user$/.test(name);
-  }
-  // Groupable = a plain status chip (Read/Grep/Bash/…): not an inline diff
-  // (Edit/MultiEdit) and not a first-class card. Runs of these collapse.
-  function isGroupableChip(name: string): boolean {
-    return !isInlineDiffTool(name) && !isCardTool(name);
-  }
-
-  // Detect every "Step N — title" header line in a text block. Returns an
-  // ordered list of prose segments interleaved with header markers so that a
-  // single text block containing multiple headers (e.g. "## Step 1 — A\n##
-  // Step 2 — B") splits into multiple step groups instead of collapsing the
-  // tail into the first group's body.
-  type TextSegment =
-    | { kind: "prose"; text: string }
-    | { kind: "header"; stepNum: number; title: string };
-  const STEP_HEADER_LINE = /^\s*(?:#{1,6}\s+)?(?:\*\*)?Step\s+(\d+)\s*[—–\-:→»]\s*(.*?)(?:\*\*)?\s*$/i;
-  function parseTextBlock(text: string): TextSegment[] {
-    const out: TextSegment[] = [];
-    const lines = text.split("\n");
-    let prose: string[] = [];
-    const flushProse = () => {
-      const joined = prose.join("\n").trim();
-      if (joined) out.push({ kind: "prose", text: joined });
-      prose = [];
-    };
-    for (const line of lines) {
-      const m = line.match(STEP_HEADER_LINE);
-      if (m) {
-        flushProse();
-        const stepNum = parseInt(m[1], 10);
-        const title = (m[2] ?? "").replace(/[*_`]+$/, "").trim() || `Step ${stepNum}`;
-        out.push({ kind: "header", stepNum, title });
-      } else {
-        prose.push(line);
-      }
-    }
-    flushProse();
-    return out;
-  }
-
-  // When the model interleaves a tool call mid-header (e.g. emits "## S",
-  // calls Bash, then continues "tep 1 — Long bash\n## Step 2 — …"), the text
-  // arrives in two separate blocks separated by tool blocks. marked.js parses
-  // the first chunk as a tear-shaped <h2>S</h2> and the second chunk as
-  // prose, killing the header. This pre-pass detects that pattern (a text
-  // block that's only a partial header prefix — `## ` plus a word fragment
-  // with no terminator) and surgically reconstructs the first complete header
-  // line, leaving any remaining tail (e.g. a *second* "## Step 2 …" header)
-  // as its own text block AFTER the intervening tool calls — so the tools
-  // attach to the recovered first step, not the second.
-  const PARTIAL_HEADER = /^\s*#{1,6}\s+(?:\*\*)?[A-Za-z]+\s*$/;
-  function reconcileSplitHeaders(blocks: Block[]): Block[] {
-    const out: Block[] = [];
-    let i = 0;
-    while (i < blocks.length) {
-      const b = blocks[i];
-      if (b.type !== "text" || !PARTIAL_HEADER.test(b.text)) {
-        out.push(b);
-        i++;
-        continue;
-      }
-      // Lookahead — collect non-text blocks until the next text block.
-      let j = i + 1;
-      const interim: Block[] = [];
-      while (j < blocks.length && blocks[j].type !== "text") {
-        interim.push(blocks[j]);
-        j++;
-      }
-      const candidate = j < blocks.length ? blocks[j] : null;
-      const tail = candidate && candidate.type === "text" ? candidate : null;
-      if (!tail) {
-        out.push(b);
-        i++;
-        continue;
-      }
-      const merged = b.text + tail.text;
-      // Confirm the merge actually produces a Step header — otherwise this
-      // partial wasn't a header at all, leave both blocks alone.
-      if (!/(?:^|\n)\s*(?:#{1,6}\s+)?(?:\*\*)?Step\s+\d+/i.test(merged)) {
-        out.push(b);
-        i++;
-        continue;
-      }
-      // Split the merged text at the first newline — that's the end of the
-      // recovered header line. Everything after stays as the tail block.
-      const firstNl = merged.indexOf("\n");
-      const firstLine = firstNl === -1 ? merged : merged.slice(0, firstNl);
-      const remainder = firstNl === -1 ? "" : merged.slice(firstNl + 1);
-      out.push({ type: "text", text: firstLine });
-      out.push(...interim);
-      if (remainder.trim()) out.push({ type: "text", text: remainder });
-      i = j + 1;
-    }
-    return out;
-  }
-
-  // Timeline-flat units. Step-N headers from prose become dividers (small
-  // inline labels on the rail) instead of numbered groups. Every other
-  // block becomes its own node on the chain.
-  type NodeStatus = "neutral" | "pending" | "done" | "error";
-  type TimelineUnit =
-    | { kind: "block"; block: Block; key: string; status: NodeStatus; stepNum?: number; caption?: string }
-    | { kind: "toolgroup"; blocks: Block[]; key: string; status: NodeStatus; stepNum?: number; caption?: string }
-    | { kind: "divider"; stepNum: number; title: string; key: string };
-
-  function statusOf(b: Block): NodeStatus {
-    if (b.type === "tool") {
-      if (b.status === "error" || b.isError) return "error";
-      if (b.status === "pending") return "pending";
-      return "done";
-    }
-    if (b.type === "thinking") return b.status === "active" ? "pending" : "done";
-    return "neutral";
-  }
-  function nodeKind(b: Block): "thinking" | "prose" | "tool" | "edit" | "image" | "steer" {
-    if (b.type === "thinking") return "thinking";
-    if (b.type === "text") return "prose";
-    if (b.type === "image") return "image";
-    if (b.type === "steer") return "steer";
-    if (b.type === "tool") return isInlineDiffTool(b.name) ? "edit" : "tool";
-    return "prose";
-  }
 
   let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
 
@@ -236,37 +101,6 @@
   );
   let boundaryExpanded = $state(false);
 
-  function formatBoundaryAt(ms: number): string {
-    return new Date(ms).toLocaleTimeString([], { hour12: true });
-  }
-
-  function formatDuration(ms: number): string {
-    if (ms < 1000) return "<1s";
-    const s = Math.floor(ms / 1000);
-    if (s < 60) return `${s}s`;
-    const m = Math.floor(s / 60);
-    const rem = s % 60;
-    return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
-  }
-
-  function elapsedFor(b: ThinkingBlock, nowMs: number): string {
-    // Done block → stored duration. Active block → live ms-from-start so the
-    // role-row label ticks up as the model reasons (otherwise "Thinking …"
-    // sits frozen for the full 17-40s on Opus tool-use turns).
-    if (b.status === "done" && b.durationMs != null) return formatDuration(b.durationMs);
-    if (b.status === "active") {
-      const ms = Math.max(0, nowMs - b.startedAt);
-      return formatDuration(ms);
-    }
-    return "…";
-  }
-
-  function previewOf(text: string): string {
-    // First non-empty line, lightly trimmed for a glimpse-style preview.
-    const line = text.split(/\n+/).find((l) => l.trim().length > 0) ?? "";
-    const t = line.trim().replace(/^[#*>`\-_\s]+/, "");
-    return t.length > 110 ? t.slice(0, 108) + "…" : t;
-  }
 
   function toggleThinking(i: string) {
     const next = new Set(expandedThinking);
@@ -283,18 +117,6 @@
     else next.add(key);
     expandedGroups = next;
   }
-  // Compact "Read ×3 · Grep · Bash" rollup for a collapsed tool-group head.
-  function summarizeGroup(blocks: Block[]): string {
-    const counts = new Map<string, number>();
-    for (const b of blocks) {
-      if (b.type !== "tool") continue;
-      const n = shortToolName(b.name);
-      counts.set(n, (counts.get(n) ?? 0) + 1);
-    }
-    const parts = [...counts].map(([n, c]) => (c > 1 ? `${n} ×${c}` : n));
-    const shown = parts.slice(0, 4).join(" · ");
-    return parts.length > 4 ? `${shown} +${parts.length - 4}` : shown;
-  }
 
   async function copy() {
     if (!plainText) return;
@@ -308,16 +130,6 @@
     }
   }
 
-  // Tighten the resolved model id into a short human label.
-  //   claude-sonnet-4-6-20251001  → Sonnet 4.6
-  //   claude-opus-4-7[1m]         → Opus 4.7
-  //   claude-haiku-4-5            → Haiku 4.5
-  function shortModel(id: string): string {
-    const m = /claude-(opus|sonnet|haiku)-(\d+)-(\d+)/i.exec(id);
-    if (!m) return id;
-    const name = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
-    return `${name} ${m[2]}.${m[3]}`;
-  }
   const modelLabel = $derived(message.model ? shortModel(message.model) : null);
   // Family key for aurora tinting — drives the bubble's left rail + avatar
   // halo color so each assistant turn carries the same hue as the composer
@@ -338,19 +150,6 @@
   // diff as EditDiff), duration from summed block work-time, cost from the
   // message. Edits are ALREADY applied (per-tool, via PermissionBar) — so this
   // is an honest recap + mode consequence, not a fake turn-level Apply/Undo.
-  function lineDelta(oldS: unknown, newS: unknown): { adds: number; dels: number } {
-    if (typeof oldS !== "string" || typeof newS !== "string") return { adds: 0, dels: 0 };
-    // Skip exact diff for very large strings; return approx line counts instead.
-    if (oldS.length + newS.length > 200_000) {
-      return { adds: newS.split("\n").length, dels: oldS.split("\n").length };
-    }
-    let adds = 0, dels = 0;
-    for (const c of diffArrays(oldS.split("\n"), newS.split("\n"))) {
-      if (c.added) adds += c.count ?? c.value.length;
-      else if (c.removed) dels += c.count ?? c.value.length;
-    }
-    return { adds, dels };
-  }
   const turnStats = $derived.by(() => {
     if (isUser) return { files: 0, adds: 0, dels: 0, firstEditId: null as string | null, firstEditFile: null as string | null };
     const files = new Set<string>();
@@ -400,76 +199,6 @@
     assistant.ui.diffOpen = true;
   }
 
-  // Fold a run of GROUP_MIN+ consecutive plain tool chips into a single
-  // collapsible "N tools" node so a multi-tool turn stops reading as a wall of
-  // rows. Prose / thinking / edits / cards / images all break a run, so the
-  // narration↔tool ordering is preserved — only back-to-back status chips
-  // collapse. Runs shorter than GROUP_MIN stay inline as before.
-  const GROUP_MIN = 3;
-  function coalesceToolGroups(units: TimelineUnit[]): TimelineUnit[] {
-    const out: TimelineUnit[] = [];
-    let run: Extract<TimelineUnit, { kind: "block" }>[] = [];
-    const flush = () => {
-      if (run.length === 0) return;
-      if (run.length < GROUP_MIN) {
-        out.push(...run);
-      } else {
-        const status: NodeStatus = run.some((u) => u.status === "error")
-          ? "error"
-          : run.some((u) => u.status === "pending")
-            ? "pending"
-            : "done";
-        out.push({
-          kind: "toolgroup",
-          blocks: run.map((u) => u.block),
-          key: `tg_${run[0].key}`,
-          status,
-        });
-      }
-      run = [];
-    };
-    for (const u of units) {
-      if (u.kind === "block" && u.block.type === "tool" && isGroupableChip(u.block.name)) {
-        run.push(u);
-      } else {
-        flush();
-        out.push(u);
-      }
-    }
-    flush();
-    return out;
-  }
-
-  // Number each action unit (chip/group/edit) sequentially; caption = preceding
-  // "Step N" divider title if any, else synthesized. Orphan dividers kept.
-  function numberActions(units: TimelineUnit[]): TimelineUnit[] {
-    const out: TimelineUnit[] = [];
-    let step = 0;
-    let pending: { title: string; stepNum: number } | null = null;
-    for (const u of units) {
-      if (u.kind === "block" && u.block.type === "tool") {
-        step++;
-        const caption = pending?.title ?? captionForTool(u.block.name, u.block.input as Record<string, unknown>);
-        pending = null;
-        out.push({ ...u, stepNum: step, caption });
-      } else if (u.kind === "toolgroup") {
-        step++;
-        const caption = pending?.title ?? captionForGroup(u.blocks);
-        pending = null;
-        out.push({ ...u, stepNum: step, caption });
-      } else if (u.kind === "divider") {
-        pending = { title: u.title, stepNum: u.stepNum };
-      } else {
-        if (pending) {
-          out.push({ kind: "divider", stepNum: pending.stepNum, title: pending.title, key: `od_${u.key}` });
-          pending = null;
-        }
-        out.push(u);
-      }
-    }
-    if (pending) out.push({ kind: "divider", stepNum: pending.stepNum, title: pending.title, key: "od_tail" });
-    return out;
-  }
 
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
   // prose become dividers; everything else becomes a node on the chain.
