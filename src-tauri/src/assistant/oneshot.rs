@@ -17,7 +17,8 @@ use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
     save_session_model,
 };
-use super::{write_mcp_config, McpConfigGuard, ENHANCE_STREAM_EVENT};
+use super::turn::ENHANCE_STREAM_EVENT;
+use super::{write_mcp_config, McpConfigGuard};
 
 /// Output of a one-shot summarize call. Mirrors the design doc Phase B
 /// shape — caller uses `summary` as the seed for the next CLI session
