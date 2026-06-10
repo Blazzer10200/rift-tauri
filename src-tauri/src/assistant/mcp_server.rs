@@ -365,7 +365,7 @@ fn trust_level() -> &'static str {
     // re-reading per call would let any in-process env mutation escalate trust
     // mid-session without a restart.
     static LEVEL: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-    *LEVEL.get_or_init(|| match std::env::var("RIFT_TRUST_LEVEL").as_deref() {
+    LEVEL.get_or_init(|| match std::env::var("RIFT_TRUST_LEVEL").as_deref() {
         Ok("full") => "full",
         Ok("standard") => "standard",
         _ => "readonly",
