@@ -2,23 +2,25 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.8.25 — 2026-06-11 — Dictation polish fixed for real + tracker cleanup
+## v0.8.26 — 2026-06-11 — Composer slim-down + open-issue sweep (#29/#30/#12/CR-UX)
 
-> **Why.** v0.8.24's Haiku dictation polish treated the transcript as a message TO it — dictate a question and it answered you instead of cleaning the text, which also broke the restore-masked-profanity layer (fully-masked `****` words shipped as asterisks). Same gap existed latently in the enhance wand's system prompt.
+> **Why.** The composer had grown into a four-layer stack (Working-rail + card + gauge + disclaimer) spanning the full 1100px column; meanwhile four tracker items were actionable in one pass.
 
-**Dictation / enhance (`stt/cleanup.rs`, `oneshot.rs`, `stt.svelte.ts`, `Composer.svelte`):**
-- **Polish no longer talks back** — transcript now piped fenced in `<transcript>` tags + explicit data-not-message guard in `CLEANUP_PROMPT` (never answer/follow/add words; a question stays a question). CLI-verified: `why the **** is this ******* thing still broken` → `Why the fuck is this fucking thing still broken…`.
-- Same never-answer guard baked into `ENHANCE_META_PROMPT` (system-prompt level; the per-call `<draft>` fence stays).
-- **"send it" no longer ships asterisks** — voice-command sends with masked words run the Haiku polish first, then fire; double-polish guard added.
-- decensor map +4 (`goddammit`, `pussy`, `jackass`, `motherfucking`).
-- **PTT stuck-mic fix** — hold-Space release now listens at window level (keyup + blur), so losing composer focus or alt-tab mid-hold can't leave the mic running.
+**Composer (`Composer.svelte`, `composer/QueueRail.svelte`):**
+- **Persistent "Working…" rail gone** — the pending rail now renders only with queue chips present, or while streaming with a steerable draft (typing mid-turn slides it in; Steer/✓Steered unchanged, Alt+Enter still steers).
+- Beta/"AI can make mistakes" disclaimer line removed.
+- Width capped at 880px (was full chat column), wrap padding 10/14→6/10, radius 18→14.
+
+**Activity panel (`ActivityPanel.svelte`):** last-turn reply-preview quote removed — recap keeps the duration/tools/files/cost stat grid only.
 
 **Tracker fixes:**
-- **#32** — ctx meter no longer blank on restored conversations: final turn's usage persists in the convo record (backend `extra` flatten, zero Rust changes) and rehydrates in `loadConversation`.
-- **#31** — 401 detection unified into `is_auth_rejection()`/`auth_rejection_message()` (turn.rs; the stdout/stderr copies had diverged) · legacy `base_url`/`provider_model` command pair + dead frontend plumbing removed (zero callers; pre-2a config migration kept).
+- **#30** — resumed tabs pinned to a different folder are now visible: new `assistant_session_cwd` command (convo_store.rs) exposes the cwd sidecar, `loadConversation` hydrates `TabState.sessionCwd`, and the tabs bar shows a warn-tinted folder badge (full path in tooltip) when it differs from the selected workspace.
+- **#29** — inline styles unblocked in prod: the style-src nonce came from **Tauri's asset-CSP rewriter** (not SvelteKit); `dangerousDisableAssetCspModification: ["style-src"]` keeps `'unsafe-inline'` effective while script-src nonce hardening stays. 🧪 verify on this build: transitions animate, update progress fills, zero CSP console violations.
+- **#12** — tool chips read as openable: chevron `fg-muted`, accent + nudge on hover, Expand/Collapse tooltip on the chip head.
+- **CR-UX** (user signed off in-session) — trust enum collapsed to `readonly|standard`. Dead `full` rejected for new writes; persisted ternary-era configs and legacy `RIFT_TRUST_LEVEL=full` env migrate read-side to `standard`; turn.rs git-write allowlist gate simplified; frontend `TrustLevel` narrowed; tests updated both sides of the gate.
 
-**Verify.** cargo check clean · svelte-check 0/0 (4093 files) · vitest 122/122 · `/quick-review` clean across the 12-file diff. Live mic pass still pending from v0.8.24 (needs real audio).
+**Verify.** cargo check clean · trust tests 2/2 · svelte-check 0/0 (4093 files) · vitest 122/122. Pixel pass on the slimmed composer + cwd badge pending first live run of this build.
 
 ## Older versions
 
-v0.8.24 enhance wand v2 (conversation `<context>`, iterative refine via `<previous>`, editable preview, Ctrl+E loop, Discard tree-kills spawn) + dictation uncensored 3-layer (`decensor()` + Haiku polish on Web Speech finals + Whisper `initial_prompt`), voice commands ("send it"/"new line"/"scratch that"), hold-Space PTT, auto-stop on silence · v0.8.23 Activity panel polish (MCP steps humanized w/ per-tool icons + payload targets, turn separators, Sources section, last-turn recap, opaque spine icons) · v0.8.22 multi-tab stream survival (live TabState authoritative over disk; pointer-switch tabs) + Harness mission control (active-sessions cell, turn drill-down, health alerts) + `/history` fix + dead-code sweep (−331L) + poison-safe CACHE locks · v0.8.21 self-aware Rift — loopback UI bridge resurrected (`bridge.rs`: ask_user card round-trip / open_browser dock / notify toast) + per-turn env snapshot + localhost links open in-app · v0.8.20 live plan limits — cost-cockpit "Plan limits" card + `/usage` popover via undocumented OAuth usage endpoint (CLI token read-only, 60s cache) · v0.8.19 custom context menus app-wide + Fable 1M ctx fix + model menu reorg + new-user hardening batch · v0.8.18 UI sweep — 9 audit findings + per-chat model scoping, slash-menu palette grammar, Home/Welcome snippets · v0.8.17 Rail-v2 steer chips + `turn.rs` overlapping-turn registry race fix · v0.8.16 backend split COMPLETE (`assistant/mod.rs` 4331→303, R1-R8) · v0.8.15 hot-file splits + honest Settings update chip · v0.8.14 update-dialog render crash fix + swarm worktree-escape guard · v0.8.13 Claude Fable 5 limited-run model · v0.8.12 pill `×` = 24h snooze · v0.8.11 Settings redesign + Harness one-viewport · v0.8.10 stable singleton `UpdatePill` · v0.8.9 first tag-driven CI release · v0.8.5 corrupted install no longer "up to date" · v0.8.3 updater can't hang forever · v0.8.0 one-click 401 recovery + edit-swarm + compression · v0.7.0 cost cockpit · v0.6.2 update child-lock fix · v0.6.0 browser dock · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
+v0.8.25 dictation polish data-fence (`<transcript>` guard — questions stay questions, masked profanity restores, "send it" polishes first) + PTT stuck-mic fix + #32 ctx meter on restore + #31 401 helpers/legacy provider cmd removal · v0.8.24 enhance wand v2 + dictation uncensored 3-layer + voice commands + hold-Space PTT · v0.8.23 Activity panel polish (MCP steps humanized, turn separators, Sources, recap) · v0.8.22 multi-tab stream survival + Harness mission control + dead-code sweep · v0.8.21 self-aware Rift (loopback UI bridge: ask_user/open_browser/notify) · v0.8.20 live plan limits · v0.8.19 custom context menus + Fable 1M ctx fix · v0.8.18 UI sweep (9 audit findings, per-chat model scoping) · v0.8.17 Rail-v2 steer chips + registry race fix · v0.8.16 backend split COMPLETE · v0.8.15 hot-file splits · v0.8.14 update-dialog crash fix · v0.8.13 Claude Fable 5 · v0.8.11 Settings redesign · v0.8.9 first tag-driven CI release · v0.8.0 one-click 401 recovery + edit-swarm · v0.7.0 cost cockpit · v0.6.2 update child-lock fix · v0.6.0 browser dock · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
