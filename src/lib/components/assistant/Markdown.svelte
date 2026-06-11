@@ -5,6 +5,7 @@
   import { untrack } from "svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
+  import { browserDock } from "../../state/browserDock.svelte";
   import { highlightSync, normalizeLang, whenReady } from "../../state/highlighter.svelte";
 
   marked.setOptions({ gfm: true, breaks: true });
@@ -301,6 +302,12 @@
     const safe = /^https?:\/\//i.test(href) || href.startsWith("mailto:");
     if (!safe) return;
     e.preventDefault();
+    // Local-dev URLs open in the in-app browser dock instead of the system
+    // browser — the preview belongs next to the chat that produced it.
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?([/?#]|$)/i.test(href)) {
+      browserDock.openUrl(href);
+      return;
+    }
     void openUrl(href).catch((err) => console.warn("openUrl failed", err));
   }
 

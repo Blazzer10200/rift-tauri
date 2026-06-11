@@ -54,6 +54,38 @@ pub struct RateLimits {
 
 static CACHE: Mutex<Option<(Instant, RateLimits)>> = Mutex::new(None);
 
+/// Non-blocking cache read for the per-turn "Rift environment snapshot"
+/// (`turn.rs`). Accepts a slightly stale value (≤5 min) — utilization moves
+/// slowly and the snapshot must never add an HTTP round-trip to turn start.
+pub fn cached_snapshot() -> Option<RateLimits> {
+    const SNAPSHOT_TTL: Duration = Duration::from_secs(300);
+    CACHE
+        .lock()
+        .ok()?
+        .as_ref()
+        .and_then(|(at, l)| (at.elapsed() < SNAPSHOT_TTL).then(|| l.clone()))
+}
+
+/// Fire-and-forget refresh from turn start: when the 60s cache is stale,
+/// refetch in the background so the NEXT turn's snapshot is warm. Errors are
+/// expected for whole user classes (API-key users have no OAuth creds) — the
+/// gauge is optional enrichment, so they log at debug instead of surfacing.
+pub fn spawn_background_refresh() {
+    {
+        let Ok(guard) = CACHE.lock() else { return };
+        if let Some((at, _)) = guard.as_ref() {
+            if at.elapsed() < CACHE_TTL {
+                return;
+            }
+        }
+    }
+    tauri::async_runtime::spawn(async {
+        if let Err(e) = usage_rate_limits(None).await {
+            log::debug!("usage limits background refresh skipped: {e}");
+        }
+    });
+}
+
 #[derive(Deserialize)]
 struct CredsFile {
     #[serde(rename = "claudeAiOauth")]

@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.8.20"
+version = "0.8.21"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 edition = "2021"
@@ -101,6 +101,11 @@ reqwest = { version = "0.13.3", default-features = false, features = ["rustls", 
 # sha2 — SHA-256 digest for STT Whisper model-download integrity verification
 # (see stt/model_manager.rs). Pure-Rust RustCrypto impl.
 sha2 = "0.10"
+
+# Assistant UI bridge (assistant/bridge.rs) — loopback token generation
+# (`rand::fill`) + base64url token/request-id encoding in the MCP child.
+rand = "0.10"
+base64 = "0.22"
 
 # Phase 6 (#9.3 / #37 / #38): OS-keychain bridge. Windows Credential Manager,
 # macOS Keychain, Linux Secret Service. Migrates bridge_token + api_key out of

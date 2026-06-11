@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "./toast.svelte";
+import { browserDock } from "./browserDock.svelte";
 
 // M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
 // here so external callers like `import type { Block } from "$lib/state/assistant.svelte"`
@@ -969,6 +970,22 @@ class AssistantStore {
       await listen<{ request_id: string; session_id: string; questions: unknown }>(
         "assistant://ask-user",
         (e) => this.onAskUser(e.payload),
+      ),
+      // mcp__rift__open_browser: the bridge validated the scheme; show the
+      // page in the dock (opens it if closed — WebBrowserPage consumes
+      // browserDock.pendingUrl on mount).
+      await listen<{ url: string; session_id: string }>(
+        "assistant://open-browser",
+        (e) => browserDock.openUrl(e.payload.url),
+      ),
+      // mcp__rift__notify: severity is allowlisted bridge-side, lengths capped.
+      await listen<{ title: string; detail: string | null; severity: "info" | "ok" | "warn" | "danger"; session_id: string }>(
+        "assistant://notify",
+        (e) => toast.push({
+          severity: e.payload.severity ?? "info",
+          title: e.payload.title,
+          detail: e.payload.detail ?? undefined,
+        }),
       ),
       await listen<{
         request_id: string;

@@ -22,7 +22,7 @@ const LABEL: &str = "rift-browser";
 /// Host window the dock lives in.
 const HOST_WINDOW: &str = "main";
 
-fn parse_url(raw: &str) -> Result<Url, String> {
+pub(crate) fn parse_url(raw: &str) -> Result<Url, String> {
     let u = Url::parse(raw).map_err(|e| format!("invalid URL '{raw}': {e}"))?;
     // Scheme allowlist: only real web navigation. `file://` would expose the
     // local disk, `javascript:`/`data:` would execute attacker-controlled script

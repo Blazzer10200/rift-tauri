@@ -4,7 +4,7 @@
 //!   1. Claude calls `mcp__rift__ask_user(questions: [...])`.
 //!   2. The MCP child (`mcp_server::tool_ask_user`) generates a `request_id`,
 //!      dials the loopback bridge with `op: "ask_user"`.
-//!   3. The bridge handler (`remote_bridge::ask_user_op`) registers a oneshot
+//!   3. The bridge handler (`bridge::ask_user_op`) registers a oneshot
 //!      here keyed by `request_id`, emits `assistant://ask-user` to the
 //!      frontend, and `await`s the oneshot (10-min timeout).
 //!   4. The user picks an answer in the chat; the frontend invokes the

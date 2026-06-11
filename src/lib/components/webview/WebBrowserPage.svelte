@@ -199,6 +199,18 @@
     }
   });
 
+  // Assistant-driven navigation (mcp__rift__open_browser) or a localhost link
+  // click in the chat: consume the queued URL once the stage exists. go()
+  // reads the stage rect, so this must wait for mount — tracking stageEl
+  // covers the dock-was-closed case where openUrl() also triggered the mount.
+  $effect(() => {
+    const url = browserDock.pendingUrl;
+    if (!url || !stageEl) return;
+    browserDock.pendingUrl = null;
+    address = url;
+    void go();
+  });
+
   // Ctrl+L (via browserDock.focusAddress) bumps focusToken — focus + select-all
   // the address bar so the user can immediately type over the current URL.
   let lastFocusToken = 0;
