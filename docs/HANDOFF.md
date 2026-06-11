@@ -2,25 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-11 (cont.106) — app-wide right-click menus + Fable ctx fix + model-menu reorg
+## Session 2026-06-11 (cont.107) — new-user readiness audit + fix batch → v0.8.19 shipped
 
-svelte-check 0/0 (4092 files) · vitest assistant 23/23 (1 new) · live CDP E2E (all menu surfaces, real paste, pixel shots) · 0 console errors.
+svelte-check 0/0 (4092) · vitest 120/120 · cargo check + new lockstep test clean (isolated `--target-dir` b/c dev was live) · CDP pixel pass (onboarding Step 4, localStorage flags restored after).
 
-- **Custom context menus everywhere; stock WebView2 menu suppressed.** New `state/contextMenu.svelte.ts` (rune store + global fallback builder) + `shell/ContextMenuHost.svelte` (portal, viewport clamp, mousedown/Esc/blur dismiss), wired in `+layout.svelte` via `<svelte:document oncontextmenu={handleGlobalContextMenu}>`. Fallback surfaces: edit fields Cut/Copy/Paste/Select-all (live disabled states) · text selection Copy · `<pre>` Copy code · links Open-in-browser/Copy-address · empty background = no menu. `MessageBubble` adds Copy message / Copy selection. **Convention: a component owns a right-click by calling `e.preventDefault()`** — global handler skips `defaultPrevented` events (existing OpenInPaneMenu on tabs/history untouched, coexists). Shift+right-click in dev = native menu (Inspect element).
-- **`tauri-plugin-clipboard-manager` added** (Cargo dep + `lib.rs` init + npm pkg + `clipboard-manager:allow-read-text` capability) — Paste needs clipboard *read*, permission-gated in WebView2 via navigator API. E2E proven: `Set-Clipboard` → menu Paste click → text landed in composer w/ `bind:value` intact (setRangeText + synthetic `input`).
-- **Fable ctx-window fix:** `ctxWindowFor` (assistant.svelte.ts) had no `fable-5` pattern → 200K denominator on a 1M model (header meter wrong AND auto-compact would fire ~5× early). Added to the 1M branch + regression test.
-- **Model menu reorg (user picked layout via preview):** two-line rows — name+badge top, new `blurb` field (modelMatrix.ts) + right-aligned ctx column below; full taglines remain hover tooltips. SettingsMenu row restructured on the existing `.rift-menu-row-body` pattern.
+- **Three-agent audit** (hardcoded assumptions · first-run UX · missing-prereq failure handling) → tiered findings, then ALL tiers fixed. Two claims were FALSE on verify: onboarding gate race (refreshAuth IS awaited before configLoaded) and Whisper-not-gated (Settings already disables + warns). Three more already handled: swarm gate hints, usage-DB error log, env-key st-note.
+- **Tier-1:** `probe_version_at` (cli_install.rs) bounded 5s via try_wait loop — hung `claude --version` used to wedge splash forever · onboarding Step 4 **Permissions picker** (default/acceptEdits/bypass from `MODE_OPTIONS`, bypass disclosed) · send.ts warns when custom provider w/o key falls back to Anthropic key.
+- **Tier-2:** send.ts no-workspace notice + Fable-sunset one-shot warning (7d ahead) · `--bare` consequences explained at ClaudeConnect + Settings key entry · login console-behind-window hint · turn.rs `write_control_response` fail-loud (`io::Error::other`, was `unwrap_or_default` → CLI hang) · update_service taskkill sweep logs failures + image from `current_exe`.
+- **Tier-3:** bundle-ID lockstep test (`diagnostics::tests`, `include_str!` tauri.conf.json) · About → rift-releases link · STT placeholder de-FiveM'd · BLAZZER out of redact fixtures. Deliberately skipped: FiveM welcome suggestions (intentional, fxmanifest-gated) · swarm `rift.local` git identity (product choice) · in-app help panel (bigger design work).
+- **Shipped v0.8.19** — bundles cont.106 (context menus + Fable ctx fix + model menu) + this batch. Bump ×3 + Cargo.lock synced via `cargo metadata --offline`.
 
 ### RESUME HERE
 
-- **cont.106 work committed, NOT shipped** — next `/git-ship` bundles it (version bump ×3 + CHANGELOG happen there, not before). v0.8.18 stands as last tag.
-- v0.8.18 release CI verified green (cont.106). User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
-- Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist.
-- Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum · consider rotating VM Administrator password (runner-scratch cleanup, cont.105).
+- **v0.8.19 tagged + pushed — VERIFY release CI green** (`gh run list` on rift-tauri, then asset on rift-releases).
+- User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
+- Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist. New-user polish leftovers (POLISH tier): mic-permission deep link, model-download disk check, in-app help panel.
+- Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum · VM Administrator password rotation (cont.105).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
-cont.105 #4 UI sweep, 9/13 audit findings (shellLabel cd-strip · SlashMenu palette grammar · per-chat model scoping `TabState.modelOverride`+`effectiveModel` · Home/Welcome snippets via `ConversationMeta.last_snippet`) + **v0.8.18 shipped** (annotated tags enforced). cont.104 Rail-v2 (per-chip steer/queue, next-turn inject) + turn.rs registry race fix (`clear_session_pid_if`/`clear_steer_tx_if`). cont.103 effort ladder CLI 1:1 (smart=`--effort high` default) + composer split C1-C7 (no file >2000L). cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
+cont.106 app-wide custom context menus (`contextMenu.svelte.ts` + `ContextMenuHost`, `preventDefault()` ownership convention, clipboard-manager plugin) + Fable 1M ctx fix + model-menu two-line reorg. cont.105 #4 UI sweep 9/13 + **v0.8.18 shipped** (annotated tags enforced). cont.104 Rail-v2 + turn.rs registry race fix. cont.103 effort ladder CLI 1:1 + composer split C1-C7. cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
 

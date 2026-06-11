@@ -654,7 +654,7 @@
               <div class="st-row">
                 <div class="st-row-body">
                   <label class="st-row-label" for="asst-apikey">API-key fallback</label>
-                  <div class="st-row-desc">Bill pay-per-token through the Anthropic Console instead of your Claude session. Overrides the session whenever a key is set.</div>
+                  <div class="st-row-desc">Bill pay-per-token through the Anthropic Console instead of your Claude session. Overrides the session whenever a key is set. Key turns run the CLI bare — your personal <code>~/.claude</code> config, MCP servers, and CLAUDE.md won't load.</div>
                 </div>
                 <div class="st-row-ctl">
                   {#if assistantStore.hasApiKey}
@@ -985,7 +985,7 @@
                     <div class="st-row-label">Vocabulary</div>
                     <div class="st-row-desc">Comma- or newline-separated. Add project names, server names. Budget ~800 chars (Whisper's 224-token prompt limit).</div>
                   </div>
-                  <textarea class="set-textarea" rows="4" placeholder="FiveM, Qbox, RedM, rift_bridge, fxmanifest, ..." disabled={!stt.config.enabled} value={stt.config.vocab_text} oninput={(e) => void stt.setConfig({ vocab_text: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
+                  <textarea class="set-textarea" rows="4" placeholder="Project names, libraries, jargon — e.g. Tauri, SvelteKit, oklch, my_project" disabled={!stt.config.enabled} value={stt.config.vocab_text} oninput={(e) => void stt.setConfig({ vocab_text: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
                 </div>
               </div>
             </div>
@@ -1027,7 +1027,7 @@
           <div class="st-block sb-s4">
             <div class="st-block-label">Build</div>
             <div class="st-card">
-              {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "MIT · github.com/Blazzer10200/rift"]] as kv (kv[0])}
+              {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "MIT · github.com/Blazzer10200/rift-releases"]] as kv (kv[0])}
                 <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
               {/each}
             </div>

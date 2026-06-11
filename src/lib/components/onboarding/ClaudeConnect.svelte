@@ -157,7 +157,7 @@
       </button>
     </div>
     {#if assistant.loginInProgress}
-      <p class="ob-hint"><span>A sign-in window opened — complete the login there. Rift detects it automatically.</span></p>
+      <p class="ob-hint"><span>A console window opened with the login link — it may be behind this window. Complete the sign-in there; Rift detects it automatically.</span></p>
     {:else}
       <p class="ob-hint"><span>Opens the Claude login in a console window. Or <button type="button" class="ob-link" onclick={() => (showApiKey = !showApiKey)}>use an API key instead</button>.</span></p>
     {/if}
@@ -174,6 +174,7 @@
           {#if savingKey}<Loader2 size={14} class="spin" />{:else}<KeyRound size={14} />{/if} Save key
         </button>
       </div>
+      <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. API-key turns run the CLI bare — your personal <code>~/.claude</code> config, MCP servers, and CLAUDE.md won't load.</span></p>
     {/if}
   {:else}
     <p class="ob-hint ok"><span>Claude is connected and ready — you're set.</span></p>

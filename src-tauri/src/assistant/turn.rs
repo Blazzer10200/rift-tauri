@@ -314,7 +314,9 @@ async fn write_control_response(
         "type": "control_response",
         "response": { "subtype": "success", "request_id": request_id, "response": response },
     });
-    let mut line = serde_json::to_vec(&env).unwrap_or_default();
+    // Fail loud: an empty line here used to wedge the CLI waiting on a valid
+    // control_response.
+    let mut line = serde_json::to_vec(&env).map_err(std::io::Error::other)?;
     line.push(b'\n');
     stdin.write_all(&line).await?;
     stdin.flush().await
