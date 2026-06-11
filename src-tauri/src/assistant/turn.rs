@@ -83,6 +83,17 @@ fn clear_session_pid(session_id: &str) {
     with_session_pids(|m| { m.remove(session_id); });
 }
 
+/// Same overlapping-turn guard as `clear_steer_tx_if`: only remove the entry
+/// when the stored PID is this turn's own — the next turn may have already
+/// re-registered under the same session key while this turn reaps its child.
+fn clear_session_pid_if(session_id: &str, pid: u32) {
+    with_session_pids(|m| {
+        if m.get(session_id) == Some(&pid) {
+            m.remove(session_id);
+        }
+    });
+}
+
 fn get_session_pid(session_id: &str) -> Option<u32> {
     with_session_pids(|m| m.get(session_id).copied()).flatten()
 }
@@ -166,8 +177,18 @@ fn register_steer_tx(session_id: &str, tx: mpsc::UnboundedSender<SteerMsg>) {
     with_steer_tx(|m| { m.insert(session_id.to_string(), tx); });
 }
 
-fn clear_steer_tx(session_id: &str) {
-    with_steer_tx(|m| { m.remove(session_id); });
+/// Remove the session's steer sender only if it still belongs to THIS turn.
+/// The reader emits DONE on `result` — BEFORE the child is reaped — so the
+/// frontend can start the next turn (re-registering under the same session
+/// key) while this turn's tail is still running. An unconditional remove here
+/// wiped the new turn's sender, making every drained follow-up turn answer
+/// `no_active_turn` to steers for its first seconds.
+fn clear_steer_tx_if(session_id: &str, tx: &mpsc::UnboundedSender<SteerMsg>) {
+    with_steer_tx(|m| {
+        if m.get(session_id).is_some_and(|cur| cur.same_channel(tx)) {
+            m.remove(session_id);
+        }
+    });
 }
 
 fn get_steer_tx(session_id: &str) -> Option<mpsc::UnboundedSender<SteerMsg>> {
@@ -831,7 +852,8 @@ pub async fn assistant_send(
     // stdout task and again after child.wait().
     let turn_start = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
-    if let Some(pid) = child.id() {
+    let turn_pid = child.id();
+    if let Some(pid) = turn_pid {
         set_session_pid(&session_id, pid);
     } else {
         // #67: `child.id()` returns None when the process already exited by
@@ -880,7 +902,7 @@ pub async fn assistant_send(
     // `assistant_steer` can inject mid-turn user messages; the reader task owns
     // the receiver. Cleared at the same points as the session PID (turn end).
     let (steer_tx, mut steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
-    register_steer_tx(&session_id, steer_tx);
+    register_steer_tx(&session_id, steer_tx.clone());
 
     let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
@@ -1134,8 +1156,8 @@ pub async fn assistant_send(
                 // path — abort them before bailing.
                 stdout_task.abort();
                 stderr_task.abort();
-                clear_session_pid(&session_id);
-                clear_steer_tx(&session_id);
+                if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
+                clear_steer_tx_if(&session_id, &steer_tx);
                 return Err(format!("await claude: {e}"));
             }
             Err(_) => {
@@ -1155,8 +1177,8 @@ pub async fn assistant_send(
             }
         }
     };
-    clear_session_pid(&session_id);
-    clear_steer_tx(&session_id);
+    if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
+    clear_steer_tx_if(&session_id, &steer_tx);
     // #241: total turn wall-clock (spawn → claude exit). Compare against the
     // TTFT line above: large TTFT w/ small (total−TTFT) = harness/prefill bound;
     // small TTFT w/ large remainder = model generation bound.

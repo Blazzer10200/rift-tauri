@@ -189,8 +189,12 @@ export async function send(store: AssistantStore, prompt: string) {
  *  Bails unless `tab` is the active tab and idle. */
 export function drainQueue(store: AssistantStore, tab: TabState | null) {
   if (!tab || tab !== store.activeTab || tab.streaming || tab.queue.length === 0 || tab.lastError) return;
-  const [next, ...rest] = tab.queue;
-  tab.queue = rest;
+  // Rail-v2: steer-mode chips don't start turns — they ride the next one
+  // (flushSteerChips injects them at its first stream line). Fire the first
+  // queue-mode chip; if the rail is ALL steer chips there is no next turn to
+  // ride, so degrade the head to a normal send — the queue can never strand.
+  const next = tab.queue.find((q) => q.mode !== "steer") ?? tab.queue[0];
+  tab.queue = tab.queue.filter((q) => q.id !== next.id);
   // #148: capture the active convo at pop time; if the user switches tabs OR
   // a new turn starts before the microtask fires, re-queue the head and bail.
   // The next completion or tab activation re-drains — never a silent strand.
@@ -288,6 +292,29 @@ export async function steer(store: AssistantStore, text: string, tabId?: string 
 export function removeQueued(store: AssistantStore, id: string, tabId?: string) {
   const tab = tabId ? store.tabFor(tabId) : store.activeTab;
   if (tab) tab.queue = tab.queue.filter((q) => q.id !== id);
+}
+
+/** Rail-v2: inject every steer-mode chip into the just-started turn, in queue
+ *  order. Called via TabState.onTurnStarted (first stream line — the backend
+ *  steer registry is guaranteed live by then). Chips that miss the turn fall
+ *  back to the queue inside steer(), losing their steer mark — correct, since
+ *  the turn they were aimed at is gone. */
+export function flushSteerChips(store: AssistantStore, tab: TabState | null) {
+  if (!tab || !tab.streaming) return;
+  const chips = tab.queue.filter((q) => q.mode === "steer");
+  if (chips.length === 0) return;
+  tab.queue = tab.queue.filter((q) => q.mode !== "steer");
+  // Resolve this tab's convoId (Map key) so steer() targets THIS tab even if
+  // the user switched panes — mirrors handleTurnComplete's reverse lookup.
+  let tabId: string | null = null;
+  for (const [cid, t] of store.tabs) {
+    if (t === tab) { tabId = cid; break; }
+  }
+  void (async () => {
+    for (const c of chips) {
+      await steer(store, c.text, tabId);
+    }
+  })();
 }
 
 /** Client-side slash commands. Returns true if input was consumed. */

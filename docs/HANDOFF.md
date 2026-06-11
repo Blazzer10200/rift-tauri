@@ -2,24 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-10 overnight (cont.103) — effort retune + composer split COMPLETE
+## Session 2026-06-10 evening (cont.104) — Rail-v2 SHIPPED + turn-registry race fix
 
-Autonomous overnight run (user-authorized). Everything below svelte-check 0/0 · vitest 116/116 · cargo check clean · CDP pixel-verified live, one commit per unit.
+Autonomous run (user-authorized). vitest 118/118 (2 new) · svelte-check 0/0 · Rust verified via tauri-dev rebuild (clean relaunch) · live CDP end-to-end.
 
-- **Effort ladder retuned to mirror the CLI 1:1** (`e62a896`). Was: default "Smart"=medium (below the API's `high` default and CC's `xhigh` agentic default), xhigh only via ultracode, invented latency hints. Now: `none→low · quick→medium · smart→high (default) · deep→xhigh · ultra→xhigh+ultracode`; Sonnet 4.6 caps at smart (xhigh is Opus/Fable-tier per claude-api ref), Haiku unchanged (API rejects effort). New `"smart"` id added to `ThinkingEffort` — stored prefs stay valid; frontend `effortToFlag` + `turn.rs` match + `config.rs` docs in lockstep (mirror test updated). **Proven end-to-end:** spawn log `model=sonnet effort=high` on a real turn. Panel now shows the literal flag (`--effort high`) beside the tier name (`b32196c`).
-- **Composer split FINISHED — C3-C7 in one night** (ISSUES #20 ✅ threshold met: no repo file >2000L). Composer 3131→**1845L**; children: QueueRail 322 (C3) · LivePills 212 (C4) · EnhanceBar 264 (C5, presentational seam — state machine stays parent) · SlashMenu 75 + MentionPopover 110 (C6) · SettingsMenu 370 + PermMenu 147 + `modelMatrix.ts` (C7 — shared option tables; onKey + children can't drift). Deviations documented in `composer-split.md` header (kept as pattern ref).
-- **Steer T2 live-verified → block deleted from ISSUES:** queued chip mid-stream, ✓Steered flash, visible mid-turn redirect (finished in-flight read → `REDIRECTED` → skipped remaining reads).
-- **Permission T2 → blocked-by-design:** derived-trust workspace correctly hides git-write tools, so the Allow/Deny bar can't fire there. Verifying needs a pinned trust=standard repo — left for the CR-UX decision (trust pins one-way).
-- Bonus fixes: enhance-error ✕ unstyled since C2 (now `.enhance-error-x`); missing `hint-in` keyframes (perm menu never tweened).
+- **Rail-v2 (ISSUES ✅):** per-chip queue/steer **mode toggle** (↳ button, accent-tinted steer chips, caption "Sends when ready · Steers next turn"), steer chips inject into the **next** turn at its first stream line, pulse-on-inject (sweep replay), all-steer queue degrades head → send (never strands). Plumbing: `TabState.onTurnStarted` hook (fires once per turn on first stream line, latch in `beginTurn`) → `send.ts::flushSteerChips`; `drainQueue` now picks the first non-steer chip. "Send now" unchanged.
+- **Preexisting backend race found via live-verify and FIXED (turn.rs):** DONE emits on `result` before child reap → next turn re-registers `SESSION_PIDS`/`STEER_TX` under the same key → old turn's tail unconditionally cleared both. Broke steer AND `assistant_stop` for the first ~seconds of every drained follow-up turn (reap grace = 5s). Fix: `clear_session_pid_if` (PID match) + `clear_steer_tx_if` (`same_channel`) — a turn only clears its own entries. Proof: pre-fix the steer chip fell back to its own turn; post-fix the "You steered" marker landed inline in the drained turn's bubble.
 
 ### RESUME HERE
 
-- **Nothing in-flight.** Tree clean on `main`, dev server + cdp:serve were left running.
-- Natural next bites: **Rail-v2** (steer chips + mode toggle — now lands in the small QueueRail child, see ISSUES), **#4 UI sweep** via `ui-audit-2026-06-09.md` 13 findings, or **ship batch** (user prod = 0.8.12 → still needs ONE manual Setup.exe; bump ×3 + Cargo.lock → CHANGELOG → tag, CI does the rest).
+- **Nothing in-flight.** Dev server + cdp:serve left running; commit pending push? — check `git log origin/main..main`.
+- Natural next bites: **#4 UI sweep** via `ui-audit-2026-06-09.md` 13 findings, or **ship batch** (user prod = 0.8.12 → still needs ONE manual Setup.exe; bump ×3 + Cargo.lock → CHANGELOG → tag, CI does the rest — Rail-v2 + race fix ride it).
 - Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum (+ Permission bar verify rides it) · `.tmp/runner/` scripts fate.
-- CDP wart noted in ISSUES: `look`'s error list accumulates since cdp:serve boot — trust the screenshot, or restart cdp:serve.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
+
+cont.103 effort ladder retuned to CLI 1:1 (smart=`--effort high` default; lockstep ×3 guarded by mirror test) + composer split COMPLETE C1-C7 (no repo file >2000L) + steer live-verified.
 
 cont.102 first-run setup redesign (4 steps, chrome-leak fix). cont.101 smoke run + double-listen fix + C2. cont.100 C1+H0s, vitest 51→116. cont.98 v0.8.16 (#20 backend split). cont.97 v0.8.15 (TS split M0-M9). cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
 

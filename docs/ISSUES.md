@@ -14,7 +14,7 @@
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
-| Rail-v2 | Pending rail v2 — steer chips + mode toggle | T3 | 🚧 open |
+| Rail-v2 | Pending rail v2 — steer chips + mode toggle | T3 | ✅ resolved in-tree |
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
 | #20 | Hot files over the 2000-line split threshold | T3 | ✅ threshold met |
@@ -41,10 +41,10 @@
 
 ### Tier 3 — strategic / longer-term
 
-#### Rail-v2 — pending rail v2: steer chips + mode toggle (🚧 open)
+#### Rail-v2 — pending rail v2: steer chips + mode toggle (✅ resolved in-tree 2026-06-10 cont.104)
 
-- **Scope:** steer chips + per-chip steer/queue mode toggle + pulse-on-inject — unifies the three-tier surface ([steer-and-queue.md](design/steer-and-queue.md) §6 #1). Makes steer discoverable (currently Alt+Enter + the rail's Steer button). v1 rail shipped in v0.8.11.
-- **Unblocked 2026-06-10:** the rail now lives in its own 322L child ([composer/QueueRail.svelte](../src/lib/components/assistant/composer/QueueRail.svelte)) — Rail-v2 lands in a small file, exactly as the split brief intended. Steer itself is fully live-verified (visible mid-turn redirect on a multi-step tool turn, cont.103) — the Steer tracker block shipped and was deleted.
+- **Shipped:** per-chip queue/steer mode toggle (↳ button; steer chips accent-tinted, caption "Steers next turn"), steer chips inject into the **next** turn at its first stream line (`flushSteerChips` via new `TabState.onTurnStarted` hook — [steer-and-queue.md](design/steer-and-queue.md) §6 #1), pulse-on-inject (rail sweep replays), all-steer queue degrades its head to a normal send so it can never strand. "Send now" stays the immediate-inject path. 2 new vitest (118 total) + svelte-check 0/0 + live-verified end-to-end: chip toggled mid-stream → drained turn fired → steer chip injected ("You steered …" marker inline in the next turn's bubble).
+- **Root-cause fix riding along (turn.rs):** overlapping-turn registry race — DONE fires on `result` *before* child reap, so the next turn re-registers `SESSION_PIDS`/`STEER_TX` under the same session key and the finishing turn's tail then wiped both (unconditional `clear_*`). Broke steer (`no_active_turn`) **and `assistant_stop`** during the first seconds of every drained follow-up turn. Now guarded: `clear_session_pid_if` (PID match) + `clear_steer_tx_if` (`same_channel`).
 
 #### 4. UI/UX consistency + navigability sweep (app-wide)
 

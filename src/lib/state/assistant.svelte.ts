@@ -150,6 +150,7 @@ import {
 import {
   send as sendImpl,
   drainQueue as sendDrainQueue,
+  flushSteerChips as sendFlushSteerChips,
   stop as sendStop,
   steer as sendSteer,
   removeQueued as sendRemoveQueued,
@@ -205,8 +206,10 @@ export class TabState {
   promptHistory = $state<string[]>([]);
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
    *  already streaming; onDone() pops the next one. Per-tab so a queued msg
-   *  in Tab A can't drain into Tab B if the user switches mid-turn. */
-  queue = $state<{ id: string; text: string }[]>([]);
+   *  in Tab A can't drain into Tab B if the user switches mid-turn.
+   *  Rail-v2: `mode: "steer"` chips don't start turns — they inject into the
+   *  next turn at its first stream line (flushSteerChips). Absent = "queue". */
+  queue = $state<{ id: string; text: string; mode?: "queue" | "steer" }[]>([]);
   /** Per-tab composer draft. Was store-level before split-pane v2 — moved
    *  here so each pane can compose into its own tab concurrently w/o the
    *  focus-change stash/restore dance dropping characters under fast typing.
@@ -294,6 +297,9 @@ export class TabState {
   /** Wall-clock of the most recent `stream_event` arrival. Null between turns.
    *  Used to compute `maxStreamGapMs` on the in-flight TurnRecord. */
   lastStreamEventAt: number | null = null;
+  /** One-shot latch so onTurnStarted fires on exactly the first stream line
+   *  of each turn. Reset in beginTurn. */
+  turnStartNotified = false;
   dockAutoOpenedThisConvo = false;
   /** Telemetry record for the in-flight turn. Set by AssistantStore.send()
    *  before invoking the backend, filled by stream handlers, finalized in
@@ -305,6 +311,10 @@ export class TabState {
   onTodoApplied?: (tab: TabState, opensDock: boolean) => void;
   /** Fired on onDone — store handles scheduleSave + queue drain. */
   onTurnComplete?: (tab: TabState) => void;
+  /** Fired once per turn, on its first stream line — by then the backend's
+   *  steer registry is live, so the store flushes steer-mode queue chips
+   *  into the now-running turn. */
+  onTurnStarted?: (tab: TabState) => void;
   /** Translates a tool name + input into a short activity-bar label.
    *  Lives on the store (knows nothing tab-specific); passed in via this hook
    *  so TabState doesn't grow its own copy. */
@@ -460,7 +470,7 @@ class AssistantStore {
   get lastModelId(): string | null { return this.activeTab?.lastModelId ?? null; }
   get promptHistory(): string[] { return this.activeTab?.promptHistory ?? []; }
   get queue() { return this.activeTab?.queue ?? []; }
-  set queue(v: { id: string; text: string }[]) {
+  set queue(v: { id: string; text: string; mode?: "queue" | "steer" }[]) {
     if (this.activeTab) this.activeTab.queue = v;
   }
 
@@ -550,6 +560,7 @@ class AssistantStore {
       if (opensDock) this.ui.dockOpen = true;
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
+    tab.onTurnStarted = (t) => sendFlushSteerChips(this, t);
   }
 
   // Informational system notice (slash-command output, /help text, etc.).
