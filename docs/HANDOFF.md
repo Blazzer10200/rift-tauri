@@ -11,8 +11,8 @@ Autonomous run. svelte-check 0/0 (4089 files) · cargo check clean · vitest 119
 
 ### RESUME HERE
 
-- **Uncommitted? No — committed this session; check `git log origin/main..main` for push state.** Dev server + cdp:serve left running. v0.8.17 released (tag + CI green); user prod = 0.8.12 → still needs ONE manual Setup.exe.
-- Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist; or ship v0.8.18 w/ this sweep.
+- **v0.8.18 SHIPPED this session** (bump ×3 + Cargo.lock → CHANGELOG → tag → CI) — verify the release run went green: `gh run list --limit 2`. Dev server + cdp:serve left running. User prod = 0.8.12 → still needs ONE manual Setup.exe to get on the Velopack train.
+- Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist.
 - Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum (+ Permission bar verify rides it) · `.tmp/runner/` scripts fate.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
@@ -30,6 +30,6 @@ cont.102 first-run setup redesign (4 steps, chrome-leak fix). cont.101 smoke run
 - **IA: 4 workspaces**, nav in titlebar, positional `workspace.order`. Harness = one viewport.
 - **AssistantPane drop handlers on `.pane` outer only**; `dragDropEnabled:false`.
 - **Blur-reveal:** `shownCount` only `$state`, written only by rAF loop.
-- **Versions lockstep ×3 + Cargo.lock** — only at ship. **v0.8.16 stands.**
+- **Versions lockstep ×3 + Cargo.lock** — only at ship. **v0.8.18 stands.**
 - **`turn.rs::kill_all_session_children` re-export** — load-bearing for Velopack apply.
 - **Pure-helper modules + vitest nets + `assistant.init()` initPromise memo + composer/ children** — don't re-inline.
