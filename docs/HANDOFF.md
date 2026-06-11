@@ -15,7 +15,8 @@
 
 ### RESUME HERE
 
-- **LEAD ITEM (user-set): #33 compaction tool broken** — reproduce first (what exactly fails: summarize? remint? post-compact resume?), then `/diagnose` → fix + regression test → evaluate improvements. Entry points: `compaction.ts` + `oneshot.rs` summarize/remint. CI 27379596782 already verified green (v0.8.26 published).
+- **Tomorrow's queue (user-set): #33 compaction broken (lead) + #34 SessionDiff overlay pile-up bug** (screenshot-evidenced; fix sketch in ISSUES — eager double-diff of every edit, no cap/virtualization).
+- **#33 compaction tool broken** — reproduce first (what exactly fails: summarize? remint? post-compact resume?), then `/diagnose` → fix + regression test → evaluate improvements. Entry points: `compaction.ts` + `oneshot.rs` summarize/remint. CI 27379596782 already verified green (v0.8.26 published).
 - ~~Verify CI release 27379596782 green~~ ✅ done in-session → user installs v0.8.26 → live-test: composer slim look (no Working-rail idle-stream, no disclaimer, 880px) · cwd badge (open a chat resumed from another folder) · #29 transitions/progress-fill + zero CSP violations · tool-chip hover affordance · git tools still gated correctly at both trust levels. Plus carried v0.8.25 dictation live-tests (question stays question, masked cussing, "send it", PTT alt-tab, Ctrl+E, ctx meter on restore).
 - **Permission-bar live-verify** now unblocked by CR-UX ship: pin trust=standard on a throwaway repo, fire a git_commit under "Ask before edits".
 - **ISSUES remaining:** Auth-Rec (needs logged-out machine) · #31 blocking-fs (deferred-by-design) · **Fable dead-branch sweep after Jun 22** · #4 remainder (#7 charts · #11 inline diff · #13 tab strip · hover actions) · #17 (blocked) · Settings checklist · POLISH tier · SEC-1 · `browser_screenshot` MCP arc.

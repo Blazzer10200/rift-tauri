@@ -14,6 +14,7 @@
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
 | #33 | Compaction tool broken — doesn't work in practice | T1 | 🚧 open |
+| #34 | Session Diff overlay bugs out when a long session's edits pile up | T2 | 🚧 open |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
@@ -36,6 +37,13 @@
 - **Symptom (user report, v0.8.25/26):** "the compaction tool does not work." No repro detail captured yet — first step is reproduce + capture what "doesn't work" means (button no-op? summarize fails? remint fails? post-compact resume wedged?).
 - **Where:** frontend `src/lib/state/assistant/compaction.ts` (`compactConversation`, remint flow, `forceNextFirstTurn`) + backend `assistant_summarize_session`/`assistant_remint_session` (oneshot.rs) + auto-trigger effect (ctx-pct threshold). Sidecar handoff: `oneshot.rs` copies the cwd/model pins old→new session.
 - **Plan:** `/diagnose` discipline — reproduce w/ a real long convo, instrument the chain (summarize → remint → first-turn dispatch), fix root cause + regression test. Then evaluate improvements (user: "possibly improve on it if needed") — but fix first, improve second.
+
+#### 34. Session Diff ("Changes") overlay bugs out on long-session pile-up (🚧 open — filed 2026-06-11)
+
+- **Where:** [SessionDiff.svelte](../src/lib/components/assistant/SessionDiff.svelte) (314L) + `EditDiff.svelte` it instantiates per edit.
+- **Symptom (user screenshot, 19 files +187/−72):** rows render as empty/clipped strips — file headers cut off mid-paint, content rows collapse to thin bars, some groups show only 1-2 diff lines then a void. Gets worse the more edits accumulate.
+- **Likely shape:** zero virtualization/cap — every group renders every `EditDiff` eagerly (each runs `diffArrays` per edit; `countDiff` already re-diffs everything for the header counts, so each edit is diffed TWICE). A long session w/ big `Write` payloads (whole-file `new_string` as all-additions) → main-thread starvation mid-layout. Also suspect: `target` scroll `requestAnimationFrame` racing the staggered render.
+- **Fix sketch:** default groups COLLAPSED above N files (header counts only — cheap) · memoize/share the per-edit diff between header count + body render · cap rendered lines per edit w/ "show more" · consider `content-visibility: auto` or simple windowing on `.diff-sheet`. Reproduce w/ a synthetic 20-file/200-edit session before picking.
 
 ### Tier 2 — code-complete, needs live-verify
 
