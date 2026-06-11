@@ -3,12 +3,11 @@
   // Top-to-bottom it answers "what's happening now" then "what it produced"
   // then "session review":
   //   Now strip   — live turn state + elapsed (while streaming)
-  //   Running     — every in-flight unit (tools / shells / agents / thinking)
-  //   Tasks       — TodoWrite plan + progress
+  //   Last turn   — idle recap: duration / tools / files / cost + reply preview
+  //   Plan        — TodoWrite plan + progress
+  //   Steps       — settled tool-call log, turn-separated
   //   Outputs     — files written/edited this convo
-  //   Sources     — URLs fetched + queries searched
-  //   Tool mix    — per-tool histogram (session review)
-  //   Insights    — slowest / failed / cancelled
+  //   Sources     — URLs fetched/opened + queries searched
   // The redundant "This session" stat card was dropped — tok/s · tools · cost
   // already live in the status bar. Everything here is per-tab reactive state.
   import { onMount, onDestroy } from "svelte";
@@ -20,7 +19,7 @@
     Loader2, Terminal, Bot, Wrench, Activity, Sparkles,
     ChevronDown, ChevronUp, FileText, FilePen, Search, Globe,
     ListChecks, Circle, CheckCircle2, XCircle,
-    StopCircle, Minimize2, Copy, ArrowDownToLine, Check, X, GitCompare,
+    StopCircle, Minimize2, Copy, ArrowDownToLine, Check, X, GitCompare, HelpCircle, Bell,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
@@ -91,7 +90,7 @@
   // "Verb · Xs ago" sub-line; write rows carry a +adds / −dels stat. The Now
   // strip above owns the single live headline, so this is the persistent log,
   // not a duplicate live readout.
-  type StepCat = "read" | "write" | "shell" | "agent" | "search" | "web" | "meta";
+  type StepCat = "read" | "write" | "shell" | "agent" | "search" | "web" | "ask" | "notify" | "meta";
   type StepRow = {
     id: string;
     cat: StepCat;
@@ -103,6 +102,7 @@
     add: number | null;
     del: number | null;
     meta: string | null;
+    turn: number;
   };
 
   function classifyTool(
@@ -130,6 +130,29 @@
       case "WebSearch":
         return { cat: "web", verb: "Search", target: s("query") || "search", add: null, del: null };
       default: {
+        // MCP tools arrive as mcp__<server>__<tool> — humanize instead of
+        // echoing the raw id twice (title + sub-line).
+        const mcp = name.match(/^mcp__.+?__(.+)$/);
+        if (mcp) {
+          switch (mcp[1]) {
+            case "read_file": return { cat: "read", verb: "Read", target: basename(s("path")) || "file", add: null, del: null };
+            case "list_dir": return { cat: "read", verb: "Listed", target: s("path") && s("path") !== "." ? basename(s("path")) : "workspace", add: null, del: null };
+            case "grep": return { cat: "search", verb: "Grep", target: s("pattern") || "search", add: null, del: null };
+            case "ask_user": {
+              // input = { questions: [{ question, header, options }] }
+              const qs = Array.isArray(input.questions) ? (input.questions as Array<Record<string, unknown>>) : [];
+              const q = typeof qs[0]?.question === "string" ? (qs[0].question as string) : "";
+              return { cat: "ask", verb: "Asked", target: q || "a question", add: null, del: null };
+            }
+            case "notify": return { cat: "notify", verb: "Notified", target: s("title") || "notification", add: null, del: null };
+            case "open_browser": return { cat: "web", verb: "Opened", target: stripProto(s("url")) || "browser", add: null, del: null };
+            default: {
+              if (mcp[1].startsWith("git_")) return { cat: "shell", verb: "Ran", target: `git ${mcp[1].slice(4)}`, add: null, del: null };
+              const t = s("path") || s("pattern") || s("url") || s("query") || "";
+              return { cat: "meta", verb: "Ran", target: t ? (basename(t) || t) : mcp[1].replace(/_/g, " "), add: null, del: null };
+            }
+          }
+        }
         const t = s("file_path") || s("path") || s("pattern") || s("url") || s("query") || s("command") || "";
         return { cat: "meta", verb: name, target: t ? (basename(t) || t) : name, add: null, del: null };
       }
@@ -142,21 +165,26 @@
 
   const steps = $derived.by<StepRow[]>(() => {
     const out: StepRow[] = [];
+    let turn = 0;
     for (const m of messages) {
+      if (m.role === "assistant") turn++;
       for (const b of m.blocks as Block[]) {
         if (b.type !== "tool" || STEP_SKIP.has(b.name)) continue;
         const c = classifyTool(b.name, (b.input ?? {}) as Record<string, unknown>);
         const status: StepRow["status"] =
           b.status === "done" ? "done" : (b.status === "error" || b.isError) ? "error" : "pending";
-        out.push({ id: b.id, cat: c.cat, verb: c.verb, target: c.target, status, startedAt: b.startedAt ?? mountTs, durationMs: b.durationMs ?? null, add: c.add, del: c.del, meta: null });
+        out.push({ id: b.id, cat: c.cat, verb: c.verb, target: c.target, status, startedAt: b.startedAt ?? mountTs, durationMs: b.durationMs ?? null, add: c.add, del: c.del, meta: null, turn: Math.max(1, turn) });
       }
     }
     for (const a of tab?.agentSpawns ?? []) {
+      // Spawns carry no message link — slot them into the latest turn already underway.
+      let tn = 1;
+      for (const r of out) if (r.startedAt <= a.startedAt) tn = Math.max(tn, r.turn);
       out.push({
         id: a.id, cat: "agent", verb: "Agent", target: a.description,
         status: a.completedAt != null ? (a.isError ? "error" : "done") : "pending",
         startedAt: a.startedAt, durationMs: a.completedAt != null ? a.completedAt - a.startedAt : null,
-        add: null, del: null, meta: a.subagentType,
+        add: null, del: null, meta: a.subagentType, turn: tn,
       });
     }
     return out.sort((x, y) => y.startedAt - x.startedAt);
@@ -173,6 +201,8 @@
   const logSteps = $derived(settledSteps.filter((s) => s.cat !== "write"));
   const baseSteps = $derived(logSteps.slice(0, STEP_CAP));
   const extraSteps = $derived(logSteps.slice(STEP_CAP));
+  // Separators render only when the log spans more than one turn.
+  const turnCount = $derived(new Set(logSteps.map((s) => s.turn)).size);
 
   // ── Outputs — deduped artifacts (what the turn PRODUCED) ────────────────
   // Steps answers "what happened, in order"; Outputs answers "which files
@@ -189,6 +219,38 @@
     }
     return [...map.values()].sort((a, b) => b.startedAt - a.startedAt);
   });
+
+  // ── Sources — URLs fetched/opened + web queries, deduped, newest-first ──
+  type SourceRow = { id: string; kind: "url" | "query"; value: string; label: string; startedAt: number };
+  const sources = $derived.by<SourceRow[]>(() => {
+    const map = new Map<string, SourceRow>();
+    for (const m of messages) {
+      for (const b of m.blocks as Block[]) {
+        if (b.type !== "tool") continue;
+        const inp = (b.input ?? {}) as Record<string, unknown>;
+        const url = typeof inp.url === "string" ? (inp.url as string) : null;
+        const query = !url && typeof inp.query === "string" ? (inp.query as string) : null;
+        const value = url ?? query;
+        if (!value || map.has(value)) continue;
+        map.set(value, {
+          id: b.id, kind: url ? "url" : "query", value,
+          label: url ? stripProto(url) : value,
+          startedAt: b.startedAt ?? mountTs,
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) => b.startedAt - a.startedAt);
+  });
+  let sourcesExpanded = $state(false);
+  const SOURCE_CAP = 4;
+
+  function agoShort(ts: number): string {
+    const sec = Math.max(0, Math.round((now - ts) / 1000));
+    if (sec < 60) return "just now";
+    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
+    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
+    return `${Math.floor(sec / 86400)}d ago`;
+  }
 
   function agoLabel(r: StepRow): string {
     if (r.status === "pending") return r.cat === "write" ? "Writing…" : "Running…";
@@ -245,7 +307,17 @@
     }
     const cost = typeof m.costUsd === "number" ? m.costUsd : null;
     if (ms === 0 && tools === 0 && cost == null) return null;
-    return { ms, tools, files: files.size, cost };
+    const reply = (m.blocks as Block[])
+      .filter((b): b is Extract<Block, { type: "text" }> => b.type === "text")
+      .map((b) => b.text.trim())
+      .filter(Boolean)
+      .join(" ")
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+      .replace(/[`*_#]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const preview = reply.length > 200 ? reply.slice(0, 200).trimEnd() + "…" : reply || null;
+    return { ms, tools, files: files.size, cost, preview };
   });
 
   // ── Context meter — tokens / window, same source as the composer gauge ──
@@ -289,6 +361,9 @@
   function basename(p: string): string {
     const m = p.match(/[^\\/]+$/);
     return m ? m[0] : p;
+  }
+  function stripProto(u: string): string {
+    return u.replace(/^https?:\/\//, "").replace(/\/$/, "");
   }
   function hostnameOrSelf(u: string): string {
     try { return new URL(u).hostname.replace(/^www\./, ""); }
@@ -431,8 +506,9 @@
 
   {#if isEmpty}
     <div class="empty-note">
-      <Search size={15} />
-      <span>Live work, the plan, files Claude touches, and web sources collect here as the conversation runs.</span>
+      <Activity size={16} />
+      <span class="en-title">Nothing here yet</span>
+      <span>As Claude works, live progress, the plan, files touched, and web sources collect here.</span>
     </div>
   {:else}
     <!-- Last-turn recap — idle headline above the log sections ────────────── -->
@@ -452,6 +528,9 @@
             <div class="rc"><span class="rc-v mono">{lastTurn.cost > 0 && lastTurn.cost < 0.01 ? "<$0.01" : `$${lastTurn.cost.toFixed(2)}`}</span><span class="rc-k">cost</span></div>
           {/if}
         </div>
+        {#if lastTurn.preview}
+          <p class="recap-preview">{lastTurn.preview}</p>
+        {/if}
       </section>
     {/if}
 
@@ -513,6 +592,8 @@
               {:else if r.cat === "agent"}<Bot size={14} />
               {:else if r.cat === "search"}<Search size={14} />
               {:else if r.cat === "web"}<Globe size={14} />
+              {:else if r.cat === "ask"}<HelpCircle size={14} />
+              {:else if r.cat === "notify"}<Bell size={14} />
               {:else}<Wrench size={14} />{/if}
             </span>
             <span class="ev-main">
@@ -532,13 +613,21 @@
         {/snippet}
         <ul class="rows">
           {#each baseSteps as r, i (r.id)}
+            {@const prev = i > 0 ? baseSteps[i - 1] : null}
             <li in:fly={rowIn(i)} out:fade={rowOut()} animate:flip={flipOpts()}>
+              {#if turnCount > 1 && (!prev || prev.turn !== r.turn)}
+                <div class="turn-sep"><span>Turn {r.turn}</span><i></i><span class="ts-ago">{agoShort(r.startedAt)}</span></div>
+              {/if}
               {@render stepBtn(r)}
             </li>
           {/each}
           {#if stepsExpanded}
             {#each extraSteps as r, i (r.id)}
+              {@const prev = i > 0 ? extraSteps[i - 1] : (baseSteps.length > 0 ? baseSteps[baseSteps.length - 1] : null)}
               <li in:fly={rowInExtra(i)} out:fade={rowOutExtra()} animate:flip={flipOpts()}>
+                {#if turnCount > 1 && (!prev || prev.turn !== r.turn)}
+                  <div class="turn-sep"><span>Turn {r.turn}</span><i></i><span class="ts-ago">{agoShort(r.startedAt)}</span></div>
+                {/if}
                 {@render stepBtn(r)}
               </li>
             {/each}
@@ -587,6 +676,42 @@
             </li>
           {/each}
         </ul>
+      </section>
+    {/if}
+
+    <!-- Sources — URLs fetched/opened + web queries (deduped, click to open/copy). -->
+    {#if sources.length > 0}
+      <section class="sect">
+        <header class="sect-head">
+          <Globe size={12} />
+          <span class="sect-title">Sources</span>
+          <span class="badge mono">{sources.length}</span>
+        </header>
+        <ul class="rows">
+          {#each (sourcesExpanded ? sources : sources.slice(0, SOURCE_CAP)) as src, i (src.value)}
+            <li in:fly={rowIn(i)} out:fade={rowOut()} animate:flip={flipOpts()}>
+              <button
+                type="button"
+                class="ev"
+                onclick={() => openSource(src)}
+                use:tooltip={src.kind === "url" ? "Open in your browser" : "Copy this search query"}
+              >
+                <span class="ev-ico">
+                  {#if src.kind === "url"}<Globe size={14} />{:else}<Search size={14} />{/if}
+                </span>
+                <span class="ev-main">
+                  <span class="ev-target mono">{src.label}</span>
+                  <span class="ev-sub">{src.kind === "url" ? `Link · ${agoShort(src.startedAt)}` : `Search · ${agoShort(src.startedAt)}`}</span>
+                </span>
+              </button>
+            </li>
+          {/each}
+        </ul>
+        {#if sources.length > SOURCE_CAP}
+          <button type="button" class="rows-more" onclick={() => (sourcesExpanded = !sourcesExpanded)}>
+            {#if sourcesExpanded}<ChevronUp size={13} />Show less{:else}<ChevronDown size={13} />Show {sources.length - SOURCE_CAP} more{/if}
+          </button>
+        {/if}
       </section>
     {/if}
 
@@ -770,9 +895,11 @@
     background: var(--bg-elev-2); color: var(--fg-subtle);
     transition: background 160ms ease, color 160ms ease;
   }
-  .ev[data-cat="write"] .ev-ico { background: var(--accent-soft); color: var(--accent); }
-  .ev.pending .ev-ico { background: var(--accent-soft); color: var(--accent); }
-  .ev[data-status="error"] .ev-ico { background: var(--danger-soft); color: var(--danger); }
+  /* Opaque tints — translucent -soft fills let the timeline spine bleed through. */
+  .ev[data-cat="write"] .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
+  .ev[data-cat="ask"] .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
+  .ev.pending .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
+  .ev[data-status="error"] .ev-ico { background: color-mix(in oklab, var(--danger) 14%, var(--bg-elev-2)); color: var(--danger); }
   .ev-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .ev-target { font-size: 11.5px; color: var(--fg); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* File rows clip from the START so the extension survives: …vity-panel.svelte
@@ -860,6 +987,18 @@
     color: var(--fg-faint); font-size: 11px; line-height: 1.5;
   }
   .empty-note :global(svg) { color: var(--fg-subtle); opacity: 0.6; }
+  .empty-note .en-title { font-size: 12px; font-weight: 600; color: var(--fg-2); }
+
+  /* Turn separators — only when the Steps log spans multiple turns. */
+  .turn-sep {
+    position: relative; z-index: 1;
+    display: flex; align-items: center; gap: 8px;
+    padding: 9px 4px 5px;
+    font-size: 9.5px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+  .turn-sep i { flex: 1; height: 1px; background: var(--border); }
+  .turn-sep .ts-ago { text-transform: none; letter-spacing: 0; font-weight: 500; }
 
   .mono { font-family: var(--font-mono, monospace); }
   .activity :global(.mon-spin) { animation: mon-spin 0.9s linear infinite; }
@@ -874,7 +1013,13 @@
 
   /* Last-turn recap — compact stat grid capping the idle panel. */
   .recap :global(.recap-ic) { color: var(--ok, var(--accent)); }
-  .recap-grid { display: flex; gap: 18px; padding: 2px 2px 4px; }
+  .recap-grid { display: flex; gap: 18px; padding: 2px 14px 8px; }
+  .recap-preview {
+    margin: 0 14px 12px; padding: 1px 0 1px 10px;
+    border-left: 2px solid color-mix(in oklab, var(--accent) 35%, var(--border));
+    font-size: 11px; line-height: 1.45; color: var(--fg-muted);
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
   .rc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .rc-v { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.15; }
   .rc-k { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); }
