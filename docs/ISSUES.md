@@ -14,13 +14,13 @@
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
-| Rail-v2 | Pending rail v2 — steer chips + mode toggle | T3 | ✅ resolved in-tree |
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
-| #20 | Hot files over the 2000-line split threshold | T3 | ✅ threshold met |
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
 | CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
 | #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
+| #30 | Workspace chip vs CLI cwd possible drift | T3 | 🚧 open |
+| #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -41,24 +41,23 @@
 
 ### Tier 3 — strategic / longer-term
 
-#### Rail-v2 — pending rail v2: steer chips + mode toggle (✅ resolved in-tree 2026-06-10 cont.104)
-
-- **Shipped:** per-chip queue/steer mode toggle (↳ button; steer chips accent-tinted, caption "Steers next turn"), steer chips inject into the **next** turn at its first stream line (`flushSteerChips` via new `TabState.onTurnStarted` hook — [steer-and-queue.md](design/steer-and-queue.md) §6 #1), pulse-on-inject (rail sweep replays), all-steer queue degrades its head to a normal send so it can never strand. "Send now" stays the immediate-inject path. 2 new vitest (118 total) + svelte-check 0/0 + live-verified end-to-end: chip toggled mid-stream → drained turn fired → steer chip injected ("You steered …" marker inline in the next turn's bubble).
-- **Root-cause fix riding along (turn.rs):** overlapping-turn registry race — DONE fires on `result` *before* child reap, so the next turn re-registers `SESSION_PIDS`/`STEER_TX` under the same session key and the finishing turn's tail then wiped both (unconditional `clear_*`). Broke steer (`no_active_turn`) **and `assistant_stop`** during the first seconds of every drained follow-up turn. Now guarded: `clear_session_pid_if` (PID match) + `clear_steer_tx_if` (`same_channel`).
-
 #### 4. UI/UX consistency + navigability sweep (app-wide)
 
 - **Scope:** not a single bug — tracks the stated goal of an app-wide consistency pass. The Settings page is the densest control surface and the natural starting point.
 - **Goal:** every visible control is wired, every section is necessary, terminology + styling consistent, navigation intuitive.
 - **Progress (cont.105, 2026-06-10):** audit findings **#1-#6 + #8-#10 SHIPPED** and live-verified — Steps-rail `cd`-strip (`shellLabel` + vitest), slash menu → palette design language, empty-dock auto-collapse, scroll bottom padding, **per-chat model scoping** (`TabState.modelOverride` + `effectiveModel`; opening an old chat no longer rewrites the new-chat default or toasts), jump-back-in snippets + model chips (backend `last_snippet` on `ConversationMeta`), KPI zero-state unify + `opus· high` space fix, user-turn inset card, insight severity stripes. Audit's "Jump back in doesn't navigate" suspicion: **not a bug** (verified live).
-- **Remaining from the audit:** #7 cost-chart sparse-data polish · #11 rich inline diff (design pass) · #12 tool-chip expand affordance · #13 tab strip into titlebar (lowest priority) · `/history` second-Enter check · message hover actions discoverability. Then the per-page Settings checklist.
+- **Remaining from the audit:** #7 cost-chart sparse-data polish · #11 rich inline diff (design pass) · #12 tool-chip expand affordance · #13 tab strip into titlebar (lowest priority) · message hover actions discoverability. (`/history` fixed + live-verified 2026-06-11 — drawer opens on single Enter via store request flag.) Then the per-page Settings checklist.
 - **Input:** [ui-audit-2026-06-09.md](design/ui-audit-2026-06-09.md) — live CDP audit of v0.8.14, 13 ranked findings (refinement tier, not redesign).
 
-#### 20. Hot files exceeding the 2000-line agent-split threshold (✅ threshold met 2026-06-10)
+#### 31. Deferred remainder from the 2026-06-11 dead-code/debug audit
 
-- **The goal is achieved: no file in the repo exceeds 2000 lines.** Composer split **COMPLETE C1-C7** (cont.100-103): 3197 → **1845L**, with eight `composer/` children (QueueRail 322 · SettingsMenu 370 · EnhanceBar 264 · LivePills 212 · PermMenu 147 · AttachmentsRow 114 · MentionPopover 110 · SlashMenu 75) + `modelMatrix.ts` (shared model/effort/perm option tables) + `helpers.ts` (17 vitest). Every cut svelte-check 0/0, vitest 116/116, CDP pixel-verified live. Brief kept as the split pattern reference: [composer-split.md](design/composer-split.md).
-- **Prior completions:** `assistant.svelte.ts` M0-M9 (3356→1700L, playback net held) · `assistant/mod.rs` R1-R8 shipped v0.8.16 (4331→303L hub) · MessageBubble H0 (1742→1471L) · ChatTabsBar H0 (1761→1717L).
-- **Optional follow-ups (quality, not threshold):** [messagebubble-split.md](design/messagebubble-split.md) B1-B6 + [chattabsbar-split.md](design/chattabsbar-split.md) T1-T6 stay mapped; `assistant_send` (917L fn inside turn.rs) can split internally later.
+Three audits (backend, frontend, orphan files) shipped a sweep this session; these were found but deliberately deferred:
+
+- **Legacy provider commands (👤 needs your call):** `assistant_{get,set}_base_url` / `assistant_{get,set}_provider_model` (config.rs) operate on LEGACY fields cleared on first load, yet `assistant.svelte.ts` still invokes them — a freshly-migrated config always round-trips None/empty. Either remove the command pair + their Settings surface, or re-wire to live fields.
+- **401-detection duplicated in turn.rs (T4):** near-identical auth-error string-matching in the stdout `result` handler (~L1043) and stderr-exit handler (~L1339), already diverging. Extract one helper next time turn.rs is open.
+- **Blocking fs reads in async commands (T4):** `load_config()` in `assistant_send` / `read_oauth_token()` in `usage_rate_limits` do sync disk I/O on the tokio executor. Tiny local files — wrap in `spawn_blocking` only if it ever shows up in traces.
+- **Fable sunset sweep (dated):** after Jun 22 (`FABLE_SUNSET_MS = Date.UTC(2026, 5, 23)` in `state/assistant/helpers.ts`), all Fable branches (`fableAvailable()` gates, `fableSunsetNoticed` toast in send.ts, `limited` rows in modelMatrix.ts) become permanently dead — sweep them out.
+- **Optional split follow-ups (quality, not threshold — #20 closed at ship):** [messagebubble-split.md](design/messagebubble-split.md) B1-B6 + [chattabsbar-split.md](design/chattabsbar-split.md) T1-T6 stay mapped; `assistant_send` (917L fn inside turn.rs) can split internally later.
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
 
@@ -71,6 +70,11 @@
 - **Symptom:** the trust segment is binary (Read-only/Standard) over a **ternary** backend enum (`readonly/standard/full`). Once clicked, `trust_level` pins and can't return to the derived state via UI; "full" (rank 2) is functionally identical to "standard" — only `"standard"` is gated for git writes.
 - **Recommendation:** collapse to a true 2-level enum (drop the dead "full"). Touches `mcp_server::trust_rank`/`trust_level`, `mod.rs::is_valid_trust_level`/`effective_trust_level`/git-write gate, serde, + persisted-config migration.
 - **Held for sign-off:** security-relevant + persisted-config change.
+
+#### 30. Workspace chip shows current workspace, not the resumed tab's cwd (🚧 open — UX gap, root cause known)
+
+- **Seen 2026-06-11 (cont.110, live CDP):** chips said `resume-project` while real turns read remotion-playground files. **Explained:** the turns resumed an old tab whose session was started under remotion-playground — `load_session_cwd` (convo_store) correctly pins a resumed session to its original cwd; the title-bar chip reflects the *currently selected* workspace only. Per-session cwd persistence working as designed.
+- **The gap:** nothing in the UI tells you a tab is operating in a different folder than the chip shows. Fix sketch: per-tab cwd badge (tabsbar tooltip or composer notice) when `session_cwd != workspace.current`.
 
 ### Tier 4 — LOW / cosmetic
 

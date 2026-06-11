@@ -29,6 +29,13 @@
   let ctxPanel = $state<HTMLDivElement | undefined>();
   let ctxPos = $state<{ top: number; right: number }>({ top: 0, right: 0 });
 
+  // `/history` slash command requests the drawer via the store's one-shot flag.
+  $effect(() => {
+    if (!assistant.ui.historyOpen) return;
+    assistant.ui.historyOpen = false;
+    openHistory();
+  });
+
   // History opens from the Panels menu now → anchor its popover off the
   // Panels button (viewAnchor).
   function openHistory() {

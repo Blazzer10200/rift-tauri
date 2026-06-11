@@ -351,7 +351,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
       void store.newTab();
       return true;
     case "history":
-      store.ui.historyOpen = !store.ui.historyOpen;
+      store.ui.historyOpen = true;
       return true;
     case "stop":
       void stop(store);

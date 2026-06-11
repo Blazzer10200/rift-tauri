@@ -88,10 +88,15 @@ fn load_config() -> BudgetConfig {
     let Ok(p) = config_path() else {
         return BudgetConfig::default();
     };
-    std::fs::read_to_string(&p)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    // Missing file = normal (silent default); an existing file that fails to
+    // parse silently dropping the budget should be traceable.
+    match std::fs::read_to_string(&p) {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+            log::warn!("usage budget config unreadable — falling back to defaults: {e}");
+            BudgetConfig::default()
+        }),
+        Err(_) => BudgetConfig::default(),
+    }
 }
 
 /// Current reset-window bounds in epoch ms, derived from the cadence. Uses

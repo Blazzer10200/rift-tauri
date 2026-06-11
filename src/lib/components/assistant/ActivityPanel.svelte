@@ -12,6 +12,7 @@
   // The redundant "This session" stat card was dropped — tok/s · tools · cost
   // already live in the status bar. Everything here is per-tab reactive state.
   import { onMount, onDestroy } from "svelte";
+  import { fmtClock } from "./composer/helpers";
   import { fly, fade, slide } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { cubicOut } from "svelte/easing";
@@ -315,10 +316,6 @@
     } catch (e) { console.warn("[ActivityPanel] copy transcript failed", e); }
   }
 
-  function fmtElapsed(ms: number): string {
-    const s = Math.max(0, Math.floor(ms / 1000));
-    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-  }
   function fmtDur(ms: number): string {
     if (ms < 1000) return `${ms}ms`;
     const s = ms / 1000;
@@ -375,7 +372,7 @@
         <span class="now-label">{streaming ? nowLabel : "Done"}</span>
       {/key}
       {#if streaming && turnStartedAt != null}
-        <span class="now-el mono">{fmtElapsed(now - turnStartedAt)}</span>
+        <span class="now-el mono">{fmtClock(now - turnStartedAt)}</span>
       {:else if !streaming && finishedMs != null}
         <span class="now-el mono">{fmtDur(finishedMs)}{#if settledSteps.length > 0} · {settledSteps.length} {settledSteps.length === 1 ? "step" : "steps"}{/if}</span>
       {/if}

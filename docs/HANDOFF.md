@@ -2,42 +2,32 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-10 (cont.109) — self-aware Rift: UI bridge resurrection + AI-driven app surfaces
+## Session 2026-06-11 (cont.111) — full-codebase audit + cleanup → v0.8.22 ship
 
-svelte-check 0/0 (4093) · cargo check clean (forced recheck, zero warnings) · full CDP live pass. **Shipped v0.8.21** — bump ×3 + Cargo.lock, CHANGELOG rewritten, annotated tag pushed.
+**Shipped v0.8.22** (tag-driven CI): cont.110's multi-tab stream-kill fix + Harness live-ops arc PLUS this session's audit sweep. All green pre-tag: svelte-check 0/0 (4093) · vitest 122/122 · cargo check/clippy 0 warnings · cargo test 95/95 · live CDP pass 0 console errors.
 
-- **Ghost-tool find:** `mcp__rift__ask_user` was steered-to (turn.rs deny msg) + allowlisted but UNREGISTERED since the pure-assistant rip killed `remote_bridge.rs` — model was told to call a tool that didn't exist. Frontend stack (FIFO binding, card UI, `assistant_answer_ask_user`) was dormant-intact.
-- **`assistant/bridge.rs` (new):** minimal loopback resurrection — NDJSON over `127.0.0.1:<rand>`, single per-launch token, ops `ask_user` / `open_browser` / `notify`. Started in lib.rs setup; `write_mcp_config` injects `RIFT_BRIDGE_PORT/TOKEN` (absent → MCP child degrades gracefully, tools unlisted).
-- **mcp_server.rs:** `bridge_enabled()`-gated tool trio + `bridge_call()` (660s read timeout for ask_user, 10s others). Deps `rand 0.10` + `base64 0.22` re-added.
-- **turn.rs:** addendum rewritten — documents ask_user/open_browser/notify + env snapshot semantics; SAFE_MCP cleaned of ghost sync tools (`{BUILTINS},{SAFE_MCP},...` reuse in scoped branch). Per-turn "Rift environment snapshot" rides the user-msg `<system-reminder>` (cache-stable): dock current URL + plan usage via `limits::cached_snapshot()` (≤5min, non-blocking) + `spawn_background_refresh()` fire-and-forget warm-up.
-- **Frontend:** `assistant://open-browser` → `browserDock.openUrl()` (new `pendingUrl`, consumed by WebBrowserPage `$effect` once stage mounts); `assistant://notify` → toast; Markdown localhost/127.0.0.1 links → dock instead of system browser.
-- **CDP-verified live:** bridge boot log · open_browser opened dock + navigated (9223/health) · warn toast pixel-confirmed · ask_user full round-trip (card → Yes → model echoed "Yes") · link intercept (0 console errors, no external browser) · session JSONL carried snapshot w/ dock URL + "5-hour window 38% used".
+- **Audit sweep (3 parallel agents: backend/frontend/orphans, findings self-verified before edits):** diagnostics/mod.rs slimmed ~200L (26 dead sync-era DiagStage variants → `Log`+`System`, dead counters/ring/accessors, dead frontend-error chain incl. `utils/diag.ts` + `diag_log_frontend_error` + `emit`), dead `cache_path`/`safe_profile_key`, SidePanel passthrough inlined into AssistantPane, dead `panelTab`/`--muted`, dedups (`SKIP_DIRS` → mcp_server's pub(crate); `modelHue`/`shortModel` → new `workspaces/helpers.ts`; `fmtElapsed`→`fmtClock`), `@xterm/*` ×4 uninstalled, MSIX icons + `cdp/send.sh` + `steer-and-queue.md` deleted, stale sync/RCON/WPF comments purged.
+- **Fixes:** `/history` slash command was a no-op → store one-shot request flag consumed by ChatTabsBar `$effect` (live-verified, closes the #4 second-Enter item) · poison-safe `CACHE` locks (limits.rs) · config/budget parse failures now `log::warn!` instead of silent defaults.
+- **ISSUES.md:** Rail-v2 + #20 blocks pruned at ship; **new #31** = deferred remainder (legacy `base_url`/`provider_model` commands — needs user call; turn.rs 401-dup helper; blocking-fs-in-async; **Fable dead-branch sweep after Jun 22**).
 
 ### RESUME HERE
 
-- **v0.8.21 release CI VERIFIED GREEN** — 4 assets live on rift-releases (Setup.exe, full.nupkg, RELEASES, releases.win.json). Nothing pending.
-- `browser_screenshot` MCP tool (AI sees the dock page → self-verify loop) parked as its own design arc — needs image transport through the bridge.
-- CDP screenshots can't capture the native child webview (dock area renders blank in shots) — verify dock content via address-bar sync / `browser_read_page`, not pixels.
-- User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
-- `/usage` endpoint undocumented — if card shows "Unavailable", check `anthropic-beta: oauth-2025-04-20` header version.
-- Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), Settings per-page checklist, POLISH tier (mic-permission deep link, model-download disk check, in-app help panel).
-- Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum · VM Administrator password rotation (cont.105).
+- **v0.8.22 tagged + pushed — confirm CI release green** (`gh run list` on `release.yml`; needs `RELEASES_TOKEN` repo secret as always).
+- User prod app still needs one manual Setup.exe (pre-Velopack install) — unchanged.
+- **New ISSUES #31** (audit deferred items) + #30 (workspace-chip drift, unconfirmed).
+- CDP test wart: synthetic `.click()` doesn't fire row handlers (welcome recents need real pointer events — same as tabsbar/model-menu rows).
+- Carried: `browser_screenshot` MCP design arc · audit remainder (#7 charts · #12 chip affordance · #11/#13) · Settings checklist · POLISH tier · SEC-1 · #29 CSP-nonce · CR-UX.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
-cont.108 live plan limits (`usage/limits.rs` OAuth `/usage` fetch — CLI token READ-ONLY — + CostPage card + `/usage` popover) + **v0.8.20 shipped**. cont.107 new-user readiness + v0.8.19. cont.106 custom context menus + Fable 1M ctx fix. cont.105 #4 UI sweep + v0.8.18. cont.104 Rail-v2 + turn.rs registry race fix. cont.103 effort ladder CLI 1:1 + composer split. cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
+cont.110 multi-tab stream-kill fix (live TabState authoritative, pure pointer-switch) + Harness mission control/drill-down/health-alerts/plan-bars — shipped in v0.8.22. cont.109 self-aware Rift: `assistant/bridge.rs` loopback resurrection (ask_user/open_browser/notify), per-turn env snapshot, v0.8.21. cont.108 live plan limits + v0.8.20. cont.106 custom context menus + Fable 1M fix. cont.104 Rail-v2 + turn.rs registry race fix. cont.94 Fable 5 (**Jun 22 sunset gate**). PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
 
-- **Onboarding gate (cont.55):** `showOnboarding = !onboarding.dismissed && assistant.configLoaded && ((!hasApiKey && !auth?.loggedIn) || !betaNotice.acknowledged)`.
-- **Effort mapping lockstep:** `effortToFlag` (helpers.ts) ↔ `turn.rs` match arm ↔ `modelMatrix.ts` tables — change all three together; vitest mirror guards it.
-- **Right-click ownership:** component context handlers MUST `preventDefault()` or the global fallback double-fires.
-- **Accent via `--accent-h`** (app.css `:root` only); tint mixes `in oklab`, never `in oklch`.
-- **Surface tiers:** page 0.142 · card 0.215 · wells 0.178 · field 0.25 · track 0.175.
-- **IA: 4 workspaces**, nav in titlebar, positional `workspace.order`. Harness = one viewport.
-- **AssistantPane drop handlers on `.pane` outer only**; `dragDropEnabled:false`.
-- **Blur-reveal:** `shownCount` only `$state`, written only by rAF loop.
-- **Versions lockstep ×3 + Cargo.lock** — only at ship. **v0.8.20 stands.**
-- **`turn.rs::kill_all_session_children` re-export** — load-bearing for Velopack apply.
-- **Bridge env injection in `write_mcp_config`** — load-bearing for ask_user/open_browser/notify; bridge OnceLock starts in lib.rs setup BEFORE first turn.
+- **Live TabState is authoritative over disk** — never re-add `stop()` to `loadConversation` or disk-reload a tab in `host.tabs`; bg streams die/clobber (cont.110 fix; regression tests guard).
+- **Onboarding gate (cont.55)** · **Effort mapping lockstep** (`effortToFlag` ↔ `turn.rs` ↔ `modelMatrix.ts` + vitest) · **Right-click ownership** (`preventDefault()` or global double-fires).
+- **Accent via `--accent-h`**; tint mixes `in oklab`, never `in oklch`. **Surface tiers:** page 0.142 · card 0.215 · wells 0.178 · field 0.25 · track 0.175.
+- **IA: 4 workspaces**, nav in titlebar. **AssistantPane drop handlers on `.pane` outer only**. **Blur-reveal:** `shownCount` only `$state` via rAF loop.
+- **Versions lockstep ×3 + Cargo.lock** — only at ship. **v0.8.22 stands.**
+- **`turn.rs::kill_all_session_children` re-export** + **bridge env injection in `write_mcp_config`** — load-bearing (Velopack apply / ask_user trio).
 - **Pure-helper modules + vitest nets + `assistant.init()` initPromise memo + composer/ children** — don't re-inline.

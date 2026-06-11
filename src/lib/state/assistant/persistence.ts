@@ -61,11 +61,9 @@ export type PersistenceHost = {
   convoCreatedAt: number | null;
   lastError: string | null;
   lastNotice: string | null;
-  streaming: boolean;
   messages: ChatMessage[];
   queue: { id: string; text: string }[];
   ui: { historyOpen: boolean; dockOpen: boolean };
-  stop(): Promise<void>;
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
@@ -230,9 +228,19 @@ export async function renameConversation(
 }
 
 export async function loadConversation(host: PersistenceHost, id: string): Promise<void> {
-  if (host.streaming) await host.stop();
+  // Streams are per-tab (routed by session_id) — switching must NOT stop the
+  // outgoing tab's in-flight turn; it keeps streaming in the background.
   if (host.messages.length > 0 && host.currentConvoId && host.currentConvoId !== id) {
     scheduleSave(host, true);
+  }
+  // A live TabState is authoritative over its disk snapshot (disk is only ever
+  // written FROM memory) — re-hydrating would clobber an in-flight bg stream's
+  // messages + streaming indexes. Pointer-switch instead.
+  if (host.tabs.get(id)) {
+    host.currentConvoId = id;
+    host.lastNotice = null;
+    host.ui.historyOpen = false;
+    return;
   }
   try {
     const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });

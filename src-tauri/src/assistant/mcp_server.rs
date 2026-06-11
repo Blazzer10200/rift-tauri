@@ -42,7 +42,8 @@ const MAX_GREP_FILES: usize = 5000;
 /// Per-file byte cap for grep: never load more than this from any one file
 /// (F10 — bound the full read after the binary probe).
 const MAX_GREP_FILE_BYTES: u64 = 4 * 1024 * 1024;
-const SKIP_DIRS: &[&str] = &[
+/// Shared with `workspace::assistant_list_workspace_files` — keep one copy.
+pub(crate) const SKIP_DIRS: &[&str] = &[
     "node_modules", ".git", ".svelte-kit", "build", "dist", "target",
     ".rift-trail", ".rift-tmp", "__pycache__", ".venv", ".next",
 ];

@@ -13,14 +13,13 @@ pub(super) struct AssistantConfig {
     /// `load_config()` runs a one-shot migration on read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) api_key: Option<String>,
-    /// Currently-open project folder for the Assistant. None = no folder open;
-    /// Assistant falls back to AutoSync's server folders if any, else no-tools.
-    /// Matches VS Code's "open folder" model — one root at a time.
+    /// Currently-open project folder for the Assistant. None = no folder open
+    /// → workspace tools are unavailable. Matches VS Code's "open folder"
+    /// model — one root at a time.
     #[serde(default)]
     pub(super) current_root: Option<PathBuf>,
     /// Last ~10 folders the user opened. Newest first. Surfaced in EmptyState
-    /// so they can jump back. AutoSync folders are NOT mirrored here; they're
-    /// a separate source the picker shows as a "Synced servers" group.
+    /// so they can jump back.
     #[serde(default)]
     pub(super) recent_roots: Vec<PathBuf>,
     /// When true (the default), spawn the CLI without `--strict-mcp-config`
@@ -174,10 +173,18 @@ pub(super) fn fable_sunset_passed() -> bool {
 }
 
 pub(super) fn load_config() -> AssistantConfig {
-    let mut cfg: AssistantConfig = config_path()
+    // Missing file = normal first run (silent default); a file that exists
+    // but fails to parse means settings are being dropped — warn so it's
+    // traceable instead of "my settings vanished".
+    let mut cfg: AssistantConfig = match config_path()
         .and_then(|p| std::fs::read_to_string(&p).map_err(|e| e.to_string()))
-        .and_then(|s| serde_json::from_str(&s).map_err(|e| e.to_string()))
-        .unwrap_or_default();
+    {
+        Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
+            log::warn!("assistant config unreadable — falling back to defaults: {e}");
+            AssistantConfig::default()
+        }),
+        Err(_) => AssistantConfig::default(),
+    };
     // Phase 6 (#37): one-shot migration of any plaintext api_key into the
     // OS keychain. Failure is non-fatal — the field stays in JSON for a
     // future attempt, and runtime reads still see it via legacy fallback in
@@ -311,7 +318,7 @@ pub(super) fn is_valid_permission_mode(v: &str) -> bool {
 
 /// The Assistant trust levels Rift exposes. Gates the local git tools in the
 /// MCP server (`git_local.rs`): `readonly` → status/diff/log; `standard` →
-/// adds pull/commit/push; `full` → reserved for RCON raw passthrough (phase 2).
+/// adds pull/commit/push; `full` → extends git write access.
 pub(super) fn is_valid_trust_level(v: &str) -> bool {
     matches!(v, "readonly" | "standard" | "full")
 }

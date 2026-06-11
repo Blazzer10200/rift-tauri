@@ -497,8 +497,7 @@ pub async fn assistant_send(
     //      `~/.claude/projects/<cwd-hash>/<uuid>.jsonl` so --resume succeeds
     //      even after the user opens a different workspace.
     //   1. The user's explicitly-opened folder (`current_root` in config).
-    //   2. AutoSync server folders if any are connected.
-    //   3. Empty → no-tools turn + no-workspace addendum.
+    //   2. Empty → no-tools turn + no-workspace addendum.
     // Validate every candidate still exists on disk; missing dir → fall through.
     let pinned_cwd: Option<PathBuf> = if is_first_turn {
         None
@@ -661,10 +660,6 @@ pub async fn assistant_send(
     }
 
     if let Some(ref p) = mcp_config_path {
-        // S73: when the remote-shell toggle is on, the explicit-named path adds
-        // `mcp__rift__remote_bash`. Piggyback already admits `mcp__*` so the
-        // tool is reachable there unconditionally — the gate is server-side
-        // (RIFT_REMOTE_SHELL_ENABLED env on the MCP child).
         // S91: full built-in tool set. The CLI's allowlist gate denies any
         // tool name not listed verbatim. S88 added `Skill`; users still hit
         // denials on `Agent` (subagent spawn — used by /plan, /quick-review,
@@ -691,8 +686,6 @@ pub async fn assistant_send(
         const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TodoWrite,WebFetch,WebSearch";
         // UI-presentation tools (ask_user / open_browser / notify) are safe to
         // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
-        // (The old sync_status/drift_snapshot/reconcile_preview ghosts died
-        // with the pure-assistant conversion and are gone from this list.)
         const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify";
         // Local git tools (git_local.rs). Read set is non-mutating → safe to
         // auto-approve even in prompting modes. Write set is admitted in
@@ -811,10 +804,9 @@ pub async fn assistant_send(
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
-    // doesn't sit idle on stdin while we lock state. Live workspace state
-    // (foreign locks, sync queue, recent diag events) + per-session toggles
-    // (remote_shell, dyslexia) ride the USER message via a <system-reminder>
-    // block instead of `--append-system-prompt`. A dynamic system prompt
+    // doesn't sit idle on stdin while we lock state. Per-turn data (env
+    // snapshot, dyslexia toggle) rides the USER message via a
+    // <system-reminder> block instead of `--append-system-prompt`. A dynamic system prompt
     // invalidates the cache prefix every turn (cache layout: system → tools
     // → CLAUDE.md → conversation tail); keeping fresh per-turn data on the
     // user turn keeps the prefix cache-stable. Multi-line is fine here

@@ -278,8 +278,8 @@ export async function restoreTabs(host: TabsHost) {
 /** Open a saved convo as a tab. Push to openTabs if not already there;
  *  activate + load from disk. Unsaved new-tab ids (minted by newTab() but
  *  no send yet → no disk record) drop into a fresh in-memory state instead
- *  of disk-load. Singleton stream pipeline — mid-stream switch is handled
- *  by loadConversation() calling stop(). */
+ *  of disk-load. Streams are per-tab — switching never stops a turn; a live
+ *  TabState (possibly mid-stream in the bg) is a pure pointer switch. */
 export async function openTab(host: TabsHost, id: string) {
   if (!host.openTabs.includes(id)) {
     host.openTabs = [...host.openTabs, id];
@@ -295,7 +295,12 @@ export async function openTab(host: TabsHost, id: string) {
   // Stash outgoing tab's composer + attachments before any state change.
   host.stashTabUi(host.currentConvoId);
   const inMeta = host.conversations.some((c) => c.id === id);
-  if (inMeta) {
+  if (host.tabs.get(id)) {
+    // Live TabState (possibly streaming in the bg) — its messages/queue ride
+    // on the TabState; disk-reloading here would clobber the in-flight turn.
+    host.currentConvoId = id;
+    host.lastNotice = null;
+  } else if (inMeta) {
     await host.loadConversation(id);
   } else {
     // Fresh in-memory tab (no disk record yet). Mint a TabState with

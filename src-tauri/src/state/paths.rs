@@ -26,50 +26,19 @@ pub fn dirs_home() -> std::io::Result<PathBuf> {
     ))
 }
 
-pub fn safe_profile_key(key: &str) -> String {
-    // #126: dots used to be silently stripped, collapsing `foo` and `foo.v2`
-    // to the same on-disk filename. `.` is safe in Windows and POSIX
-    // filenames; allow it through.
-    let cleaned: String = key
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
-        .collect();
-    if cleaned.is_empty() {
-        log::warn!(
-            "safe_profile_key: input '{key}' sanitized to empty; using '_empty' sentinel"
-        );
-        return "_empty".into();
-    }
-    if cleaned != key {
-        log::warn!(
-            "safe_profile_key: input '{key}' was sanitized to '{cleaned}' — collision risk if multiple profiles map to the same cleaned form"
-        );
-    }
-    cleaned
-}
-
-pub fn cache_path(prefix: &str, profile_key: &str) -> std::io::Result<PathBuf> {
-    let dir = rift_dir()?;
-    let safe = safe_profile_key(profile_key);
-    Ok(dir.join(format!("{prefix}-{safe}.json")))
-}
-
 /// **BLOCKING** — uses `std::fs` + `std::thread::sleep` for the Windows
 /// rename-retry backoff (worst case ~500ms across 4 attempts). Callers on
 /// the tokio runtime should wrap in `tokio::task::spawn_blocking` for paths
-/// known to hit the retry window (concurrent indexer / AV); call sites in
-/// the flush loop are already on `spawn_blocking` or non-runtime contexts.
-/// #27: contract documented; behavior unchanged.
+/// known to hit the retry window (concurrent indexer / AV).
 pub fn atomic_write_json(path: &std::path::Path, json: &str) -> std::io::Result<()> {
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    // #80: deterministic `.json.tmp` collided when `SyncSnapshot::set` (flush
-    // loop) and `replace_under` (rebaseline) raced on the same snapshot key —
-    // each truncated the other's in-flight write. Unique per-call suffix
-    // (pid + monotonic counter) keeps every save isolated; the rename target
-    // is still the canonical path so readers never see the temp name.
+    // #80: a deterministic `.json.tmp` name lets concurrent writers truncate
+    // each other's in-flight write. Unique per-call suffix (pid + monotonic
+    // counter) keeps every save isolated; the rename target is still the
+    // canonical path so readers never see the temp name.
     static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
     let suffix = format!(
         "{}-{}.json.tmp",
@@ -127,23 +96,6 @@ pub fn atomic_write_json(path: &std::path::Path, json: &str) -> std::io::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn safe_profile_key_keeps_safe_chars_and_strips_separators() {
-        // Allowed: alphanumerics + - _ . (the #126 dot fix keeps `foo` and
-        // `foo.v2` distinct).
-        assert_eq!(safe_profile_key("foo.v2"), "foo.v2");
-        assert_eq!(safe_profile_key("My-Profile_1"), "My-Profile_1");
-        assert_ne!(safe_profile_key("foo"), safe_profile_key("foo.v2"));
-        // Path separators + traversal chars are stripped, so the result can
-        // never escape its directory or carry a separator.
-        let cleaned = safe_profile_key("../../etc/passwd");
-        assert!(!cleaned.contains('/') && !cleaned.contains('\\'));
-        assert_eq!(safe_profile_key("a/b\\c d:e"), "abcde");
-        // Sanitizes-to-empty → sentinel, never an empty filename component.
-        assert_eq!(safe_profile_key("///"), "_empty");
-        assert_eq!(safe_profile_key(""), "_empty");
-    }
 
     #[test]
     fn atomic_write_json_round_trips_and_overwrites() {

@@ -170,7 +170,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
-            commands::diag_log_frontend_error,
             commands::open_in_vscode,
             commands::check_for_updates,
             commands::download_update,

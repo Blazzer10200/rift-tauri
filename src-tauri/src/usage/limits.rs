@@ -129,7 +129,7 @@ fn read_oauth_token() -> Result<String, String> {
 /// without a `claude-code/<ver>` UA the endpoint throttles aggressively.
 #[tauri::command]
 pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits, String> {
-    if let Some((at, cached)) = CACHE.lock().unwrap().as_ref() {
+    if let Some((at, cached)) = CACHE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
         if at.elapsed() < CACHE_TTL {
             return Ok(cached.clone());
         }
@@ -171,6 +171,6 @@ pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits
         .await
         .map_err(|e| format!("unexpected usage response shape: {e}"))?;
     limits.fetched_at = now_ms();
-    *CACHE.lock().unwrap() = Some((Instant::now(), limits.clone()));
+    *CACHE.lock().unwrap_or_else(|p| p.into_inner()) = Some((Instant::now(), limits.clone()));
     Ok(limits)
 }

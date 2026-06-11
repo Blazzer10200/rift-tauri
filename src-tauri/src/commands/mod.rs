@@ -45,14 +45,3 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| format!("Couldn't launch VS Code (is `code` on PATH?): {e}"))
 }
-
-#[tauri::command]
-pub fn diag_log_frontend_error(label: String, message: String) {
-    let label = label.chars().take(64).collect::<String>();
-    let message = message.chars().take(512).collect::<String>();
-    crate::diagnostics::emit(
-        crate::diagnostics::DiagStage::System,
-        crate::diagnostics::DiagLevel::Error,
-        format!("frontend/{label}: {message}"),
-    );
-}

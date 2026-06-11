@@ -1,10 +1,7 @@
-//! Sync Inspector — observability surface for the autosync pipeline.
+//! Diagnostics — process-global log/event bus.
 //!
-//! Provides a process-global event bus that any subsystem (watcher, debounce,
-//! sftp pool, drift, bridge) can publish into without dep-injection. The Tauri
-//! command `diag_subscribe` forwards bus events to the frontend over the
-//! `diag://event` channel; pipeline state snapshots are emitted on
-//! `diag://state` every 500ms.
+//! Any subsystem can publish into the bus without dep-injection; a pump
+//! forwards events to the frontend over the `diag://event` channel.
 //!
 //! Design notes:
 //! * `DiagBus` wraps `tokio::sync::broadcast` (cap 4096, drop-oldest on lag).
@@ -19,7 +16,7 @@
 
 use std::io::Write as _;
 use std::sync::{Mutex, OnceLock};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -33,45 +30,10 @@ const FRONTEND_RATE_PER_SEC: u32 = 200;
 /// activity (drift result + reconnect + bridge ack arriving in the same
 /// second) while bounding pathological cases.
 const FRONTEND_CRITICAL_RATE_PER_SEC: u32 = 50;
-/// Cap of the recent-events ring buffer. Sized to cover ~30s of activity at
-/// typical churn while staying small enough that snapshot reads don't matter.
-const RECENT_RING_CAP: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagStage {
-    FsEvent,
-    Ignored,
-    Debounced,
-    Queued,
-    QueueDropped,
-    UploadStart,
-    UploadDone,
-    UploadFail,
-    AtomicRename,
-    LockAcquired,
-    LockReleased,
-    LockHeldByOther,
-    DriftScanStart,
-    DriftScanProgress,
-    DriftScanResult,
-    BridgePing,
-    BridgeAck,
-    RescanSignal,
-    SftpConnect,
-    SftpDisconnect,
-    // v0.2.50: explicit signal that an SFTP op timed out — the session is
-    // wedged (TCP open but no data flowing). Emitted by transfer.rs's
-    // with_t() helper. Distinct from UploadFail so the UI can surface a
-    // "Reconnect?" affordance instead of a generic upload error.
-    ConnectionWedged,
-    RemoteScanStart,
-    RemoteScanResult,
-    RemotePullStart,
-    RemotePullDone,
-    RemotePullFail,
-    BaselineShrinkDetected,
-    BaselineRebaselined,
     Log,
     System,
 }
@@ -113,20 +75,7 @@ pub struct DiagEvent {
 pub struct DiagBus {
     tx: broadcast::Sender<DiagEvent>,
     seq: AtomicU64,
-    queue_dropped_total: AtomicU64,
-    /// Epoch-ms of the last RescanSignal publish. `i64::MIN` = none seen yet.
-    /// Atomic (vs `Mutex<Option<DateTime>>`) so the diagnostics hot-path
-    /// stays lock-free.
-    last_rescan_signal_at_ms: AtomicI64,
-    /// Epoch-ms of the last DriftScanStart/Result publish. `i64::MIN` = none.
-    last_drift_scan_at_ms: AtomicI64,
-    bus_lag_total: AtomicU64,
-    events_emitted_total: AtomicU64,
     enabled: AtomicBool,
-    /// Bounded ring of the most recent events. Pre-existing subscribers see
-    /// every event live; this is a passive cache so non-subscriber callers
-    /// (Assistant `WorkspaceContext` gather) can pull a snapshot synchronously.
-    recent: std::sync::Mutex<std::collections::VecDeque<DiagEvent>>,
 }
 
 fn basename_only(path: &str) -> String {
@@ -140,15 +89,7 @@ impl DiagBus {
         Self {
             tx,
             seq: AtomicU64::new(0),
-            queue_dropped_total: AtomicU64::new(0),
-            last_rescan_signal_at_ms: AtomicI64::new(i64::MIN),
-            last_drift_scan_at_ms: AtomicI64::new(i64::MIN),
-            bus_lag_total: AtomicU64::new(0),
-            events_emitted_total: AtomicU64::new(0),
             enabled: AtomicBool::new(true),
-            recent: std::sync::Mutex::new(std::collections::VecDeque::with_capacity(
-                RECENT_RING_CAP,
-            )),
         }
     }
 
@@ -167,9 +108,9 @@ impl DiagBus {
         event.file = event.file.as_deref().map(basename_only);
         // #238 / completes #8: scrub home-dir prefixes + private-key bodies
         // on every bus-bound message. LogForwarder already scrubs; the direct
-        // `emit*` helpers (58 sites in sync/sftp/assistant) bypassed scrub
-        // entirely. Idempotent — homedir replacement is a no-op on already-
-        // scrubbed strings, key-body redaction is a no-op on `[REDACTED ...]`.
+        // `emit*` helpers bypassed scrub entirely. Idempotent — homedir
+        // replacement is a no-op on already-scrubbed strings, key-body
+        // redaction is a no-op on `[REDACTED ...]`.
         event.message = scrub_log_message(&event.message);
         if !event.fields.is_null() {
             let raw = event.fields.to_string();
@@ -178,76 +119,12 @@ impl DiagBus {
                 .unwrap_or(serde_json::Value::String(scrubbed));
         }
         event.seq = self.seq.fetch_add(1, Ordering::Relaxed);
-        self.events_emitted_total.fetch_add(1, Ordering::Relaxed);
-        match event.stage {
-            DiagStage::QueueDropped => {
-                self.queue_dropped_total.fetch_add(1, Ordering::Relaxed);
-            }
-            DiagStage::RescanSignal => {
-                self.last_rescan_signal_at_ms
-                    .store(event.at.timestamp_millis(), Ordering::Relaxed);
-            }
-            DiagStage::DriftScanStart | DiagStage::DriftScanResult => {
-                self.last_drift_scan_at_ms
-                    .store(event.at.timestamp_millis(), Ordering::Relaxed);
-            }
-            _ => {}
-        }
-        if let Ok(mut ring) = self.recent.lock() {
-            if ring.len() >= RECENT_RING_CAP {
-                ring.pop_front();
-            }
-            ring.push_back(event.clone());
-        }
         // send() returns Err only when there are zero subscribers — that's
         // fine, we drop on the floor. Lag is reported through Receiver::recv
         // returning RecvError::Lagged on the consumer side.
         let _ = self.tx.send(event);
     }
 
-    /// Snapshot of the most recent `n` events, newest first. Synchronous —
-    /// safe to call from any thread without subscribing to the broadcast.
-    pub fn recent_events(&self, n: usize) -> Vec<DiagEvent> {
-        self.recent
-            .lock()
-            .ok()
-            .map(|g| g.iter().rev().take(n).cloned().collect::<Vec<_>>())
-            .unwrap_or_default()
-    }
-
-    pub fn record_bus_lag(&self, n: u64) {
-        self.bus_lag_total.fetch_add(n, Ordering::Relaxed);
-    }
-
-    pub fn queue_dropped_total(&self) -> u64 {
-        self.queue_dropped_total.load(Ordering::Relaxed)
-    }
-
-    pub fn last_rescan_signal_at(&self) -> Option<DateTime<Utc>> {
-        let ms = self.last_rescan_signal_at_ms.load(Ordering::Relaxed);
-        if ms == i64::MIN {
-            None
-        } else {
-            DateTime::<Utc>::from_timestamp_millis(ms)
-        }
-    }
-
-    pub fn last_drift_scan_at(&self) -> Option<DateTime<Utc>> {
-        let ms = self.last_drift_scan_at_ms.load(Ordering::Relaxed);
-        if ms == i64::MIN {
-            None
-        } else {
-            DateTime::<Utc>::from_timestamp_millis(ms)
-        }
-    }
-
-    pub fn bus_lag_total(&self) -> u64 {
-        self.bus_lag_total.load(Ordering::Relaxed)
-    }
-
-    pub fn events_emitted_total(&self) -> u64 {
-        self.events_emitted_total.load(Ordering::Relaxed)
-    }
 }
 
 static BUS: OnceLock<DiagBus> = OnceLock::new();
@@ -257,38 +134,6 @@ pub fn bus() -> &'static DiagBus {
 }
 
 // ─── Convenience emit helpers ───────────────────────────────────────────────
-
-pub fn emit(stage: DiagStage, level: DiagLevel, message: impl Into<String>) {
-    bus().publish(DiagEvent {
-        at: Utc::now(),
-        seq: 0,
-        stage,
-        level,
-        resource: None,
-        file: None,
-        message: message.into(),
-        fields: serde_json::Value::Null,
-    });
-}
-
-pub fn emit_for(
-    stage: DiagStage,
-    level: DiagLevel,
-    resource: Option<&str>,
-    file: Option<&str>,
-    message: impl Into<String>,
-) {
-    bus().publish(DiagEvent {
-        at: Utc::now(),
-        seq: 0,
-        stage,
-        level,
-        resource: resource.map(|s| s.to_string()),
-        file: file.map(|s| s.to_string()),
-        message: message.into(),
-        fields: serde_json::Value::Null,
-    });
-}
 
 pub fn emit_with_fields(
     stage: DiagStage,
@@ -490,22 +335,9 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
         loop {
             match rx.recv().await {
                 Ok(ev) => {
-                    // Critical lifecycle events bypass the 200/s cap — the
-                    // SyncModal blocks on DriftScanResult and TabRail's busy
-                    // flag clears on it. Rate-limiting these caused the
-                    // "Pushing pending local edits…" hang after a 192-file
-                    // burst: result event got dropped by the 200/sec cap.
-                    let is_critical = matches!(
-                        ev.stage,
-                        DiagStage::DriftScanStart
-                            | DiagStage::DriftScanResult
-                            | DiagStage::RescanSignal
-                            | DiagStage::SftpConnect
-                            | DiagStage::SftpDisconnect
-                            | DiagStage::RemoteScanResult
-                            | DiagStage::BridgeAck
-                            | DiagStage::System
-                    );
+                    // System events (panics, command errors) bypass the 200/s
+                    // cap so they can't be dropped under a Log-event burst.
+                    let is_critical = matches!(ev.stage, DiagStage::System);
                     if is_critical {
                         // #246: secondary ceiling on the critical bypass —
                         // pathological loops (e.g. a RemoteScanResult fired
@@ -535,10 +367,6 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
                     let _ = app.emit("diag://event", &ev);
                 }
                 Err(RecvError::Lagged(n)) => {
-                    bus().record_bus_lag(n);
-                    // #226: prior silent counter only surfaced via 500ms
-                    // diag://state if the Diagnostics tab was open. Warn-log
-                    // makes the drop visible to LogForwarder + activity feed.
                     log::warn!("diag bus lagged: {n} events dropped");
                 }
                 Err(RecvError::Closed) => break,

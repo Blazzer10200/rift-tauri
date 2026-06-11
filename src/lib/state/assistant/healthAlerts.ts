@@ -1,0 +1,103 @@
+// Harness health alerts — turn-completion checks that surface problems (and
+// background-tab completions) as toasts instead of waiting to be noticed on
+// the Harness dashboard. Called from AssistantStore.handleTurnComplete via a
+// thin thunk, mirroring the M8/M9 free-fn-over-store-ref pattern.
+
+import { toast } from "../toast.svelte";
+import { workspace } from "../workspace.svelte";
+import type { AssistantStore, TabState } from "../assistant.svelte";
+import type { TurnRecord } from "./types";
+
+// One-shot-per-app-session latches for the health warnings — each fires as a
+// hint once, not a nag (same pattern as send.ts's fableSunsetNoticed).
+const warned = new Set<"deadWait" | "staleCache" | "toolErrors">();
+
+/** Test-only reset. */
+export function resetHealthLatches() {
+  warned.clear();
+}
+
+function tabTitle(tab: TabState): string {
+  if (tab.convoTitle) return tab.convoTitle;
+  const first = tab.messages.find((m) => m.role === "user");
+  const text = first?.blocks
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("")
+    .trim()
+    .replace(/\s+/g, " ");
+  return text ? (text.length > 40 ? text.slice(0, 40) + "…" : text) : "Untitled chat";
+}
+
+function lastTurnFor(store: AssistantStore, convoId: string): TurnRecord | null {
+  const turns = store.telemetry.turns;
+  for (let i = turns.length - 1; i >= 0; i--) {
+    if (turns[i].convoId === convoId) return turns[i];
+  }
+  return null;
+}
+
+/** Post-turn health pass. `convoId` is the completed tab's Map key (resolved
+ *  by handleTurnComplete's reverse lookup — cliSessionId can diverge from it
+ *  post-compaction). */
+export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: string | undefined) {
+  const rec = convoId ? lastTurnFor(store, convoId) : null;
+
+  // Background-tab completion — the user isn't looking at this tab, so the
+  // outcome would otherwise be invisible until they switch back.
+  if (convoId && tab !== store.activeTab) {
+    const title = tabTitle(tab);
+    const jump = {
+      label: "View",
+      onClick: () => {
+        workspace.setActive("chat");
+        void store.openTab(convoId);
+      },
+    };
+    if (tab.lastError) {
+      toast.push({ severity: "danger", title: "Background turn failed", detail: title, action: jump });
+    } else {
+      toast.push({ severity: "ok", title: "Background turn finished", detail: title, action: jump, timeoutMs: 6000 });
+    }
+  }
+
+  if (!rec) return;
+
+  // Silent pre-paint stall not attributable to thinking (spawn/prefill/queue).
+  if (!warned.has("deadWait") && rec.firstPaintAt != null) {
+    const deadWait = rec.firstPaintAt - rec.ts - rec.thinkingTotalMs;
+    if (deadWait > 8000) {
+      warned.add("deadWait");
+      toast.push({
+        severity: "warn",
+        title: "Slow turn start",
+        detail: `${Math.round(deadWait / 1000)}s passed before first output — details on the Harness page.`,
+      });
+    }
+  }
+
+  // Continuation turn paid full cache_create with zero cache_read — the
+  // prompt cache was busted (model/effort flip, >5min idle, …).
+  if (!warned.has("staleCache") && !rec.isFirstTurn && rec.resultUsage) {
+    const u = rec.resultUsage;
+    if (u.cacheRead === 0 && u.cacheCreate > 0) {
+      warned.add("staleCache");
+      toast.push({
+        severity: "warn",
+        title: "Prompt cache miss",
+        detail: "This turn rebuilt the cache from scratch — repeated misses cost real money.",
+      });
+    }
+  }
+
+  if (!warned.has("toolErrors")) {
+    const errs = rec.toolUses.filter((t) => t.isError === true).length;
+    if (errs >= 3) {
+      warned.add("toolErrors");
+      toast.push({
+        severity: "warn",
+        title: "Tools failing repeatedly",
+        detail: `${errs} tool calls errored in one turn — check the Harness reliability card.`,
+      });
+    }
+  }
+}
