@@ -17,6 +17,11 @@ class BrowserDock {
   // Bumped to request the address bar take focus + select-all (Ctrl+L). The
   // WebBrowserPage input watches this token rather than holding a DOM ref here.
   focusToken = $state(0);
+  // URL queued for the dock to navigate to — set by the assistant
+  // (`assistant://open-browser`) or a localhost link click in the chat.
+  // WebBrowserPage consumes it once its stage element exists (the dock may
+  // need a mount cycle first when this call also opens it).
+  pendingUrl = $state<string | null>(null);
 
   init() {
     if (typeof window === "undefined") return;
@@ -34,6 +39,12 @@ class BrowserDock {
   focusAddress() {
     if (!this.open) this.toggle();
     this.focusToken++;
+  }
+
+  // Queue a URL for the dock and make sure the dock is showing.
+  openUrl(url: string) {
+    this.pendingUrl = url;
+    if (!this.open) this.toggle();
   }
 
   setWidth(w: number) {

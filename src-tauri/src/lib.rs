@@ -137,6 +137,16 @@ pub fn run() {
             // every 500ms. Both run for the life of the process.
             let app_handle = app.handle().clone();
             diagnostics::spawn_frontend_pump(app_handle.clone());
+            // Assistant UI bridge (ask_user / open_browser / notify): bind the
+            // loopback listener before the first turn can spawn an MCP child.
+            // Failure is non-fatal — write_mcp_config skips the env injection
+            // and the MCP child simply doesn't list the bridge tools.
+            let bridge_app = app_handle.clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = assistant::bridge::start(bridge_app).await {
+                    log::error!("assistant bridge failed to start: {e}");
+                }
+            });
             // Phase E4: best-effort sweep of CLI JSONLs whose sessions were
             // retired by compaction >30 days ago.
             tauri::async_runtime::spawn_blocking(|| {

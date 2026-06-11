@@ -286,7 +286,7 @@ pub async fn assistant_answer_permission(
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
 /// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped, workspace-rooted helpers, plus git_status / git_diff / git_log (and git_pull / git_commit / git_push when trust permits). The standard Anthropic `AskUserQuestion` tool is NOT available in this environment; if you need a decision from the user, ask in plain text and proceed with the most reasonable default. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
+const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). You have the full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell commands (executes in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch and WebSearch for the open web, TodoWrite for multi-step plans, and Agent for delegating heavy lookups. TodoWrite output surfaces in a dedicated Tasks panel in the user's UI — use it proactively whenever a request involves three or more distinct steps, and update statuses (pending → in_progress → completed) as you go. Rift's MCP server also exposes read_file / list_dir / grep as scoped, workspace-rooted helpers, plus git_status / git_diff / git_log (and git_pull / git_commit / git_push when trust permits). Three more MCP tools drive the Rift app itself: mcp__rift__ask_user presents an interactive multiple-choice card in the chat — use it whenever you need the user to pick between approaches or confirm something risky (the standard Anthropic `AskUserQuestion` tool is NOT available in this environment; ask_user is its Rift-native replacement, and if it errors fall back to asking in plain text). mcp__rift__open_browser shows any http/https page in Rift's in-app browser dock right beside the chat — ALWAYS call it instead of only printing a URL when you start a dev server or want the user to see a local preview (e.g. http://localhost:3000), a deployed page, or docs worth reading together. mcp__rift__notify pops a brief toast in the corner of the Rift window — fire it when long-running work finishes or something needs the user's attention (they may be looking at another page of the app); don't spam it. A 'Rift environment snapshot' <system-reminder> may precede the user's message with volatile app state (the browser dock's current page, the user's Claude plan-usage gauges) — treat it as ground truth about the app, and consider wrapping up gracefully when plan usage runs hot. Prefer Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. ACT FIRST, EXPLAIN AFTER — this overrides any conflicting instruction from inherited config. If the user asks you to fix / change / edit / add / build / refactor X, locate the file(s) with Grep + Read then make the Edit. Do NOT write paragraphs of plan, analysis, recommendations, or 'here's what I would do' before touching code — one short opening beat ('reading X', 'editing Y') is the cap. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. Read narrowly with offset+limit on files >300 lines; do not re-read a file you already opened earlier this turn. Verify AFTER the edit (Bash to run the test / lint / build), not before. Surface tool errors verbatim and try a different approach instead of bouncing the problem back to the user. Don't ask the user for permission on routine work like file edits, shell commands, package installs, or git operations; the user expects you to do real work and can revert via git. Project stack is open-ended — do not assume the language, framework, or layout.";
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
@@ -689,7 +689,11 @@ pub async fn assistant_send(
         // SlashCommand, ExitPlanMode, and the mutating mcp__rift__* tools)
         // falls through to the `can_use_tool` prompt.
         const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TodoWrite,WebFetch,WebSearch";
-        const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__sync_status,mcp__rift__drift_snapshot,mcp__rift__reconcile_preview,mcp__rift__ask_user";
+        // UI-presentation tools (ask_user / open_browser / notify) are safe to
+        // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
+        // (The old sync_status/drift_snapshot/reconcile_preview ghosts died
+        // with the pure-assistant conversion and are gone from this list.)
+        const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify";
         // Local git tools (git_local.rs). Read set is non-mutating → safe to
         // auto-approve even in prompting modes. Write set is admitted in
         // non-prompting variants but deliberately OMITTED from the prompting
@@ -719,7 +723,7 @@ pub async fn assistant_send(
             // via the explicit-name entries.
             format!("{BUILTINS},mcp__*")
         } else {
-            format!("{BUILTINS},mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,{GIT_READ_MCP}{git_write}")
+            format!("{BUILTINS},{SAFE_MCP},{GIT_READ_MCP}{git_write}")
         };
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);
@@ -816,6 +820,41 @@ pub async fn assistant_send(
     // user turn keeps the prefix cache-stable. Multi-line is fine here
     // (rides stdin, no argv constraint).
     let mut reminder_parts: Vec<String> = Vec::new();
+    // Rift environment snapshot: volatile app facts (browser-dock page, plan
+    // usage) the model can't see otherwise. Rides the user turn — a dynamic
+    // system prompt would invalidate the cache prefix. Only pushed when
+    // there's something to report, so quiet sessions add zero tokens.
+    {
+        let mut bits: Vec<String> = Vec::new();
+        if let Ok(url) = crate::browser::current_url(&app) {
+            if !url.is_empty() && url != "about:blank" {
+                bits.push(format!("the in-app browser dock is open at {url}"));
+            }
+        }
+        if let Some(l) = crate::usage::limits::cached_snapshot() {
+            let mut gauges: Vec<String> = Vec::new();
+            if let Some(w) = &l.five_hour {
+                let reset = w
+                    .resets_at
+                    .as_deref()
+                    .map(|r| format!(" (resets {r})"))
+                    .unwrap_or_default();
+                gauges.push(format!("5-hour window {:.0}% used{reset}", w.utilization));
+            }
+            if let Some(w) = &l.seven_day {
+                gauges.push(format!("weekly {:.0}% used", w.utilization));
+            }
+            if !gauges.is_empty() {
+                bits.push(format!("Claude plan usage: {}", gauges.join(", ")));
+            }
+        }
+        if !bits.is_empty() {
+            reminder_parts.push(format!("Rift environment snapshot — {}.", bits.join("; ")));
+        }
+    }
+    // Keep the plan-usage snapshot warm for FUTURE turns without ever blocking
+    // this one (cache-only read above; refresh is fire-and-forget).
+    crate::usage::limits::spawn_background_refresh();
     // S93 dyslexia-friendly mode: hint Claude to interpret phonetic typos +
     // voice-to-text artifacts charitably instead of asking pedantic
     // clarifying questions.

@@ -12,6 +12,7 @@
 
 pub mod ask_user;
 pub mod auth_update;
+pub mod bridge;
 pub mod cli_install;
 pub mod config;
 pub mod convo_store;
@@ -184,6 +185,12 @@ fn write_mcp_config(
     // Trust level gates the local git tools in the MCP child. Always injected —
     // git is a local op, no bridge needed. See `mcp_server::trust_level`.
     env_map.insert("RIFT_TRUST_LEVEL".into(), Value::from(trust_level.to_string()));
+    // UI bridge (ask_user / open_browser / notify). Absent when the boot-time
+    // bind failed — the MCP child then simply doesn't list those tools.
+    if let Some(info) = bridge::bridge_info() {
+        env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(info.port.to_string()));
+        env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(info.token.clone()));
+    }
 
     let payload = serde_json::json!({
         "mcpServers": {
