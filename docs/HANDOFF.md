@@ -15,7 +15,7 @@ svelte-check 0/0 (4093) · cargo check clean (forced recheck, zero warnings) · 
 
 ### RESUME HERE
 
-- **v0.8.21 tag pushed at session end — verify release CI green next session** (4 assets on rift-releases).
+- **v0.8.21 release CI VERIFIED GREEN** — 4 assets live on rift-releases (Setup.exe, full.nupkg, RELEASES, releases.win.json). Nothing pending.
 - `browser_screenshot` MCP tool (AI sees the dock page → self-verify loop) parked as its own design arc — needs image transport through the bridge.
 - CDP screenshots can't capture the native child webview (dock area renders blank in shots) — verify dock content via address-bar sync / `browser_read_page`, not pixels.
 - User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
