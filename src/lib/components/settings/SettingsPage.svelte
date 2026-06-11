@@ -1012,6 +1012,26 @@
                   <button class="st-switch" class:on={stt.config.append_to_draft} role="switch" aria-checked={stt.config.append_to_draft} aria-label="Append transcript to existing draft" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ append_to_draft: !stt.config.append_to_draft })}></button>
                 </div>
               </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Voice commands</div>
+                  <div class="st-row-desc">"send it" fires the message, "new line" / "new paragraph" insert breaks, "scratch that" deletes the last phrase.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={stt.config.voice_commands} role="switch" aria-checked={stt.config.voice_commands} aria-label="Voice commands" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ voice_commands: !stt.config.voice_commands })}></button>
+                </div>
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Auto-stop on silence</div>
+                  <div class="st-row-desc">Ends the recording by itself after a pause — hands-free dictation. Needs live partials on the Web Speech engine.</div>
+                </div>
+                <div class="st-row-ctl">
+                  {#each [{ v: 0, label: "Off" }, { v: 3, label: "3s" }, { v: 5, label: "5s" }, { v: 10, label: "10s" }] as opt (opt.v)}
+                    <button type="button" class="set-pick" data-active={stt.config.auto_stop_secs === opt.v} disabled={!stt.config.enabled} onclick={() => void stt.setConfig({ auto_stop_secs: opt.v })}>{opt.label}</button>
+                  {/each}
+                </div>
+              </div>
             </div>
           </div>
 

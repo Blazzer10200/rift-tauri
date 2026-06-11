@@ -359,8 +359,19 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   if (block.name === "mcp__rift__ask_user") {
     tab.unboundAskUserToolUseIds.push(block.id);
     tryBindAskUser(tab);
+    // The whole turn (and the CLI subprocess) blocks on this answer — nudge
+    // via the store hook if it's still unanswered after the grace period.
+    const rec = tab.currentTurnRecord;
+    setTimeout(() => {
+      const tu = rec?.toolUses.find((t) => t.id === block.id);
+      if (tab.streaming && tab.currentTurnRecord === rec && tu && tu.completedAt == null) {
+        tab.onAskUserStale?.(tab);
+      }
+    }, ASK_USER_NUDGE_MS);
   }
 }
+
+const ASK_USER_NUDGE_MS = 60_000;
 
 /** Drain the two ask_user FIFOs as long as both have entries. Each pair
  *  binds a toolUseId to a requestId in `askUserBindings`, making the chip

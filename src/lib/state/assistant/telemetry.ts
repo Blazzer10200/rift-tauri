@@ -89,6 +89,11 @@ export function summarizeSession(
     let totalStreamMs = 0;
     let mostParallelTurn: { idx: number; maxConcurrentTools: number } | null = null;
     let staleCacheTurns = 0;
+    // Zero-tool turns = pure-conversation turns. Tracked with their spend b/c
+    // they're the cheapest thing to route to a smaller model (40-session audit
+    // 2026-06-11: 28% of turns used no tools, mostly on the priciest model).
+    let zeroToolTurns = 0;
+    let zeroToolCostUsd = 0;
     const ttfps: number[] = [];
     const doneTimes: number[] = [];
     // Latency attribution: ttfp is what the user *feels* as the silent wait, but
@@ -145,6 +150,10 @@ export function summarizeSession(
       if (t.blankTurn) { bucket.blankTurns += 1; blank += 1; }
       if (t.envelopeFallback) { bucket.envelopeFallbacks += 1; envFallback += 1; }
       totalCost += t.costUsd ?? 0;
+      if (t.toolUses.length === 0 && t.endKind === "success") {
+        zeroToolTurns += 1;
+        zeroToolCostUsd += t.costUsd ?? 0;
+      }
       if (t.firstPaintAt != null) {
         const v = t.firstPaintAt - t.ts; ttfps.push(v); tm.ttfp.push(v);
         const dead = Math.max(0, v - t.thinkingTotalMs);
@@ -248,6 +257,8 @@ export function summarizeSession(
       coldStartCacheCreate,
       mostParallelTurn,
       staleCacheTurns,
+      zeroToolTurns,
+      zeroToolCostUsd: Math.round(zeroToolCostUsd * 10000) / 10000,
       avgDeadWaitMs: deadWaits.length ? Math.round(deadWaits.reduce((a, b) => a + b, 0) / deadWaits.length) : null,
       worstDeadWaitTurn,
       totalToolActiveMs,

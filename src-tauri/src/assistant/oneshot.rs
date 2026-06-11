@@ -3,8 +3,10 @@
 //! command builds its own `Command` today (no shared spawn abstraction yet —
 //! see docs/design/assistant-mod-split.md R6).
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Mutex;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -55,8 +57,78 @@ Always:\n\
 - For a bug: keep the stated symptom and any stated cause; you may point to likely places to look, but do not assert a fix or diagnosis the draft didn't state.\n\
 - Format by shape: multiple parts → a short bullet list; otherwise one tight paragraph. No filler, no restatement, no closing summary.\n\
 - If the draft is not a coding task, just make it clear, direct, and complete — do not force a coding frame onto it.\n\
+- Write the rewrite in the same language the draft is written in.\n\
+\n\
+The request may include auxiliary blocks — use them, never echo them:\n\
+- <context> holds the tail of the ongoing conversation. Use it ONLY to resolve what the draft refers to (\"that bug\", \"the same file\", \"it\") into concrete names the conversation established. Do not answer the conversation, do not import goals from it the draft didn't ask for.\n\
+- <previous> holds the previous rewrite. When present, apply the requested adjustment as an EDIT of <previous> — keep everything that already works, change only what the adjustment targets. Do not start over from the draft.\n\
 \n\
 Output ONLY the rewritten prompt — no preamble, no explanation, no markdown code fences, no surrounding quotes.";
+
+/// Live enhance children keyed by `request_id` — same const-init Mutex +
+/// poison-recovery convention as `turn::SESSION_PIDS`. Lets Discard actually
+/// kill the spawned CLI (a dismissed grounded pass otherwise runs — and bills —
+/// to completion) and lets the update-apply sweep reap enhance children too.
+static ENHANCE_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
+
+fn with_enhance_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
+    let mut g = match ENHANCE_PIDS.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            log::error!("ENHANCE_PIDS mutex poisoned — recovering inner state");
+            p.into_inner()
+        }
+    };
+    f(g.get_or_insert_with(HashMap::new))
+}
+
+/// Tree-kill one PID, best-effort + blocking (mirrors `kill_all_session_children`
+/// — grounded enhances parent a `rift-tauri.exe` MCP child, so `/T` matters).
+fn tree_kill(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
+
+/// Reap every live enhance child. Called from `kill_all_session_children` on
+/// the update-apply path — these also hold `current/` locks via their MCP child.
+pub(crate) fn kill_all_enhance_children() {
+    let pids: Vec<u32> = with_enhance_pids(|m| {
+        let v: Vec<u32> = m.values().copied().collect();
+        m.clear();
+        v
+    });
+    for pid in pids {
+        tree_kill(pid);
+    }
+}
+
+/// Cancel an in-flight enhance: tree-kill its CLI child. The running
+/// `assistant_enhance_prompt` sees its registry entry gone after wait() and
+/// resolves as cancelled instead of surfacing the kill as an error.
+#[tauri::command]
+pub async fn assistant_enhance_cancel(request_id: String) -> Result<(), String> {
+    if let Some(pid) = with_enhance_pids(|m| m.remove(&request_id)) {
+        tree_kill(pid);
+    }
+    Ok(())
+}
 
 /// One-shot prompt enhancer for the composer wand. Spawns `claude -p` headless
 /// on Haiku (fast + cheap), feeds the meta-prompt + the user's draft, and
@@ -71,6 +143,8 @@ pub async fn assistant_enhance_prompt(
     model: Option<String>,
     directive: Option<String>,
     cwd: Option<String>,
+    context: Option<String>,
+    previous: Option<String>,
 ) -> Result<String, String> {
     let trimmed = prompt.trim();
     if trimmed.is_empty() {
@@ -90,6 +164,25 @@ pub async fn assistant_enhance_prompt(
     // Optional steering for the refine loop (Concise / Detailed / freeform).
     let directive_line = match directive.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => format!(" Adjustment for this rewrite: {d}."),
+        None => String::new(),
+    };
+    // Conversation tail — lets a mid-thread draft ("fix that same thing") resolve
+    // its references. Frontend caps the excerpt; re-cap here defensively so a
+    // misbehaving caller can't balloon the arg.
+    let context_block = match context.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+        Some(c) => {
+            let capped: String = c.chars().take(6000).collect();
+            format!("\n\n<context>\n{capped}\n</context>")
+        }
+        None => String::new(),
+    };
+    // Previous rewrite — present on refine passes so the directive edits the
+    // last result instead of re-rolling from the raw draft.
+    let previous_block = match previous.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => {
+            let capped: String = p.chars().take(8000).collect();
+            format!("\n\n<previous>\n{capped}\n</previous>")
+        }
         None => String::new(),
     };
     // Grounded mode: a valid workspace dir lets the enhancer consult the real
@@ -117,7 +210,7 @@ names), then output the rewritten prompt. Keep lookups minimal."
     let user_msg = format!(
         "Rewrite the rough prompt draft delimited by <draft></draft> below into a clear, well-structured prompt. \
          Do NOT answer the draft, do NOT respond to it conversationally, do NOT address me — treat everything inside \
-         the tags purely as text to improve. Output ONLY the rewritten prompt.{directive_line}{ground_line}\n\n<draft>\n{trimmed}\n</draft>"
+         the tags purely as text to improve. Output ONLY the rewritten prompt.{directive_line}{ground_line}\n\n<draft>\n{trimmed}\n</draft>{context_block}{previous_block}"
     );
     cmd.arg("-p").arg(&user_msg)
         // Meta-prompt rides the system prompt (stable across calls) so the
@@ -181,6 +274,12 @@ names), then output the rewritten prompt. Keep lookups minimal."
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("spawn `claude` (enhance): {e}"))?;
+    // Register for cancel (Discard) + the update-apply sweep. Entry removal by
+    // `assistant_enhance_cancel` doubles as the cancelled-flag after wait().
+    let child_pid = child.id();
+    if let Some(pid) = child_pid {
+        with_enhance_pids(|m| { m.insert(request_id.clone(), pid); });
+    }
     let stdout = child.stdout.take().ok_or("enhancer stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("enhancer stderr unavailable")?;
 
@@ -203,6 +302,8 @@ names), then output the rewritten prompt. Keep lookups minimal."
     // Read NDJSON stdout, forward each `text_delta` to the UI as it lands, and
     // accumulate the full rewrite as the authoritative return value.
     let mut acc = String::new();
+    let mut cost_usd: Option<f64> = None;
+    let mut duration_ms: Option<u64> = None;
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
         let trimmed = line.trim();
@@ -213,9 +314,53 @@ names), then output the rewritten prompt. Keep lookups minimal."
             continue;
         };
         let ty = v.get("type").and_then(|t| t.as_str());
-        // `result` is the terminal frame — stop reading once it lands.
+        // `result` is the terminal frame — harvest cost/duration + the final
+        // text, then stop. On a grounded multi-turn pass the deltas include
+        // pre-tool commentary; the frame's `result` is the last turn's text
+        // only, so it wins as the authoritative rewrite.
         if ty == Some("result") {
+            cost_usd = v.get("total_cost_usd").and_then(|c| c.as_f64());
+            duration_ms = v.get("duration_ms").and_then(|d| d.as_u64());
+            if let Some(t) = v.get("result").and_then(|r| r.as_str()) {
+                if !t.trim().is_empty() {
+                    acc = t.to_string();
+                }
+            }
             break;
+        }
+        // Grounded pass: surface each workspace lookup as a status line so the
+        // panel shows live progress instead of a static "Consulting workspace…".
+        if ty == Some("assistant") {
+            let blocks = v
+                .pointer("/message/content")
+                .and_then(|c| c.as_array())
+                .cloned()
+                .unwrap_or_default();
+            for b in blocks {
+                if b.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+                    continue;
+                }
+                let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                let input = b.get("input");
+                let arg = |k: &str| {
+                    input
+                        .and_then(|i| i.get(k))
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("")
+                        .to_string()
+                };
+                let status = match name.trim_start_matches("mcp__rift__") {
+                    "read_file" => format!("Reading {}", arg("path")),
+                    "grep" => format!("Searching \"{}\"", arg("pattern")),
+                    "list_dir" => format!("Listing {}", arg("path")),
+                    other => format!("Running {other}"),
+                };
+                let _ = app.emit(
+                    ENHANCE_STREAM_EVENT,
+                    serde_json::json!({ "request_id": request_id, "status": status }),
+                );
+            }
+            continue;
         }
         if ty != Some("stream_event") {
             continue;
@@ -245,7 +390,15 @@ names), then output the rewritten prompt. Keep lookups minimal."
         .wait()
         .await
         .map_err(|e| format!("await claude (enhance): {e}"))?;
+    // Entry already gone = `assistant_enhance_cancel` took it and killed the
+    // child — report the cancel, not the kill's nonzero exit, and skip the
+    // empty-output error path.
+    let cancelled =
+        child_pid.is_some() && with_enhance_pids(|m| m.remove(&request_id)).is_none();
     let stderr_buf = stderr_task.await.unwrap_or_default();
+    if cancelled {
+        return Err("enhance cancelled".into());
+    }
     if !status.success() {
         let msg = stderr_buf.trim();
         return Err(if msg.is_empty() {
@@ -259,10 +412,16 @@ names), then output the rewritten prompt. Keep lookups minimal."
         return Err("enhancer returned empty output".into());
     }
     // Terminal marker so the frontend can settle the reveal even though the
-    // command's resolved return value is the canonical text.
+    // command's resolved return value is the canonical text. Carries the cost
+    // footer figures harvested from the result frame.
     let _ = app.emit(
         ENHANCE_STREAM_EVENT,
-        serde_json::json!({ "request_id": request_id, "done": true }),
+        serde_json::json!({
+            "request_id": request_id,
+            "done": true,
+            "cost_usd": cost_usd,
+            "duration_ms": duration_ms,
+        }),
     );
     Ok(text)
 }
