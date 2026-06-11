@@ -173,6 +173,8 @@ export type ConversationRecord = {
   messages: ChatMessage[];
   // CLI session UUID (--session-id / --resume target).
   cliSessionId?: string;
+  /** Final turn's ctx usage — hydrates the ctx meter on restore (ISSUES #32). */
+  lastTurnUsage?: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
   // Phase E prerequisite: ordered list of compactions that happened on this convo.
   compactionHistory?: CompactionHistoryEntry[];
 };

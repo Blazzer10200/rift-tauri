@@ -535,13 +535,19 @@
     }, 300);
     return true;
   }
-  function onKeyUp(e: KeyboardEvent) {
-    if (e.key !== " ") return;
+  // Release listens at window level — keyup never reaches the textarea if
+  // focus left the composer mid-hold (menu click, alt-tab), which used to
+  // leave the mic running. Idempotent, so the bubbled textarea keyup is fine.
+  function pttRelease() {
     if (pttTimer) { clearTimeout(pttTimer); pttTimer = null; }
     if (pttActive) {
       pttActive = false;
       void stt.stop();
     }
+  }
+  function onKeyUp(e: KeyboardEvent) {
+    if (e.key !== " ") return;
+    pttRelease();
   }
   // Voice command "send it" — the stt store commits the draft then raises the
   // flag; fire() runs the same path as the Send button.
@@ -914,6 +920,8 @@
   }
 </script>
 
+<svelte:window onkeyup={onKeyUp} onblur={pttRelease} />
+
 <div class="composer-wrap" data-model={modelFamily(assistant.effectiveModel)}>
   <QueueRail
     tab={tab ?? null}
@@ -1025,7 +1033,7 @@
             stt.dismissPolishUndo();
             resetRecall(); autosize(); refreshMention();
           }}
-          onkeyup={(e) => { onKeyUp(e); refreshMention(); }}
+          onkeyup={() => refreshMention()}
           onclick={refreshMention}
           onfocus={() => { composerFocused = true; }}
           onblur={() => {

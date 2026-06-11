@@ -33,6 +33,7 @@ export type SaveableTab = {
   compactionHistory: CompactionHistoryEntry[];
   titleGenerated: boolean;
   modelOverride: ModelSel | null;
+  lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
 };
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
@@ -110,6 +111,7 @@ export function buildSaveRecord(
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
     compactionHistory: tab.compactionHistory.length > 0 ? tab.compactionHistory : undefined,
+    lastTurnUsage: tab.lastTurnUsage ?? undefined,
   };
 }
 
@@ -255,6 +257,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     tab.lastError = null;
     tab.totalCostUsd = null;
     tab.resetUsage();
+    // #32: hydrate the ctx meter from the saved final-turn usage — without
+    // this a restored convo shows a blank gauge until the next turn lands.
+    tab.lastTurnUsage = convo.lastTurnUsage ?? null;
     tab.promptHistory = (convo.messages ?? [])
       .filter((m) => m.role === "user")
       .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())

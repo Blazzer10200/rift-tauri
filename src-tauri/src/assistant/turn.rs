@@ -1034,22 +1034,9 @@ pub async fn assistant_send(
                             let res_is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
                                 || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);
                             let res_text = v.get("result").and_then(|s| s.as_str()).unwrap_or("");
-                            if res_is_err
-                                && (res_text.contains("401")
-                                    || res_text.contains("authentication_error")
-                                    || res_text.contains("Invalid authentication")
-                                    || res_text.contains("invalid x-api-key"))
-                            {
-                                let friendly = if current_api_key().is_some() {
-                                    "Your configured API key was rejected (401). Clear it in Settings → CLI session to fall back to your `claude login`, or paste a valid key.".to_string()
-                                } else {
-                                    format!(
-                                        "Authentication failed (401). Rift is using the Claude CLI at {} — sign in there by running `claude login` in a terminal, or switch installs in Settings → CLI session, then retry.",
-                                        resolve_claude_exe().map(|p| p.display().to_string()).unwrap_or_else(|| "your active install".into())
-                                    )
-                                };
+                            if res_is_err && is_auth_rejection(res_text) {
                                 let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
-                                    "session_id": stream_sid, "message": friendly,
+                                    "session_id": stream_sid, "message": auth_rejection_message(),
                                 }));
                             }
                             let _ = app_out.emit(STREAM_EVENT, serde_json::json!({
@@ -1330,19 +1317,8 @@ pub async fn assistant_send(
                     status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
                 ),
             }
-        } else if raw.contains("401")
-            || raw.contains("authentication_error")
-            || raw.contains("Invalid authentication")
-            || raw.contains("invalid x-api-key")
-        {
-            // A rejected credential. The bare "claude exited with 1 — API Error:
-            // 401" leaves the user with nothing to do; route them to the exact
-            // field to fix based on which auth path is active.
-            if current_api_key().is_some() {
-                "Your configured API key was rejected (401). Clear it in Settings → CLI session to fall back to your `claude login`, or paste a valid key.".to_string()
-            } else {
-                "Authentication failed (401) — your `claude login` session was rejected or expired. Run `claude` in a terminal and sign in again, then retry.".to_string()
-            }
+        } else if is_auth_rejection(raw) {
+            auth_rejection_message()
         } else {
             format!(
                 "claude exited with {} — {}",
@@ -1355,6 +1331,29 @@ pub async fn assistant_send(
             serde_json::json!({ "session_id": session_id, "message": msg.clone() }),
         );
         Err(msg)
+    }
+}
+
+/// A rejected credential (401) arrives either as a stdout error-result frame
+/// or as stderr at exit — one detector + one remap for both sites (#31; the
+/// two inline copies had started to diverge).
+fn is_auth_rejection(text: &str) -> bool {
+    text.contains("401")
+        || text.contains("authentication_error")
+        || text.contains("Invalid authentication")
+        || text.contains("invalid x-api-key")
+}
+
+/// Actionable replacement for the raw "API Error: 401 …" dead-end, routed by
+/// which auth path is active.
+fn auth_rejection_message() -> String {
+    if current_api_key().is_some() {
+        "Your configured API key was rejected (401). Clear it in Settings → CLI session to fall back to your `claude login`, or paste a valid key.".to_string()
+    } else {
+        format!(
+            "Authentication failed (401). Rift is using the Claude CLI at {} — sign in by running `claude login` in a terminal, or switch installs in Settings → CLI session, then retry.",
+            resolve_claude_exe().map(|p| p.display().to_string()).unwrap_or_else(|| "your active install".into())
+        )
     }
 }
 

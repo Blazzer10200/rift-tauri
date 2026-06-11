@@ -21,7 +21,7 @@
 | #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
 | #30 | Workspace chip vs CLI cwd possible drift | T3 | 🚧 open |
 | #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
-| #32 | Ctx meter blank on restored conversations | T4 | 🚧 open |
+| #32 | Ctx meter blank on restored conversations | T4 | ✅ resolved in-tree |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -54,8 +54,8 @@
 
 Three audits (backend, frontend, orphan files) shipped a sweep this session; these were found but deliberately deferred:
 
-- **Legacy provider commands (👤 needs your call):** `assistant_{get,set}_base_url` / `assistant_{get,set}_provider_model` (config.rs) operate on LEGACY fields cleared on first load, yet `assistant.svelte.ts` still invokes them — a freshly-migrated config always round-trips None/empty. Either remove the command pair + their Settings surface, or re-wire to live fields.
-- **401-detection duplicated in turn.rs (T4):** near-identical auth-error string-matching in the stdout `result` handler (~L1043) and stderr-exit handler (~L1339), already diverging. Extract one helper next time turn.rs is open.
+- **Legacy provider commands (✅ resolved in-tree 2026-06-11):** removed the four commands (config.rs + lib.rs registry) and the dead frontend plumbing (`baseUrl`/`providerModel` $state, init getters, `setBaseUrl`/`setProviderModel`) — zero component callers existed; the providers list is the only surface. Config struct fields + first-load migration KEPT so pre-2a configs still migrate.
+- **401-detection duplicated in turn.rs (✅ resolved in-tree 2026-06-11):** extracted `is_auth_rejection()` + `auth_rejection_message()`; both the stdout result-frame and stderr-exit sites now share one detector + one remap (unified on the richer CLI-path message).
 - **Blocking fs reads in async commands (T4):** `load_config()` in `assistant_send` / `read_oauth_token()` in `usage_rate_limits` do sync disk I/O on the tokio executor. Tiny local files — wrap in `spawn_blocking` only if it ever shows up in traces.
 - **Fable sunset sweep (dated):** after Jun 22 (`FABLE_SUNSET_MS = Date.UTC(2026, 5, 23)` in `state/assistant/helpers.ts`), all Fable branches (`fableAvailable()` gates, `fableSunsetNoticed` toast in send.ts, `limited` rows in modelMatrix.ts) become permanently dead — sweep them out.
 - **Optional split follow-ups (quality, not threshold — #20 closed at ship):** [messagebubble-split.md](design/messagebubble-split.md) B1-B6 + [chattabsbar-split.md](design/chattabsbar-split.md) T1-T6 stay mapped; `assistant_send` (917L fn inside turn.rs) can split internally later.
@@ -85,7 +85,9 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Symptom (observed v0.8.14, prod CDP):** per CSP spec, **a nonce makes `'unsafe-inline'` be ignored** — so Svelte's dynamically-applied inline styles get blocked. Console spams `Applying inline style violates ... style-src 'self' 'unsafe-inline' 'nonce-…'`. Real impact: Svelte transition styles (fly/fade) and `style="width:{progress}%"` on the update download progress-bar don't apply. **Cosmetic** — download/apply and all clicks still work; animations snap and the progress fill stays empty.
 - **Fix sketch:** make the static CSP and SvelteKit's nonce agree. Either (a) configure SvelteKit `kit.csp` so the nonce also covers the styles Svelte injects, or (b) drop the nonce path so `'unsafe-inline'` actually takes effect, or (c) move the affected inline styles to classes. **App-wide blast radius** — verify every transition + `style:` binding across the app before shipping; deliberately kept out of the v0.8.14 update-fix release to avoid re-breaking the updater.
 
-#### 32. Ctx meter blank on restored conversations (🚧 open)
+#### 32. Ctx meter blank on restored conversations (✅ resolved in-tree 2026-06-11)
+
+- **Fix shipped in-tree:** `buildSaveRecord` persists `lastTurnUsage` on the record (backend `Conversation.extra` flatten round-trips it, zero Rust changes); `loadConversation` hydrates it after `resetUsage()`. Block stays until `/git-ship`.
 
 - **Where:** `ActivityPanel.svelte` ctx meter + composer gauge read `assistant.ctxTokensFor(tab)` → `tab.lastTurnUsage`, which is set only by live `recordTurnUsage` and never persisted by the conversation store.
 - **Symptom:** a history-restored conversation shows no Context gauge (and 0% in the composer) until the first new turn completes — exactly when "how full is this old session?" matters.
