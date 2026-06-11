@@ -158,6 +158,8 @@
 
   // ── Cumulative metrics (sourced) ──
   const sum = $derived(source.summary);
+  // One "no data yet" semantic for the whole KPI rail: dim — until the first turn.
+  const kpiFresh = $derived(sum.totalTurns === 0);
   // Spread into a fresh array so downstream folds (tok / cacheEff / turnViz)
   // invalidate per turn: telemetry mutates `turns` in place, so the bare
   // reference is === across snapshots and memoized deriveds never recompute
@@ -231,7 +233,7 @@
     return null;
   });
 
-  const effortFlag = $derived(effortToFlag(assistant.thinkingEffort, assistant.model));
+  const effortFlag = $derived(effortToFlag(assistant.thinkingEffort, assistant.effectiveModel));
   const writeOK = $derived(assistant.trustLevel !== "readonly");
 
   // Reasoning footprint for the hero footer (real per-turn breakdown, live).
@@ -267,7 +269,7 @@
   // snapshot recorded (model/workspace) + the session's own shape.
   const cfgRows = $derived(isLive
     ? [
-        { k: "Model",          v: resolvedModelId ? shortModel(resolvedModelId) : assistant.model },
+        { k: "Model",          v: resolvedModelId ? shortModel(resolvedModelId) : assistant.effectiveModel },
         { k: "Thinking",       v: assistant.thinkingEffort + (effortFlag ? ` · ${effortFlag}` : "") },
         { k: "Permission",     v: assistant.permissionMode },
         { k: "Trust",          v: assistant.trustLevel },
@@ -401,7 +403,7 @@
         <span class="chip" class:ok={assistant.auth.pill === "green"} class:warn={assistant.auth.pill === "yellow" || assistant.auth.pill === "red"}><span class="chip-dot"></span>{assistant.auth.summary}</span>
       {/if}
       {#if !isAll}
-        <span class="chip"><Cpu size={13} /> {isLive ? assistant.model : (source.model ? shortModel(source.model) : "—")}{#if isLive && effortFlag} · {effortFlag}{/if}</span>
+        <span class="chip"><Cpu size={13} /> {isLive ? assistant.effectiveModel + (effortFlag ? ` · ${effortFlag}` : "") : (source.model ? shortModel(source.model) : "—")}</span>
         <span class="chip"><GitBranch size={13} /> {cleanPath(isLive ? assistant.workspace.current : source.workspace)}</span>
         <span class="chip"><Clock size={13} /> {fmtDur(uptime)}</span>
       {/if}
@@ -535,11 +537,11 @@
 
       <!-- KPI rail (session-wide headline metrics) -->
       <section class="cell full kpi-rail">
-        <div class="kpi"><span class="kpi-v">{fmtUsd(sum.totalCostUsd)}</span><span class="kpi-k">session cost</span></div>
-        <div class="kpi"><span class="kpi-v">{sum.totalTurns}</span><span class="kpi-k">turns</span></div>
-        <div class="kpi"><span class="kpi-v">{sum.toolCallTotal}</span><span class="kpi-k">tool calls</span></div>
+        <div class="kpi"><span class="kpi-v" class:nodata={kpiFresh}>{kpiFresh ? "—" : fmtUsd(sum.totalCostUsd)}</span><span class="kpi-k">session cost</span></div>
+        <div class="kpi"><span class="kpi-v" class:nodata={kpiFresh}>{kpiFresh ? "—" : sum.totalTurns}</span><span class="kpi-k">turns</span></div>
+        <div class="kpi"><span class="kpi-v" class:nodata={kpiFresh}>{kpiFresh ? "—" : sum.toolCallTotal}</span><span class="kpi-k">tool calls</span></div>
         <div class="kpi"><span class="kpi-v" class:nodata={sum.outputTokensPerSec == null}>{sum.outputTokensPerSec ?? "—"}{#if sum.outputTokensPerSec}<span class="kpi-u"> t/s</span>{/if}</span><span class="kpi-k">output speed</span></div>
-        <div class="kpi"><span class="kpi-v">{cacheEff.toFixed(0)}<span class="kpi-u">%</span></span><span class="kpi-k">cache hit</span></div>
+        <div class="kpi"><span class="kpi-v" class:nodata={kpiFresh}>{#if kpiFresh}—{:else}{cacheEff.toFixed(0)}<span class="kpi-u">%</span>{/if}</span><span class="kpi-k">cache hit</span></div>
         <div class="kpi"><span class="kpi-v" class:nodata={sum.avgTtfpMs == null}>{fmtMs(sum.avgTtfpMs)}</span><span class="kpi-k">avg first paint</span></div>
       </section>
 

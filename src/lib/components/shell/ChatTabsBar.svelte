@@ -420,7 +420,7 @@
   });
 </script>
 
-<div class="tabsbar" data-model={modelFamily(assistant.model)} role="tablist" aria-label="Chat tabs">
+<div class="tabsbar" data-model={modelFamily(assistant.effectiveModel)} role="tablist" aria-label="Chat tabs">
   <div class="strip">
     {#each tabs as id, idx (id)}
       <div

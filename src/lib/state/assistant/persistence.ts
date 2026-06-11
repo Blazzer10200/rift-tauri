@@ -12,6 +12,7 @@
 // (M6 tabs lifecycle). Move them in M5b after M6 lands.
 
 import { invoke } from "@tauri-apps/api/core";
+import { asModelSel } from "./helpers";
 import type {
   ChatMessage,
   CompactionHistoryEntry,
@@ -31,6 +32,7 @@ export type SaveableTab = {
   cliSessionId: string;
   compactionHistory: CompactionHistoryEntry[];
   titleGenerated: boolean;
+  modelOverride: ModelSel | null;
 };
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
@@ -65,7 +67,6 @@ export type PersistenceHost = {
   ui: { historyOpen: boolean; dockOpen: boolean };
   stop(): Promise<void>;
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
-  setModel(m: ModelSel): void;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
 };
@@ -105,7 +106,7 @@ export function buildSaveRecord(
   return {
     id: convoId,
     title: tab.convoTitle ?? deriveTitle(tab),
-    model: host.model,
+    model: tab.modelOverride ?? host.model,
     createdAt: tab.convoCreatedAt ?? Date.now(),
     updatedAt: Date.now(),
     messages: tab.messages,
@@ -261,12 +262,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     host.queue = [];
     host.lastNotice = null;
     host.ui.historyOpen = false;
-    if (
-      convo.model === "sonnet" || convo.model === "opus" ||
-      convo.model === "claude-opus-4-7" || convo.model === "haiku"
-    ) {
-      host.setModel(convo.model);
-    }
+    // ui-audit #5: the saved model scopes to THIS tab only — opening an old
+    // chat must not rewrite the global new-chat default (or toast about it).
+    tab.modelOverride = asModelSel(convo.model);
   } catch (e) {
     host.lastError = `Failed to load conversation: ${String(e)}`;
   }

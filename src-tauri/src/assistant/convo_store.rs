@@ -38,6 +38,10 @@ pub struct ConversationMeta {
     /// loading every transcript. Empty for convos that never compacted.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub compaction_summaries: Vec<String>,
+    /// One-line preview of the newest text message (ui-audit #6) — feeds the
+    /// Home "Jump back in" rows. None when no text block exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_snippet: Option<String>,
 }
 
 /// Full conversation record persisted to disk. `messages` is the frontend's
@@ -240,6 +244,28 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let last_snippet = convo.messages.as_array().and_then(|arr| {
+            arr.iter().rev().find_map(|m| {
+                if m.get("role").and_then(|r| r.as_str()) == Some("system") {
+                    return None;
+                }
+                m.get("blocks")?.as_array()?.iter().find_map(|b| {
+                    if b.get("type").and_then(|t| t.as_str()) != Some("text") {
+                        return None;
+                    }
+                    let t = b.get("text")?.as_str()?;
+                    let flat = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                    if flat.is_empty() {
+                        return None;
+                    }
+                    let mut s: String = flat.chars().take(120).collect();
+                    if flat.chars().count() > 120 {
+                        s.push('…');
+                    }
+                    Some(s)
+                })
+            })
+        });
         out.push(ConversationMeta {
             id: convo.id,
             title: convo.title,
@@ -249,6 +275,7 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             updated_at: convo.updated_at,
             cost_usd,
             compaction_summaries,
+            last_snippet,
         });
     }
     out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));

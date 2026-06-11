@@ -228,9 +228,12 @@
                 <span class="hf-chat-ico"><MessageSquare size={13} /></span>
                 <span class="hf-chat-body">
                   <span class="hf-chat-t">{c.title}</span>
-                  <span class="hf-chat-s">{c.messageCount} msg</span>
+                  <span class="hf-chat-s">{c.lastSnippet ?? `${c.messageCount} msg`}</span>
                 </span>
-                <span class="hf-chat-w">{fmtAgo(c.updatedAt)}</span>
+                <span class="hf-chat-meta">
+                  <span class="hf-chat-model">{MODEL_LABELS[c.model] ?? c.model}</span>
+                  <span class="hf-chat-w">{fmtAgo(c.updatedAt)}</span>
+                </span>
               </button>
             {/each}
           {/if}
@@ -390,7 +393,9 @@
   .hf-chat-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
   .hf-chat-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .hf-chat-t { font-size: var(--fs-sm); font-weight: 500; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .hf-chat-s { font-size: 10.5px; color: var(--fg-faint); }
+  .hf-chat-s { font-size: 10.5px; color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hf-chat-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
+  .hf-chat-model { font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; color: var(--fg-muted); padding: 1px 7px; border-radius: 999px; background: var(--bg-elev-2); border: 1px solid var(--border); }
   .hf-chat-w { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); }
 
   .hf-allchats { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; margin-top: 16px; padding: 6px 2px; flex: none; border: 0; background: transparent; color: var(--fg-muted); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; transition: color 130ms, gap 130ms; }

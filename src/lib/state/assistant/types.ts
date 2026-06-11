@@ -138,6 +138,8 @@ export type ConversationMeta = {
   costUsd: number;
   /** Phase E5: flattened compactionHistory summaries for HistoryDrawer search. */
   compactionSummaries?: string[];
+  /** One-line preview of the newest text message (ui-audit #6). */
+  lastSnippet?: string;
 };
 
 /** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in

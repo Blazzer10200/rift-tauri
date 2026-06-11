@@ -203,6 +203,10 @@ export class TabState {
   lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
   sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
   lastModelId = $state<string | null>(null);
+  /** Per-chat model override (ui-audit #5). Set when an old convo is opened
+   *  (its saved model scopes to this tab) and on explicit pick; null = follow
+   *  the global default. Opening a chat no longer rewrites the new-chat default. */
+  modelOverride = $state<ModelSel | null>(null);
   promptHistory = $state<string[]>([]);
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
    *  already streaming; onDone() pops the next one. Per-tab so a queued msg
@@ -761,14 +765,21 @@ class AssistantStore {
   // envelopeTextBuffer / rawLineLog / pendingText / drainHandle / lastDrainAt /
   // thinkingByIndex / activeThinkingIndex now live on TabState.
 
+  /** Model the ACTIVE chat talks to: its per-chat override (seeded when an
+   *  old convo is opened) else the global default. Per-chat surfaces
+   *  (composer, send, tabsbar, live harness) read this; Home quick-ask and
+   *  onboarding read `model` — the new-chat default. (ui-audit #5) */
+  get effectiveModel(): ModelSel { return this.activeTab?.modelOverride ?? this.model; }
+
   setModel(v: ModelSel) {
-    if (this.model === v) return;
-    const prev = this.model;
+    const prev = this.effectiveModel;
+    if (prev === v && this.model === v) return;
     this.model = v;
+    if (this.activeTab) this.activeTab.modelOverride = v;
     saveModel(v, this.workspace.current);
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("model.change", { from: prev, to: v, midConvo });
-    if (midConvo) this.cacheBustHint("model");
+    if (midConvo && prev !== v) this.cacheBustHint("model");
   }
 
   setThinkingEffort(v: ThinkingEffort) {
