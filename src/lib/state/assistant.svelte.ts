@@ -694,7 +694,7 @@ class AssistantStore {
   // dockOpen defaults true — the activity dock is a permanent surface now (not a
   // toggle-to-peek panel). New/clear no longer force it shut; the Composer
   // affordance still hides it on demand.
-  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth(), diffOpen: false, diffTarget: null as string | null });
+  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth(), diffOpen: false, diffTarget: null as string | null, usageOpen: false });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first

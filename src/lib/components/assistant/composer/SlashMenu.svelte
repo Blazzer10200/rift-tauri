@@ -6,7 +6,7 @@
   // grouped rows, bold matched prefix, kbd hints.
   import {
     Plus, Eraser, Minimize2, History, Cpu, RotateCcw, Copy, StopCircle,
-    Wrench, Coins, BarChart3, FileText, Terminal, ClipboardCopy, HelpCircle,
+    Wrench, Coins, Gauge, BarChart3, FileText, Terminal, ClipboardCopy, HelpCircle,
   } from "lucide-svelte";
 
   type Icon = typeof Plus;
@@ -35,6 +35,7 @@
     stop:      { icon: StopCircle,    group: "Compose" },
     tools:     { icon: Wrench,        group: "Info" },
     cost:      { icon: Coins,         group: "Info" },
+    usage:     { icon: Gauge,         group: "Info" },
     stats:     { icon: BarChart3,     group: "Info" },
     summarize: { icon: FileText,      group: "Info" },
     openincli: { icon: Terminal,      group: "Info" },

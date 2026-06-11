@@ -7,6 +7,7 @@
 pub mod aggregate;
 pub mod budget;
 pub mod insights;
+pub mod limits;
 pub mod pricing;
 pub mod store;
 

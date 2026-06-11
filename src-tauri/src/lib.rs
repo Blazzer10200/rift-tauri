@@ -229,6 +229,7 @@ pub fn run() {
             usage::budget::usage_set_budget,
             usage::budget::usage_budget_status,
             usage::insights::usage_insights,
+            usage::limits::usage_rate_limits,
             swarm::swarm_env_check,
             swarm::swarm_run,
             commands::browser_open,
