@@ -13,7 +13,7 @@ svelte-check 0/0 (4093) · Rust via live tauri-dev watcher (no manual cargo — 
 
 ### RESUME HERE
 
-- **v0.8.20 tagged + pushed — VERIFY release CI green** (`gh run list` on rift-tauri, then asset on rift-releases). Was queued at session end.
+- **v0.8.20 release CI VERIFIED GREEN** — 4 assets live on rift-releases (Setup.exe, full.nupkg, RELEASES, releases.win.json). Nothing pending.
 - User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
 - `/usage` endpoint is undocumented — if the card ever shows "Unavailable", check whether the `anthropic-beta: oauth-2025-04-20` header version changed (it has changed before).
 - Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist. New-user polish leftovers (POLISH tier): mic-permission deep link, model-download disk check, in-app help panel.
