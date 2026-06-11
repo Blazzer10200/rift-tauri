@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, User, Wrench, Loader2, CheckCircle2, AlertCircle, Navigation } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Wrench, Loader2, CheckCircle2, AlertCircle, Navigation } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -251,7 +251,28 @@
       }
       units.push({ kind: "block", block: b, status: statusOf(b), key: `b_${i}` });
     }
-    return numberActions(coalesceToolGroups(units));
+    // Fold runs of back-to-back completed thinking units into one row —
+    // summed duration, prose joined. Kills the "Thought for 1s / Thought for
+    // <1s" stack between tool calls without losing the expandable text.
+    const folded: TimelineUnit[] = [];
+    for (const u of units) {
+      const prev = folded[folded.length - 1];
+      if (
+        u.kind === "block" && u.block.type === "thinking" && u.block.status === "done" &&
+        prev?.kind === "block" && prev.block.type === "thinking" && prev.block.status === "done"
+      ) {
+        const a = prev.block, b = u.block;
+        prev.block = {
+          ...a,
+          text: [a.text, b.text].filter(Boolean).join("\n\n"),
+          hasSignature: a.hasSignature || b.hasSignature,
+          durationMs: (a.durationMs ?? 0) + (b.durationMs ?? 0),
+        };
+        continue;
+      }
+      folded.push(u);
+    }
+    return numberActions(coalesceToolGroups(folded));
   });
 
   // Trailing activity row — fills the "blank while working" gap the bare
@@ -325,10 +346,12 @@
 {:else}
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null} oncontextmenu={onBubbleContext}>
-  <div class="turn-rail" aria-hidden="true"></div>
-  <div class="avatar" class:avatar-user={isUser} aria-hidden="true">
-    {#if isUser}<User size={13} />{:else}<Sparkles size={13} />{/if}
-  </div>
+  {#if !isUser}
+    <div class="turn-rail" aria-hidden="true"></div>
+    <div class="avatar" aria-hidden="true">
+      <Sparkles size={13} />
+    </div>
+  {/if}
 
   <div class="body">
     {#if !isUser}
@@ -372,21 +395,6 @@
                 <RotateCcw size={11} />
               </button>
             {/if}
-          </div>
-        {/if}
-      </div>
-    {:else}
-      <div class="turn-head">
-        <span class="role-name">You</span>
-        {#if plainText.length > 0}
-          <div class="turn-actions">
-            <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
-              {#if copied}
-                <Check size={11} />
-              {:else}
-                <Copy size={11} />
-              {/if}
-            </button>
           </div>
         {/if}
       </div>
@@ -670,16 +678,22 @@
   }
   /* Thread is emerald-only — rail/avatar/hover-glow/halo all use --accent.
      Model identity lives on the Composer model-card, not the thread. */
-  /* User bubbles drop the rail entirely + right-align — the bubble shape
-     already signals "you", and the position differentiates from Claude
-     without forcing a rail on user messages. */
-  /* User turns share Claude's grid + left edge so the thread reads as one calm
-     left-aligned column instead of ping-ponging left↔right. The 2px rail column
-     stays empty for user (no rail element), so user content lands at the same x
-     as Claude's content. */
+  /* User turns: right-aligned tinted bubble, no rail/avatar/header — position
+     + tint carry the role, so turn boundaries scan at a glance. Copy lives in
+     the right-click menu. */
   .bubble[data-role="user"] .body {
-    align-items: flex-start;
+    align-items: flex-end;
     display: flex; flex-direction: column;
+  }
+  .bubble[data-role="user"] .content {
+    align-items: flex-end;
+  }
+  /* User nodes flex so the fit-content text bubble can actually right-align —
+     a long message clamps the node to full width, and align-self on .text is
+     inert under a block parent. */
+  .bubble[data-role="user"] .tl-node {
+    display: flex; flex-direction: column; align-items: flex-end;
+    width: 100%;
   }
 
   /* Continuous accent rail down the LEFT of every assistant turn — visually
@@ -708,16 +722,6 @@
      to the thread it's reading. */
   .bubble[data-role="assistant"]:hover .turn-rail {
     box-shadow: 0 0 6px 0 color-mix(in oklab, var(--accent) 22%, transparent);
-  }
-  /* User turns share the spine but in a quiet neutral grey — so both roles read
-     as "rail + content," differentiated by hue (your neutral vs Claude's model
-     tint), not by box-vs-no-box. */
-  .bubble[data-role="user"] .turn-rail {
-    background: linear-gradient(to bottom,
-      transparent 0,
-      color-mix(in oklch, var(--fg-faint) 42%, var(--border)) 10px,
-      color-mix(in oklch, var(--fg-faint) 42%, var(--border)) calc(100% - 10px),
-      transparent 100%);
   }
   .bubble[data-streaming="true"] .turn-rail {
     background: color-mix(in oklab, var(--accent) 55%, transparent);
@@ -749,10 +753,6 @@
     box-shadow: 0 0 0 3px var(--bg);
     transition: box-shadow 240ms ease-out, background 240ms ease-out, color 240ms ease-out;
   }
-  .avatar.avatar-user {
-    background: color-mix(in oklch, var(--bg-elev-2) 90%, var(--fg-faint));
-    color: var(--fg-muted);
-  }
   .bubble[data-streaming="true"] .avatar {
     animation: avatar-halo 1.8s ease-in-out infinite;
   }
@@ -782,7 +782,6 @@
     margin-bottom: 6px;
     min-height: 22px;
   }
-  .bubble[data-role="user"] .turn-head { justify-content: flex-start; }
   .role-name {
     font-size: var(--fs-xs);
     font-weight: 600;
@@ -1276,18 +1275,18 @@
      whitespace mode applies — `pre-wrap` here would render every `\n`
      between `</li>` and `<li>` in the marked output as a full line of
      empty space, stacking ~20px under every list item. */
-  /* User prose sits in a quiet inset well (ui-audit #9) — same column as
-     Claude's prose, but a soft container so turn boundaries scan without
-     reading the role labels. Borderless wash, not a hard card. */
+  /* User prose: right-aligned accent-tinted bubble with a bottom-right tail.
+     Position + tint signal "you" without an avatar or role label. */
   .bubble[data-role="user"] .text {
-    padding: 9px 13px;
-    background: var(--bg-inset);
-    border: 0;
-    border-radius: 10px;
+    padding: 10px 14px;
+    background: color-mix(in oklab, var(--accent) 8%, var(--bg-inset));
+    border: 1px solid color-mix(in oklab, var(--accent) 14%, var(--border));
+    border-radius: 14px 14px 4px 14px;
     color: var(--fg);
     line-height: 1.6;
-    align-self: flex-start;
-    max-width: min(100%, 72ch);
+    align-self: flex-end;
+    text-align: left;
+    max-width: min(100%, 62ch);
     width: fit-content;
     white-space: pre-wrap;
   }
@@ -1325,6 +1324,7 @@
     image-rendering: auto;
   }
   .bubble[data-role="assistant"] .user-image-thumb { align-self: flex-start; }
+  .bubble[data-role="user"] .user-image-thumb { align-self: flex-end; }
 
   /* Flat thinking node — no bordered surface; bullet on the rail carries
      the "this is a reasoning beat" signal. Label is single-line, prose
