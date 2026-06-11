@@ -37,6 +37,8 @@ export type SttConfig = {
   vocab_text: string;
   cleanup_enabled: boolean;
   beam_size: number | null;
+  voice_commands: boolean;
+  auto_stop_secs: number;
 };
 
 export type ModelInfo = {
@@ -116,6 +118,8 @@ class SttStore {
     vocab_text: "",
     cleanup_enabled: true,
     beam_size: null,
+    voice_commands: true,
+    auto_stop_secs: 0,
   });
   configLoaded = $state(false);
 
@@ -131,6 +135,13 @@ class SttStore {
   lastTranscript = $state<string>("");
   /** Backend lifecycle state, mirrored from `stt://state` events. */
   currentState = $state<SttState>("idle");
+  /** Voice command "send it" landed — the composer watches this and fires. */
+  sendRequested = $state(false);
+  /** True while the Haiku polish of a finished dictation is in flight. */
+  polishing = $state(false);
+  /** Restore-point after a Haiku polish: full draft before/after, so the user
+   *  can flip back to the raw transcript. Cleared on typing or timeout. */
+  polishUndo = $state<{ committed: string; original: string } | null>(null);
 
   // Whisper-specific reactive state.
   models = $state<ModelInfo[]>([]);
@@ -140,6 +151,12 @@ class SttStore {
   whisperStartInvoked = $state(false);
 
   // --- Private fields ---
+  /** Per-utterance final segments (Web Speech) — "scratch that" pops the tail. */
+  private segments: string[] = [];
+  private pendingSend = false;
+  private lastSpeechAt = 0;
+  private silenceTimer: ReturnType<typeof setInterval> | null = null;
+  private polishUndoTimer: ReturnType<typeof setTimeout> | null = null;
   private recognition: SpeechRecognitionInstance | null = null;
   private initStarted = false;
   private baseDraft = "";
@@ -197,7 +214,7 @@ class SttStore {
       );
       await sub("stt://final", () =>
         listen<{ text: string; raw: string; cleaned: boolean }>("stt://final", (ev) =>
-          this.onBackendFinal(ev.payload.text),
+          this.onBackendFinal(ev.payload.text, ev.payload.raw, ev.payload.cleaned),
         ),
       );
       await sub("stt://state", () =>
@@ -281,12 +298,16 @@ class SttStore {
     }
     this.baseDraft = "";
     this.finalText = "";
+    this.segments = [];
+    this.pendingSend = false;
+    this.polishUndo = null;
     this.consumed = true;
     this.lastTranscript = "";
     this.recording = false;
     this.transcribing = false;
     this.recognition = null;
     this.clearTranscribeTimer();
+    this.clearSilenceWatch();
   }
 
   /** Begin live recognition. Returns false if unavailable / disabled. */
@@ -299,6 +320,10 @@ class SttStore {
     this.lastError = null;
     this.baseDraft = this.config.append_to_draft ? assistant.composerDraft : "";
     this.finalText = "";
+    this.segments = [];
+    this.pendingSend = false;
+    this.sendRequested = false;
+    this.polishUndo = null;
     this.consumed = false;
     this.cancelRequested = false;
     this.clearTranscribeTimer();
@@ -313,6 +338,7 @@ class SttStore {
         await invoke("stt_start_recording", { model: this.config.whisper_model });
         // `recording` flips to true once the `stt://state: recording` event arrives.
         this.whisperStartInvoked = true;
+        this.startSilenceWatch();
         return true;
       } catch (e) {
         this.lastError = `Could not start whisper recording: ${e}`;
@@ -336,6 +362,7 @@ class SttStore {
     r.onstart = () => {
       this.recording = true;
       this.transcribing = false;
+      this.startSilenceWatch();
     };
     r.onresult = (e) => this.onResult(e);
     r.onerror = (e) => this.onError(e);
@@ -354,6 +381,7 @@ class SttStore {
 
   /** End live recognition. */
   async stop(): Promise<string> {
+    this.clearSilenceWatch();
     if (this.config.engine === "whisper") {
       if (!this.recording && !this.transcribing && !this.whisperStartInvoked) return this.lastTranscript;
       this.whisperStartInvoked = false;
@@ -391,6 +419,9 @@ class SttStore {
   /** Hard-cancel — drop interim text, restore the original draft. */
   async cancel() {
     this.cancelRequested = true;
+    this.clearSilenceWatch();
+    this.segments = [];
+    this.pendingSend = false;
     if (this.config.engine === "whisper") {
       if (this.recording || this.transcribing) {
         try {
@@ -473,19 +504,39 @@ class SttStore {
   // ---- Event handlers (backend) -------------------------------------------
 
   private onBackendPartial(text: string) {
+    // Speech activity signal for the silence watch — fires even when interim
+    // display is off (the backend only emits partials when VAD hears speech).
+    this.lastSpeechAt = Date.now();
     if (this.consumed || this.cancelRequested) return;
     if (!this.config.show_interim) return;
-    this.lastTranscript = text;
-    assistant.composerDraft = this.composeDraft(text, "");
+    const t = decensor(text);
+    this.lastTranscript = t;
+    assistant.composerDraft = this.composeDraft(t, "");
   }
 
-  private onBackendFinal(text: string) {
+  private onBackendFinal(text: string, raw?: string, cleaned?: boolean) {
+    this.clearSilenceWatch();
     if (this.consumed || this.cancelRequested) return;
-    this.finalText = text;
-    this.lastTranscript = text;
-    assistant.composerDraft = this.composeDraft(text, "");
+    let t = decensor(text);
+    let send = false;
+    if (this.config.voice_commands) {
+      t = applyInlineCommands(t).trim();
+      if (SEND_CMD_RE.test(t)) {
+        t = t.replace(SEND_CMD_RE, "").trim();
+        send = t.length > 0;
+      }
+    }
+    this.finalText = t;
+    this.lastTranscript = t;
+    const committed = this.composeDraft(t, "");
+    assistant.composerDraft = committed;
+    // The Whisper path polishes backend-side — arm the raw-transcript undo.
+    if (cleaned && raw && raw.trim() !== text.trim()) {
+      this.setPolishUndo(committed, this.composeDraft(decensor(raw.trim()), ""));
+    }
     this.recording = false;
     this.transcribing = false;
+    if (send) this.sendRequested = true;
   }
 
   // ---- Event handlers (Web Speech) ----------------------------------------
@@ -497,14 +548,65 @@ class SttStore {
     }
   }
 
+  // ---- Auto-stop on silence ------------------------------------------------
+
+  /** Watch the speech-event stream and end the recording after
+   *  `auto_stop_secs` of silence. Skipped when the engine produces no events
+   *  to watch (Web Speech with interim results off). */
+  private startSilenceWatch() {
+    this.clearSilenceWatch();
+    const secs = this.config.auto_stop_secs;
+    if (!secs) return;
+    if (this.config.engine === "web_speech" && !this.config.show_interim) return;
+    this.lastSpeechAt = Date.now();
+    this.silenceTimer = setInterval(() => {
+      if (!this.recording) return;
+      if (Date.now() - this.lastSpeechAt >= secs * 1000) {
+        this.clearSilenceWatch();
+        void this.stop();
+      }
+    }, 500);
+  }
+
+  private clearSilenceWatch() {
+    if (this.silenceTimer) {
+      clearInterval(this.silenceTimer);
+      this.silenceTimer = null;
+    }
+  }
+
+  // ---- Haiku-polish undo -----------------------------------------------------
+
+  /** Arm the raw-transcript restore point. Auto-expires. */
+  private setPolishUndo(committed: string, original: string) {
+    this.polishUndo = { committed, original };
+    if (this.polishUndoTimer) clearTimeout(this.polishUndoTimer);
+    this.polishUndoTimer = setTimeout(() => (this.polishUndo = null), 15000);
+  }
+
+  /** Flip the draft back to the raw (pre-Haiku) transcript. */
+  revertPolish() {
+    const u = this.polishUndo;
+    this.polishUndo = null;
+    if (u && assistant.composerDraft === u.committed) {
+      assistant.composerDraft = u.original;
+      this.finalText = "";
+    }
+  }
+
+  dismissPolishUndo() {
+    this.polishUndo = null;
+  }
+
   private onResult(e: SpeechRecognitionEvent) {
     if (this.consumed) return;
+    this.lastSpeechAt = Date.now();
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
-      const txt = pickBestAlternate(res);
+      const txt = decensor(pickBestAlternate(res));
       if (res.isFinal) {
-        this.finalText = (this.finalText + " " + txt).replace(/\s+/g, " ").trim();
+        this.commitSegment(txt);
       } else if (this.config.show_interim) {
         interim += txt;
       }
@@ -512,6 +614,48 @@ class SttStore {
     const composed = this.composeDraft(this.finalText, interim);
     assistant.composerDraft = composed;
     this.lastTranscript = this.finalText;
+    // "send it" — draft is committed above; the composer's effect fires it.
+    if (this.pendingSend) {
+      this.pendingSend = false;
+      this.sendRequested = true;
+    }
+  }
+
+  /** Fold one final Web Speech segment into the transcript, interpreting
+   *  voice commands when enabled. */
+  private commitSegment(raw: string) {
+    let seg = raw.trim();
+    if (!seg) return;
+    if (this.config.voice_commands) {
+      seg = applyInlineCommands(seg);
+      if (SCRATCH_CMD_RE.test(seg)) {
+        // "scratch that" deletes the last thing said — text in the same
+        // utterance if any, otherwise the previous committed segment.
+        const rest = seg.replace(SCRATCH_CMD_RE, "").trim();
+        if (!rest) this.segments.pop();
+        this.refreshFinal();
+        return;
+      }
+      if (SEND_CMD_RE.test(seg)) {
+        const rest = seg.replace(SEND_CMD_RE, "").trim();
+        if (rest) this.segments.push(rest);
+        this.refreshFinal();
+        this.pendingSend = true;
+        return;
+      }
+    }
+    this.segments.push(seg);
+    this.refreshFinal();
+  }
+
+  /** Rebuild finalText from segments — collapses runs of spaces but keeps the
+   *  newlines voice commands insert. */
+  private refreshFinal() {
+    this.finalText = this.segments
+      .join(" ")
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/[ \t]*\n[ \t]*/g, "\n")
+      .trim();
   }
 
   private composeDraft(final: string, interim: string): string {
@@ -529,14 +673,90 @@ class SttStore {
 
   private onEnd() {
     // #175: commit only if neither user-cancel nor composer-consume fired.
-    if (!this.cancelRequested && !this.consumed) {
+    const commit = !this.cancelRequested && !this.consumed;
+    if (commit) {
       assistant.composerDraft = this.composeDraft(this.finalText, "");
     }
     this.recording = false;
     this.transcribing = false;
     this.recognition = null;
     this.clearTranscribeTimer();
+    this.clearSilenceWatch();
+    // Web Speech finals never got the Haiku polish (Whisper-only until now) —
+    // run it post-commit so punctuation lands and any leftover engine-masked
+    // profanity ("******") gets restored from context. Skipped when a voice
+    // command is about to send — the text is leaving now.
+    if (commit && !this.sendRequested) void this.polishWebSpeechFinal();
   }
+
+  /** Haiku cleanup for a finished Web Speech dictation. Replaces the dictated
+   *  tail of the draft only if the user hasn't sent, cancelled, or typed over
+   *  it while the polish was in flight. Any failure leaves the raw transcript
+   *  — same never-lose-the-transcript contract as the Whisper path. */
+  private async polishWebSpeechFinal() {
+    const raw = this.finalText.trim();
+    if (!this.config.cleanup_enabled || raw.split(/\s+/).length < 3) return;
+    const committed = this.composeDraft(raw, "");
+    this.transcribing = true;
+    this.polishing = true;
+    try {
+      const cleaned = (await invoke<string>("stt_clean_transcript", { text: raw })).trim();
+      if (
+        cleaned &&
+        cleaned !== raw &&
+        !this.consumed &&
+        !this.cancelRequested &&
+        assistant.composerDraft === committed
+      ) {
+        const polished = this.composeDraft(cleaned, "");
+        assistant.composerDraft = polished;
+        this.finalText = cleaned;
+        this.lastTranscript = cleaned;
+        this.setPolishUndo(polished, committed);
+      }
+    } catch (e) {
+      console.warn("stt cleanup failed:", e);
+    } finally {
+      this.transcribing = false;
+      this.polishing = false;
+    }
+  }
+}
+
+// Azure/Google recognition masks profanity as a leading letter + asterisks
+// ("f***", "b****") — the Web Speech API exposes no knob to turn that off, and
+// Whisper occasionally emits the same masks from its training data. Restore the
+// high-frequency unambiguous ones by (first letter, original word length);
+// unknown masks pass through for the Haiku cleanup pass to resolve from context.
+const DECENSOR_MAP: Record<string, string> = {
+  f4: "fuck", f5: "fucks", f6: "fucker", f7: "fucking",
+  s4: "shit", s5: "shits", s6: "shitty",
+  b5: "bitch", b7: "bastard", b8: "bullshit",
+  a3: "ass", a7: "asshole", a8: "assholes",
+  d4: "damn", d6: "damnit", d7: "dammit",
+  h4: "hell",
+  g7: "goddamn",
+  p4: "piss", p6: "pissed", p7: "pissing",
+  m12: "motherfucker",
+};
+// Spoken commands — recognized only when `voice_commands` is on. Trailing
+// punctuation tolerated since both engines like to append periods.
+const SEND_CMD_RE = /(?:^|\s)send (?:it|that|message)[.,!?]*\s*$/i;
+const SCRATCH_CMD_RE = /(?:^|\s)(?:scratch|strike) that[.,!?]*\s*$/i;
+export function applyInlineCommands(t: string): string {
+  return t
+    .replace(/(?:^|\s)new paragraph[.,]?(?=\s|$)/gi, "\n\n")
+    .replace(/(?:^|\s)new line[.,]?(?=\s|$)/gi, "\n");
+}
+
+export function decensor(text: string): string {
+  if (!text.includes("*")) return text;
+  return text.replace(/\b([a-zA-Z])(\*{2,})([a-zA-Z]*)/g, (match, first: string, stars: string, tail: string) => {
+    const key = `${first.toLowerCase()}${1 + stars.length + tail.length}`;
+    const word = DECENSOR_MAP[key];
+    if (!word) return match;
+    return first === first.toUpperCase() ? word[0].toUpperCase() + word.slice(1) : word;
+  });
 }
 
 function pickBestAlternate(res: SpeechRecognitionResult): string {

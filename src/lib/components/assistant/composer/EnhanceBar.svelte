@@ -6,7 +6,7 @@
   // the composer's `enchanting` class — and arrives here as props + callbacks.
   // `showEnhanceDiff` is child-local: the panel unmounts when the preview
   // clears, which resets it exactly like the old explicit `= false` writes.
-  import { Wand2, GitCompare, FolderSearch, RefreshCw, Check, X } from "lucide-svelte";
+  import { Wand2, GitCompare, FolderSearch, RefreshCw, Check, X, Pencil, Undo2 } from "lucide-svelte";
   import EditDiff from "../EditDiff.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -15,32 +15,66 @@
     enhancedPreview,
     enhanceError,
     enhanceOriginal,
+    enhanceStatus,
+    enhanceMeta,
     groundEnhance,
     hasWorkspace,
+    undoAvailable,
     onToggleGround,
     onAccept,
     onDismiss,
     onRefine,
+    onEditPreview,
+    onUndo,
   }: {
     enhancing: boolean;
     enhancedPreview: string | null;
     enhanceError: string | null;
     enhanceOriginal: string | null;
+    enhanceStatus: string | null;
+    enhanceMeta: { costUsd: number | null; durationMs: number | null } | null;
     groundEnhance: boolean;
     hasWorkspace: boolean;
+    undoAvailable: boolean;
     onToggleGround: () => void;
     onAccept: () => void;
     onDismiss: () => void;
     onRefine: (directive?: string) => void;
+    onEditPreview: (text: string) => void;
+    onUndo: () => void;
   } = $props();
 
   // Toggle the body between the enhanced text and a diff vs the original.
   let showEnhanceDiff = $state(false);
+  // Inline edit of the preview before accepting — swaps the stagger render for
+  // a textarea that writes straight back to the parent's enhancedPreview.
+  let editing = $state(false);
+  // Freeform steer for the refine loop, alongside the canned chips.
+  let steerText = $state("");
+  $effect(() => {
+    if (enhancing) editing = false;
+  });
   // Split preserving whitespace so the reveal can stagger word-by-word while
   // keeping spacing/newlines intact. Each chunk gets its own materialize delay.
   const enhancedWords = $derived(
     enhancedPreview === null ? [] : enhancedPreview.split(/(\s+)/),
   );
+  const metaLabel = $derived.by(() => {
+    if (!enhanceMeta) return null;
+    const bits: string[] = [];
+    if (enhanceMeta.costUsd !== null) {
+      bits.push(`$${enhanceMeta.costUsd.toFixed(enhanceMeta.costUsd < 0.095 ? 3 : 2)}`);
+    }
+    if (enhanceMeta.durationMs !== null) bits.push(`${(enhanceMeta.durationMs / 1000).toFixed(1)}s`);
+    return bits.length ? bits.join(" · ") : null;
+  });
+  function submitSteer(e: SubmitEvent) {
+    e.preventDefault();
+    const d = steerText.trim();
+    if (!d || enhancing) return;
+    steerText = "";
+    onRefine(d);
+  }
 </script>
 
 {#if enhancedPreview !== null || enhanceError !== null}
@@ -48,7 +82,11 @@
     {#if enhancedPreview !== null}
       <div class="enhance-head">
         <Wand2 size={13} />
-        <span class="enhance-title">{enhancing ? (groundEnhance ? "Consulting workspace…" : "Enhancing…") : "Enhanced prompt"}</span>
+        <span class="enhance-title" class:status={enhancing && enhanceStatus !== null}>
+          {enhancing
+            ? (enhanceStatus ?? (groundEnhance ? "Consulting workspace…" : "Enhancing…"))
+            : "Enhanced prompt"}
+        </span>
         <div class="enhance-head-tools">
           {#if hasWorkspace}
             <button
@@ -67,8 +105,18 @@
             <button
               type="button"
               class="enhance-toggle"
+              class:on={editing}
+              onclick={() => { editing = !editing; if (editing) showEnhanceDiff = false; }}
+              aria-pressed={editing}
+              use:tooltip={editing ? "Done editing" : "Edit the rewrite before accepting"}
+            >
+              <Pencil size={12} /> Edit
+            </button>
+            <button
+              type="button"
+              class="enhance-toggle"
               class:on={showEnhanceDiff}
-              onclick={() => (showEnhanceDiff = !showEnhanceDiff)}
+              onclick={() => { showEnhanceDiff = !showEnhanceDiff; if (showEnhanceDiff) editing = false; }}
               aria-pressed={showEnhanceDiff}
               use:tooltip={showEnhanceDiff ? "Show enhanced text" : "Show what changed vs your draft"}
             >
@@ -81,17 +129,25 @@
         <div class="enhance-diff">
           <EditDiff input={{ old_string: enhanceOriginal, new_string: enhancedPreview }} hideHead compact />
         </div>
+      {:else if editing}
+        <!-- svelte-ignore a11y_autofocus -->
+        <textarea
+          class="enhance-edit"
+          value={enhancedPreview}
+          oninput={(e) => onEditPreview((e.currentTarget as HTMLTextAreaElement).value)}
+          autofocus
+        ></textarea>
       {:else}
         <div class="enhance-text">
           {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
         </div>
       {/if}
       <div class="enhance-actions">
-        <button type="button" class="enhance-btn enhance-accept" onclick={onAccept} disabled={enhancing || !enhancedPreview}>
+        <button type="button" class="enhance-btn enhance-accept" onclick={onAccept} disabled={enhancing || !enhancedPreview} use:tooltip={"Drop into the composer (Ctrl+E)"}>
           <Check size={13} /> Use this
         </button>
-        <button type="button" class="enhance-btn enhance-discard" onclick={onDismiss}>
-          Discard
+        <button type="button" class="enhance-btn enhance-discard" onclick={onDismiss} use:tooltip={enhancing ? "Stop and discard — cancels the run" : "Dismiss (Esc)"}>
+          {enhancing ? "Stop" : "Discard"}
         </button>
         <span class="enhance-sep" aria-hidden="true"></span>
         <button type="button" class="enhance-refine" onclick={() => onRefine()} disabled={enhancing} use:tooltip={"Regenerate from your original draft"}>
@@ -100,6 +156,18 @@
         <button type="button" class="enhance-refine" onclick={() => onRefine("Make it more concise — cut to the essentials, keep every technical specific.")} disabled={enhancing}>Concise</button>
         <button type="button" class="enhance-refine" onclick={() => onRefine("Add more implementation detail and the edge cases worth handling.")} disabled={enhancing}>More detail</button>
         <button type="button" class="enhance-refine" onclick={() => onRefine("Append a short acceptance-criteria checklist of what 'done' looks like.")} disabled={enhancing}>+ Acceptance</button>
+        <form class="enhance-steer" onsubmit={submitSteer}>
+          <input
+            type="text"
+            bind:value={steerText}
+            placeholder="Steer the rewrite… ⏎"
+            disabled={enhancing}
+            aria-label="Custom refine instruction"
+          />
+        </form>
+        {#if metaLabel && !enhancing}
+          <span class="enhance-meta" use:tooltip={"Cost · time of this rewrite"}>{metaLabel}</span>
+        {/if}
       </div>
     {:else if enhanceError !== null}
       <div class="enhance-error" role="alert">
@@ -109,6 +177,14 @@
         </button>
       </div>
     {/if}
+  </div>
+{:else if undoAvailable}
+  <div class="enhance-panel undo-mini" role="region" aria-label="Prompt enhanced">
+    <Check size={12} />
+    <span class="undo-label">Prompt enhanced</span>
+    <button type="button" class="enhance-refine" onclick={onUndo} use:tooltip={"Restore your original draft (Esc hides)"}>
+      <Undo2 size={12} /> Undo
+    </button>
   </div>
 {/if}
 
@@ -222,6 +298,69 @@
   .enhance-refine:hover:not(:disabled) { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
   .enhance-refine:active:not(:disabled) { transform: scale(0.96); }
   .enhance-refine:disabled { opacity: 0.45; cursor: default; }
+  /* Grounded-lookup status line pulses gently so progress reads as live. */
+  .enhance-title.status {
+    color: var(--fg-muted);
+    font-weight: 500;
+    animation: status-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  /* Inline edit — same metrics as .enhance-text so toggling doesn't jump. */
+  .enhance-edit {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 90px;
+    max-height: 220px;
+    resize: vertical;
+    font: inherit;
+    font-size: var(--fs-md);
+    line-height: 1.55;
+    color: var(--fg);
+    background: color-mix(in oklch, var(--bg-elev-2) 55%, transparent);
+    border: 1px solid color-mix(in oklch, var(--model-color) 30%, var(--border));
+    border-radius: 10px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    outline: none;
+  }
+  .enhance-edit:focus { border-color: color-mix(in oklch, var(--model-color) 55%, var(--border)); }
+  /* Freeform steer input rides the actions row, swallowing leftover width. */
+  .enhance-steer { flex: 1; min-width: 120px; display: flex; }
+  .enhance-steer input {
+    flex: 1;
+    font: inherit; font-size: 11px;
+    color: var(--fg);
+    background: color-mix(in oklch, var(--bg-elev-2) 50%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    border-radius: 8px;
+    padding: 4px 9px;
+    outline: none;
+    transition: border-color 130ms;
+  }
+  .enhance-steer input:focus { border-color: color-mix(in oklch, var(--model-color) 45%, var(--border)); }
+  .enhance-steer input::placeholder { color: var(--fg-muted); opacity: 0.7; }
+  .enhance-steer input:disabled { opacity: 0.45; }
+  .enhance-meta {
+    margin-left: auto;
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
+    white-space: nowrap;
+  }
+  /* Post-accept restore chip — compact single-row variant of the panel. */
+  .enhance-panel.undo-mini {
+    display: flex; align-items: center; gap: 7px;
+    width: auto;
+    padding: 6px 10px;
+    border-radius: 999px;
+    color: var(--fg-muted);
+    font-size: var(--fs-sm);
+  }
+  .undo-mini :global(svg:first-child) { color: var(--model-color); }
+  .undo-label { font-weight: 600; color: var(--fg); }
   .enhance-error {
     display: flex; align-items: center; gap: 8px;
     font-size: var(--fs-sm);

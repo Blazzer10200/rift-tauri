@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, Eye, ChevronUp } from "lucide-svelte";
+    Sparkles, Eye, ChevronUp, Undo2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
@@ -370,33 +370,92 @@
   // The draft we enhanced FROM — kept so Regenerate/refine re-run on the
   // original (not the already-enhanced text) and the diff has a baseline.
   let enhanceOriginal = $state<string | null>(null);
+  // Grounded-lookup progress ("Reading src/…") + cost footer from the backend.
+  let enhanceStatus = $state<string | null>(null);
+  let enhanceMeta = $state<{ costUsd: number | null; durationMs: number | null } | null>(null);
+  // In-flight request id — Discard kills the actual CLI spawn through it.
+  let enhanceRequestId: string | null = null;
+  // Restore-point after Accept (the raw draft we enhanced from). Cleared on
+  // typing or after a grace window.
+  let undoDraft = $state<string | null>(null);
+  let undoTimer: ReturnType<typeof setTimeout> | undefined;
   // Opt-in: let the rewrite read the real workspace (read-only). Slower, more
-  // specific. Preference persists across regenerates within the session.
-  let groundEnhance = $state(false);
+  // specific. Explicit choice persists in localStorage; until the user touches
+  // the toggle, code-anchored drafts (paths/symbols) auto-enable it per run.
+  const GROUND_KEY = "rift.enhanceGround";
+  let groundEnhance = $state(localStorage.getItem(GROUND_KEY) === "1");
+  let groundTouched = localStorage.getItem(GROUND_KEY) !== null;
+  function toggleGround() {
+    groundEnhance = !groundEnhance;
+    groundTouched = true;
+    localStorage.setItem(GROUND_KEY, groundEnhance ? "1" : "0");
+  }
+  const CODE_ANCHOR_RE =
+    /[\w-]+\.(rs|ts|tsx|js|jsx|svelte|py|css|html|json|toml|ya?ml|md)\b|src\/|src-tauri|\w+::\w+|\w+\(\)/;
   // Draft preview (eye) — render the composer draft as Markdown before sending.
   let previewing = $state(false);
   // Preview panel markup + word-stagger render live in composer/EnhanceBar.svelte
-  // (C5); the state machine stays here (wand button + onKey Escape drive it).
-  // `directive` steers a refine pass (Concise / More detail / + Acceptance);
-  // omitted for the first run + plain Regenerate.
+  // (C5); the state machine stays here (wand button + onKey Escape/Ctrl+E drive
+  // it). `directive` steers a refine pass (chips or freeform); omitted for the
+  // first run + plain Regenerate.
   // Generation token: accept/dismiss bumps it so a still-in-flight enhance
   // can't write its stream/result back into a closed preview.
   let enhanceSeq = 0;
+  // Conversation tail for the rewrite — resolves mid-thread references ("that
+  // bug", "the same file") into the names the conversation established. Text
+  // blocks only; per-message + total caps keep the arg small.
+  function buildEnhanceContext(): string | undefined {
+    const msgs = tab?.messages ?? [];
+    const parts: string[] = [];
+    let total = 0;
+    for (let i = msgs.length - 1; i >= 0 && parts.length < 8 && total < 3000; i--) {
+      const m = msgs[i];
+      if (m.role === "system") continue;
+      const text = m.blocks
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .filter(Boolean)
+        .join("\n")
+        .trim();
+      if (!text) continue;
+      const clipped = text.length > 600 ? `${text.slice(0, 600)} …` : text;
+      parts.unshift(`${m.role}: ${clipped}`);
+      total += clipped.length;
+    }
+    return parts.length ? parts.join("\n\n") : undefined;
+  }
   async function runEnhance(directive?: string) {
     const text = (enhanceOriginal ?? draft).trim();
     if (!text || enhancing) return;
-    if (enhanceOriginal === null) enhanceOriginal = text;
+    if (enhanceOriginal === null) {
+      enhanceOriginal = text;
+      if (!groundTouched && !groundEnhance && !!assistant.workspace.current && CODE_ANCHOR_RE.test(text)) {
+        groundEnhance = true;
+      }
+    }
+    // A directive edits the current rewrite (iterative); Regenerate re-rolls
+    // fresh from the original.
+    const previous = directive && enhancedPreview ? enhancedPreview : undefined;
     const seq = ++enhanceSeq;
     enhancing = true;
     enhanceError = null;
     enhancedPreview = "";
+    enhanceStatus = null;
+    enhanceMeta = null;
     try {
       // Stream: deltas fill the preview live; the resolved value is the
       // authoritative final text. Grounded mode passes the workspace cwd.
       const result = await assistant.enhancePrompt(
         text,
-        (full) => { if (seq === enhanceSeq) enhancedPreview = full; },
-        { directive, cwd: groundEnhance ? (assistant.workspace.current ?? undefined) : undefined },
+        (full) => { if (seq === enhanceSeq) { enhancedPreview = full; enhanceStatus = null; } },
+        {
+          directive,
+          previous,
+          context: buildEnhanceContext(),
+          cwd: groundEnhance ? (assistant.workspace.current ?? undefined) : undefined,
+          onRequestId: (id) => { if (seq === enhanceSeq) enhanceRequestId = id; },
+          onStatus: (s) => { if (seq === enhanceSeq) enhanceStatus = s; },
+          onMeta: (m) => { if (seq === enhanceSeq) enhanceMeta = m; },
+        },
       );
       if (seq === enhanceSeq) enhancedPreview = result;
     } catch (e) {
@@ -405,27 +464,93 @@
         enhancedPreview = null;
       }
     } finally {
-      if (seq === enhanceSeq) enhancing = false;
+      if (seq === enhanceSeq) {
+        enhancing = false;
+        enhanceRequestId = null;
+        enhanceStatus = null;
+      }
     }
   }
   function acceptEnhanced() {
     if (!enhancedPreview) return;
     enhanceSeq++;
     enhancing = false;
+    undoDraft = enhanceOriginal;
+    clearTimeout(undoTimer);
+    undoTimer = setTimeout(() => (undoDraft = null), 12000);
     setDraft(enhancedPreview);
     enhancedPreview = null;
     enhanceError = null;
     enhanceOriginal = null;
+    enhanceStatus = null;
+    enhanceMeta = null;
     void tick().then(() => { autosize(); ta?.focus(); });
   }
   function dismissEnhanced() {
+    // Kill the actual spawn — a dismissed grounded pass otherwise runs (and
+    // bills) to completion in the background.
+    if (enhancing && enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
+    enhanceRequestId = null;
     enhanceSeq++;
     enhancing = false;
     enhancedPreview = null;
     enhanceError = null;
     enhanceOriginal = null;
+    enhanceStatus = null;
+    enhanceMeta = null;
     void tick().then(() => ta?.focus());
   }
+  function undoEnhanced() {
+    if (undoDraft === null) return;
+    setDraft(undoDraft);
+    undoDraft = null;
+    clearTimeout(undoTimer);
+    void tick().then(() => { autosize(); ta?.focus(); });
+  }
+
+  // ── Dictation integration ───────────────────────────────────────────────
+  // Hold-Space push-to-talk (CC CLI style): empty composer + plain Space held
+  // ≥300ms starts dictation; release stops. A quick tap stays inert, and any
+  // draft text disables the path so Space types spaces normally.
+  let pttTimer: ReturnType<typeof setTimeout> | null = null;
+  let pttActive = false;
+  function pttKeydown(e: KeyboardEvent): boolean {
+    if (e.key !== " ") return false;
+    // Swallow auto-repeat while engaged — once words land, draft is non-empty
+    // and repeats would otherwise type spaces into the transcript.
+    if (pttActive || pttTimer !== null) {
+      e.preventDefault();
+      return true;
+    }
+    if (
+      e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.repeat ||
+      draft.length > 0 || attachments.length > 0 || streaming ||
+      !stt.config.enabled || stt.recording
+    ) return false;
+    e.preventDefault();
+    pttTimer = setTimeout(() => {
+      pttTimer = null;
+      pttActive = true;
+      void stt.start();
+    }, 300);
+    return true;
+  }
+  function onKeyUp(e: KeyboardEvent) {
+    if (e.key !== " ") return;
+    if (pttTimer) { clearTimeout(pttTimer); pttTimer = null; }
+    if (pttActive) {
+      pttActive = false;
+      void stt.stop();
+    }
+  }
+  // Voice command "send it" — the stt store commits the draft then raises the
+  // flag; fire() runs the same path as the Send button.
+  $effect(() => {
+    if (stt.sendRequested) {
+      stt.sendRequested = false;
+      fire();
+    }
+  });
 
   // S88: mic toggle. The stt store writes recognized text directly into the
   // focused tab's draft (via `assistant.composerDraft` setter shim → activeTab.draft)
@@ -521,6 +646,21 @@
       dismissEnhanced();
       return;
     }
+    if (undoDraft !== null && e.key === "Escape") {
+      e.preventDefault();
+      undoDraft = null;
+      return;
+    }
+    // Ctrl/Cmd+E — full keyboard loop: enhance the draft; with the preview
+    // settled, accept it.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "e") {
+      e.preventDefault();
+      if (enhancing) return;
+      if (enhancedPreview) acceptEnhanced();
+      else void runEnhance();
+      return;
+    }
+    if (pttKeydown(e)) return;
     // Permission-mode menu nav (mirrors the settings-menu nav below).
     if (permOpen) {
       const n = MODE_OPTIONS.length;
@@ -815,13 +955,28 @@
       {enhancedPreview}
       {enhanceError}
       {enhanceOriginal}
+      {enhanceStatus}
+      {enhanceMeta}
       {groundEnhance}
       hasWorkspace={!!assistant.workspace.current}
-      onToggleGround={() => (groundEnhance = !groundEnhance)}
+      undoAvailable={undoDraft !== null}
+      onToggleGround={toggleGround}
       onAccept={acceptEnhanced}
       onDismiss={dismissEnhanced}
       onRefine={(directive) => void runEnhance(directive)}
+      onEditPreview={(text) => (enhancedPreview = text)}
+      onUndo={undoEnhanced}
     />
+
+    {#if stt.polishUndo}
+      <div class="dictate-undo" role="region" aria-label="Transcript cleaned">
+        <Sparkles size={12} />
+        <span class="du-label">Cleaned up</span>
+        <button type="button" class="du-btn" onclick={() => { stt.revertPolish(); void tick().then(autosize); }} use:tooltip={"Restore the raw transcript"}>
+          <Undo2 size={12} /> Show raw
+        </button>
+      </div>
+    {/if}
 
     {#if previewing && draft.trim().length > 0}
       <div class="preview-panel" role="region" aria-label="Message preview">
@@ -860,15 +1015,17 @@
     {/if}
 
     <div class="composer" class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
-      <div class="textarea-wrap">
+      <div class="textarea-wrap" class:polishing={stt.polishing}>
         <textarea
           bind:this={ta}
           value={draft}
           oninput={(e) => {
             setDraft((e.currentTarget as HTMLTextAreaElement).value);
+            undoDraft = null;
+            stt.dismissPolishUndo();
             resetRecall(); autosize(); refreshMention();
           }}
-          onkeyup={refreshMention}
+          onkeyup={(e) => { onKeyUp(e); refreshMention(); }}
           onclick={refreshMention}
           onfocus={() => { composerFocused = true; }}
           onblur={() => {
@@ -882,7 +1039,7 @@
           rows="1"
         ></textarea>
         {#if draft.length === 0 && !streaming && attachments.length === 0}
-          <span class="placeholder-ghost static" aria-hidden="true">Ask Claude · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file</span>
+          <span class="placeholder-ghost static" aria-hidden="true">Ask Claude · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · hold <span class="ph-k">Space</span> to talk{/if}</span>
         {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Type to queue for after this turn · <span class="ph-k">/stop</span> halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
@@ -973,7 +1130,7 @@
             type="button"
             onclick={() => runEnhance()}
             disabled={enhancing}
-            use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify"}
+            use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify (Ctrl+E)"}
             aria-label="Improve prompt"
           >
             <Wand2 size={14} />
@@ -1713,6 +1870,46 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .wandbtn.enhancing { animation: none; }
+  }
+
+  /* Dictation: gentle text pulse while Haiku polishes the final transcript. */
+  .textarea-wrap.polishing textarea {
+    animation: dictate-polish 1.2s ease-in-out infinite;
+  }
+  @keyframes dictate-polish {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+  }
+  /* Post-polish restore chip — mirrors the enhance undo-mini pill. */
+  .dictate-undo {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    display: flex; align-items: center; gap: 7px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--surface) 88%, transparent);
+    backdrop-filter: blur(14px) saturate(135%);
+    -webkit-backdrop-filter: blur(14px) saturate(135%);
+    border: 1px solid color-mix(in oklch, var(--model-color) 32%, var(--border));
+    color: var(--model-color);
+    font-size: var(--fs-sm);
+    z-index: 10;
+  }
+  .du-label { font-weight: 600; color: var(--fg); }
+  .du-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px; border-radius: 999px;
+    font: inherit; font-size: 11px; font-weight: 600;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    cursor: pointer;
+    transition: color 130ms, background 130ms, border-color 130ms;
+  }
+  .du-btn:hover { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
+  @media (prefers-reduced-motion: reduce) {
+    .textarea-wrap.polishing textarea { animation: none; }
   }
 
   /* Word-materialize reveal (.ew) moved to composer/EnhanceBar.svelte (C5). */

@@ -36,6 +36,32 @@ function lastTurnFor(store: AssistantStore, convoId: string): TurnRecord | null 
   return null;
 }
 
+/** An ask_user question has sat unanswered past the nudge window (the turn —
+ *  and its CLI subprocess — is frozen on it). Toast unless the question is
+ *  plausibly on-screen right now: app visible, chat workspace, active tab. */
+export function askUserStaleNudge(store: AssistantStore, tab: TabState) {
+  const onScreen =
+    typeof document !== "undefined" && !document.hidden &&
+    workspace.activeId === "chat" && tab === store.activeTab;
+  if (onScreen) return;
+  let convoId: string | undefined;
+  for (const [id, t] of store.tabs) if (t === tab) { convoId = id; break; }
+  toast.push({
+    severity: "info",
+    title: "Claude is waiting on your answer",
+    detail: tabTitle(tab),
+    action: convoId
+      ? {
+          label: "Answer",
+          onClick: () => {
+            workspace.setActive("chat");
+            void store.openTab(convoId);
+          },
+        }
+      : undefined,
+  });
+}
+
 /** Post-turn health pass. `convoId` is the completed tab's Map key (resolved
  *  by handleTurnComplete's reverse lookup — cliSessionId can diverge from it
  *  post-compaction). */

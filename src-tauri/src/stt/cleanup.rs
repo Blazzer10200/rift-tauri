@@ -12,8 +12,11 @@ transcribed speech from a Southern US English speaker. Fix obvious slur-to-word 
 substitutions, add punctuation and proper capitalisation, normalise spacing, \
 and preserve the speaker's intent, tone, and word choice. Preserve profanity and \
 swear words EXACTLY as spoken — never censor, mask, asterisk out, bleep, or \
-soften them. Do NOT rephrase, summarise, or add content. Do NOT add quotes or \
-markdown. Output only the cleaned transcript text, nothing else.";
+soften them. If the transcript contains asterisk-masked words (like f***, b****, \
+or a fully masked ******), the recognition engine censored the speaker — restore \
+the intended profanity, spelled out in full, choosing the word that fits the \
+sentence naturally. Do NOT rephrase, summarise, or add content. Do NOT add \
+quotes or markdown. Output only the cleaned transcript text, nothing else.";
 
 const HAIKU_MODEL: &str = "claude-haiku-4-5";
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);

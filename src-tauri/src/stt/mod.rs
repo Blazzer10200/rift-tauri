@@ -27,8 +27,9 @@ use tokio_util::sync::CancellationToken;
 
 const DEFAULT_INITIAL_PROMPT: &str =
     "Casual Southern American English. Informal contractions, dropped word \
-     endings, and slurred consonants are normal. Transcribe what was meant, \
-     not a literal phonetic reading.";
+     endings, and slurred consonants are normal. Profanity is fine and is \
+     transcribed verbatim — fuck, shit, damn, ass — never masked or asterisked. \
+     Transcribe what was meant, not a literal phonetic reading.";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SttConfig {
@@ -77,6 +78,14 @@ pub struct SttConfig {
     /// only in practice). Whisper engine only; ignored by `web_speech`.
     #[serde(default)]
     pub beam_size: Option<u8>,
+    /// Spoken commands ("send it", "new line", "scratch that"). Interpreted
+    /// frontend-side; stored here so the preference rides the same config file.
+    #[serde(default = "default_true")]
+    pub voice_commands: bool,
+    /// End recording after this many seconds of silence. 0 = off. Enforced
+    /// frontend-side off the speech-event stream.
+    #[serde(default)]
+    pub auto_stop_secs: u16,
 
     #[serde(flatten)]
     pub extra: serde_json::Map<String, serde_json::Value>,
@@ -113,6 +122,8 @@ impl Default for SttConfig {
             vocab_text: String::new(),
             cleanup_enabled: true,
             beam_size: None,
+            voice_commands: true,
+            auto_stop_secs: 0,
             extra: serde_json::Map::new(),
         }
     }

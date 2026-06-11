@@ -320,6 +320,7 @@
     { k: "thinking turns",  v: String(sum.thinkingTurns) },
     { k: "max parallel",    v: sum.mostParallelTurn ? sum.mostParallelTurn.maxConcurrentTools + "×" : "—" },
     { k: "cold-start cache", v: sum.coldStartCacheCreate != null ? fmtTok(sum.coldStartCacheCreate) + " tok" : "—" },
+    { k: "zero-tool spend", v: sum.zeroToolTurns ? `${sum.zeroToolTurns} turns · ${fmtUsd(sum.zeroToolCostUsd)}` : "—" },
   ]);
   const relRows = $derived([
     { k: "stale cache",   v: sum.staleCacheTurns,                    warn: sum.staleCacheTurns > 0 },

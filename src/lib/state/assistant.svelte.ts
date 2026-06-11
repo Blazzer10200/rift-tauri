@@ -161,7 +161,7 @@ import {
 } from "./assistant/send";
 // Post-turn health pass — bg-tab completion toasts + once-per-session
 // dead-wait / stale-cache / tool-error warnings.
-import { checkTurnHealth } from "./assistant/healthAlerts";
+import { checkTurnHealth, askUserStaleNudge } from "./assistant/healthAlerts";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -323,6 +323,9 @@ export class TabState {
    *  steer registry is live, so the store flushes steer-mode queue chips
    *  into the now-running turn. */
   onTurnStarted?: (tab: TabState) => void;
+  /** Fired when an ask_user card has sat unanswered past the nudge window —
+   *  the turn (and CLI subprocess) is blocked on it. Store routes to a toast. */
+  onAskUserStale?: (tab: TabState) => void;
   /** Translates a tool name + input into a short activity-bar label.
    *  Lives on the store (knows nothing tab-specific); passed in via this hook
    *  so TabState doesn't grow its own copy. */
@@ -579,6 +582,7 @@ class AssistantStore {
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
     tab.onTurnStarted = (t) => sendFlushSteerChips(this, t);
+    tab.onAskUserStale = (t) => askUserStaleNudge(this, t);
   }
 
   // Informational system notice (slash-command output, /help text, etc.).
@@ -1658,25 +1662,50 @@ class AssistantStore {
    *  `assistant://enhance-stream`, then resolves to the authoritative final
    *  text. `onDelta` receives the accumulated text on each chunk. `opts` steers
    *  it: `model` (default sonnet), `directive` (refine instruction), `cwd`
-   *  (workspace dir → grounded read-only pass over the real code). Throws on
-   *  failure so the caller can surface it. */
+   *  (workspace dir → grounded read-only pass over the real code), `context`
+   *  (conversation tail so mid-thread drafts resolve references), `previous`
+   *  (last rewrite — a refine edits it instead of re-rolling). Callbacks:
+   *  `onRequestId` hands back the id for `cancelEnhance`, `onStatus` gets
+   *  grounded-lookup progress lines, `onMeta` the cost/duration footer from the
+   *  terminal frame. Throws on failure so the caller can surface it. */
   async enhancePrompt(
     text: string,
     onDelta?: (full: string) => void,
-    opts?: { model?: string; directive?: string; cwd?: string },
+    opts?: {
+      model?: string;
+      directive?: string;
+      cwd?: string;
+      context?: string;
+      previous?: string;
+      onRequestId?: (id: string) => void;
+      onStatus?: (status: string) => void;
+      onMeta?: (meta: { costUsd: number | null; durationMs: number | null }) => void;
+    },
   ): Promise<string> {
     const requestId = crypto.randomUUID();
+    opts?.onRequestId?.(requestId);
     let acc = "";
-    const unlisten = await listen<{ request_id: string; delta?: string; done?: boolean }>(
-      "assistant://enhance-stream",
-      (e) => {
-        if (e.payload.request_id !== requestId) return;
-        if (e.payload.delta) {
-          acc += e.payload.delta;
-          onDelta?.(acc);
-        }
-      },
-    );
+    const unlisten = await listen<{
+      request_id: string;
+      delta?: string;
+      status?: string;
+      done?: boolean;
+      cost_usd?: number | null;
+      duration_ms?: number | null;
+    }>("assistant://enhance-stream", (e) => {
+      if (e.payload.request_id !== requestId) return;
+      if (e.payload.delta) {
+        acc += e.payload.delta;
+        onDelta?.(acc);
+      }
+      if (e.payload.status) opts?.onStatus?.(e.payload.status);
+      if (e.payload.done) {
+        opts?.onMeta?.({
+          costUsd: e.payload.cost_usd ?? null,
+          durationMs: e.payload.duration_ms ?? null,
+        });
+      }
+    });
     try {
       return await invoke<string>("assistant_enhance_prompt", {
         requestId,
@@ -1684,10 +1713,20 @@ class AssistantStore {
         model: opts?.model,
         directive: opts?.directive,
         cwd: opts?.cwd,
+        context: opts?.context,
+        previous: opts?.previous,
       });
     } finally {
       unlisten();
     }
+  }
+
+  /** Kill an in-flight enhance spawn (Discard while streaming). Best-effort —
+   *  the pending enhancePrompt rejects with "enhance cancelled". */
+  cancelEnhance(requestId: string) {
+    void invoke("assistant_enhance_cancel", { requestId }).catch((e) =>
+      console.warn("enhance cancel failed:", e),
+    );
   }
 
   /** Compaction Phase B: one-shot summarize of the current CLI session.

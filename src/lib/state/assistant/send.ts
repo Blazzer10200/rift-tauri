@@ -387,7 +387,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
         "Read / Write / Edit (files); Bash (shell, in workspace cwd); " +
         "Glob (filename patterns); Grep (content search); " +
         "WebFetch / WebSearch (open web); " +
-        "TodoWrite (multi-step plans → Tasks dock). " +
+        "TaskCreate / TaskUpdate (multi-step plans → Tasks dock; TodoWrite on older CLI builds). " +
         "Rift MCP: read_file / list_dir / grep (workspace-scoped helpers); " +
         "git_status / git_diff / git_log (and pull/commit/push when trust permits).";
       return true;
