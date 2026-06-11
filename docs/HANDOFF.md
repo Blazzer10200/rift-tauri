@@ -13,7 +13,7 @@ Autonomous run. svelte-check 0/0 (4089 files) · cargo check clean · vitest 119
 
 - **v0.8.18 SHIPPED this session** (bump ×3 + Cargo.lock → CHANGELOG → tag → CI) — verify the release run went green: `gh run list --limit 2`. Dev server + cdp:serve left running. User prod = 0.8.12 → still needs ONE manual Setup.exe to get on the Velopack train.
 - Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist.
-- Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum (+ Permission bar verify rides it) · `.tmp/runner/` scripts fate.
+- Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum (+ Permission bar verify rides it). `.tmp/runner/` RESOLVED: scratch deleted (incl. plaintext runner-token/VM-password in register.ps1 — token expired; **consider rotating the VM Administrator password**); keepalive recipe kept as `scripts/runner-keepalive-setup.ps1`.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
