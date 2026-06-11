@@ -26,11 +26,11 @@
     onPickModel: (m: ModelOpt) => void;
   } = $props();
 
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
+  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
   // The real CLI flag for the current tier — shown beside the tier name so the
   // panel never hides what actually gets sent.
-  const effortFlagLabel = $derived(effortToFlag(assistant.thinkingEffort, assistant.model));
+  const effortFlagLabel = $derived(effortToFlag(assistant.thinkingEffort, assistant.effectiveModel));
   const effortApplies = $derived(currentModel?.effort ?? true);
   const effortStops = $derived(effortStopsFor(currentModel));
   const fastModeApplies = $derived((currentModel?.fastMode ?? false) && FAST_MODE_WIRED);
@@ -84,17 +84,17 @@
     <button
       type="button"
       role="menuitemradio"
-      aria-checked={m.id === assistant.model}
+      aria-checked={m.id === assistant.effectiveModel}
       class="rift-menu-row model-row"
       class:active={i === settingsIdx}
-      class:current={m.id === assistant.model}
+      class:current={m.id === assistant.effectiveModel}
       use:tooltip={m.tagline}
       onmousedown={(e) => { e.preventDefault(); onPickModel(m); }}
     >
       <span class="rift-menu-row-t model-row-name" class:limited={m.limited}>{m.label} {m.version}</span>
       {#if m.limited}<span class="model-badge">Until Jun 22</span>{/if}
       {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
-      {#if m.id === assistant.model}
+      {#if m.id === assistant.effectiveModel}
         <Check size={14} class="rift-menu-row-chk" />
       {:else}
         <kbd class="model-num">{modelShortcut(m.id)}</kbd>

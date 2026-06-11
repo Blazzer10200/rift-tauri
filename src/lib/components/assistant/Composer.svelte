@@ -212,7 +212,7 @@
     slashIdx = 0;
   });
   // Current model row — drives the composer's bottom-right pill label.
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
+  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
 
   // Effort derives the parent still needs (pill label, settingsRows, onKey
   // ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
@@ -272,7 +272,7 @@
   // Re-seed the cursor to the current model row whenever the panel opens.
   $effect(() => {
     if (settingsOpen) {
-      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === assistant.model);
+      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === assistant.effectiveModel);
       settingsIdx = i >= 0 ? i : 0;
     }
   });
@@ -772,7 +772,7 @@
   }
 </script>
 
-<div class="composer-wrap" data-model={modelFamily(assistant.model)}>
+<div class="composer-wrap" data-model={modelFamily(assistant.effectiveModel)}>
   <QueueRail
     tab={tab ?? null}
     {tabId}
@@ -833,7 +833,7 @@
     {/if}
 
     {#if slashOpen && slashFiltered.length > 0}
-      <SlashMenu commands={slashFiltered} activeIdx={slashIdx} onPick={pickSlash} />
+      <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
@@ -1044,11 +1044,11 @@
             aria-expanded={settingsOpen}
             aria-label="Model & thinking depth"
             use:tooltip={effortApplies
-              ? `Model · thinking depth\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model} · ${currentEffort.label}`
-              : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model} · no extended thinking`}
+              ? `Model · thinking depth\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort.label}`
+              : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
             <span class="mode-dot" aria-hidden="true"></span>
-            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.model}</span>
+            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel}</span>
             {#if effortApplies}
               <span class="pill-effort">· {currentEffort.label}</span>
             {/if}

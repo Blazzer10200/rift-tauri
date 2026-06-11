@@ -1259,12 +1259,14 @@
      whitespace mode applies — `pre-wrap` here would render every `\n`
      between `</li>` and `<li>` in the marked output as a full line of
      empty space, stacking ~20px under every list item. */
-  /* De-boxed user prose (mock `.ct-usertext`): plain text in the same column as
-     Claude's prose, brighter ink, no bg/padding/border. */
+  /* User prose sits in a quiet inset well (ui-audit #9) — same column as
+     Claude's prose, but a soft container so turn boundaries scan without
+     reading the role labels. Borderless wash, not a hard card. */
   .bubble[data-role="user"] .text {
-    padding: 0;
-    background: transparent;
+    padding: 9px 13px;
+    background: var(--bg-inset);
     border: 0;
+    border-radius: 10px;
     color: var(--fg);
     line-height: 1.6;
     align-self: flex-start;

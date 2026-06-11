@@ -41,10 +41,10 @@
           lastError,
         )),
   );
-  // Open whenever the user toggled the panel and a tab exists — the panel now
-  // has an Activity tab that always has something to show (live + empty-state),
-  // so the old "only if there are context signals" gate no longer applies.
-  const dockOpen = $derived(assistant.ui.dockOpen && !!tab);
+  // Open whenever the user toggled the panel and a tab exists — except on a
+  // brand-new empty chat (ui-audit #3): a fresh conversation has nothing to
+  // show, so the dock stays collapsed and slides in on the first message.
+  const dockOpen = $derived(assistant.ui.dockOpen && !!tab && !showEmpty);
 
   // Per-pane status chip — own tab's ctx%, model, cost — independent of focus.
   const paneCtxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
@@ -672,7 +672,8 @@
     z-index: 1;
     flex: 1; min-height: 0;
     overflow-y: auto;
-    padding: 16px 18px 4px;
+    padding: 16px 18px 28px;
+    scroll-padding-bottom: 28px;
     display: flex; flex-direction: column;
     scrollbar-width: none;
   }

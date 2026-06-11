@@ -301,11 +301,14 @@
   /* ── Insights ("Rift noticed…") ── */
   .ins-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
   @media (max-width: 760px) { .ins-grid { grid-template-columns: 1fr; } }
-  .ins { display: flex; gap: 10px; padding: 10px 12px; border-radius: 11px; background: var(--bg-inset); border: 1px solid var(--border); }
+  /* Severity encodes consistently (ui-audit #10): every card carries the same
+     left stripe + dot in its severity hue; the border stays neutral. */
+  .ins { display: flex; gap: 10px; padding: 10px 12px; border-radius: 11px; background: var(--bg-inset); border: 1px solid var(--border); box-shadow: inset 2.5px 0 0 var(--info, var(--accent)); }
   .ins-dot { flex-shrink: 0; width: 8px; height: 8px; margin-top: 5px; border-radius: 999px; background: var(--info, var(--accent)); }
+  .ins[data-sev="good"] { box-shadow: inset 2.5px 0 0 var(--ok); }
   .ins[data-sev="good"] .ins-dot { background: var(--ok); }
+  .ins[data-sev="warn"] { box-shadow: inset 2.5px 0 0 var(--warn); }
   .ins[data-sev="warn"] .ins-dot { background: var(--warn); }
-  .ins[data-sev="warn"] { border-color: color-mix(in oklab, var(--warn) 26%, var(--border)); }
   .ins-body { min-width: 0; }
   .ins-title { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); margin-bottom: 2px; }
   .ins-detail { font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.45; }

@@ -229,8 +229,11 @@
                 use:tooltip={`${c.title} · ${c.model}`}
               >
                 <span class="wel-recent-ic"><MessageSquare size={13}/></span>
-                <span class="wel-recent-t">{c.title}</span>
-                <span class="wel-recent-meta mono">{c.messageCount} msg</span>
+                <span class="wel-recent-body">
+                  <span class="wel-recent-t">{c.title}</span>
+                  {#if c.lastSnippet}<span class="wel-recent-snip">{c.lastSnippet}</span>{/if}
+                </span>
+                <span class="wel-recent-meta mono">{c.model} · {c.messageCount} msg</span>
                 <span class="wel-recent-time mono">{fmtAgo(c.updatedAt)}</span>
               </button>
             {/each}
@@ -410,8 +413,13 @@
     transition: color 130ms ease;
   }
   .wel-recent:hover .wel-recent-ic { color: var(--accent); }
+  .wel-recent-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .wel-recent-t {
     font-size: var(--fs-sm); font-weight: 500; color: var(--fg);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .wel-recent-snip {
+    font-size: 10.5px; color: var(--fg-subtle);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .wel-recent-meta {

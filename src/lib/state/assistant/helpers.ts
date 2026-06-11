@@ -42,6 +42,14 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
   "default", "acceptEdits", "plan", "auto", "bypassPermissions",
 ] as const;
 
+/** Validate an untrusted string (e.g. a saved convo's model) into a ModelSel.
+ *  Returns null for unknown values and for Fable past its sunset. */
+export function asModelSel(v: unknown): ModelSel | null {
+  if (typeof v !== "string" || !(MODEL_SELS as readonly string[]).includes(v)) return null;
+  if (v === "claude-fable-5" && !fableAvailable()) return null;
+  return v as ModelSel;
+}
+
 export function loadModel(ws?: string | null): ModelSel {
   try {
     if (typeof localStorage !== "undefined") {
@@ -224,6 +232,19 @@ export function firstLine(cmd: string): string {
   return line.length > 60 ? line.slice(0, 59) + "…" : line;
 }
 
+/** Display label for a shell command: drops leading `cd <path> &&`/`;` hops
+ *  (the harness prefixes most commands with one, which made every rail row
+ *  read `cd "C:/…`) and middle-truncates so the tail survives. */
+export function shellLabel(cmd: string): string {
+  let c = (cmd.split("\n")[0] ?? "").trim();
+  for (let prev = ""; prev !== c; ) {
+    prev = c;
+    c = c.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, "").trim();
+  }
+  if (!c) c = (cmd.split("\n")[0] ?? "").trim();
+  return c.length > 60 ? c.slice(0, 38) + "…" + c.slice(-21) : c;
+}
+
 /** Live "what's running now" for a tab: pending Bash shells + in-flight agent
  *  spawns (no completedAt), sorted by start time. Single source of truth so
  *  the ActivityPanel (full rows) and the composer live pills (counts only)
@@ -248,7 +269,7 @@ export function liveActivity(
       if (AGENT_TOOL_NAMES.has(b.name)) continue;
       if (b.name === "Bash") {
         const cmd = typeof b.input.command === "string" ? b.input.command : "";
-        out.push({ id: b.id, kind: "shell", label: firstLine(cmd) || "shell", sub: null, startedAt: b.startedAt ?? fallbackTs });
+        out.push({ id: b.id, kind: "shell", label: shellLabel(cmd) || "shell", sub: null, startedAt: b.startedAt ?? fallbackTs });
       } else {
         // Read/Edit/Grep/Glob/Write/WebFetch/… — the previously invisible
         // majority. Friendly caption matching the transcript rail.

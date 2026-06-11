@@ -50,8 +50,9 @@
 
 - **Scope:** not a single bug — tracks the stated goal of an app-wide consistency pass. The Settings page is the densest control surface and the natural starting point.
 - **Goal:** every visible control is wired, every section is necessary, terminology + styling consistent, navigation intuitive.
-- **Approach when actioned:** per-page audit checklist (control → wired? necessary? consistent?). [SettingsPage.svelte](../src/lib/components/settings/SettingsPage.svelte) 1343L — audit still non-trivial.
-- **Input:** [ui-audit-2026-06-09.md](design/ui-audit-2026-06-09.md) — live CDP audit of v0.8.14, 13 ranked findings (refinement tier, not redesign). Start there.
+- **Progress (cont.105, 2026-06-10):** audit findings **#1-#6 + #8-#10 SHIPPED** and live-verified — Steps-rail `cd`-strip (`shellLabel` + vitest), slash menu → palette design language, empty-dock auto-collapse, scroll bottom padding, **per-chat model scoping** (`TabState.modelOverride` + `effectiveModel`; opening an old chat no longer rewrites the new-chat default or toasts), jump-back-in snippets + model chips (backend `last_snippet` on `ConversationMeta`), KPI zero-state unify + `opus· high` space fix, user-turn inset card, insight severity stripes. Audit's "Jump back in doesn't navigate" suspicion: **not a bug** (verified live).
+- **Remaining from the audit:** #7 cost-chart sparse-data polish · #11 rich inline diff (design pass) · #12 tool-chip expand affordance · #13 tab strip into titlebar (lowest priority) · `/history` second-Enter check · message hover actions discoverability. Then the per-page Settings checklist.
+- **Input:** [ui-audit-2026-06-09.md](design/ui-audit-2026-06-09.md) — live CDP audit of v0.8.14, 13 ranked findings (refinement tier, not redesign).
 
 #### 20. Hot files exceeding the 2000-line agent-split threshold (✅ threshold met 2026-06-10)
 

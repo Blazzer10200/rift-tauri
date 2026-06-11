@@ -2,22 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-10 evening (cont.104) — Rail-v2 SHIPPED + turn-registry race fix
+## Session 2026-06-11 (cont.105) — #4 UI sweep: audit findings 1-6 + 8-10 SHIPPED
 
-Autonomous run (user-authorized). vitest 118/118 (2 new) · svelte-check 0/0 · Rust verified via tauri-dev rebuild (clean relaunch) · live CDP end-to-end.
+Autonomous run. svelte-check 0/0 (4089 files) · cargo check clean · vitest 119/119 (1 new) · live CDP end-to-end, 0 console errors.
 
-- **Rail-v2 (ISSUES ✅):** per-chip queue/steer **mode toggle** (↳ button, accent-tinted steer chips, caption "Sends when ready · Steers next turn"), steer chips inject into the **next** turn at its first stream line, pulse-on-inject (sweep replay), all-steer queue degrades head → send (never strands). Plumbing: `TabState.onTurnStarted` hook (fires once per turn on first stream line, latch in `beginTurn`) → `send.ts::flushSteerChips`; `drainQueue` now picks the first non-steer chip. "Send now" unchanged.
-- **Preexisting backend race found via live-verify and FIXED (turn.rs):** DONE emits on `result` before child reap → next turn re-registers `SESSION_PIDS`/`STEER_TX` under the same key → old turn's tail unconditionally cleared both. Broke steer AND `assistant_stop` for the first ~seconds of every drained follow-up turn (reap grace = 5s). Fix: `clear_session_pid_if` (PID match) + `clear_steer_tx_if` (`same_channel`) — a turn only clears its own entries. Proof: pre-fix the steer chip fell back to its own turn; post-fix the "You steered" marker landed inline in the drained turn's bubble.
+- **9 of 13 ui-audit findings done** (see ISSUES #4 for the list). Highlights: `shellLabel` (helpers.ts) strips `cd … &&` hops in rail + live rows; SlashMenu rebuilt in palette grammar (icons/groups/highlight/kbd); empty-tab dock auto-collapse (`AssistantPane dockOpen ∧ !showEmpty`); **per-chat model scoping** — `TabState.modelOverride` + `store.effectiveModel`; explicit `setModel` writes default+override; `loadConversation` sets override only (no toast/persist); send/composer/tabsbar/harness read effective, Home+onboarding read default; convo save keeps per-tab model; `asModelSel` validator (fable-sunset aware) replaced stale allow-list. Backend: `ConversationMeta.last_snippet` (convo_store.rs) feeds Home/Welcome row snippets.
+- Live-verified: rail row `git status --short` (cd stripped), Opus chat pill w/ Home default still Sonnet + no toast + nav works (audit's "doesn't navigate" = not a bug), insight stripes via computed styles, `sonnet · high` chip space.
 
 ### RESUME HERE
 
-- **Nothing in-flight.** Dev server + cdp:serve left running; commit pending push? — check `git log origin/main..main`.
-- Natural next bites: **#4 UI sweep** via `ui-audit-2026-06-09.md` 13 findings, or **ship batch** (user prod = 0.8.12 → still needs ONE manual Setup.exe; bump ×3 + Cargo.lock → CHANGELOG → tag, CI does the rest — Rail-v2 + race fix ride it).
+- **Uncommitted? No — committed this session; check `git log origin/main..main` for push state.** Dev server + cdp:serve left running. v0.8.17 released (tag + CI green); user prod = 0.8.12 → still needs ONE manual Setup.exe.
+- Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist; or ship v0.8.18 w/ this sweep.
 - Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum (+ Permission bar verify rides it) · `.tmp/runner/` scripts fate.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
-cont.103 effort ladder retuned to CLI 1:1 (smart=`--effort high` default; lockstep ×3 guarded by mirror test) + composer split COMPLETE C1-C7 (no repo file >2000L) + steer live-verified.
+cont.104 Rail-v2 shipped (per-chip steer/queue toggle, next-turn inject) + turn.rs registry race fix (`clear_session_pid_if`/`clear_steer_tx_if` — a turn only clears its own entries); v0.8.17 tagged, CI green. cont.103 effort ladder retuned to CLI 1:1 (smart=`--effort high` default; lockstep ×3 guarded by mirror test) + composer split COMPLETE C1-C7 (no repo file >2000L).
 
 cont.102 first-run setup redesign (4 steps, chrome-leak fix). cont.101 smoke run + double-listen fix + C2. cont.100 C1+H0s, vitest 51→116. cont.98 v0.8.16 (#20 backend split). cont.97 v0.8.15 (TS split M0-M9). cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
 

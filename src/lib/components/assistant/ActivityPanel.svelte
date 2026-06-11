@@ -23,7 +23,7 @@
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
-  import { liveActivity, firstLine } from "../../state/assistant/helpers";
+  import { liveActivity, shellLabel } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -123,7 +123,7 @@
       case "Glob":
         return { cat: "search", verb: "Glob", target: s("pattern") || "glob", add: null, del: null };
       case "Bash":
-        return { cat: "shell", verb: "Run", target: firstLine(s("command")) || "shell", add: null, del: null };
+        return { cat: "shell", verb: "Run", target: shellLabel(s("command")) || "shell", add: null, del: null };
       case "WebFetch":
         return { cat: "web", verb: "Fetch", target: hostnameOrSelf(s("url")), add: null, del: null };
       case "WebSearch":

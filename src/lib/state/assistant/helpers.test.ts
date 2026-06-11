@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
-  FABLE_SUNSET_MS, effortToFlag, fableAvailable, firstLine, flattenToolResult,
+  FABLE_SUNSET_MS, effortToFlag, fableAvailable, firstLine, flattenToolResult, shellLabel,
   liveActivity, messagesHaveContextSignals, modelFamily, previewToolInput,
 } from "./helpers";
 
@@ -60,6 +60,16 @@ describe("flattenToolResult + previewToolInput + firstLine", () => {
   it("firstLine takes line one and caps at 60", () => {
     expect(firstLine("git status\nsecond")).toBe("git status");
     expect(firstLine("x".repeat(80))).toBe("x".repeat(59) + "…");
+  });
+  it("shellLabel strips cd-hops and middle-truncates keeping the tail", () => {
+    expect(shellLabel('cd "C:/AI Workflow/projects/rift-tauri" && npm run check')).toBe("npm run check");
+    expect(shellLabel("cd /a && cd 'b c' ; git status")).toBe("git status");
+    expect(shellLabel('cd "C:/only/path"')).toBe('cd "C:/only/path"');
+    const long = "git log --oneline " + "x".repeat(60) + " --tail-marker";
+    const lbl = shellLabel(long);
+    expect(lbl.length).toBe(60);
+    expect(lbl.startsWith("git log --oneline")).toBe(true);
+    expect(lbl.endsWith("--tail-marker")).toBe(true);
   });
 });
 
