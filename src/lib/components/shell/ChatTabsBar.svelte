@@ -384,6 +384,16 @@
   const lastModelId = $derived(assistant.lastModelId);
   const autoCompactThreshold = $derived(assistant.autoCompactThreshold);
   const compactWarning = $derived(assistant.compactWarning);
+  // #30: a resumed tab stays pinned to its original folder — when that differs
+  // from the selected workspace, badge it so "chip says X, turns run in Y" is
+  // visible. Comparison is separator/case-insensitive (Windows paths).
+  const normPath = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
+  const cwdMismatch = $derived.by(() => {
+    const pinned = assistant.activeTab?.sessionCwd;
+    const ws = assistant.workspace.current;
+    if (!pinned || !ws) return null;
+    return normPath(pinned) === normPath(ws) ? null : pinned;
+  });
   const activeAgents = $derived(
     (assistant.activeTab?.agentSpawns ?? []).filter((a) => a.completedAt === null),
   );
@@ -510,6 +520,16 @@
         <ChevronDown size={13} class={projMenuOpen ? "proj-chev chev-open" : "proj-chev"}/>
       </button>
     </div>
+
+    {#if cwdMismatch}
+      <span
+        class="cwd-badge"
+        use:tooltip={`This chat runs in ${prettyPath(cwdMismatch)} — its session was started there and stays pinned to it. New chats use the selected workspace.`}
+      >
+        <FolderGit2 size={12} />
+        <span class="cwd-name">{leafName(cwdMismatch)}</span>
+      </span>
+    {/if}
 
     {#if assistant.workspaceBranch}
       <span class="branch-chip mono" use:tooltip={`On branch ${assistant.workspaceBranch}`}>
@@ -1178,6 +1198,20 @@
   }
   .branch-chip :global(svg) { color: var(--fg-faint); flex-shrink: 0; }
   .branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* #30: active tab pinned to a different folder than the workspace chip. */
+  .cwd-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 22px; padding: 0 8px;
+    font-size: 11px; font-weight: 600;
+    color: var(--warn, #e2b340);
+    background: color-mix(in oklab, var(--warn, #e2b340) 10%, transparent);
+    border: 1px solid color-mix(in oklab, var(--warn, #e2b340) 32%, transparent);
+    border-radius: 999px;
+    max-width: 180px;
+  }
+  .cwd-badge :global(svg) { flex-shrink: 0; }
+  .cwd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* ── Project dropdown — recent roots + open/close. Inherits .rift-menu chrome
      + .rift-menu-row rows (app.css); this only carries positioning + sizing. */

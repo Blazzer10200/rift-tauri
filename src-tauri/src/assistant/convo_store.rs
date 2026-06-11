@@ -289,6 +289,13 @@ pub fn assistant_load_conversation(id: String) -> Result<Conversation, String> {
     serde_json::from_slice(&bytes).map_err(|e| format!("parse conversation: {e}"))
 }
 
+/// #30: expose a session's pinned cwd so the UI can flag a resumed tab that
+/// operates in a different folder than the currently selected workspace.
+#[tauri::command]
+pub fn assistant_session_cwd(id: String) -> Option<String> {
+    load_session_cwd(&id).map(|p| p.to_string_lossy().into_owned())
+}
+
 /// Write an exported conversation to a user-chosen path. The markdown/json
 /// string is built on the frontend (where the typed block schema lives); this
 /// just commits the bytes. `dest` comes from the native save dialog, so the

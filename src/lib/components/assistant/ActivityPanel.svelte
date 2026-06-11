@@ -307,17 +307,7 @@
     }
     const cost = typeof m.costUsd === "number" ? m.costUsd : null;
     if (ms === 0 && tools === 0 && cost == null) return null;
-    const reply = (m.blocks as Block[])
-      .filter((b): b is Extract<Block, { type: "text" }> => b.type === "text")
-      .map((b) => b.text.trim())
-      .filter(Boolean)
-      .join(" ")
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-      .replace(/[`*_#]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const preview = reply.length > 200 ? reply.slice(0, 200).trimEnd() + "…" : reply || null;
-    return { ms, tools, files: files.size, cost, preview };
+    return { ms, tools, files: files.size, cost };
   });
 
   // ── Context meter — tokens / window, same source as the composer gauge ──
@@ -528,9 +518,6 @@
             <div class="rc"><span class="rc-v mono">{lastTurn.cost > 0 && lastTurn.cost < 0.01 ? "<$0.01" : `$${lastTurn.cost.toFixed(2)}`}</span><span class="rc-k">cost</span></div>
           {/if}
         </div>
-        {#if lastTurn.preview}
-          <p class="recap-preview">{lastTurn.preview}</p>
-        {/if}
       </section>
     {/if}
 
@@ -1014,12 +1001,6 @@
   /* Last-turn recap — compact stat grid capping the idle panel. */
   .recap :global(.recap-ic) { color: var(--ok, var(--accent)); }
   .recap-grid { display: flex; gap: 18px; padding: 2px 14px 8px; }
-  .recap-preview {
-    margin: 0 14px 12px; padding: 1px 0 1px 10px;
-    border-left: 2px solid color-mix(in oklab, var(--accent) 35%, var(--border));
-    font-size: 11px; line-height: 1.45; color: var(--fg-muted);
-    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
   .rc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .rc-v { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.15; }
   .rc-k { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); }

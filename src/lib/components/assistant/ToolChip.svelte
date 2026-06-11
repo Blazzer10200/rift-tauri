@@ -523,7 +523,7 @@
       </span>
     </div>
   {:else}
-    <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded}>
+    <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded} use:tooltip={expanded ? "Collapse" : "Expand details"}>
       <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
       <span class="chip-icon"><Icon size={12} /></span>
       {#if variant === "timeline" && caption}
@@ -861,11 +861,15 @@
   .chip-head:hover { background: var(--surface-hover); }
   .chip-chev {
     display: inline-flex;
-    color: var(--fg-faint);
-    transition: transform 140ms ease-out;
+    color: var(--fg-muted);
+    transition: transform 140ms ease-out, color 140ms ease-out;
     flex-shrink: 0;
   }
   .chip-chev.open { transform: rotate(90deg); }
+  /* ui-audit #12: the chevron IS the expand affordance — let hover light it
+     up so chips read as openable, not static log lines. */
+  .chip-head:hover .chip-chev { color: var(--accent); }
+  .chip-head:hover .chip-chev:not(.open) { transform: translateX(2px); }
   .chip-icon {
     display: inline-flex;
     color: var(--accent);

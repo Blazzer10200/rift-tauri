@@ -289,13 +289,16 @@ mod tests {
     fn trust_level_allowlist_and_resolution() {
         assert!(is_valid_trust_level("readonly"));
         assert!(is_valid_trust_level("standard"));
-        assert!(is_valid_trust_level("full"));
+        // CR-UX: "full" collapsed — invalid for NEW writes, but persisted
+        // ternary-era configs migrate read-side to "standard".
+        assert!(!is_valid_trust_level("full"));
         assert!(!is_valid_trust_level("admin"));
         assert!(!is_valid_trust_level(""));
         // Unset or garbage must floor to readonly — never escalate.
         assert_eq!(effective_trust_level(&None), "readonly");
         assert_eq!(effective_trust_level(&Some("garbage".into())), "readonly");
         assert_eq!(effective_trust_level(&Some("standard".into())), "standard");
+        assert_eq!(effective_trust_level(&Some("full".into())), "standard");
     }
 
     #[test]

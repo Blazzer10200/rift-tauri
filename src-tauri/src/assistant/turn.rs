@@ -701,7 +701,7 @@ pub async fn assistant_send(
         // the CLI allowlist: only list the git-write tools when trust actually
         // permits them, so the outer allowlist is never wider than the server
         // gate (defense-in-depth — a patched CLI can't call what isn't listed).
-        let git_write = if matches!(trust_level.as_str(), "standard" | "full") {
+        let git_write = if trust_level == "standard" {
             format!(",{GIT_WRITE_MCP}")
         } else {
             String::new()

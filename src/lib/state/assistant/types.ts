@@ -236,7 +236,7 @@ export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypa
  *  stay in sync with `is_valid_trust_level` in src-tauri/src/assistant/mod.rs.
  *  `readonly` → git status/diff/log; `standard` → adds commit/pull/push;
  *  `full` → reserved for RCON raw passthrough (phase 2). */
-export type TrustLevel = "readonly" | "standard" | "full";
+export type TrustLevel = "readonly" | "standard";
 
 /** A suggestion the CLI attaches to a `can_use_tool` ask — e.g.
  *  `{ type: "setMode", mode: "acceptEdits", destination: "session" }`, which
