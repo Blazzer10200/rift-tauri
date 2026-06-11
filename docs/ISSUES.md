@@ -21,6 +21,7 @@
 | #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
 | #30 | Workspace chip vs CLI cwd possible drift | T3 | 🚧 open |
 | #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
+| #32 | Ctx meter blank on restored conversations | T4 | 🚧 open |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -84,6 +85,12 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Symptom (observed v0.8.14, prod CDP):** per CSP spec, **a nonce makes `'unsafe-inline'` be ignored** — so Svelte's dynamically-applied inline styles get blocked. Console spams `Applying inline style violates ... style-src 'self' 'unsafe-inline' 'nonce-…'`. Real impact: Svelte transition styles (fly/fade) and `style="width:{progress}%"` on the update download progress-bar don't apply. **Cosmetic** — download/apply and all clicks still work; animations snap and the progress fill stays empty.
 - **Fix sketch:** make the static CSP and SvelteKit's nonce agree. Either (a) configure SvelteKit `kit.csp` so the nonce also covers the styles Svelte injects, or (b) drop the nonce path so `'unsafe-inline'` actually takes effect, or (c) move the affected inline styles to classes. **App-wide blast radius** — verify every transition + `style:` binding across the app before shipping; deliberately kept out of the v0.8.14 update-fix release to avoid re-breaking the updater.
 
+#### 32. Ctx meter blank on restored conversations (🚧 open)
+
+- **Where:** `ActivityPanel.svelte` ctx meter + composer gauge read `assistant.ctxTokensFor(tab)` → `tab.lastTurnUsage`, which is set only by live `recordTurnUsage` and never persisted by the conversation store.
+- **Symptom:** a history-restored conversation shows no Context gauge (and 0% in the composer) until the first new turn completes — exactly when "how full is this old session?" matters.
+- **Fix sketch:** persist the final turn's usage in conversation meta on save; hydrate `lastTurnUsage` in `loadConversation`. Found cont.113 (2026-06-11).
+
 > Also parked: **Wave-1 LOWs #91–#134** — clippy/doc/perf nits, in the deleted `docs/archive/audit-history.md` (recover via `git log` if ever needed; not tracked live here).
 
 ---
@@ -109,7 +116,6 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - `docs/design/composer-split.md` (#20 frontend — **COMPLETE C1-C7 2026-06-10**; kept as the component-split pattern reference — the `composer/` child headers cite it)
 - `docs/design/messagebubble-split.md` + `docs/design/chattabsbar-split.md` (optional quality follow-ups — both files already under threshold)
 - `docs/design/assistant-svelte-split.md` (#20 frontend — COMPLETE, M0-M9 all shipped; KEPT permanently — the `src/lib/state/assistant/*` module headers reference it)
-- `docs/design/steer-and-queue.md` (steer/queue three-tier model — steer shipped; queue improvements + inline-bubble follow-ups open)
 
 ---
 
