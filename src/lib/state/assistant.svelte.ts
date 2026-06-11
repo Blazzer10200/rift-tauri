@@ -644,10 +644,6 @@ class AssistantStore {
   // Phase D: model alias used by summarize call. "haiku" default ($0.91 vs
   // $2.73 on sonnet for a 900K-token summarize).
   compactModel = $state<"haiku" | "sonnet">("haiku");
-  // June-15 hedge (legacy single-provider — superseded by `providers`; kept so
-  // any pre-2a config still reads). null = Anthropic.
-  baseUrl = $state<string | null>(null);
-  providerModel = $state<string | null>(null);
   // 2a multi-provider list (cc-switch pattern). Empty = Anthropic only. The
   // `active` one routes turns; secrets live in the keychain (see ProviderDto).
   providers = $state<ProviderDto[]>([]);
@@ -951,16 +947,6 @@ class AssistantStore {
       this.compactModel = m === "sonnet" ? "sonnet" : "haiku";
     } catch (e) {
       console.warn("assistant_get_compact_model failed", e);
-    }
-    try {
-      this.baseUrl = await invoke<string | null>("assistant_get_base_url");
-    } catch (e) {
-      console.warn("assistant_get_base_url failed", e);
-    }
-    try {
-      this.providerModel = await invoke<string | null>("assistant_get_provider_model");
-    } catch (e) {
-      console.warn("assistant_get_provider_model failed", e);
     }
     try {
       this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
@@ -1428,28 +1414,6 @@ class AssistantStore {
     try {
       await invoke("assistant_set_compact_model", { value });
       this.compactModel = value;
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  async setBaseUrl(value: string | null) {
-    const v = value && value.trim().length > 0 ? value.trim() : null;
-    try {
-      await invoke("assistant_set_base_url", { value: v });
-      this.baseUrl = v;
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  async setProviderModel(value: string | null) {
-    const v = value && value.trim().length > 0 ? value.trim() : null;
-    try {
-      await invoke("assistant_set_provider_model", { value: v });
-      this.providerModel = v;
     } catch (e) {
       this.lastNotice = String(e);
       throw e;

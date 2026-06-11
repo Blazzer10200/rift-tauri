@@ -617,7 +617,14 @@ class SttStore {
     // "send it" — draft is committed above; the composer's effect fires it.
     if (this.pendingSend) {
       this.pendingSend = false;
-      this.sendRequested = true;
+      if (this.config.cleanup_enabled && /\*{2,}/.test(this.finalText)) {
+        // Engine-masked profanity that decensor() couldn't resolve (fully
+        // masked, no leading letter) only gets restored by the Haiku pass —
+        // polish first so "send it" doesn't ship asterisks.
+        void this.polishWebSpeechFinal().then(() => (this.sendRequested = true));
+      } else {
+        this.sendRequested = true;
+      }
     }
   }
 
@@ -694,6 +701,7 @@ class SttStore {
    *  it while the polish was in flight. Any failure leaves the raw transcript
    *  — same never-lose-the-transcript contract as the Whisper path. */
   private async polishWebSpeechFinal() {
+    if (this.polishing) return; // pre-send pass already in flight — don't double-spawn from onEnd
     const raw = this.finalText.trim();
     if (!this.config.cleanup_enabled || raw.split(/\s+/).length < 3) return;
     const committed = this.composeDraft(raw, "");
@@ -735,9 +743,10 @@ const DECENSOR_MAP: Record<string, string> = {
   a3: "ass", a7: "asshole", a8: "assholes",
   d4: "damn", d6: "damnit", d7: "dammit",
   h4: "hell",
-  g7: "goddamn",
-  p4: "piss", p6: "pissed", p7: "pissing",
-  m12: "motherfucker",
+  g7: "goddamn", g9: "goddammit",
+  p4: "piss", p5: "pussy", p6: "pissed", p7: "pissing",
+  j7: "jackass",
+  m12: "motherfucker", m13: "motherfucking",
 };
 // Spoken commands — recognized only when `voice_commands` is on. Trailing
 // punctuation tolerated since both engines like to append periods.

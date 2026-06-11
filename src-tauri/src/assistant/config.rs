@@ -382,47 +382,9 @@ pub fn assistant_set_compact_model(value: String) -> Result<(), String> {
     save_config(&cfg)
 }
 
-#[tauri::command]
-pub fn assistant_get_base_url() -> Result<Option<String>, String> {
-    Ok(load_config().base_url.filter(|s| !s.trim().is_empty()))
-}
-
-/// Custom Anthropic-compatible endpoint; routes headless `-p` turns off the metered pool (June-15).
-#[tauri::command]
-pub fn assistant_set_base_url(value: Option<String>) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let v = value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    if let Some(ref u) = v {
-        if !(u.starts_with("http://") || u.starts_with("https://")) {
-            return Err("base_url must start with http:// or https://".into());
-        }
-    }
-    let mut cfg = load_config();
-    cfg.base_url = v;
-    save_config(&cfg)
-}
-
-#[tauri::command]
-pub fn assistant_get_provider_model() -> Result<Option<String>, String> {
-    Ok(load_config().provider_model.filter(|s| !s.trim().is_empty()))
-}
-
-/// Model id passed to `--model` when a custom base_url is set (e.g. "deepseek-chat").
-#[tauri::command]
-pub fn assistant_set_provider_model(value: Option<String>) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let v = value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    if let Some(ref m) = v {
-        if !is_valid_model_name(m) {
-            return Err(format!("invalid provider_model: {m}"));
-        }
-    }
-    let mut cfg = load_config();
-    cfg.provider_model = v;
-    save_config(&cfg)
-}
-
 // ── 2a multi-provider escape hatch (cc-switch pattern) ──
+// The legacy single base_url/provider_model command pair was removed (#31) —
+// the struct fields remain only so pre-2a configs still migrate on load.
 
 /// List saved custom providers with derived flags. Secrets are never returned —
 /// only `has_key` so the UI can show "key set" without exposing the value.
