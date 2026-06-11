@@ -11,6 +11,7 @@
   import LivePills from "./composer/LivePills.svelte";
   import EnhanceBar from "./composer/EnhanceBar.svelte";
   import SlashMenu from "./composer/SlashMenu.svelte";
+  import UsagePanel from "./composer/UsagePanel.svelte";
   import MentionPopover from "./composer/MentionPopover.svelte";
   import SettingsMenu from "./composer/SettingsMenu.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
@@ -88,6 +89,7 @@
     { name: "stop",      desc: "Halt the current turn" },
     { name: "tools",     desc: "List available workspace tools" },
     { name: "cost",      desc: "Show session cost" },
+    { name: "usage",     desc: "Plan limits — 5-hour & weekly windows" },
     { name: "stats",     desc: "Session telemetry summary (inline)" },
     { name: "summarize", desc: "Dry-run a compaction summary (no state change)" },
     { name: "openincli", desc: "Print the claude --resume command for this session" },
@@ -834,6 +836,10 @@
 
     {#if slashOpen && slashFiltered.length > 0}
       <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
+    {/if}
+
+    {#if assistant.ui.usageOpen}
+      <UsagePanel onClose={() => (assistant.ui.usageOpen = false)} />
     {/if}
 
     {#if mentionState && mentionResults.length > 0}

@@ -37,6 +37,17 @@ export type Insight = {
   id: string; kind: string; title: string; detail: string;
   severity: "good" | "info" | "warn";
 };
+// Live plan limits (same data as Claude Code's /usage) — utilization is 0–100.
+export type LimitWindow = { utilization: number; resetsAt: string | null };
+export type ExtraUsage = {
+  isEnabled: boolean; monthlyLimit: number | null; usedCredits: number | null;
+  utilization: number | null; currency: string | null;
+};
+export type RateLimits = {
+  fiveHour: LimitWindow | null; sevenDay: LimitWindow | null;
+  sevenDayOpus: LimitWindow | null; sevenDaySonnet: LimitWindow | null;
+  extraUsage: ExtraUsage | null; fetchedAt: number;
+};
 
 class UsageStore {
   daily = $state<DailyRow[]>([]);
@@ -45,6 +56,8 @@ class UsageStore {
   byWorkspace = $state<WorkspaceRow[]>([]);
   blocks = $state<BlockRow[]>([]);
   insights = $state<Insight[]>([]);
+  rateLimits = $state<RateLimits | null>(null);
+  rateLimitsError = $state<string | null>(null);
   budget = $state<BudgetStatus | null>(null);
   config = $state<BudgetConfig>({ plan: "max5x", customLimitUsd: null, cadence: "monthly" });
 
@@ -85,6 +98,17 @@ class UsageStore {
       console.warn("usage refresh failed", e);
     } finally {
       this.loading = false;
+    }
+  }
+
+  /** Live plan-limit gauge — kept out of refresh()'s Promise.all so an OAuth
+   *  hiccup (no login, throttle) can't take the local cockpit down with it. */
+  async refreshRateLimits(cliVersion: string | null): Promise<void> {
+    try {
+      this.rateLimits = await invoke<RateLimits>("usage_rate_limits", { cliVersion });
+      this.rateLimitsError = null;
+    } catch (e) {
+      this.rateLimitsError = String(e);
     }
   }
 

@@ -372,6 +372,9 @@ function runSlash(store: AssistantStore, input: string): boolean {
     case "copy":
       void copyLastAssistant(store);
       return true;
+    case "usage":
+      store.ui.usageOpen = true;
+      return true;
     case "cost":
       store.lastNotice =
         store.totalCostUsd != null
@@ -460,7 +463,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
     }
     case "help":
       store.lastNotice =
-        "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
+        "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /usage · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
         "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
         "/compact summarizes the current session + remints the CLI session id; the next turn carries the summary forward. " +
         "/summarize dry-runs Phase-B compaction summarize (no state change). " +

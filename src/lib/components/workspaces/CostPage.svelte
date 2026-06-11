@@ -5,7 +5,8 @@
   // SQLite usage store. Reuses the Harness bento/KPI visual language.
   import { onMount } from "svelte";
   import { RotateCw, Gauge as GaugeIcon } from "lucide-svelte";
-  import { usage, type BudgetPlan, type BudgetCadence } from "../../state/usage.svelte";
+  import { usage, type BudgetPlan, type BudgetCadence, type LimitWindow } from "../../state/usage.svelte";
+  import { assistant } from "../../state/assistant.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
   // ── formatters (local — mirrors HarnessPage's own set) ──
@@ -94,8 +95,37 @@
     if (!isNaN(v) && v > 0) void usage.setBudget({ ...usage.config, plan: "custom", customLimitUsd: v });
   }
 
-  onMount(() => {
+  // ── live plan limits (same source as Claude Code's /usage) ──
+  const limitRows = $derived.by(() => {
+    const rl = usage.rateLimits;
+    if (!rl) return [] as { k: string; w: LimitWindow }[];
+    const rows: { k: string; w: LimitWindow }[] = [];
+    if (rl.fiveHour) rows.push({ k: "5-hour window", w: rl.fiveHour });
+    if (rl.sevenDay) rows.push({ k: "Weekly · all models", w: rl.sevenDay });
+    if (rl.sevenDayOpus) rows.push({ k: "Weekly · Opus", w: rl.sevenDayOpus });
+    if (rl.sevenDaySonnet) rows.push({ k: "Weekly · Sonnet", w: rl.sevenDaySonnet });
+    return rows;
+  });
+  function limitZone(u: number): string {
+    return u < 60 ? "ok" : u < 85 ? "warn" : "hot";
+  }
+  function fmtReset(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+    if (mins < 60) return `resets in ${mins}m`;
+    const h = Math.floor(mins / 60);
+    if (h < 48) return `resets in ${h}h ${mins % 60}m`;
+    return `resets ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
+  }
+  function refreshAll() {
     void usage.refresh();
+    void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+  }
+
+  onMount(() => {
+    refreshAll();
     customLimit = usage.config.customLimitUsd != null ? String(usage.config.customLimitUsd) : "";
   });
 </script>
@@ -108,7 +138,7 @@
         Credit pool across all sessions · {usage.allTimeTurns} turns logged · {fmtUsd(usage.allTimeCost)} all-time
       </div>
     </div>
-    <button class="crefresh" type="button" onclick={() => usage.refresh()} use:tooltip={"Refresh"}>
+    <button class="crefresh" type="button" onclick={refreshAll} use:tooltip={"Refresh"}>
       <RotateCw size={13} class={usage.loading ? "spin" : ""} />
     </button>
   </header>
@@ -183,6 +213,36 @@
         <div class="kpi"><span class="kpi-v">{fmtUsd(usage.allTimeCost)}</span><span class="kpi-k">all-time cost</span></div>
         <div class="kpi"><span class="kpi-v">{usage.allTimeTurns}</span><span class="kpi-k">all-time turns</span></div>
         <div class="kpi"><span class="kpi-v" class:nodata={b?.projectedExhaustionDate == null}>{b?.projectedExhaustionDate != null ? fmtDate(b.projectedExhaustionDate) : "—"}</span><span class="kpi-k">projected dry-out</span></div>
+      </section>
+
+      <!-- Plan limits — live from the CLI's OAuth session (same data as /usage) -->
+      <section class="cell full">
+        <div class="cell-head">
+          <span class="cell-title">Plan limits</span>
+          <span class="cell-meta">
+            {#if usage.rateLimits}live · claude.ai subscription{:else}claude.ai subscription{/if}
+          </span>
+        </div>
+        {#if limitRows.length > 0}
+          <div class="rl-grid">
+            {#each limitRows as r (r.k)}
+              <div class="rl">
+                <div class="rl-top">
+                  <span class="rl-k">{r.k}</span>
+                  <span class="rl-pct mono" data-zone={limitZone(r.w.utilization)}>{r.w.utilization.toFixed(0)}<span class="rl-pct-u">%</span></span>
+                </div>
+                <div class="rl-track">
+                  <span class="rl-fill" data-zone={limitZone(r.w.utilization)} style="width:{Math.min(100, Math.max(2, r.w.utilization))}%"></span>
+                </div>
+                <div class="rl-reset">{fmtReset(r.w.resetsAt)}</div>
+              </div>
+            {/each}
+          </div>
+        {:else if usage.rateLimitsError}
+          <div class="empty">Unavailable — {usage.rateLimitsError}</div>
+        {:else}
+          <div class="empty">Checking plan limits…</div>
+        {/if}
       </section>
 
       <!-- Insights — "Rift noticed…" (2b, observational only) -->
@@ -297,6 +357,22 @@
   .empty { font-size: var(--fs-xs); color: var(--fg-subtle); padding: 10px 0; }
   .dim { color: var(--fg-subtle); }
   .mono { font-family: var(--font-mono); }
+
+  /* ── Plan limits (live /usage data) ── */
+  .rl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+  .rl { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .rl-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .rl-k { font-size: var(--fs-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rl-pct { font-size: 17px; font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
+  .rl-pct[data-zone="warn"] { color: var(--warn); }
+  .rl-pct[data-zone="hot"] { color: var(--danger); }
+  .rl-pct-u { font-size: 11px; font-weight: 600; color: var(--fg-subtle); margin-left: 1px; }
+  .rl-track { height: 9px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; position: relative; }
+  .rl-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-page);
+    background: linear-gradient(90deg, oklch(0.62 0.15 var(--accent-h)), oklch(0.78 0.16 var(--accent-h))); }
+  .rl-fill[data-zone="warn"] { background: linear-gradient(90deg, color-mix(in oklab, var(--warn) 80%, black), var(--warn)); }
+  .rl-fill[data-zone="hot"] { background: linear-gradient(90deg, color-mix(in oklab, var(--danger) 80%, black), var(--danger)); }
+  .rl-reset { font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); letter-spacing: 0.02em; }
 
   /* ── Insights ("Rift noticed…") ── */
   .ins-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
