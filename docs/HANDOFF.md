@@ -14,7 +14,7 @@ svelte-check 0/0 (4092 files) · vitest assistant 23/23 (1 new) · live CDP E2E 
 ### RESUME HERE
 
 - **cont.106 work committed, NOT shipped** — next `/git-ship` bundles it (version bump ×3 + CHANGELOG happen there, not before). v0.8.18 stands as last tag.
-- cont.105 leftover: verify v0.8.18 release CI went green (`gh run list --limit 2`). User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
+- v0.8.18 release CI verified green (cont.106). User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
 - Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist.
 - Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum · consider rotating VM Administrator password (runner-scratch cleanup, cont.105).
 
