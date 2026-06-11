@@ -13,6 +13,7 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
+| #33 | Compaction tool broken — doesn't work in practice | T1 | 🚧 open |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
@@ -27,6 +28,14 @@
 ---
 
 ## 🚧 Open issues
+
+### Tier 1 — broken feature
+
+#### 33. Compaction tool broken — doesn't work (🚧 open — filed 2026-06-11, NEXT SESSION'S LEAD ITEM)
+
+- **Symptom (user report, v0.8.25/26):** "the compaction tool does not work." No repro detail captured yet — first step is reproduce + capture what "doesn't work" means (button no-op? summarize fails? remint fails? post-compact resume wedged?).
+- **Where:** frontend `src/lib/state/assistant/compaction.ts` (`compactConversation`, remint flow, `forceNextFirstTurn`) + backend `assistant_summarize_session`/`assistant_remint_session` (oneshot.rs) + auto-trigger effect (ctx-pct threshold). Sidecar handoff: `oneshot.rs` copies the cwd/model pins old→new session.
+- **Plan:** `/diagnose` discipline — reproduce w/ a real long convo, instrument the chain (summarize → remint → first-turn dispatch), fix root cause + regression test. Then evaluate improvements (user: "possibly improve on it if needed") — but fix first, improve second.
 
 ### Tier 2 — code-complete, needs live-verify
 
