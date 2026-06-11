@@ -546,3 +546,19 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
         }
     });
 }
+
+#[cfg(test)]
+mod tests {
+    /// `app_log_path()` mirrors the bundle identifier as a string literal
+    /// (it runs before the AppHandle exists, so it can't query Tauri). This
+    /// pins the two copies together — if `tauri.conf.json` ever changes its
+    /// identifier, this fails instead of logs silently diverging.
+    #[test]
+    fn bundle_identifier_matches_tauri_conf() {
+        let conf = include_str!("../../tauri.conf.json");
+        assert!(
+            conf.contains("\"identifier\": \"com.blazzer.rift\""),
+            "tauri.conf.json identifier changed — update app_log_path() in diagnostics/mod.rs to match"
+        );
+    }
+}

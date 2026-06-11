@@ -3788,7 +3788,7 @@ dependencies = [
 
 [[package]]
 name = "rift-tauri"
-version = "0.8.18"
+version = "0.8.19"
 dependencies = [
  "chrono",
  "cpal",

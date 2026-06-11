@@ -19,7 +19,10 @@ import { accessibility } from "../accessibility.svelte";
 import { toast } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, TurnRecord } from "./types";
-import { effortToFlag } from "./helpers";
+import { effortToFlag, FABLE_SUNSET_MS } from "./helpers";
+
+// One-shot per app session — the sunset warning shouldn't nag on every send.
+let fableSunsetNoticed = false;
 
 export async function send(store: AssistantStore, prompt: string) {
   const trimmed = prompt.trim();
@@ -77,6 +80,25 @@ export async function send(store: AssistantStore, prompt: string) {
   // #184: clear stale error banner so it doesn't bleed into the new turn.
   // Setter routes to tab.lastError when activeTab is set, store-level otherwise.
   store.lastError = null;
+  // No workspace → the backend silently runs the turn in no-tools mode; say so
+  // up front instead of letting the user discover it from the reply.
+  if (!store.workspace.current) {
+    store.lastNotice = "No folder open — the assistant can't read or edit files this turn. Open one from the title bar.";
+  }
+  // turn.rs falls back to the Anthropic key when the active custom provider has
+  // none saved — warn before that key is sent to a third-party endpoint.
+  const prov = store.activeProvider;
+  if (prov && !prov.hasKey && store.hasApiKey) {
+    store.lastNotice = `Provider "${prov.name}" has no API key saved — your Anthropic key is being used for ${prov.baseUrl}. Add a provider key in Settings if that's not intended.`;
+  }
+  // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
+  if (!fableSunsetNoticed && store.effectiveModel === "claude-fable-5"
+      && Date.now() >= FABLE_SUNSET_MS - 7 * 86_400_000) {
+    fableSunsetNoticed = true;
+    store.lastNotice = Date.now() >= FABLE_SUNSET_MS
+      ? "Fable's limited run has ended — this turn falls back to Opus 4.8."
+      : "Heads up: Fable retires June 22 — chats fall back to Opus 4.8 after that.";
+  }
   // Telemetry: build the turn record + attach to tab. TabState fills it as
   // envelopes arrive; finalized in onDone/onError.
   const attachBytes = store.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);

@@ -239,18 +239,33 @@ impl UpdateService {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
             let me = std::process::id();
-            let _ = std::process::Command::new("taskkill")
+            // Image name derived from the running exe — a hardcoded name breaks
+            // the sweep (and silently blocks the swap) if the binary is renamed.
+            let image = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| "rift-tauri.exe".to_string());
+            match std::process::Command::new("taskkill")
                 .args([
                     "/F",
                     "/FI",
-                    "IMAGENAME eq rift-tauri.exe",
+                    &format!("IMAGENAME eq {image}"),
                     "/FI",
                     &format!("PID ne {me}"),
                 ])
                 .creation_flags(CREATE_NO_WINDOW)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
-                .status();
+                .status()
+            {
+                Err(e) => log::warn!(
+                    "update apply: taskkill sweep failed to run ({e}) — a live MCP child may block the swap"
+                ),
+                Ok(s) if !s.success() => log::info!(
+                    "update apply: taskkill sweep exited {s} (no matching children is benign)"
+                ),
+                Ok(_) => {}
+            }
         }
 
         // Hand control to Velopack: exit so Update.exe can take the file lock.

@@ -4,11 +4,11 @@ import { scrubUser } from "./redact.js";
 
 describe("scrubUser", () => {
   it("redacts the Windows username, keeping the rest of the path", () => {
-    expect(scrubUser("C:\\Users\\BLAZZER\\AppData\\Local\\Temp")).toBe(
+    expect(scrubUser("C:\\Users\\SOMEUSER\\AppData\\Local\\Temp")).toBe(
       "C:\\Users\\<user>\\AppData\\Local\\Temp",
     );
     // Forward-slash Windows paths (as Tauri / web layers often emit) too.
-    expect(scrubUser("C:/Users/BLAZZER/Documents")).toBe("C:/Users/<user>/Documents");
+    expect(scrubUser("C:/Users/SOMEUSER/Documents")).toBe("C:/Users/<user>/Documents");
     // Lower-case drive letter still matches.
     expect(scrubUser("d:\\Users\\jane\\x")).toBe("d:\\Users\\<user>\\x");
   });
@@ -19,7 +19,7 @@ describe("scrubUser", () => {
   });
 
   it("redacts every occurrence in one string", () => {
-    expect(scrubUser("C:\\Users\\BLAZZER\\a and C:\\Users\\BLAZZER\\b")).toBe(
+    expect(scrubUser("C:\\Users\\SOMEUSER\\a and C:\\Users\\SOMEUSER\\b")).toBe(
       "C:\\Users\\<user>\\a and C:\\Users\\<user>\\b",
     );
   });

@@ -11,6 +11,7 @@
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { fableAvailable } from "$lib/state/assistant/helpers";
+  import { MODE_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
   import type { ModelSel, ThinkingEffort } from "$lib/state/assistant/types";
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen, Terminal, Zap,
@@ -87,6 +88,11 @@
     const cap = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
     if (m.effort && cap >= 0 && idx > cap) assistant.setThinkingEffort(EFFORT_OPTIONS[cap].id);
   }
+  // The three modes a first-run user can reason about — plan/auto stay in the
+  // composer's full picker. Same source as the composer so labels never drift.
+  const PERM_OPTIONS = MODE_OPTIONS.filter((m) =>
+    m.id === "default" || m.id === "acceptEdits" || m.id === "bypassPermissions",
+  );
 </script>
 
 <svelte:window onkeydown={onEscape} />
@@ -270,6 +276,23 @@
                   </div>
                 </div>
               {/if}
+              <div class="ob-field">
+                <span class="ob-flabel">Permissions</span>
+                <div class="ob-seg" role="radiogroup" aria-label="Permission mode">
+                  {#each PERM_OPTIONS as m (m.id)}
+                    <button
+                      type="button"
+                      class="ob-seg-btn"
+                      class:on={assistant.permissionMode === m.id}
+                      role="radio"
+                      aria-checked={assistant.permissionMode === m.id}
+                      title={m.hint}
+                      onclick={() => assistant.setPermissionMode(m.id)}
+                    >{m.label}</button>
+                  {/each}
+                </div>
+                <span class="ob-field-hint">Bypass runs tools and edits files without asking — pick "Ask before edits" to approve each change. Change anytime from the composer.</span>
+              </div>
               <div class="ob-field">
                 <span class="ob-flabel">Git tools</span>
                 <div class="ob-seg" role="radiogroup" aria-label="Git tools trust level">

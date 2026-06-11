@@ -101,9 +101,16 @@ fn classify_install_method(p: &Path) -> &'static str {
 
 /// Run `<exe> --version` and return its trimmed output (None if it can't run).
 /// Strips a stray `ANTHROPIC_API_KEY` like every other spawn; hides the window.
+/// Bounded at 5s — a hung binary here used to block the auth probe (and with it
+/// the first-run gate) forever.
 fn probe_version_at(exe: &Path) -> Option<String> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
     let mut cmd = std::process::Command::new(exe);
-    cmd.arg("--version").stderr(Stdio::null());
+    cmd.arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     cmd.env_remove("ANTHROPIC_API_KEY");
     #[cfg(windows)]
     {
@@ -111,11 +118,31 @@ fn probe_version_at(exe: &Path) -> Option<String> {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let out = cmd.output().ok()?;
-    if !out.status.success() {
+    let mut child = cmd.spawn().ok()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::warn!("claude --version timed out after 5s: {}", exe.display());
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
         return None;
     }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut s = String::new();
+    child.stdout.take()?.read_to_string(&mut s).ok()?;
+    let s = s.trim().to_string();
     (!s.is_empty()).then_some(s)
 }
 
