@@ -5,14 +5,14 @@
   // the parent (they bind textarea focus + tab state) and arrive as props;
   // sendQueuedNow talks to the assistant store directly (brief allows — the
   // cluster already reads it pervasively).
-  import { X, Check, Clock, Pencil, Navigation } from "lucide-svelte";
+  import { X, Check, Clock, Pencil, Navigation, CornerDownRight } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
-  type QueueItem = { id: string; text: string };
+  type QueueItem = { id: string; text: string; mode?: "queue" | "steer" };
 
   let {
     tab,
@@ -67,8 +67,37 @@
   function sendQueuedNow(q: { id: string; text: string }) {
     if (!tab || !streaming) return;
     removeQueued(q.id);
+    pulseKey++;
     void assistant.steer(q.text, tabId);
   }
+  // Rail-v2: per-chip fire mode. Steer chips don't start their own turn —
+  // they inject into the NEXT turn at its first step (flushSteerChips in the
+  // store). Toggle is a standing mark; "Send now" stays the immediate path.
+  function toggleMode(q: QueueItem) {
+    if (!tab) return;
+    tab.queue = tab.queue.map((it) =>
+      it.id === q.id ? { ...it, mode: it.mode === "steer" ? "queue" : "steer" } : it,
+    );
+  }
+  // Pulse-on-inject: re-keying the sweep span replays the accent sweep. Fired
+  // on "Send now" clicks and whenever the store flushes steer chips into a
+  // turn (detected as a steer-count drop while streaming).
+  let pulseKey = $state(0);
+  let prevSteerCount = 0;
+  $effect(() => {
+    const n = queue.filter((q) => q.mode === "steer").length;
+    if (n < prevSteerCount && streaming) pulseKey++;
+    prevSteerCount = n;
+  });
+  const steerCount = $derived(queue.filter((q) => q.mode === "steer").length);
+  const queueCount = $derived(queue.length - steerCount);
+  const caption = $derived.by(() => {
+    if (queue.length === 0) return "Working…";
+    const parts: string[] = [];
+    if (queueCount > 0) parts.push(queueCount === 1 ? "Sends when ready" : `${queueCount} queued`);
+    if (steerCount > 0) parts.push(steerCount === 1 ? "Steers next turn" : `${steerCount} steer next turn`);
+    return parts.join(" · ");
+  });
   // Drag-to-reorder queued chips — the queue order IS the send order. Reorder
   // live on dragover so the rail rearranges under the cursor.
   let dragId = $state<string | null>(null);
@@ -92,19 +121,16 @@
 
 {#if streaming || queue.length > 0}
   <div class="pending-rail" class:working={streaming && queue.length === 0} transition:fly={{ y: 14, duration: 260, easing: quintOut }}>
-    <span class="rail-sweep" aria-hidden="true"></span>
+    {#key pulseKey}
+      <span class="rail-sweep" aria-hidden="true"></span>
+    {/key}
     <Clock size={12} class="rail-lead" />
-    <span class="rail-caption">
-      {queue.length === 0
-        ? "Working…"
-        : queue.length === 1
-        ? "Sends when ready"
-        : `${queue.length} queued`}
-    </span>
+    <span class="rail-caption">{caption}</span>
     {#each queue as q, i (q.id)}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="pchip"
+        class:steer={q.mode === "steer"}
         class:dragging={dragId === q.id}
         style="--idx: {i}"
         draggable={queue.length > 1 && editingId !== q.id}
@@ -131,6 +157,18 @@
               <Navigation size={11} />
             </button>
           {/if}
+          <button
+            class="pchip-btn"
+            class:accent={q.mode === "steer"}
+            type="button"
+            onclick={() => toggleMode(q)}
+            aria-label={q.mode === "steer" ? "Switch to queue mode — fires as its own turn" : "Switch to steer mode — injects into the next turn"}
+            use:tooltip={q.mode === "steer"
+              ? "Steer mode — injects into the next turn's first step. Click for queue mode."
+              : "Queue mode — fires as its own turn. Click to steer into the next turn instead."}
+          >
+            <CornerDownRight size={11} />
+          </button>
           <button class="pchip-btn" type="button" onclick={() => startEditQueued(q)} aria-label="Edit queued message" use:tooltip={"Edit"}>
             <Pencil size={11} />
           </button>
@@ -242,6 +280,12 @@
     box-shadow: 0 1px 3px -1px oklch(0 0 0 / 0.3);
   }
   .pchip.dragging { opacity: 0.45; }
+  /* Steer-mode chip — accent tint signals "rides the next turn" vs. a plain
+     queued turn-starter. */
+  .pchip.steer {
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+    background: color-mix(in oklab, var(--accent) 10%, var(--field));
+  }
   .pchip-text {
     overflow: hidden;
     text-overflow: ellipsis;

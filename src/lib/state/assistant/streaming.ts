@@ -35,6 +35,7 @@ export function beginTurn(tab: TabState) {
   tab.thinkingByIndex.clear();
   tab.activeThinkingIndex = null;
   tab.lastStreamEventAt = null;
+  tab.turnStartNotified = false;
   tab.activity = { currentLabel: null, turnStartedAt: Date.now() };
   tab.streaming = true;
 }
@@ -449,6 +450,12 @@ function fillToolResult(tab: TabState, toolUseId: string, content: string, isErr
 export function onStreamLine(tab: TabState, raw: string) {
   if (tab.rawLineLog.length >= 200) tab.rawLineLog.shift();
   tab.rawLineLog.push(raw);
+  // Rail-v2: first line of a turn proves the CLI is live (the backend's steer
+  // registry registers before the reader spawns) — flush steer-mode chips.
+  if (tab.streaming && !tab.turnStartNotified) {
+    tab.turnStartNotified = true;
+    tab.onTurnStarted?.(tab);
+  }
   let env: StreamEnvelope;
   try {
     env = JSON.parse(raw) as StreamEnvelope;

@@ -546,3 +546,52 @@ describe("playback — steer", () => {
     expect(tab.queue.map((q) => q.text)).toEqual(["too late"]);
   });
 });
+
+describe("playback — steer-mode chips (Rail-v2)", () => {
+  it("drain skips steer chips, then flushes them into the new turn at its first stream line", async () => {
+    const { tab } = readyStore();
+    await assistant.send("first");
+    feed(tab, [textDelta("reply one")]); // turn 1's first line — latch fires with no steer chips
+
+    // Steer chip ahead of a queue-mode chip: drain must NOT fire it as a turn.
+    tab.queue = [{ id: "sc1", text: "watch the edge cases", mode: "steer" }];
+    await assistant.send("second"); // streaming → queued behind the steer chip
+    expect(tab.queue.map((q) => q.text)).toEqual(["watch the edge cases", "second"]);
+
+    tab.onDone();
+    await settle();
+
+    // The queue-mode chip became turn 2; the steer chip stayed parked.
+    expect(tab.streaming).toBe(true);
+    expect(assistant.telemetry.turns).toHaveLength(2);
+    expect(assistant.telemetry.turns[1].promptPreview).toBe("second");
+    expect(tab.queue.map((q) => q.text)).toEqual(["watch the edge cases"]);
+
+    // Turn 2's first stream line → steer chip injects into the running turn.
+    mockInvoke.mockClear();
+    feed(tab, [textDelta("turn two begins")]);
+    await settle();
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_steer",
+      expect.objectContaining({ text: "watch the edge cases" }),
+    );
+    expect(tab.queue).toHaveLength(0);
+  });
+
+  it("an all-steer queue degrades its head to a normal send so it can't strand", async () => {
+    const { tab } = readyStore();
+    await assistant.send("go");
+    feed(tab, [textDelta("working")]);
+    tab.queue = [{ id: "sc1", text: "only a steer", mode: "steer" }];
+    mockInvoke.mockClear();
+
+    tab.onDone();
+    await settle();
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_send",
+      expect.objectContaining({ prompt: "only a steer" }),
+    );
+    expect(tab.queue).toHaveLength(0);
+  });
+});
