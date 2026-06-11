@@ -2,26 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-11 (cont.107) — new-user readiness audit + fix batch → v0.8.19 shipped
+## Session 2026-06-11 (cont.108) — live plan limits (cockpit card + /usage) → v0.8.20 shipped
 
-svelte-check 0/0 (4092) · vitest 120/120 · cargo check + new lockstep test clean (isolated `--target-dir` b/c dev was live) · CDP pixel pass (onboarding Step 4, localStorage flags restored after).
+svelte-check 0/0 (4093) · Rust via live tauri-dev watcher (no manual cargo — dev was up all session) · live endpoint probe verified response shape before coding · CDP behavior pass (card pixels, slash entry, panel open/Esc/✕/click-outside).
 
-- **Three-agent audit** (hardcoded assumptions · first-run UX · missing-prereq failure handling) → tiered findings, then ALL tiers fixed. Two claims were FALSE on verify: onboarding gate race (refreshAuth IS awaited before configLoaded) and Whisper-not-gated (Settings already disables + warns). Three more already handled: swarm gate hints, usage-DB error log, env-key st-note.
-- **Tier-1:** `probe_version_at` (cli_install.rs) bounded 5s via try_wait loop — hung `claude --version` used to wedge splash forever · onboarding Step 4 **Permissions picker** (default/acceptEdits/bypass from `MODE_OPTIONS`, bypass disclosed) · send.ts warns when custom provider w/o key falls back to Anthropic key.
-- **Tier-2:** send.ts no-workspace notice + Fable-sunset one-shot warning (7d ahead) · `--bare` consequences explained at ClaudeConnect + Settings key entry · login console-behind-window hint · turn.rs `write_control_response` fail-loud (`io::Error::other`, was `unwrap_or_default` → CLI hang) · update_service taskkill sweep logs failures + image from `current_exe`.
-- **Tier-3:** bundle-ID lockstep test (`diagnostics::tests`, `include_str!` tauri.conf.json) · About → rift-releases link · STT placeholder de-FiveM'd · BLAZZER out of redact fixtures. Deliberately skipped: FiveM welcome suggestions (intentional, fxmanifest-gated) · swarm `rift.local` git identity (product choice) · in-app help panel (bigger design work).
-- **Shipped v0.8.19** — bundles cont.106 (context menus + Fable ctx fix + model menu) + this batch. Bump ×3 + Cargo.lock synced via `cargo metadata --offline`.
+- **Research first:** statusline JSON officially carries `rate_limits` now (Pro/Max, TUI-only — useless for Rift's headless `-p` spawns); NO official subscription-limits API; the community-proven path is `GET api.anthropic.com/api/oauth/usage`. Verified live: `utilization` 0–100 float, `resets_at` ISO 8601, nullable per-model weekly buckets, `extra_usage` block.
+- **`usage/limits.rs` (new):** `usage_rate_limits` command — token from `~/.claude/.credentials.json` (**READ-ONLY, never refresh it** — one-time-use refresh tokens; external refresh breaks the CLI's own auth loop), headers `anthropic-beta: oauth-2025-04-20` + `User-Agent: claude-code/<ver>` (wrong UA = throttled bucket), tolerant serde, 60s cache, friendly 401/429/no-login errors.
+- **Two surfaces, one data path:** CostPage "Plan limits" card (zone-colored bars + reset countdowns, fetch outside the cockpit `Promise.all`) + `/usage` composer popover (`UsagePanel.svelte`, SlashMenu Gauge/Info entry, `ui.usageOpen` flag, closes Esc/✕/outside-click).
+- **Shipped v0.8.20** — bump ×3 + Cargo.lock (dev watcher synced it), CHANGELOG rewritten, annotated tag pushed.
 
 ### RESUME HERE
 
-- **v0.8.19 tagged + pushed — VERIFY release CI green** (`gh run list` on rift-tauri, then asset on rift-releases).
+- **v0.8.20 tagged + pushed — VERIFY release CI green** (`gh run list` on rift-tauri, then asset on rift-releases). Was queued at session end.
 - User prod = 0.8.12 → still needs ONE manual Setup.exe onto the Velopack train.
+- `/usage` endpoint is undocumented — if the card ever shows "Unavailable", check whether the `anthropic-beta: oauth-2025-04-20` header version changed (it has changed before).
 - Next bites: audit remainder (#7 charts · #12 chip affordance · #11/#13 design passes · `/history` + hover-actions checks), then Settings per-page checklist. New-user polish leftovers (POLISH tier): mic-permission deep link, model-download disk check, in-app help panel.
 - Parked: SEC-1 live pass · #29 CSP-nonce (needs prod build) · CR-UX trust-enum · VM Administrator password rotation (cont.105).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
-cont.106 app-wide custom context menus (`contextMenu.svelte.ts` + `ContextMenuHost`, `preventDefault()` ownership convention, clipboard-manager plugin) + Fable 1M ctx fix + model-menu two-line reorg. cont.105 #4 UI sweep 9/13 + **v0.8.18 shipped** (annotated tags enforced). cont.104 Rail-v2 + turn.rs registry race fix. cont.103 effort ladder CLI 1:1 + composer split C1-C7. cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
+cont.107 new-user readiness audit (three tiers fixed: 5s version-probe bound, onboarding permissions picker, key-fallback warning, fail-loud control_response, bundle-ID lockstep test) + **v0.8.19 shipped**. cont.106 app-wide custom context menus (`contextMenu.svelte.ts` + `ContextMenuHost`, `preventDefault()` ownership convention, clipboard-manager plugin) + Fable 1M ctx fix + model-menu two-line reorg. cont.105 #4 UI sweep 9/13 + **v0.8.18 shipped** (annotated tags enforced). cont.104 Rail-v2 + turn.rs registry race fix. cont.103 effort ladder CLI 1:1 + composer split C1-C7. cont.94 Fable 5 limited-run (**Jun 22 sunset gate**). cont.90 first tag-driven release; **`RunnerKeepAlive` startup task load-bearing.** PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
 

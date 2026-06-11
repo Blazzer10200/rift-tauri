@@ -33,7 +33,7 @@ Files large enough to matter for agent scoping. Everything else is small enough 
 | `src-tauri/src/swarm/mod.rs` | 824 | edit-swarm orchestrator (v0.7.0) — parallel sub-agent edit batching + safety layer |
 | `src-tauri/src/assistant/git_local.rs` | 627 | local-git MCP tools (git_status/diff/log/pull/commit/push) |
 | `src-tauri/src/diagnostics/mod.rs` | 548 | DiagBus + LogForwarder + panic hook + frontend pump (`diag://event`). Sync-only `diag_state` DTO/pump removed |
-| `src-tauri/src/usage/*.rs` | ~1440 | cost cockpit (v0.7.0) — aggregate·budget·insights·pricing·store·mod |
+| `src-tauri/src/usage/*.rs` | ~1590 | cost cockpit (v0.7.0) — aggregate·budget·insights·pricing·store·mod + `limits.rs` (v0.8.20 OAuth `/usage` rate-limit fetch — CLI token READ-ONLY, never refresh it) |
 | `src-tauri/src/lib.rs` | 265 | tauri command registry (per-domain handlers in `commands/*.rs`) |
 
 Backend dirs (current): `assistant/ browser/ commands/ diagnostics/ state/ stt/ swarm/ usage/` + `lib.rs main.rs secrets.rs update_service.rs`. `swarm/`+`usage/` added in the v0.7.0 cost-cockpit/edit-swarm arc. The entire `sftp/ sync/ bootstrap/ edit/ tunnel/ transport/ bridge/ rcon/ profile/` set is gone (pure-assistant rip), plus `local_fs.rs path_guard.rs` and the `remote_state`/`sync_snapshot` state caches.
