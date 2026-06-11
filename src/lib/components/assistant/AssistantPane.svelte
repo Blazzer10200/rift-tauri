@@ -717,7 +717,7 @@
      uniform 28px that made every turn float equally. Rail-spans-turn still
      carries assistant grouping; no divider line. */
   .messages > :global(.bubble[data-role="user"]:not(:first-child)) {
-    margin-top: 12px;
+    margin-top: 18px;
   }
 
   .pane-empty {
