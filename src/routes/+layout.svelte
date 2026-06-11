@@ -8,6 +8,8 @@
   import { workspace } from "$lib/state/workspace.svelte";
   import { accessibility } from "$lib/state/accessibility.svelte";
   import SplashOverlay from "$lib/components/SplashOverlay.svelte";
+  import ContextMenuHost from "$lib/components/shell/ContextMenuHost.svelte";
+  import { handleGlobalContextMenu } from "$lib/state/contextMenu.svelte";
 
   let { children } = $props();
   // sessionStorage is per-window-instance (cleared on close), so prod cold-
@@ -26,7 +28,11 @@
   });
 </script>
 
+<svelte:document oncontextmenu={handleGlobalContextMenu} />
+
 {@render children()}
+
+<ContextMenuHost />
 
 {#if !splashDone}
   <SplashOverlay onComplete={() => (splashDone = true)} />

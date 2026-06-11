@@ -91,9 +91,16 @@
       use:tooltip={m.tagline}
       onmousedown={(e) => { e.preventDefault(); onPickModel(m); }}
     >
-      <span class="rift-menu-row-t model-row-name" class:limited={m.limited}>{m.label} {m.version}</span>
-      {#if m.limited}<span class="model-badge">Until Jun 22</span>{/if}
-      {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
+      <span class="rift-menu-row-body">
+        <span class="model-row-top">
+          <span class="rift-menu-row-t model-row-name" class:limited={m.limited}>{m.label} {m.version}</span>
+          {#if m.limited}<span class="model-badge">Until Jun 22</span>{/if}
+        </span>
+        <span class="model-row-sub">
+          <span class="model-blurb">{m.blurb}</span>
+          {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
+        </span>
+      </span>
       {#if m.id === assistant.effectiveModel}
         <Check size={14} class="rift-menu-row-chk" />
       {:else}
@@ -206,12 +213,24 @@
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  /* Model row — name + muted suffix on one line, number shortcut / ✓ trailing. */
+  /* Model row — two lines: name + badge up top, blurb + right-aligned ctx
+     below, number shortcut / ✓ trailing. */
   .model-row { align-items: center; gap: 8px; }
+  .model-row .model-row-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
   .model-row .model-row-name { flex: 0 0 auto; }
+  .model-row .model-row-sub {
+    display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  }
+  .model-blurb {
+    flex: 1; min-width: 0;
+    font-size: 10.5px; color: var(--fg-subtle);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .model-row:hover .model-blurb, .model-row.active .model-blurb { color: var(--fg-muted); }
   .model-suffix {
-    font-size: 11px; font-weight: 500; color: var(--fg-subtle);
-    margin-right: auto;
+    flex-shrink: 0;
+    font-size: 10px; font-weight: 600; color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .model-suffix.legacy { color: var(--fg-faint); }

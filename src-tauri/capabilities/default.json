@@ -28,6 +28,7 @@
       "identifier": "opener:allow-reveal-item-in-dir",
       "allow": [{ "path": "**" }]
     },
-    "dialog:default"
+    "dialog:default",
+    "clipboard-manager:allow-read-text"
   ]
 }

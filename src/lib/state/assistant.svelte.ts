@@ -428,7 +428,7 @@ class AssistantStore {
     if (/\[1m\]/i.test(model)) return 1_000_000;
     const id = model.toLowerCase();
     if (id.includes("haiku")) return 200_000;
-    if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id)) return 1_000_000;
+    if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
     return 200_000;
   }
   ctxTokensFor(tab: TabState | null): number {
