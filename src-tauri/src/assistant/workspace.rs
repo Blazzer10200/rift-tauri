@@ -79,14 +79,11 @@ pub(crate) fn current_root() -> Option<PathBuf> {
 
 /// Enumerate file paths under the active workspace root, relative to the root,
 /// forward-slash normalized. Drives the composer's `@`-file mention picker.
-/// Skip set mirrors `mcp_server::SKIP_DIRS`. Capped at `MENTION_LIMIT` files.
+/// Capped at `MENTION_LIMIT` files.
 #[tauri::command]
 pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
     const MENTION_LIMIT: usize = 4000;
-    const SKIP_DIRS: &[&str] = &[
-        "node_modules", ".git", ".svelte-kit", "build", "dist", "target",
-        ".rift-trail", ".rift-tmp", "__pycache__", ".venv", ".next",
-    ];
+    use super::mcp_server::SKIP_DIRS;
     let cfg = load_config();
     let root = match cfg.current_root {
         Some(p) => p,

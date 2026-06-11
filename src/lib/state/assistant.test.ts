@@ -9,6 +9,7 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
+import { invoke } from "@tauri-apps/api/core";
 import { assistant } from "./assistant.svelte.js";
 import { recordTurnUsage } from "./assistant/streaming.js";
 
@@ -358,6 +359,72 @@ describe("assistant.telemetry.snapshot() — byModel rollup", () => {
     ] as any;
     const s = assistant.telemetry.snapshot();
     expect(s.summary.staleCacheTurns).toBe(1);
+  });
+});
+
+describe("tab switching never kills background streams (multi-tab regression)", () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return {
+          id: args.id, title: "t", model: "sonnet", createdAt: 1, updatedAt: 1,
+          messages: [], cliSessionId: args.id,
+        };
+      }
+      if (cmd === "assistant_list_conversations") return assistant.conversations;
+      return undefined;
+    });
+  });
+
+  const userMsg = () => ({
+    id: crypto.randomUUID(),
+    role: "user" as const,
+    blocks: [{ type: "text" as const, text: "hi" }],
+  });
+
+  it("switching away to a saved (not-yet-open) tab leaves the streaming tab running", async () => {
+    const tabA = assistant.ensureTab("bg-away-a", "bg-away-a") as any;
+    tabA.messages = [userMsg()];
+    tabA.streaming = true;
+    tabA.streamingMsgId = "m-live";
+    assistant.conversations = [
+      { id: "bg-away-a", title: "a", model: "sonnet", createdAt: 1, updatedAt: 1 },
+      { id: "bg-away-b", title: "b", model: "sonnet", createdAt: 1, updatedAt: 1 },
+    ] as any;
+    assistant.openTabs = ["bg-away-a"];
+    assistant.currentConvoId = "bg-away-a";
+
+    await assistant.openTab("bg-away-b");
+
+    expect(assistant.currentConvoId).toBe("bg-away-b");
+    expect(tabA.streaming).toBe(true);
+    expect(tabA.streamingMsgId).toBe("m-live");
+    expect(invokeMock).not.toHaveBeenCalledWith("assistant_stop", expect.anything());
+  });
+
+  it("switching back to a live streaming tab pointer-switches without disk reload", async () => {
+    const tabA = assistant.ensureTab("bg-back-a", "bg-back-a") as any;
+    const liveMsgs = [userMsg(), { id: "m-stream", role: "assistant", blocks: [{ type: "text", text: "partial…" }] }];
+    tabA.messages = liveMsgs;
+    tabA.streaming = true;
+    tabA.streamingMsgId = "m-stream";
+    assistant.ensureTab("bg-back-b", "bg-back-b");
+    assistant.conversations = [
+      { id: "bg-back-a", title: "a", model: "sonnet", createdAt: 1, updatedAt: 1 },
+    ] as any;
+    assistant.openTabs = ["bg-back-a", "bg-back-b"];
+    assistant.currentConvoId = "bg-back-b";
+
+    await assistant.openTab("bg-back-a");
+
+    expect(assistant.currentConvoId).toBe("bg-back-a");
+    expect(invokeMock).not.toHaveBeenCalledWith("assistant_load_conversation", expect.anything());
+    expect(invokeMock).not.toHaveBeenCalledWith("assistant_stop", expect.anything());
+    expect(tabA.streaming).toBe(true);
+    expect(tabA.messages.map((m: any) => m.id)).toEqual(liveMsgs.map((m) => m.id));
   });
 });
 

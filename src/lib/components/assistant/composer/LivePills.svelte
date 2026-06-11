@@ -52,16 +52,9 @@
     return streaming ? assistant.telemetry.snapshot().summary.outputTokensPerSec : null;
   });
   const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
-  // Toggle the Activity dock: if it's already open ON the activity tab, a
-  // second click closes it; otherwise open + switch to activity (so clicking
-  // from another panel tab focuses activity rather than closing).
+  // Toggle the Activity dock.
   function openActivity() {
-    if (assistant.ui.dockOpen && assistant.ui.panelTab === "activity") {
-      assistant.ui.dockOpen = false;
-      return;
-    }
-    assistant.ui.panelTab = "activity";
-    assistant.ui.dockOpen = true;
+    assistant.ui.dockOpen = !assistant.ui.dockOpen;
   }
 </script>
 

@@ -112,9 +112,6 @@
      space at desktop widths. Consumed by AssistantPane/Composer/StatusHub. */
   --chat-col-max: min(900px, calc(100% - 32px));
 
-  /* legacy alias kept for SyncPage.svelte — rest of shadcn aliases removed */
-  --muted:               var(--bg-elev-2);
-
   color-scheme: dark;
 }
 

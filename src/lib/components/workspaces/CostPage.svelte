@@ -40,15 +40,7 @@
   function cleanPath(p: string | null | undefined): string {
     return p ? p.replace(/^\\\\\?\\/, "").split(/[\\/]/).pop() || p : "—";
   }
-  function modelHue(name: string): number {
-    if (name.includes("haiku")) return 175;
-    if (name.includes("opus")) return 280;
-    if (name.includes("sonnet")) return 225;
-    return 163;
-  }
-  function shortModel(id: string): string {
-    return id.replace(/^claude-/, "").replace(/-(\d)-(\d)$/, " $1.$2");
-  }
+  import { modelHue, shortModel } from "./helpers";
 
   const PLANS: { id: BudgetPlan; label: string; sub: string }[] = [
     { id: "pro", label: "Pro", sub: "$20" },

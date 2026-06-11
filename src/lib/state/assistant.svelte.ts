@@ -159,6 +159,9 @@ import {
   copyLastAssistant as sendCopyLastAssistant,
   recallPrompt as sendRecallPrompt,
 } from "./assistant/send";
+// Post-turn health pass — bg-tab completion toasts + once-per-session
+// dead-wait / stale-cache / tool-error warnings.
+import { checkTurnHealth } from "./assistant/healthAlerts";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -406,6 +409,16 @@ class AssistantStore {
    *  Getter-derived so it tracks both `tabs` and `currentConvoId` reactively. */
   get activeTab(): TabState | null {
     return this.currentConvoId ? this.tabs.get(this.currentConvoId) ?? null : null;
+  }
+
+  /** Every tab with an in-flight turn, keyed by convoId — the Harness
+   *  mission-control view reads this instead of reaching into `tabs`. */
+  get liveTabs(): { convoId: string; tab: TabState }[] {
+    const out: { convoId: string; tab: TabState }[] = [];
+    for (const [convoId, tab] of this.tabs) {
+      if (tab.streaming) out.push({ convoId, tab });
+    }
+    return out;
   }
 
   // ── Per-tab UI surface — delegated getters so components read
@@ -690,12 +703,12 @@ class AssistantStore {
   // existing behavior is unchanged. Persisted to localStorage.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
   // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
-  // is retained as a no-op flag for back-compat w/ any remaining slash
-  // command — History is now its own workspace, not an overlay.
+  // is a one-shot request flag: the `/history` slash command sets it and
+  // ChatTabsBar consumes it to open the history drawer.
   // dockOpen defaults true — the activity dock is a permanent surface now (not a
   // toggle-to-peek panel). New/clear no longer force it shut; the Composer
   // affordance still hides it on demand.
-  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, panelTab: "session" as "session" | "activity", dockWidth: loadDockWidth(), diffOpen: false, diffTarget: null as string | null, usageOpen: false });
+  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, dockWidth: loadDockWidth(), diffOpen: false, diffTarget: null as string | null, usageOpen: false });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
@@ -704,8 +717,8 @@ class AssistantStore {
   //     after every save/delete/rename.
   //   - `createdAt` is set when the convo starts, kept stable across saves.
   //   - `openTabs` (v0.4) is the ordered list of convo ids visible as tabs in
-  //     the top tab bar. Tabs share the singleton stream pipeline (mid-stream
-  //     switch = stop stream; concurrent live UI deferred to v0.4.1).
+  //     the top tab bar. Each tab owns its own stream (routed by session_id) —
+  //     switching tabs leaves background turns running.
   currentConvoId = $state<string | null>(null);
   conversations = $state<ConversationMeta[]>([]);
   openTabs = $state<string[]>([]);
@@ -1617,6 +1630,7 @@ class AssistantStore {
     }
     this.scheduleSave(false, convoId);
     this.recordSessionLog();
+    checkTurnHealth(this, tab, convoId);
     this.drainQueue(tab);
   }
 

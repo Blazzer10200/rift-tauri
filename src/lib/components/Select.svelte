@@ -1,5 +1,8 @@
 <script lang="ts">
   import { ChevronDown, Check } from "lucide-svelte";
+  // Portal the popover to <body> so an ancestor card's overflow:hidden /
+  // backdrop-filter containing block can't clip it.
+  import { portal } from "$lib/actions/portal";
 
   type Opt = { value: string; label: string; hint?: string; disabled?: boolean };
 
@@ -26,13 +29,6 @@
   let highlight = $state(-1);
 
   const selected = $derived(options.find((o) => o.value === value));
-
-  // Portal the popover to <body> so an ancestor card's overflow:hidden /
-  // backdrop-filter containing block can't clip it.
-  function portal(node: HTMLElement) {
-    document.body.appendChild(node);
-    return { destroy: () => node.remove() };
-  }
 
   function place() {
     if (!triggerEl) return;

@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle, Gauge, Boxes } from "lucide-svelte";
-  import { assistant } from "../../state/assistant.svelte";
+  import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle, Gauge, Boxes, Square, X } from "lucide-svelte";
+  import { assistant, type TabState } from "../../state/assistant.svelte";
+  import { workspace as appWorkspace } from "../../state/workspace.svelte";
+  import { usage } from "../../state/usage.svelte";
   import CostPage from "./CostPage.svelte";
   import SwarmPage from "./SwarmPage.svelte";
   import { effortToFlag } from "../../state/assistant/helpers";
@@ -68,16 +70,7 @@
   function cleanPath(p: string | null | undefined): string {
     return p ? p.replace(/^\\\\\?\\/, "").split(/[\\/]/).pop() || p : "—";
   }
-  // Per-model hue (app convention: sonnet=blue, opus=purple, haiku=teal).
-  function modelHue(name: string): number {
-    if (name.includes("haiku")) return 175;
-    if (name.includes("opus")) return 280;
-    if (name.includes("sonnet")) return 225;
-    return 163;
-  }
-  function shortModel(id: string): string {
-    return id.replace(/^claude-/, "").replace(/-(\d)-(\d)$/, " $1.$2");
-  }
+  import { modelHue, shortModel } from "./helpers";
 
   const live = $derived(assistant.streaming);
 
@@ -228,6 +221,17 @@
     for (const t of srcTurns) s += t.thinkingTotalMs || 0;
     return s;
   });
+
+  // ── Turn drill-down: clicking a timeline bar opens the per-turn detail cell.
+  //    Index is into srcTurns (timeline rows carry it 1-based as r.i). ──
+  let selectedTurn = $state<number | null>(null);
+  $effect(() => { void view; selectedTurn = null; });
+  const turnDetail = $derived.by(() => {
+    if (selectedTurn == null) return null;
+    const t = srcTurns[selectedTurn];
+    if (!t) return null;
+    return { n: selectedTurn + 1, t, u: t.resultUsage || t.envelopeUsage };
+  });
   const resolvedModelId = $derived.by(() => {
     for (let i = srcTurns.length - 1; i >= 0; i--) if (srcTurns[i].modelId) return srcTurns[i].modelId;
     return null;
@@ -242,6 +246,60 @@
     { k: "out",    v: lt?.output },
     { k: "cached", v: lt ? lt.cacheRead + lt.cacheCreate : null },
   ]);
+
+  // ── Plan limits (same data as the CLI's /usage) in the live hero — context
+  //    answers "how full is this conversation", these answer "how much plan
+  //    runway is left". Fetched once on mount; backend caches ≤5min. ──
+  const planRows = $derived.by(() => {
+    const rl = usage.rateLimits;
+    if (!rl) return [];
+    const zone = (u: number) => (u < 60 ? "ok" : u < 85 ? "warn" : "hot");
+    const reset = (iso: string | null) =>
+      iso ? ` · resets ${new Date(iso).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "";
+    const rows: { k: string; pct: number; zone: string; tip: string }[] = [];
+    if (rl.fiveHour) rows.push({ k: "5h window", pct: Math.round(rl.fiveHour.utilization), zone: zone(rl.fiveHour.utilization), tip: `Plan usage — 5-hour window${reset(rl.fiveHour.resetsAt)}` });
+    if (rl.sevenDay) rows.push({ k: "weekly", pct: Math.round(rl.sevenDay.utilization), zone: zone(rl.sevenDay.utilization), tip: `Plan usage — 7-day window${reset(rl.sevenDay.resetsAt)}` });
+    return rows;
+  });
+
+  // ── Live ops (mission control): every tab with an in-flight turn. The 1s
+  //    nowTick re-poll also refreshes the non-reactive currentTurnRecord reads
+  //    (tool list / durations) without per-delta invalidation. ──
+  const liveOps = $derived.by(() => {
+    void nowTick;
+    return assistant.liveTabs.map(({ convoId, tab }) => {
+      const tools = tab.currentTurnRecord?.toolUses ?? [];
+      return {
+        convoId,
+        isActive: tab === assistant.activeTab,
+        title: liveTitle(tab),
+        model: tab.lastModelId ?? tab.modelOverride ?? assistant.model,
+        label: tab.activity.currentLabel ?? "Streaming…",
+        startedAt: tab.activity.turnStartedAt,
+        ctxPct: Math.min(100, assistant.ctxPctFor(tab)),
+        queued: tab.queue.length,
+        thinking: tab.activeThinkingIndex !== null,
+        toolCount: tools.length,
+        tools: tools.slice(-7).map((t) => ({
+          id: t.id,
+          name: t.name.replace(/^mcp__rift__/, ""),
+          durationMs: t.durationMs ?? Date.now() - t.startedAt,
+          done: t.completedAt != null,
+          isError: t.isError === true,
+        })),
+      };
+    });
+  });
+  function liveTitle(tab: TabState): string {
+    if (tab.convoTitle) return tab.convoTitle;
+    const first = tab.messages.find((m) => m.role === "user");
+    const text = first?.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim().replace(/\s+/g, " ") ?? "";
+    return text ? (text.length > 44 ? text.slice(0, 44) + "…" : text) : "New chat";
+  }
+  function jumpToTab(convoId: string) {
+    appWorkspace.setActive("chat");
+    void assistant.openTab(convoId);
+  }
 
   // ── Timing / reliability / config rows ──
   const timeRows = $derived([
@@ -360,7 +418,8 @@
       log = [...log, e.payload].slice(-LOG_CAP);
     }).then((u) => { if (alive) un = u; else u(); })
       .catch((err) => console.warn("diag listen failed", err));
-    void assistant.refreshAuth().catch(() => {});
+    void assistant.refreshAuth().catch(() => {})
+      .then(() => usage.refreshRateLimits(assistant.auth?.cliVersion ?? null));
     void refreshSessions();
     // 1s heartbeat so the live session's uptime/duration advances while idle;
     // reads nowTick only in the live branch of `uptime`, so archived views
@@ -545,6 +604,44 @@
         <div class="kpi"><span class="kpi-v" class:nodata={sum.avgTtfpMs == null}>{fmtMs(sum.avgTtfpMs)}</span><span class="kpi-k">avg first paint</span></div>
       </section>
 
+      {#if isLive && liveOps.length > 0}
+        <!-- Mission control: every tab with an in-flight turn. Background tabs
+             keep streaming across switches — stop / jump per row. -->
+        <section class="cell full lo">
+          <div class="cell-head">
+            <span class="cell-title"><span class="term-led on"></span>Active sessions</span>
+            <span class="cell-meta">{liveOps.length} turn{liveOps.length === 1 ? "" : "s"} in flight</span>
+          </div>
+          <div class="lo-list">
+            {#each liveOps as s (s.convoId)}
+              <div class="lo-row">
+                <div class="lo-main">
+                  <span class="lo-dot" style="--mH:{modelHue(s.model)}"></span>
+                  <button class="lo-title" type="button" onclick={() => jumpToTab(s.convoId)} use:tooltip={"Open this chat"}>
+                    <span class="lo-title-t">{s.title}</span>
+                    {#if s.isActive}<span class="lo-cur">current</span>{/if}
+                  </button>
+                  <span class="lo-act mono">{s.label}</span>
+                  <span class="lo-stat mono">{fmtDur(s.startedAt != null ? Math.max(0, nowTick - s.startedAt) : null)}</span>
+                  <span class="lo-stat mono">{s.ctxPct.toFixed(0)}% ctx</span>
+                  <span class="lo-stat mono">{s.toolCount} tool{s.toolCount === 1 ? "" : "s"}</span>
+                  {#if s.queued > 0}<span class="lo-stat mono">{s.queued} queued</span>{/if}
+                  <button class="ic-btn lo-stop" type="button" onclick={() => void assistant.stop(s.convoId)} use:tooltip={"Stop this turn"}><Square size={12} /></button>
+                </div>
+                {#if s.thinking || s.tools.length > 0}
+                  <div class="lo-tools">
+                    {#each s.tools as t (t.id)}
+                      <span class="lo-tool" class:live={!t.done} class:err={t.isError}>{t.name}<span class="lo-tool-d">{fmtMs(t.durationMs)}</span></span>
+                    {/each}
+                    {#if s.thinking}<span class="lo-tool think">thinking…</span>{/if}
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        </section>
+      {/if}
+
       {#if isLive}
         <!-- HERO: context ring (active conversation) -->
         <section class="cell hero" class:waiting={!lt}>
@@ -592,6 +689,17 @@
                   <span class="hero-last-stat"><span class="hero-last-v mono">{fmtTok(b.v)}</span><span class="hero-last-k">{b.k}</span></span>
                 {/each}
               </div>
+            </div>
+          {/if}
+          {#if planRows.length > 0}
+            <div class="plan-strip">
+              {#each planRows as p (p.k)}
+                <div class="ps-row" use:tooltip={p.tip}>
+                  <span class="ps-k">{p.k}</span>
+                  <span class="ps-track"><span class="ps-fill" data-zone={p.zone} style="width:{p.pct}%"></span></span>
+                  <span class="ps-v mono">{p.pct}%</span>
+                </div>
+              {/each}
             </div>
           {/if}
         </section>
@@ -656,7 +764,7 @@
       <section class="cell full tl">
         <div class="cell-head">
           <span class="cell-title">Turn timeline</span>
-          <span class="cell-meta">{turnViz.rows.length} turns · bar = duration · ◦ reasoning</span>
+          <span class="cell-meta">{turnViz.rows.length} turns · bar = duration · ◦ reasoning · click for detail</span>
         </div>
         {#if turnViz.rows.length === 0}
           <div class="empty tl-empty">No turns yet — send a message and each turn lands here as a bar.</div>
@@ -664,17 +772,56 @@
           <div class="tl-track">
             <span class="tl-grid"></span>
             {#each turnViz.rows.slice(-80) as r (r.i)}
-              <span class="tl-bar" data-end={r.end}
+              <button class="tl-bar tl-btn" type="button" data-end={r.end} class:sel={selectedTurn === r.i - 1}
+                aria-label={`Turn ${r.i} details`}
                 style="height:{Math.max(7, (r.dur ? r.dur / turnViz.maxDur : 0) * 100)}%"
+                onclick={() => (selectedTurn = selectedTurn === r.i - 1 ? null : r.i - 1)}
                 use:tooltip={`Turn ${r.i} · ${shortModel(r.model)}  ·  ${fmtUsd(r.cost)}\nttfp ${fmtMs(r.ttfp)} · dur ${fmtMs(r.dur)} · ${r.out} out\n${r.tools} tool${r.tools === 1 ? "" : "s"}${r.think ? ` · reasoned ${fmtMs(r.thinkMs)}` : ""}${r.deadWait && r.deadWait > 4000 ? ` · dead-wait ${fmtMs(r.deadWait)}` : ""}${r.end !== "success" ? `  · ${r.end}` : ""}`}>
                 {#if r.think}<span class="tl-think"></span>{/if}
                 {#if r.deadWait && r.deadWait > 8000}<span class="tl-dead"></span>{/if}
-              </span>
+              </button>
             {/each}
           </div>
           <div class="tl-axis"><span>oldest</span><span>latest →</span></div>
         {/if}
       </section>
+
+      {#if turnDetail}
+        <!-- Turn drill-down — opened from a timeline bar. Works for live AND
+             archived sessions (reads off srcTurns). -->
+        <section class="cell full td">
+          <div class="cell-head">
+            <span class="cell-title">Turn {turnDetail.n}
+              <span class="td-model mono">{shortModel(turnDetail.t.modelId || turnDetail.t.model)}</span>
+              {#if turnDetail.t.endKind && turnDetail.t.endKind !== "success"}<span class="td-end mono" data-end={turnDetail.t.endKind}>{turnDetail.t.endKind}</span>{/if}
+            </span>
+            <button class="ic-btn" type="button" onclick={() => (selectedTurn = null)} use:tooltip={"Close"}><X size={14} /></button>
+          </div>
+          {#if turnDetail.t.promptPreview}<div class="td-prompt mono">“{turnDetail.t.promptPreview}”</div>{/if}
+          <div class="stat6 td-stats">
+            <div class="mini"><div class="mini-v mono">{fmtUsd(turnDetail.t.costUsd)}</div><div class="mini-k">cost</div></div>
+            <div class="mini"><div class="mini-v mono">{fmtMs(turnDetail.t.doneAt != null ? turnDetail.t.doneAt - turnDetail.t.ts : null)}</div><div class="mini-k">duration</div></div>
+            <div class="mini"><div class="mini-v mono">{fmtMs(turnDetail.t.firstPaintAt != null ? turnDetail.t.firstPaintAt - turnDetail.t.ts : null)}</div><div class="mini-k">first paint</div></div>
+            <div class="mini"><div class="mini-v mono">{fmtMs(turnDetail.t.thinkingTotalMs || null)}</div><div class="mini-k">reasoning</div></div>
+            <div class="mini"><div class="mini-v mono">{fmtTok(turnDetail.u?.output ?? null)}</div><div class="mini-k">output tok</div></div>
+            <div class="mini"><div class="mini-v mono">{fmtTok(turnDetail.u?.cacheRead ?? null)}</div><div class="mini-k">cache read</div></div>
+          </div>
+          <div class="td-sec">{turnDetail.t.toolUses.length} tool call{turnDetail.t.toolUses.length === 1 ? "" : "s"}</div>
+          {#if turnDetail.t.toolUses.length === 0}
+            <div class="empty">No tools this turn — pure model response.</div>
+          {:else}
+            <div class="td-tools">
+              {#each turnDetail.t.toolUses as t (t.id)}
+                <div class="td-tool">
+                  <span class="td-tool-n mono" class:err={t.isError === true}>{t.name.replace(/^mcp__rift__/, "")}</span>
+                  <span class="td-tool-p mono">{t.inputPreview ?? ""}</span>
+                  <span class="td-tool-d mono">{fmtMs(t.durationMs)}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {/if}
 
       <!-- tool activity bars -->
       <section class="cell wide">
@@ -1054,6 +1201,53 @@
   .term-empty { display: flex; align-items: center; gap: 6px; padding: 14px 0; }
   .caret { width: 7px; height: 14px; background: var(--accent); display: inline-block; animation: blink 1.1s steps(2) infinite; border-radius: 1px; }
 
+  /* ── Active sessions (mission control) ── */
+  .lo-list { display: flex; flex-direction: column; gap: 2px; }
+  .lo-row { display: flex; flex-direction: column; gap: 7px; padding: 8px 4px; border-bottom: 1px solid color-mix(in oklab, var(--border) 50%, transparent); }
+  .lo-row:last-child { border-bottom: 0; }
+  .lo-main { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .lo-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: oklch(0.74 0.16 var(--mH)); box-shadow: 0 0 8px oklch(0.74 0.16 var(--mH) / 0.6); animation: pulse 2s ease-in-out infinite; }
+  .lo-title { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--fg); font: inherit; font-size: var(--fs-xs); font-weight: 650; text-align: left; }
+  .lo-title:hover .lo-title-t { color: var(--accent); }
+  .lo-title-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color var(--dur-fast) var(--ease-soft); }
+  .lo-cur { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent); background: var(--accent-soft); padding: 1px 7px; border-radius: 999px; flex: none; }
+  .lo-act { font-size: 11px; color: var(--accent); flex: none; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lo-stat { font-size: 11px; color: var(--fg-subtle); flex: none; }
+  .lo-stop:hover { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 40%, var(--border)); }
+  .lo-tools { display: flex; flex-wrap: wrap; gap: 6px; padding-left: 20px; }
+  .lo-tool { display: inline-flex; align-items: baseline; gap: 6px; font-family: var(--font-mono); font-size: 10.5px; padding: 2px 9px; border-radius: 6px; background: var(--bg-inset); border: 1px solid var(--border); color: var(--fg-muted); }
+  .lo-tool.live { border-color: var(--ghost-border); background: var(--accent-soft); color: var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+  .lo-tool.err { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); }
+  .lo-tool.think { color: oklch(0.88 0.12 var(--accent-h)); font-style: italic; }
+  .lo-tool-d { color: var(--fg-faint); font-size: 9.5px; }
+
+  /* ── Plan-limit strip (live hero footer) ── */
+  .plan-strip { display: flex; flex-direction: column; gap: 5px; width: 100%; max-width: 340px; margin-top: 8px; padding-top: 9px; border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); z-index: 1; }
+  .ps-row { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 9px; }
+  .ps-k { font-size: 10px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+  .ps-track { height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; position: relative; }
+  .ps-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-page);
+    background: linear-gradient(90deg, oklch(0.62 0.15 var(--accent-h)), oklch(0.78 0.16 var(--accent-h))); }
+  .ps-fill[data-zone="warn"] { background: linear-gradient(90deg, color-mix(in oklab, var(--warn) 75%, black), var(--warn)); }
+  .ps-fill[data-zone="hot"] { background: linear-gradient(90deg, color-mix(in oklab, var(--danger) 75%, black), var(--danger)); }
+  .ps-v { font-size: 10.5px; color: var(--fg-subtle); text-align: right; }
+
+  /* ── Turn drill-down ── */
+  .tl-bar.sel { outline: 2px solid color-mix(in oklab, var(--accent) 70%, transparent); outline-offset: 1px; }
+  .td-model { font-size: 11px; color: var(--fg-subtle); font-weight: 500; }
+  .td-end { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; padding: 1px 8px; border-radius: 999px; color: var(--fg-faint); background: var(--bg-inset); }
+  .td-end[data-end="error"] { color: var(--danger); background: color-mix(in oklab, var(--danger) 14%, transparent); }
+  .td-prompt { font-size: var(--fs-xs); color: var(--fg-muted); margin: -2px 0 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-stats { margin-bottom: 11px; }
+  .td-sec { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); margin-bottom: 6px; }
+  .td-tools { display: flex; flex-direction: column; max-height: 230px; overflow-y: auto; }
+  .td-tool { display: grid; grid-template-columns: 150px 1fr 70px; align-items: baseline; gap: 12px; padding: 4px 0; font-size: 11px; border-bottom: 1px solid color-mix(in oklab, var(--border) 45%, transparent); }
+  .td-tool:last-child { border-bottom: 0; }
+  .td-tool-n { color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-tool-n.err { color: var(--danger); }
+  .td-tool-p { color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-tool-d { color: var(--fg-subtle); text-align: right; }
+
   /* ── Keyframes ── */
   @keyframes flow { to { transform: translateX(200%); } }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
@@ -1070,6 +1264,6 @@
   }
   @media (prefers-reduced-motion: reduce) {
     .dhead-spark, .chip.livechip :global(svg), .term-led.on, .bar-fill.flow::after, .caret, .sesh-led.beat,
-    .dash[data-live="true"] .dhead-spark, .bento > .cell, .bento > .det-toggle { animation: none; }
+    .dash[data-live="true"] .dhead-spark, .bento > .cell, .bento > .det-toggle, .lo-dot, .lo-tool.live { animation: none; }
   }
 </style>

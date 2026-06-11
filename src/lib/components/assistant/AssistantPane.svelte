@@ -6,7 +6,7 @@
   import MessageBubble from "./MessageBubble.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
-  import SidePanel from "./SidePanel.svelte";
+  import ActivityPanel from "./ActivityPanel.svelte";
   import SessionDiff from "./SessionDiff.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -468,7 +468,9 @@
     aria-hidden={!dockOpen}
     style={dockOpen ? `width:${assistant.ui.dockWidth}px` : ""}
   >
-    <SidePanel {tabId} />
+    <div class="side-panel">
+      <ActivityPanel {tabId} />
+    </div>
   </aside>
 </div>
 
@@ -479,6 +481,7 @@
     display: flex; flex-direction: row;
     min-height: 0;
   }
+  .side-panel { width: 100%; flex: 1; display: flex; flex-direction: column; min-height: 0; }
   .pane-dock-slot {
     width: 0;
     overflow: hidden;
