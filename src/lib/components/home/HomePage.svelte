@@ -2,11 +2,13 @@
   import {
     MessageSquare, Sparkles, Send, FolderOpen, Folder, FolderGit2,
     GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check, Loader2,
+    Gauge, Lightbulb,
   } from "lucide-svelte";
   import { onMount } from "svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { cliUpdate } from "$lib/state/cliUpdate.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
+  import { usage, type LimitWindow } from "$lib/state/usage.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
   // Claude Code CLI update — the dashboard is the launch surface, so kick the
@@ -14,7 +16,11 @@
   const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
   const cliUpdAvail = $derived(cliUpdate.availableAny(assistant.auth?.installs, cliInstalled));
   const cliSummary = $derived(cliUpdate.summary(assistant.auth?.installs));
-  onMount(() => { void cliUpdate.maybeCheck(); });
+  onMount(() => {
+    void cliUpdate.maybeCheck();
+    if (!usage.loaded && !usage.loading) void usage.refresh();
+    void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+  });
   // Keep the update command method-aware (npm vs native).
   $effect(() => { cliUpdate.setMethod(assistant.auth?.installMethod ?? null); });
 
@@ -101,26 +107,69 @@
     void assistant.openTab(id);
     workspace.setActive("chat");
   }
+
+  // ── Usage tiles — read off the shared usage store ──
+  function fmtUsd(n: number | null | undefined): string {
+    if (n == null) return "—";
+    return "$" + (n < 1 ? n.toFixed(3) : n.toFixed(2));
+  }
+  // Backend daily rows roll up in local time, keyed `YYYY-MM-DD`.
+  function todayKey(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+  const todayCost = $derived(usage.daily.find((r) => r.date === todayKey())?.cost ?? 0);
+
+  const b = $derived(usage.budget);
+  const budgetPct = $derived(b && b.limit > 0 ? Math.min(100, (b.spent / b.limit) * 100) : 0);
+  const cadenceLabel = $derived(b?.cadence === "monthly" ? "month" : b?.cadence === "weekly" ? "week" : "day");
+
+  const gauges = $derived.by(() => {
+    const rl = usage.rateLimits;
+    if (!rl) return [] as { k: string; w: LimitWindow }[];
+    const out: { k: string; w: LimitWindow }[] = [];
+    if (rl.fiveHour) out.push({ k: "5-hour window", w: rl.fiveHour });
+    if (rl.sevenDay) out.push({ k: "Weekly · all models", w: rl.sevenDay });
+    return out;
+  });
+  function zone(u: number): string {
+    return u < 60 ? "ok" : u < 85 ? "warn" : "hot";
+  }
+  function fmtReset(iso: string | null): string {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    const mins = Math.max(0, Math.round((d.getTime() - Date.now()) / 60000));
+    if (mins < 60) return `resets in ${mins}m`;
+    const h = Math.floor(mins / 60);
+    if (h < 48) return `resets in ${h}h ${mins % 60}m`;
+    return `resets ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
+  }
+
+  const last14 = $derived(usage.daily.slice(-14));
+  const sparkMax = $derived(Math.max(0.0001, ...last14.map((d) => d.cost)));
+  function fmtDay(date: string): string {
+    const d = new Date(date + "T00:00:00");
+    return isNaN(d.getTime()) ? date : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  const insights = $derived(usage.insights.slice(0, 3));
 </script>
 
 <div class="hf">
   <div class="hf-inner">
     <!-- Hero -->
-    <section class="hf-hero">
+    <header class="hf-hero">
       <div class="hf-hero-l">
         <div class="hf-eyebrow"><span class="led"></span>{greet}</div>
         {#if hasRoot}
           <h1 class="hf-title">What's next for <span class="emer">{leafName(root!)}</span>?</h1>
-          <p class="hf-sub">Claude reads, greps, and edits across your workspace in place.</p>
         {:else}
           <h1 class="hf-title">Open a project to begin</h1>
-          <p class="hf-sub">Point Claude at any folder on your disk — it reads, greps, and edits in place.</p>
         {/if}
       </div>
-      <div class="hf-hero-actions">
-        <button class="hf-btn primary" onclick={() => go()}><Sparkles size={15} />New chat</button>
-      </div>
-    </section>
+      <button class="hf-btn primary" onclick={() => go()}><Sparkles size={15} />New chat</button>
+    </header>
 
     <!-- Ask Claude -->
     <button class="dash-ask" onclick={() => go()}>
@@ -163,10 +212,11 @@
       </div>
     {/if}
 
-    <div class="hf-grid">
-      <!-- Workspace -->
-      <div class="hf-card">
-        <div class="l3-card-head">
+    <!-- Mission-control bento -->
+    <div class="bento">
+      <!-- Workspace — tall left tile -->
+      <div class="tile t-ws">
+        <div class="tile-head">
           <span class="ci"><FolderGit2 size={14} /></span>
           <span class="t">Workspace</span>
           {#if branch}<span class="badge info"><GitBranch size={11} /> {branch}</span>{/if}
@@ -212,16 +262,63 @@
         {/if}
       </div>
 
-      <!-- Jump back in -->
-      <div class="hf-card">
-        <div class="l3-card-head">
+      <!-- KPI minis -->
+      <div class="tile t-kpi t-today">
+        <span class="kpi-v mono">{fmtUsd(todayCost)}</span>
+        <span class="kpi-k">today</span>
+      </div>
+      <div class="tile t-kpi t-month">
+        <span class="kpi-v mono">{fmtUsd(b?.spent)}</span>
+        <span class="kpi-k">this {cadenceLabel}</span>
+        {#if b && b.limit > 0}
+          <div class="kpi-track" use:tooltip={`${fmtUsd(b.spent)} / ${fmtUsd(b.limit)} · ${budgetPct.toFixed(0)}% of ${cadenceLabel}`}>
+            <span class="kpi-fill" data-zone={zone(budgetPct)} style="width:{Math.max(2, budgetPct)}%"></span>
+          </div>
+        {/if}
+      </div>
+      <div class="tile t-kpi t-burn">
+        <span class="kpi-v mono">{fmtUsd(b?.burnPerDay)}<span class="kpi-u">/day</span></span>
+        <span class="kpi-k">burn rate</span>
+      </div>
+
+      <!-- 14-day sparkline -->
+      <div class="tile t-spark">
+        <div class="tile-head slim">
+          <span class="ci"><Gauge size={13} /></span>
+          <span class="t">Usage</span>
+          {#if usage.rateLimits}<span class="live mono">live</span>{/if}
+          <button class="tile-link" type="button" onclick={() => workspace.openHarness("cost")}>
+            Cost cockpit<ChevronRight size={12} />
+          </button>
+        </div>
+        {#if last14.length > 0}
+          <div class="spark-bars">
+            {#each last14 as d (d.date)}
+              <span
+                class="spark-bar"
+                style="height:{Math.max(6, (d.cost / sparkMax) * 100)}%"
+                use:tooltip={`${fmtDay(d.date)} · ${fmtUsd(d.cost)} · ${d.turns} turns`}
+              ></span>
+            {/each}
+          </div>
+        {:else}
+          <div class="tile-empty">No usage logged yet</div>
+        {/if}
+      </div>
+
+      <!-- Jump back in — wide tile -->
+      <div class="tile t-jump">
+        <div class="tile-head">
           <span class="ci"><MessageSquare size={14} /></span>
           <span class="t">Jump back in</span>
           <span class="badge ok">{recentChats.length} saved</span>
+          <button class="tile-link" type="button" onclick={() => go()}>
+            <History size={12} />Browse all<ChevronRight size={12} />
+          </button>
         </div>
         <div class="hf-chats">
           {#if recentChats.length === 0}
-            <div class="hf-empty">No conversations yet — start one from the composer.</div>
+            <div class="tile-empty">No conversations yet — start one from the composer.</div>
           {:else}
             {#each recentChats as c (c.id)}
               <button class="hf-chat" onclick={() => resume(c.id)} use:tooltip={`${c.title} · ${c.model}`}>
@@ -238,39 +335,84 @@
             {/each}
           {/if}
         </div>
-        <button class="hf-allchats" onclick={() => go()}>
-          <History size={13} />Browse all conversations<ChevronRight size={13} />
-        </button>
+      </div>
+
+      <!-- Right rail: plan limits + insight -->
+      <div class="t-side">
+        <div class="tile t-limits">
+          <div class="tile-head slim">
+            <span class="ci"><Gauge size={13} /></span>
+            <span class="t">Plan limits</span>
+            {#if usage.rateLimits}<span class="live mono">claude.ai</span>{/if}
+          </div>
+          {#if gauges.length > 0}
+            <div class="limit-rows">
+              {#each gauges as g (g.k)}
+                <div class="limit-row">
+                  <div class="limit-top">
+                    <span class="lk">{g.k}</span>
+                    <span class="lp mono" data-zone={zone(g.w.utilization)}>{g.w.utilization.toFixed(0)}<span class="lp-u">%</span></span>
+                  </div>
+                  <div class="kpi-track"><span class="kpi-fill" data-zone={zone(g.w.utilization)} style="width:{Math.min(100, Math.max(2, g.w.utilization))}%"></span></div>
+                  <div class="limit-reset mono">{fmtReset(g.w.resetsAt)}</div>
+                </div>
+              {/each}
+            </div>
+          {:else if usage.rateLimitsError}
+            <div class="tile-empty" use:tooltip={usage.rateLimitsError}>Plan limits unavailable</div>
+          {:else}
+            <div class="tile-empty">Checking plan limits…</div>
+          {/if}
+        </div>
+
+        {#if insights.length > 0}
+          <div class="tile t-insight">
+            <div class="tile-head slim">
+              <span class="ci"><Lightbulb size={13} /></span>
+              <span class="t">Rift noticed</span>
+              <span class="live mono">{insights.length} pattern{insights.length === 1 ? "" : "s"}</span>
+            </div>
+            <div class="in-list">
+              {#each insights as i (i.id)}
+                <div class="in-item" data-sev={i.severity}>
+                  <span class="in-dot"></span>
+                  <div class="in-body">
+                    <div class="in-title">{i.title}</div>
+                    <div class="in-detail">{i.detail}</div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
       </div>
     </div>
   </div>
 </div>
 
 <style>
-  .hf { height: 100%; overflow: hidden; padding: 32px 40px; }
-  .hf-inner { height: 100%; max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; min-height: 0; }
+  .hf { height: 100%; overflow: hidden; padding: 26px 36px 28px; }
+  .hf-inner { height: 100%; max-width: 1560px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; min-height: 0; }
 
   .hf-hero { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; flex: none; }
   .hf-hero-l { min-width: 0; }
-  .hf-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 11px; }
+  .hf-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 8px; }
   .hf-eyebrow .led { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 60%, transparent); }
   @media (prefers-reduced-motion: no-preference) {
     .hf-eyebrow .led { animation: led-breathe 2.6s ease-in-out infinite; }
   }
   @keyframes led-breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-  .hf-title { margin: 2px 0 0; font-size: 33px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.08; color: var(--fg); }
+  .hf-title { margin: 0; font-size: 27px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.1; color: var(--fg); }
   .hf-title .emer { color: var(--accent); }
-  .hf-sub { margin: 12px 0 0; color: var(--fg-muted); font-size: var(--fs-lg); }
 
-  .hf-hero-actions { display: flex; align-items: center; gap: 9px; flex-shrink: 0; }
-  .hf-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 16px; border-radius: var(--radius-lg); font: inherit; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg); transition: background 140ms, border-color 140ms; }
+  .hf-btn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 15px; border-radius: var(--radius-lg); font: inherit; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg); transition: background 140ms, border-color 140ms; flex-shrink: 0; }
   .hf-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
   .hf-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 4px 16px -4px color-mix(in oklab, var(--accent) 55%, transparent); }
   .hf-btn.primary:hover { background: var(--accent-hover); }
 
   .dash-ask {
     flex: none; display: flex; align-items: center; gap: 13px; width: 100%; text-align: left;
-    height: 62px; padding: 0 14px 0 16px;
+    height: 58px; padding: 0 14px 0 16px;
     background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: 16px;
     cursor: text; transition: border-color 140ms ease, box-shadow 140ms ease;
   }
@@ -339,16 +481,104 @@
   }
   .dash-cli .dc-x:hover { color: var(--fg); background: var(--surface-hover); }
 
-  .hf-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; }
-  .hf-card { min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 24px 24px 18px; border-radius: 18px; background: var(--surface); border: 1px solid var(--border); box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent); }
-  .l3-card-head { display: flex; align-items: center; gap: 9px; flex: none; margin-bottom: 20px; }
-  .l3-card-head .ci { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
-  .l3-card-head .t { font-weight: 650; font-size: var(--fs-md); color: var(--fg); }
-  .l3-card-head .badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
-  .badge.ok { background: var(--ok-soft); color: var(--ok); }
-  .badge.info { background: var(--info-soft); color: var(--info); }
+  /* ── Bento grid ── */
+  .bento {
+    flex: 1; min-height: 0; display: grid; gap: 14px;
+    grid-template-columns: 1.05fr 0.62fr 0.62fr 0.62fr 1.15fr;
+    grid-template-rows: 118px minmax(0, 1fr);
+    grid-template-areas:
+      "ws today month burn spark"
+      "ws jump  jump  jump side";
+  }
+  .tile {
+    min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column;
+    padding: 16px 18px 14px; border-radius: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent);
+  }
+  .t-ws { grid-area: ws; padding: 20px 20px 16px; }
+  .t-jump { grid-area: jump; padding: 20px 20px 14px; }
+  .t-spark { grid-area: spark; }
+  .t-today { grid-area: today; }
+  .t-month { grid-area: month; }
+  .t-burn { grid-area: burn; }
+  .t-side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+  .t-limits { flex: none; }
+  .t-insight { flex: 1; min-height: 0; }
 
-  /* Workspace current-folder block */
+  /* Narrow windows: page scrolls, tiles stack — KPIs stay a row, rail goes side-by-side. */
+  @media (max-width: 1240px) {
+    .hf { overflow-y: auto; }
+    .hf-inner { height: auto; min-height: 100%; }
+    .bento {
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: 104px 150px auto auto;
+      grid-template-areas:
+        "today month burn"
+        "spark spark spark"
+        "ws    jump  jump"
+        "side  side  side";
+    }
+    .t-ws, .t-jump { min-height: 280px; }
+    .t-side { flex-direction: row; }
+    .t-side > .tile { flex: 1; min-width: 0; }
+  }
+
+  .tile-head { display: flex; align-items: center; gap: 9px; flex: none; margin-bottom: 16px; min-width: 0; }
+  .tile-head.slim { margin-bottom: 10px; }
+  .tile-head .ci { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex-shrink: 0; }
+  .tile-head.slim .ci { width: 22px; height: 22px; border-radius: 7px; }
+  .tile-head .t { font-weight: 650; font-size: var(--fs-md); color: var(--fg); white-space: nowrap; }
+  .tile-head.slim .t { font-size: var(--fs-sm); }
+  .tile-head .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px; flex-shrink: 0; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.info { margin-left: auto; background: var(--info-soft); color: var(--info); }
+  .tile-head .live { font-size: 9.5px; color: var(--fg-subtle); flex-shrink: 0; }
+  .tile-link { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; padding: 3px 2px; border: 0; background: transparent; color: var(--fg-muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; white-space: nowrap; transition: color 130ms, gap 130ms; }
+  .tile-link:hover { color: var(--accent); gap: 7px; }
+  .tile-empty { font-size: var(--fs-xs); color: var(--fg-subtle); padding: 2px 0; }
+
+  /* KPI minis */
+  .t-kpi { justify-content: center; gap: 4px; }
+  .kpi-v { font-size: clamp(17px, 1.5vw, 23px); font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .kpi-u { font-size: 11px; font-weight: 600; color: var(--fg-subtle); }
+  .kpi-k { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); }
+  .kpi-track { height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; position: relative; margin-top: 6px; }
+  .kpi-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-page);
+    background: linear-gradient(90deg, oklch(0.62 0.15 var(--accent-h)), oklch(0.78 0.16 var(--accent-h))); }
+  .kpi-fill[data-zone="warn"] { background: linear-gradient(90deg, color-mix(in oklab, var(--warn) 80%, black), var(--warn)); }
+  .kpi-fill[data-zone="hot"] { background: linear-gradient(90deg, color-mix(in oklab, var(--danger) 80%, black), var(--danger)); }
+
+  /* Sparkline tile */
+  .spark-bars { flex: 1; min-height: 0; display: flex; align-items: flex-end; gap: 3px; }
+  .spark-bar { flex: 1; min-width: 4px; border-radius: 3px 3px 1px 1px; cursor: default;
+    background: linear-gradient(180deg, oklch(0.72 0.15 var(--accent-h) / 0.85), oklch(0.55 0.12 var(--accent-h) / 0.55));
+    transition: filter 120ms ease; }
+  .spark-bar:hover { filter: brightness(1.25); }
+
+  /* Plan-limit gauges */
+  .limit-rows { display: flex; flex-direction: column; gap: 9px; }
+  .limit-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .limit-row .kpi-track { margin-top: 0; height: 7px; }
+  .limit-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .lk { font-size: var(--fs-xs); color: var(--fg-muted); }
+  .lp { font-size: 14px; font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
+  .lp[data-zone="warn"] { color: var(--warn); }
+  .lp[data-zone="hot"] { color: var(--danger); }
+  .lp-u { font-size: 10px; font-weight: 600; color: var(--fg-subtle); margin-left: 1px; }
+  .limit-reset { font-size: 10px; color: var(--fg-faint); letter-spacing: 0.02em; }
+
+  /* Insight tile */
+  .in-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 13px; }
+  .in-item { display: flex; gap: 10px; min-width: 0; }
+  .in-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--info); flex-shrink: 0; margin-top: 5px; }
+  .in-item[data-sev="good"] .in-dot { background: var(--ok); }
+  .in-item[data-sev="warn"] .in-dot { background: var(--warn); }
+  .in-body { min-width: 0; }
+  .in-title { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); margin-bottom: 3px; }
+  .in-detail { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.45; }
+
+  /* Workspace tile internals */
   .ws-current { display: flex; align-items: center; gap: 12px; flex: none; margin-bottom: 14px; }
   .ws-cur-ic { width: 38px; height: 38px; border-radius: 11px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
   .ws-cur-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -370,8 +600,8 @@
   .ws-open-t { font-size: var(--fs-md); font-weight: 600; }
   .ws-open-s { font-size: var(--fs-xs); color: var(--fg-muted); }
 
-  .hf-divider { height: 1px; background: var(--border); margin: 18px 0 0; flex: none; }
-  .hf-feed-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); margin: 16px 2px 4px; flex: none; }
+  .hf-divider { height: 1px; background: var(--border); margin: 16px 0 0; flex: none; }
+  .hf-feed-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); margin: 14px 2px 4px; flex: none; }
 
   .ws-recents { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
   .ws-recent-row { display: flex; align-items: stretch; gap: 2px; border-radius: 10px; }
@@ -385,10 +615,9 @@
   .ws-recent-row:hover .ws-recent-x { opacity: 1; }
   .ws-recent-x:hover { color: var(--danger); }
 
-  .hf-empty { color: var(--fg-subtle); font-size: var(--fs-sm); padding: 8px 6px; }
-
-  .hf-chats { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 2px; overflow: auto; }
-  .hf-chat { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 11px; padding: 11px 8px; border-radius: 9px; background: transparent; border: 0; width: 100%; text-align: left; font: inherit; cursor: pointer; transition: background 120ms; }
+  /* Jump back in — wide tile, two-column rows */
+  .hf-chats { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: min-content; gap: 2px 14px; overflow: auto; align-content: start; }
+  .hf-chat { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 11px; padding: 10px 8px; border-radius: 9px; background: transparent; border: 0; width: 100%; text-align: left; font: inherit; cursor: pointer; transition: background 120ms; min-width: 0; }
   .hf-chat:hover { background: var(--surface-hover); }
   .hf-chat-ico { width: 28px; height: 28px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; }
   .hf-chat-body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -397,8 +626,4 @@
   .hf-chat-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
   .hf-chat-model { font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; color: var(--fg-muted); padding: 1px 7px; border-radius: 999px; background: var(--bg-elev-2); border: 1px solid var(--border); }
   .hf-chat-w { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); }
-
-  .hf-allchats { display: inline-flex; align-items: center; gap: 8px; align-self: flex-start; margin-top: 16px; padding: 6px 2px; flex: none; border: 0; background: transparent; color: var(--fg-muted); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; transition: color 130ms, gap 130ms; }
-  .hf-allchats:hover { color: var(--accent); gap: 10px; }
-  .hf-allchats :global(svg:first-child) { color: var(--accent); }
 </style>

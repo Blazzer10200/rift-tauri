@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { Copy, Check, Trash2, Radio, Cpu, GitBranch, Zap, Clock, RotateCw, Layers, History as HistoryIcon, MessageCircle, Gauge, Boxes, Square, X } from "lucide-svelte";
   import { assistant, type TabState } from "../../state/assistant.svelte";
@@ -78,6 +78,15 @@
   // (idea-phase-plan §1e). Kept here (not a 5th workspace) to preserve the
   // 4-workspace IA invariant.
   let subtab = $state<"telemetry" | "cost" | "swarm">("telemetry");
+
+  // Deep-link from Home's usage card: consume the one-shot subtab request.
+  $effect(() => {
+    const req = appWorkspace.targetHarnessSubtab;
+    if (req) {
+      subtab = req;
+      untrack(() => appWorkspace.clearHarnessSubtab());
+    }
+  });
 
   // ── Active-conversation context (the hero gauge is intentionally per-tab:
   //    it measures how full the CURRENT conversation is, not the session).
