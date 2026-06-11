@@ -102,6 +102,11 @@ describe("assistant.ctxWindowFor()", () => {
     expect(assistant.ctxWindowFor({ lastModelId: "claude-opus-4-7", lastTurnUsage: null } as any)).toBe(1_000_000);
   });
 
+  it("returns 1M for fable 5", () => {
+    const tab = { lastModelId: "claude-fable-5", lastTurnUsage: null } as any;
+    expect(assistant.ctxWindowFor(tab)).toBe(1_000_000);
+  });
+
   it("returns 1M for any model with the [1m] suffix", () => {
     const tab = { lastModelId: "claude-opus-4-7[1m]", lastTurnUsage: null } as any;
     expect(assistant.ctxWindowFor(tab)).toBe(1_000_000);

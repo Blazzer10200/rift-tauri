@@ -53,6 +53,9 @@ tauri-plugin-opener = "2"
 # Native OS folder picker — Assistant uses it for "Open Folder…" so the user
 # can point Rift at any local project, decoupled from Sync's server folders.
 tauri-plugin-dialog = "2"
+# Clipboard read for the custom right-click Paste (navigator.clipboard.readText
+# is permission-gated in WebView2; the plugin is the deterministic path).
+tauri-plugin-clipboard-manager = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 

@@ -25,6 +25,7 @@ export type ModelOpt = {
   label: string;
   version: string;
   tagline: string;
+  blurb: string;     // short second-line description in the model menu row
   ctx: string;
   suffix: string;    // muted inline tag beside the name (e.g. "1M context")
   legacy: boolean;   // previous-generation — grouped under a "Legacy" subhead
@@ -49,11 +50,11 @@ export type ModelOpt = {
 // Fable 5 is a limited run — row exists only while fableAvailable() (through
 // Jun 22 2026); after sunset the list collapses back to the standard four.
 export const MODEL_OPTIONS: ModelOpt[] = [
-  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: "ultra" as ThinkingEffort, fastMode: false }] : []),
-  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "ultra", fastMode: true  },
-  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "smart", fastMode: false },
-  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: "none",  fastMode: false },
-  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: "ultra", fastMode: true  },
+  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: "ultra" as ThinkingEffort, fastMode: false }] : []),
+  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "ultra", fastMode: true  },
+  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: "smart", fastMode: false },
+  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: "none",  fastMode: false },
+  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: "ultra", fastMode: true  },
 ];
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;

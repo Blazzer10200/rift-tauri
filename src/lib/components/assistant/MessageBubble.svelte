@@ -16,8 +16,24 @@
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
+  import { contextMenu, copyText, type CtxMenuItem } from "../../state/contextMenu.svelte";
 
   let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
+
+  function onBubbleContext(e: MouseEvent) {
+    if (e.defaultPrevented) return;
+    const target = e.target as Element | null;
+    // Fields, links, and code blocks get richer items from the global fallback.
+    if (target?.closest("a[href], input, textarea, pre")) return;
+    const sel = window.getSelection();
+    const selText = sel && !sel.isCollapsed ? sel.toString() : "";
+    const items: CtxMenuItem[] = [];
+    if (selText) items.push({ label: "Copy", icon: Copy, action: () => copyText(selText) });
+    if (plainText) items.push({ label: "Copy message", icon: Copy, action: () => copy() });
+    if (!items.length) return;
+    e.preventDefault();
+    contextMenu.open(e.clientX, e.clientY, items);
+  }
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -307,7 +323,8 @@
     {/if}
   </div>
 {:else}
-<div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null}>
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null} oncontextmenu={onBubbleContext}>
   <div class="turn-rail" aria-hidden="true"></div>
   <div class="avatar" class:avatar-user={isUser} aria-hidden="true">
     {#if isUser}<User size={13} />{:else}<Sparkles size={13} />{/if}

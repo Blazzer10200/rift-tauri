@@ -116,6 +116,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(std::sync::Arc::new(update_service::UpdateService::new()))
