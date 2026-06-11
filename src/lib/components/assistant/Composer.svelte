@@ -1258,34 +1258,16 @@
     </div>
   </div>
 
-  <div class="composer-disclaimer">
-    <span class="cd-tag">Beta</span>
-    AI can make mistakes — review changes before relying on them.
-  </div>
 </div>
 
 <style>
   .composer-wrap {
     position: relative;
-    padding: 10px 18px 14px;
-    max-width: var(--chat-col-max);
+    padding: 6px 18px 10px;
+    max-width: min(var(--chat-col-max), 880px);
     margin: 0 auto;
     width: 100%;
     box-sizing: border-box;
-  }
-  /* Persistent beta + AI-disclaimer line under the input. Quiet, single-line. */
-  .composer-disclaimer {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    margin-top: 7px;
-    font-size: 10px; line-height: 1.2; color: var(--fg-faint);
-    text-align: center;
-  }
-  .composer-disclaimer .cd-tag {
-    padding: 1px 6px; border-radius: 999px;
-    font-size: 9px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
-    color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 12%, transparent);
-    border: 1px solid color-mix(in oklab, var(--accent) 28%, transparent);
   }
   /* Composer chrome is emerald-only — the ring/divider/send/ripple no longer
      tint by model. Every accent inside reads from this single source; model
@@ -1350,7 +1332,7 @@
     backdrop-filter: blur(14px) saturate(135%);
     -webkit-backdrop-filter: blur(14px) saturate(135%);
     border: 1px solid color-mix(in oklch, var(--border) 90%, transparent);
-    border-radius: 18px;
+    border-radius: 14px;
     box-shadow:
       0 10px 28px -10px oklch(0 0 0 / 0.45),
       inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
@@ -1384,7 +1366,7 @@
     content: "";
     position: absolute;
     inset: 0;
-    border-radius: 18px;
+    border-radius: 14px;
     border: 1.5px solid color-mix(in oklch, var(--model-color) 65%, transparent);
     box-shadow:
       0 0 12px color-mix(in oklch, var(--model-color) 32%, transparent),

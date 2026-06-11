@@ -211,6 +211,10 @@ export class TabState {
    *  (its saved model scopes to this tab) and on explicit pick; null = follow
    *  the global default. Opening a chat no longer rewrites the new-chat default. */
   modelOverride = $state<ModelSel | null>(null);
+  /** #30: cwd the CLI session is pinned to (resumed convos keep their original
+   *  folder). Hydrated on disk-load; null = no pin known / fresh tab. The tabs
+   *  bar badges the active tab when this differs from workspace.current. */
+  sessionCwd = $state<string | null>(null);
   promptHistory = $state<string[]>([]);
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
    *  already streaming; onDone() pops the next one. Per-tab so a queued msg

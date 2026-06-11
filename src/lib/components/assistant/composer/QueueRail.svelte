@@ -119,7 +119,7 @@
   function onChipDragEnd() { dragId = null; }
 </script>
 
-{#if streaming || queue.length > 0}
+{#if queue.length > 0 || (streaming && (steerFlash || draft.trim().length > 0))}
   <div class="pending-rail" class:working={streaming && queue.length === 0} transition:fly={{ y: 14, duration: 260, easing: quintOut }}>
     {#key pulseKey}
       <span class="rail-sweep" aria-hidden="true"></span>

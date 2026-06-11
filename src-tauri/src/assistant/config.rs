@@ -318,17 +318,21 @@ pub(super) fn is_valid_permission_mode(v: &str) -> bool {
 
 /// The Assistant trust levels Rift exposes. Gates the local git tools in the
 /// MCP server (`git_local.rs`): `readonly` → status/diff/log; `standard` →
-/// adds pull/commit/push; `full` → extends git write access.
+/// adds pull/commit/push. (CR-UX: the dead third level `full` — functionally
+/// identical to `standard` — was collapsed 2026-06-11.)
 pub(super) fn is_valid_trust_level(v: &str) -> bool {
-    matches!(v, "readonly" | "standard" | "full")
+    matches!(v, "readonly" | "standard")
 }
 
-/// Resolve the effective trust level. Explicit setting wins; when unset → `readonly`.
+/// Resolve the effective trust level. Explicit setting wins; when unset →
+/// `readonly`. Persisted configs from the ternary era map `full` → `standard`
+/// (read-side migration — no disk rewrite needed).
 pub(super) fn effective_trust_level(trust_level: &Option<String>) -> String {
-    trust_level
-        .clone()
-        .filter(|v| is_valid_trust_level(v))
-        .unwrap_or_else(|| "readonly".into())
+    match trust_level.as_deref() {
+        Some("full") | Some("standard") => "standard".into(),
+        Some("readonly") => "readonly".into(),
+        _ => "readonly".into(),
+    }
 }
 
 #[tauri::command]

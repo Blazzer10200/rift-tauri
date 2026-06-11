@@ -40,6 +40,7 @@ export type SaveableTab = {
  *  when re-hydrating from disk. Structural; must remain a subset of TabState. */
 export type LoadableTab = SaveableTab & {
   tasks: { id: string; content: string; status: "pending" | "in_progress" | "completed" }[];
+  sessionCwd: string | null;
   lastError: string | null;
   totalCostUsd: number | null;
   resetUsage(): void;
@@ -260,6 +261,12 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // #32: hydrate the ctx meter from the saved final-turn usage — without
     // this a restored convo shows a blank gauge until the next turn lands.
     tab.lastTurnUsage = convo.lastTurnUsage ?? null;
+    // #30: resumed sessions stay pinned to their original folder — fetch the
+    // pin so the tabs bar can badge a cwd that differs from the workspace.
+    tab.sessionCwd = null;
+    void invoke<string | null>("assistant_session_cwd", { id: cliSid })
+      .then((cwd) => { tab.sessionCwd = cwd ?? null; })
+      .catch((e) => console.warn("assistant_session_cwd lookup failed:", e));
     tab.promptHistory = (convo.messages ?? [])
       .filter((m) => m.role === "user")
       .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())

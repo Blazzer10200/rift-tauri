@@ -374,15 +374,14 @@ fn trust_level() -> &'static str {
     // mid-session without a restart.
     static LEVEL: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
     LEVEL.get_or_init(|| match std::env::var("RIFT_TRUST_LEVEL").as_deref() {
-        Ok("full") => "full",
-        Ok("standard") => "standard",
+        // CR-UX: legacy `full` (pre-collapse) maps to `standard`, not the floor.
+        Ok("full") | Ok("standard") => "standard",
         _ => "readonly",
     })
 }
 
 fn trust_rank(level: &str) -> u8 {
     match level {
-        "full" => 2,
         "standard" => 1,
         _ => 0,
     }
@@ -1065,7 +1064,9 @@ mod tests {
 
     #[test]
     fn trust_rank_orders_and_floors() {
-        assert!(trust_rank("full") > trust_rank("standard"));
+        // CR-UX: "full" is no longer a rank of its own — trust_level() maps the
+        // legacy env value to "standard" before ranking; raw "full" floors.
+        assert_eq!(trust_rank("full"), trust_rank("readonly"));
         assert!(trust_rank("standard") > trust_rank("readonly"));
         // Unknown / unset must floor to readonly (0), never escalate.
         assert_eq!(trust_rank("garbage"), trust_rank("readonly"));

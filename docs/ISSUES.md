@@ -17,9 +17,9 @@
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
 | #17 | Two-repo split → collapse | T3 | 🔒 blocked |
-| CR-UX | Trust segment binary-vs-ternary enum | T3 | 👤 needs your call |
-| #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | 🚧 open |
-| #30 | Workspace chip vs CLI cwd possible drift | T3 | 🚧 open |
+| CR-UX | Trust segment binary-vs-ternary enum | T3 | ✅ resolved in-tree |
+| #29 | CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime | T4 | ✅ resolved in-tree (🧪 prod verify) |
+| #30 | Workspace chip vs CLI cwd possible drift | T3 | ✅ resolved in-tree |
 | #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
 | #32 | Ctx meter blank on restored conversations | T4 | ✅ resolved in-tree |
 | #14 | No release CI — local-only path | — | 🗄 closed |
@@ -47,7 +47,7 @@
 - **Scope:** not a single bug — tracks the stated goal of an app-wide consistency pass. The Settings page is the densest control surface and the natural starting point.
 - **Goal:** every visible control is wired, every section is necessary, terminology + styling consistent, navigation intuitive.
 - **Progress (cont.105, 2026-06-10):** audit findings **#1-#6 + #8-#10 SHIPPED** and live-verified — Steps-rail `cd`-strip (`shellLabel` + vitest), slash menu → palette design language, empty-dock auto-collapse, scroll bottom padding, **per-chat model scoping** (`TabState.modelOverride` + `effectiveModel`; opening an old chat no longer rewrites the new-chat default or toasts), jump-back-in snippets + model chips (backend `last_snippet` on `ConversationMeta`), KPI zero-state unify + `opus· high` space fix, user-turn inset card, insight severity stripes. Audit's "Jump back in doesn't navigate" suspicion: **not a bug** (verified live).
-- **Remaining from the audit:** #7 cost-chart sparse-data polish · #11 rich inline diff (design pass) · #12 tool-chip expand affordance · #13 tab strip into titlebar (lowest priority) · message hover actions discoverability. (`/history` fixed + live-verified 2026-06-11 — drawer opens on single Enter via store request flag.) Then the per-page Settings checklist.
+- **Remaining from the audit:** #7 cost-chart sparse-data polish · #11 rich inline diff (design pass) · #13 tab strip into titlebar (lowest priority) · message hover actions discoverability. (#12 tool-chip expand affordance ✅ 2026-06-11 — chevron brightened `fg-muted`→accent-on-hover + nudge + Expand/Collapse tooltip on chip-head.) (`/history` fixed + live-verified 2026-06-11 — drawer opens on single Enter via store request flag.) Then the per-page Settings checklist.
 - **Input:** [ui-audit-2026-06-09.md](design/ui-audit-2026-06-09.md) — live CDP audit of v0.8.14, 13 ranked findings (refinement tier, not redesign).
 
 #### 31. Deferred remainder from the 2026-06-11 dead-code/debug audit
@@ -66,20 +66,23 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Symptom:** every release requires manual sync between the private source repo and the public releases repo. Forks/contributors can't test the update path against the real source.
 - **Fix sketch:** collapse to a single repo **if the source repo goes public** — a small change in `release.ps1` + the update source constant. Blocked on that decision.
 
-#### CR-UX. Trust segment binary-vs-ternary enum (👤 needs your sign-off)
+#### CR-UX. Trust segment binary-vs-ternary enum (✅ resolved in-tree 2026-06-11 — user signed off in-session)
 
-- **Symptom:** the trust segment is binary (Read-only/Standard) over a **ternary** backend enum (`readonly/standard/full`). Once clicked, `trust_level` pins and can't return to the derived state via UI; "full" (rank 2) is functionally identical to "standard" — only `"standard"` is gated for git writes.
-- **Recommendation:** collapse to a true 2-level enum (drop the dead "full"). Touches `mcp_server::trust_rank`/`trust_level`, `mod.rs::is_valid_trust_level`/`effective_trust_level`/git-write gate, serde, + persisted-config migration.
-- **Held for sign-off:** security-relevant + persisted-config change.
+- **Fix shipped in-tree:** dead `full` dropped. `is_valid_trust_level` now `readonly|standard` (new writes of "full" rejected); `effective_trust_level` migrates persisted ternary-era `full` → `standard` read-side (no disk rewrite); `mcp_server::trust_level()` maps legacy `RIFT_TRUST_LEVEL=full` env → `standard`; `trust_rank` 2-level; turn.rs git-write allowlist gate `== "standard"`; frontend `TrustLevel` type narrowed. Tests updated both sides of the gate.
+- **Permission-bar live-verify still rides on a trust-standard throwaway repo** (unchanged — see Permission block).
 
-#### 30. Workspace chip shows current workspace, not the resumed tab's cwd (🚧 open — UX gap, root cause known)
+#### 30. Workspace chip shows current workspace, not the resumed tab's cwd (✅ resolved in-tree 2026-06-11)
+
+- **Fix shipped in-tree:** new `assistant_session_cwd` command (convo_store.rs) exposes the cwd sidecar; `loadConversation` hydrates `TabState.sessionCwd`; ChatTabsBar shows a warn-tinted `cwd-badge` (folder leaf + full-path tooltip) next to the project chip when the active tab's pinned cwd ≠ `workspace.current` (separator/case-insensitive compare). Block stays until `/git-ship`.
 
 - **Seen 2026-06-11 (cont.110, live CDP):** chips said `resume-project` while real turns read remotion-playground files. **Explained:** the turns resumed an old tab whose session was started under remotion-playground — `load_session_cwd` (convo_store) correctly pins a resumed session to its original cwd; the title-bar chip reflects the *currently selected* workspace only. Per-session cwd persistence working as designed.
 - **The gap:** nothing in the UI tells you a tab is operating in a different folder than the chip shows. Fix sketch: per-tab cwd badge (tabsbar tooltip or composer notice) when `session_cwd != workspace.current`.
 
 ### Tier 4 — LOW / cosmetic
 
-#### 29. CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime (🚧 open)
+#### 29. CSP nonce nullifies `'unsafe-inline'` — inline styles blocked at runtime (✅ resolved in-tree 2026-06-11 — 🧪 needs prod-build verify)
+
+- **Fix shipped in-tree:** the nonce came from **Tauri's asset-CSP rewriter**, not SvelteKit (no `kit.csp` configured). Added `"dangerousDisableAssetCspModification": ["style-src"]` to tauri.conf.json security — style-src keeps the static `'self' 'unsafe-inline'` (now actually effective), script-src nonce hardening untouched. Dev builds never exercised the rewrite, so verify on the next prod build: transitions animate + update progress-bar fills + zero CSP console violations.
 
 - **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `csp` (`style-src 'self' 'unsafe-inline'`). At runtime SvelteKit injects a `nonce-…` into the served CSP.
 - **Symptom (observed v0.8.14, prod CDP):** per CSP spec, **a nonce makes `'unsafe-inline'` be ignored** — so Svelte's dynamically-applied inline styles get blocked. Console spams `Applying inline style violates ... style-src 'self' 'unsafe-inline' 'nonce-…'`. Real impact: Svelte transition styles (fly/fade) and `style="width:{progress}%"` on the update download progress-bar don't apply. **Cosmetic** — download/apply and all clicks still work; animations snap and the progress fill stays empty.
