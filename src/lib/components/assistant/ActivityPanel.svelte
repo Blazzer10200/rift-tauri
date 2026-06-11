@@ -225,6 +225,29 @@
   const showFinished = $derived(finishedAt != null && !streaming);
   onDestroy(() => { if (finishTimer) clearTimeout(finishTimer); });
 
+  // ── Last-turn recap — the idle headline. Answers "what did that turn
+  // accomplish" at a glance before the user digs into the Steps log.
+  const lastTurn = $derived.by(() => {
+    if (streaming) return null;
+    const m = [...messages].reverse().find((x) => x.role === "assistant");
+    if (!m) return null;
+    let ms = 0, tools = 0;
+    const files = new Set<string>();
+    for (const b of m.blocks as Block[]) {
+      if ((b.type === "thinking" || b.type === "tool") && b.durationMs != null) ms += b.durationMs;
+      if (b.type !== "tool") continue;
+      tools++;
+      const name = b.name.replace(/^mcp__rift__/, "");
+      const inp = (b.input ?? {}) as Record<string, unknown>;
+      const fp = typeof inp.file_path === "string" ? inp.file_path
+        : typeof inp.notebook_path === "string" ? (inp.notebook_path as string) : null;
+      if (fp && (name === "Edit" || name === "MultiEdit" || name === "NotebookEdit" || name === "Write")) files.add(fp);
+    }
+    const cost = typeof m.costUsd === "number" ? m.costUsd : null;
+    if (ms === 0 && tools === 0 && cost == null) return null;
+    return { ms, tools, files: files.size, cost };
+  });
+
   // ── Context meter — tokens / window, same source as the composer gauge ──
   const ctxTokens = $derived(assistant.ctxTokensFor(tab));
   const ctxWindow = $derived(assistant.ctxWindowFor(tab));
@@ -412,6 +435,26 @@
       <span>Live work, the plan, files Claude touches, and web sources collect here as the conversation runs.</span>
     </div>
   {:else}
+    <!-- Last-turn recap — idle headline above the log sections ────────────── -->
+    {#if lastTurn && !showFinished}
+      <section class="sect recap" in:fade={{ duration: reducedMotion ? 0 : 160 }}>
+        <header class="sect-head">
+          <CheckCircle2 size={13} class="recap-ic" />
+          <span class="sect-title">Last turn</span>
+        </header>
+        <div class="recap-grid">
+          <div class="rc"><span class="rc-v mono">{fmtDur(lastTurn.ms)}</span><span class="rc-k">duration</span></div>
+          <div class="rc"><span class="rc-v mono">{lastTurn.tools}</span><span class="rc-k">tool{lastTurn.tools === 1 ? "" : "s"}</span></div>
+          {#if lastTurn.files > 0}
+            <div class="rc"><span class="rc-v mono">{lastTurn.files}</span><span class="rc-k">file{lastTurn.files === 1 ? "" : "s"}</span></div>
+          {/if}
+          {#if lastTurn.cost != null}
+            <div class="rc"><span class="rc-v mono">{lastTurn.cost > 0 && lastTurn.cost < 0.01 ? "<$0.01" : `$${lastTurn.cost.toFixed(2)}`}</span><span class="rc-k">cost</span></div>
+          {/if}
+        </div>
+      </section>
+    {/if}
+
     <!-- Plan — TodoWrite objective + live progress (pinned above Steps) ────── -->
     {#if tasks.length > 0}
       <section class="sect plan-card" class:active={taskCounts.active > 0} class:done={taskCounts.active === 0 && taskCounts.done === taskCounts.total}>
@@ -828,4 +871,11 @@
     .now-label { animation: none; }
     :global(.tl-node.act-flash) { animation: none; }
   }
+
+  /* Last-turn recap — compact stat grid capping the idle panel. */
+  .recap :global(.recap-ic) { color: var(--ok, var(--accent)); }
+  .recap-grid { display: flex; gap: 18px; padding: 2px 2px 4px; }
+  .rc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .rc-v { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .rc-k { font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); }
 </style>

@@ -36,7 +36,7 @@ function wsKey(base: string, ws: string | null | undefined): string | null {
 
 export const DOCK_MIN = 260;
 export const DOCK_MAX = 520;
-const DOCK_DEFAULT = 300;
+export const DOCK_DEFAULT = 340;
 
 const PERMISSION_MODES: readonly PermissionMode[] = [
   "default", "acceptEdits", "plan", "auto", "bypassPermissions",

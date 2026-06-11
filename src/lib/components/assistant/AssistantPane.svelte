@@ -10,7 +10,7 @@
   import SessionDiff from "./SessionDiff.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
-  import { DOCK_MIN, DOCK_MAX, saveDockWidth } from "../../state/assistant/helpers";
+  import { DOCK_MIN, DOCK_MAX, DOCK_DEFAULT, saveDockWidth } from "../../state/assistant/helpers";
   let {
     tabId,
     focused,
@@ -101,8 +101,8 @@
   }
   onDestroy(() => _resizeCleanup?.());
   function resetDockWidth() {
-    assistant.ui.dockWidth = 300;
-    saveDockWidth(300);
+    assistant.ui.dockWidth = DOCK_DEFAULT;
+    saveDockWidth(DOCK_DEFAULT);
   }
 
   function onScroll() {
@@ -491,7 +491,7 @@
     flex-shrink: 0;
     border-left: 1px solid var(--border);
   }
-  .pane-dock-slot.open { width: 300px; opacity: 1; }
+  .pane-dock-slot.open { width: 340px; opacity: 1; }
   /* While dragging, kill the width transition so the panel tracks the cursor. */
   .pane-dock-slot.resizing { transition: opacity 180ms ease-out; }
   .pane-dock-slot :global(.side-panel) { flex: 1; min-width: 0; }
