@@ -29,7 +29,7 @@ cont.117 composer slim + issue sweep + CR-UX trust 2-level → v0.8.26 (CI verif
 - **Trust enum is now 2-level** (cont.117) — `full` must stay rejected for new writes but MIGRATE read-side (config + `RIFT_TRUST_LEVEL` env); don't "clean up" the migration arms.
 - **Onboarding gate (cont.55)** · **Effort mapping lockstep** (`effortToFlag` ↔ `turn.rs` ↔ `modelMatrix.ts` + vitest) · **Right-click ownership** (`preventDefault()` or global double-fires).
 - **Accent via `--accent-h`**; tint mixes `in oklab`, never `in oklch`. **Surface tiers:** page 0.142 · card 0.215 · wells 0.178 · field 0.25 · track 0.175. **Spine-node icons stay opaque**.
-- **IA: 4 workspaces** (→ 3 after S3 lands — update this line then), nav in titlebar. **AssistantPane drop handlers on `.pane` outer only**. **Blur-reveal:** `shownCount` only `$state` via rAF loop.
+- **IA: 3 workspaces** (Home · Chat · Settings — Harness cut in S3), nav in titlebar. **AssistantPane drop handlers on `.pane` outer only**. **Blur-reveal:** `shownCount` only `$state` via rAF loop.
 - **Versions lockstep ×3 + Cargo.lock** — only at ship. **v0.8.26 stands.**
 - **`turn.rs::kill_all_session_children` re-export** (sweeps `oneshot::ENHANCE_PIDS`) + **bridge env injection in `write_mcp_config`** — load-bearing.
 - **Pure-helper modules + vitest nets + `assistant.init()` initPromise memo + composer/ children** — don't re-inline.

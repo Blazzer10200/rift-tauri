@@ -13,7 +13,7 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
-| #33 | Compaction tool broken — doesn't work in practice | T1 | 🚧 open |
+| #33 | Compaction tool broken | T1 | 🗄 closed (feature removed in minimal-core strip) |
 | #34 | Session Diff overlay bugs out when a long session's edits pile up | T2 | 🚧 open |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
@@ -31,12 +31,6 @@
 ## 🚧 Open issues
 
 ### Tier 1 — broken feature
-
-#### 33. Compaction tool broken — doesn't work (🚧 open — filed 2026-06-11, NEXT SESSION'S LEAD ITEM)
-
-- **Symptom (user report, v0.8.25/26):** "the compaction tool does not work." No repro detail captured yet — first step is reproduce + capture what "doesn't work" means (button no-op? summarize fails? remint fails? post-compact resume wedged?).
-- **Where:** frontend `src/lib/state/assistant/compaction.ts` (`compactConversation`, remint flow, `forceNextFirstTurn`) + backend `assistant_summarize_session`/`assistant_remint_session` (oneshot.rs) + auto-trigger effect (ctx-pct threshold). Sidecar handoff: `oneshot.rs` copies the cwd/model pins old→new session.
-- **Plan:** `/diagnose` discipline — reproduce w/ a real long convo, instrument the chain (summarize → remint → first-turn dispatch), fix root cause + regression test. Then evaluate improvements (user: "possibly improve on it if needed") — but fix first, improve second.
 
 #### 34. Session Diff ("Changes") overlay bugs out on long-session pile-up (🚧 open — filed 2026-06-11)
 
@@ -71,7 +65,7 @@
 
 Three audits (backend, frontend, orphan files) shipped a sweep this session; these were found but deliberately deferred:
 
-- **Legacy provider commands (✅ resolved in-tree 2026-06-11):** removed the four commands (config.rs + lib.rs registry) and the dead frontend plumbing (`baseUrl`/`providerModel` $state, init getters, `setBaseUrl`/`setProviderModel`) — zero component callers existed; the providers list is the only surface. Config struct fields + first-load migration KEPT so pre-2a configs still migrate.
+- **Legacy provider commands (🗄 superseded 2026-06-12):** the entire custom-provider + compression surface was removed in the minimal-core strip (S6) — nothing left to migrate or sweep.
 - **401-detection duplicated in turn.rs (✅ resolved in-tree 2026-06-11):** extracted `is_auth_rejection()` + `auth_rejection_message()`; both the stdout result-frame and stderr-exit sites now share one detector + one remap (unified on the richer CLI-path message).
 - **Blocking fs reads in async commands (T4):** `load_config()` in `assistant_send` / `read_oauth_token()` in `usage_rate_limits` do sync disk I/O on the tokio executor. Tiny local files — wrap in `spawn_blocking` only if it ever shows up in traces.
 - **Fable sunset sweep (dated):** after Jun 22 (`FABLE_SUNSET_MS = Date.UTC(2026, 5, 23)` in `state/assistant/helpers.ts`), all Fable branches (`fableAvailable()` gates, `fableSunsetNoticed` toast in send.ts, `limited` rows in modelMatrix.ts) become permanently dead — sweep them out.
@@ -118,6 +112,10 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 ---
 
 ## 🗄 Closed — kept for the record
+
+### 33. Compaction tool broken (closed 2026-06-12 — feature removed)
+
+- User report (v0.8.25/26): "the compaction tool does not work." Resolved by **removal, not repair** — the minimal-core strip (S2, buddy-release campaign) deleted the whole compaction subsystem (pipeline, auto-fire, UI, backend summarize/remint). Long chats → Ctrl+T fresh tab; the ≥70% ctx nudge survives with new copy. Legacy boundary pills in old saved conversations still render.
 
 ### 14. No CI — release path local-only (closed by choice)
 
