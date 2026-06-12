@@ -104,7 +104,6 @@ import {
   deleteConversation as persistDelete,
   deleteAllConversations as persistDeleteAll,
 } from "./assistant/persistence";
-import { saveSessionLog, pruneSessionLogs, ingestUsage } from "./assistant/sessionLog";
 // M6 split (2026-05-27): tab lifecycle + split-pane management in
 // `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
 // tabByCliSession) + scroll cache stay on the class; only the lifecycle
@@ -601,36 +600,6 @@ class AssistantStore {
    *  `/diag-clear`. Non-reactive: callers don't render off this, they only
    *  serialize-and-export. */
   telemetry = new SessionTelemetry();
-  /** Debounce handle for session-log persistence (see recordSessionLog). */
-  private sessionLogTimer: ReturnType<typeof setTimeout> | null = null;
-
-  /** Persist the current session's telemetry snapshot to disk (debounced).
-   *  Fired after every completed turn so a crash/HMR reload loses at most the
-   *  in-flight turn. Skips empty sessions so dev hot-reloads don't litter the
-   *  log dir with zero-turn files. `flush=true` writes immediately (window
-   *  close). Best-effort: saveSessionLog swallows IPC errors to a warn. */
-  recordSessionLog(flush = false): void {
-    if (this.telemetry.turns.length === 0) return;
-    const write = () => {
-      this.sessionLogTimer = null;
-      const snap = this.telemetry.snapshot();
-      const payload = {
-        ...snap,
-        model: this.model,
-        workspace: this.workspace.current,
-      };
-      void saveSessionLog(payload);
-      // Mirror finalized turns into the durable SQLite usage store before the
-      // session-log ring buffer can prune them (cost cockpit, §1a).
-      void ingestUsage(payload);
-    };
-    if (this.sessionLogTimer) {
-      clearTimeout(this.sessionLogTimer);
-      this.sessionLogTimer = null;
-    }
-    if (flush) write();
-    else this.sessionLogTimer = setTimeout(write, 1500);
-  }
 
   /** Phase 6 (#37): the value never crosses IPC — only whether one is set. */
   hasApiKey = $state<boolean>(false);
@@ -1011,9 +980,6 @@ class AssistantStore {
     await this.refreshWorkspace();
     await this.restoreTabs();
 
-    // Trim the persisted session-log ring buffer on launch (keep recent 40).
-    void pruneSessionLogs(40);
-
     // Best-effort flush on window close so we don't lose the last turn
     // sitting inside the 700ms scheduleSave debounce. See flushNow() doc.
     // #177: store the handler so destroy() can remove it; anonymous arrow
@@ -1222,7 +1188,7 @@ class AssistantStore {
     return persistBuildRecord(this, convoId, tab);
   }
 
-  flushNow() { persistFlushNow(this); this.recordSessionLog(true); }
+  flushNow() { persistFlushNow(this); }
 
   // M6: relaxed from `private` so the tabs module calls it through the host ref.
   scheduleSave(flush = false, convoId?: string) { persistSchedule(this, flush, convoId); }
@@ -1601,7 +1567,6 @@ class AssistantStore {
       }
     }
     this.scheduleSave(false, convoId);
-    this.recordSessionLog();
     checkTurnHealth(this, tab, convoId);
     this.drainQueue(tab);
   }

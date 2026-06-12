@@ -21,7 +21,6 @@ pub mod git_local;
 pub mod mcp_server;
 pub mod oneshot;
 pub mod permission;
-pub mod session_log;
 pub mod turn;
 pub mod workspace;
 
@@ -57,10 +56,6 @@ pub use oneshot::*;
 pub use workspace::*;
 pub(crate) use workspace::current_root;
 pub use permission::PermissionRegistry;
-// Flatten the session-log commands into `crate::assistant` so the wildcard
-// `pub use crate::assistant::*` in commands/assistant.rs forwards them to the
-// path `invoke_handler!` resolves.
-pub use session_log::*;
 // R8 split (2026-06-09): the live-turn nervous system — session registry
 // (PIDs/stop/steer + `kill_all_session_children`, load-bearing for the
 // Velopack apply), control-response + permission plumbing, and
