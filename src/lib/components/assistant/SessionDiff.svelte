@@ -65,6 +65,15 @@
     }
     return { adds, dels };
   }
+  // #34: completed tool inputs are immutable, so cache header counts by edit
+  // id — without this every stream tick re-diffs EVERY edit while the overlay
+  // is open (groups re-derive off `messages`).
+  const countCache = new Map<string, { adds: number; dels: number }>();
+  function countFor(e: Edit): { adds: number; dels: number } {
+    let c = countCache.get(e.id);
+    if (!c) { c = countDiff(s(e.input.old_string), s(e.input.new_string)); countCache.set(e.id, c); }
+    return c;
+  }
   function baseName(p: string): string {
     const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
     return norm.split("/").pop() ?? norm;
@@ -93,7 +102,7 @@
       let g = map.get(key);
       if (!g) { g = { key, file: e.file, base: baseName(e.file), dir: dirLabel(e.file), lang: langOf(e.file), edits: [], adds: 0, dels: 0, lastTs: 0 }; map.set(key, g); }
       g.edits.push(e);
-      const c = countDiff(s(e.input.old_string), s(e.input.new_string));
+      const c = countFor(e);
       g.adds += c.adds; g.dels += c.dels;
       if (e.ts > g.lastTs) g.lastTs = e.ts;
     }
@@ -101,8 +110,26 @@
   });
   const totals = $derived(groups.reduce((a, g) => ({ files: a.files + 1, adds: a.adds + g.adds, dels: a.dels + g.dels }), { files: 0, adds: 0, dels: 0 }));
 
-  // Per-file collapse — default all open. Set holds the COLLAPSED keys.
+  // Per-file collapse. Set holds the COLLAPSED keys. #34: long sessions start
+  // collapsed — >COLLAPSE_FILE_THRESHOLD files collapses everything, and any
+  // individually huge group collapses regardless — so opening the overlay
+  // never eagerly mounts thousands of diff rows. Seeded once; the user's
+  // clicks are sticky after that. A deep-link target stays open.
+  const COLLAPSE_FILE_THRESHOLD = 8;
+  const COLLAPSE_GROUP_LINES = 400;
   let collapsed = $state<Set<string>>(new Set());
+  let collapseSeeded = false;
+  $effect(() => {
+    if (collapseSeeded || groups.length === 0) return;
+    collapseSeeded = true;
+    const manyFiles = groups.length > COLLAPSE_FILE_THRESHOLD;
+    const init = new Set<string>();
+    for (const g of groups) {
+      if (target && g.base === target) continue;
+      if (manyFiles || g.adds + g.dels > COLLAPSE_GROUP_LINES) init.add(g.key);
+    }
+    if (init.size > 0) collapsed = init;
+  });
   function toggleGroup(key: string) {
     const next = new Set(collapsed);
     if (next.has(key)) next.delete(key); else next.add(key);
@@ -187,7 +214,7 @@
               <div class="dg-body">
                 {#each g.edits as e, ei (e.id)}
                   {#if ei > 0}<div class="dg-rule" aria-hidden="true"></div>{/if}
-                  <EditDiff input={e.input} hideHead />
+                  <EditDiff input={e.input} hideHead maxLines={200} />
                 {/each}
               </div>
             {/if}
@@ -273,6 +300,10 @@
     border-radius: 12px;
     overflow: hidden;
     background: var(--bg-inset);
+    /* #34: skip layout/paint for off-screen groups — a 20-file session no
+       longer pays for every diff row on open. Intrinsic size ≈ header row. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 38px;
   }
   .dg-head {
     display: flex; align-items: center; gap: 8px;

@@ -22,6 +22,7 @@
     compact = false,
     defaultExpanded = false,
     hideHead = false,
+    maxLines = null,
   }: {
     input: Record<string, unknown>;
     compact?: boolean;
@@ -29,6 +30,9 @@
     // Suppress the breadcrumb header + chrome and force the body open. Used by
     // SessionDiff, which renders its own per-file header above stacked bodies.
     hideHead?: boolean;
+    // #34: cap rendered diff rows; the rest hides behind a "Show N more lines"
+    // button. null = unlimited (chat-bubble default).
+    maxLines?: number | null;
   } = $props();
 
   type DiffPair =
@@ -215,6 +219,16 @@
     return out;
   });
 
+  // #34: line cap — render only the first `maxLines` rows until the user asks
+  // for the rest. +24 hysteresis so a diff barely over the cap isn't truncated
+  // for a handful of lines.
+  let showAllLines = $state(false);
+  const lineCapped = $derived(
+    maxLines !== null && !showAllLines && unifiedLines.length > maxLines + 24,
+  );
+  const visibleLines = $derived(lineCapped ? unifiedLines.slice(0, maxLines!) : unifiedLines);
+  const hiddenLineCount = $derived(unifiedLines.length - visibleLines.length);
+
   function toggleExpanded(e: MouseEvent) {
     if (compact) return;
     e.stopPropagation();
@@ -281,7 +295,7 @@
     {/if}
     {#if expanded}
       <div class="diff-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
-        {#each unifiedLines as l, li (li)}
+        {#each visibleLines as l, li (li)}
           {#if l.kind === "meta"}
             <div class="diff-meta" style="--ri: {Math.min(li, 14)}">{l.text}</div>
           {:else if l.kind === "gap"}
@@ -297,6 +311,11 @@
             </div>
           {/if}
         {/each}
+        {#if lineCapped}
+          <button type="button" class="diff-more mono" onclick={(e) => { e.stopPropagation(); showAllLines = true; }}>
+            Show {hiddenLineCount} more line{hiddenLineCount === 1 ? "" : "s"}
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -528,5 +547,22 @@
   .gap-count {
     font-variant-numeric: tabular-nums;
   }
+  /* #34: line-cap reveal button — full-width strip at the truncation point. */
+  .diff-more {
+    display: block;
+    width: 100%;
+    padding: 5px 12px;
+    border: 0;
+    border-top: 1px dashed color-mix(in oklch, var(--border) 70%, transparent);
+    background: var(--bg-elev-2);
+    color: var(--fg-muted);
+    font-size: 10.5px;
+    letter-spacing: 0.03em;
+    text-align: center;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .diff-more:hover { background: var(--surface-hover); color: var(--fg); }
+  .diff-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .mono { font-family: var(--font-mono, monospace); }
 </style>
