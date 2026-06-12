@@ -78,11 +78,6 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # the linked runtime. Bump vpk (`dotnet tool update -g vpk`) and this pin together.
 velopack = "=1.2.0"
 
-# Durable per-turn usage/metrics store (Pillar 2 cost cockpit). `bundled`
-# compiles SQLite from source — no system libsqlite3 dependency on Windows.
-# See src/usage/ + docs/design/idea-phase-plan.md §1 (D1).
-rusqlite = { version = "0.40", features = ["bundled"] }
-
 # Logging
 log = "0.4"
 env_logger = "0.11"
