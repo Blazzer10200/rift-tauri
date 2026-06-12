@@ -2,22 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-12 (cont.118) — Buddy-release campaign PLANNED (no code changes)
+## Session 2026-06-12 (cont.119) — Phase 2 minimal-core strip EXECUTED ✅
 
-User is releasing Rift to friends. Chose **minimal core** scope + ASAP timeline, delegated all cut decisions. This session = research + planning only; working tree has zero code edits.
+All 7 slices of `docs/design/minimal-core-strip.md` shipped as 7 commits on main (`470845b`…`bd1709c`), green gates between each. **Net −7,407 lines across 43 files.** Final pass: svelte-check 0/0 · vitest 122/122 · cargo check clean · cargo test 52/52.
 
-- **Execution brief written: `docs/design/minimal-core-strip.md`** — locked decisions, slice order (S3→S1→S4→S5→S2→S6→S7), exact files/lines/symbols, verification gates, watchpoints. Read it FIRST next session; it is the whole Phase 2 spec.
-- **CUT:** Harness workspace (+ Cost/Swarm sub-tabs) · swarm backend · cost cockpit except plan-limit gauges (`limits.rs` verified independent of UsageDb/store) · session-log subsystem (Harness-only consumers) · **compaction — closes #33 by removal, not repair** · custom providers + compression proxy (first-party only).
-- **KEEP:** speech/dictation, enhance wand, browser dock (`open_browser` depends), API-key override, per-turn cost cap, in-memory `telemetry.turns` (ActivityPanel + healthAlerts).
-- **FIX (Phase 3):** #34 SessionDiff pile-up (sketch in ISSUES).
-- Campaign tasks #1-#5 in Tasks panel: #1 inventory ✅ · #2 strip (pending, brief-driven) · #3 fix #34 · #4 CDP walkthrough + fresh-machine pass · #5 ship + distribute.
+- **Gone:** Harness workspace (3 workspaces now) · `swarm/` · session-log subsystem · SQLite cost cockpit + **rusqlite dep** (usage = `limits.rs` only) · compaction (**#33 closed by removal**; ctx≥70% nudge survives w/ Ctrl+T copy; legacy boundary pills still render) · custom providers + compression proxy (turn.rs `ANTHROPIC_BASE_URL` seam deleted; API-key `--bare` path KEPT).
+- **Home bento** re-balanced to 3 tiles (ws · jump · limits). `usage.svelte.ts` = gauges-only.
+- **Keepers verified intact:** `cleanup_retired_jsonls` · `environment_check` · `usage_rate_limits` · dictation · enhance wand · browser dock · cost cap · `telemetry.turns` · trust-migration arms.
+- Deviation from brief: none material. `send.ts` still passes `priorContextSummary: null` (backend param kept, harmless). Backend tests 93→52 (deleted modules carried their suites).
+- Docs: ISSUES re-indexed (#33 🗄, #31 provider item superseded), project CLAUDE.md hot-files re-measured.
 
 ### RESUME HERE
 
-1. **Execute `docs/design/minimal-core-strip.md`** slice by slice; green gates between (svelte-check + vitest / cargo check + test). Line numbers are 2026-06-12-fresh.
-2. Then Phase 3 (#34 fix) → Phase 4 walkthrough — folds in the carried live-verify list: v0.8.26 composer slim + cwd badge + #29 CSP prod verify + tool-chip hover + trust gating + v0.8.25 dictation items + permission-bar on a trust-standard throwaway repo + Auth-Rec (buddies' logged-out machines close it).
-3. Phase 5 ship: tag-driven CI → install from real feed → smoke → distribute (unsigned — buddies get SmartScreen "More info → Run anyway" note).
-4. Fable sunset sweep stays dated post-Jun 22 (ships to buddies via auto-update).
+1. **Phase 3 — #34 SessionDiff pile-up fix** (`SessionDiff.svelte` 314L + `EditDiff.svelte`): repro w/ synthetic 20-file session FIRST, then collapse groups >N files by default · memoize per-edit diff (header `countDiff` + body currently diff TWICE) · cap rendered lines w/ "show more". Sketch in ISSUES #34.
+2. Phase 4 CDP walkthrough (3 workspaces) + fresh-machine pass — carries: composer slim · cwd badge · #29 CSP prod verify · tool-chip hover · trust gating · v0.8.25 dictation · permission-bar on trust-standard throwaway · Auth-Rec.
+3. Phase 5 ship: bump → CHANGELOG → tag-driven CI → install from real feed → smoke → distribute (unsigned; SmartScreen "More info → Run anyway" note for buddies).
+4. Fable sunset sweep post-Jun 22.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
