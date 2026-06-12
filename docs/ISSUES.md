@@ -14,7 +14,7 @@
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
 | #33 | Compaction tool broken | T1 | 🗄 closed (feature removed in minimal-core strip) |
-| #34 | Session Diff overlay bugs out when a long session's edits pile up | T2 | 🚧 open |
+| #34 | Session Diff overlay bugs out when a long session's edits pile up | T2 | ✅ resolved in-tree (🧪 live-verify in Phase 4 CDP sweep) |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
 | Permission | Allow/Deny round-trip bar | T2 | 🔒 blocked (trust gate) |
 | #4 | App-wide UX consistency + navigability sweep | T3 | 🚧 open |
@@ -32,7 +32,9 @@
 
 ### Tier 1 — broken feature
 
-#### 34. Session Diff ("Changes") overlay bugs out on long-session pile-up (🚧 open — filed 2026-06-11)
+#### 34. Session Diff ("Changes") overlay bugs out on long-session pile-up (✅ resolved in-tree 2026-06-12 — 🧪 live-verify w/ a synthetic 20-file session in the Phase 4 CDP sweep)
+
+- **Fix shipped in-tree (all four sketch items):** (1) header counts memoized per edit id (`countFor` cache — completed tool inputs are immutable; previously every stream tick re-diffed every edit while the overlay was open); (2) groups default-collapsed when >8 files OR a single group exceeds 400 changed lines (seeded once, user clicks sticky, deep-link target stays open); (3) `EditDiff` grew a `maxLines` prop — SessionDiff passes 200; rest hides behind a "Show N more lines" strip (+24 hysteresis); (4) `content-visibility: auto` + `contain-intrinsic-size` on `.dg` groups so off-screen groups skip layout/paint.
 
 - **Where:** [SessionDiff.svelte](../src/lib/components/assistant/SessionDiff.svelte) (314L) + `EditDiff.svelte` it instantiates per edit.
 - **Symptom (user screenshot, 19 files +187/−72):** rows render as empty/clipped strips — file headers cut off mid-paint, content rows collapse to thin bars, some groups show only 1-2 diff lines then a void. Gets worse the more edits accumulate.
