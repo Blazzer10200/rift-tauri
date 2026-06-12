@@ -82,12 +82,6 @@ export async function send(store: AssistantStore, prompt: string) {
   if (!store.workspace.current) {
     store.lastNotice = "No folder open — the assistant can't read or edit files this turn. Open one from the title bar.";
   }
-  // turn.rs falls back to the Anthropic key when the active custom provider has
-  // none saved — warn before that key is sent to a third-party endpoint.
-  const prov = store.activeProvider;
-  if (prov && !prov.hasKey && store.hasApiKey) {
-    store.lastNotice = `Provider "${prov.name}" has no API key saved — your Anthropic key is being used for ${prov.baseUrl}. Add a provider key in Settings if that's not intended.`;
-  }
   // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
   if (!fableSunsetNoticed && store.effectiveModel === "claude-fable-5"
       && Date.now() >= FABLE_SUNSET_MS - 7 * 86_400_000) {

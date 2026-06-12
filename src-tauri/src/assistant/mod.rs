@@ -33,7 +33,7 @@ pub use auth_update::*;
 // `crate::assistant::claude_command()` (stt/swarm callers) path-stable.
 pub use cli_install::ClaudeInstall;
 pub(crate) use cli_install::claude_command;
-// R2 split (2026-06-09): AssistantConfig + provider profiles + config get/set
+// R2 split (2026-06-09): AssistantConfig + config get/set
 // commands + validation helpers in `config.rs`. Glob re-export for the
 // __cmd__ items; helpers stay reachable as `super::X` across the subtree.
 pub use config::*;
@@ -42,7 +42,7 @@ pub use config::*;
 // `convo_store.rs`. Glob re-export for the __cmd__ items + Conversation DTOs
 // + lib.rs's `assistant::cleanup_retired_jsonls`.
 pub use convo_store::*;
-// R5 split (2026-06-09): compression toggle + proxy/host-tool probes in
+// R5 split (2026-06-09): host-tool probes in
 // `env_checks.rs`. Glob re-export (like session_log) so the macro-generated
 // `__cmd__*` items travel with the commands — a named re-export strands them.
 pub use env_checks::*;
