@@ -17,11 +17,17 @@ All 7 slices of `docs/design/minimal-core-strip.md` shipped as 7 commits on main
 - **#34 FIXED + live-verified** (`d5e8c3a`): memoized header counts (countFor cache) · default-collapse >8 files or >400-line group · `EditDiff maxLines` prop (SessionDiff passes 200, "Show N more" strip) · `content-visibility:auto` on `.dg`. CDP synthetic 20-file/200-edit repro: instant open, crisp collapsed headers, 0 errors; 400-line Write capped at 200 rows → reveal works.
 - **CDP sweep of all 3 workspaces green** (dev build): Home 3-tile bento + live gauges · Chat welcome/composer · Settings→Assistant (compaction/providers/compression sections confirmed GONE, API-key + cost guard + 2-level trust intact). New ctx≥70% nudge copy renders; cwd badge fires on mismatch. 0 console errors everywhere. Dev binary killed by PID (11980, path-verified) — prod untouched.
 
+### v0.9.0 SHIPPED + docs cleaned (user-authorized, same session)
+
+- Bumped ×3 + Cargo.lock, CHANGELOG rewritten, **tag `v0.9.0` pushed → tag-driven CI** publishes to rift-releases (run 27448186035).
+- **Docs sweep:** deleted retired design docs (`rift-roadmap` · `idea-phase-plan` · `edit-swarm-safety-layer` · completed `minimal-core-strip` + `scripts/proto/swarm-harness.ps1`); IDEAS.md rewritten w/ pivot note + surviving seeds only; ISSUES stale Harness refs pruned + verification section refreshed; README feature list updated. Kept: 6 docs/ files + 7 design refs (splits ×5, velopack, self-hosted-runner, ui-audit).
+
 ### RESUME HERE
 
-1. **Remaining Phase 4 = user/machine-dependent only:** fresh-machine pass (clean-profile install → onboarding → logged-out sign-in closes Auth-Rec → updater round-trip) · #29 CSP **prod-build** verify · permission-bar on a trust-standard throwaway repo · dictation mic checks.
-2. **Phase 5 ship (READY — needs user go):** `bump.ps1 X.Y.Z` → CHANGELOG → commit → `git tag vX.Y.Z && git push --tags` → CI publishes to rift-releases → install from real feed → smoke → distribute (unsigned; SmartScreen "More info → Run anyway" note for buddies). Suggest 0.9.0 (feature-removal release).
-3. Fable sunset sweep post-Jun 22.
+1. **Verify the shipped build:** prod app auto-updates to v0.9.0 (or install from rift-releases) → smoke: 3 workspaces, a real turn, #29 CSP check (transitions animate, update progress fills, 0 violations).
+2. Fresh-machine pass on a buddy install: onboarding → logged-out sign-in (closes Auth-Rec) → updater round-trip. Permission-bar on a trust-standard throwaway repo.
+3. Distribute (unsigned — SmartScreen "More info → Run anyway" note).
+4. Fable sunset sweep post-Jun 22.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
