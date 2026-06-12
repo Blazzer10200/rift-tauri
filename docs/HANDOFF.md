@@ -2,29 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-11 (cont.117) — Composer slim-down + open-issue sweep → SHIPPED v0.8.26
+## Session 2026-06-12 (cont.118) — Buddy-release campaign PLANNED (no code changes)
 
-**Shipped v0.8.26** (feature `336a422`, release `d61dc62`, tag pushed → CI run 27379596782 queued at handoff — **verify green**). v0.8.25 release CI confirmed green earlier this session. Verified: cargo check clean · trust tests 2/2 · svelte-check 0/0 (4093 files) · vitest 122/122.
+User is releasing Rift to friends. Chose **minimal core** scope + ASAP timeline, delegated all cut decisions. This session = research + planning only; working tree has zero code edits.
 
-- **Composer slim-down (user: "why is it so damn big"):** pending rail no longer renders for bare streaming — only w/ queue chips OR (streaming && steerable draft/steerFlash); Beta disclaimer line deleted; wrap capped `min(--chat-col-max, 880px)`, padding 10/14→6/10, radius 18→14 (incl. streaming ::before).
-- **Activity recap quote removed** (user disliked it): `lastTurn.preview` computation + markup + `.recap-preview` CSS gone; stat grid (duration/tools/files/cost) kept.
-- **#30 resolved:** `assistant_session_cwd` cmd (convo_store.rs) + lib.rs registry · `TabState.sessionCwd` hydrated in `loadConversation` · warn `cwd-badge` in ChatTabsBar when pinned cwd ≠ workspace (normalized compare).
-- **#29 resolved:** root cause = **Tauri asset-CSP rewriter** injects style-src nonce (NOT SvelteKit — no `kit.csp`); fix = `"dangerousDisableAssetCspModification": ["style-src"]` in tauri.conf.json. Prod-only behavior — **verify on v0.8.26 install**: transitions animate, update progress fills, no CSP console spam.
-- **#12 resolved:** ToolChip chevron `fg-muted` + accent/nudge hover + Expand-details tooltip.
-- **CR-UX resolved (user signed off via ask_user card):** trust enum collapsed `readonly|standard`. `is_valid_trust_level` rejects `full`; `effective_trust_level` + `mcp_server::trust_level()` migrate legacy `full`→`standard` read-side; turn.rs git-write gate `== "standard"`; `TrustLevel` type narrowed; tests updated (mod.rs + mcp_server.rs).
+- **Execution brief written: `docs/design/minimal-core-strip.md`** — locked decisions, slice order (S3→S1→S4→S5→S2→S6→S7), exact files/lines/symbols, verification gates, watchpoints. Read it FIRST next session; it is the whole Phase 2 spec.
+- **CUT:** Harness workspace (+ Cost/Swarm sub-tabs) · swarm backend · cost cockpit except plan-limit gauges (`limits.rs` verified independent of UsageDb/store) · session-log subsystem (Harness-only consumers) · **compaction — closes #33 by removal, not repair** · custom providers + compression proxy (first-party only).
+- **KEEP:** speech/dictation, enhance wand, browser dock (`open_browser` depends), API-key override, per-turn cost cap, in-memory `telemetry.turns` (ActivityPanel + healthAlerts).
+- **FIX (Phase 3):** #34 SessionDiff pile-up (sketch in ISSUES).
+- Campaign tasks #1-#5 in Tasks panel: #1 inventory ✅ · #2 strip (pending, brief-driven) · #3 fix #34 · #4 CDP walkthrough + fresh-machine pass · #5 ship + distribute.
 
 ### RESUME HERE
 
-- **Tomorrow's queue (user-set): #33 compaction broken (lead) + #34 SessionDiff overlay pile-up bug** (screenshot-evidenced; fix sketch in ISSUES — eager double-diff of every edit, no cap/virtualization).
-- **#33 compaction tool broken** — reproduce first (what exactly fails: summarize? remint? post-compact resume?), then `/diagnose` → fix + regression test → evaluate improvements. Entry points: `compaction.ts` + `oneshot.rs` summarize/remint. CI 27379596782 already verified green (v0.8.26 published).
-- ~~Verify CI release 27379596782 green~~ ✅ done in-session → user installs v0.8.26 → live-test: composer slim look (no Working-rail idle-stream, no disclaimer, 880px) · cwd badge (open a chat resumed from another folder) · #29 transitions/progress-fill + zero CSP violations · tool-chip hover affordance · git tools still gated correctly at both trust levels. Plus carried v0.8.25 dictation live-tests (question stays question, masked cussing, "send it", PTT alt-tab, Ctrl+E, ctx meter on restore).
-- **Permission-bar live-verify** now unblocked by CR-UX ship: pin trust=standard on a throwaway repo, fire a git_commit under "Ask before edits".
-- **ISSUES remaining:** Auth-Rec (needs logged-out machine) · #31 blocking-fs (deferred-by-design) · **Fable dead-branch sweep after Jun 22** · #4 remainder (#7 charts · #11 inline diff · #13 tab strip · hover actions) · #17 (blocked) · Settings checklist · POLISH tier · SEC-1 · `browser_screenshot` MCP arc.
-- Chat-page arc candidates: collapsible Activity sections, tooltip `.tip` glass transparency (app-wide).
+1. **Execute `docs/design/minimal-core-strip.md`** slice by slice; green gates between (svelte-check + vitest / cargo check + test). Line numbers are 2026-06-12-fresh.
+2. Then Phase 3 (#34 fix) → Phase 4 walkthrough — folds in the carried live-verify list: v0.8.26 composer slim + cwd badge + #29 CSP prod verify + tool-chip hover + trust gating + v0.8.25 dictation items + permission-bar on a trust-standard throwaway repo + Auth-Rec (buddies' logged-out machines close it).
+3. Phase 5 ship: tag-driven CI → install from real feed → smoke → distribute (unsigned — buddies get SmartScreen "More info → Run anyway" note).
+4. Fable sunset sweep stays dated post-Jun 22 (ships to buddies via auto-update).
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
-cont.116 dictation data-fence + tracker cleanup → v0.8.25. cont.115 enhance wand v2 + dictation uncensored + PTT → v0.8.24. cont.113 Activity panel polish → v0.8.23. cont.112 UI/UX arc (Home bento, chat revamp, 1100px col). cont.111 full-codebase audit → v0.8.22. cont.109 bridge.rs loopback v0.8.21. cont.108 live plan limits v0.8.20. cont.104 Rail-v2 + turn.rs registry race fix. cont.94 Fable 5 (**Jun 22 sunset gate**). PID-only kills, NEVER by image name.
+cont.117 composer slim + issue sweep + CR-UX trust 2-level → v0.8.26 (CI verified green). cont.116 dictation data-fence → v0.8.25. cont.115 enhance wand v2 + PTT → v0.8.24. cont.113 Activity polish → v0.8.23. cont.111 full-codebase audit → v0.8.22. cont.109 bridge.rs loopback v0.8.21. cont.108 live plan limits v0.8.20. cont.104 Rail-v2 + registry race fix. cont.94 Fable 5 (**Jun 22 sunset gate**). PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
 
@@ -32,7 +29,8 @@ cont.116 dictation data-fence + tracker cleanup → v0.8.25. cont.115 enhance wa
 - **Trust enum is now 2-level** (cont.117) — `full` must stay rejected for new writes but MIGRATE read-side (config + `RIFT_TRUST_LEVEL` env); don't "clean up" the migration arms.
 - **Onboarding gate (cont.55)** · **Effort mapping lockstep** (`effortToFlag` ↔ `turn.rs` ↔ `modelMatrix.ts` + vitest) · **Right-click ownership** (`preventDefault()` or global double-fires).
 - **Accent via `--accent-h`**; tint mixes `in oklab`, never `in oklch`. **Surface tiers:** page 0.142 · card 0.215 · wells 0.178 · field 0.25 · track 0.175. **Spine-node icons stay opaque**.
-- **IA: 4 workspaces**, nav in titlebar. **AssistantPane drop handlers on `.pane` outer only**. **Blur-reveal:** `shownCount` only `$state` via rAF loop.
+- **IA: 4 workspaces** (→ 3 after S3 lands — update this line then), nav in titlebar. **AssistantPane drop handlers on `.pane` outer only**. **Blur-reveal:** `shownCount` only `$state` via rAF loop.
 - **Versions lockstep ×3 + Cargo.lock** — only at ship. **v0.8.26 stands.**
 - **`turn.rs::kill_all_session_children` re-export** (sweeps `oneshot::ENHANCE_PIDS`) + **bridge env injection in `write_mcp_config`** — load-bearing.
 - **Pure-helper modules + vitest nets + `assistant.init()` initPromise memo + composer/ children** — don't re-inline.
+- **Strip-brief keepers:** `cleanup_retired_jsonls`, `environment_check`, `usage::limits::usage_rate_limits` — slices delete their neighbors, not these.
