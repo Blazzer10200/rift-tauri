@@ -12,12 +12,16 @@ All 7 slices of `docs/design/minimal-core-strip.md` shipped as 7 commits on main
 - Deviation from brief: none material. `send.ts` still passes `priorContextSummary: null` (backend param kept, harmless). Backend tests 93→52 (deleted modules carried their suites).
 - Docs: ISSUES re-indexed (#33 🗄, #31 provider item superseded), project CLAUDE.md hot-files re-measured.
 
+### Phase 3 + Phase 4 (dev side) — also DONE this session
+
+- **#34 FIXED + live-verified** (`d5e8c3a`): memoized header counts (countFor cache) · default-collapse >8 files or >400-line group · `EditDiff maxLines` prop (SessionDiff passes 200, "Show N more" strip) · `content-visibility:auto` on `.dg`. CDP synthetic 20-file/200-edit repro: instant open, crisp collapsed headers, 0 errors; 400-line Write capped at 200 rows → reveal works.
+- **CDP sweep of all 3 workspaces green** (dev build): Home 3-tile bento + live gauges · Chat welcome/composer · Settings→Assistant (compaction/providers/compression sections confirmed GONE, API-key + cost guard + 2-level trust intact). New ctx≥70% nudge copy renders; cwd badge fires on mismatch. 0 console errors everywhere. Dev binary killed by PID (11980, path-verified) — prod untouched.
+
 ### RESUME HERE
 
-1. **Phase 3 — #34 SessionDiff pile-up fix** (`SessionDiff.svelte` 314L + `EditDiff.svelte`): repro w/ synthetic 20-file session FIRST, then collapse groups >N files by default · memoize per-edit diff (header `countDiff` + body currently diff TWICE) · cap rendered lines w/ "show more". Sketch in ISSUES #34.
-2. Phase 4 CDP walkthrough (3 workspaces) + fresh-machine pass — carries: composer slim · cwd badge · #29 CSP prod verify · tool-chip hover · trust gating · v0.8.25 dictation · permission-bar on trust-standard throwaway · Auth-Rec.
-3. Phase 5 ship: bump → CHANGELOG → tag-driven CI → install from real feed → smoke → distribute (unsigned; SmartScreen "More info → Run anyway" note for buddies).
-4. Fable sunset sweep post-Jun 22.
+1. **Remaining Phase 4 = user/machine-dependent only:** fresh-machine pass (clean-profile install → onboarding → logged-out sign-in closes Auth-Rec → updater round-trip) · #29 CSP **prod-build** verify · permission-bar on a trust-standard throwaway repo · dictation mic checks.
+2. **Phase 5 ship (READY — needs user go):** `bump.ps1 X.Y.Z` → CHANGELOG → commit → `git tag vX.Y.Z && git push --tags` → CI publishes to rift-releases → install from real feed → smoke → distribute (unsigned; SmartScreen "More info → Run anyway" note for buddies). Suggest 0.9.0 (feature-removal release).
+3. Fable sunset sweep post-Jun 22.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
