@@ -21,6 +21,9 @@ Pre-1.0 (`-alpha`). Pure-assistant — the former SFTP/sync/server/RCON half was
 - **Local git** — `git_status` / `diff` / `log` / `pull` / `commit` / `push` exposed as assistant tools.
 - **Per-tab sessions** — multiple concurrent chats/panes, each with its own model, permission mode, and thinking-effort.
 - **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass — switchable per turn.
+- **Session Diff** — every edit Claude makes collects into a reviewable per-file diff overlay.
+- **Voice dictation** — push-to-talk speech-to-text (Web Speech or local Whisper) plus a prompt-enhance wand.
+- **Browser dock** — Claude can open docs or a local dev server in an in-app browser pane beside the chat.
 - **Self-update** — Velopack checks on launch + every 6h, downloads in the background, and applies on restart (one click to consent, then unattended).
 
 ## Platforms
