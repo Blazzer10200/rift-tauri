@@ -96,7 +96,7 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
       toast.push({
         severity: "warn",
         title: "Slow turn start",
-        detail: `${Math.round(deadWait / 1000)}s passed before first output — details on the Harness page.`,
+        detail: `${Math.round(deadWait / 1000)}s passed before first output (spawn/prefill/queue stall).`,
       });
     }
   }
@@ -122,7 +122,7 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
       toast.push({
         severity: "warn",
         title: "Tools failing repeatedly",
-        detail: `${errs} tool calls errored in one turn — check the Harness reliability card.`,
+        detail: `${errs} tool calls errored in one turn — check the chat's tool chips for details.`,
       });
     }
   }

@@ -3,14 +3,10 @@
 // Chat is the default workspace.
 
 export type WorkspaceId =
-  | "home" | "chat"
-  | "harness" | "settings";
-
-export type HarnessSubtab = "telemetry" | "cost" | "swarm";
+  | "home" | "chat" | "settings";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
-  "home", "chat",
-  "harness", "settings",
+  "home", "chat", "settings",
 ] as const;
 
 const ACTIVE_KEY = "rift.ui.workspace.v1";
@@ -61,9 +57,6 @@ function isWorkspaceId(v: unknown): v is WorkspaceId {
 class WorkspaceState {
   activeId = $state<WorkspaceId>("chat");
   order = $state<WorkspaceId[]>([...DEFAULT_ORDER]);
-  /** One-shot deep-link into a Harness sub-tab — set by openHarness(),
-   *  consumed + cleared by HarnessPage's $effect. */
-  targetHarnessSubtab = $state<HarnessSubtab | null>(null);
   /** Lazy-mount latch — once a workspace has been active, its component stays
    *  mounted (hidden via [hidden]) so scroll/terminal/etc. state survives
    *  workspace switches. Same pattern v0.4.1 RightPane used. */
@@ -135,12 +128,6 @@ class WorkspaceState {
     }
     for (const k of LEGACY_KEYS_TO_SWEEP) localStorage.removeItem(k);
   }
-
-  openHarness(subtab: HarnessSubtab) {
-    this.targetHarnessSubtab = subtab;
-    this.setActive("harness");
-  }
-  clearHarnessSubtab() { this.targetHarnessSubtab = null; }
 
   setActive(id: WorkspaceId) {
     if (DISABLED.has(id)) return;

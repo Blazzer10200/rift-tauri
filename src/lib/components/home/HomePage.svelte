@@ -287,9 +287,6 @@
           <span class="ci"><Gauge size={13} /></span>
           <span class="t">Usage</span>
           {#if usage.rateLimits}<span class="live mono">live</span>{/if}
-          <button class="tile-link" type="button" onclick={() => workspace.openHarness("cost")}>
-            Cost cockpit<ChevronRight size={12} />
-          </button>
         </div>
         {#if last14.length > 0}
           <div class="spark-bars">
