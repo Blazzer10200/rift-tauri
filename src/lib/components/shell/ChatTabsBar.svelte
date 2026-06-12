@@ -4,7 +4,7 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, Layers, History, ChevronDown, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff, Loader2 } from "lucide-svelte";
+  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, History, ChevronDown, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff, Loader2 } from "lucide-svelte";
   import { onDestroy, onMount } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
@@ -382,8 +382,6 @@
   const sessionUsage = $derived(assistant.sessionUsage);
   const totalCostUsd = $derived(assistant.totalCostUsd);
   const lastModelId = $derived(assistant.lastModelId);
-  const autoCompactThreshold = $derived(assistant.autoCompactThreshold);
-  const compactWarning = $derived(assistant.compactWarning);
   // #30: a resumed tab stays pinned to its original folder — when that differs
   // from the selected workspace, badge it so "chip says X, turns run in Y" is
   // visible. Comparison is separator/case-insensitive (Windows paths).
@@ -400,9 +398,9 @@
   const activeAgentTitle = $derived.by(() =>
     activeAgents.map((a) => `${a.subagentType}: ${a.description}`).join("\n"),
   );
-  const autoCompactDisabledNudge = $derived(
-    assistant.autoCompactThreshold === null && ctxPct >= 70
-      ? `Auto-compact off (${ctxPct >= 85 ? "compact soon" : "approaching window cap"})`
+  const ctxHighNudge = $derived(
+    ctxPct >= 70
+      ? `Context ${ctxPct >= 85 ? "nearly full — start a fresh chat soon" : "filling up"} (Ctrl+T)`
       : null,
   );
 
@@ -416,14 +414,10 @@
         : "";
     const action =
       ctxPct >= 85
-        ? "\n\nWindow nearly full. Type /compact to summarize and reset this chat, or Ctrl+T for a fresh one."
+        ? "\n\nWindow nearly full. Ctrl+T starts a fresh chat."
         : ctxPct >= 70
-          ? "\n\nApproaching the window cap. /compact will summarize-and-reset; Ctrl+T starts fresh."
+          ? "\n\nApproaching the window cap — Ctrl+T starts a fresh chat."
           : "";
-    const autoNote =
-      assistant.autoCompactThreshold === null && ctxPct >= 70
-        ? "\nAuto-compact is off — enable it in Settings → Conversation compaction to fire automatically."
-        : "";
     return (
       `Context: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} (${ctxPct.toFixed(1)}%) — the model's hard input cap.\n\n` +
       `This turn:\n` +
@@ -432,7 +426,7 @@
       `  • output: ${u.output.toLocaleString()}\n\n` +
       `The cache only saves billing — those tokens are in the window every send, same as fresh input.\n\n` +
       `Session (${s.turns} turn${s.turns === 1 ? "" : "s"}): in ${s.totalInput.toLocaleString()} · out ${s.totalOutput.toLocaleString()} · cache ${s.totalCacheRead.toLocaleString()} r / ${s.totalCacheCreate.toLocaleString()} w${cost}\n` +
-      `Model: ${assistant.lastModelId ?? "?"}${action}${autoNote}`
+      `Model: ${assistant.lastModelId ?? "?"}${action}`
     );
   });
 </script>
@@ -563,15 +557,12 @@
       </button>
     {/if}
 
-    {#if compactWarning}
-      <span class="compact-warn" use:tooltip={"Compact early w/ /compact <focus> if you want fine control over the summary."}
-        >{compactWarning}</span>
-    {:else if autoCompactDisabledNudge}
+    {#if ctxHighNudge}
       <span
         class="compact-warn"
         data-tone={ctxPct >= 85 ? "red" : "yellow"}
-        use:tooltip={"Auto-compact is off in Settings → Conversation compaction. Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Enable a threshold to fire compaction automatically, or click the Compact button now."}
-        >{autoCompactDisabledNudge}</span>
+        use:tooltip={"Cache-read tokens count toward the window — at 95% there's no headroom for the next turn. Ctrl+T starts a fresh chat."}
+        >{ctxHighNudge}</span>
     {/if}
 
     {#if ctxTokens > 0 && !assistant.ui.dockOpen}
@@ -589,22 +580,6 @@
         <span class="ctx-bar"><span class="ctx-fill" style="width: {ctxPct}%"></span></span>
         <span class="ctx-text">{shortK(ctxTokens)}<span class="ctx-sep">/</span>{shortK(ctxWindow)}</span>
         <span class="ctx-pct">{Math.round(ctxPct)}%</span>
-      </button>
-    {/if}
-
-    {#if ctxPct >= 50}
-      <button
-        class="compact-btn"
-        data-tone={ctxTone}
-        type="button"
-        onclick={() => {
-          if (!confirm(`Compact conversation? Cost varies by model · drops context to ~5-10% · next turn carries the summary forward.`)) return;
-          void assistant.compactConversation();
-        }}
-        use:tooltip={"Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."}
-      >
-        <Layers size={11} />
-        <span>Compact</span>
       </button>
     {/if}
 
@@ -724,23 +699,7 @@
     {/if}
 
     <div class="ctx-panel-foot">
-      <span class="ctx-panel-meta">
-        {lastModelId ?? "—"} · auto-compact {autoCompactThreshold === null ? "off" : `${autoCompactThreshold}%`}
-      </span>
-      <button
-        type="button"
-        class="ctx-panel-compact"
-        data-tone={ctxTone}
-        onclick={() => {
-          const cost = ctxPct >= 70 ? "≈ $0.91" : "≈ $0.30";
-          if (!confirm(`Compact conversation? ${cost} on Haiku · drops context to ~5-10% · next turn carries the summary forward.`)) return;
-          ctxPanelOpen = false;
-          void assistant.compactConversation();
-        }}
-        use:tooltip={"Summarize + remint the CLI session. Drops working context but preserves the summary on the next turn."}
-      >
-        <Layers size={11} /> Compact now
-      </button>
+      <span class="ctx-panel-meta">{lastModelId ?? "—"}</span>
     </div>
   </div>
 {/if}
@@ -1364,29 +1323,6 @@
     border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
   }
 
-  .compact-btn {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 2px 8px;
-    border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    line-height: 1;
-    cursor: pointer;
-    transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft), border-color 120ms var(--ease-soft);
-  }
-  .compact-btn:hover { background: var(--surface-hover); color: var(--fg); }
-  .compact-btn[data-tone="yellow"] {
-    border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
-    color: var(--warn);
-  }
-  .compact-btn[data-tone="red"] {
-    border-color: color-mix(in oklab, var(--danger) 45%, var(--border));
-    background: color-mix(in oklab, var(--danger) 8%, transparent);
-    color: var(--danger);
-  }
-
   .ctx-pill {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 2px 8px;
@@ -1499,17 +1435,6 @@
     padding-top: 10px;
   }
   .ctx-panel-meta { color: var(--fg-faint); font-size: 10.5px; }
-  .ctx-panel-compact {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 4px 10px; border-radius: 8px;
-    background: var(--bg-elev-2); border: 1px solid var(--border);
-    color: var(--fg-2); cursor: pointer; font: inherit; font-size: var(--fs-xs);
-    white-space: nowrap;
-    transition: border-color 120ms var(--ease-soft), color 120ms var(--ease-soft), background 120ms var(--ease-soft);
-  }
-  .ctx-panel-compact:hover { border-color: var(--border-strong); color: var(--fg); }
-  .ctx-panel-compact[data-tone="yellow"] { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 35%, var(--border)); }
-  .ctx-panel-compact[data-tone="red"] { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 40%, var(--border)); }
 
   /* Claude Code CLI update — accent-tinted notice pill + detail popover. */
   .cli-badge {

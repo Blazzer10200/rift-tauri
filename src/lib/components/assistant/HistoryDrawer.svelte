@@ -45,12 +45,7 @@
     const q = searchQuery.trim().toLowerCase();
     const base = assistant.conversations;
     if (!q) return base;
-    return base.filter((c) => {
-      if (c.title.toLowerCase().includes(q)) return true;
-      const summaries = c.compactionSummaries;
-      if (!summaries || summaries.length === 0) return false;
-      return summaries.some((s) => s.toLowerCase().includes(q));
-    });
+    return base.filter((c) => c.title.toLowerCase().includes(q));
   });
 
   type BucketKey = "today" | "yesterday" | "week" | "older";
@@ -182,12 +177,6 @@
     return `$${usd.toFixed(2)}`;
   }
 
-  // Compaction recap — most recent summary if present
-  const latestRecap = $derived.by(() => {
-    if (!detailRecord?.compactionHistory?.length) return null;
-    const hist = detailRecord.compactionHistory;
-    return hist[hist.length - 1].summary;
-  });
 
   // Fallback when no compaction recap exists (the common case): first user
   // message, so the block previews the conversation instead of looking empty.
@@ -533,14 +522,12 @@
             <div class="hp-block">
               <div class="hp-block-label">
                 <Sparkles size={12} />
-                {latestRecap ? "AI Recap" : "Preview"}
+                Preview
               </div>
               {#if detailLoading}
                 <p class="hp-noedit">Loading…</p>
               {:else if detailError}
                 <p class="hp-noedit">Error: {detailError}</p>
-              {:else if latestRecap}
-                <p class="hp-summary">{latestRecap}</p>
               {:else if firstUserPreview}
                 <p class="hp-summary">{firstUserPreview}…</p>
               {:else}

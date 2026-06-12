@@ -136,32 +136,8 @@ export type ConversationMeta = {
   updatedAt: number;
   /** Σ of per-turn costs across the transcript. 0 for convos predating cost capture. */
   costUsd: number;
-  /** Phase E5: flattened compactionHistory summaries for HistoryDrawer search. */
-  compactionSummaries?: string[];
   /** One-line preview of the newest text message (ui-audit #6). */
   lastSnippet?: string;
-};
-
-/** Compaction Phase B output. Mirrors `assistant::SummarizeResult` in
- *  `assistant/mod.rs` (camelCase serde). */
-export type SummarizeResult = {
-  summary: string;
-  model: string;
-  costUsd: number;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreateTokens: number;
-};
-
-export type CompactionHistoryEntry = {
-  at: number;
-  priorSessionId: string;
-  newSessionId: string;
-  summary: string;
-  costUsd: number;
-  summaryModel: string;
-  archivedCount: number;
 };
 
 export type ConversationRecord = {
@@ -175,8 +151,6 @@ export type ConversationRecord = {
   cliSessionId?: string;
   /** Final turn's ctx usage — hydrates the ctx meter on restore (ISSUES #32). */
   lastTurnUsage?: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
-  // Phase E prerequisite: ordered list of compactions that happened on this convo.
-  compactionHistory?: CompactionHistoryEntry[];
 };
 
 // Minimal stream-json envelope shape we care about.

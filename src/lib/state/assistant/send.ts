@@ -11,8 +11,7 @@
 // (this.* → store.*) so the baked-in invariants survive: the auth chokepoint,
 // queue-on-busy, #143 ensureTab-before-field-writes, #146 streamingMsgIdx
 // cache, #148 drain re-queue on tab switch, #179 flush-before-stop, #184
-// stale-error clear, #185 retry re-entrance guard, and the Phase-C
-// pendingCompactionSummary drain.
+// stale-error clear, #185 retry re-entrance guard.
 
 import { invoke } from "@tauri-apps/api/core";
 import { accessibility } from "../accessibility.svelte";
@@ -57,11 +56,9 @@ export async function send(store: AssistantStore, prompt: string) {
   }
   // #143: per-tab fields live on TabState now — ensureTab BEFORE touching
   // them so the writes don't no-op via the store's activeTab=null setter
-  // path. ensureTab seeds cliSessionId to convoId for fresh tabs; compaction
-  // remints it later without recreating the tab.
+  // path. ensureTab seeds cliSessionId to convoId for fresh tabs.
   const tab = store.ensureTab(store.currentConvoId, store.currentConvoId);
-  const isFirstTurn = !tab.convoCreatedAt || tab.forceNextFirstTurn;
-  tab.forceNextFirstTurn = false;
+  const isFirstTurn = !tab.convoCreatedAt;
   if (!tab.cliSessionId) {
     tab.cliSessionId = store.currentConvoId;
   }
@@ -177,15 +174,6 @@ export async function send(store: AssistantStore, prompt: string) {
     dataBase64: a.dataBase64,
   }));
   store.composerAttachments = [];
-  // Phase C: drain pendingCompactionSummary onto THIS turn only.
-  // The new CLI session was minted at compactConversation() but is
-  // empty — this summary is the model's only context for what came
-  // before. Cleared immediately after dispatch; never persists across
-  // turns. If the invoke itself fails the summary is lost (next send
-  // starts cold) — acceptable since the boundary message stays in the
-  // UI for the user to copy out if they need to manually re-seed.
-  const priorSummary = tab.pendingCompactionSummary ?? null;
-  tab.pendingCompactionSummary = null;
   try {
     await invoke("assistant_send", {
       prompt: trimmed,
@@ -196,7 +184,7 @@ export async function send(store: AssistantStore, prompt: string) {
       dyslexiaMode: accessibility.dyslexiaMode,
       thinkingEffort: store.thinkingEffort,
       permissionMode: store.permissionMode,
-      priorContextSummary: priorSummary,
+      priorContextSummary: null,
     });
   } catch (e) {
     tab.onError(String(e));
@@ -428,24 +416,6 @@ function runSlash(store: AssistantStore, input: string): boolean {
         slowT + costT + slowTool + stale;
       return true;
     }
-    case "compact": {
-      // Phase C: full compact action. arg becomes the focus hint.
-      void store.compactConversation(arg || undefined);
-      return true;
-    }
-    case "summarize": {
-      // Compaction Phase B debug — dry-runs the summarize primitive
-      // and renders the result as a notice. No state mutation; the
-      // actual compaction flow lands in Phase C.
-      store.lastNotice = "Summarizing… (cheap model, no state change)";
-      void store.summarizeCurrentSession(arg || undefined).then((res) => {
-        if (!res) return; // error already on lastError
-        const tk = res.inputTokens + res.cacheReadTokens + res.cacheCreateTokens;
-        store.lastNotice =
-          `Summary ($${res.costUsd.toFixed(4)} · ${tk.toLocaleString()} in / ${res.outputTokens.toLocaleString()} out · ${res.model}):\n\n${res.summary}`;
-      });
-      return true;
-    }
     case "openincli": {
       const sid = store.currentCliSessionId;
       const ws = store.workspace.current;
@@ -463,10 +433,8 @@ function runSlash(store: AssistantStore, input: string): boolean {
     }
     case "help":
       store.lastNotice =
-        "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /usage · /compact · /summarize · /openincli · /diag · /diag-clear · /help. " +
+        "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
         "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
-        "/compact summarizes the current session + remints the CLI session id; the next turn carries the summary forward. " +
-        "/summarize dry-runs Phase-B compaction summarize (no state change). " +
         "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
       return true;
     default:

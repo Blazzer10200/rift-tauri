@@ -28,7 +28,7 @@
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance",    label: "Appearance",    icon: Palette,  sub: "Theme color, density, code preview, and keyboard shortcuts — applied instantly across Rift." },
     { id: "accessibility", label: "Accessibility", icon: A11yIcon, sub: "Reading-comfort options for the Assistant chat." },
-    { id: "assistant",     label: "Assistant",     icon: Sparkles, sub: "Your Claude session, per-turn cost guard, and conversation compaction." },
+    { id: "assistant",     label: "Assistant",     icon: Sparkles, sub: "Your Claude session and per-turn cost guard." },
     { id: "speech",        label: "Speech",        icon: Mic,      sub: "Voice-to-text input. Web Speech (online) or Whisper (local, accent-tuned)." },
     { id: "about",         label: "About",         icon: Info,     sub: "Build info, file paths, first-run, and support diagnostics." },
   ];
@@ -776,46 +776,6 @@
             </div>
           </div>
 
-          <div class="st-block">
-            <div class="st-block-label">Conversation compaction</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Auto-compact threshold</div>
-                  <div class="st-row-desc">When context (incl. cache-read) fills past the threshold, Rift summarizes via <code>claude -p</code> and seeds the next turn with the summary. 5min cooldown between fires.</div>
-                </div>
-                <div class="st-row-ctl" style="min-width:170px;">
-                  <Select
-                    value={String(assistantStore.autoCompactThreshold ?? 0)}
-                    options={[{ value: "0", label: "Off" }, { value: "0.7", label: "70%" }, { value: "0.8", label: "80% — recommended" }, { value: "0.85", label: "85%" }, { value: "0.9", label: "90%" }]}
-                    onChange={(v) => { const raw = Number(v); void assistantStore.setAutoCompactThreshold(raw > 0 ? raw : null); }}
-                    ariaLabel="Auto-compact threshold"
-                  />
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Compact model</div>
-                  <div class="st-row-desc">Haiku is sufficient for prose summarization. Sonnet only if Haiku misses details on your workflow.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <div class="st-seg" role="radiogroup" aria-label="Compact model">
-                    <button class="st-seg-btn" class:on={assistantStore.compactModel === "haiku"} role="radio" aria-checked={assistantStore.compactModel === "haiku"} type="button" onclick={() => void assistantStore.setCompactModel("haiku")}>Haiku</button>
-                    <button class="st-seg-btn" class:on={assistantStore.compactModel === "sonnet"} role="radio" aria-checked={assistantStore.compactModel === "sonnet"} type="button" onclick={() => void assistantStore.setCompactModel("sonnet")}>Sonnet</button>
-                  </div>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Compact now</div>
-                  <div class="st-row-desc">Summarize the active chat regardless of threshold. Needs ≥4 messages and no in-flight stream.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-btn primary" type="button" disabled={assistantStore.activeTab?.compactingNow} onclick={() => void assistantStore.compactConversation()}>Compact now</button>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       {/if}
 

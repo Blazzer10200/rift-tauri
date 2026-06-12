@@ -25,7 +25,6 @@ export type {
   Block,
   ChatMessage,
   ConversationMeta,
-  SummarizeResult,
   ThinkingEffort,
   PaneState,
 } from "./assistant/types";
@@ -40,8 +39,6 @@ import type {
   Block,
   ChatMessage,
   ConversationMeta,
-  SummarizeResult,
-  CompactionHistoryEntry,
   ConversationRecord,
   ContentBlock,
   StreamDelta,
@@ -124,13 +121,6 @@ import {
   closeAllTabs as tabsCloseAll,
   closeTabsToRight as tabsCloseToRight,
 } from "./assistant/tabs";
-// M7 split (2026-05-27): summarize + compact pipeline in `./assistant/compaction`.
-// Per-tab compaction fields stay on TabState; threshold/model setters stay on
-// the store. The two pipeline methods below are thin thunks onto these.
-import {
-  summarizeCurrentSession as compactSummarize,
-  compactConversation as compactRun,
-} from "./assistant/compaction";
 // M8 split (2026-06-09): the stream pump (envelope/delta parsing, thinking
 // timing, tool→activity routing, ask_user FIFO binding, usage accounting,
 // rAF text pacer) in `./assistant/streaming`. TabState keeps the $state
@@ -229,33 +219,6 @@ export class TabState {
   /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
    *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
   attachments = $state<{ id: string; mime: string; dataBase64: string; sizeBytes: number }[]>([]);
-  /** Compaction Phase C: summary seeded by compactConversation() that the
-   *  next send() drains into the `prior_context_summary` invoke arg. Null
-   *  outside of the one-turn post-compaction window. Per-tab so concurrent
-   *  compactions on different tabs don't cross-contaminate. */
-  pendingCompactionSummary = $state<string | null>(null);
-  /** S124 fix: scheduleSave's doSave() unconditionally writes
-   *  `tab.convoCreatedAt = record.createdAt` and buildSaveRecord falls
-   *  back to Date.now() when null, so compaction's `convoCreatedAt = null`
-   *  gets clobbered before the next send reads it — causing isFirstTurn
-   *  to be false → --resume on a non-existent new JSONL → session-lost
-   *  recovery → priorSummary lost. This flag is the authoritative signal
-   *  to send() that the next dispatch MUST be first-turn regardless of
-   *  convoCreatedAt's persistence-driven value. Cleared on first read. */
-  forceNextFirstTurn = $state(false);
-  /** Compaction Phase D guard: prevents auto-trigger from re-firing on a
-   *  failed compaction (ctx pill stays high → effect re-runs). Set when
-   *  compactConversation() starts; cleared on success OR failure. */
-  compactingNow = $state(false);
-  /** Compaction Phase D cooldown: wall-clock ms of the last successful
-   *  compaction. The auto-trigger effect checks this against a 5min floor
-   *  before re-firing — a failed compaction at $0.91 × runaway = real
-   *  money, so erring long. */
-  lastCompactionAt = $state(0);
-  /** Phase E prerequisite: structured log of compactions on this tab. Pushed
-   *  by compactConversation() on success; hydrated from ConversationRecord on
-   *  load. Persists alongside messages. */
-  compactionHistory = $state<CompactionHistoryEntry[]>([]);
   /** S124: in-flight sub-agent spawns. Pushed on Task tool_use, marked done
    *  on the matching tool_result. CLI does NOT stream intermediate sub-agent
    *  activity — we only know spawn + final result. */
@@ -440,8 +403,7 @@ class AssistantStore {
   get ctxTokens(): number { return this.ctxTokensFor(this.activeTab); }
   get ctxPct(): number { return this.ctxPctFor(this.activeTab); }
 
-  /** Per-tab ctx helpers — let the auto-compact effect iterate `panes[]` so
-   *  a background-pane tab can't sail past the threshold silently. */
+  /** Per-tab ctx helpers. */
   ctxWindowFor(tab: TabState | null): number {
     const model = tab?.lastModelId ?? null;
     if (!model) return 200_000;
@@ -458,20 +420,6 @@ class AssistantStore {
   ctxPctFor(tab: TabState | null): number {
     const w = this.ctxWindowFor(tab);
     return w > 0 ? Math.min(100, (this.ctxTokensFor(tab) / w) * 100) : 0;
-  }
-  /** Pre-emption banner text — non-null when ctx is within 10pp of the
-   *  user's auto-compact threshold but hasn't crossed yet. Lets the user
-   *  compact early w/ a focus string if they want fine control. */
-  get compactWarning(): string | null {
-    const t = this.autoCompactThreshold;
-    if (!t) return null;
-    const tab = this.activeTab;
-    if (!tab || tab.compactingNow) return null;
-    const pct = this.ctxPct;
-    const threshPct = t * 100;
-    if (pct >= threshPct) return null; // crossed — the effect handles it
-    if (pct < threshPct - 10) return null;
-    return `Approaching auto-compact at ${Math.round(threshPct)}%`;
   }
   get activity() {
     return this.activeTab?.activity ?? { currentLabel: null, turnStartedAt: null };
@@ -611,12 +559,6 @@ class AssistantStore {
   // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
   // backend; defaults to "readonly" when unset. Settings seg treats full ⊇ standard.
   trustLevel = $state<TrustLevel>("readonly");
-  // Phase D: fraction (0-1] of ctx window that auto-fires compactConversation.
-  // Null = manual only (matches the user's DISABLE_AUTO_COMPACT=1 stance).
-  autoCompactThreshold = $state<number | null>(null);
-  // Phase D: model alias used by summarize call. "haiku" default ($0.91 vs
-  // $2.73 on sonnet for a 900K-token summarize).
-  compactModel = $state<"haiku" | "sonnet">("haiku");
   // 2a multi-provider list (cc-switch pattern). Empty = Anthropic only. The
   // `active` one routes turns; secrets live in the keychain (see ProviderDto).
   providers = $state<ProviderDto[]>([]);
@@ -909,17 +851,6 @@ class AssistantStore {
       this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
     } catch (e) {
       console.warn("assistant_get_trust_level failed", e);
-    }
-    try {
-      this.autoCompactThreshold = await invoke<number | null>("assistant_get_auto_compact_threshold");
-    } catch (e) {
-      console.warn("assistant_get_auto_compact_threshold failed", e);
-    }
-    try {
-      const m = await invoke<string>("assistant_get_compact_model");
-      this.compactModel = m === "sonnet" ? "sonnet" : "haiku";
-    } catch (e) {
-      console.warn("assistant_get_compact_model failed", e);
     }
     try {
       this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
@@ -1369,27 +1300,6 @@ class AssistantStore {
     }
   }
 
-  async setAutoCompactThreshold(value: number | null) {
-    const v = value !== null && Number.isFinite(value) && value > 0 && value <= 1 ? value : null;
-    try {
-      await invoke("assistant_set_auto_compact_threshold", { value: v });
-      this.autoCompactThreshold = v;
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  async setCompactModel(value: "haiku" | "sonnet") {
-    try {
-      await invoke("assistant_set_compact_model", { value });
-      this.compactModel = value;
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
   // ── 2a multi-provider list ──
   async refreshProviders() {
     this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
@@ -1660,35 +1570,6 @@ class AssistantStore {
     void invoke("assistant_enhance_cancel", { requestId }).catch((e) =>
       console.warn("enhance cancel failed:", e),
     );
-  }
-
-  /** Compaction Phase B: one-shot summarize of the current CLI session.
-   *  Pure read — does NOT mutate `messages`, doesn't archive, doesn't
-   *  remint. Phase C wires this into the actual compaction flow; until
-   *  then it's reachable only via the `/summarize` debug slash.
-   *
-   *  Returns the SummarizeResult on success, or null if no active session
-   *  or the call fails (error surfaces via `lastError`). The cost/usage
-   *  fields let Phase C populate the boundary message pill. */
-  summarizeCurrentSession(focus?: string): Promise<SummarizeResult | null> {
-    return compactSummarize(this, focus);
-  }
-
-  /** Compaction Phase C: full compact action. Summarizes the current
-   *  session via Phase B, remints the CLI session id via the backend,
-   *  pushes a BoundaryBlock into messages, and stages the summary onto
-   *  the next send so the fresh CLI session has context.
-   *
-   *  Guards (any failed → abort with notice/error, no state change):
-   *   - not currently streaming
-   *   - not already compacting
-   *   - at least 4 messages worth compacting
-   *   - have an active tab + cliSessionId
-   *
-   *  Cost is fully internal — no UI confirmation here; the Compact button
-   *  in the header should confirm before calling (Phase E1 polish). */
-  compactConversation(focus?: string, tabId?: string | null): Promise<boolean> {
-    return compactRun(this, focus, tabId);
   }
 
   /** Re-send the most recent user prompt — see ./assistant/send. */

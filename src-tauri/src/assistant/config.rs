@@ -54,16 +54,6 @@ pub(super) struct AssistantConfig {
     /// `standard` / `full`. `None` = `readonly`.
     #[serde(default)]
     pub(super) trust_level: Option<String>,
-    /// Auto-compact threshold as fraction of context window (0.0-1.0). `None` =
-    /// disabled (manual only). User has `DISABLE_AUTO_COMPACT=1` set globally
-    /// so default to None — opt-in, not opt-out. See `docs/design/assistant-compaction.md`.
-    #[serde(default)]
-    pub(super) auto_compact_threshold: Option<f32>,
-    /// Model alias for the one-shot summarize call. `None` = "haiku" (cheap +
-    /// fast; sufficient for prose summarization w/ explicit preservation prompt).
-    /// $0.91 at 900K vs $2.73 on sonnet.
-    #[serde(default)]
-    pub(super) compact_model: Option<String>,
     /// LEGACY single-provider escape hatch (pre-2a). Migrated into `providers`
     /// on first `load_config()` and then cleared. Still parsed so old on-disk
     /// configs migrate cleanly; never re-written once `providers` is populated.
@@ -349,40 +339,6 @@ pub fn assistant_set_trust_level(value: String) -> Result<(), String> {
     }
     let mut cfg = load_config();
     cfg.trust_level = Some(value);
-    save_config(&cfg)
-}
-
-#[tauri::command]
-pub fn assistant_get_auto_compact_threshold() -> Result<Option<f32>, String> {
-    Ok(load_config()
-        .auto_compact_threshold
-        .filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0))
-}
-
-#[tauri::command]
-pub fn assistant_set_auto_compact_threshold(value: Option<f32>) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let mut cfg = load_config();
-    cfg.auto_compact_threshold = value.filter(|v| v.is_finite() && *v > 0.0 && *v <= 1.0);
-    save_config(&cfg)
-}
-
-#[tauri::command]
-pub fn assistant_get_compact_model() -> Result<String, String> {
-    Ok(load_config()
-        .compact_model
-        .filter(|v| matches!(v.as_str(), "haiku" | "sonnet" | "opus"))
-        .unwrap_or_else(|| "haiku".to_string()))
-}
-
-#[tauri::command]
-pub fn assistant_set_compact_model(value: String) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    if !matches!(value.as_str(), "haiku" | "sonnet" | "opus") {
-        return Err(format!("invalid compact_model: {value}"));
-    }
-    let mut cfg = load_config();
-    cfg.compact_model = Some(value);
     save_config(&cfg)
 }
 
