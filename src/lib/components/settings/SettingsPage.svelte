@@ -101,10 +101,10 @@
   // Optional host tools surfaced in About → Local tools. `use` = what breaks
   // without it; `hint` = how to get it (shown only when missing).
   const LOCAL_TOOLS: { key: "git" | "node" | "npm" | "cargo" | "code"; label: string; use: string; hint: string }[] = [
-    { key: "git",   label: "Git",     use: "Version control — powers the assistant's git tools and the edit swarm.", hint: "install Git for Windows (git-scm.com)" },
+    { key: "git",   label: "Git",     use: "Version control — powers the assistant's git tools.", hint: "install Git for Windows (git-scm.com)" },
     { key: "node",  label: "Node.js", use: "JavaScript runtime for project tooling.", hint: "install from nodejs.org" },
-    { key: "npm",   label: "npm",     use: "The edit swarm's frontend gate runs npm run check.", hint: "ships with Node.js" },
-    { key: "cargo", label: "Cargo",   use: "The edit swarm's Rust gate runs cargo check.", hint: "install via rustup.rs" },
+    { key: "npm",   label: "npm",     use: "Runs frontend project tooling like npm run check.", hint: "ships with Node.js" },
+    { key: "cargo", label: "Cargo",   use: "Runs Rust project tooling like cargo check.", hint: "install via rustup.rs" },
     { key: "code",  label: "VS Code", use: "Enables “Open in VS Code” on file paths.", hint: "install VS Code and enable the ‘code’ command in PATH" },
   ];
 
