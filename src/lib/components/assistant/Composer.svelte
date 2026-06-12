@@ -81,7 +81,6 @@
   const SLASH_COMMANDS: SlashCmd[] = [
     { name: "new",       desc: "Start a new conversation (saves current)" },
     { name: "clear",     desc: "Clear this chat in place (saves current to History)" },
-    { name: "compact",   desc: "Summarize + remint the CLI session (optional focus)" },
     { name: "history",   desc: "Open conversation history" },
     { name: "model",     desc: "Switch model — opens picker" },
     { name: "retry",     desc: "Re-fire the last prompt" },
@@ -91,7 +90,6 @@
     { name: "cost",      desc: "Show session cost" },
     { name: "usage",     desc: "Plan limits — 5-hour & weekly windows" },
     { name: "stats",     desc: "Session telemetry summary (inline)" },
-    { name: "summarize", desc: "Dry-run a compaction summary (no state change)" },
     { name: "openincli", desc: "Print the claude --resume command for this session" },
     { name: "diag",      desc: "Copy full telemetry JSON to clipboard" },
     { name: "help",      desc: "List slash commands" },

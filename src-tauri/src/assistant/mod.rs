@@ -46,9 +46,8 @@ pub use convo_store::*;
 // `env_checks.rs`. Glob re-export (like session_log) so the macro-generated
 // `__cmd__*` items travel with the commands — a named re-export strands them.
 pub use env_checks::*;
-// R6 split (2026-06-09): one-shot headless spawns (enhance / title / summarize
-// / remint) in `oneshot.rs`. Glob re-export for the __cmd__ items +
-// SummarizeResult DTO.
+// R6 split (2026-06-09): one-shot headless spawns (enhance / title) in
+// `oneshot.rs`. Glob re-export for the __cmd__ items.
 pub use oneshot::*;
 // R7 split (2026-06-09): workspace root state + @-mention file enumeration +
 // branch probe in `workspace.rs`. Glob re-export for the same __cmd__ reason;

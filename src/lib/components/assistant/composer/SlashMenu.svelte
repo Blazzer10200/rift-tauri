@@ -5,8 +5,8 @@
   // palette's design language: compact left-anchored panel, boxed icons,
   // grouped rows, bold matched prefix, kbd hints.
   import {
-    Plus, Eraser, Minimize2, History, Cpu, RotateCcw, Copy, StopCircle,
-    Wrench, Coins, Gauge, BarChart3, FileText, Terminal, ClipboardCopy, HelpCircle,
+    Plus, Eraser, History, Cpu, RotateCcw, Copy, StopCircle,
+    Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
   } from "lucide-svelte";
 
   type Icon = typeof Plus;
@@ -27,7 +27,6 @@
   const META: Record<string, { icon: Icon; group: string }> = {
     new:       { icon: Plus,          group: "Conversation" },
     clear:     { icon: Eraser,        group: "Conversation" },
-    compact:   { icon: Minimize2,     group: "Conversation" },
     history:   { icon: History,       group: "Conversation" },
     model:     { icon: Cpu,           group: "Compose" },
     retry:     { icon: RotateCcw,     group: "Compose" },
@@ -37,7 +36,6 @@
     cost:      { icon: Coins,         group: "Info" },
     usage:     { icon: Gauge,         group: "Info" },
     stats:     { icon: BarChart3,     group: "Info" },
-    summarize: { icon: FileText,      group: "Info" },
     openincli: { icon: Terminal,      group: "Info" },
     diag:      { icon: ClipboardCopy, group: "Info" },
     help:      { icon: HelpCircle,    group: "Info" },

@@ -2,7 +2,7 @@
 // IPC + tab-list localStorage lifted out of `src/lib/state/assistant.svelte.ts`
 // as free fns operating on a host ref. Follows M3/M4 precedent: $state fields
 // (conversations, currentConvoId, openTabs, panes, focusedPaneIdx, convoTitle,
-// per-tab saveTimer/messages/convoTitle/convoCreatedAt/cliSessionId/compactionHistory)
+// per-tab saveTimer/messages/convoTitle/convoCreatedAt/cliSessionId)
 // STAY where they are; only the IPC + serialization logic moves here.
 //
 // Scope (this pass): refreshConversations, buildSaveRecord, flushNow,
@@ -15,7 +15,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { asModelSel } from "./helpers";
 import type {
   ChatMessage,
-  CompactionHistoryEntry,
   ConversationMeta,
   ConversationRecord,
   ModelSel,
@@ -30,7 +29,6 @@ export type SaveableTab = {
   convoTitle: string | null;
   convoCreatedAt: number | null;
   cliSessionId: string;
-  compactionHistory: CompactionHistoryEntry[];
   titleGenerated: boolean;
   modelOverride: ModelSel | null;
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
@@ -111,7 +109,6 @@ export function buildSaveRecord(
     updatedAt: Date.now(),
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
-    compactionHistory: tab.compactionHistory.length > 0 ? tab.compactionHistory : undefined,
     lastTurnUsage: tab.lastTurnUsage ?? undefined,
   };
 }
@@ -253,7 +250,6 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     const tab = host.ensureTab(convo.id, cliSid);
     tab.messages = convo.messages ?? [];
     tab.cliSessionId = cliSid;
-    tab.compactionHistory = convo.compactionHistory ?? [];
     tab.tasks = [];
     tab.lastError = null;
     tab.totalCostUsd = null;

@@ -26,42 +26,6 @@
     });
   });
 
-  // Phase D + split-pane v2.1: auto-compact iterates EVERY pane so a
-  // background-pane tab can't sail past threshold silently. Guards per tab:
-  //   - threshold non-null (feature opt-in, global)
-  //   - tab exists + not streaming + not already compacting
-  //   - ≥5min since last successful compaction (cooldown vs runaway on failure)
-  //   - that tab's ctxPct has crossed threshold
-  // Page-scoped so the effect lives only while the chat workspace is mounted;
-  // navigating to Sync/Settings pauses auto-trigger naturally.
-  $effect(() => {
-    const threshold = assistant.autoCompactThreshold;
-    if (!threshold) return;
-    // Serialize auto-compaction: never launch two at once. The original loop
-    // fired for every over-threshold pane in one synchronous pass before any
-    // `compactingNow` flag was observed cross-tab, so a split-pane session with
-    // two hot tabs spun up two concurrent Haiku summarize calls (double spend /
-    // rate-limit spike). Bail if any tab is already compacting, and `break`
-    // after launching one — the next over-threshold tab fires on the re-run
-    // once this one clears.
-    if (
-      assistant.panes.some((p) => p.tabId && assistant.tabFor(p.tabId)?.compactingNow)
-    )
-      return;
-    const threshPct = threshold * 100;
-    const now = Date.now();
-    for (const p of assistant.panes) {
-      if (!p.tabId) continue;
-      const tab = assistant.tabFor(p.tabId);
-      if (!tab) continue;
-      if (tab.streaming || tab.compactingNow) continue;
-      if (now - tab.lastCompactionAt < 5 * 60_000) continue;
-      if (assistant.ctxPctFor(tab) < threshPct) continue;
-      void assistant.compactConversation(undefined, p.tabId);
-      break;
-    }
-  });
-
   // ── Resizable dividers ────────────────────────────────────────────────────
   // Per pane-count storage. fracs[i] is pane i's share; sum ≈ 1. Drag on the
   // divider btw pane i and i+1 redistributes between those two only.

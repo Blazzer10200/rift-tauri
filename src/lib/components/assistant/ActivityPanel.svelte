@@ -19,7 +19,7 @@
     Loader2, Terminal, Bot, Wrench, Activity, Sparkles,
     ChevronDown, ChevronUp, FileText, FilePen, Search, Globe,
     ListChecks, Circle, CheckCircle2, XCircle,
-    StopCircle, Minimize2, Copy, ArrowDownToLine, Check, X, GitCompare, HelpCircle, Bell,
+    StopCircle, Copy, ArrowDownToLine, Check, X, GitCompare, HelpCircle, Bell,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
@@ -370,7 +370,6 @@
   // turn streams; the rest act on the whole conversation.
   let rootEl = $state<HTMLDivElement | undefined>();
   let copied = $state(false);
-  const canCompact = $derived(!streaming && messages.length >= 4);
 
   function interrupt() { void assistant.stop(tabId); }
   function closeDock() { assistant.ui.dockOpen = false; }
@@ -380,7 +379,6 @@
     assistant.ui.diffTarget = target;
     assistant.ui.diffOpen = true;
   }
-  function doCompact() { if (canCompact) void assistant.compactConversation(undefined, tabId); }
   function jumpLatest() {
     const scroll = rootEl?.closest(".pane-shell")?.querySelector<HTMLElement>(".scroll");
     if (scroll) scroll.scrollTo({ top: scroll.scrollHeight, behavior: "smooth" });
@@ -432,10 +430,6 @@
       <button type="button" class="qbtn" onclick={copyTranscript} use:tooltip={"Copy the transcript as Markdown"}>
         {#if copied}<Check size={14} class="qb-ok" /><span>Copied</span>
         {:else}<Copy size={14} /><span>Copy</span>{/if}
-      </button>
-      <button type="button" class="qbtn" onclick={doCompact} disabled={!canCompact}
-        use:tooltip={canCompact ? "Compact — summarize history into a fresh, smaller context" : "Compact needs ≥4 messages and an idle turn"}>
-        <Minimize2 size={14} /><span>Compact</span>
       </button>
       <button type="button" class="qbtn" onclick={jumpLatest} use:tooltip={"Jump to the latest message"}>
         <ArrowDownToLine size={14} /><span>Latest</span>
