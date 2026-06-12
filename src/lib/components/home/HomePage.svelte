@@ -2,7 +2,7 @@
   import {
     MessageSquare, Sparkles, Send, FolderOpen, Folder, FolderGit2,
     GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check, Loader2,
-    Gauge, Lightbulb,
+    Gauge,
   } from "lucide-svelte";
   import { onMount } from "svelte";
   import { assistant } from "$lib/state/assistant.svelte";
@@ -18,7 +18,6 @@
   const cliSummary = $derived(cliUpdate.summary(assistant.auth?.installs));
   onMount(() => {
     void cliUpdate.maybeCheck();
-    if (!usage.loaded && !usage.loading) void usage.refresh();
     void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
   });
   // Keep the update command method-aware (npm vs native).
@@ -108,22 +107,7 @@
     workspace.setActive("chat");
   }
 
-  // ── Usage tiles — read off the shared usage store ──
-  function fmtUsd(n: number | null | undefined): string {
-    if (n == null) return "—";
-    return "$" + (n < 1 ? n.toFixed(3) : n.toFixed(2));
-  }
-  // Backend daily rows roll up in local time, keyed `YYYY-MM-DD`.
-  function todayKey(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  const todayCost = $derived(usage.daily.find((r) => r.date === todayKey())?.cost ?? 0);
-
-  const b = $derived(usage.budget);
-  const budgetPct = $derived(b && b.limit > 0 ? Math.min(100, (b.spent / b.limit) * 100) : 0);
-  const cadenceLabel = $derived(b?.cadence === "monthly" ? "month" : b?.cadence === "weekly" ? "week" : "day");
-
+  // ── Plan-limit gauges — read off the shared usage store ──
   const gauges = $derived.by(() => {
     const rl = usage.rateLimits;
     if (!rl) return [] as { k: string; w: LimitWindow }[];
@@ -146,14 +130,6 @@
     return `resets ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
   }
 
-  const last14 = $derived(usage.daily.slice(-14));
-  const sparkMax = $derived(Math.max(0.0001, ...last14.map((d) => d.cost)));
-  function fmtDay(date: string): string {
-    const d = new Date(date + "T00:00:00");
-    return isNaN(d.getTime()) ? date : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
-
-  const insights = $derived(usage.insights.slice(0, 3));
 </script>
 
 <div class="hf">
@@ -262,47 +238,6 @@
         {/if}
       </div>
 
-      <!-- KPI minis -->
-      <div class="tile t-kpi t-today">
-        <span class="kpi-v mono">{fmtUsd(todayCost)}</span>
-        <span class="kpi-k">today</span>
-      </div>
-      <div class="tile t-kpi t-month">
-        <span class="kpi-v mono">{fmtUsd(b?.spent)}</span>
-        <span class="kpi-k">this {cadenceLabel}</span>
-        {#if b && b.limit > 0}
-          <div class="kpi-track" use:tooltip={`${fmtUsd(b.spent)} / ${fmtUsd(b.limit)} · ${budgetPct.toFixed(0)}% of ${cadenceLabel}`}>
-            <span class="kpi-fill" data-zone={zone(budgetPct)} style="width:{Math.max(2, budgetPct)}%"></span>
-          </div>
-        {/if}
-      </div>
-      <div class="tile t-kpi t-burn">
-        <span class="kpi-v mono">{fmtUsd(b?.burnPerDay)}<span class="kpi-u">/day</span></span>
-        <span class="kpi-k">burn rate</span>
-      </div>
-
-      <!-- 14-day sparkline -->
-      <div class="tile t-spark">
-        <div class="tile-head slim">
-          <span class="ci"><Gauge size={13} /></span>
-          <span class="t">Usage</span>
-          {#if usage.rateLimits}<span class="live mono">live</span>{/if}
-        </div>
-        {#if last14.length > 0}
-          <div class="spark-bars">
-            {#each last14 as d (d.date)}
-              <span
-                class="spark-bar"
-                style="height:{Math.max(6, (d.cost / sparkMax) * 100)}%"
-                use:tooltip={`${fmtDay(d.date)} · ${fmtUsd(d.cost)} · ${d.turns} turns`}
-              ></span>
-            {/each}
-          </div>
-        {:else}
-          <div class="tile-empty">No usage logged yet</div>
-        {/if}
-      </div>
-
       <!-- Jump back in — wide tile -->
       <div class="tile t-jump">
         <div class="tile-head">
@@ -334,7 +269,7 @@
         </div>
       </div>
 
-      <!-- Right rail: plan limits + insight -->
+      <!-- Right rail: plan limits -->
       <div class="t-side">
         <div class="tile t-limits">
           <div class="tile-head slim">
@@ -362,26 +297,6 @@
           {/if}
         </div>
 
-        {#if insights.length > 0}
-          <div class="tile t-insight">
-            <div class="tile-head slim">
-              <span class="ci"><Lightbulb size={13} /></span>
-              <span class="t">Rift noticed</span>
-              <span class="live mono">{insights.length} pattern{insights.length === 1 ? "" : "s"}</span>
-            </div>
-            <div class="in-list">
-              {#each insights as i (i.id)}
-                <div class="in-item" data-sev={i.severity}>
-                  <span class="in-dot"></span>
-                  <div class="in-body">
-                    <div class="in-title">{i.title}</div>
-                    <div class="in-detail">{i.detail}</div>
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-        {/if}
       </div>
     </div>
   </div>
@@ -478,14 +393,12 @@
   }
   .dash-cli .dc-x:hover { color: var(--fg); background: var(--surface-hover); }
 
-  /* ── Bento grid ── */
+  /* ── Bento grid — 3 tiles: workspace · jump · plan limits ── */
   .bento {
     flex: 1; min-height: 0; display: grid; gap: 14px;
-    grid-template-columns: 1.05fr 0.62fr 0.62fr 0.62fr 1.15fr;
-    grid-template-rows: 118px minmax(0, 1fr);
-    grid-template-areas:
-      "ws today month burn spark"
-      "ws jump  jump  jump side";
+    grid-template-columns: 1.05fr 1.9fr 1fr;
+    grid-template-rows: minmax(0, 1fr);
+    grid-template-areas: "ws jump side";
   }
   .tile {
     min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column;
@@ -495,26 +408,19 @@
   }
   .t-ws { grid-area: ws; padding: 20px 20px 16px; }
   .t-jump { grid-area: jump; padding: 20px 20px 14px; }
-  .t-spark { grid-area: spark; }
-  .t-today { grid-area: today; }
-  .t-month { grid-area: month; }
-  .t-burn { grid-area: burn; }
   .t-side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
   .t-limits { flex: none; }
-  .t-insight { flex: 1; min-height: 0; }
 
-  /* Narrow windows: page scrolls, tiles stack — KPIs stay a row, rail goes side-by-side. */
+  /* Narrow windows: page scrolls, tiles stack. */
   @media (max-width: 1240px) {
     .hf { overflow-y: auto; }
     .hf-inner { height: auto; min-height: 100%; }
     .bento {
-      grid-template-columns: 1fr 1fr 1fr;
-      grid-template-rows: 104px 150px auto auto;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
       grid-template-areas:
-        "today month burn"
-        "spark spark spark"
-        "ws    jump  jump"
-        "side  side  side";
+        "ws   jump"
+        "side side";
     }
     .t-ws, .t-jump { min-height: 280px; }
     .t-side { flex-direction: row; }
@@ -535,23 +441,12 @@
   .tile-link:hover { color: var(--accent); gap: 7px; }
   .tile-empty { font-size: var(--fs-xs); color: var(--fg-subtle); padding: 2px 0; }
 
-  /* KPI minis */
-  .t-kpi { justify-content: center; gap: 4px; }
-  .kpi-v { font-size: clamp(17px, 1.5vw, 23px); font-weight: 720; letter-spacing: -0.02em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1.1; }
-  .kpi-u { font-size: 11px; font-weight: 600; color: var(--fg-subtle); }
-  .kpi-k { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--fg-faint); }
+  /* Gauge track (plan-limit rows) */
   .kpi-track { height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; position: relative; margin-top: 6px; }
   .kpi-fill { position: absolute; inset: 0 auto 0 0; height: 100%; border-radius: 999px; transition: width var(--dur-slow) var(--ease-page);
     background: linear-gradient(90deg, oklch(0.62 0.15 var(--accent-h)), oklch(0.78 0.16 var(--accent-h))); }
   .kpi-fill[data-zone="warn"] { background: linear-gradient(90deg, color-mix(in oklab, var(--warn) 80%, black), var(--warn)); }
   .kpi-fill[data-zone="hot"] { background: linear-gradient(90deg, color-mix(in oklab, var(--danger) 80%, black), var(--danger)); }
-
-  /* Sparkline tile */
-  .spark-bars { flex: 1; min-height: 0; display: flex; align-items: flex-end; gap: 3px; }
-  .spark-bar { flex: 1; min-width: 4px; border-radius: 3px 3px 1px 1px; cursor: default;
-    background: linear-gradient(180deg, oklch(0.72 0.15 var(--accent-h) / 0.85), oklch(0.55 0.12 var(--accent-h) / 0.55));
-    transition: filter 120ms ease; }
-  .spark-bar:hover { filter: brightness(1.25); }
 
   /* Plan-limit gauges */
   .limit-rows { display: flex; flex-direction: column; gap: 9px; }
@@ -564,16 +459,6 @@
   .lp[data-zone="hot"] { color: var(--danger); }
   .lp-u { font-size: 10px; font-weight: 600; color: var(--fg-subtle); margin-left: 1px; }
   .limit-reset { font-size: 10px; color: var(--fg-faint); letter-spacing: 0.02em; }
-
-  /* Insight tile */
-  .in-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 13px; }
-  .in-item { display: flex; gap: 10px; min-width: 0; }
-  .in-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--info); flex-shrink: 0; margin-top: 5px; }
-  .in-item[data-sev="good"] .in-dot { background: var(--ok); }
-  .in-item[data-sev="warn"] .in-dot { background: var(--warn); }
-  .in-body { min-width: 0; }
-  .in-title { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); margin-bottom: 3px; }
-  .in-detail { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.45; }
 
   /* Workspace tile internals */
   .ws-current { display: flex; align-items: center; gap: 12px; flex: none; margin-bottom: 14px; }
