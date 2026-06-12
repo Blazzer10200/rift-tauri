@@ -342,17 +342,6 @@ export class TabState {
   }
 }
 
-// 2a: one saved custom-provider endpoint. Secret stays in the OS keychain on
-// the Rust side; `hasKey` is the only signal the renderer gets about it.
-export type ProviderDto = {
-  id: string;
-  name: string;
-  baseUrl: string;
-  model: string | null;
-  hasKey: boolean;
-  active: boolean;
-};
-
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
@@ -559,21 +548,6 @@ class AssistantStore {
   // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
   // backend; defaults to "readonly" when unset. Settings seg treats full ⊇ standard.
   trustLevel = $state<TrustLevel>("readonly");
-  // 2a multi-provider list (cc-switch pattern). Empty = Anthropic only. The
-  // `active` one routes turns; secrets live in the keychain (see ProviderDto).
-  providers = $state<ProviderDto[]>([]);
-  activeProvider = $derived(this.providers.find((p) => p.active) ?? null);
-  // Flips true after providers (+ legacy fields) are fetched — distinct from
-  // configLoaded (set earlier), so the Settings draft-seed waits for real values.
-  providerConfigLoaded = $state<boolean>(false);
-  // 3c compression toggle (headroom-style local proxy). Off by default; the
-  // Python proxy runtime is a soft dep Rift never bundles or spawns. When on
-  // AND no custom provider is active, turns route through the proxy via
-  // ANTHROPIC_BASE_URL. `compressionProxyUrl` null = use `compressionDefaultUrl`.
-  compressionEnabled = $state<boolean>(false);
-  compressionProxyUrl = $state<string | null>(null);
-  compressionDefaultUrl = $state<string>("http://127.0.0.1:8787");
-
   // The Assistant's open project folder + recent-folder list. Decoupled from
   // Sync's server folders; populated by `assistant_get_workspace` on init and
   // updated whenever the user opens, switches, or clears a folder. Empty
@@ -851,23 +825,6 @@ class AssistantStore {
       this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
     } catch (e) {
       console.warn("assistant_get_trust_level failed", e);
-    }
-    try {
-      this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
-    } catch (e) {
-      console.warn("assistant_list_providers failed", e);
-    } finally {
-      this.providerConfigLoaded = true;
-    }
-    try {
-      const c = await invoke<{ enabled: boolean; proxyUrl: string | null; defaultUrl: string }>(
-        "assistant_get_compression",
-      );
-      this.compressionEnabled = c.enabled;
-      this.compressionProxyUrl = c.proxyUrl;
-      this.compressionDefaultUrl = c.defaultUrl;
-    } catch (e) {
-      console.warn("assistant_get_compression failed", e);
     }
     this.unlistens.push(
       await listen<{ session_id: string; prompt: string }>(
@@ -1298,71 +1255,6 @@ class AssistantStore {
       this.lastNotice = String(e);
       throw e;
     }
-  }
-
-  // ── 2a multi-provider list ──
-  async refreshProviders() {
-    this.providers = await invoke<ProviderDto[]>("assistant_list_providers");
-  }
-
-  /** Create (empty id) or update a provider. `apiKey` omitted on edit keeps the stored key. */
-  async saveProvider(
-    profile: { id?: string; name: string; baseUrl: string; model: string | null },
-    apiKey: string | null,
-  ): Promise<string> {
-    try {
-      const id = await invoke<string>("assistant_save_provider", {
-        profile: { id: profile.id ?? null, name: profile.name, baseUrl: profile.baseUrl, model: profile.model },
-        apiKey: apiKey && apiKey.trim().length > 0 ? apiKey.trim() : null,
-      });
-      await this.refreshProviders();
-      return id;
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  async deleteProvider(id: string) {
-    try {
-      await invoke("assistant_delete_provider", { id });
-      await this.refreshProviders();
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  /** Set the routing provider (`null` = Anthropic). */
-  async setActiveProvider(id: string | null) {
-    try {
-      await invoke("assistant_set_active_provider", { id });
-      await this.refreshProviders();
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  // ── 3c compression toggle ──
-  async setCompression(enabled: boolean, proxyUrl: string | null) {
-    const v = proxyUrl && proxyUrl.trim().length > 0 ? proxyUrl.trim() : null;
-    try {
-      await invoke("assistant_set_compression", { enabled, proxyUrl: v });
-      this.compressionEnabled = enabled;
-      this.compressionProxyUrl = v;
-    } catch (e) {
-      this.lastNotice = String(e);
-      throw e;
-    }
-  }
-
-  /** Probe proxy reachability + headroom runtime presence. Pure observation. */
-  async compressionEnvCheck(
-    proxyUrl: string | null,
-  ): Promise<{ proxyUrl: string; proxyReachable: boolean; headroomPresent: boolean; pythonPresent: boolean }> {
-    const v = proxyUrl && proxyUrl.trim().length > 0 ? proxyUrl.trim() : null;
-    return await invoke("compression_env_check", { proxyUrl: v });
   }
 
   /** Turn dispatch (incl. client-side slash commands). M9: body in ./assistant/send. */

@@ -19,13 +19,12 @@ use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
     current_api_key, effective_trust_level, fable_sunset_passed, is_valid_model_name,
-    is_valid_permission_mode, load_config, resolve_active_provider, FABLE_MODEL,
+    is_valid_permission_mode, load_config, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
     save_session_model,
 };
-use super::env_checks::resolve_compression;
 use super::{write_mcp_config, AskUserRegistry, McpConfigGuard, PermissionRegistry};
 
 /// PID of every currently-streaming `claude` child, keyed by the CLI session
@@ -430,30 +429,8 @@ pub async fn assistant_send(
     }
     let cfg = load_config();
     let api_key = current_api_key();
-    // June-15 hedge: the active custom provider routes this turn to a cheaper
-    // endpoint, off the metered pool. None = plain Anthropic.
-    let active_provider = resolve_active_provider(&cfg);
-    let custom_base: Option<String> = active_provider.as_ref().map(|p| p.base_url.clone());
-    // Custom-provider auth: its own keychain key, falling back to the main
-    // Anthropic key (covers gateways that reuse it + the legacy migrated profile).
-    let provider_key: Option<String> = active_provider
-        .as_ref()
-        .and_then(|p| crate::secrets::get(&p.key_ref))
-        .or_else(|| api_key.clone());
-    // Spawn with `--bare` + injected key whenever we have credentials for the
-    // route: the provider key in custom mode, the Anthropic key otherwise.
-    let use_api_key = if custom_base.is_some() {
-        provider_key.is_some()
-    } else {
-        api_key.is_some()
-    };
+    let use_api_key = api_key.is_some();
     let mut model = model.unwrap_or_else(|| "sonnet".to_string());
-    // Custom endpoints use their own model ids; the profile's model overrides the Rift tier.
-    if let Some(ref p) = active_provider {
-        if let Some(pm) = p.model.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-            model = pm.to_string();
-        }
-    }
     if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
     }
@@ -461,9 +438,7 @@ pub async fn assistant_send(
     // resuming under a switched model 400s on the replayed prior turn (see
     // session_model_path). On resume, the model the session was created with wins
     // over a live picker change; the new model only takes effect in a new chat.
-    // Pin is Anthropic-only (thinking-signature preservation); a custom endpoint
-    // must keep its own provider_model, not a stale Anthropic tier.
-    if !is_first_turn && custom_base.is_none() {
+    if !is_first_turn {
         if let Some(pinned) = load_session_model(&session_id) {
             if pinned != model {
                 log::info!(
@@ -474,8 +449,8 @@ pub async fn assistant_send(
         }
     }
     // Fable sunset guard — after pin resolution so a pinned Fable session also
-    // falls back once the limited run ends. Anthropic route only.
-    if custom_base.is_none() && model == FABLE_MODEL && fable_sunset_passed() {
+    // falls back once the limited run ends.
+    if model == FABLE_MODEL && fable_sunset_passed() {
         log::info!("assistant_send: {FABLE_MODEL} sunset passed — falling back to opus");
         model = "opus".to_string();
     }
@@ -733,30 +708,13 @@ pub async fn assistant_send(
         cmd.arg("--tools").arg("");
     }
 
-    // June-15 hedge: route this turn to a custom Anthropic-compatible endpoint when set.
-    // 3c: with no custom provider active, an enabled compression toggle routes the turn
-    // through the local compression proxy instead (it forwards upstream to Anthropic).
-    // Both can't own ANTHROPIC_BASE_URL — the custom provider wins the seam.
-    let compression_base = if custom_base.is_none() { resolve_compression(&cfg) } else { None };
-    if let Some(ref base) = custom_base {
-        cmd.env("ANTHROPIC_BASE_URL", base);
-    } else if let Some(ref base) = compression_base {
-        cmd.env("ANTHROPIC_BASE_URL", base);
-        log::info!("assistant_send: routing turn through compression proxy {base}");
-    }
     if use_api_key {
         // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly. The
         // builder stripped any inherited env key; this re-adds the sanctioned
         // Rift-configured one (the only API-key path). OAuth/login turns leave
         // it stripped so a stray system env key can't shadow `claude login`.
         cmd.arg("--bare");
-        // Custom routes use the active provider's key; Anthropic uses the main key.
-        let auth = if custom_base.is_some() { provider_key.as_deref() } else { api_key.as_deref() };
-        if let Some(k) = auth {
-            // Custom endpoints want a bearer token (ANTHROPIC_AUTH_TOKEN); set both for gateway compat.
-            if custom_base.is_some() {
-                cmd.env("ANTHROPIC_AUTH_TOKEN", k);
-            }
+        if let Some(k) = api_key.as_deref() {
             cmd.env("ANTHROPIC_API_KEY", k);
         }
     }
@@ -786,7 +744,7 @@ pub async fn assistant_send(
         "deep" | "ultra" => "xhigh",
         _ /* "smart" or unknown */ => "high",
     };
-    if model != "haiku" && custom_base.is_none() {
+    if model != "haiku" {
         cmd.arg("--effort").arg(effort_level);
         // Ultracode tier: xhigh effort + autonomous dynamic-workflow
         // orchestration. The workflow behavior rides the CLI's `ultracode`

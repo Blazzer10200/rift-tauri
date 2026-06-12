@@ -10,7 +10,7 @@
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
-  import { assistant as assistantStore, type ProviderDto } from "../../state/assistant.svelte";
+  import { assistant as assistantStore } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
@@ -126,103 +126,6 @@
   const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
   $effect(() => { if (!asstApiKeyDraft) asstApiKeyVisible = false; });
 
-  // ── Custom-provider list (2a) ──
-  type ProviderPreset = { id: string; label: string; baseUrl: string; model: string };
-  const PROVIDER_PRESETS: ProviderPreset[] = [
-    { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/anthropic", model: "deepseek-chat" },
-    { id: "glm", label: "GLM / Zhipu", baseUrl: "https://open.bigmodel.cn/api/anthropic", model: "glm-4.6" },
-    { id: "bedrock", label: "AWS Bedrock (gateway)", baseUrl: "https://your-bedrock-gateway/anthropic", model: "" },
-    { id: "openai-compat", label: "OpenAI-compat gateway", baseUrl: "", model: "" },
-  ];
-  let provName = $state("");
-  let provBaseUrl = $state("");
-  let provModel = $state("");
-  let provKey = $state("");
-  let provKeyVisible = $state(false);
-  let provEditingId = $state<string | null>(null);
-  let provSaving = $state(false);
-  let provMsg = $state<string | null>(null);
-  const provFormValid = $derived(provName.trim().length > 0 && /^https?:\/\//.test(provBaseUrl.trim()));
-  $effect(() => { if (!provKey) provKeyVisible = false; });
-
-  function applyProviderPreset(id: string) {
-    const p = PROVIDER_PRESETS.find((x) => x.id === id);
-    if (!p) return;
-    if (!provName.trim()) provName = p.label;
-    provBaseUrl = p.baseUrl;
-    provModel = p.model;
-  }
-  function editProvider(p: ProviderDto) {
-    provEditingId = p.id;
-    provName = p.name;
-    provBaseUrl = p.baseUrl;
-    provModel = p.model ?? "";
-    provKey = "";
-    provMsg = null;
-  }
-  function resetProviderForm() {
-    provEditingId = null;
-    provName = ""; provBaseUrl = ""; provModel = ""; provKey = ""; provKeyVisible = false; provMsg = null;
-  }
-  async function saveProviderForm() {
-    provSaving = true;
-    provMsg = null;
-    try {
-      await assistantStore.saveProvider(
-        { id: provEditingId ?? undefined, name: provName, baseUrl: provBaseUrl, model: provModel.trim() || null },
-        provKey || null,
-      );
-      resetProviderForm();
-    } catch (e) {
-      provMsg = `Failed: ${e}`;
-    } finally {
-      provSaving = false;
-    }
-  }
-  async function deleteProviderRow(id: string) {
-    try {
-      await assistantStore.deleteProvider(id);
-      if (provEditingId === id) resetProviderForm();
-    } catch (e) {
-      provMsg = `Failed: ${e}`;
-    }
-  }
-
-  // ── Context compression (3c) ──
-  let compProxyDraft = $state("");
-  let compChecking = $state(false);
-  let compEnv = $state<{ proxyUrl: string; proxyReachable: boolean; headroomPresent: boolean; pythonPresent: boolean } | null>(null);
-  let compMsg = $state<string | null>(null);
-
-  async function toggleCompression(enabled: boolean) {
-    compMsg = null;
-    try {
-      await assistantStore.setCompression(enabled, compProxyDraft.trim() || null);
-    } catch (e) {
-      compMsg = `Failed: ${e}`;
-    }
-  }
-  async function saveCompressionProxy() {
-    compMsg = null;
-    try {
-      await assistantStore.setCompression(assistantStore.compressionEnabled, compProxyDraft.trim() || null);
-      compMsg = "Saved.";
-    } catch (e) {
-      compMsg = `Failed: ${e}`;
-    }
-  }
-  async function checkCompressionEnv() {
-    compChecking = true;
-    compMsg = null;
-    try {
-      compEnv = await assistantStore.compressionEnvCheck(compProxyDraft.trim() || null);
-    } catch (e) {
-      compMsg = `Check failed: ${e}`;
-    } finally {
-      compChecking = false;
-    }
-  }
-
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
   // always shows the true status even after the toolbar badge was dismissed.
@@ -301,7 +204,6 @@
     void assistantStore.init().then(() => {
       asstApiKeyDraft = "";
       asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
-      compProxyDraft = assistantStore.compressionProxyUrl ?? "";
     }).catch((e) => console.warn("assistantStore.init failed", e)); // F160: no unhandled rejection
     void stt.init();
     void loadAboutPaths();
@@ -649,7 +551,7 @@
             <div class="st-block-label">Model &amp; routing</div>
             <div class="st-card">
               <div class="st-row-desc" style="padding:14px 17px 0;">
-                By default, turns run on your Claude session above. The options here override <em>where</em> each turn is sent, in priority order: <strong>API key</strong>, then an active <strong>custom provider</strong>, then the <strong>compression proxy</strong> below. Keys are stored in your OS keychain.
+                By default, turns run on your Claude session above. Setting an <strong>API key</strong> overrides that and bills pay-per-token instead. The key is stored in your OS keychain.
               </div>
               <div class="st-row">
                 <div class="st-row-body">
@@ -673,106 +575,6 @@
               {#if assistantStore.auth?.envApiKeyPresent && !assistantStore.auth?.apiKeyConfigured}
                 <div class="st-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it above; otherwise remove it from your environment.</div>
               {/if}
-              <div class="st-subhead">Custom providers</div>
-
-              <!-- Active selector: Anthropic (default) + each saved provider -->
-              <div class="prov-list">
-                <button
-                  class="prov-row"
-                  class:active={assistantStore.activeProvider === null}
-                  type="button"
-                  onclick={() => assistantStore.setActiveProvider(null)}
-                >
-                  <span class="prov-radio" class:on={assistantStore.activeProvider === null}></span>
-                  <span class="prov-main">
-                    <span class="prov-name">Anthropic <span class="prov-sub">default · metered subscription</span></span>
-                  </span>
-                </button>
-
-                {#each assistantStore.providers as p (p.id)}
-                  <div class="prov-row" class:active={p.active}>
-                    <button class="prov-pick" type="button" onclick={() => assistantStore.setActiveProvider(p.id)} aria-label={`Activate ${p.name}`}>
-                      <span class="prov-radio" class:on={p.active}></span>
-                      <span class="prov-main">
-                        <span class="prov-name">
-                          {p.name}
-                          {#if p.active}<span class="st-pill ok"><span class="dot"></span>Active</span>{/if}
-                          {#if !p.hasKey}<span class="st-pill warn">no key</span>{/if}
-                        </span>
-                        <span class="prov-sub mono">{p.baseUrl}{p.model ? ` · ${p.model}` : ""}</span>
-                      </span>
-                    </button>
-                    <span class="prov-actions">
-                      <button class="st-btn" type="button" onclick={() => editProvider(p)} aria-label={`Edit ${p.name}`}>Edit</button>
-                      <button class="st-btn danger-btn" type="button" onclick={() => deleteProviderRow(p.id)} aria-label={`Delete ${p.name}`}><Trash2 size={13} /></button>
-                    </span>
-                  </div>
-                {/each}
-              </div>
-
-              <!-- Add / edit form -->
-              <div class="prov-form">
-                <div class="prov-form-head">
-                  <span class="st-row-label">{provEditingId ? "Edit provider" : "Add provider"}</span>
-                  <Select
-                    value=""
-                    options={[{ value: "", label: "Preset…" }, ...PROVIDER_PRESETS.map((p) => ({ value: p.id, label: p.label }))]}
-                    onChange={(v) => { if (v) applyProviderPreset(v); }}
-                    ariaLabel="Provider preset"
-                  />
-                </div>
-                <div class="prov-grid">
-                  <input class="st-input" type="text" placeholder="Name (e.g. DeepSeek)" bind:value={provName} autocomplete="off" spellcheck="false" />
-                  <input class="st-input mono" type="text" placeholder="https://api.deepseek.com/anthropic" bind:value={provBaseUrl} autocomplete="off" spellcheck="false" />
-                  <input class="st-input mono" type="text" placeholder="Model id (optional, e.g. deepseek-chat)" bind:value={provModel} autocomplete="off" spellcheck="false" />
-                  <span class="st-secret">
-                    <input class="st-input mono" type={provKeyVisible ? "text" : "password"} placeholder={provEditingId ? "API key (leave blank to keep)" : "API key"} bind:value={provKey} autocomplete="off" spellcheck="false" />
-                    <button class="st-eye" type="button" onclick={() => (provKeyVisible = !provKeyVisible)} aria-label={provKeyVisible ? "Hide key" : "Show key"}>{#if provKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
-                  </span>
-                </div>
-                <div class="prov-form-actions">
-                  <button class="st-btn primary" type="button" onclick={saveProviderForm} disabled={provSaving || !provFormValid}>{provSaving ? "Saving…" : provEditingId ? "Update" : "Add provider"}</button>
-                  {#if provEditingId}<button class="st-btn" type="button" onclick={resetProviderForm}>Cancel</button>{/if}
-                </div>
-                {#if provMsg}<div class="st-note">{provMsg}</div>{/if}
-              </div>
-            </div>
-          </div>
-
-          <div class="st-block">
-            <div class="st-block-label">Compression proxy (advanced)</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Route turns through a local compression proxy</div>
-                  <div class="st-row-desc">
-                    Points <code>ANTHROPIC_BASE_URL</code> at a local proxy (e.g. <a href="https://github.com/chopratejas/headroom" target="_blank" rel="noreferrer">headroom</a>) that shrinks context before forwarding — cutting tokens and spend. <strong>You run the proxy yourself</strong>; Rift never launches it. An active custom provider takes priority.
-                  </div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={assistantStore.compressionEnabled} role="switch" aria-checked={assistantStore.compressionEnabled} aria-label="Enable context compression proxy" type="button" onclick={() => void toggleCompression(!assistantStore.compressionEnabled)}></button>
-                </div>
-              </div>
-              {#if assistantStore.compressionEnabled}
-                <div class="st-row">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Proxy URL</div>
-                    <div class="st-row-desc">Leave blank for the headroom default (<code>{assistantStore.compressionDefaultUrl}</code>).</div>
-                  </div>
-                  <div class="st-row-ctl" style="gap:6px;">
-                    <input class="st-input mono" type="text" placeholder={assistantStore.compressionDefaultUrl} style="width:208px;" bind:value={compProxyDraft} autocomplete="off" spellcheck="false" />
-                    <button class="st-btn" type="button" onclick={() => void saveCompressionProxy()}>Save</button>
-                    <button class="st-btn" type="button" disabled={compChecking} onclick={() => void checkCompressionEnv()}>{compChecking ? "Testing…" : "Test"}</button>
-                  </div>
-                </div>
-                {#if compEnv}
-                  <div class="st-note">
-                    {#if compEnv.proxyReachable}<span class="st-pill ok"><span class="dot"></span>Proxy reachable</span>{:else}<span class="st-pill warn">No proxy at {compEnv.proxyUrl} — start it, then turns won't route until it's up</span>{/if}
-                    {#if compEnv.headroomPresent}<span class="st-pill ok"><span class="dot"></span>headroom on PATH</span>{:else if compEnv.pythonPresent}<span class="st-pill">Python found · install headroom to use it</span>{:else}<span class="st-pill warn">No headroom or Python on PATH</span>{/if}
-                  </div>
-                {/if}
-              {/if}
-              {#if compMsg}<div class="st-note">{compMsg}</div>{/if}
             </div>
           </div>
 
@@ -1138,11 +940,8 @@
   .st-card { background: transparent; border: 0; border-radius: 0; }
   /* Loose (non-row) content sits flush to the body edge — give it the row/header inset. */
   .st-card > .st-row-desc { padding: 14px 17px 0; }
-  .st-card > .prov-list { padding: 0 17px; }
-  .st-card > .prov-form { padding-left: 17px; padding-right: 17px; }
   .st-card > .st-warn { margin: 4px 17px 14px; }
   /* In-card sub-section heading (e.g. "Custom providers" within Model & routing). */
-  .st-subhead { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--fg-subtle); padding: 13px 17px 9px; border-top: 1px solid var(--border); }
 
   /* ── Rows ── */
   .st-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 17px; }
@@ -1218,26 +1017,6 @@
   .st-pill.accent .dot { background: var(--accent); }
 
   /* ── Custom-provider list (2a) ── */
-  .prov-list { display: flex; flex-direction: column; gap: 6px; }
-  .prov-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 9px 11px; border-radius: 9px; border: 1px solid var(--border); background: var(--bg-inset); cursor: pointer; transition: border-color 120ms, background 120ms; }
-  button.prov-row:hover, .prov-row:hover { border-color: var(--border-strong); }
-  .prov-row.active { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); background: color-mix(in oklab, var(--accent) 8%, var(--bg-inset)); }
-  .prov-pick { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; border: 0; background: none; color: inherit; cursor: pointer; padding: 0; text-align: left; }
-  .prov-radio { flex-shrink: 0; width: 14px; height: 14px; border-radius: 999px; border: 2px solid var(--fg-faint); transition: border-color 120ms, box-shadow 120ms; }
-  .prov-radio.on { border-color: var(--accent); box-shadow: inset 0 0 0 3px var(--accent); }
-  .prov-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .prov-name { display: inline-flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-  .prov-sub { font-size: 11px; color: var(--fg-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .prov-actions { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; }
-
-  .prov-form { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .prov-form-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
-  .prov-form-head .st-row-label { white-space: nowrap; flex: none; }
-  .prov-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .prov-grid .st-input { width: 100%; }
-  .prov-grid .st-secret { display: flex; }
-  .prov-grid .st-secret .st-input { flex: 1; }
-  .prov-form-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
 
   /* CLI update command line — copyable npm install command. */
   .st-cli-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; max-width: 360px; background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 7px 6px 10px; }
