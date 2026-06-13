@@ -167,11 +167,29 @@
         <h1 class="wel-title">Set up Claude</h1>
         <p class="wel-sub">The Assistant needs the Claude Code CLI logged in, or an API key configured in Settings.</p>
       </div>
+      <div class="auth-actions">
+        <button
+          class="auth-btn primary"
+          type="button"
+          disabled={assistant.loginInProgress}
+          onclick={() => assistant.startLogin()}
+        >
+          {assistant.loginInProgress ? "Signing in…" : "Sign in"}
+        </button>
+        <button
+          class="auth-btn"
+          type="button"
+          disabled={assistant.authChecking || assistant.loginInProgress}
+          onclick={() => assistant.recheckAuth()}
+        >
+          {assistant.authChecking ? "Checking…" : "Re-check"}
+        </button>
+      </div>
       <div class="auth-help">
         <a href="https://claude.com/download" target="_blank" rel="noreferrer">
           Download Claude Code <ExternalLink size={11}/>
         </a>
-        <span class="dim">— then run <code>claude login</code> and hit refresh.</span>
+        <span class="dim">— or run <code>claude login</code> in a terminal, then Re-check.</span>
         <p class="muted">Or open <strong>Settings → Assistant</strong> and paste an <code>sk-ant-api03-…</code> key.</p>
       </div>
     </div>
@@ -470,6 +488,29 @@
   .wel-open-t { font-size: var(--fs-md); font-weight: 600; }
   .wel-open-s { font-size: var(--fs-xs); color: var(--fg-muted); }
   :global(.wel-open .wel-open-chev) { color: var(--accent); opacity: 0.7; }
+
+  /* ── Auth actions (needsAuth path) — live Sign-in + Re-check ───────────── */
+  .auth-actions {
+    display: flex; justify-content: center; gap: 8px;
+  }
+  .auth-btn {
+    font: inherit; font-size: var(--fs-sm); font-weight: 600;
+    padding: 7px 16px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--ghost-border);
+    background: var(--bg-elev-1); color: var(--fg);
+    transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
+  }
+  .auth-btn:hover:not(:disabled) {
+    background: var(--surface-hover); border-color: var(--border);
+  }
+  .auth-btn.primary {
+    background: var(--accent); border-color: var(--accent);
+    color: oklch(0.99 0.01 163);
+  }
+  .auth-btn.primary:hover:not(:disabled) {
+    background: color-mix(in oklab, var(--accent) 88%, white);
+  }
+  .auth-btn:disabled { opacity: 0.6; cursor: default; }
 
   /* ── Auth-help block (needsAuth path) ──────────────────────────────────── */
   .auth-help {
