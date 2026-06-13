@@ -2,6 +2,7 @@
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
     Sparkles, Eye, ChevronUp, Undo2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { notify } from "../../state/toast.svelte";
   import type { PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
@@ -326,9 +327,9 @@
     // draft so their text survives; re-probe (state may be stale) and surface
     // the actionable reason via the notice banner.
     if (!(assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")) {
-      assistant.lastNotice =
-        assistant.auth?.summary ??
-        "Claude isn't set up on this machine — open Settings to sign in or add an API key.";
+      notify.danger("Claude isn't set up", {
+        detail: assistant.auth?.summary ?? "Open Settings to sign in or add an API key.",
+      });
       void assistant.refreshAuth();
       return;
     }

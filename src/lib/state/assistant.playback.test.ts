@@ -10,7 +10,13 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 // toast is a UI singleton; the send/steer orchestrator calls toast.push on the
 // steer-success path. Stub it so the harness stays headless.
-vi.mock("./toast.svelte", () => ({ toast: { push: vi.fn() } }));
+vi.mock("./toast.svelte", () => {
+  const push = vi.fn();
+  return {
+    toast: { push },
+    notify: { ok: vi.fn(), info: vi.fn(), warn: vi.fn(), danger: vi.fn() },
+  };
+});
 
 // onStream's text path paces itself through requestAnimationFrame (enqueueText →
 // drainTick re-arms rAF until pendingText empties). The test env is `node` — no
@@ -41,6 +47,7 @@ function pumpRaf() {
 }
 
 import { assistant } from "./assistant.svelte.js";
+import { notify } from "./toast.svelte";
 import { invoke } from "@tauri-apps/api/core";
 import type { TurnRecord } from "./assistant/types.js";
 
@@ -500,15 +507,16 @@ describe("playback — send() turn initialization", () => {
   });
 
   it("blocks the send when auth isn't green/yellow — no turn, surfaces a notice", async () => {
-    assistant.currentConvoId = null; // no active tab → store-level notice
+    assistant.currentConvoId = null; // no active tab
     assistant.auth = { pill: "red", summary: "Claude isn't set up" } as never;
     mockInvoke.mockClear();
+    vi.mocked(notify.danger).mockClear();
     const before = assistant.telemetry.turns.length;
 
     await assistant.send("hi");
 
     expect(assistant.telemetry.turns.length).toBe(before);
-    expect(assistant.lastNotice).toBe("Claude isn't set up");
+    expect(notify.danger).toHaveBeenCalledWith("Claude isn't set up", expect.anything());
     expect(mockInvoke).not.toHaveBeenCalledWith("assistant_send", expect.anything());
   });
 

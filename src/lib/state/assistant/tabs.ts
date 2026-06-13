@@ -13,6 +13,7 @@
 // (racy openTab during delete), #181 (persistTabs in finally on restore).
 
 import { MAX_PANES, type PaneState } from "./types";
+import { notify } from "../toast.svelte";
 
 /** Subset of AssistantStore the tab/pane lifecycle touches. Structural —
  *  mirrors the live public surface of AssistantStore. */
@@ -335,7 +336,7 @@ export async function closeTab(host: TabsHost, id: string) {
   // on disk via scheduleSave below; only in-memory streaming state is retired.
   const closingTab = host.tabs.get(id) as { queue?: { id: string; text: string }[] } | undefined;
   if (closingTab?.queue?.length) {
-    host.lastNotice = `${closingTab.queue.length} queued message(s) were discarded when the tab was closed.`;
+    notify.warn(`${closingTab.queue.length} queued message(s) discarded`, { detail: "The tab was closed mid-queue." });
   }
   host.pruneTabUi(id);
   scrubTabFromPanes(host, id);
@@ -442,7 +443,7 @@ export async function clearConversation(host: TabsHost) {
   host.telemetry.event("tab.clear", { from: oldId, to: newId });
   host.currentConvoId = newId;
   host.queue = [];
-  host.lastNotice = "Conversation cleared — previous chat saved to History.";
+  notify.info("Conversation cleared", { detail: "Previous chat saved to History." });
   host.composerDraft = "";
   host.composerAttachments = [];
   // Retire the old tab's in-memory state; the disk record stays (still in
