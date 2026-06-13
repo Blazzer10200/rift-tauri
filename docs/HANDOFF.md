@@ -22,12 +22,14 @@ All 7 slices of `docs/design/minimal-core-strip.md` shipped as 7 commits on main
 - Bumped ×3 + Cargo.lock, CHANGELOG rewritten, **tag `v0.9.0` pushed → tag-driven CI** publishes to rift-releases (run 27448186035).
 - **Docs sweep:** deleted retired design docs (`rift-roadmap` · `idea-phase-plan` · `edit-swarm-safety-layer` · completed `minimal-core-strip` + `scripts/proto/swarm-harness.ps1`); IDEAS.md rewritten w/ pivot note + surviving seeds only; ISSUES stale Harness refs pruned + verification section refreshed; README feature list updated. Kept: 6 docs/ files + 7 design refs (splits ×5, velopack, self-hosted-runner, ui-audit).
 
-### RESUME HERE
+### RESUME HERE — UI Polish Arc (next session)
 
-1. **Verify the shipped build:** prod app auto-updates to v0.9.0 (or install from rift-releases) → smoke: 3 workspaces, a real turn, #29 CSP check (transitions animate, update progress fills, 0 violations).
-2. Fresh-machine pass on a buddy install: onboarding → logged-out sign-in (closes Auth-Rec) → updater round-trip. Permission-bar on a trust-standard throwaway repo.
-3. Distribute (unsigned — SmartScreen "More info → Run anyway" note).
-4. Fable sunset sweep post-Jun 22.
+**Full map: `docs/design/ui-polish-arc.md`** — user goal (2026-06-13): *cleaner, less sloppy, more organized UI*. Finish/tighten what's there, not new features. 6 backlog items grounded w/ file:line + my delegated design calls; Harness rebuild deferred to AFTER the backlog.
+
+1. **Live token counter (item §1) — COMMITTED `b450242`, NOT live-verified:** Claude-Code-style cumulative output-token count in spinner line + composer pill (replaced tok/s). svelte-check 0/0 · 51/51 tests. **REMAINING: live CDP verify against a real streaming turn (counter climbs, resets per turn, hidden when idle).**
+2. Then §2 notifications overhaul → §4/§5 broken features (lightbox, drag-drop) → §3 activity repolish → §6 streaming pass → §7 Harness rebuild.
+
+**Older RESUME (v0.9.0 ship verify — still valid, lower priority):** prod auto-updates to v0.9.0 → smoke 3 workspaces + real turn + #29 CSP. Fresh-machine buddy install (onboarding → sign-in → updater). Distribute (unsigned, SmartScreen). Fable sunset sweep post-Jun 22.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
