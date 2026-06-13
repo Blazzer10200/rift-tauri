@@ -49,6 +49,10 @@ pub fn run() {
         let payload = diagnostics::scrub_log_message(payload_raw);
         let location = diagnostics::scrub_log_message(&location);
         log::error!("panic at {location}: {payload}");
+        // Field crash observability: persist a dedicated, non-rotating
+        // crash-<ts>.txt. Survives a second crash + captures startup panics
+        // that fire before the frontend pump exists. (RR-2)
+        diagnostics::write_crash_report(&location, &payload);
         diagnostics::emit_with_fields(
             diagnostics::DiagStage::System,
             diagnostics::DiagLevel::Error,
