@@ -36,6 +36,7 @@ export function beginTurn(tab: TabState) {
   tab.activeThinkingIndex = null;
   tab.lastStreamEventAt = null;
   tab.turnStartNotified = false;
+  tab.liveOutputTokens = 0;
   tab.activity = { currentLabel: null, turnStartedAt: Date.now() };
   tab.streaming = true;
 }
@@ -427,6 +428,9 @@ export function recordTurnUsage(tab: TabState, u: Record<string, unknown>, accum
   } else {
     // assistant envelope = point-in-time window occupancy → drives the pill.
     tab.lastTurnUsage = turn;
+    // Each assistant envelope carries one loop-step's output; summing them
+    // across the turn gives the live cumulative count (CC-style "1.2k tokens").
+    tab.liveOutputTokens += turn.output;
   }
 }
 

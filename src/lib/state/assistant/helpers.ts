@@ -284,6 +284,14 @@ export function liveActivity(
   return out.sort((x, y) => x.startedAt - y.startedAt);
 }
 
+/** Compact token count for the live turn readout (Claude-Code style: "1.2k"). */
+export function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  return String(n);
+}
+
 /** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/turn.rs.
  *  Ladder: none→low · quick→medium · smart→high (API default) · deep→xhigh
  *  (Claude Code's own agentic default) · ultra→xhigh; ultra's autonomous-workflow

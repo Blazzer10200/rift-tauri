@@ -14,6 +14,7 @@
   import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, statusOf, nodeKind,
     formatBoundaryAt, formatDuration, elapsedFor, summarizeGroup, shortModel, lineDelta,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
+  import { fmtTokens } from "../../state/assistant/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
   import { contextMenu, copyText, type CtxMenuItem } from "../../state/contextMenu.svelte";
@@ -95,6 +96,13 @@
     if (/^thinking/i.test(raw)) return `${WHIM_WORDS[whimTick]}…`;
     return raw;
   });
+  // Live cumulative output tokens for this turn (CC-style "1.2k tokens"),
+  // shown trailing the spinner label while streaming.
+  const liveTokenLabel = $derived(
+    streaming && assistant.liveOutputTokens > 0
+      ? `${fmtTokens(assistant.liveOutputTokens)} tokens`
+      : null,
+  );
 
   const plainText = $derived(
     message.blocks
@@ -411,6 +419,10 @@
           {#key stageLabel}
             <span class="stage-label">{stageLabel ?? "Thinking…"}</span>
           {/key}
+          {#if liveTokenLabel}
+            <span class="stage-sep" aria-hidden="true">·</span>
+            <span class="stage-tokens mono">{liveTokenLabel}</span>
+          {/if}
         </div>
       </div>
     {/if}
@@ -564,6 +576,10 @@
           {#key stageLabel}
             <span class="ta-label">{stageLabel ?? "Working…"}</span>
           {/key}
+          {#if liveTokenLabel}
+            <span class="stage-sep" aria-hidden="true">·</span>
+            <span class="stage-tokens mono">{liveTokenLabel}</span>
+          {/if}
         </div>
       {/if}
 
@@ -836,6 +852,15 @@
   @keyframes stage-bounce {
     0%, 80%, 100% { opacity: 0.35; transform: translateY(0) scale(0.85); }
     40%           { opacity: 1;    transform: translateY(-2px) scale(1.1); }
+  }
+  /* Live token tally trailing the spinner label — quiet, muted, tabular so the
+     digits don't jitter as the count climbs. */
+  .stage-sep { color: var(--fg-faint); }
+  .stage-tokens {
+    color: var(--fg-muted);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
   }
   .stage-label {
     color: var(--fg);
