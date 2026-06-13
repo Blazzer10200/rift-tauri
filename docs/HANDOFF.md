@@ -2,27 +2,26 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-13 (cont.122) — Release-readiness re-verify + Activity dock removal
+## Session 2026-06-13 (cont.123) — Release-readiness ship-blockers + robustness → v0.9.3
 
-**1. Release-readiness audit hardened** (`docs/release-readiness-2026-06-13.md`, untracked). All 🔍 findings re-grepped against `main` via 4 parallel verifiers + manual. Corrections:
-- **RR-3 REVERSED** — `registry.npmjs.org` is NOT dead; `cliUpdate.svelte.ts:30` fetches it at runtime (CLI-update check). CSP entry load-bearing — do NOT remove. Dropped from fix list.
-- **B5 (`auth_update.rs`) + B9 (`convo_store.rs`) cite deleted files** (gone in the strip). B9's real `remove_file` = `state/paths.rs:69,90` (benign tmp cleanup, symptom N/A). Drop both.
-- **B3 weaker** — `:881` has `clear_session_pid` mitigation; only `:868` stop-during-spawn arm exposed. **RR-2 mechanism** refined (panic hook uses log::error!/emit_with_fields, not tx.send). Rest confirmed.
-- CI: v0.9.2 run `27477310839` = success, prod auto-update live.
+**SHIPPED v0.9.3** (tag-driven CI, run `27481935945`). Cleared the release-readiness audit (`docs/release-readiness-2026-06-13.md`) — both T1 blockers, all T2 should-fixes, the actionable T4 swallows:
+- **T1 RR-1** new-user auth dead-end: live **Sign in** (`startLogin`) + **Re-check** on the `needsAuth` welcome card (`AssistantWelcome.svelte`), mirroring the recovery banner; dead "hit refresh" text fixed.
+- **T1 RR-2** field crash file: panic hook writes a dedicated non-rotating `crash-<ts>.txt` (version+location+scrubbed backtrace) — survives a 2nd crash + pre-setup startup panics. `diagnostics::write_crash_report`, called from the `lib.rs` hook.
+- **T2:** RR-4 open-path denies OS-execute exts (exe/msi/bat/…) · RR-6 steer-drain surfaces write/build errs · RR-7 oneshot surfaces stderr JoinError · RR-9 download epoch-guard kills zombie-after-stall `downloaded=true`.
+- **Polish:** dropped wrench glyph from tool-group heads; mixed groups lead w/ dominant kind ("Reading 3 files +1 more", `toolCaption.ts`+vitest).
+- **T4 sweep:** B3(:868 kill log)·B4(unreachable-UI perm→fast deny)·A1(killed `.expect()` panic)·B7(bridge session_id warn)·B10(STT panic log)·B11(log-rotation size cap)·RR-14(stale comment). Skipped B1(flush noise)+A4(cosmetic).
 
-**2. Activity dock fully removed** (`ced39af`, −1240 lines). `ActivityPanel.svelte` deleted + dock aside/resize/state/persistence/Ctrl+Shift+E purged. Surfaces were duplicated (pills/gauge/tabsbar/transcript/Ctrl+Shift+D). Plan/Tasks + Sources dropped per user call. `dockAutoOpenedThisConvo`/`opensDock` left inert in streaming.ts (out of scope). svelte-check 0/0, vitest 131/131.
+Verify: svelte-check 0/0 · vitest 12/12 · cargo check clean 0.9.3 · CDP live (boots 0 errors, wrench-free heads + captions render).
 
-**3. Steps numbering unified** (in `ced39af`) — group `.tg-num` now echoes single-node `.tl-stepdot` status-ring. Card+left-rail design (cont.121) untouched.
-
-### RESUME HERE — next arc: T1 ship-blockers (full re-verified plan in release-readiness doc)
-1. **RR-1** — new-user auth dead-end (T1). `AssistantWelcome.svelte:163-176` needsAuth card is static (no live Sign-in). Add Sign-in (→`assistant.startLogin()`) + Re-check buttons mirroring the recovery banner in `AssistantPane.svelte`. All 4 sub-claims confirmed.
-2. **RR-2** — no field crash file (T1). Write dedicated `crash-<ts>.txt` on panic (`diagnostics/mod.rs` hook) — don't reuse the rotating `rift.log` slot.
-3. Then T2: RR-4 (`opener:allow-open-path` `**` scope), RR-6/7/9, RR-5 (#29 CSP — needs prod build).
-4. Deferred steps polish (my-call, not bugs): drop redundant wrench in group head · `captionForGroup` "Running N actions" vagueness · card treatment for single/double nodes.
-5. **Composer bug** — user spotted one above the composer, deferred; have them re-point when ready.
+### RESUME HERE — v0.9.3 shipped; remaining audit tail (none are code-only-mine)
+1. **RR-5 / #29** CSP prod-verify — **v0.9.3 IS a prod build**: install it, confirm transitions animate + update progress-bar fills + 0 CSP console violations.
+2. **RR-8 / Permission** Allow/Deny round-trip — still needs `trust_level=standard` pinned on a throwaway repo (one-way pin → do deliberately). Fold into the CR-UX trust rework.
+3. **Your decisions:** RR-10 `ALLOW_PRERELEASE=true` for the wider cohort? · RR-11 code-signing? · RR-12 repo collapse (#17).
+4. **Deferred polish:** card treatment for single/double-node groups — visual call, left for your eye (don't regress cont.121 card design).
+5. **Composer bug** — user spotted one above the composer; re-point when ready.
 
 ## Prior arcs — detail in git log + CHANGELOG
-cont.121 Concept-D tool-group cards + auto-correct → v0.9.2. cont.120 UI Polish §1-§6 → v0.9.1. cont.119 minimal-core strip (−7,407 → 3 workspaces) → v0.9.0. **§7 Harness rebuild still OPEN**. cont.94 Fable 5 (Jun 22 sunset gate). PID-only kills, NEVER by image name.
+cont.122 release-readiness re-verify + Activity dock removal (`ced39af`). cont.121 Concept-D tool-group cards + auto-correct → v0.9.2. cont.120 UI Polish §1-§6 → v0.9.1. cont.119 minimal-core strip (−7,407 → 3 workspaces) → v0.9.0. **§7 Harness rebuild still OPEN**. cont.94 Fable 5 (Jun 22 sunset gate). PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
 - **Activity dock is GONE** (cont.122) — don't reintroduce `assistant.ui.dockOpen`/`dockWidth`. Live readout = composer LivePills; context = composer gauge + tabsbar ctx-pill; diff = Ctrl+Shift+D.

@@ -6,6 +6,12 @@
 >
 > **Re-verified firsthand 2026-06-13** (4 parallel verifiers + manual, against current `main`): every 🔍 item below was re-grepped. Net changes — **RR-3 REVERSED** (npmjs URL is a live runtime fetch, NOT dead — do not remove), **B5 + B9 cite files that no longer exist** (deleted in the minimal-core strip), **B3 has partial mitigation**, **RR-2 mechanism refined**. CI: v0.9.2 release run `27477310839` = **success**, prod auto-update path live. Inline corrections tagged **[RV]**.
 
+## ✅ Resolved in v0.9.3 (2026-06-13, CI run `27481935945`)
+
+Shipped this release: **RR-1, RR-2** (T1) · **RR-4, RR-6, RR-7, RR-9** (T2) · the deferred wrench/caption polish · T4 swallows **B3(:868), B4, B7, B10, B11, A1, RR-14**. Skipped as intentional/cosmetic: **B1** (flush-error noise, self-surfacing), **A4** (fidelity-loss, not a crash). **RR-3 stays REVERSED** (not-a-bug).
+
+**Still open (not code-only-mine):** RR-5/#29 CSP — verify against the v0.9.3 prod build · RR-8 permission round-trip (needs `trust_level=standard` pinned) · RR-10/11/12 — your decisions (prerelease channel · code-signing · repo collapse) · single/double-node card treatment — visual call.
+
 ## Legend
 
 - **Verify status** — ✅ confirmed firsthand this audit · 🔍 agent-reported, not independently re-checked · 🧪 needs runtime/prod-build confirmation

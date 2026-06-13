@@ -47,7 +47,7 @@
 
 #### Auth-Rec — in-app sign-in recovery for 401 failures (🧪 live-verify)
 
-- **Status:** shipped in v0.8.9+ (`9c468a4`+`2d72af8`) — `assistant_open_login(console)` spawn + actionable 401 banner ([Sign in]/[Open Settings]/[Re-check]). CDP-verified all banner states; the live login spawn itself is compile/registration-verified only.
+- **Status:** shipped in v0.8.9+ (`9c468a4`+`2d72af8`) — `assistant_open_login(console)` spawn + actionable 401 banner ([Sign in]/[Open Settings]/[Re-check]). CDP-verified all banner states; the live login spawn itself is compile/registration-verified only. **v0.9.3 (RR-1):** the same Sign-in/Re-check now also lives on the `needsAuth` welcome card (`AssistantWelcome.svelte`) — closes the new-user dead-end where a red-pill user could never reach the post-turn banner (send is disabled, so no turn fires).
 - **Remaining:** confirm an end-to-end real sign-in on a genuinely-logged-out machine (dev box stays authed). **Strategic follow-ups** (not built): proactive re-probe before first send; auto-prefer an authed install when multiple exist; collapse scattered 401 string-matching into one `AuthError` enum + DiagBus telemetry.
 
 #### Permission — Allow/Deny round-trip bar (🔒 blocked on a trust-standard workspace)
