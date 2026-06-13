@@ -12,7 +12,8 @@
   import { browserDock } from "../state/browserDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { assistant } from "../state/assistant.svelte";
-  import { toast } from "../state/toast.svelte";
+  import { toast, notify } from "../state/toast.svelte";
+  import { isFileDrag, attachImageFiles, summarizeAttach } from "./assistant/composer/helpers";
   import { onboarding } from "../state/onboarding.svelte";
   import { betaNotice } from "../state/betaNotice.svelte";
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
@@ -61,6 +62,33 @@
   $effect(() => {
     window.addEventListener("keydown", onGlobalKey);
     return () => window.removeEventListener("keydown", onGlobalKey);
+  });
+
+  // Window-level file-drop guard. Without it, a file dropped anywhere outside a
+  // drop zone makes WebView2 navigate to its file:// URL — the app "breaks".
+  // We swallow every file drag; a stray drop over the Chat workspace still
+  // attaches its images to the active tab (the composer's own onDrop
+  // stopPropagation()s, so this only catches drops that miss the composer).
+  $effect(() => {
+    const onWinDragOver = (e: DragEvent) => { if (isFileDrag(e)) e.preventDefault(); };
+    const onWinDrop = async (e: DragEvent) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault();
+      const files = e.dataTransfer?.files;
+      if (workspace.activeId !== "chat" || !assistant.currentConvoId || !files?.length) return;
+      const res = await attachImageFiles(files, (a) => assistant.addAttachment(a));
+      if (res.attached > 0) {
+        notify.ok(`${res.attached} image${res.attached === 1 ? "" : "s"} attached`, { detail: "Send to include them in your next message." });
+      }
+      const msg = summarizeAttach(res);
+      if (msg) notify.warn("Some files weren't attached", { detail: msg });
+    };
+    window.addEventListener("dragover", onWinDragOver);
+    window.addEventListener("drop", onWinDrop);
+    return () => {
+      window.removeEventListener("dragover", onWinDragOver);
+      window.removeEventListener("drop", onWinDrop);
+    };
   });
 
   function onGlobalKey(e: KeyboardEvent) {

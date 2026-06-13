@@ -69,3 +69,51 @@ export function isFileDrag(e: DragEvent): boolean {
   for (let i = 0; i < types.length; i++) if (types[i] === "Files") return true;
   return false;
 }
+
+const ATTACH_MAX_BYTES = 20 * 1024 * 1024;
+
+export type AttachResult = {
+  attached: number;
+  nonImage: string[]; // dropped/pasted but not an image
+  tooLarge: string[]; // image over the 20 MB cap
+  failed: string[]; // couldn't be read
+  limitHit: boolean; // per-turn total-size cap reached
+};
+
+/** Stage image files as attachments via the supplied `add` callback (kept as a
+ *  param so this stays store-free + unit-testable). Non-image / oversized /
+ *  unreadable files are collected, never silently dropped. Shared by the
+ *  composer's paste/drop/file-pick paths and the window-level drop guard. */
+export async function attachImageFiles(
+  files: Iterable<File>,
+  add: (att: { mime: string; dataBase64: string; sizeBytes: number }) => boolean,
+): Promise<AttachResult> {
+  const r: AttachResult = { attached: 0, nonImage: [], tooLarge: [], failed: [], limitHit: false };
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith("image/")) { r.nonImage.push(file.name || "file"); continue; }
+    if (file.size > ATTACH_MAX_BYTES) { r.tooLarge.push(file.name || "image"); continue; }
+    try {
+      const dataBase64 = bytesToBase64(await file.arrayBuffer());
+      if (add({ mime: file.type || "image/png", dataBase64, sizeBytes: file.size })) r.attached++;
+      else r.limitHit = true;
+    } catch {
+      r.failed.push(file.name || "file");
+    }
+  }
+  return r;
+}
+
+/** One-line summary of what an attach attempt rejected — null when everything
+ *  attached cleanly. Drives a single warn toast instead of a swallowed skip. */
+export function summarizeAttach(r: AttachResult): string | null {
+  const parts: string[] = [];
+  if (r.nonImage.length) {
+    parts.push(r.nonImage.length === 1
+      ? `${r.nonImage[0]} isn't an image — only images attach (the assistant can read workspace files directly)`
+      : `${r.nonImage.length} non-image files skipped — only images attach`);
+  }
+  if (r.tooLarge.length) parts.push(`${r.tooLarge.length === 1 ? r.tooLarge[0] : `${r.tooLarge.length} images`} over the 20 MB cap`);
+  if (r.failed.length) parts.push(`${r.failed.length} file(s) couldn't be read`);
+  if (r.limitHit) parts.push("attachment limit reached (20 MB per turn)");
+  return parts.length ? parts.join(" · ") : null;
+}
