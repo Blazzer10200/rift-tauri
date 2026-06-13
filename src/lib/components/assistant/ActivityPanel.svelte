@@ -23,7 +23,7 @@
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import type { Block, ChatMessage } from "../../state/assistant.svelte";
-  import { liveActivity, shellLabel } from "../../state/assistant/helpers";
+  import { liveActivity, shellLabel, fmtTokens } from "../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
   import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -105,6 +105,14 @@
     turn: number;
   };
 
+  // Search/glob patterns are raw regex — rendered bare they read as broken text
+  // (`lastNotice|Workspace:|…`). Collapse whitespace + quote so the row reads as
+  // a search string; the CSS ellipsis keeps the head when it overflows.
+  function searchTarget(raw: string, fallback: string): string {
+    const p = raw.replace(/\s+/g, " ").trim();
+    return p ? `"${p}"` : fallback;
+  }
+
   function classifyTool(
     name: string,
     input: Record<string, unknown>,
@@ -120,15 +128,15 @@
       case "NotebookEdit":
         return { cat: "write", verb: "Edit", target: basename(s("file_path") || s("notebook_path")) || "file", add: lineCount(input.new_string), del: lineCount(input.old_string) };
       case "Grep":
-        return { cat: "search", verb: "Grep", target: s("pattern") || "search", add: null, del: null };
+        return { cat: "search", verb: "Grep", target: searchTarget(s("pattern"), "search"), add: null, del: null };
       case "Glob":
-        return { cat: "search", verb: "Glob", target: s("pattern") || "glob", add: null, del: null };
+        return { cat: "search", verb: "Glob", target: searchTarget(s("pattern"), "glob"), add: null, del: null };
       case "Bash":
         return { cat: "shell", verb: "Run", target: shellLabel(s("command")) || "shell", add: null, del: null };
       case "WebFetch":
         return { cat: "web", verb: "Fetch", target: hostnameOrSelf(s("url")), add: null, del: null };
       case "WebSearch":
-        return { cat: "web", verb: "Search", target: s("query") || "search", add: null, del: null };
+        return { cat: "web", verb: "Search", target: searchTarget(s("query"), "search"), add: null, del: null };
       default: {
         // MCP tools arrive as mcp__<server>__<tool> — humanize instead of
         // echoing the raw id twice (title + sub-line).
@@ -137,7 +145,7 @@
           switch (mcp[1]) {
             case "read_file": return { cat: "read", verb: "Read", target: basename(s("path")) || "file", add: null, del: null };
             case "list_dir": return { cat: "read", verb: "Listed", target: s("path") && s("path") !== "." ? basename(s("path")) : "workspace", add: null, del: null };
-            case "grep": return { cat: "search", verb: "Grep", target: s("pattern") || "search", add: null, del: null };
+            case "grep": return { cat: "search", verb: "Grep", target: searchTarget(s("pattern"), "search"), add: null, del: null };
             case "ask_user": {
               // input = { questions: [{ question, header, options }] }
               const qs = Array.isArray(input.questions) ? (input.questions as Array<Record<string, unknown>>) : [];
@@ -252,12 +260,12 @@
     return `${Math.floor(sec / 86400)}d ago`;
   }
 
-  function agoLabel(r: StepRow): string {
+  // Row sub-line = just the verb. Relative "ago" lives once on the turn
+  // separator; per-tool duration lives in the row's right column — so the row
+  // no longer triples the same timing across three slots.
+  function stepVerb(r: StepRow): string {
     if (r.status === "pending") return r.cat === "write" ? "Writing…" : "Running…";
-    const end = r.durationMs != null ? r.startedAt + r.durationMs : r.startedAt;
-    const sec = Math.max(0, Math.round((now - end) / 1000));
-    const t = sec < 1 ? "just now" : sec < 60 ? `${sec}s ago` : sec < 3600 ? `${Math.floor(sec / 60)}m ago` : `${Math.floor(sec / 3600)}h ago`;
-    return `${r.verb} · ${t}`;
+    return r.verb;
   }
 
   // ── Turn-end confirmation ──────────────────────────────────────────────
@@ -454,7 +462,7 @@
         <span class="now-label">{streaming ? nowLabel : "Done"}</span>
       {/key}
       {#if streaming && turnStartedAt != null}
-        <span class="now-el mono">{fmtClock(now - turnStartedAt)}</span>
+        <span class="now-el mono">{fmtClock(now - turnStartedAt)}{#if assistant.liveOutputTokens > 0}{" · "}{fmtTokens(assistant.liveOutputTokens)} tokens{/if}</span>
       {:else if !streaming && finishedMs != null}
         <span class="now-el mono">{fmtDur(finishedMs)}{#if settledSteps.length > 0} · {settledSteps.length} {settledSteps.length === 1 ? "step" : "steps"}{/if}</span>
       {/if}
@@ -483,8 +491,13 @@
       <div class="cm-bar" data-tone={ctxTone}><i style="width: {Math.min(100, ctxPct)}%"></i></div>
       <div class="cm-foot mono">
         <span>{ctxPct < 1 ? "<1" : Math.round(ctxPct)}% used</span>
-        {#if cost != null && cost > 0}<span class="cm-cost">${cost.toFixed(2)}</span>{/if}
       </div>
+      {#if cost != null && cost > 0}
+        <div class="cm-cost-row">
+          <span class="cm-cost-k">Session cost</span>
+          <span class="cm-cost-v mono">${cost.toFixed(2)}</span>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -579,7 +592,7 @@
             </span>
             <span class="ev-main">
               <span class="ev-target mono">{r.target}</span>
-              <span class="ev-sub">{agoLabel(r)}</span>
+              <span class="ev-sub">{stepVerb(r)}</span>
             </span>
             <span class="ev-right">
               {#if r.cat === "write" && r.status !== "pending"}
@@ -876,9 +889,17 @@
     background: var(--bg-elev-2); color: var(--fg-subtle);
     transition: background 160ms ease, color 160ms ease;
   }
-  /* Opaque tints — translucent -soft fills let the timeline spine bleed through. */
-  .ev[data-cat="write"] .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
-  .ev[data-cat="ask"] .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
+  /* Opaque tints — translucent -soft fills let the timeline spine bleed through.
+     Category-coded so the log scans by colour: green = produced/agent, blue =
+     read/web, amber = search/notify, neutral = shell/other. pending + error
+     override the category below. */
+  .ev[data-cat="write"] .ev-ico,
+  .ev[data-cat="ask"] .ev-ico,
+  .ev[data-cat="agent"] .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
+  .ev[data-cat="read"] .ev-ico,
+  .ev[data-cat="web"] .ev-ico { background: color-mix(in oklab, var(--info) 16%, var(--bg-elev-2)); color: var(--info); }
+  .ev[data-cat="search"] .ev-ico,
+  .ev[data-cat="notify"] .ev-ico { background: color-mix(in oklab, var(--warn) 16%, var(--bg-elev-2)); color: var(--warn); }
   .ev.pending .ev-ico { background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); color: var(--accent); }
   .ev[data-status="error"] .ev-ico { background: color-mix(in oklab, var(--danger) 14%, var(--bg-elev-2)); color: var(--danger); }
   .ev-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -948,9 +969,13 @@
   .cm-bar[data-tone="warn"] i { background: var(--warn); }
   .cm-bar[data-tone="crit"] i { background: var(--danger); }
   .cm-foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: 10.5px; color: var(--fg-subtle); }
-  .cm-cost { color: var(--fg-muted); }
   .ctx-meter[data-tone="warn"] .cm-foot { color: var(--warn); }
   .ctx-meter[data-tone="crit"] .cm-foot { color: var(--danger); }
+  /* Session cost — promoted out of the cramped meter foot to its own labelled
+     line so it reads as a real figure, not a stray number. */
+  .cm-cost-row { display: flex; align-items: baseline; justify-content: space-between; margin-top: 9px; padding-top: 9px; border-top: 1px solid var(--border); }
+  .cm-cost-k { font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-faint); }
+  .cm-cost-v { font-size: 12.5px; font-weight: 650; color: var(--fg-2); font-variant-numeric: tabular-nums; }
 
   :global(.tl-node.act-flash) {
     animation: act-flash 1.1s cubic-bezier(0.22, 1, 0.36, 1) both;
