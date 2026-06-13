@@ -12,7 +12,7 @@
   import ToolChip from "./ToolChip.svelte";
   import PermissionBar from "./PermissionBar.svelte";
   import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, statusOf, nodeKind,
-    formatBoundaryAt, formatDuration, elapsedFor, summarizeGroup, shortModel, lineDelta,
+    formatBoundaryAt, formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel, lineDelta,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
   import { fmtTokens } from "../../state/assistant/helpers";
 
@@ -523,22 +523,24 @@
           {@const isLastNode = !isUser && unit.key === lastBlockKey}
           {@const nodeStatus =
             streaming && isLastNode && unit.status === "done" ? "pending" : unit.status}
-          {@const open = expandedGroups.has(unit.key) || (streaming && isLastNode)}
+          {@const defaultOpen = (streaming && isLastNode) || unit.status === "error"}
+          {@const open = expandedGroups.has(unit.key) !== defaultOpen}
+          {@const groupMs = groupDurationMs(unit.blocks)}
           <div
             class="tl-node tl-toolgroup"
             data-kind="tool"
             data-status={nodeStatus}
             data-open={open ? "true" : null}
-            data-numbered={unit.stepNum ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
-            {#if unit.stepNum}<span class="tl-stepdot mono" aria-hidden="true">{unit.stepNum}</span>{/if}
             <button class="tg-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
               <span class="tg-chev" class:open><ChevronRight size={11} /></span>
+              {#if unit.stepNum}<span class="tg-num mono" aria-hidden="true">{unit.stepNum}</span>{/if}
               <Wrench size={12} class="tg-icon" />
               <span class="tg-cap">{unit.caption ?? `${unit.blocks.length} tools`}</span>
               <span class="tg-sep" aria-hidden="true">·</span>
               <span class="tg-sum mono">{summarizeGroup(unit.blocks)}</span>
+              {#if groupMs > 0}<span class="tg-meta mono">{formatDurationMs(groupMs)}</span>{/if}
               <span class="tg-status">
                 {#if unit.status === "pending"}<Loader2 size={11} class="tg-spin" />
                 {:else if unit.status === "error"}<AlertCircle size={11} />
@@ -547,7 +549,7 @@
             </button>
             {#if open}
               <div class="tg-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
-                {#each unit.blocks as gb, gi (gb.type === "tool" ? gb.id : gi)}
+                {#each unit.blocks.filter((gb) => gb.type !== "thinking") as gb, gi (gb.type === "tool" ? gb.id : gi)}
                   {@render renderBlock(gb, `tg_inner_${ui}_${gi}`)}
                 {/each}
               </div>
@@ -1085,7 +1087,7 @@
      + dimmer so they read as a faint timestamp, not a content row. Still
      readable and expandable on hover, just not competing for attention. */
   .tl-node[data-quick="true"] .tn-think-head {
-    opacity: 0.38;
+    opacity: 0.52;
     font-size: 10px;
     padding-top: 0; padding-bottom: 0;
   }
@@ -1124,29 +1126,51 @@
      Click to expand the chips; the live (last) node auto-opens while streaming
      so tools are watchable as they land, then collapses when the turn moves on.
      The group's rail bullet is drawn by .tl-node::before (data-kind="tool"). */
+  /* Concept-D step card — the group reads as a self-contained card hanging off
+     the spine, carrying a left status rail (quiet green when done, accent while
+     running, loud red + tinted on error). Replaces the spine bullet so the rail
+     isn't double-signalled. */
+  .tl-toolgroup {
+    position: relative;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    overflow: hidden;
+    transition: border-color 160ms ease-out, background 160ms ease-out;
+  }
+  .tl-toolgroup::before { display: none; }
+  .tl-toolgroup::after {
+    content: "";
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: 3px;
+    background: var(--ok, oklch(0.74 0.15 145));
+    transition: background 200ms ease-out;
+  }
+  .tl-toolgroup[data-status="pending"]::after { background: var(--accent); }
+  .tl-toolgroup[data-status="error"]::after { background: var(--danger); }
+  .tl-toolgroup[data-status="error"] {
+    border-color: color-mix(in oklab, var(--danger) 42%, var(--border));
+    background: color-mix(in oklab, var(--danger) 7%, var(--bg));
+  }
   .tg-head {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 7px;
     width: 100%;
-    padding: 3px 8px;
+    padding: 7px 11px;
     min-height: 22px;
-    background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
+    background: transparent;
     border: 0;
-    border-radius: 8px;
     color: var(--fg-2);
     font: inherit; font-size: 11px; text-align: left;
     cursor: pointer;
-    transition: background 140ms ease-out, box-shadow 140ms ease-out, transform 140ms ease-out;
+    transition: background 140ms ease-out;
   }
-  .tg-head:hover {
-    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
-    transform: translateX(1px);
-  }
-  .tl-toolgroup[data-status="pending"] .tg-head {
-    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 60%, transparent);
-  }
-  .tl-toolgroup[data-status="error"] .tg-head {
-    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--danger) 60%, transparent);
+  .tg-head:hover { background: color-mix(in oklch, var(--surface-hover) 45%, transparent); }
+  .tg-num {
+    color: var(--fg-faint);
+    font-size: 10px; font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    flex: none;
   }
   .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
   .tg-chev.open { transform: rotate(90deg); }
@@ -1163,6 +1187,11 @@
     color: var(--fg-muted); font-size: 10.5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .tg-meta {
+    flex: none;
+    color: var(--fg-faint); font-size: 10px;
+    font-variant-numeric: tabular-nums;
+  }
   .tg-status { display: inline-flex; flex-shrink: 0; }
   .tl-toolgroup[data-status="pending"] .tg-status { color: var(--accent); }
   .tl-toolgroup[data-status="error"] .tg-status { color: var(--danger); }
@@ -1172,8 +1201,8 @@
   .tg-body {
     display: flex; flex-direction: column;
     gap: 4px;
-    margin-top: 4px;
-    padding-left: 6px;
+    margin-top: 0;
+    padding: 1px 11px 9px 13px;
   }
   /* No per-child rail bullet inside a group, so re-show each chip's own status
      icon (the timeline variant hides it, assuming the rail bullet carries it). */

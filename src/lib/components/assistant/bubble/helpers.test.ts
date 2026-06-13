@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Block, ThinkingBlock, ToolBlock } from "../../../state/assistant/types";
 import {
-  coalesceToolGroups, elapsedFor, formatDuration, isCardTool, isGroupableChip,
+  coalesceToolGroups, elapsedFor, formatDuration, formatDurationMs, groupDurationMs,
+  isCardTool, isGroupableChip,
   isInlineDiffTool, lineDelta, nodeKind, numberActions, parseTextBlock, previewOf,
   reconcileSplitHeaders, shortModel, shortToolName, statusOf, summarizeGroup,
   type TimelineUnit,
@@ -91,6 +92,34 @@ describe("coalesceToolGroups", () => {
     expect((out[0] as { status: string }).status).toBe("pending");
     const withError = [unit(tool("Read", "error", true), "a"), unit(tool("Grep"), "b"), unit(tool("Bash"), "c")];
     expect((coalesceToolGroups(withError)[0] as { status: string }).status).toBe("error");
+  });
+  it("absorbs quick interleaved thoughts into a run; tools (not units) hit the threshold", () => {
+    const quick = (): ThinkingBlock =>
+      ({ type: "thinking", text: "", hasSignature: false, startedAt: 0, status: "done", durationMs: 500 });
+    // tool · quick-thought · tool · quick-thought · tool → 3 tools → one group.
+    const woven = [
+      unit(tool("Read"), "a"), unit(quick(), "q1"), unit(tool("Grep"), "b"),
+      unit(quick(), "q2"), unit(tool("Bash"), "c"),
+    ];
+    const folded = coalesceToolGroups(woven);
+    expect(folded).toHaveLength(1);
+    expect(folded[0].kind).toBe("toolgroup");
+    // Only 2 tools (a quick thought between) stays inline — thought doesn't pad the count.
+    const twoTools = [unit(tool("Read"), "a"), unit(quick(), "q1"), unit(tool("Grep"), "b")];
+    expect(coalesceToolGroups(twoTools).every((u) => u.kind === "block")).toBe(true);
+  });
+});
+
+describe("group duration", () => {
+  it("sums tool durations, ignores non-tools, and formats sub-second as ms", () => {
+    const blocks: Block[] = [
+      { ...tool("Read"), durationMs: 120 } as Block,
+      { ...tool("Grep"), durationMs: 80 } as Block,
+      { type: "thinking", text: "", hasSignature: false, startedAt: 0, status: "done", durationMs: 9000 } as Block,
+    ];
+    expect(groupDurationMs(blocks)).toBe(200);
+    expect(formatDurationMs(200)).toBe("200ms");
+    expect(formatDurationMs(1500)).toBe("1s");
   });
 });
 

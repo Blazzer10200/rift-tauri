@@ -8,6 +8,7 @@ import {
   ExternalLink,
   Link as LinkIcon,
   Scissors,
+  SpellCheck,
   SquareCode,
   TextSelect,
 } from "lucide-svelte";
@@ -80,6 +81,50 @@ async function cutField(el: EditField) {
   replaceFieldSelection(el, "");
 }
 
+// Common misspellings → fix. Lowercase keys; capitalization of the match is
+// preserved when applied. Deliberately small + high-confidence — this is a
+// deterministic local pass, not a spellchecker.
+const TYPO_MAP: Record<string, string> = {
+  teh: "the", thier: "their", recieve: "receive", recieved: "received",
+  seperate: "separate", definately: "definitely", occured: "occurred",
+  untill: "until", wich: "which", becuase: "because", alot: "a lot",
+  cant: "can't", dont: "don't", doesnt: "doesn't", wont: "won't",
+  isnt: "isn't", wasnt: "wasn't", didnt: "didn't", couldnt: "couldn't",
+  wouldnt: "wouldn't", shouldnt: "shouldn't", im: "I'm", ive: "I've",
+  youre: "you're", theyre: "they're", freind: "friend", wierd: "weird",
+};
+
+/** Deterministic auto-correction: common typos, sentence-start + standalone
+ *  "i" capitalization, collapse runs of spaces. Pure — returns corrected text. */
+export function autoCorrect(text: string): string {
+  if (!text) return text;
+  let out = text.replace(/\b([A-Za-z][A-Za-z']*)\b/g, (m) => {
+    const rep = TYPO_MAP[m.toLowerCase()];
+    if (!rep) return m;
+    return m[0] === m[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep;
+  });
+  out = out.replace(/\bi\b/g, "I");
+  out = out.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_, lead, c) => lead + c.toUpperCase());
+  out = out.replace(/ {2,}/g, " ");
+  return out;
+}
+
+/** Correct the field's selection if one exists, else the whole value. Replaces
+ *  via setRangeText so bind:value updates and the change stays undoable. */
+function autoCorrectField(el: EditField) {
+  const selStart = el.selectionStart ?? 0;
+  const selEnd = el.selectionEnd ?? 0;
+  const hasSel = selStart !== selEnd;
+  const s = hasSel ? selStart : 0;
+  const e = hasSel ? selEnd : el.value.length;
+  const src = el.value.slice(s, e);
+  const fixed = autoCorrect(src);
+  if (fixed === src) return;
+  el.focus();
+  el.setRangeText(fixed, s, e, "end");
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 async function pasteField(el: EditField) {
   let text = "";
   try {
@@ -109,6 +154,13 @@ function editFieldItems(el: EditField): CtxMenuItem[] {
         el.focus();
         el.select();
       },
+    },
+    { kind: "divider" },
+    {
+      label: "Auto-correct",
+      icon: SpellCheck,
+      disabled: !el.value || ro,
+      action: () => autoCorrectField(el),
     },
   ];
 }
