@@ -192,12 +192,26 @@ async fn dispatch(app: &AppHandle, req: Request) -> Response {
 /// request_id with the matching tool block, then `await`s the registry
 /// oneshot. 10-min timeout; on timeout the MCP child gets `ok: false` and
 /// surfaces "user did not answer" so the model falls back to plain-text asking.
+/// Bridge events carry the originating `session_id` so the frontend routes them
+/// to the right chat tab. A missing id (shouldn't happen — the MCP child always
+/// sets it) would silently misroute or drop the event, so log the fallback
+/// instead of swallowing it with `unwrap_or_default()`. (B7)
+fn session_id_or_warn(id: Option<String>, op: &str) -> String {
+    match id {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => {
+            log::warn!("{op}: bridge request missing session_id — event may misroute");
+            String::new()
+        }
+    }
+}
+
 async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
     let request_id = match req.request_id {
         Some(s) if !s.trim().is_empty() => s,
         _ => return err("ask_user: missing `request_id`"),
     };
-    let session_id = req.session_id.unwrap_or_default();
+    let session_id = session_id_or_warn(req.session_id, "ask_user");
     let questions = req.questions.unwrap_or(Value::Null);
 
     let registry = match app.try_state::<std::sync::Arc<crate::assistant::AskUserRegistry>>() {
@@ -246,7 +260,7 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
         "assistant://open-browser",
         serde_json::json!({
             "url": url,
-            "session_id": req.session_id.unwrap_or_default(),
+            "session_id": session_id_or_warn(req.session_id, "open_browser"),
         }),
     );
     ok_with(serde_json::json!({ "opened": url }))
@@ -277,7 +291,7 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
             "title": title,
             "detail": detail,
             "severity": severity,
-            "session_id": req.session_id.unwrap_or_default(),
+            "session_id": session_id_or_warn(req.session_id, "notify"),
         }),
     );
     ok_with(serde_json::json!({ "shown": true }))
