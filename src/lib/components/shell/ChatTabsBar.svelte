@@ -344,30 +344,6 @@
     return null;
   });
 
-  const taskCount = $derived(assistant.tasks.length);
-  const taskDone = $derived(assistant.tasks.filter((t) => t.status === "completed").length);
-
-  let pulse = $state(false);
-  let lastSeenUpdate = $state(0);
-  $effect(() => {
-    const t = assistant.ui.tasksUpdatedAt;
-    if (t > lastSeenUpdate) {
-      lastSeenUpdate = t;
-      if (!assistant.ui.dockOpen && taskCount > 0) {
-        pulse = true;
-        // Return cleanup so a workspace-switch / unmount within 700ms doesn't
-        // leave the callback writing into a detached closure. (#159)
-        const handle = setTimeout(() => (pulse = false), 700);
-        return () => clearTimeout(handle);
-      }
-    }
-  });
-
-  const tasksOpen = $derived(assistant.ui.dockOpen);
-  function toggleTasks() {
-    assistant.ui.dockOpen = !assistant.ui.dockOpen;
-  }
-
   const newTokens = $derived(
     assistant.lastTurnUsage
       ? assistant.lastTurnUsage.input + assistant.lastTurnUsage.cacheCreate
@@ -565,7 +541,7 @@
         >{ctxHighNudge}</span>
     {/if}
 
-    {#if ctxTokens > 0 && !assistant.ui.dockOpen}
+    {#if ctxTokens > 0}
       <button
         type="button"
         class="ctx-pill"
@@ -604,7 +580,6 @@
     <button
       class="hdr-btn panels-btn"
       class:open={viewMenuOpen}
-      class:pulse
       type="button"
       bind:this={viewAnchor}
       onclick={() => { viewMenuOpen ? (viewMenuOpen = false) : openViewMenu(); }}
@@ -613,7 +588,7 @@
       use:tooltip={"Panels & layout"}
     >
       <PanelRight size={13} />
-      {#if browserDock.open || tasksOpen || splitActive}
+      {#if browserDock.open || splitActive}
         <span class="view-dot" aria-hidden="true"></span>
       {/if}
       <ChevronDown size={10} class={viewMenuOpen ? "chev-open" : ""} />
@@ -827,20 +802,6 @@
       <Globe size={14} class="vm-icon" />
       <span class="vm-label">Web browser</span>
       <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;B</kbd>
-      <Check size={13} class="vm-check" />
-    </button>
-    <button
-      class="vm-item"
-      class:on={tasksOpen}
-      type="button"
-      role="menuitemcheckbox"
-      aria-checked={tasksOpen}
-      onclick={() => { toggleTasks(); viewMenuOpen = false; }}
-    >
-      <PanelRight size={14} class="vm-icon" />
-      <span class="vm-label">Activity panel</span>
-      {#if taskCount > 0}<span class="vm-count">{taskDone}/{taskCount}</span>{/if}
-      <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;E</kbd>
       <Check size={13} class="vm-check" />
     </button>
     <button
@@ -1562,18 +1523,11 @@
   }
   .panels-btn :global(svg) { transition: transform 140ms ease; }
   .panels-btn :global(.chev-open) { transform: rotate(180deg); }
-  .panels-btn.pulse { animation: dock-pulse 700ms ease-out; }
   .view-dot {
     width: 5px; height: 5px;
     border-radius: 999px;
     background: var(--accent);
     box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 60%, transparent);
-  }
-
-  @keyframes dock-pulse {
-    0%   { box-shadow: 0 0 0 0 var(--accent-soft); }
-    60%  { box-shadow: 0 0 0 6px transparent; }
-    100% { box-shadow: 0 0 0 0 transparent; }
   }
 
   /* View popover — Rift-styled take on the Claude Code desktop options menu:

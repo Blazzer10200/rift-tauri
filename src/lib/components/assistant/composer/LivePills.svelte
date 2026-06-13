@@ -53,77 +53,43 @@
     return streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null;
   });
   const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
-  // Toggle the Activity dock.
-  function openActivity() {
-    assistant.ui.dockOpen = !assistant.ui.dockOpen;
-  }
 </script>
 
 {#if showLivePills}
   <div class="live-pills" role="group" aria-label="Live turn activity">
     {#if turnElapsed}
-      <button
-        type="button"
-        class="live-pill turn"
-        onclick={openActivity}
-        aria-label="Current turn — elapsed · output tokens. Click to open Activity."
-        use:tooltip={"Current turn — elapsed · output tokens. Click to open Activity."}
-      >
+      <span class="live-pill turn" use:tooltip={"Current turn — elapsed · output tokens."}>
         <span class="lp-dot" aria-hidden="true"></span>
         <span class="mono">{turnElapsed}</span>
         {#if liveTokens != null}
           <span class="lp-sep" aria-hidden="true">·</span>
           <span class="mono">{fmtTokens(liveTokens)}<span class="lp-unit"> tokens</span></span>
         {/if}
-      </button>
+      </span>
     {/if}
     {#if agentCount > 0}
-      <button
-        type="button"
-        class="live-pill"
-        onclick={openActivity}
-        aria-label={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running. Click to open Activity.`}
-        use:tooltip={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running. Click to open Activity.`}
-      >
+      <span class="live-pill" use:tooltip={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running.`}>
         <Bot size={12} />
         <span class="mono">{agentCount}</span>
-      </button>
+      </span>
     {/if}
     {#if shellCount > 0}
-      <button
-        type="button"
-        class="live-pill"
-        onclick={openActivity}
-        aria-label={`${shellCount} shell${shellCount === 1 ? "" : "s"} running. Click to open Activity.`}
-        use:tooltip={`${shellCount} shell${shellCount === 1 ? "" : "s"} running. Click to open Activity.`}
-      >
+      <span class="live-pill" use:tooltip={`${shellCount} shell${shellCount === 1 ? "" : "s"} running.`}>
         <Terminal size={12} />
         <span class="mono">{shellCount}</span>
-      </button>
+      </span>
     {/if}
     {#if toolCount > 0}
-      <button
-        type="button"
-        class="live-pill"
-        onclick={openActivity}
-        aria-label={`${toolCount} tool${toolCount === 1 ? "" : "s"} running. Click to open Activity.`}
-        use:tooltip={`${toolCount} tool${toolCount === 1 ? "" : "s"} running. Click to open Activity.`}
-      >
+      <span class="live-pill" use:tooltip={`${toolCount} tool${toolCount === 1 ? "" : "s"} running.`}>
         <Wrench size={12} />
         <span class="mono">{toolCount}</span>
-      </button>
+      </span>
     {/if}
     {#if queue.length > 0}
-      <button
-        type="button"
-        class="live-pill queued"
-        onclick={openActivity}
-        aria-label={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}
-        use:tooltip={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}
-      >
+      <span class="live-pill queued" use:tooltip={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}>
         <ListPlus size={12} />
         <span class="mono">{queue.length}</span>
-      </button>
+      </span>
     {/if}
   </div>
 {:else if composerFocused}

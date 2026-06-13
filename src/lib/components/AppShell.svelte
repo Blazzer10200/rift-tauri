@@ -140,7 +140,6 @@
     const k = e.key.toLowerCase();
     // View toggles, mirrored in the ChatTabsBar View dropdown.
     if (e.shiftKey && k === "b") { e.preventDefault(); browserDock.toggle(); return; }
-    if (e.shiftKey && k === "e") { e.preventDefault(); assistant.ui.dockOpen = !assistant.ui.dockOpen; return; }
     if (e.shiftKey && k === "d" && workspace.activeId === "chat") {
       e.preventDefault();
       if (assistant.ui.diffOpen) { assistant.ui.diffOpen = false; }

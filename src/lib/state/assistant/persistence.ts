@@ -63,7 +63,7 @@ export type PersistenceHost = {
   lastNotice: string | null;
   messages: ChatMessage[];
   queue: { id: string; text: string }[];
-  ui: { historyOpen: boolean; dockOpen: boolean };
+  ui: { historyOpen: boolean };
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;

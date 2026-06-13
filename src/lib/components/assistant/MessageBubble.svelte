@@ -1166,11 +1166,34 @@
     transition: background 140ms ease-out;
   }
   .tg-head:hover { background: color-mix(in oklch, var(--surface-hover) 45%, transparent); }
+  /* Group step-number — echoes the single-node .tl-stepdot ring so a step reads
+     the same whether it's one chip or a folded group (cont.121 keeps the card +
+     left status rail; only the number marker is unified, not moved to the spine). */
   .tg-num {
-    color: var(--fg-faint);
-    font-size: 10px; font-weight: 700;
-    font-variant-numeric: tabular-nums;
     flex: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 15px; height: 15px; padding: 0 3px;
+    border-radius: 999px;
+    border: 1.5px solid color-mix(in oklch, var(--fg-faint) 55%, transparent);
+    background: var(--bg);
+    color: var(--fg-muted);
+    font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
+    transition: background 200ms ease-out, border-color 200ms ease-out, color 200ms ease-out;
+  }
+  .tl-toolgroup[data-status="done"] .tg-num {
+    background: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 18%, var(--bg));
+    border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 58%, transparent);
+    color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 90%, var(--fg));
+  }
+  .tl-toolgroup[data-status="pending"] .tg-num {
+    background: color-mix(in oklab, var(--accent) 26%, var(--bg));
+    border-color: color-mix(in oklab, var(--accent) 70%, transparent);
+    color: color-mix(in oklab, var(--accent) 92%, var(--fg));
+  }
+  .tl-toolgroup[data-status="error"] .tg-num {
+    background: color-mix(in oklab, var(--danger) 24%, var(--bg));
+    border-color: color-mix(in oklab, var(--danger) 65%, transparent);
+    color: color-mix(in oklab, var(--danger) 90%, var(--fg));
   }
   .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
   .tg-chev.open { transform: rotate(90deg); }

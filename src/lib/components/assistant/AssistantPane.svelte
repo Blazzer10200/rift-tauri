@@ -1,16 +1,14 @@
 <script lang="ts">
-  import { tick, onDestroy } from "svelte";
+  import { tick } from "svelte";
   import { ChevronDown, Plus, X } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
-  import ActivityPanel from "./ActivityPanel.svelte";
   import SessionDiff from "./SessionDiff.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
-  import { DOCK_MIN, DOCK_MAX, DOCK_DEFAULT, saveDockWidth } from "../../state/assistant/helpers";
   let {
     tabId,
     focused,
@@ -41,11 +39,6 @@
           lastError,
         )),
   );
-  // Open whenever the user toggled the panel and a tab exists — except on a
-  // brand-new empty chat (ui-audit #3): a fresh conversation has nothing to
-  // show, so the dock stays collapsed and slides in on the first message.
-  const dockOpen = $derived(assistant.ui.dockOpen && !!tab && !showEmpty);
-
   // Per-pane status chip — own tab's ctx%, model, cost — independent of focus.
   const paneCtxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
   const paneCtxTone = $derived(
@@ -70,40 +63,6 @@
   let stickToBottom = $state(true);
   let scrolledTop = $state(false);
   let lastTabId: string | null = null;
-
-  // Dock resize — drag the handle on the dock's left edge. Dragging left widens
-  // (the dock is right-anchored). Width is app-global (assistant.ui.dockWidth),
-  // clamped + persisted on release.
-  let resizing = $state(false);
-  let _resizeCleanup: (() => void) | null = null;
-  function startResize(e: PointerEvent) {
-    e.preventDefault();
-    resizing = true;
-    const startX = e.clientX;
-    const startW = assistant.ui.dockWidth;
-    const onMove = (ev: PointerEvent) => {
-      const next = startW + (startX - ev.clientX);
-      assistant.ui.dockWidth = Math.min(DOCK_MAX, Math.max(DOCK_MIN, next));
-    };
-    const cleanup = () => {
-      if (!_resizeCleanup) return; // idempotent
-      resizing = false;
-      saveDockWidth(assistant.ui.dockWidth);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", cleanup);
-      window.removeEventListener("pointercancel", cleanup);
-      _resizeCleanup = null;
-    };
-    _resizeCleanup = cleanup;
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", cleanup);
-    window.addEventListener("pointercancel", cleanup);
-  }
-  onDestroy(() => _resizeCleanup?.());
-  function resetDockWidth() {
-    assistant.ui.dockWidth = DOCK_DEFAULT;
-    saveDockWidth(DOCK_DEFAULT);
-  }
 
   function onScroll() {
     if (!scrollEl) return;
@@ -448,30 +407,6 @@
     <SessionDiff {tabId} onClose={() => (assistant.ui.diffOpen = false)} />
   {/if}
 </div>
-
-  {#if dockOpen}
-    <div
-      class="dock-resize"
-      class:active={resizing}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize panel"
-      onpointerdown={startResize}
-      ondblclick={resetDockWidth}
-      use:tooltip={"Drag to resize · double-click to reset"}
-    ></div>
-  {/if}
-  <aside
-    class="pane-dock-slot"
-    class:open={dockOpen}
-    class:resizing
-    aria-hidden={!dockOpen}
-    style={dockOpen ? `width:${assistant.ui.dockWidth}px` : ""}
-  >
-    <div class="side-panel">
-      <ActivityPanel {tabId} />
-    </div>
-  </aside>
 </div>
 
 <style>
@@ -481,41 +416,6 @@
     display: flex; flex-direction: row;
     min-height: 0;
   }
-  .side-panel { width: 100%; flex: 1; display: flex; flex-direction: column; min-height: 0; }
-  .pane-dock-slot {
-    width: 0;
-    overflow: hidden;
-    transition: width 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out;
-    display: flex;
-    opacity: 0;
-    flex-shrink: 0;
-    border-left: 1px solid var(--border);
-  }
-  .pane-dock-slot.open { width: 340px; opacity: 1; }
-  /* While dragging, kill the width transition so the panel tracks the cursor. */
-  .pane-dock-slot.resizing { transition: opacity 180ms ease-out; }
-  .pane-dock-slot :global(.side-panel) { flex: 1; min-width: 0; }
-
-  /* Resize grabber on the dock's left edge — a thin hit-area with a hover line. */
-  .dock-resize {
-    flex-shrink: 0;
-    width: 6px;
-    margin-right: -6px; /* overlap the dock border so it sits on the seam */
-    z-index: 6; /* above the dock-head (z5) so the bar reaches the top, not cut at the header */
-    cursor: col-resize;
-    position: relative;
-  }
-  .dock-resize::after {
-    content: "";
-    position: absolute;
-    inset: 0 2px;
-    border-radius: 2px;
-    background: transparent;
-    transition: background 120ms ease;
-  }
-  .dock-resize:hover::after,
-  .dock-resize.active::after { background: var(--accent); }
-
   .pane {
     flex: 1 1 0;
     min-width: 0;
