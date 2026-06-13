@@ -8,7 +8,7 @@
   import { Bot, Terminal, Wrench, ListPlus } from "lucide-svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import type { ChatMessage } from "../../../state/assistant/types";
-  import { liveActivity } from "../../../state/assistant/helpers";
+  import { liveActivity, fmtTokens } from "../../../state/assistant/helpers";
   import { fmtClock } from "./helpers";
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -46,10 +46,11 @@
   const turnElapsed = $derived(
     streaming && turnStartedAt != null ? fmtClock(now - turnStartedAt) : null,
   );
-  // tok/s is session-global telemetry; recompute each tick by touching `now`.
-  const tokPerSec = $derived.by(() => {
+  // Cumulative output tokens for the in-flight turn (CC-style); touch `now`
+  // so it refreshes on the 1s tick alongside elapsed.
+  const liveTokens = $derived.by(() => {
     void now;
-    return streaming ? assistant.telemetry.snapshot().summary.outputTokensPerSec : null;
+    return streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null;
   });
   const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
   // Toggle the Activity dock.
@@ -65,14 +66,14 @@
         type="button"
         class="live-pill turn"
         onclick={openActivity}
-        aria-label="Current turn — elapsed · output speed. Click to open Activity."
-        use:tooltip={"Current turn — elapsed · output speed. Click to open Activity."}
+        aria-label="Current turn — elapsed · output tokens. Click to open Activity."
+        use:tooltip={"Current turn — elapsed · output tokens. Click to open Activity."}
       >
         <span class="lp-dot" aria-hidden="true"></span>
         <span class="mono">{turnElapsed}</span>
-        {#if tokPerSec != null}
+        {#if liveTokens != null}
           <span class="lp-sep" aria-hidden="true">·</span>
-          <span class="mono">{tokPerSec}<span class="lp-unit"> tok/s</span></span>
+          <span class="mono">{fmtTokens(liveTokens)}<span class="lp-unit"> tokens</span></span>
         {/if}
       </button>
     {/if}

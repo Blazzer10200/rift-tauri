@@ -195,6 +195,10 @@ export class TabState {
   totalCostUsd = $state<number | null>(null);
   lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
   sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
+  /** Output tokens generated so far in the in-flight turn (summed across the
+   *  agentic loop's assistant envelopes). Reset at turn start; drives the live
+   *  "1.2k tokens" readout in the spinner + composer pill. */
+  liveOutputTokens = $state(0);
   lastModelId = $state<string | null>(null);
   /** Per-chat model override (ui-audit #5). Set when an old convo is opened
    *  (its saved model scopes to this tab) and on explicit pick; null = follow
@@ -428,6 +432,7 @@ class AssistantStore {
   get sessionUsage() {
     return this.activeTab?.sessionUsage ?? { totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 };
   }
+  get liveOutputTokens(): number { return this.activeTab?.liveOutputTokens ?? 0; }
   get lastModelId(): string | null { return this.activeTab?.lastModelId ?? null; }
   get promptHistory(): string[] { return this.activeTab?.promptHistory ?? []; }
   get queue() { return this.activeTab?.queue ?? []; }
