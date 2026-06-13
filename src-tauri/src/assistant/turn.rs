@@ -959,9 +959,25 @@ pub async fn assistant_send(
                             }
                             let _ = stdin.flush().await;
                             // Flush steers that landed during the handshake.
+                            // RR-6: surface write/build failures instead of
+                            // dropping them silently — mirrors the live steer
+                            // path below so a lost steer always signals.
                             for m in steer_pending.drain(..) {
-                                if let Ok(env) = build_user_envelope(&m.text, &m.attachments) {
-                                    let _ = stdin.write_all(&env).await;
+                                match build_user_envelope(&m.text, &m.attachments) {
+                                    Ok(env) => {
+                                        if let Err(e) = stdin.write_all(&env).await {
+                                            let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                                "session_id": stream_sid,
+                                                "message": format!("write steer: {e}"),
+                                            }));
+                                            break;
+                                        }
+                                    }
+                                    Err(e) => {
+                                        let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                            "session_id": stream_sid, "message": e,
+                                        }));
+                                    }
                                 }
                             }
                             let _ = stdin.flush().await;
