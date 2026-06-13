@@ -195,10 +195,20 @@ export class TabState {
   totalCostUsd = $state<number | null>(null);
   lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
   sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
-  /** Output tokens generated so far in the in-flight turn (summed across the
-   *  agentic loop's assistant envelopes). Reset at turn start; drives the live
-   *  "1.2k tokens" readout in the spinner + composer pill. */
+  /** Output tokens generated so far in the in-flight turn. Drives the live
+   *  "1.2k tokens" readout in the spinner + composer pill. The CLI only reports
+   *  real output_tokens at each message's end (no mid-stream usage), so this
+   *  climbs as a char/4 estimate over the in-flight message (`liveOutputChars`)
+   *  layered on the exact totals already banked from completed messages
+   *  (`committedOutputTokens`), then snaps exact when each message lands. Reset
+   *  at turn start. */
   liveOutputTokens = $state(0);
+  /** Exact output_tokens banked from assistant messages already completed this
+   *  turn (multi-message agentic loops). The in-flight estimate rides on top. */
+  committedOutputTokens = 0;
+  /** Chars streamed for the in-flight (not-yet-completed) message; ×0.25 ≈ its
+   *  output tokens. Reset to 0 each time a message completes. */
+  liveOutputChars = 0;
   lastModelId = $state<string | null>(null);
   /** Per-chat model override (ui-audit #5). Set when an old convo is opened
    *  (its saved model scopes to this tab) and on explicit pick; null = follow

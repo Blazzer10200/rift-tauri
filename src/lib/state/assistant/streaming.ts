@@ -37,6 +37,8 @@ export function beginTurn(tab: TabState) {
   tab.lastStreamEventAt = null;
   tab.turnStartNotified = false;
   tab.liveOutputTokens = 0;
+  tab.committedOutputTokens = 0;
+  tab.liveOutputChars = 0;
   tab.activity = { currentLabel: null, turnStartedAt: Date.now() };
   tab.streaming = true;
 }
@@ -93,6 +95,8 @@ function mutateThinking(tab: TabState, index: number, fn: (b: ThinkingBlock) => 
 function appendThinkingText(tab: TabState, index: number, chunk: string) {
   if (!chunk) return;
   mutateThinking(tab, index, (b) => ({ ...b, text: b.text + chunk }));
+  tab.liveOutputChars += chunk.length;
+  refreshLiveTokens(tab);
 }
 
 function markThinkingSignature(tab: TabState, index: number) {
@@ -196,10 +200,20 @@ function appendText(tab: TabState, chunk: string) {
 function enqueueText(tab: TabState, chunk: string) {
   if (!chunk) return;
   tab.pendingText += chunk;
+  tab.liveOutputChars += chunk.length;
+  refreshLiveTokens(tab);
   if (tab.drainHandle === null) {
     tab.lastDrainAt = performance.now();
     tab.drainHandle = requestAnimationFrame(tab.drainTick);
   }
+}
+
+/** Recompute the live output-token readout: exact totals banked from completed
+ *  messages + a char/4 estimate for the in-flight message. The CLI gives no
+ *  mid-stream usage, so the estimate is what makes the counter climb (CC-style)
+ *  until each message's real count snaps in via `recordTurnUsage`. */
+function refreshLiveTokens(tab: TabState) {
+  tab.liveOutputTokens = tab.committedOutputTokens + Math.round(tab.liveOutputChars / 4);
 }
 
 /** Body of the per-tab rAF pacer. TabState keeps a stable bound arrow
@@ -428,9 +442,11 @@ export function recordTurnUsage(tab: TabState, u: Record<string, unknown>, accum
   } else {
     // assistant envelope = point-in-time window occupancy → drives the pill.
     tab.lastTurnUsage = turn;
-    // Each assistant envelope carries one loop-step's output; summing them
-    // across the turn gives the live cumulative count (CC-style "1.2k tokens").
-    tab.liveOutputTokens += turn.output;
+    // This message just completed — bank its exact output and clear the
+    // in-flight char estimate, snapping the live count to the real total.
+    tab.committedOutputTokens += turn.output;
+    tab.liveOutputChars = 0;
+    tab.liveOutputTokens = tab.committedOutputTokens;
   }
 }
 

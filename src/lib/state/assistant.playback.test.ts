@@ -306,6 +306,39 @@ describe("playback — usage, cost, model attribution", () => {
   });
 });
 
+// ── Live output-token counter ────────────────────────────────────────────────
+describe("playback — live output-token counter", () => {
+  it("resets at turn start, climbs from streamed chars, snaps exact per message", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    expect(tab.liveOutputTokens).toBe(0);
+
+    // No mid-stream usage from the CLI, so the count climbs as a chars/4
+    // estimate over the in-flight message.
+    feed(tab, [textDelta("y".repeat(80))]);
+    expect(tab.liveOutputTokens).toBe(20); // round(80/4)
+    feed(tab, [textDelta("y".repeat(40))]);
+    expect(tab.liveOutputTokens).toBe(30); // round(120/4)
+
+    // The message's real usage envelope snaps the count exact + clears the estimate.
+    feed(tab, [assistantUsageEnv({ input_tokens: 1, output_tokens: 95 })]);
+    expect(tab.liveOutputTokens).toBe(95);
+
+    // A second message's estimate rides on top of the banked exact total.
+    feed(tab, [textDelta("y".repeat(40))]);
+    expect(tab.liveOutputTokens).toBe(105); // 95 + round(40/4)
+    feed(tab, [assistantUsageEnv({ input_tokens: 1, output_tokens: 30 })]);
+    expect(tab.liveOutputTokens).toBe(125); // 95 + 30
+  });
+
+  it("counts thinking deltas toward the live estimate", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [thinkStart(0), thinkDelta("z".repeat(60), 0)]);
+    expect(tab.liveOutputTokens).toBe(15); // round(60/4)
+  });
+});
+
 // ── onDone finalization ──────────────────────────────────────────────────────
 describe("playback — onDone finalization", () => {
   it("finalizes a successful turn: streaming off, endKind success, doneAt set", () => {
