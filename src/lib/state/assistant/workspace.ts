@@ -9,6 +9,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { WorkspaceState } from "./types";
+import { notify } from "../toast.svelte";
+import { prettyPath } from "../../components/shell/tabsbar/helpers";
 
 /** Shape of the bits of AssistantStore the workspace fns mutate. Structural
  *  type (no class import) — matches AssistantStore's declared $state fields. */
@@ -18,7 +20,6 @@ type WorkspaceHost = {
   workspaceFilesLoadingFor: string | null;
   workspaceBranch: string | null;
   lastError: string | null;
-  lastNotice: string | null;
   applyWorkspacePrefs: () => void;
 };
 
@@ -51,14 +52,14 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
     host.workspaceFiles = [];
     host.workspaceBranch = null;
     host.applyWorkspacePrefs();
-    host.lastNotice = `Workspace: ${path}`;
+    notify.info("Workspace changed", { detail: prettyPath(path), mono: true });
   } catch (e) {
     const msg = String(e);
     // #35: a recent folder that was moved/deleted fails here ("not a directory").
     // Self-heal — drop the dead entry so the MRU stops offering a path that 404s.
     if (/not a directory/i.test(msg) && host.workspace.recent.includes(path)) {
       await removeRecentRoot(host, path);
-      host.lastNotice = `Folder no longer exists — removed from recents: ${path}`;
+      notify.warn("Folder no longer exists", { detail: `Removed from recents: ${prettyPath(path)}`, mono: true });
     } else {
       host.lastError = `Set workspace failed: ${msg}`;
     }

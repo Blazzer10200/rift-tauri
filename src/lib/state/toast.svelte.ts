@@ -116,3 +116,14 @@ class ToastStore {
 }
 
 export const toast = new ToastStore();
+
+/** Terse helpers for the common one-line case — keeps the ~severity at every
+ *  call site obvious and the push options optional. `notify.ok("Copied")`,
+ *  `notify.warn("No folder open", { detail })`, etc. Returns the toast id. */
+type NotifyOpts = Partial<Omit<ToastPushOptions, "severity" | "title">>;
+export const notify = {
+  ok: (title: string, opts?: NotifyOpts) => toast.push({ severity: "ok", title, ...opts }),
+  info: (title: string, opts?: NotifyOpts) => toast.push({ severity: "info", title, ...opts }),
+  warn: (title: string, opts?: NotifyOpts) => toast.push({ severity: "warn", title, ...opts }),
+  danger: (title: string, opts?: NotifyOpts) => toast.push({ severity: "danger", title, ...opts }),
+};

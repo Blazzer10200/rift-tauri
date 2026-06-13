@@ -15,7 +15,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { accessibility } from "../accessibility.svelte";
-import { toast } from "../toast.svelte";
+import { toast, notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, TurnRecord } from "./types";
 import { effortToFlag, FABLE_SUNSET_MS } from "./helpers";
@@ -35,9 +35,9 @@ export async function send(store: AssistantStore, prompt: string) {
   // dies as "claude exited with 1"; block it, re-probe (state may be stale),
   // and surface the reason. Slash commands above are local, so they still run.
   if (!(store.auth?.pill === "green" || store.auth?.pill === "yellow")) {
-    store.lastNotice =
-      store.auth?.summary ??
-      "Claude isn't set up on this machine — open Settings to sign in or add an API key.";
+    notify.danger("Claude isn't set up", {
+      detail: store.auth?.summary ?? "Open Settings to sign in or add an API key.",
+    });
     void store.refreshAuth();
     return;
   }
@@ -80,15 +80,19 @@ export async function send(store: AssistantStore, prompt: string) {
   // No workspace → the backend silently runs the turn in no-tools mode; say so
   // up front instead of letting the user discover it from the reply.
   if (!store.workspace.current) {
-    store.lastNotice = "No folder open — the assistant can't read or edit files this turn. Open one from the title bar.";
+    notify.warn("No folder open", {
+      detail: "The assistant can't read or edit files this turn. Open one from the title bar.",
+    });
   }
   // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
   if (!fableSunsetNoticed && store.effectiveModel === "claude-fable-5"
       && Date.now() >= FABLE_SUNSET_MS - 7 * 86_400_000) {
     fableSunsetNoticed = true;
-    store.lastNotice = Date.now() >= FABLE_SUNSET_MS
-      ? "Fable's limited run has ended — this turn falls back to Opus 4.8."
-      : "Heads up: Fable retires June 22 — chats fall back to Opus 4.8 after that.";
+    notify.warn(
+      Date.now() >= FABLE_SUNSET_MS
+        ? "Fable's limited run has ended — this turn falls back to Opus 4.8."
+        : "Heads up: Fable retires June 22 — chats fall back to Opus 4.8 after that.",
+    );
   }
   // Telemetry: build the turn record + attach to tab. TabState fills it as
   // envelopes arrive; finalized in onDone/onError.
@@ -342,7 +346,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
       const v = arg.toLowerCase();
       if (v === "sonnet" || v === "opus" || v === "haiku") {
         store.setModel(v);
-        store.lastNotice = `Model switched to ${v}.`;
+        notify.ok(`Model switched to ${v}.`);
       } else {
         store.lastError = `Unknown model "${arg}". Use sonnet, opus, or haiku.`;
       }
@@ -358,10 +362,12 @@ function runSlash(store: AssistantStore, input: string): boolean {
       store.ui.usageOpen = true;
       return true;
     case "cost":
-      store.lastNotice =
-        store.totalCostUsd != null
-          ? `Session cost: $${store.totalCostUsd.toFixed(4)} USD across ${store.messages.filter((m) => m.role === "assistant").length} turn(s).`
-          : "No cost recorded yet — send a message first.";
+      if (store.totalCostUsd != null) {
+        const turns = store.messages.filter((m) => m.role === "assistant").length;
+        notify.info("Session cost", { detail: `$${store.totalCostUsd.toFixed(4)} USD · ${turns} turn(s)` });
+      } else {
+        notify.info("No cost recorded yet — send a message first.");
+      }
       return true;
     case "tools":
       store.lastNotice =
@@ -380,14 +386,16 @@ function runSlash(store: AssistantStore, input: string): boolean {
       navigator.clipboard
         .writeText(json)
         .then(() => {
-          store.lastNotice = `Telemetry copied — ${snap.turnCount} turn(s), ${snap.events.length} event(s), ${sizeKb}KB. Paste into a code block here.`;
+          notify.ok("Telemetry copied", {
+            detail: `${snap.turnCount} turn(s), ${snap.events.length} event(s), ${sizeKb}KB — paste into a code block`,
+          });
         })
         .catch((e) => { store.lastError = `Clipboard write failed: ${String(e)}`; });
       return true;
     }
     case "diag-clear":
       store.telemetry.reset();
-      store.lastNotice = "Telemetry buffer cleared — fresh capture starting now.";
+      notify.info("Telemetry buffer cleared — fresh capture starting now.");
       return true;
     case "stats": {
       // Inline-readable session summary — same data as /diag's `summary`
@@ -396,7 +404,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
       const snap = store.telemetry.snapshot();
       const s = snap.summary;
       if (s.totalTurns === 0) {
-        store.lastNotice = "No turns captured yet this session — send a message first.";
+        notify.info("No turns captured yet this session — send a message first.");
         return true;
       }
       const slowT = s.slowestTurn ? ` slowest turn #${s.slowestTurn.idx} ${(s.slowestTurn.durationMs / 1000).toFixed(1)}s` : "";
@@ -421,7 +429,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
       const cmd = safeWs ? `cd '${safeWs}' && claude --resume ${sid}` : `claude --resume ${sid}`;
       navigator.clipboard
         .writeText(cmd)
-        .then(() => { store.lastNotice = `Copied to clipboard: ${cmd}`; })
+        .then(() => { notify.ok("Copied to clipboard", { detail: cmd, mono: true }); })
         .catch((e) => { store.lastError = `Clipboard write failed: ${String(e)}`; });
       return true;
     }
@@ -482,7 +490,7 @@ export async function copyLastAssistant(store: AssistantStore) {
   }
   try {
     await navigator.clipboard.writeText(text);
-    store.lastNotice = `Copied ${text.length.toLocaleString()} chars to clipboard.`;
+    notify.ok(`Copied ${text.length.toLocaleString()} chars to clipboard.`);
   } catch (e) {
     store.lastError = `Clipboard write failed: ${String(e)}`;
   }

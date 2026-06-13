@@ -7,7 +7,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { toast } from "./toast.svelte";
+import { toast, notify } from "./toast.svelte";
 import { browserDock } from "./browserDock.svelte";
 
 // M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
@@ -943,7 +943,7 @@ class AssistantStore {
     tab.streamingMsgId = null;
     tab.streamingMsgIdx = null;
     tab.lastError = null;
-    this.lastNotice = "Session was lost — retrying as a fresh start";
+    notify.warn("Session was lost — retrying as a fresh start");
     // Auto-retry only when the lost tab is active. Bg-tab retry would require
     // routing send() to a specific tab; for now the user re-clicks send.
     if (this.activeTab === tab) {
@@ -1193,7 +1193,7 @@ class AssistantStore {
     }
     // A separate console window opens for the OAuth flow — it can surface behind
     // Rift, so tell the user where to look immediately rather than only on timeout.
-    this.lastNotice = "A sign-in window opened — complete the login there, then come back. Rift will detect it automatically.";
+    notify.info("A sign-in window opened", { detail: "Complete the login there, then come back — Rift detects it automatically.", timeoutMs: 12000 });
     // Poll the probe until the session is usable, or give up after ~3 min so a
     // user who closes the login window without finishing isn't stuck "Signing
     // in…" forever.
@@ -1205,12 +1205,11 @@ class AssistantStore {
         const pill = this.auth?.pill;
         if (pill === "green" || pill === "yellow") {
           this.lastError = null;
-          this.lastNotice = "Signed in — you're good to go. Resend your message to continue.";
+          notify.ok("Signed in — you're good to go", { detail: "Resend your message to continue." });
           return;
         }
       }
-      this.lastNotice =
-        "Sign-in didn't complete. Finish in the console window that opened (or close it and try again), then resend.";
+      notify.warn("Sign-in didn't complete", { detail: "Finish in the console window that opened (or close it and try again), then resend." });
     } finally {
       this.loginInProgress = false;
     }
@@ -1225,7 +1224,7 @@ class AssistantStore {
     const pill = this.auth?.pill;
     if (pill === "green" || pill === "yellow") {
       this.lastError = null;
-      this.lastNotice = "Auth looks good now — resend your message to continue.";
+      notify.ok("Auth looks good now", { detail: "Resend your message to continue." });
     }
   }
 
@@ -1236,7 +1235,7 @@ class AssistantStore {
       this.hasApiKey = v !== null;
       await this.refreshAuth();
     } catch (e) {
-      this.lastNotice = String(e);
+      notify.danger("Couldn't save API key", { detail: String(e) });
       throw e;
     }
   }
@@ -1246,7 +1245,7 @@ class AssistantStore {
       await invoke("assistant_set_use_full_config", { value });
       this.useFullConfig = value;
     } catch (e) {
-      this.lastNotice = String(e);
+      notify.danger("Couldn't change config setting", { detail: String(e) });
       throw e;
     }
   }
@@ -1257,7 +1256,7 @@ class AssistantStore {
       await invoke("assistant_set_max_budget_usd", { value: v });
       this.maxBudgetUsd = v;
     } catch (e) {
-      this.lastNotice = String(e);
+      notify.danger("Couldn't set budget cap", { detail: String(e) });
       throw e;
     }
   }
@@ -1267,7 +1266,7 @@ class AssistantStore {
       await invoke("assistant_set_trust_level", { value });
       this.trustLevel = value;
     } catch (e) {
-      this.lastNotice = String(e);
+      notify.danger("Couldn't change trust level", { detail: String(e) });
       throw e;
     }
   }
