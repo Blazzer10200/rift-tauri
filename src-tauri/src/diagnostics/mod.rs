@@ -204,6 +204,34 @@ fn file_log_write(level: log::Level, target: &str, msg: &str) {
     }
 }
 
+/// Write a dedicated, non-rotating crash report on panic. The rotating
+/// `rift.log` keeps only one `.log.old` backup — a second crash in a session
+/// overwrites it before the user can grab it, and a startup panic that fires
+/// before the frontend pump is wired never reaches the UI at all. Each panic
+/// instead gets its own `crash-<ts>.txt` in the log dir so a field user can
+/// always find and send the exact crash. Best-effort: a write failure here is
+/// itself swallowed (we're already unwinding — nothing useful to do with it).
+///
+/// `location` + `payload` are expected pre-scrubbed by the caller; the
+/// force-captured backtrace is scrubbed here.
+pub fn write_crash_report(location: &str, payload: &str) {
+    let Some(log) = app_log_path() else { return };
+    let Some(dir) = log.parent() else { return };
+    // `%.3fZ` timestamp has no `:` — safe as a Windows filename.
+    let ts = Utc::now().format("%Y%m%dT%H%M%S%.3fZ");
+    let path = dir.join(format!("crash-{ts}.txt"));
+    let backtrace = scrub_log_message(&std::backtrace::Backtrace::force_capture().to_string());
+    let body = format!(
+        "Rift crash report\nversion:  {}\ntime:     {}\nlocation: {}\npayload:  {}\n\n--- backtrace ---\n{}\n",
+        env!("CARGO_PKG_VERSION"),
+        Utc::now().to_rfc3339(),
+        location,
+        payload,
+        backtrace,
+    );
+    let _ = std::fs::write(&path, body);
+}
+
 // ─── Log forwarder ──────────────────────────────────────────────────────────
 
 /// `log::Log` impl that mirrors every log macro into the diagnostics bus AND
