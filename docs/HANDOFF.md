@@ -2,34 +2,31 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-12 (cont.119) — Phase 2 minimal-core strip EXECUTED ✅
+## Session 2026-06-13 (cont.120) — UI Polish Arc EXECUTED (§1–§6) ✅
 
-All 7 slices of `docs/design/minimal-core-strip.md` shipped as 7 commits on main (`470845b`…`bd1709c`), green gates between each. **Net −7,407 lines across 43 files.** Final pass: svelte-check 0/0 · vitest 122/122 · cargo check clean · cargo test 52/52.
+All six backlog items of `docs/design/ui-polish-arc.md` shipped as 6 commits on main, each svelte-check 0/0 + tests green, CDP-verified against the live dev UI. Map (statuses updated in the arc doc):
+- **§1 token counter** (`253a2b8`) — live-verify found it frozen (CLI gives no mid-stream `output_tokens`); rewrote to climb from a streamed-char estimate snapping exact per message. +2 regression tests.
+- **§2 notifications** (`a0fc902`) — ~22 `lastNotice` sites → severity toasts (`notify.*`); banner now = slash reference output only; path bug + invisible-Settings-errors fixed; UpdatePill left alone (regressing the click-fix was the doc's mistake).
+- **§4 lightbox** (`cc7dfa9`) — dead `window.open` → portal'd overlay.
+- **§5 drag-drop** (`aa9e2cb`) — window-level drop guard (no more file-nav break) + non-image feedback + deduped handlers.
+- **§3 activity** (`4be207c`, 5/7) — timestamp dedup, quoted regex targets, colour-coded icons, promoted cost, live-token in Now strip.
+- **§6 streaming** (`44cb8b2`) — conservative pacer tuning (less compounding latency); architectural merge/incremental-parse/code-reveal deferred as high-risk.
 
-- **Gone:** Harness workspace (3 workspaces now) · `swarm/` · session-log subsystem · SQLite cost cockpit + **rusqlite dep** (usage = `limits.rs` only) · compaction (**#33 closed by removal**; ctx≥70% nudge survives w/ Ctrl+T copy; legacy boundary pills still render) · custom providers + compression proxy (turn.rs `ANTHROPIC_BASE_URL` seam deleted; API-key `--bare` path KEPT).
-- **Home bento** re-balanced to 3 tiles (ws · jump · limits). `usage.svelte.ts` = gauges-only.
-- **Keepers verified intact:** `cleanup_retired_jsonls` · `environment_check` · `usage_rate_limits` · dictation · enhance wand · browser dock · cost cap · `telemetry.turns` · trust-migration arms.
-- Deviation from brief: none material. `send.ts` still passes `priorContextSummary: null` (backend param kept, harmless). Backend tests 93→52 (deleted modules carried their suites).
-- Docs: ISSUES re-indexed (#33 🗄, #31 provider item superseded), project CLAUDE.md hot-files re-measured.
+**Not shipped (no version bump):** v0.9.0 stands; these are uncommitted-to-release dev-branch fixes. Next ship gathers them into a bump.
 
-### Phase 3 + Phase 4 (dev side) — also DONE this session
+## Session 2026-06-12 (cont.119) — minimal-core strip + v0.9.0 ship ✅
 
-- **#34 FIXED + live-verified** (`d5e8c3a`): memoized header counts (countFor cache) · default-collapse >8 files or >400-line group · `EditDiff maxLines` prop (SessionDiff passes 200, "Show N more" strip) · `content-visibility:auto` on `.dg`. CDP synthetic 20-file/200-edit repro: instant open, crisp collapsed headers, 0 errors; 400-line Write capped at 200 rows → reveal works.
-- **CDP sweep of all 3 workspaces green** (dev build): Home 3-tile bento + live gauges · Chat welcome/composer · Settings→Assistant (compaction/providers/compression sections confirmed GONE, API-key + cost guard + 2-level trust intact). New ctx≥70% nudge copy renders; cwd badge fires on mismatch. 0 console errors everywhere. Dev binary killed by PID (11980, path-verified) — prod untouched.
+Strip shipped (`470845b`…`bd1709c`, **−7,407 lines**): Harness/Swarm/session-log/SQLite-cockpit/compaction/custom-providers all gone → **3 workspaces** (Home·Chat·Settings), `usage`=gauges-only. #34 diff-perf FIXED (`d5e8c3a`). **v0.9.0 tagged + CI-published** to rift-releases. Detail in git + CHANGELOG.
 
-### v0.9.0 SHIPPED + docs cleaned (user-authorized, same session)
+### RESUME HERE — §7 Harness rebuild (next), then ship
 
-- Bumped ×3 + Cargo.lock, CHANGELOG rewritten, **tag `v0.9.0` pushed → tag-driven CI** publishes to rift-releases (run 27448186035).
-- **Docs sweep:** deleted retired design docs (`rift-roadmap` · `idea-phase-plan` · `edit-swarm-safety-layer` · completed `minimal-core-strip` + `scripts/proto/swarm-harness.ps1`); IDEAS.md rewritten w/ pivot note + surviving seeds only; ISSUES stale Harness refs pruned + verification section refreshed; README feature list updated. Kept: 6 docs/ files + 7 design refs (splits ×5, velopack, self-hosted-runner, ui-audit).
+UI Polish Arc §1–§6 are DONE (above). Remaining:
 
-### RESUME HERE — UI Polish Arc (next session)
+1. **§7 Harness rebuild** (`docs/design/ui-polish-arc.md` §7) — rebuild Harness page + Cost cockpit + Swarm cleanly to match the new minimal-core aesthetic, NOT a `git revert` of the strip. Recovery source intact up to `ba1f7dc`. Scope it fresh when starting.
+2. **Ship the arc** — gather §1–§6 into a version bump (`bump.ps1` → CHANGELOG → tag) when ready. v0.9.0 currently stands.
+3. **Optional §3/§6 follow-ups** (deferred, low priority): §3 collapse-same-tool-runs, §6 full pacer merge / incremental tail-parse / code-block reveal — all noted in the arc doc as intentional-skips, not bugs.
 
-**Full map: `docs/design/ui-polish-arc.md`** — user goal (2026-06-13): *cleaner, less sloppy, more organized UI*. Finish/tighten what's there, not new features. 6 backlog items grounded w/ file:line + my delegated design calls; Harness rebuild deferred to AFTER the backlog.
-
-1. **Live token counter (item §1) — COMMITTED `b450242`, NOT live-verified:** Claude-Code-style cumulative output-token count in spinner line + composer pill (replaced tok/s). svelte-check 0/0 · 51/51 tests. **REMAINING: live CDP verify against a real streaming turn (counter climbs, resets per turn, hidden when idle).**
-2. Then §2 notifications overhaul → §4/§5 broken features (lightbox, drag-drop) → §3 activity repolish → §6 streaming pass → §7 Harness rebuild.
-
-**Older RESUME (v0.9.0 ship verify — still valid, lower priority):** prod auto-updates to v0.9.0 → smoke 3 workspaces + real turn + #29 CSP. Fresh-machine buddy install (onboarding → sign-in → updater). Distribute (unsigned, SmartScreen). Fable sunset sweep post-Jun 22.
+**Older RESUME (v0.9.0 ship verify — still valid):** prod auto-updates to v0.9.0 → smoke 3 workspaces + real turn + #29 CSP. Fresh-machine buddy install. Fable sunset sweep post-Jun 22.
 
 ## Prior arcs — detail in `git log` + CHANGELOG
 
