@@ -181,10 +181,20 @@ fn init_file_log() -> Option<Mutex<std::fs::File>> {
     let path = app_log_path()?;
     // Size-based rotation so a long-lived install can't grow the file unbounded.
     const MAX_BYTES: u64 = 5 * 1024 * 1024;
-    if std::fs::metadata(&path).map(|m| m.len() > MAX_BYTES).unwrap_or(false) {
-        let _ = std::fs::rename(&path, path.with_extension("log.old"));
+    let oversized = std::fs::metadata(&path).map(|m| m.len() > MAX_BYTES).unwrap_or(false);
+    // B11: if rotation fails (e.g. .log.old is locked), truncate on open instead
+    // of appending — otherwise a stuck rename reopens the full 5 MB log in append
+    // mode and it grows without bound. No logging here: we ARE the log sink.
+    let rotate_failed =
+        oversized && std::fs::rename(&path, path.with_extension("log.old")).is_err();
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true);
+    if rotate_failed {
+        opts.write(true).truncate(true);
+    } else {
+        opts.append(true);
     }
-    let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok()?;
+    let file = opts.open(&path).ok()?;
     Some(Mutex::new(file))
 }
 
