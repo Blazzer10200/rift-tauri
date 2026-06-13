@@ -61,8 +61,13 @@ describe("captionForGroup", () => {
     expect(captionForGroup([tool("mcp__rift__grep"), tool("grep")])).toBe("Running 2 searches");
   });
 
-  it("counts mixed groups as actions", () => {
+  it("counts an all-distinct mix as actions", () => {
     expect(captionForGroup([tool("Read"), tool("Grep"), tool("Bash"), tool("Glob")])).toBe("Running 4 actions");
+  });
+
+  it("leads with the dominant kind when one is ≥2", () => {
+    expect(captionForGroup([tool("Read"), tool("Read"), tool("Read"), tool("Grep")])).toBe("Reading 3 files +1 more");
+    expect(captionForGroup([tool("Bash"), tool("Bash"), tool("Read"), tool("Glob")])).toBe("Running 2 commands +2 more");
   });
 
   it("falls back for unknown homogeneous names and empty input", () => {
