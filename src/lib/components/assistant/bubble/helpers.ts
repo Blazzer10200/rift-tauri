@@ -154,6 +154,22 @@ export function formatDuration(ms: number): string {
   return rem === 0 ? `${m}m` : `${m}m ${rem}s`;
 }
 
+// Sub-second-aware: tool durations are often tens of ms, where formatDuration's
+// "<1s" floor hides the signal. Show "Nms" below a second, else fall through.
+export function formatDurationMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return formatDuration(ms);
+}
+
+// Wall-clock sum across a group's tool blocks (thinking/absorbed blocks ignored).
+export function groupDurationMs(blocks: Block[]): number {
+  let ms = 0;
+  for (const b of blocks) {
+    if (b.type === "tool" && b.durationMs != null) ms += b.durationMs;
+  }
+  return ms;
+}
+
 export function elapsedFor(b: ThinkingBlock, nowMs: number): string {
   // Done block → stored duration. Active block → live ms-from-start so the
   // role-row label ticks up as the model reasons (otherwise "Thinking …"
@@ -217,12 +233,27 @@ export function lineDelta(oldS: unknown, newS: unknown): { adds: number; dels: n
 // narration↔tool ordering is preserved — only back-to-back status chips
 // collapse. Runs shorter than GROUP_MIN stay inline as before.
 const GROUP_MIN = 3;
+// A short/empty completed thought. Claude emits one of these between most tool
+// calls, which would otherwise break every run and prevent any grouping — so a
+// quick thought mid-run is absorbed into the group (rendered inside its body)
+// instead of splitting it. Substantial (>3s) or still-active thoughts stay
+// visible on the spine and DO break the run.
+function isQuickThinking(b: Block): boolean {
+  return (
+    b.type === "thinking" &&
+    b.status === "done" &&
+    (b.text.length === 0 || (b.durationMs != null && b.durationMs < 3000))
+  );
+}
 export function coalesceToolGroups(units: TimelineUnit[]): TimelineUnit[] {
   const out: TimelineUnit[] = [];
   let run: Extract<TimelineUnit, { kind: "block" }>[] = [];
   const flush = () => {
     if (run.length === 0) return;
-    if (run.length < GROUP_MIN) {
+    // Threshold counts TOOLS, not units — interleaved quick-thoughts shouldn't
+    // tip a 2-tool run over the grouping line.
+    const toolCount = run.filter((u) => u.block.type === "tool").length;
+    if (toolCount < GROUP_MIN) {
       out.push(...run);
     } else {
       const status: NodeStatus = run.some((u) => u.status === "error")
@@ -240,8 +271,13 @@ export function coalesceToolGroups(units: TimelineUnit[]): TimelineUnit[] {
     run = [];
   };
   for (const u of units) {
-    if (u.kind === "block" && u.block.type === "tool" && isGroupableChip(u.block.name)) {
-      run.push(u);
+    const groupable =
+      u.kind === "block" && u.block.type === "tool" && isGroupableChip(u.block.name);
+    // Only absorb a quick thought when a run is already open (run starts on a
+    // tool) so a lone thought never seeds a group.
+    const absorbThought = u.kind === "block" && run.length > 0 && isQuickThinking(u.block);
+    if (groupable || absorbThought) {
+      run.push(u as Extract<TimelineUnit, { kind: "block" }>);
     } else {
       flush();
       out.push(u);
