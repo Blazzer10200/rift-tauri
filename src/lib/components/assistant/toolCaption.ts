@@ -106,5 +106,17 @@ export function captionForGroup(blocks: Array<{ type: string; name?: string }>):
     if (n === "TaskUpdate") return `Updating ${c} task${c === 1 ? "" : "s"}`;
     return `Running ${c} ${n} calls`;
   }
+  // Heterogeneous. If one kind clearly dominates (≥2), lead with it so the
+  // header stays specific ("Reading 3 files +1 more") instead of a flat count.
+  // A flat all-distinct mix keeps the generic "Running N actions".
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const [topName, topCount] = [...counts].sort((a, b) => b[1] - a[1])[0];
+  if (topCount >= 2) {
+    const lead = captionForGroup(
+      Array.from({ length: topCount }, () => ({ type: "tool", name: topName })),
+    );
+    return `${lead} +${c - topCount} more`;
+  }
   return `Running ${c} actions`;
 }
