@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Wrench, Loader2, CheckCircle2, AlertCircle, Navigation } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Wrench, Loader2, CheckCircle2, AlertCircle, Navigation, X } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -17,7 +17,19 @@
   import { fmtTokens } from "../../state/assistant/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
+  import { portal } from "$lib/actions/portal";
   import { contextMenu, copyText, type CtxMenuItem } from "../../state/contextMenu.svelte";
+
+  // In-app image lightbox. window.open("data:…") is a no-op in WebView2 (no
+  // browser tabs; CSP blocks data: navigation), so a thumbnail click opens a
+  // portal'd full-screen overlay instead — click-anywhere / Esc to close.
+  let lightboxSrc = $state<string | null>(null);
+  $effect(() => {
+    if (!lightboxSrc) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") lightboxSrc = null; };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
 
@@ -436,7 +448,7 @@
             class="user-image-thumb"
             aria-label="View full size image"
             use:tooltip={"Click to view full size"}
-            onclick={() => window.open(`data:${safeMime};base64,${b.dataBase64}`, "_blank")}
+            onclick={() => (lightboxSrc = `data:${safeMime};base64,${b.dataBase64}`)}
           >
             <img
               src={`data:${safeMime};base64,${b.dataBase64}`}
@@ -610,6 +622,26 @@
     </div>
   </div>
 </div>
+{/if}
+
+{#if lightboxSrc}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="lightbox"
+    use:portal
+    role="dialog"
+    tabindex="-1"
+    aria-modal="true"
+    aria-label="Full size image — click anywhere or press Escape to close"
+    transition:fade={{ duration: reducedMotion ? 0 : 140 }}
+    onclick={() => (lightboxSrc = null)}
+  >
+    <img class="lightbox-img" src={lightboxSrc} alt="" />
+    <button class="lightbox-close" type="button" aria-label="Close" onclick={() => (lightboxSrc = null)}>
+      <X size={18} />
+    </button>
+  </div>
 {/if}
 
 <style>
@@ -1512,4 +1544,39 @@
     12%      { box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 55%, transparent), 0 0 14px color-mix(in oklab, var(--accent) 35%, transparent); }
   }
   @media (prefers-reduced-motion: reduce) { :global(.tid-flash) { animation: none; } }
+
+  /* Full-screen image lightbox (portal'd to <body>). Sits above toasts (z-2000),
+     below tooltips/splash (z-9999). Opaque scrim — WebView2 mis-composites
+     backdrop-filter on fixed layers. */
+  .lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    background: oklch(0 0 0 / 0.78);
+    cursor: zoom-out;
+  }
+  .lightbox-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    border-radius: 8px;
+    box-shadow: 0 24px 64px -16px oklch(0 0 0 / 0.7);
+  }
+  .lightbox-close {
+    position: fixed;
+    top: 16px; right: 16px;
+    width: 34px; height: 34px;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: var(--fg);
+    background: color-mix(in oklab, var(--bg-elev-2) 80%, transparent);
+    border: 1px solid var(--border-strong);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 120ms ease, color 120ms ease;
+  }
+  .lightbox-close:hover { background: var(--surface-hover); }
 </style>
