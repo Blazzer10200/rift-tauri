@@ -378,7 +378,15 @@ names), then output the rewritten prompt. Keep lookups minimal."
     // empty-output error path.
     let cancelled =
         child_pid.is_some() && with_enhance_pids(|m| m.remove(&request_id)).is_none();
-    let stderr_buf = stderr_task.await.unwrap_or_default();
+    // RR-7: surface a panicked stderr-drain task instead of unwrap_or_default()
+    // collapsing it to an empty body (which then reads as a reasonless failure).
+    let stderr_buf = match stderr_task.await {
+        Ok(buf) => buf,
+        Err(e) => {
+            log::error!("enhance stderr drain task panicked: {e}");
+            format!("(stderr drain task panicked: {e})")
+        }
+    };
     if cancelled {
         return Err("enhance cancelled".into());
     }
@@ -518,7 +526,14 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
         .wait()
         .await
         .map_err(|e| format!("await claude (title): {e}"))?;
-    let stderr_buf = stderr_task.await.unwrap_or_default();
+    // RR-7: surface a panicked stderr-drain task (see enhance path above).
+    let stderr_buf = match stderr_task.await {
+        Ok(buf) => buf,
+        Err(e) => {
+            log::error!("title stderr drain task panicked: {e}");
+            format!("(stderr drain task panicked: {e})")
+        }
+    };
     if !status.success() {
         let msg = stderr_buf.trim();
         return Err(if msg.is_empty() {
