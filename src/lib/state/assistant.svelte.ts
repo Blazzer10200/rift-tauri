@@ -64,7 +64,6 @@ import {
   saveEffort,
   loadPermissionMode,
   savePermissionMode,
-  loadDockWidth,
   messagesHaveContextSignals,
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
@@ -531,9 +530,8 @@ class AssistantStore {
   /** Attach cross-cutting hooks to a freshly-minted TabState. */
   private wireTab(tab: TabState) {
     tab.shortToolLabel = (name, input) => this.shortToolLabel(name, input);
-    tab.onTodoApplied = (_t, opensDock) => {
+    tab.onTodoApplied = (_t, _opensDock) => {
       this.ui.tasksUpdatedAt = Date.now();
-      if (opensDock) this.ui.dockOpen = true;
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
     tab.onTurnStarted = (t) => sendFlushSteerChips(this, t);
@@ -606,13 +604,9 @@ class AssistantStore {
   // model/effort). `bypassPermissions` until the user picks otherwise so
   // existing behavior is unchanged. Persisted to localStorage.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
-  // `dockOpen` drives the inline TasksDock in AssistantPage. `historyOpen`
-  // is a one-shot request flag: the `/history` slash command sets it and
-  // ChatTabsBar consumes it to open the history drawer.
-  // dockOpen defaults true — the activity dock is a permanent surface now (not a
-  // toggle-to-peek panel). New/clear no longer force it shut; the Composer
-  // affordance still hides it on demand.
-  ui = $state({ dockOpen: true, tasksUpdatedAt: 0, historyOpen: false, dockWidth: loadDockWidth(), diffOpen: false, diffTarget: null as string | null, usageOpen: false });
+  // `historyOpen` is a one-shot request flag: the `/history` slash command sets
+  // it and ChatTabsBar consumes it to open the history drawer.
+  ui = $state({ tasksUpdatedAt: 0, historyOpen: false, diffOpen: false, diffTarget: null as string | null, usageOpen: false });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
@@ -1313,8 +1307,6 @@ class AssistantStore {
       status: t.checked ? "completed" : "pending",
     }));
     this.ui.tasksUpdatedAt = Date.now();
-    this.ui.dockOpen = true;
-    tab.dockAutoOpenedThisConvo = true;
   }
 
   private shortToolLabel(name: string, input?: Record<string, unknown>): string {

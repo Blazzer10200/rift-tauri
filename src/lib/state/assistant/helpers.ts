@@ -19,8 +19,6 @@ export function fableAvailable(): boolean {
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
 const PERMISSION_KEY = "rift.assistant.permissionMode";
-const DOCK_WIDTH_KEY = "rift.assistant.dockWidth";
-const DOCK_COLLAPSE_KEY = "rift.assistant.dockCollapsed";
 
 // Per-workspace override keys for model + effort. A `base::<root>` key holds a
 // workspace's pinned choice; the bare global key is the baseline default for
@@ -33,10 +31,6 @@ const DOCK_COLLAPSE_KEY = "rift.assistant.dockCollapsed";
 function wsKey(base: string, ws: string | null | undefined): string | null {
   return ws ? `${base}::${ws}` : null;
 }
-
-export const DOCK_MIN = 260;
-export const DOCK_MAX = 520;
-export const DOCK_DEFAULT = 340;
 
 const PERMISSION_MODES: readonly PermissionMode[] = [
   "default", "acceptEdits", "plan", "auto", "bypassPermissions",
@@ -122,48 +116,6 @@ export function loadPermissionMode(): PermissionMode {
 export function savePermissionMode(v: PermissionMode) {
   try {
     if (typeof localStorage !== "undefined") localStorage.setItem(PERMISSION_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
-}
-
-export function loadDockWidth(): number {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(DOCK_WIDTH_KEY) : null;
-    const n = v ? parseInt(v, 10) : NaN;
-    if (Number.isFinite(n)) return Math.min(DOCK_MAX, Math.max(DOCK_MIN, n));
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return DOCK_DEFAULT;
-}
-
-export function saveDockWidth(px: number) {
-  try {
-    const clamped = Math.min(DOCK_MAX, Math.max(DOCK_MIN, Math.round(px)));
-    if (typeof localStorage !== "undefined") localStorage.setItem(DOCK_WIDTH_KEY, String(clamped));
-  } catch {
-    /* storage disabled */
-  }
-}
-
-/** Set of ActivityPanel section keys the user has collapsed. App-global UI pref. */
-export function loadCollapsedSections(): Set<string> {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(DOCK_COLLAPSE_KEY) : null;
-    if (v) {
-      const arr = JSON.parse(v);
-      if (Array.isArray(arr)) return new Set(arr.filter((x): x is string => typeof x === "string"));
-    }
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return new Set();
-}
-
-export function saveCollapsedSections(s: Set<string>) {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(DOCK_COLLAPSE_KEY, JSON.stringify([...s]));
   } catch {
     /* storage disabled */
   }
