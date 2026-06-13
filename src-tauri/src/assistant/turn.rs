@@ -363,14 +363,24 @@ async fn handle_permission_request(
     };
 
     let rx = registry.register(request_id.clone());
-    let _ = app.emit(PERMISSION_EVENT, serde_json::json!({
+    // B4: if the UI is unreachable (window closed mid-turn) the emit fails and
+    // the user never sees the prompt — deny immediately rather than let the
+    // request hang for the full 30-min timeout while the CLI waits on us.
+    if let Err(e) = app.emit(PERMISSION_EVENT, serde_json::json!({
         "session_id": session_id,
         "request_id": request_id,
         "tool_use_id": tool_use_id,
         "tool_name": req.get("tool_name").cloned().unwrap_or(Value::Null),
         "input": req.get("input").cloned().unwrap_or(Value::Null),
         "suggestions": req.get("permission_suggestions").cloned().unwrap_or(Value::Null),
-    }));
+    })) {
+        log::warn!("permission emit failed for {session_id} ({e}) — denying (UI unreachable)");
+        registry.cancel(&request_id);
+        let _ = write_control_response(stdin, &request_id, serde_json::json!({
+            "behavior": "deny", "message": "permission UI unreachable",
+        })).await;
+        return;
+    }
 
     // Cap the wait so a forgotten prompt can't wedge the turn forever; deny on
     // timeout / cancel (e.g. the user closed the tab).
@@ -865,7 +875,13 @@ pub async fn assistant_send(
     // emits the normal stop-path done event.
     if take_session_stopped(&session_id) {
         log::info!("assistant_send: stop arrived during spawn for {session_id} — killing child");
-        let _ = child.start_kill();
+        // B3: surface a failed kill. This arm intentionally keeps the pid
+        // registered (so a retry can stop the child), so a silent start_kill
+        // failure is exactly the case where a later stale-pid kill could hit a
+        // recycled pid — log it so it's diagnosable.
+        if let Err(e) = child.start_kill() {
+            log::warn!("assistant_send: start_kill failed for {session_id} during stop-on-spawn: {e}");
+        }
         // Re-set the marker so the post-wait take_ at the failure branch
         // recognizes this as a user-initiated stop, not a crash.
         mark_session_stopped(&session_id);
@@ -877,14 +893,15 @@ pub async fn assistant_send(
     // below owns stdin and drops it (EOF) once the turn's `result` lands.
     // #117: a None stdin would otherwise leave the child waiting forever —
     // fail loudly + kill so the wait loop unblocks.
-    if child.stdin.is_none() {
+    // A1: take() + guard in one — no `.expect()` panic path. None means the
+    // child died between spawn and now; kill + clear the registered pid so a
+    // later assistant_stop can't taskkill a since-recycled pid (#39), then fail
+    // loudly so the wait loop unblocks (#117).
+    let Some(stdin) = child.stdin.take() else {
         let _ = child.start_kill();
-        // #39: the pid was registered above; clear it so a later assistant_stop
-        // can't taskkill a since-recycled pid.
         clear_session_pid(&session_id);
         return Err("claude stdin unavailable — process killed".into());
-    }
-    let stdin = child.stdin.take().expect("stdin checked is_some above");
+    };
 
     // The per-turn user message — always a stream-json `user` envelope (text +
     // optional image blocks). Sent by the reader task once the `initialize`
