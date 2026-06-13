@@ -51,6 +51,13 @@ struct Inner {
     /// True only after `download_updates` succeeds; guards `apply` from running
     /// without a downloaded package.
     downloaded: bool,
+    /// Monotonic download-attempt counter. Bumped by `cancel_inflight_download`
+    /// when the command-layer stall watchdog abandons a wedged transfer. A
+    /// `download()` whose captured epoch no longer matches at completion is a
+    /// zombie (the watchdog already returned an error to the user) and MUST NOT
+    /// flip `downloaded` — else a retry could `apply` a package the user
+    /// believes failed. (RR-9)
+    download_epoch: u64,
     /// Why `mgr` is None, if it is. A failed `UpdateManager::new` (e.g. Velopack
     /// "not properly installed: could not auto-locate app manifest" — a
     /// corrupted/hand-modified install) leaves no manager. We keep the reason so
@@ -74,7 +81,7 @@ impl UpdateService {
             }
         };
         Self {
-            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, init_error }),
+            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, download_epoch: 0, init_error }),
         }
     }
 
@@ -173,14 +180,16 @@ impl UpdateService {
             self.check()?;
         }
         // Clone out under lock so the mutex isn't held across blocking I/O.
-        let (mgr, info) = {
+        // Capture the epoch now; if it's been bumped by the time we finish,
+        // this attempt was abandoned (stall) and must not flip `downloaded`.
+        let (mgr, info, epoch) = {
             let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
             let mgr = g.mgr.clone().ok_or_else(|| "no update source configured".to_string())?;
             let info = g
                 .pending
                 .clone()
                 .ok_or_else(|| "no pending update — nothing newer available".to_string())?;
-            (mgr, info)
+            (mgr, info, g.download_epoch)
         };
         log::info!("update download: starting v{}", info.TargetFullRelease.Version);
         mgr.download_updates(&info, Some(progress))
@@ -191,8 +200,28 @@ impl UpdateService {
         log::info!("update download: complete v{}", info.TargetFullRelease.Version);
         // Mark downloaded under lock so apply() can guard against skipped download.
         let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        if g.download_epoch != epoch {
+            // Watchdog gave up on this transfer and the user already saw a stall
+            // error — discard the zombie result rather than arm apply(). (RR-9)
+            log::warn!(
+                "update download: superseded (epoch {epoch} != {}) — discarding zombie result",
+                g.download_epoch
+            );
+            return Ok(());
+        }
         g.downloaded = true;
         Ok(())
+    }
+
+    /// Abandon any in-flight download: bump the epoch so a still-running
+    /// `download()` task can't later flip `downloaded`, and clear the flag now.
+    /// Called by the command layer when its stall watchdog gives up on a wedged
+    /// transfer. (RR-9)
+    pub fn cancel_inflight_download(&self) {
+        if let Ok(mut g) = self.inner.lock() {
+            g.download_epoch = g.download_epoch.wrapping_add(1);
+            g.downloaded = false;
+        }
     }
 
     /// Schedule the downloaded update to apply once this process exits, then
