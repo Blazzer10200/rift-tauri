@@ -6,7 +6,7 @@
   import type { PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
-  import { fuzzyScore, bytesToBase64, isFileDrag } from "./composer/helpers";
+  import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach } from "./composer/helpers";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -602,34 +602,16 @@
   async function onPaste(e: ClipboardEvent) {
     const items = e.clipboardData?.items;
     if (!items) return;
-    const imageItems = Array.from(items).filter(
-      (it) => it.kind === "file" && it.type.startsWith("image/"),
-    );
-    if (imageItems.length === 0) return;
+    // Only engage on image files — a non-image clipboard payload falls through
+    // to the normal text paste.
+    const imageFiles = Array.from(items)
+      .filter((it) => it.kind === "file" && it.type.startsWith("image/"))
+      .map((it) => it.getAsFile())
+      .filter((f): f is File => f != null);
+    if (imageFiles.length === 0) return;
     e.preventDefault();
-    attachError = null;
-    for (const it of imageItems) {
-      const file = it.getAsFile();
-      if (!file) continue;
-      if (file.size > 20 * 1024 * 1024) {
-        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
-        continue;
-      }
-      try {
-        const buf = await file.arrayBuffer();
-        const dataBase64 = bytesToBase64(buf);
-        const ok = assistant.addAttachment({
-          mime: file.type || "image/png",
-          dataBase64,
-          sizeBytes: file.size,
-        }, tabId);
-        if (!ok) {
-          attachError = "Attachment limit reached (20 MB total per turn).";
-        }
-      } catch (err) {
-        attachError = `Failed to read pasted image: ${String(err)}`;
-      }
-    }
+    const res = await attachImageFiles(imageFiles, (a) => assistant.addAttachment(a, tabId));
+    attachError = summarizeAttach(res);
   }
 
   // Up-arrow recall offset (0 = newest). Reset whenever the user types or
@@ -861,29 +843,12 @@
   async function onDrop(e: DragEvent) {
     if (!isFileDrag(e)) return;
     e.preventDefault();
+    e.stopPropagation(); // handled here — don't let the window-level guard re-attach
     dragDepth = 0;
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    attachError = null;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith("image/")) continue;
-      if (file.size > 20 * 1024 * 1024) {
-        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
-        continue;
-      }
-      try {
-        const buf = await file.arrayBuffer();
-        const dataBase64 = bytesToBase64(buf);
-        const ok = assistant.addAttachment({
-          mime: file.type || "image/png",
-          dataBase64,
-          sizeBytes: file.size,
-        }, tabId);
-        if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
-      } catch (err) {
-        attachError = `Failed to read dropped image: ${String(err)}`;
-      }
-    }
+    const res = await attachImageFiles(files, (a) => assistant.addAttachment(a, tabId));
+    attachError = summarizeAttach(res);
   }
 
   // ── Click-to-attach ───────────────────────────────────────────────────────
@@ -895,26 +860,8 @@
     const input = e.currentTarget as HTMLInputElement;
     const files = input.files;
     if (!files || files.length === 0) return;
-    attachError = null;
-    for (const file of Array.from(files)) {
-      if (!file.type.startsWith("image/")) continue;
-      if (file.size > 20 * 1024 * 1024) {
-        attachError = `Image too large: ${(file.size / 1024 / 1024).toFixed(1)} MB > 20 MB cap`;
-        continue;
-      }
-      try {
-        const buf = await file.arrayBuffer();
-        const dataBase64 = bytesToBase64(buf);
-        const ok = assistant.addAttachment({
-          mime: file.type || "image/png",
-          dataBase64,
-          sizeBytes: file.size,
-        }, tabId);
-        if (!ok) attachError = "Attachment limit reached (20 MB total per turn).";
-      } catch (err) {
-        attachError = `Failed to read image: ${String(err)}`;
-      }
-    }
+    const res = await attachImageFiles(files, (a) => assistant.addAttachment(a, tabId));
+    attachError = summarizeAttach(res);
     input.value = ""; // allow re-picking the same file
   }
 </script>

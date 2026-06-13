@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bytesToBase64, effortIdxFromX, fmtClock, fmtSize, fuzzyScore, isFileDrag } from "./helpers";
+import { attachImageFiles, bytesToBase64, effortIdxFromX, fmtClock, fmtSize, fuzzyScore, isFileDrag, summarizeAttach } from "./helpers";
 
 describe("fmtClock", () => {
   it("formats zero and sub-second values", () => {
@@ -97,5 +97,43 @@ describe("isFileDrag", () => {
   it("rejects text-only drags and missing dataTransfer", () => {
     expect(isFileDrag(drag(["text/html"]))).toBe(false);
     expect(isFileDrag(drag(null))).toBe(false);
+  });
+});
+
+describe("attachImageFiles", () => {
+  const png = (name: string, bytes = 4) => new File([new Uint8Array(bytes)], name, { type: "image/png" });
+  const txt = (name: string) => new File([new Uint8Array(4)], name, { type: "text/plain" });
+
+  it("attaches images and collects non-image + oversized rejects", async () => {
+    const big = new File([new Uint8Array(20 * 1024 * 1024 + 1)], "huge.png", { type: "image/png" });
+    const res = await attachImageFiles([png("a.png"), txt("code.ts"), big], () => true);
+    expect(res.attached).toBe(1);
+    expect(res.nonImage).toEqual(["code.ts"]);
+    expect(res.tooLarge).toEqual(["huge.png"]);
+    expect(res.limitHit).toBe(false);
+  });
+
+  it("flags limitHit when the add callback refuses", async () => {
+    const res = await attachImageFiles([png("a.png")], () => false);
+    expect(res.attached).toBe(0);
+    expect(res.limitHit).toBe(true);
+  });
+});
+
+describe("summarizeAttach", () => {
+  it("returns null when everything attached cleanly", () => {
+    expect(summarizeAttach({ attached: 2, nonImage: [], tooLarge: [], failed: [], limitHit: false })).toBeNull();
+  });
+  it("names a single non-image file", () => {
+    const s = summarizeAttach({ attached: 0, nonImage: ["code.ts"], tooLarge: [], failed: [], limitHit: false });
+    expect(s).toContain("code.ts");
+    expect(s).toContain("only images");
+  });
+  it("joins multiple rejection categories with a separator", () => {
+    const s = summarizeAttach({ attached: 1, nonImage: ["a", "b"], tooLarge: ["big.png"], failed: [], limitHit: true })!;
+    expect(s).toContain("2 non-image");
+    expect(s).toContain("big.png");
+    expect(s).toContain("limit reached");
+    expect(s).toContain(" · ");
   });
 });
