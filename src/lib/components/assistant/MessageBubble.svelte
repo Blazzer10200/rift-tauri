@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Wrench, Loader2, CheckCircle2, AlertCircle, Navigation, X } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle, Navigation, X } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -536,7 +536,6 @@
             <button class="tg-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
               <span class="tg-chev" class:open><ChevronRight size={11} /></span>
               {#if unit.stepNum}<span class="tg-num mono" aria-hidden="true">{unit.stepNum}</span>{/if}
-              <Wrench size={12} class="tg-icon" />
               <span class="tg-cap">{unit.caption ?? `${unit.blocks.length} tools`}</span>
               <span class="tg-sep" aria-hidden="true">·</span>
               <span class="tg-sum mono">{summarizeGroup(unit.blocks)}</span>
@@ -1197,7 +1196,6 @@
   }
   .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
   .tg-chev.open { transform: rotate(90deg); }
-  .tg-head :global(.tg-icon) { color: var(--accent); opacity: 0.85; flex-shrink: 0; }
   .tg-cap {
     font-weight: 500; color: var(--fg); font-size: 11px;
     flex: 0 1 auto; min-width: 0;
