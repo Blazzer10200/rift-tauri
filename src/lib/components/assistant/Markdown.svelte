@@ -123,7 +123,7 @@
   const WORD_MS = 42;      // mock stagger: i * 0.042s
   const REVEAL_MS = 500;   // per-word blur duration (matches md-word keyframe)
   const REVEAL_WINDOW = Math.ceil(REVEAL_MS / WORD_MS) + 1; // words still mid-blur behind the cursor (+1 so the oldest finishes before snapping solid)
-  const CATCHUP_LAG = Math.ceil(800 / WORD_MS); // trail beyond ~800ms of words drains proportionally so a burst never crawls behind
+  const CATCHUP_LAG = Math.ceil(520 / WORD_MS); // trail beyond ~520ms of words drains proportionally so a fast burst stays close to live (tightened from 800ms — lower felt latency on bursts)
   let shownCount = $state(0);
   let totalWords = 0;
   let everStreamed = false;
