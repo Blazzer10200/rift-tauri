@@ -236,8 +236,17 @@ impl ActiveSession {
 impl Drop for ActiveSession {
     fn drop(&mut self) {
         // Drop-path is off the async runtime; blocking join is safe here.
+        // B10: surface a panicked capture thread instead of swallowing it — a
+        // silent panic here leaks the mic handle to process exit with no signal.
         if let Some(h) = self.shutdown_capture() {
-            let _ = h.join();
+            if let Err(e) = h.join() {
+                let msg = e
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| e.downcast_ref::<String>().map(|s| s.as_str()))
+                    .unwrap_or("<non-string panic payload>");
+                log::warn!("stt: capture thread panicked on shutdown: {msg}");
+            }
         }
     }
 }
