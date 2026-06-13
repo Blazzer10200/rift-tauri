@@ -1,4 +1,6 @@
-//! Auto-update service — Velopack (v0.4.47+, restored 2026-06-04).
+//! Auto-update service — Velopack (`velopack` crate pinned `=1.2.0`; restored
+//! into Rift at app v0.4.47 on 2026-06-04). The vpk CLI version MUST match the
+//! crate version — bump both together (see project CLAUDE.md).
 //!
 //! Wraps `velopack::UpdateManager` over the crate's native `GithubSource`
 //! (v1.x). The old hand-rolled `GithubSource` (~200 lines against the GitHub
