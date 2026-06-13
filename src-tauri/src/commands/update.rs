@@ -64,6 +64,7 @@ pub async fn download_update(
     log::info!("download_update: command invoked (frontend → backend OK)");
 
     let svc = svc.inner().clone();
+    let svc_cancel = svc.clone();
     let (tx, rx) = std::sync::mpsc::channel::<i16>();
 
     // Forward Velopack's progress ticks to the frontend on a side thread. If no
@@ -107,7 +108,12 @@ pub async fn download_update(
             let _ = app.emit("update-downloaded", ());
             Ok(())
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            // RR-9: invalidate the abandoned attempt so a zombie blocking task
+            // that finishes later can't flip `downloaded` and arm a stale apply.
+            svc_cancel.cancel_inflight_download();
+            Err(e)
+        }
     }
 }
 
