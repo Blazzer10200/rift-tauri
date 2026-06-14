@@ -25,8 +25,9 @@
 | #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
 | #32 | Ctx meter blank on restored conversations | T4 | ✅ resolved in-tree |
 | #35 | Live shell + sub-agent streaming output panel (Claude-Code-desktop "Background tasks") | T3 | 🚧 open (idea) |
-| #36 | Split-pane feature overhaul | T3 | 🚧 open (idea) |
+| #36 | Split-pane feature overhaul | T3 | 🚧 open (idea) — 2 concrete pains gathered + fixed (see #38) |
 | #37 | Multi-window — separate OS windows (VSCode-style, multi-monitor) | T3 | 🚧 open (idea) |
+| #38 | Per-pane STT routing + per-tab workspace root | T2 | ✅ resolved in-tree (🧪 live-verified via CDP; mic input untested) |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -109,7 +110,7 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **What exists today:** N-pane split lives entirely *inside the single window* — `panes: PaneState[]` (`{tabId}` array), drag-a-tab-onto-a-half to split, `MAX_PANES` cap, `focusedPaneIdx`, per-pane composer-draft stash/restore. Drop-into-pane handles split-on/swap/focus. All state on the one `AssistantStore`, persisted to `localStorage` `rift.ui.tabs.v1`.
 - **Where:** [state/assistant/tabs.ts](../src/lib/state/assistant/tabs.ts) (pane lifecycle: addPane/closePane/setFocusedPane/dropTabIntoPane/scrubTabFromPanes) · `PaneState`/`MAX_PANES` in `state/assistant/types.ts` · `AssistantPane.svelte` renders the pane grid.
 - **Candidate improvements (to confirm w/ user):** resizable pane splits (drag the divider — current looks fixed-ratio) · vertical *and* horizontal splits (grid, not just a row) · keyboard pane nav/move · per-pane independent scroll already?/focus ring clarity · raise/remove `MAX_PANES` · drag a pane out → its own window (overlaps #37).
-- **Next:** ask the user for the 2-3 concrete frustrations before designing — "better" is ambiguous.
+- **Concrete pains gathered (user, 2026-06-14 cont.131) → FIXED in #38:** (1) STT dictation landed in the *other* pane; (2) switching a pane's project folder leaked to other panes (esp. visible after `/clear`). Both resolved — see #38. Remaining "better" candidates above still un-prioritized; ask for more specifics before the bigger overhaul.
 
 #### 37. Multi-window — separate OS windows (idea — user-requested 2026-06-14)
 
@@ -120,6 +121,15 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Route B — tear-off tab (true VSCode drag-out):** Route A + drag a tab out of the tabsbar → spawns a window pre-loaded w/ that convo + ownership transfer + per-window tab arrays + cross-window drag. Bigger lift, natural follow-up.
 - **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `app.windows` · [lib.rs](../src-tauri/src/lib.rs) (only `get_webview_window("main")` today; emits are global) · `assistant/turn.rs` + `assistant/bridge.rs` (global `emit` sites to scope per-window) · `state/assistant/persistence.ts` + `tabs.ts` (localStorage key namespacing) · `shell/Titlebar.svelte` + `capabilities/`.
 - **Recommendation:** ship Route A first (complements, doesn't replace, in-window splits); Route B layers on. Load-bearing risks: shared-origin localStorage + global event/bridge broadcast — both solvable b/c backend keys by session.
+
+#### 38. Per-pane STT routing + per-tab workspace root (✅ resolved in-tree 2026-06-14 cont.131)
+
+- **Two split-pane bugs the user hit (the concrete #36 pains):**
+  - **(a) STT landed in the wrong pane.** Dictation wrote to `assistant.composerDraft` — the *focused-pane* shim. A mic-button `onclick` fires before the pane-focus `onclick` bubbles, so `stt.start()` captured the OLD focused pane and text landed there. Same single-global flaw made voice "send it" fire every mounted composer.
+  - **(b) Project folder was one global.** `cfg.current_root` is a single backend value; switching it in one pane changed it for all, so a freshly `/clear`ed or new pane inherited the just-switched folder. (cwd was *already* pinned per-session after the first turn via `save_session_cwd`; the leak was the global default + the UI display + the @-mention/branch probe.)
+- **Fix (a) — STT target binding:** `stt.targetTabId` bound at `start(tabId)`; all draft reads/writes route through `readDraft/writeDraft` to that tab; composer passes its `tabId` (mic toggle + push-to-talk); the `sendRequested` effect gates on `stt.targetTabId === tabId`. [state/stt.svelte.ts](../src/lib/state/stt.svelte.ts) · [Composer.svelte](../src/lib/components/assistant/Composer.svelte).
+- **Fix (b) — per-tab root:** `TabState.workspaceRoot` (canonical per-tab folder) + `assistant.effectiveRoot(tab)`/`activeRoot` (`tab.workspaceRoot ?? global`). Per-pane picker writes the tab via new backend cmd `assistant_set_tab_root` (canonicalize + record recent MRU, **no `current_root` mutation** → zero leak). `assistant_send` takes optional `root`, used on the first turn (then per-session pinned as before). `newTab` snapshots the focused tab's root; `clearConversation` preserves the pane's own root; disk-load hydrates `workspaceRoot` from `sessionCwd`. `@`-mention walk + branch probe scope to `activeRoot` (commands take optional `root`); caches invalidated on focus change. [turn.rs](../src-tauri/src/assistant/turn.rs) · [workspace.rs](../src-tauri/src/assistant/workspace.rs) · [state/assistant/{tabs,workspace,persistence}.ts] · [ChatTabsBar.svelte](../src/lib/components/shell/ChatTabsBar.svelte) · [AssistantWelcome.svelte](../src/lib/components/assistant/AssistantWelcome.svelte).
+- **Verified:** `svelte-check` 0/0, vitest 132/132, Rust recompiled (CDP-invoked `assistant_set_tab_root` → canonical path), live CDP: set focused tab → exfil-v1, new tab inherited exfil-v1 (concrete snapshot, no live-global ref), restore → default; 0 console errors. **Untested:** real mic dictation (no CDP audio); true cross-pane non-leak (live state was single-pane — guaranteed by the snapshot design + inherit test). No new persistence needed — saved convos re-hydrate `workspaceRoot` from `sessionCwd` on load; unsaved tabs (never sent) already don't survive reload at all (`restoreTabs` keeps only convos in the meta list), so there's nothing to persist. Tabsbar `cwdMismatch` badge now compares pinned cwd vs the tab's `activeRoot` (was the global default → would've badged spuriously).
 
 ### Tier 4 — LOW / cosmetic
 

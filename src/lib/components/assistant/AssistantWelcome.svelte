@@ -77,13 +77,13 @@
   // Kick off a workspace file walk lazily once the empty-state renders.
   // Cheap (~ms) on typical FiveM resource folders; cached on the store.
   $effect(() => {
-    if (assistant.workspace.current && assistant.workspaceFiles.length === 0) {
+    if (paneRoot && assistant.workspaceFiles.length === 0) {
       void assistant.loadWorkspaceFiles();
     }
   });
   // Resolve the workspace git branch lazily for the context strip (null = not a repo).
   $effect(() => {
-    if (assistant.workspace.current && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
+    if (paneRoot && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
 
   const stack = $derived(detectStack(assistant.workspaceFiles));
@@ -107,7 +107,10 @@
     return `…/${parts.slice(-2).join("/")}`;
   }
 
-  const hasRoot = $derived(assistant.workspace.current != null);
+  // Per-pane root: this pane's own folder (or the global default), so two
+  // panes showing the welcome can advertise different project dirs.
+  const paneRoot = $derived(assistant.effectiveRoot(targetTab));
+  const hasRoot = $derived(paneRoot != null);
   const hasWorkspace = $derived(hasRoot);
   const recents = $derived(assistant.workspace.recent);
 
@@ -115,7 +118,7 @@
   // `assistant_workspace_branch` (omitted when not a git repo); file count
   // shows once the lazy walk resolves.
   const ctxName = $derived(
-    hasRoot ? leafName(assistant.workspace.current!) : "workspace",
+    hasRoot ? leafName(paneRoot!) : "workspace",
   );
   const fileCount = $derived(assistant.workspaceFiles.length);
   const branch = $derived(assistant.workspaceBranch);
@@ -270,7 +273,7 @@
         <p class="wel-sub">Point Claude at any folder on your disk — it reads, greps, and edits in place.</p>
       </div>
 
-      <button class="wel-open" type="button" onclick={() => void assistant.pickFolder()}>
+      <button class="wel-open" type="button" onclick={() => void assistant.pickTabFolder(tabId)}>
         <span class="wel-open-ic"><FolderOpen size={18}/></span>
         <span class="wel-open-body">
           <span class="wel-open-t">Open folder…</span>
@@ -288,7 +291,7 @@
                 <button
                   class="wel-recent open"
                   type="button"
-                  onclick={() => void assistant.setRoot(r)}
+                  onclick={() => void assistant.setTabRoot(tabId, r)}
                   use:tooltip={r}
                 >
                   <span class="wel-recent-ic"><Folder size={13}/></span>

@@ -137,6 +137,12 @@ class SttStore {
   currentState = $state<SttState>("idle");
   /** Voice command "send it" landed — the composer watches this and fires. */
   sendRequested = $state(false);
+  /** The tab whose composer owns the active dictation. Bound at start() so
+   *  recognized text lands in the pane the mic was clicked in — NOT the
+   *  focused-pane shim, which may point at a different pane (the mic's onclick
+   *  fires before the pane-focus onclick bubbles). Composers gate their
+   *  sendRequested handler on this so "send it" only fires the right pane. */
+  targetTabId = $state<string | null>(null);
   /** True while the Haiku polish of a finished dictation is in flight. */
   polishing = $state(false);
   /** Restore-point after a Haiku polish: full draft before/after, so the user
@@ -282,6 +288,19 @@ class SttStore {
     }
   }
 
+  /** Read/write the dictation target's draft. Routes to the tab the mic was
+   *  started in (`targetTabId`), falling back to the focused-pane shim when no
+   *  target is bound (e.g. legacy single-pane callers). */
+  private readDraft(): string {
+    const t = assistant.tabFor(this.targetTabId);
+    return t ? t.draft : assistant.composerDraft;
+  }
+  private writeDraft(v: string) {
+    const t = assistant.tabFor(this.targetTabId);
+    if (t) t.draft = v;
+    else assistant.composerDraft = v;
+  }
+
   /** Composer-side hook: the current draft was just sent / cleared. */
   consume() {
     this.cancelRequested = true;
@@ -310,15 +329,19 @@ class SttStore {
     this.clearSilenceWatch();
   }
 
-  /** Begin live recognition. Returns false if unavailable / disabled. */
-  async start(): Promise<boolean> {
+  /** Begin live recognition. Returns false if unavailable / disabled.
+   *  `tabId` binds the dictation to a specific pane's tab; omit for the
+   *  focused tab (the legacy single-pane behaviour). */
+  async start(tabId?: string | null): Promise<boolean> {
     if (!this.config.enabled) {
       this.lastError = "Speech-to-text is disabled. Enable it in Settings → Speech.";
       return false;
     }
     if (this.recording) return true;
+    // Bind BEFORE reading baseDraft so we capture the target pane's draft.
+    this.targetTabId = tabId ?? assistant.currentConvoId;
     this.lastError = null;
-    this.baseDraft = this.config.append_to_draft ? assistant.composerDraft : "";
+    this.baseDraft = this.config.append_to_draft ? this.readDraft() : "";
     this.finalText = "";
     this.segments = [];
     this.pendingSend = false;
@@ -431,7 +454,7 @@ class SttStore {
         }
       }
       if (!this.consumed) {
-        assistant.composerDraft = this.baseDraft;
+        this.writeDraft(this.baseDraft);
       }
       this.finalText = "";
       this.recording = false;
@@ -448,7 +471,7 @@ class SttStore {
       /* recogniser may already be stopped */
     }
     if (!this.consumed) {
-      assistant.composerDraft = this.baseDraft;
+      this.writeDraft(this.baseDraft);
     }
     this.finalText = "";
     this.recording = false;
@@ -511,7 +534,7 @@ class SttStore {
     if (!this.config.show_interim) return;
     const t = decensor(text);
     this.lastTranscript = t;
-    assistant.composerDraft = this.composeDraft(t, "");
+    this.writeDraft(this.composeDraft(t, ""));
   }
 
   private onBackendFinal(text: string, raw?: string, cleaned?: boolean) {
@@ -529,7 +552,7 @@ class SttStore {
     this.finalText = t;
     this.lastTranscript = t;
     const committed = this.composeDraft(t, "");
-    assistant.composerDraft = committed;
+    this.writeDraft(committed);
     // The Whisper path polishes backend-side — arm the raw-transcript undo.
     if (cleaned && raw && raw.trim() !== text.trim()) {
       this.setPolishUndo(committed, this.composeDraft(decensor(raw.trim()), ""));
@@ -588,8 +611,8 @@ class SttStore {
   revertPolish() {
     const u = this.polishUndo;
     this.polishUndo = null;
-    if (u && assistant.composerDraft === u.committed) {
-      assistant.composerDraft = u.original;
+    if (u && this.readDraft() === u.committed) {
+      this.writeDraft(u.original);
       this.finalText = "";
     }
   }
@@ -612,7 +635,7 @@ class SttStore {
       }
     }
     const composed = this.composeDraft(this.finalText, interim);
-    assistant.composerDraft = composed;
+    this.writeDraft(composed);
     this.lastTranscript = this.finalText;
     // "send it" — draft is committed above; the composer's effect fires it.
     if (this.pendingSend) {
@@ -682,7 +705,7 @@ class SttStore {
     // #175: commit only if neither user-cancel nor composer-consume fired.
     const commit = !this.cancelRequested && !this.consumed;
     if (commit) {
-      assistant.composerDraft = this.composeDraft(this.finalText, "");
+      this.writeDraft(this.composeDraft(this.finalText, ""));
     }
     this.recording = false;
     this.transcribing = false;
@@ -714,10 +737,10 @@ class SttStore {
         cleaned !== raw &&
         !this.consumed &&
         !this.cancelRequested &&
-        assistant.composerDraft === committed
+        this.readDraft() === committed
       ) {
         const polished = this.composeDraft(cleaned, "");
-        assistant.composerDraft = polished;
+        this.writeDraft(polished);
         this.finalText = cleaned;
         this.lastTranscript = cleaned;
         this.setPolishUndo(polished, committed);

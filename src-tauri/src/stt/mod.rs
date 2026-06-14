@@ -308,10 +308,10 @@ fn workspace_context() -> String {
     if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
         let _ = write!(ctx, "Project: {name}.");
     }
-    if let Some(branch) = crate::assistant::assistant_workspace_branch() {
+    if let Some(branch) = crate::assistant::assistant_workspace_branch(None) {
         let _ = write!(ctx, " Branch: {branch}.");
     }
-    if let Ok(files) = crate::assistant::assistant_list_workspace_files() {
+    if let Ok(files) = crate::assistant::assistant_list_workspace_files(None) {
         // Distinct basenames, first ~30. compose_prompt's 800-char cap is the
         // final backstop; this keeps the file list from dominating it.
         let mut names: Vec<&str> = Vec::new();
