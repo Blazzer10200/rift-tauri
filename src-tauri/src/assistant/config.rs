@@ -54,6 +54,18 @@ pub(super) struct AssistantConfig {
     /// `standard` / `full`. `None` = `readonly`.
     #[serde(default)]
     pub(super) trust_level: Option<String>,
+    /// Experimental local-LLM mode. When true, `turn.rs` points the spawned CLI
+    /// at a local Anthropic-Messages-compatible endpoint (LiteLLM/Ollama) via
+    /// `ANTHROPIC_BASE_URL` + the keychain `LOCAL_LLM_API_KEY`, forces `--bare`,
+    /// overrides `--model` with `local_llm_model`, and skips the cloud model-pin
+    /// + `--effort`. Purely additive + flag-gated — off = byte-identical to the
+    /// cloud path. Testing/experiment only for now.
+    #[serde(default)]
+    pub(super) local_llm_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) local_llm_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) local_llm_model: Option<String>,
 }
 
 pub(super) const RECENT_ROOTS_MAX: usize = 10;
@@ -74,6 +86,16 @@ pub(super) fn is_valid_model_name(s: &str) -> bool {
         return false;
     }
     s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+}
+
+/// Local-LLM model names carry provider prefixes + tags the cloud allowlist
+/// rejects (`ollama/llama3`, `ollama_chat/qwen2.5:7b`). Same anti-flag-injection
+/// guard (no leading dash, no empty) but also allows `/` and `:`.
+pub(super) fn is_valid_local_model_name(s: &str) -> bool {
+    if s.is_empty() || s.starts_with('-') {
+        return false;
+    }
+    s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/' | b':'))
 }
 
 /// Claude Fable 5 — limited run Rift offers only through 2026-06-22. Past
@@ -230,6 +252,71 @@ pub fn assistant_set_trust_level(value: String) -> Result<(), String> {
     let mut cfg = load_config();
     cfg.trust_level = Some(value);
     save_config(&cfg)
+}
+
+/// Renderer-facing view of local-LLM config. Never includes the key value —
+/// only whether one is set (mirrors `assistant_get_api_key_present`).
+#[derive(Serialize)]
+pub struct LocalLlmDto {
+    enabled: bool,
+    base_url: Option<String>,
+    model: Option<String>,
+    has_key: bool,
+}
+
+#[tauri::command]
+pub fn assistant_get_local_llm_config() -> Result<LocalLlmDto, String> {
+    let cfg = load_config();
+    Ok(LocalLlmDto {
+        enabled: cfg.local_llm_enabled,
+        base_url: cfg.local_llm_base_url,
+        model: cfg.local_llm_model,
+        has_key: crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY).is_some(),
+    })
+}
+
+#[tauri::command]
+pub fn assistant_set_local_llm_enabled(value: bool) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut cfg = load_config();
+    cfg.local_llm_enabled = value;
+    save_config(&cfg)
+}
+
+#[tauri::command]
+pub fn assistant_set_local_llm_base_url(value: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    // Normalize: a bare `localhost:4000` (no scheme) would reach the CLI as a
+    // malformed ANTHROPIC_BASE_URL and fail confusingly — prepend http://.
+    let normalized = value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(|s| if s.contains("://") { s } else { format!("http://{s}") });
+    let mut cfg = load_config();
+    cfg.local_llm_base_url = normalized;
+    save_config(&cfg)
+}
+
+#[tauri::command]
+pub fn assistant_set_local_llm_model(value: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let trimmed = value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+    if let Some(ref m) = trimmed {
+        if !is_valid_local_model_name(m) {
+            return Err(format!("invalid local model name: {m}"));
+        }
+    }
+    let mut cfg = load_config();
+    cfg.local_llm_model = trimmed;
+    save_config(&cfg)
+}
+
+#[tauri::command]
+pub fn assistant_set_local_llm_key(key: Option<String>) -> Result<(), String> {
+    match key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(k) => crate::secrets::set(crate::secrets::LOCAL_LLM_API_KEY, k),
+        None => crate::secrets::delete(crate::secrets::LOCAL_LLM_API_KEY),
+    }
 }
 
 #[tauri::command]

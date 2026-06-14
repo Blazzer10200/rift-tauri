@@ -597,9 +597,17 @@ pub async fn assistant_test_local_llm() -> Result<String, String> {
     // status + body verbatim. Bounded at 20s so an unresponsive proxy fails
     // cleanly instead of hanging the spinner forever.
     let url = format!("{base_url}/v1/messages");
+    // Include a `thinking` block: the spawned CLI sends one on EVERY real turn
+    // (interleaved-thinking beta, no flag disables it), so a probe without it
+    // would false-green — a plain request succeeds against proxies whose model
+    // can't actually think, then every real turn 500s. Mimicking the real shape
+    // makes the probe fail the same way real traffic does (e.g. LiteLLM →
+    // `OllamaException - "qwen3-coder:30b" does not support thinking`).
+    // Anthropic requires budget_tokens >= 1024 and max_tokens > budget_tokens.
     let body = serde_json::json!({
         "model": model,
-        "max_tokens": 16,
+        "max_tokens": 1280,
+        "thinking": { "type": "enabled", "budget_tokens": 1024 },
         "messages": [{ "role": "user", "content": "Reply with exactly: OK" }],
     });
 
@@ -659,4 +667,56 @@ pub async fn assistant_test_local_llm() -> Result<String, String> {
     } else {
         reply
     })
+}
+
+/// Experimental: list the models the configured local endpoint advertises, so
+/// the Local LLM page can offer a picker instead of free-text. GETs the
+/// OpenAI-style `{base_url}/v1/models` (LiteLLM exposes it; the `/v1/messages`
+/// adapter shares the same proxy). The key stays backend-side — only the model
+/// id strings cross to the renderer. Returns [] (not an error) when the endpoint
+/// is unreachable or advertises nothing, so the picker degrades to free-text.
+#[tauri::command]
+pub async fn assistant_list_local_models() -> Result<Vec<String>, String> {
+    let cfg = load_config();
+    let base_url = cfg
+        .local_llm_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("No base URL configured")?
+        .trim_end_matches('/')
+        .to_string();
+    let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
+        .unwrap_or_else(|| "local".to_string());
+
+    let url = format!("{base_url}/v1/models");
+    let resp = reqwest::Client::new()
+        .get(&url)
+        .header("x-api-key", &local_key)
+        .header("authorization", format!("Bearer {local_key}"))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| format!("can't reach {url}: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("{url} returned HTTP {}", resp.status().as_u16()));
+    }
+
+    let text = resp.text().await.unwrap_or_default();
+    // OpenAI list shape: { "data": [ { "id": "ollama/qwen3-coder:30b" }, ... ] }.
+    // Keep only ids that pass the same name guard the model field enforces.
+    let models = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|v| v.get("data")?.as_array().cloned())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(Value::as_str))
+                .filter(|id| is_valid_local_model_name(id))
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Ok(models)
 }

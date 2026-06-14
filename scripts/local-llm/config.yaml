@@ -1,0 +1,25 @@
+# LiteLLM proxy config for Rift local-LLM mode.
+#
+# WHY THIS EXISTS: the spawned Claude Code CLI sends an Anthropic `thinking`
+# param on every turn (interleaved-thinking beta — no CLI flag disables it).
+# `ollama/qwen3-coder:30b` can't think, so a bare `litellm --model ...` launch
+# passes `thinking` straight to Ollama -> HTTP 500
+# `OllamaException - "qwen3-coder:30b" does not support thinking`.
+#
+# FIX: drop_params + modify_params make LiteLLM strip the unsupported `thinking`
+# block before forwarding to Ollama. additional_drop_params is belt-and-braces
+# in case the global flag misses the Anthropic /v1/messages adapter path.
+#
+# Launch:  litellm --config C:/AI Workflow/tools/litellm/config.yaml --port 4000
+# Verify:  curl :4000/v1/messages with a `thinking` field -> HTTP 200.
+
+litellm_settings:
+  drop_params: true       # drop params the target model doesn't support (incl. `thinking`)
+  modify_params: true     # auto-handle thinking/tool-call incompatibilities
+
+model_list:
+  - model_name: ollama/qwen3-coder:30b
+    litellm_params:
+      model: ollama/qwen3-coder:30b
+      api_base: http://localhost:11434
+      additional_drop_params: ["thinking"]

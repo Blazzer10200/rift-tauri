@@ -18,8 +18,8 @@ use tokio::sync::mpsc;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    current_api_key, effective_trust_level, fable_sunset_passed, is_valid_model_name,
-    is_valid_permission_mode, load_config, FABLE_MODEL,
+    current_api_key, effective_trust_level, fable_sunset_passed, is_valid_local_model_name,
+    is_valid_model_name, is_valid_permission_mode, load_config, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
@@ -444,25 +444,35 @@ pub async fn assistant_send(
     if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
     }
-    // Pin model per conversation: thinking-block signatures are model-bound, so
-    // resuming under a switched model 400s on the replayed prior turn (see
-    // session_model_path). On resume, the model the session was created with wins
-    // over a live picker change; the new model only takes effect in a new chat.
-    if !is_first_turn {
-        if let Some(pinned) = load_session_model(&session_id) {
-            if pinned != model {
-                log::info!(
-                    "assistant_send: session {session_id} pinned to model {pinned} (picker={model}) — preserving thinking-block signatures"
-                );
-                model = pinned;
+    if cfg.local_llm_enabled {
+        // Local-LLM mode (experimental): use the configured local model verbatim
+        // and skip cloud-only machinery (model pin, Fable guard) — there are no
+        // thinking-block signatures to preserve and no Anthropic model ids in
+        // play. Env injection + `--effort` bypass happen at the spawn site below.
+        if let Some(lm) = cfg.local_llm_model.as_deref().filter(|s| is_valid_local_model_name(s)) {
+            model = lm.to_string();
+        }
+    } else {
+        // Pin model per conversation: thinking-block signatures are model-bound, so
+        // resuming under a switched model 400s on the replayed prior turn (see
+        // session_model_path). On resume, the model the session was created with wins
+        // over a live picker change; the new model only takes effect in a new chat.
+        if !is_first_turn {
+            if let Some(pinned) = load_session_model(&session_id) {
+                if pinned != model {
+                    log::info!(
+                        "assistant_send: session {session_id} pinned to model {pinned} (picker={model}) — preserving thinking-block signatures"
+                    );
+                    model = pinned;
+                }
             }
         }
-    }
-    // Fable sunset guard — after pin resolution so a pinned Fable session also
-    // falls back once the limited run ends.
-    if model == FABLE_MODEL && fable_sunset_passed() {
-        log::info!("assistant_send: {FABLE_MODEL} sunset passed — falling back to opus");
-        model = "opus".to_string();
+        // Fable sunset guard — after pin resolution so a pinned Fable session also
+        // falls back once the limited run ends.
+        if model == FABLE_MODEL && fable_sunset_passed() {
+            log::info!("assistant_send: {FABLE_MODEL} sunset passed — falling back to opus");
+            model = "opus".to_string();
+        }
     }
     // Effort tier: per-turn override wins, else stored default, else "smart"
     // (--effort high, the API default — mirrors the frontend's loadEffort()).
@@ -549,8 +559,12 @@ pub async fn assistant_send(
     // / skills already load today via the CLI's own resolution regardless of
     // these flags — verified live via CDP probe 2026-05-16 (S71).
     // API-key mode forces `--bare`, which suppresses user config wholesale,
-    // so we runtime-disable piggyback in that path.
-    let use_full_config = cfg.use_full_config.unwrap_or(true) && !use_api_key;
+    // so we runtime-disable piggyback in that path. Local-LLM mode also forces
+    // `--bare` (below), so it disables piggyback for the same reason — keeps
+    // Rift's `--mcp-config` the strict source instead of a contradictory
+    // `--bare` + piggyback combo.
+    let use_full_config =
+        cfg.use_full_config.unwrap_or(true) && !use_api_key && !cfg.local_llm_enabled;
 
     // 20 MiB total cap across all attachments — protects the CLI's JSON
     // parser from a runaway paste. Per-image cap is the same as the cumulative
@@ -729,6 +743,24 @@ pub async fn assistant_send(
         }
     }
 
+    // Local-LLM mode (experimental): redirect the CLI at a local Anthropic-
+    // compatible endpoint (LiteLLM/Ollama). `--bare` forces env-key auth so the
+    // CLI ignores OAuth/keychain (added above already if api-key mode). The base
+    // URL + local key override anything set in the api-key branch — local wins.
+    // Additive + flag-gated; off = the spawn is byte-identical to cloud. Yank =
+    // delete this block + the model/effort guards above/below.
+    if cfg.local_llm_enabled {
+        if !use_api_key {
+            cmd.arg("--bare");
+        }
+        if let Some(base) = cfg.local_llm_base_url.as_deref().filter(|s| !s.is_empty()) {
+            cmd.env("ANTHROPIC_BASE_URL", base);
+        }
+        let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
+            .unwrap_or_else(|| "local".to_string());
+        cmd.env("ANTHROPIC_API_KEY", local_key);
+    }
+
     // Effort-gated extended thinking via the CLI's `--effort` flag (the CLI
     // accepts low/medium/high/xhigh/max). Haiku skips wholesale — the API
     // rejects effort on Haiku 4.5. Tier mapping (MUST mirror frontend
@@ -754,7 +786,9 @@ pub async fn assistant_send(
         "deep" | "ultra" => "xhigh",
         _ /* "smart" or unknown */ => "high",
     };
-    if model != "haiku" {
+    // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
+    // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
+    if !cfg.local_llm_enabled && model != "haiku" {
         cmd.arg("--effort").arg(effort_level);
         // Ultracode tier: xhigh effort + autonomous dynamic-workflow
         // orchestration. The workflow behavior rides the CLI's `ultracode`
@@ -769,8 +803,8 @@ pub async fn assistant_send(
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={}",
-        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key
+        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={} local_llm={}",
+        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
