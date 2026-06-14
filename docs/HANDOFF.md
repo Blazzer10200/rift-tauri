@@ -8,10 +8,16 @@ Executed `docs/design/self-hosted-distribution-BUILD.md` §0→§2 autonomously.
 
 - **§1 — `web/` static download site created** (plain HTML/CSS/JS, no framework/build; Cloudflare Pages serves dir as-is). Files: `index.html` · `styles.css` (Rift tokens: emerald `--accent-h:163`, surface tiers .142/.215/.178/.25, oklch) · `app.js` (fetches `releases.win.json` for version, try/catch fallback) · `_headers` (nosniff/DENY/strict-origin) · `README.md`. Hero "Claude Code, with a real UI." + 6-feature grid + CTA → `https://pub-REPLACE.r2.dev/Setup.exe`. **Verified:** `npx serve` rendered, HTML + CTA present, styles.css/app.js → 200, server killed by PID.
 - **§2 — `release.ps1` conditional R2 dual-publish** inserted after the GitHub `vpk upload` block (now `:295-296`), before the portable-zip drop. Fires `vpk upload s3` only when `R2_ACCESS_KEY_ID`+`R2_SECRET_ACCESS_KEY`+`R2_ENDPOINT` env present; else DarkGray no-op. GitHub path untouched. **Verified:** `[ScriptBlock]::Create` parse = OK.
-- **Placeholders left for human:** `pub-REPLACE` in `web/index.html` (CTA href) + `web/app.js` (feed URL).
+### Cloudflare PROVISIONED (BUILD §H done, same session) — live infra
+- **Account ID** `1cf0273eb938093158d2c7246719fea8`. **Bucket** `rift-releases` created, public dev URL **live**: `https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev` (boto3-verified: bucket exists, creds valid, empty).
+- **CI secrets set on `Blazzer10200/rift-tauri`** (gh secret): `R2_ACCESS_KEY_ID` · `R2_SECRET_ACCESS_KEY` · `R2_ENDPOINT` · `R2_BUCKET`. Dual-publish block will fire on next CI release.
+- **web/ placeholders FILLED** (real `pub-<hash>` baked into `index.html`+`app.js`+README; commit `wire R2 public URL`).
+- **Pages DEPLOYED** via wrangler → **https://rift-5hr.pages.dev** (project `rift`, prod branch main, output `web/`). Verified: renders, security headers applied, assets 200.
 
-### RESUME HERE — human Cloudflare click-ops (BUILD §H, ~10 min, cannot be automated)
-1. Create R2 bucket `rift-releases`; note Account ID. 2. Enable public access → copy `pub-<hash>.r2.dev` URL. 3. Mint scoped S3 API token (Read&Write) → save Key ID + Secret. 4. Upload current `Setup.exe` to bucket. 5. Connect Pages → repo, build output dir = `web/`, no build cmd. 6. Fill placeholders: `pub-REPLACE` → real hash in `index.html` + `app.js`; add CI secrets `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY`/`R2_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com`/`R2_BUCKET=rift-releases`. 7. **Apply BUILD §3 staged diff** (`update_service.rs` `GithubSource`→`HttpSource`, set real URL, `cargo check`), then ship the bridge release via GitHub path.
+### RESUME HERE — what's still pending
+1. **Roll 2 exposed tokens** (both pasted in cont.125 chat): the R2 S3 token + the `cfut_` Pages token. Optional hygiene; rotate when convenient.
+2. **Setup.exe in bucket** — NOT yet uploaded (no local build existed). Auto-published to R2 by the next `release.ps1`/CI run via the dual-publish block. Until then the site CTA 404s.
+3. **Apply BUILD §3 staged diff** (`update_service.rs` `GithubSource`→`HttpSource`, set URL=`https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`, confirm `HttpSource::new` arity vs velopack 1.2.0, `cargo check` dev-quit), then ship the **bridge release** via the GitHub path — that binary is the first to read R2.
 
 **Decisions (locked):** D1 R2+Pages · D2 domain DEFERRED (ship $0 on r2.dev, throttle accepted; baked-in URL → domain later = 2nd bridge) · D5 single `win` channel · D4 site in-repo `web/`. Plan: `docs/design/self-hosted-distribution.md`.
 
