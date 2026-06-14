@@ -11,7 +11,8 @@ End-to-end working. **Committed** (still experimental/gated — no version bump,
 - **Page redesign:** 2-col bento (Mode+Connection left, Endpoint right) sized to fit the 800px min window — **no scrollbar**. Toggle/Test inline. `npm run check` 0/0, `cargo check` clean.
 - **NOT added:** temperature/context-limit — the `claude` CLI has no such knobs (turn.rs forwards only `--model`/`--bare`/env, skips `--effort`); would be fake UI. Tune on proxy/Ollama side.
 - **Security audit clean:** key in OS keychain only, injected as CLI env, logged as bool; DTO/store expose `has_key` only; new cmd returns model strings only. Nothing synced/transmitted beyond the local proxy call.
-- **Proxy infra:** running copies in `C:/AI Workflow/tools/litellm/`; canonical reproducible copies + README in repo `scripts/local-llm/`.
+- **Tool-calling FIXED (`8f30f17`):** live chat showed the model printing tool calls as raw JSON text (agentic loop dead). Cause = `ollama/` provider → `/api/generate` (text completion). Switched config.yaml to `ollama_chat/` (→ `/api/chat`, native function calling). Verified in-app: plain chat clean, "list files here" → real `list_dir` exec → coherent answer. Rift-facing model alias unchanged.
+- **Proxy infra:** running copies in `C:/AI Workflow/tools/litellm/`; canonical reproducible copies + README in repo `scripts/local-llm/`. Stack must be up: litellm `:4001` (`--config scripts/local-llm/config.yaml`) + shim `:4000` (`strip_thinking_proxy.py 4000 4001`).
 
 ## Session 2026-06-14 (cont.128) — Local-LLM: shared store + pill + guard + LIVE root-cause
 
