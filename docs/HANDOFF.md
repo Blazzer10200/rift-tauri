@@ -22,7 +22,7 @@ Executed `docs/design/self-hosted-distribution-BUILD.md` §0→§2 autonomously.
 **Decisions (locked, full in plan):** D1 R2+Pages · D2 domain DEFERRED (r2.dev, baked-in URL → domain later = 2nd bridge) · D5 single `win` channel. Plan: `docs/design/self-hosted-distribution.md`.
 
 ### Carried-over from cont.123 (v0.9.3 shipped — tail still open)
-- **RR-5/#29** CSP prod-verify: install v0.9.3, confirm animations + update bar + 0 CSP violations. · **RR-8** Allow/Deny round-trip needs `trust_level=standard`. · **Decisions:** RR-11 code-signing? RR-12 repo collapse (#17). · **Deferred polish:** single/double-node group card. · **Composer bug** above composer — re-point.
+- **RR-5/#29** CSP prod-verify: install v0.9.3, confirm animations + update bar + 0 CSP violations. · **RR-8** Allow/Deny needs `trust_level=standard`. · **Open:** RR-11 code-signing? RR-12 repo collapse (#17). · **Polish:** single/double-node group card; composer bug re-point.
 
 ## Prior arcs — detail in git log + CHANGELOG
 cont.123 release-readiness ship-blockers + robustness → **v0.9.3** (tag CI run `27481935945`; RR-1 auth dead-end, RR-2 crash file, T2/T4 sweep). cont.122 re-verify + Activity dock removal (`ced39af`). cont.121 Concept-D tool-group cards → v0.9.2. cont.120 UI Polish → v0.9.1. cont.119 minimal-core strip (−7,407 → 3 workspaces) → v0.9.0. **§7 Harness rebuild still OPEN**. cont.94 Fable 5 (Jun 22 sunset gate). PID-only kills, NEVER by image name.
