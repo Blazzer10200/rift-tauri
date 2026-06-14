@@ -1,30 +1,37 @@
 # LiteLLM proxy config for Rift local-LLM mode.
 #
-# WHY THIS EXISTS: the spawned Claude Code CLI sends an Anthropic `thinking`
-# param on every turn (interleaved-thinking beta — no CLI flag disables it).
-# `ollama/qwen3-coder:30b` can't think, so a bare `litellm --model ...` launch
-# passes `thinking` straight to Ollama -> HTTP 500
-# `OllamaException - "qwen3-coder:30b" does not support thinking`.
+# Sits behind strip_thinking_proxy.py (the shim on :4000 -> this on :4001).
 #
-# FIX: drop_params + modify_params make LiteLLM strip the unsupported `thinking`
-# block before forwarding to Ollama. additional_drop_params is belt-and-braces
-# in case the global flag misses the Anthropic /v1/messages adapter path.
+# ollama_chat/ (NOT ollama/) is mandatory: it routes to Ollama's /api/chat for
+# NATIVE function calling. The plain ollama/ provider uses /api/generate, where
+# the model prints tool calls as raw JSON text Rift can't execute.
 #
-# Launch:  litellm --config C:/AI Workflow/tools/litellm/config.yaml --port 4000
-# Verify:  curl :4000/v1/messages with a `thinking` field -> HTTP 200.
+# drop_params/modify_params are hygiene; the shim is what actually strips the
+# Anthropic `thinking` param for models that can't think (qwen3-coder). Thinking-
+# capable models (qwen3:*) keep it — the shim passes thinking through for them.
+#
+# Launch:  litellm --config <this> --port 4001
+# Verify:  curl :4000/v1/messages (through the shim) -> HTTP 200.
 
 litellm_settings:
-  drop_params: true       # drop params the target model doesn't support (incl. `thinking`)
-  modify_params: true     # auto-handle thinking/tool-call incompatibilities
+  drop_params: true
+  modify_params: true
 
 model_list:
-  - model_name: ollama/qwen3-coder:30b   # alias Rift sends (keep stable)
+  # Thinking-capable general/coding model — reasons + calls tools. Default.
+  # num_ctx 32768: Ollama defaults to ~4K, which truncates Rift's large system
+  # prompt + MCP tool definitions and wrecks tool use. Provider-specific param,
+  # passed straight through to Ollama (not dropped by drop_params).
+  - model_name: ollama/qwen3:14b
     litellm_params:
-      # ollama_chat/ -> Ollama's /api/chat = NATIVE function calling. The plain
-      # ollama/ provider uses /api/generate (text completion), where the model
-      # prints tool calls as raw JSON text instead of structured tool_use blocks,
-      # so Rift can't execute them. /api/chat makes Ollama parse qwen3-coder's
-      # tool calls into real tool_calls that LiteLLM maps to Anthropic tool_use.
+      model: ollama_chat/qwen3:14b
+      api_base: http://localhost:11434
+      num_ctx: 32768
+
+  # Coding-focused, NO thinking support — the shim strips `thinking` for it.
+  - model_name: ollama/qwen3-coder:30b
+    litellm_params:
       model: ollama_chat/qwen3-coder:30b
       api_base: http://localhost:11434
+      num_ctx: 32768
       additional_drop_params: ["thinking"]
