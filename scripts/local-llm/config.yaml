@@ -18,8 +18,13 @@ litellm_settings:
   modify_params: true     # auto-handle thinking/tool-call incompatibilities
 
 model_list:
-  - model_name: ollama/qwen3-coder:30b
+  - model_name: ollama/qwen3-coder:30b   # alias Rift sends (keep stable)
     litellm_params:
-      model: ollama/qwen3-coder:30b
+      # ollama_chat/ -> Ollama's /api/chat = NATIVE function calling. The plain
+      # ollama/ provider uses /api/generate (text completion), where the model
+      # prints tool calls as raw JSON text instead of structured tool_use blocks,
+      # so Rift can't execute them. /api/chat makes Ollama parse qwen3-coder's
+      # tool calls into real tool_calls that LiteLLM maps to Anthropic tool_use.
+      model: ollama_chat/qwen3-coder:30b
       api_base: http://localhost:11434
       additional_drop_params: ["thinking"]
