@@ -26,15 +26,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 
-use velopack::sources::GithubSource;
+use velopack::sources::HttpSource;
 use velopack::{UpdateInfo, UpdateManager};
 
-/// Public release repo. Source repo is private; releases publish here so
-/// unauthenticated GithubSource fetches succeed without exposing source.
-const GITHUB_REPO_URL: &str = "https://github.com/Blazzer10200/rift-releases";
-/// Alpha/beta tags are eligible for the "newest" pick (mirrors the WPF
-/// GithubSource(prerelease:true) call site + the `--pre` upload flag).
-const ALLOW_PRERELEASE: bool = true;
+/// Self-hosted update feed (Cloudflare R2 public bucket). The bridge release
+/// shipping this is the first client to read R2 instead of the GitHub repo.
+const UPDATE_FEED_URL: &str = "https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -330,10 +327,8 @@ fn resolve_manager() -> Result<Option<UpdateManager>, String> {
             }
         }
     }
-    // `None` access token → unauthenticated (60 req/hr per IP, fine for the
-    // launch + 6h-poll cadence).
-    let src = GithubSource::new(GITHUB_REPO_URL, None, ALLOW_PRERELEASE);
+    let src = HttpSource::new(UPDATE_FEED_URL);
     UpdateManager::new(src, None, None)
         .map(Some)
-        .map_err(|e| format!("UpdateManager(github): {e}"))
+        .map_err(|e| format!("UpdateManager(http): {e}"))
 }
