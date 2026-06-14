@@ -2,26 +2,22 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-13 (cont.125) — Self-hosted distribution BUILD §1+§2 (web site + conditional R2 dual-publish, no ship)
+## Session 2026-06-14 (cont.126) — v0.9.4 bridge release SHIPPED + R2 wiring gap found/fixed
 
-Executed `docs/design/self-hosted-distribution-BUILD.md` §0→§2 autonomously. **No release tagged/shipped, no prod killed, `update_service.rs` UNTOUCHED.** One commit `feat(dist): R2 download site + conditional S3 dual-publish`.
+Applied BUILD §3 cutover, shipped **v0.9.4** (bridge), then caught that the R2 dual-publish never fired. Commits: `feat(dist): cut updater to R2 HttpSource feed — v0.9.4 bridge release` (`5fc77ab`, tagged `v0.9.4`) + a follow-up wiring fix (release.yml + CTA).
 
-- **§1 — `web/` static download site** (plain HTML/CSS/JS, no build; Pages serves as-is): `index.html`·`styles.css` (Rift tokens)·`app.js` (feed fetch + fallback)·`_headers`·`README.md`. Hero "Claude Code, with a real UI." + 6-feature grid + CTA.
-- **§2 — `release.ps1` conditional R2 dual-publish** after GitHub `vpk upload` (`:295-296`), before portable drop. Fires `vpk upload s3` only when R2 env present; else no-op. GitHub path untouched.
-### Cloudflare PROVISIONED + serve-path PROVEN (BUILD §H done, same session)
-- **Account ID** `1cf0273eb938093158d2c7246719fea8`. **Bucket** `rift-releases` live, public dev URL: `https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`. Smoke-tested: put→public GET = **200** (brief propagation delay possible right after enabling); bucket left **empty/clean**.
-- **CORS set on bucket** (`GET`/`HEAD`, origins `*`) so the Pages site's `app.js` feed fetch works cross-origin — verified `Access-Control-Allow-Origin: *` returns. (Updater itself is native Rust = no CORS.)
-- **CI secrets on `Blazzer10200/rift-tauri`**: `R2_ACCESS_KEY_ID/SECRET/ENDPOINT/BUCKET`. **vpk `upload s3` flags verified** against live `vpk upload s3 --help` (`-o`/`--channel`/`--keyId`/`--secret`/`--endpoint`/`--bucket` all valid; vpk defaults path-style, R2-OK).
-- **web/ placeholders FILLED**; **Pages DEPLOYED** via wrangler → **https://rift-5hr.pages.dev** (project `rift`, branch main, output `web/`). Verified: renders, headers applied, assets 200.
+- **§3 cutover applied** — `update_service.rs` `resolve_manager()` now `HttpSource::new(UPDATE_FEED_URL)` against `https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev` (arity confirmed vs velopack 1.2.0: `new<S: AsRef<str>>(url)`). `RIFT_UPDATE_FEED` FileSource hatch untouched. `cargo check` EXIT=0. Version lockstep ×3 + Cargo.lock @ 0.9.4.
+- **CI run `27489143952` = success.** GitHub release `v0.9.4` published to `rift-releases` (assets `Rift-win-Setup.exe` 14.2MB, `Rift-0.9.4-full.nupkg`, `releases.win.json`, `RELEASES`). Existing GithubSource clients update from GitHub as designed.
+- **⚠️ R2 dual-publish SILENTLY no-op'd** — `release.yml` Release step `env:` only exported `RELEASES_TOKEN`, NOT the 4 `R2_*` secrets, so `$env:R2_ACCESS_KEY_ID` was empty → §2 hit its `else`. CI still green. **R2 bucket is still EMPTY; site CTA 404s.**
+- **FIXED for next release:** added `R2_ACCESS_KEY_ID/SECRET_ACCESS_KEY/ENDPOINT/BUCKET` to the Release step `env:` (`release.yml:92`). Also fixed site CTA filename `Setup.exe`→`Rift-win-Setup.exe` (vpk's real artifact name) in `web/index.html`. NOT yet committed at handoff-write — committing now.
 
 ### RESUME HERE — what's still pending
-1. **Roll 2 exposed tokens** (both pasted in cont.125 chat): the R2 S3 token + the `cfut_` Pages token. Optional hygiene; rotate when convenient.
-2. **Setup.exe in bucket** — NOT yet uploaded (no local build existed). Auto-published to R2 by the next `release.ps1`/CI run via the dual-publish block. Until then the site CTA 404s.
-3. **Apply BUILD §3 staged diff** (`update_service.rs` `GithubSource`→`HttpSource`, set URL=`https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`, confirm `HttpSource::new` arity vs velopack 1.2.0, `cargo check` dev-quit), then ship the **bridge release** via the GitHub path — that binary is the first to read R2.
+1. **Populate R2** — the release.yml fix only applies to the NEXT tag (v0.9.4's tag points at the pre-fix commit; re-running uses old YAML). Options: ship a quick **v0.9.5** to dual-publish into R2, OR manually `vpk upload s3` the v0.9.4 artifacts. Until R2 has objects: site download 404s AND v0.9.4 clients see no further updates.
+2. **Roll 2 exposed tokens** (pasted cont.125 chat): R2 S3 token + `cfut_` Pages token. Optional hygiene.
 
-**Decisions (locked, full in plan):** D1 R2+Pages · D2 domain DEFERRED (r2.dev, baked-in URL → domain later = 2nd bridge) · D5 single `win` channel. Plan: `docs/design/self-hosted-distribution.md`.
+**Decisions (locked):** D1 R2+Pages · D2 domain DEFERRED · D5 single `win` channel. Plan: `docs/design/self-hosted-distribution.md`. Cloudflare provisioned cont.125 (bucket `rift-releases`, CORS GET/HEAD `*`, Pages `rift-5hr.pages.dev`, 4 CI secrets exist on repo).
 
-### Carried-over from cont.123 (v0.9.3 shipped — tail still open)
+### Carried-over from cont.123 (v0.9.3 — tail still open)
 - **RR-5/#29** CSP prod-verify: install v0.9.3, confirm animations + update bar + 0 CSP violations. · **RR-8** Allow/Deny needs `trust_level=standard`. · **Open:** RR-11 code-signing? RR-12 repo collapse (#17). · **Polish:** single/double-node group card; composer bug re-point.
 
 ## Prior arcs — detail in git log + CHANGELOG
