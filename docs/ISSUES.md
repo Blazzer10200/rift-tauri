@@ -25,6 +25,8 @@
 | #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
 | #32 | Ctx meter blank on restored conversations | T4 | ✅ resolved in-tree |
 | #35 | Live shell + sub-agent streaming output panel (Claude-Code-desktop "Background tasks") | T3 | 🚧 open (idea) |
+| #36 | Split-pane feature overhaul | T3 | 🚧 open (idea) |
+| #37 | Multi-window — separate OS windows (VSCode-style, multi-monitor) | T3 | 🚧 open (idea) |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -100,6 +102,24 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Why it's non-trivial — the data may not exist yet:** the CLI streams tool_use/tool_result envelopes; a `Bash` tool result arrives as one final block, not incremental stdout. Real *live* shell output would need either (a) the CLI to stream partial Bash output (check current envelope shape), or (b) routing long-lived/background Bash through Rift's own MCP/PTY so we own the stream. Sub-agents are worse: per the `agentSpawns` comment in `assistant.svelte.ts`, "CLI does NOT stream intermediate sub-agent activity — we only know spawn + final result." So an agent live-feed is blocked on the same upstream gap.
 - **Where to start:** `liveActivity` derivation + `LivePills.svelte` (current counts-only readout) · `TabState.agentSpawns` / shell tracking in `state/assistant/streaming.ts` · the dock/panel was removed cont.122 (don't reintroduce `assistant.ui.dockOpen`) so this is a *new* surface, not a revival.
 - **Scope decision needed:** confirm what the CLI actually streams before designing UI — a panel that can only show final output isn't the ask. If upstream won't stream it, the honest version is a per-shell/-agent expandable card showing final output + timing, framed as "tasks" not "live tail."
+
+#### 36. Split-pane feature overhaul (idea — user-requested 2026-06-14)
+
+- **Want (user, 2026-06-14):** "the split pane feature could be way better improved." General dissatisfaction — **specific pain points not yet gathered.** Capture now; scope before building.
+- **What exists today:** N-pane split lives entirely *inside the single window* — `panes: PaneState[]` (`{tabId}` array), drag-a-tab-onto-a-half to split, `MAX_PANES` cap, `focusedPaneIdx`, per-pane composer-draft stash/restore. Drop-into-pane handles split-on/swap/focus. All state on the one `AssistantStore`, persisted to `localStorage` `rift.ui.tabs.v1`.
+- **Where:** [state/assistant/tabs.ts](../src/lib/state/assistant/tabs.ts) (pane lifecycle: addPane/closePane/setFocusedPane/dropTabIntoPane/scrubTabFromPanes) · `PaneState`/`MAX_PANES` in `state/assistant/types.ts` · `AssistantPane.svelte` renders the pane grid.
+- **Candidate improvements (to confirm w/ user):** resizable pane splits (drag the divider — current looks fixed-ratio) · vertical *and* horizontal splits (grid, not just a row) · keyboard pane nav/move · per-pane independent scroll already?/focus ring clarity · raise/remove `MAX_PANES` · drag a pane out → its own window (overlaps #37).
+- **Next:** ask the user for the 2-3 concrete frustrations before designing — "better" is ambiguous.
+
+#### 37. Multi-window — separate OS windows (idea — user-requested 2026-06-14)
+
+- **Want (user, 2026-06-14):** VSCode-style — open Rift sessions as **separate native windows** so each can live on a different monitor (session on monitor 1, another on monitor 2). Distinct from #36 (splits *within* one window).
+- **Feasibility: YES.** Tauri 2 supports multiple `WebviewWindow`s natively. Tractable because the **Rust backend already partitions by session** — turn registry keyed by cliSessionId; stream/permission/error events are **broadcast app-wide** (`app.emit`) carrying the session id, and the frontend filters by id. So multiple windows can drive different sessions against one backend w/o a backend rewrite.
+- **Today:** single OS window (`tauri.conf.json` declares one), custom titlebar (`decorations:false`). All tab/pane/convo state in one webview's `AssistantStore` → `localStorage` `rift.ui.tabs.v1` + convos on disk.
+- **Route A — "New Window" MVP (a session per monitor):** spawn a second `WebviewWindow` (same app URL, unique label); it boots its own store. Must-fix gotchas: **(1)** shared origin → both windows stomp `rift.ui.tabs.v1` → namespace the persistence key per window label; **(2)** same convo open in 2 windows = disk save race → per-convo owning-window guard or last-write-wins for v1; **(3)** UI-bridge + permission prompts are broadcast (`ask_user`/`open_browser`/`notify`/`PERMISSION_EVENT`) → carry window label through the turn + `emit_to` instead of global `emit`; **(4)** custom titlebar → new windows need the `Titlebar` component + `core:window:allow-start-dragging` granted for non-`main` labels (see drag-region gotcha).
+- **Route B — tear-off tab (true VSCode drag-out):** Route A + drag a tab out of the tabsbar → spawns a window pre-loaded w/ that convo + ownership transfer + per-window tab arrays + cross-window drag. Bigger lift, natural follow-up.
+- **Where:** [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) `app.windows` · [lib.rs](../src-tauri/src/lib.rs) (only `get_webview_window("main")` today; emits are global) · `assistant/turn.rs` + `assistant/bridge.rs` (global `emit` sites to scope per-window) · `state/assistant/persistence.ts` + `tabs.ts` (localStorage key namespacing) · `shell/Titlebar.svelte` + `capabilities/`.
+- **Recommendation:** ship Route A first (complements, doesn't replace, in-window splits); Route B layers on. Load-bearing risks: shared-origin localStorage + global event/bridge broadcast — both solvable b/c backend keys by session.
 
 ### Tier 4 — LOW / cosmetic
 
