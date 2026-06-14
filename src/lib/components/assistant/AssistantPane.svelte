@@ -57,6 +57,20 @@
     if (paneCost != null) lines.push(`Cost: ${paneCost.toFixed(4)}`);
     return lines.join("\n");
   });
+  // Human-friendly label for the pane header so a split is identifiable by its
+  // conversation, not just a number. Mirrors healthAlerts.tabTitle.
+  const paneTitle = $derived.by(() => {
+    if (!tabId || !tab) return "Empty pane";
+    if (tab.convoTitle) return tab.convoTitle;
+    const first = tab.messages.find((m) => m.role === "user");
+    const text = first?.blocks
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim()
+      .replace(/\s+/g, " ");
+    if (!text) return "New chat";
+    return text.length > 48 ? text.slice(0, 48) + "…" : text;
+  });
 
   let scrollEl = $state<HTMLDivElement | undefined>();
   let messagesEl = $state<HTMLDivElement | undefined>();
@@ -235,8 +249,9 @@
     <span class="atmos-grain"></span>
   </div>
   {#if assistant.splitActive}
-    <div class="pane-chrome" aria-hidden="true">
-      <span class="pane-label" use:tooltip={"Pane {paneIdx + 1} of {assistant.panes.length}"}>{paneIdx + 1}</span>
+    <div class="pane-head" class:focused>
+      <span class="pane-label" use:tooltip={`Pane ${paneIdx + 1} of ${assistant.panes.length}`}>{paneIdx + 1}</span>
+      <span class="pane-head-title" use:tooltip={paneTitle}>{paneTitle}</span>
       {#if tabId && tab}
         <span class="pane-ctx-chip" data-tone={paneCtxTone} use:tooltip={paneChipTitle}>
           <span class="pane-ctx-bar"><span class="pane-ctx-fill" style="width: {Math.min(100, paneCtxPct)}%"></span></span>
@@ -249,7 +264,7 @@
       <button
         class="pane-close"
         type="button"
-        use:tooltip={"Close this pane (Ctrl+Shift+\\)"}
+        use:tooltip={"Close this pane"}
         aria-label="Close pane"
         onclick={onClosePane}
       >
@@ -425,21 +440,36 @@
     border: 1px solid transparent;
     transition: border-color 140ms ease-out, background 140ms ease-out;
   }
-  .pane-chrome {
-    position: absolute;
-    top: 4px; right: 6px;
+  /* Pane header — a slim, always-legible strip atop each pane in split mode.
+     Replaces the old floating low-opacity chrome: shows the pane index, its
+     conversation title (so a split is identifiable at a glance), the ctx chip
+     and a close button. Focused pane gets an accent wash + brighter title. */
+  .pane-head {
+    position: relative;
     z-index: 4;
-    display: inline-flex; align-items: center; gap: 4px;
-    pointer-events: none;
-    /* Always-visible at low opacity so the pane index is readable at a glance;
-       hover/focus brightens it. Hidden-until-hover hid the affordance the
-       multi-session UI depends on. */
-    opacity: 0.5;
-    transition: opacity 120ms ease-out;
+    flex-shrink: 0;
+    display: flex; align-items: center; gap: 6px;
+    height: 28px;
+    padding: 0 6px 0 8px;
+    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    border-bottom: 1px solid var(--border);
+    transition: background 140ms ease-out, border-color 140ms ease-out;
   }
-  .pane:hover .pane-chrome, .pane.focused .pane-chrome { opacity: 0.95; }
+  .pane-head.focused {
+    background: color-mix(in oklab, var(--accent) 9%, var(--bg-elev-1));
+    border-bottom-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+  }
+  .pane-head-title {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    color: var(--fg-muted);
+    transition: color 140ms ease-out;
+  }
+  .pane-head.focused .pane-head-title { color: var(--fg); }
   .pane-label {
-    pointer-events: auto;
+    flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     min-width: 16px; height: 16px;
     padding: 0 5px;
@@ -453,7 +483,7 @@
     line-height: 1;
   }
   .pane-ctx-chip {
-    pointer-events: auto;
+    flex-shrink: 0;
     display: inline-flex; align-items: center; gap: 5px;
     height: 16px;
     padding: 0 6px;
@@ -497,7 +527,7 @@
     background: var(--accent-soft);
   }
   .pane-close {
-    pointer-events: auto;
+    flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px;
     padding: 0;
