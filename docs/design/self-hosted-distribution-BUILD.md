@@ -174,15 +174,33 @@ Do these in the Cloudflare dashboard, then fill the placeholders the build left.
 7. **Apply §3 diff** (`update_service.rs`), set `UPDATE_FEED_URL` to the real
    `pub-<hash>.r2.dev`, `cargo check`, then ship the bridge release.
 
+## STATUS — cont.125 (autonomous build + human §H, same session)
+
+§1+§2 built & verified. §H Cloudflare click-ops then completed live (user pasted
+creds; assistant scripted the rest): bucket + public URL up, 4 CI secrets set,
+web placeholders filled, Pages **deployed → https://rift-5hr.pages.dev**, serve
+path smoke-tested (200), vpk `upload s3` flags verified vs live `--help`.
+
+**Extra step not in the original sheet — bucket CORS.** `app.js` fetches
+`releases.win.json` cross-origin (pages.dev → r2.dev); R2 public URLs send no CORS
+headers by default, so the version display would silently fall back. Fixed: set
+bucket CORS (`GET`/`HEAD`, origin `*`), verified `Access-Control-Allow-Origin: *`.
+(The native Rust updater is unaffected — CORS is browser-only.) If the bucket is
+ever recreated, re-apply this CORS policy.
+
+**Still pending (human/next session):** `Setup.exe` auto-lands on next CI release;
+§3 `update_service.rs` cutover ships as the bridge release; roll the 2 creds
+pasted in chat.
+
 ## Done-criteria for the autonomous session
 
-- [ ] `web/` site created, all files well-formed, renders locally, CTA + features
+- [x] `web/` site created, all files well-formed, renders locally, CTA + features
       present, design tokens applied.
-- [ ] `release.ps1` has the conditional S3 dual-publish block; `[ScriptBlock]`
+- [x] `release.ps1` has the conditional S3 dual-publish block; `[ScriptBlock]`
       parse = OK; GitHub path untouched.
-- [ ] `update_service.rs` UNCHANGED (cutover staged in §3 only).
-- [ ] No release tagged/shipped; no prod process killed.
-- [ ] CHANGELOG.md gets a one-line entry; HANDOFF.md updated (cont.125) within the
+- [x] `update_service.rs` UNCHANGED (cutover staged in §3 only).
+- [x] No release tagged/shipped; no prod process killed.
+- [x] CHANGELOG.md gets a one-line entry; HANDOFF.md updated (cont.125) within the
       600-word cap; this BUILD sheet's done-criteria checked.
-- [ ] Single commit: `feat(dist): R2 download site + conditional S3 dual-publish`.
-- [ ] Final report lists exactly what's left for the human (§H), nothing more.
+- [x] Single commit: `feat(dist): R2 download site + conditional S3 dual-publish`.
+- [x] Final report lists exactly what's left for the human (§H), nothing more.

@@ -8,11 +8,11 @@ Executed `docs/design/self-hosted-distribution-BUILD.md` §0→§2 autonomously.
 
 - **§1 — `web/` static download site** (plain HTML/CSS/JS, no build; Pages serves as-is). `index.html`·`styles.css` (Rift tokens emerald 163, tiers .142/.215/.178/.25 oklch)·`app.js` (fetches `releases.win.json`, try/catch fallback)·`_headers`·`README.md`. Hero "Claude Code, with a real UI." + 6-feature grid + CTA.
 - **§2 — `release.ps1` conditional R2 dual-publish** after the GitHub `vpk upload` block (`:295-296`), before portable-zip drop. Fires `vpk upload s3` only when R2 env present; else no-op. GitHub path untouched. `[ScriptBlock]` parse OK.
-### Cloudflare PROVISIONED (BUILD §H done, same session) — live infra
-- **Account ID** `1cf0273eb938093158d2c7246719fea8`. **Bucket** `rift-releases` created, public dev URL **live**: `https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev` (boto3-verified: bucket exists, creds valid, empty).
-- **CI secrets set on `Blazzer10200/rift-tauri`** (gh secret): `R2_ACCESS_KEY_ID` · `R2_SECRET_ACCESS_KEY` · `R2_ENDPOINT` · `R2_BUCKET`. Dual-publish block will fire on next CI release.
-- **web/ placeholders FILLED** (real `pub-<hash>` baked into `index.html`+`app.js`+README; commit `wire R2 public URL`).
-- **Pages DEPLOYED** via wrangler → **https://rift-5hr.pages.dev** (project `rift`, prod branch main, output `web/`). Verified: renders, security headers applied, assets 200.
+### Cloudflare PROVISIONED + serve-path PROVEN (BUILD §H done, same session)
+- **Account ID** `1cf0273eb938093158d2c7246719fea8`. **Bucket** `rift-releases` live, public dev URL: `https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`. Smoke-tested: put→public GET = **200** (brief propagation delay possible right after enabling); bucket left **empty/clean**.
+- **CORS set on bucket** (`GET`/`HEAD`, origins `*`) so the Pages site's `app.js` feed fetch works cross-origin — verified `Access-Control-Allow-Origin: *` returns. (Updater itself is native Rust = no CORS.)
+- **CI secrets on `Blazzer10200/rift-tauri`**: `R2_ACCESS_KEY_ID/SECRET/ENDPOINT/BUCKET`. **vpk `upload s3` flags verified** against live `vpk upload s3 --help` (`-o`/`--channel`/`--keyId`/`--secret`/`--endpoint`/`--bucket` all valid; vpk defaults path-style, R2-OK).
+- **web/ placeholders FILLED**; **Pages DEPLOYED** via wrangler → **https://rift-5hr.pages.dev** (project `rift`, branch main, output `web/`). Verified: renders, headers applied, assets 200.
 
 ### RESUME HERE — what's still pending
 1. **Roll 2 exposed tokens** (both pasted in cont.125 chat): the R2 S3 token + the `cfut_` Pages token. Optional hygiene; rotate when convenient.
