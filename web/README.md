@@ -4,6 +4,6 @@ Static download page for Rift. Plain HTML/CSS/JS — no framework, no build step
 
 This deploys to **Cloudflare Pages** with the **build output dir set to `web/`** and
 **no build command**; Pages serves the directory as-is. The "Download for Windows"
-CTA and the version feed point at the Cloudflare R2 bucket — replace the
-`pub-REPLACE.r2.dev` placeholders in `index.html` and `app.js` with the real bucket
-hash once the bucket exists (see `docs/design/self-hosted-distribution-BUILD.md` §H).
+CTA and the version feed point at the Cloudflare R2 bucket at
+`https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev` (the `rift-releases` public
+dev URL). See `docs/design/self-hosted-distribution-BUILD.md` §H for the full setup.

@@ -4,7 +4,7 @@
 (function () {
   "use strict";
 
-  var FEED_URL = "https://pub-REPLACE.r2.dev/releases.win.json";
+  var FEED_URL = "https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev/releases.win.json";
   var FALLBACK = "Latest release";
 
   function setVersion(text) {
