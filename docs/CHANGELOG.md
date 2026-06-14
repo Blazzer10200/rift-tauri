@@ -3,7 +3,7 @@
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
 ## Unreleased (infra, no ship)
-- **Self-hosted distribution (cont.125):** added `web/` static download site (Cloudflare Pages, Rift design tokens) + conditional Cloudflare R2 dual-publish block in `scripts/release.ps1` (fires only when R2 CI secrets present; GitHub feed untouched). App cutover (`update_service.rs` → `HttpSource`) staged for a later bridge release. See `docs/design/self-hosted-distribution-BUILD.md`.
+- **Self-hosted distribution (cont.125):** added `web/` static download site (Cloudflare Pages, Rift design tokens) + conditional Cloudflare R2 dual-publish block in `scripts/release.ps1` (fires only when R2 CI secrets present; GitHub feed untouched). Cloudflare provisioned + serve-path proven: R2 bucket `rift-releases` (public URL `pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`, CORS-enabled, smoke-tested 200), 4 CI secrets set, site live at **rift-5hr.pages.dev**. Pending: `Setup.exe` lands on next CI release; app cutover (`update_service.rs` → `HttpSource`) staged for a later bridge release. See `docs/design/self-hosted-distribution-BUILD.md`.
 
 ## v0.9.3 — 2026-06-13 — Release-readiness hardening
 
