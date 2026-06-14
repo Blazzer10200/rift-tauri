@@ -2,6 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-14 (cont.132) — split-pane header w/ convo title (#36 UX) → COMMITTED `3b28567`
+
+User dir: "do whatever's best for user-friendly + UI, make it look good"; **keybinds explicitly off the table** (rejected #36 kbd-nav). Picked the clearest split-pane UX gap: panes were identifiable only by a tiny 50%-opacity floating number — couldn't tell *which chat* was in *which pane*.
+- **Fix:** floating `.pane-chrome` → always-legible in-flow `.pane-head` strip (split mode only). Shows pane index + **conversation title** (`tab.convoTitle` / first-user-msg fallback, mirrors `healthAlerts.tabTitle`) + ctx chip + close. Focused pane = accent wash + brighter title. Single-pane unchanged (no header). Also fixed a pre-existing tooltip bug (pane-label was a plain string w/ literal `{braces}` → template literal). `AssistantPane.svelte` only.
+- **Verified:** svelte-check 0/0 · vitest 132/132 · live CDP (forced 2-pane split: both headers titled, focused pane tinted, restored to single → no header). **No version bump.**
+- **Note for next:** resizable pane dividers ALREADY EXIST (`AssistantPage.svelte:29-132` — drag/dbl-click-reset/arrow-keys). #37 multi-window Route A + vertical/grid splits still open if user wants more.
+
 ## Session 2026-06-14 (cont.131) — per-pane STT routing + per-tab workspace root (#38) → COMMITTED `ca5db9d`, live-verified
 
 Fixed the two concrete split-pane pains the user reported (the #36 specifics). **Committed, not shipped** — no version bump; ready to `/git-ship` when wanted.
@@ -14,11 +21,7 @@ Fixed the two concrete split-pane pains the user reported (the #36 specifics). *
 - **v0.9.5 SHIPPED + R2 verified live.** Empty-bucket root cause: v0.9.4's `release.yml` got the R2 secrets wired into the Release `env:` *after* the v0.9.4 tag, so v0.9.4's own CI run never reached `vpk upload s3`. v0.9.5 is the first tag through the corrected workflow. CI green (3m51s, run `27511422298`). **Verified:** `releases.win.json` → HTTP 200 (v0.9.5, SHA256 present) + `Rift-win-Setup.exe` → HTTP 200 (15MB) on the R2 public URL → auto-update feed + site download CTA both live. **Closes the cont.126 R2 RESUME item.** The 5 cont.129 local-llm commits rode along in the binary (gated off, inert).
 - **Windowing ideas in `docs/ISSUES.md`** (T3, 🚧): #36 split-pane overhaul (2 concrete pains gathered + fixed in cont.131 #38; bigger "better" still un-prioritized) · #37 multi-window (Tauri 2 multi-`WebviewWindow`, backend per-session keyed; Route A MVP gotchas documented).
 
-## Session 2026-06-14 (cont.129) — Local-LLM: thinking-shim + probe + model picker → WORKING & COMMITTED (gated, unshipped)
-
-End-to-end working; experimental/gated, no version bump. Root cause = LiteLLM won't strip `thinking` on its `/v1/messages` adapter (#8199) → stdlib reverse proxy `scripts/local-llm/strip_thinking_proxy.py` removes `thinking`/`context_management`/`output_config` (SSE-safe). Topology CLI→shim:4000→litellm:4001→ollama:11434. Probe (`oneshot.rs assistant_test_local_llm`) POSTs real `thinking` (no false-green); real model picker (`assistant_list_local_models`, key stays backend); `ollama_chat/` provider for native tool-calling; default `ollama/qwen3:14b` (thinking+tools, `num_ctx:32768`). **Stack must be up:** litellm `:4001` (`--config scripts/local-llm/config.yaml`) + shim `:4000` (`strip_thinking_proxy.py 4000 4001`); running copies in `C:/AI Workflow/tools/litellm/`. Detail: `docs/design/local-llm.md` + git log.
-
-## Sessions cont.127–128 — Local-LLM build-up (superseded by cont.129; detail in git log + `docs/design/local-llm.md`)
+## Sessions cont.127–129 — Local-LLM (thinking-shim + probe + model picker) → WORKING, COMMITTED, gated/unshipped. Stack must be up: litellm `:4001` + shim `:4000` (`strip_thinking_proxy.py`); copies in `C:/AI Workflow/tools/litellm/`. Detail: `docs/design/local-llm.md` + git log.
 
 ## Open tails (v0.9.4–0.9.5 arc — detail in git log + `docs/design/self-hosted-distribution.md`)
 - **Roll 2 exposed tokens** (R2 S3 + `cfut_` Pages) — optional, still pending.
