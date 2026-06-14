@@ -59,13 +59,20 @@ HTTP 500  OllamaException - "qwen3-coder:30b" does not support thinking
 
 LiteLLM's own `drop_params` / `additional_drop_params: ["thinking"]` do **not** fix this: `thinking` is statically *supported* by the ollama provider (other models think), so drop_params never strips it — the rejection is model-specific and runtime, and the experimental `/v1/messages` adapter doesn't honour `additional_drop_params` anyway (LiteLLM #8199).
 
-**Fix: a strip-shim in front of LiteLLM.** `scripts/local-llm/strip_thinking_proxy.py` (stdlib only) listens on `:4000`, removes `thinking` (and `context_management` / `output_config`) from every JSON body, and forwards method/path/headers + the streaming response to LiteLLM on `:4001`. Topology:
+**Fix: a thinking-aware strip-shim in front of LiteLLM.** `scripts/local-llm/strip_thinking_proxy.py` (stdlib only) listens on `:4000` and forwards method/path/headers + the streaming response to LiteLLM on `:4001`. It always drops `context_management` / `output_config` (Claude-orchestration noise), but drops `thinking` **only for models that can't think** — matched by a substring denylist (`NO_THINK_MARKERS = ("coder",)`). Topology:
 
 ```
-CLI ──/v1/messages+thinking──▶ shim :4000 ──thinking stripped──▶ LiteLLM :4001 ──▶ Ollama :11434
+CLI ──/v1/messages+thinking──▶ shim :4000 ──▶ LiteLLM :4001 ──▶ Ollama :11434
+                                  └ thinking dropped ONLY for no-think models (qwen3-coder)
 ```
 
 Both streaming (SSE turns) and non-streaming (the probe) verified through it.
+
+### Thinking restored for thinking-capable models (cont.129b)
+
+Default model is now **`ollama/qwen3:14b`** (thinking-capable, native tools, fits 16GB VRAM). Because the shim no longer strips `thinking` for it, the CLI's `thinking` block flows through → Ollama `think:true` → the model reasons → LiteLLM maps the reasoning into an Anthropic `thinking` content block (with signature) → **Rift renders it as an expandable "Thought for Ns" section.** Verified in-app: bat-and-ball trap ($0.05) and the 8-balls/2-weighings puzzle (3ⁿ → 27) both solved correctly with visible thinking.
+
+`num_ctx: 32768` is set per-model in config.yaml — Ollama's ~4K default truncates Rift's large system prompt + MCP tool defs and wrecks tool use. It's a provider-specific param, passed straight through (not dropped).
 
 ## To run
 
@@ -77,6 +84,6 @@ litellm --config scripts/local-llm/config.yaml --port 4001
 # 2. The strip-thinking shim on :4000 (what Rift points at)
 python scripts/local-llm/strip_thinking_proxy.py 4000 4001
 ```
-Local LLM page → base `http://localhost:4000`, **Detect** → pick the model, any key → **Test connection** (goes green).
+Local LLM page → base `http://localhost:4000`, **Detect** → pick the model (default `ollama/qwen3:14b` for thinking + tools; `ollama/qwen3-coder:30b` for heavier coding without thinking), any key → **Test connection** (goes green).
 
-> Models that natively support `thinking` don't need the shim — point Rift straight at LiteLLM `:4000`. The shim only matters for non-thinking local models like qwen3-coder.
+> The shim handles both model classes on one endpoint (`:4000`): it keeps `thinking` for thinking-capable models so their reasoning displays, and strips it for the `coder` denylist so they don't 500. Add other no-think model markers to `NO_THINK_MARKERS` in the shim if needed.

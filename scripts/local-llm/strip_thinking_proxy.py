@@ -29,7 +29,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 LISTEN_PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 4000
 UPSTREAM_HOST = "127.0.0.1"
 UPSTREAM_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 4001
-STRIP_KEYS = ("thinking", "context_management", "output_config")
+# Claude-orchestration params irrelevant to local models — always removed.
+ALWAYS_STRIP = ("context_management", "output_config")
+# `thinking` is removed ONLY for models that can't do extended thinking, so
+# thinking-capable models (qwen3, deepseek-r1, ...) keep it and their reasoning
+# flows back for display. Matched as a case-insensitive substring of `model`.
+NO_THINK_MARKERS = ("coder",)
 HOP_BY_HOP = {
     "connection",
     "keep-alive",
@@ -53,14 +58,24 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0) or 0)
         body = self.rfile.read(length) if length else b""
 
-        # Strip the offending keys from JSON bodies. Non-JSON passes untouched.
+        # Strip offending keys from JSON bodies. Non-JSON passes untouched.
+        # `thinking` is dropped only for non-thinking models so reasoning-capable
+        # models keep it and their thinking blocks stream back for display.
         if body:
             try:
                 data = json.loads(body)
-                if isinstance(data, dict) and any(k in data for k in STRIP_KEYS):
-                    for k in STRIP_KEYS:
-                        data.pop(k, None)
-                    body = json.dumps(data).encode("utf-8")
+                if isinstance(data, dict):
+                    changed = False
+                    for k in ALWAYS_STRIP:
+                        if data.pop(k, None) is not None:
+                            changed = True
+                    if "thinking" in data:
+                        model = str(data.get("model", "")).lower()
+                        if any(m in model for m in NO_THINK_MARKERS):
+                            data.pop("thinking", None)
+                            changed = True
+                    if changed:
+                        body = json.dumps(data).encode("utf-8")
             except (ValueError, UnicodeDecodeError):
                 pass
 

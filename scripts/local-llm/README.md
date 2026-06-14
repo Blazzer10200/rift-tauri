@@ -10,15 +10,15 @@ The `claude` CLI sends an Anthropic `thinking` block on every turn (no flag
 disables it). Non-thinking local models (e.g. `ollama/qwen3-coder:30b`) make
 LiteLLM forward it to Ollama, which 500s with
 `"qwen3-coder:30b" does not support thinking`. LiteLLM's `drop_params` can't
-strip it on the `/v1/messages` adapter path, so a tiny shim removes it one hop
-earlier.
+strip it on the `/v1/messages` adapter path, so a tiny **thinking-aware** shim
+handles it one hop earlier: it keeps `thinking` for thinking-capable models (so
+their reasoning shows up as "Thought for Ns" in Rift) and drops it only for the
+`NO_THINK_MARKERS` denylist (currently `coder`).
 
 ```
-CLI ──/v1/messages (+thinking)──▶ shim :4000 ──(thinking stripped)──▶ LiteLLM :4001 ──▶ Ollama :11434
+CLI ──/v1/messages (+thinking)──▶ shim :4000 ──▶ LiteLLM :4001 ──▶ Ollama :11434
+                                    └ thinking dropped ONLY for no-think models
 ```
-
-Models that natively support `thinking` don't need the shim — point Rift
-straight at LiteLLM on `:4000` and skip step 2.
 
 ## Run
 
@@ -32,12 +32,14 @@ python strip_thinking_proxy.py 4000 4001
 ```
 
 Then in Rift → **Local LLM**: base `http://localhost:4000`, **Detect** the
-model, any non-empty key, **Test connection** (goes green).
+model (default `ollama/qwen3:14b` — thinking + tools; `ollama/qwen3-coder:30b`
+for heavier coding, no thinking), any non-empty key, **Test connection** (green).
 
 ## Files
 
-- `strip_thinking_proxy.py` — stdlib reverse proxy; strips `thinking` /
-  `context_management` / `output_config` from JSON bodies, streams everything
-  else through (SSE-safe). Args: `[listen_port] [upstream_port]` (default 4000 4001).
-- `config.yaml` — LiteLLM config with `drop_params` / `modify_params` (hygiene;
-  the shim is what actually fixes qwen3-coder).
+- `strip_thinking_proxy.py` — stdlib reverse proxy; always strips
+  `context_management` / `output_config`, strips `thinking` only for
+  `NO_THINK_MARKERS` models (`coder`), streams everything else through (SSE-safe).
+  Args: `[listen_port] [upstream_port]` (default 4000 4001).
+- `config.yaml` — LiteLLM config: both models via `ollama_chat/` (native tools),
+  `num_ctx: 32768` (Ollama's 4K default truncates Rift's prompt), `drop_params`.
