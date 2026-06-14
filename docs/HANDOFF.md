@@ -6,8 +6,8 @@
 
 Executed `docs/design/self-hosted-distribution-BUILD.md` §0→§2 autonomously. **No release tagged/shipped, no prod killed, `update_service.rs` UNTOUCHED.** One commit `feat(dist): R2 download site + conditional S3 dual-publish`.
 
-- **§1 — `web/` static download site** (plain HTML/CSS/JS, no build; Pages serves as-is). `index.html`·`styles.css` (Rift tokens emerald 163, tiers .142/.215/.178/.25 oklch)·`app.js` (fetches `releases.win.json`, try/catch fallback)·`_headers`·`README.md`. Hero "Claude Code, with a real UI." + 6-feature grid + CTA.
-- **§2 — `release.ps1` conditional R2 dual-publish** after the GitHub `vpk upload` block (`:295-296`), before portable-zip drop. Fires `vpk upload s3` only when R2 env present; else no-op. GitHub path untouched. `[ScriptBlock]` parse OK.
+- **§1 — `web/` static download site** (plain HTML/CSS/JS, no build; Pages serves as-is): `index.html`·`styles.css` (Rift tokens)·`app.js` (feed fetch + fallback)·`_headers`·`README.md`. Hero "Claude Code, with a real UI." + 6-feature grid + CTA.
+- **§2 — `release.ps1` conditional R2 dual-publish** after GitHub `vpk upload` (`:295-296`), before portable drop. Fires `vpk upload s3` only when R2 env present; else no-op. GitHub path untouched.
 ### Cloudflare PROVISIONED + serve-path PROVEN (BUILD §H done, same session)
 - **Account ID** `1cf0273eb938093158d2c7246719fea8`. **Bucket** `rift-releases` live, public dev URL: `https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`. Smoke-tested: put→public GET = **200** (brief propagation delay possible right after enabling); bucket left **empty/clean**.
 - **CORS set on bucket** (`GET`/`HEAD`, origins `*`) so the Pages site's `app.js` feed fetch works cross-origin — verified `Access-Control-Allow-Origin: *` returns. (Updater itself is native Rust = no CORS.)
