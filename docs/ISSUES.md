@@ -24,6 +24,7 @@
 | #30 | Workspace chip vs CLI cwd possible drift | T3 | ✅ resolved in-tree |
 | #31 | Deferred 2026-06-11 audit remainder (legacy provider cmds · 401-dup · Fable sunset sweep) | T3/T4 | 🚧 open |
 | #32 | Ctx meter blank on restored conversations | T4 | ✅ resolved in-tree |
+| #35 | Live shell + sub-agent streaming output panel (Claude-Code-desktop "Background tasks") | T3 | 🚧 open (idea) |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -92,6 +93,13 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 
 - **Seen 2026-06-11 (cont.110, live CDP):** chips said `resume-project` while real turns read remotion-playground files. **Explained:** the turns resumed an old tab whose session was started under remotion-playground — `load_session_cwd` (convo_store) correctly pins a resumed session to its original cwd; the title-bar chip reflects the *currently selected* workspace only. Per-session cwd persistence working as designed.
 - **The gap:** nothing in the UI tells you a tab is operating in a different folder than the chip shows. Fix sketch: per-tab cwd badge (tabsbar tooltip or composer notice) when `session_cwd != workspace.current`.
+
+#### 35. Live shell + sub-agent streaming output panel (idea — user-requested 2026-06-14)
+
+- **Want (user, 2026-06-14):** a Chat-page feature that lets users *watch what's happening under the hood* the way Claude Code desktop's pane menu does (its "Background tasks" entry, alongside Preview / Diff / Terminal / Files / Plan). Two concrete asks: **(1) sub-agent activity** — what each spawned sub-agent is actually doing as it runs, not just "N agents"; **(2) terminal I/O, both directions** — the live back-and-forth with a shell, whether *the user* drove it or a *sub-agent* did (command in → streaming stdout/stderr out). Today Rift only shows *counts*: composer LivePills render `▸ N shells` / `◍ N agents`, no rolling output, no per-agent detail.
+- **Why it's non-trivial — the data may not exist yet:** the CLI streams tool_use/tool_result envelopes; a `Bash` tool result arrives as one final block, not incremental stdout. Real *live* shell output would need either (a) the CLI to stream partial Bash output (check current envelope shape), or (b) routing long-lived/background Bash through Rift's own MCP/PTY so we own the stream. Sub-agents are worse: per the `agentSpawns` comment in `assistant.svelte.ts`, "CLI does NOT stream intermediate sub-agent activity — we only know spawn + final result." So an agent live-feed is blocked on the same upstream gap.
+- **Where to start:** `liveActivity` derivation + `LivePills.svelte` (current counts-only readout) · `TabState.agentSpawns` / shell tracking in `state/assistant/streaming.ts` · the dock/panel was removed cont.122 (don't reintroduce `assistant.ui.dockOpen`) so this is a *new* surface, not a revival.
+- **Scope decision needed:** confirm what the CLI actually streams before designing UI — a panel that can only show final output isn't the ask. If upstream won't stream it, the honest version is a per-shell/-agent expandable card showing final output + timing, framed as "tasks" not "live tail."
 
 ### Tier 4 — LOW / cosmetic
 

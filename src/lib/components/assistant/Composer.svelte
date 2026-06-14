@@ -1,7 +1,9 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, Eye, ChevronUp, Undo2 } from "lucide-svelte";
+    Sparkles, Eye, ChevronUp, Undo2, Cpu } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { localLlm } from "../../state/localLlm.svelte";
+  import { workspace } from "../../state/workspace.svelte";
   import { notify } from "../../state/toast.svelte";
   import type { PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
@@ -29,7 +31,7 @@
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
   // mic until they opened Settings → Speech once.
-  onMount(() => { void stt.init(); });
+  onMount(() => { void stt.init(); void localLlm.refresh(); });
 
   let {
     onsubmit,
@@ -1124,6 +1126,22 @@
         <LivePills tab={tab ?? null} {queue} {streaming} {composerFocused} />
 
         <div class="toolbar-cluster toolbar-right">
+          {#if localLlm.enabled}
+            <!-- Experimental local-mode indicator (cont.127). The model/effort
+                 pill lies in local mode (cloud model pin is bypassed), so this
+                 shows what the turn actually runs against. Click → settings. -->
+            <button
+              type="button"
+              class="local-pill"
+              onclick={() => workspace.setActive("local-llm")}
+              use:tooltip={`Local LLM mode — turns run against ${localLlm.baseUrl || "your local endpoint"}\nClick to configure`}
+              aria-label="Local LLM mode active — configure"
+            >
+              <Cpu size={12} />
+              <span class="local-pill-label">{localLlm.pillLabel}</span>
+            </button>
+          {/if}
+
           <button
             type="button"
             class="perm-pill"
@@ -1923,6 +1941,27 @@
   }
   .settings-pill.open :global(.pill-chev),
   .perm-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
+
+  /* Experimental local-mode pill (cont.127) — accent-tinted so the active
+     "talking to a local model" state reads at a glance, distinct from the
+     neutral model/perm pills. Only mounts when local mode is on. */
+  .local-pill {
+    align-self: center;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 26px; padding: 0 9px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in oklab, var(--accent) 38%, transparent);
+    border-radius: 999px;
+    color: var(--accent);
+    cursor: pointer; font: inherit;
+    transition: background 140ms ease-out, border-color 140ms ease-out;
+  }
+  .local-pill:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
+  .local-pill :global(svg) { color: var(--accent); flex-shrink: 0; }
+  .local-pill-label {
+    font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.01em;
+    max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
 
   /* ── Permission-mode pill + menu (mock split from the model pill) ──────── */
   .toolbar-right { position: relative; }

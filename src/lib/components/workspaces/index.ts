@@ -2,11 +2,12 @@ import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
   Home as HomeIcon, MessageSquare,
-  Activity, Settings as SettingsIcon,
+  Activity, Settings as SettingsIcon, Cpu,
 } from "lucide-svelte";
 import HomePage from "../home/HomePage.svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
+import LocalLlmPage from "../local-llm/LocalLlmPage.svelte";
 
 // lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
 // matches what each icon export looks like and stays compatible w/ Svelte 5
@@ -33,4 +34,5 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   home:        { component: HomePage,          title: "Home",        icon: HomeIcon,      kbd: "1" },
   chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "2" },
   settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "3" },
+  "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "4" },
 };
