@@ -2,9 +2,9 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-14 (cont.131) — per-pane STT routing + per-tab workspace root (#38) → IN-TREE, live-verified
+## Session 2026-06-14 (cont.131) — per-pane STT routing + per-tab workspace root (#38) → COMMITTED `ca5db9d`, live-verified
 
-Fixed the two concrete split-pane pains the user reported (the #36 specifics). **Not shipped** — no version bump.
+Fixed the two concrete split-pane pains the user reported (the #36 specifics). **Committed, not shipped** — no version bump; ready to `/git-ship` when wanted.
 - **STT wrong-pane (a):** dictation wrote `assistant.composerDraft` (focused-pane shim); mic `onclick` beats the pane-focus bubble so text landed in the old pane. Fix: `stt.targetTabId` bound at `start(tabId)`, draft I/O via `readDraft/writeDraft`, composer passes `tabId` (mic + PTT), `sendRequested` gated on target. (`stt.svelte.ts`, `Composer.svelte`)
 - **Per-tab root (b):** `cfg.current_root` was one global → switching a pane's folder leaked (esp. after `/clear`). Added `TabState.workspaceRoot` + `effectiveRoot/activeRoot`; new backend `assistant_set_tab_root` (canonicalize + record recent, **no `current_root` mutation**); `assistant_send` takes optional `root` (first-turn only, then per-session pinned as before); `newTab` snapshots focused root, `clearConversation` preserves the pane's own, disk-load hydrates from `sessionCwd`; @-mention/branch scope to `activeRoot`, caches dropped on focus change. (`turn.rs`, `workspace.rs`, `tabs/workspace/persistence.ts`, `ChatTabsBar`, `AssistantWelcome`) **3 files lockstep N/A (no version bump).**
 - **Verified:** svelte-check 0/0 · vitest 132/132 · Rust recompiled (CDP-invoked new cmd → canonical) · live CDP: set focused→exfil-v1, new tab inherited it, restore→default, 0 errors. **Untested:** real mic; true cross-pane leak (live was single-pane — design-guaranteed). Detail: `docs/ISSUES.md` #38.
