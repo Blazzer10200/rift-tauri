@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::cli_install::claude_command;
-use super::config::effective_trust_level;
+use super::config::{effective_trust_level, is_valid_local_model_name, load_config};
 use super::turn::ENHANCE_STREAM_EVENT;
 use super::{write_mcp_config, McpConfigGuard};
 
@@ -560,4 +560,103 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
         return Err("title generation returned empty output".into());
     }
     Ok(title)
+}
+
+/// Experimental: round-trip a one-line prompt through the configured local-LLM
+/// endpoint so the Local LLM page can show a green/red "Test connection".
+/// POSTs directly to `{base_url}/v1/messages` (the Anthropic API the CLI
+/// targets) instead of spawning the CLI — a direct request surfaces the
+/// upstream HTTP status + body verbatim, so an upstream 500 (e.g. LiteLLM
+/// rejecting a `thinking` param Ollama can't honour) shows the real cause
+/// instead of hanging behind a generic CLI timeout.
+/// Returns the model's reply on success, the upstream error on failure.
+#[tauri::command]
+pub async fn assistant_test_local_llm() -> Result<String, String> {
+    let cfg = load_config();
+    let base_url = cfg
+        .local_llm_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("No base URL configured")?
+        .trim_end_matches('/')
+        .to_string();
+    let model = cfg
+        .local_llm_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && is_valid_local_model_name(s))
+        .ok_or("No (valid) model configured")?
+        .to_string();
+    let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
+        .unwrap_or_else(|| "local".to_string());
+
+    // Hit the Anthropic `/v1/messages` API directly. The CLI fires two parallel
+    // calls and, on an upstream 500, hangs until our timeout — burying the real
+    // cause behind a generic "timed out". A direct POST surfaces the upstream
+    // status + body verbatim. Bounded at 20s so an unresponsive proxy fails
+    // cleanly instead of hanging the spinner forever.
+    let url = format!("{base_url}/v1/messages");
+    let body = serde_json::json!({
+        "model": model,
+        "max_tokens": 16,
+        "messages": [{ "role": "user", "content": "Reply with exactly: OK" }],
+    });
+
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .header("x-api-key", &local_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_timeout() {
+                format!("timed out after 20s reaching {url} — is the proxy up and responding?")
+            } else if e.is_connect() {
+                format!(
+                    "can't connect to {url} — check the Base URL. It must point at a LiteLLM \
+                     proxy speaking the Anthropic /v1/messages API; raw Ollama (:11434) won't work."
+                )
+            } else {
+                format!("request to {url} failed: {e}")
+            }
+        })?;
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        // Surface the upstream body (truncated) so the UI shows the real cause —
+        // e.g. `OllamaException - "qwen3-coder:30b" does not support thinking`.
+        let snippet: String = text.trim().chars().take(600).collect();
+        return Err(if snippet.is_empty() {
+            format!("proxy returned HTTP {}", status.as_u16())
+        } else {
+            format!("proxy returned HTTP {}: {snippet}", status.as_u16())
+        });
+    }
+
+    // Anthropic Messages response: { "content": [ { "type": "text", "text": "OK" }, ... ] }
+    let reply = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|v| {
+            v.get("content")?.as_array().map(|blocks| {
+                blocks
+                    .iter()
+                    .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+                    .filter_map(|b| b.get("text").and_then(Value::as_str))
+                    .collect::<Vec<_>>()
+                    .join("")
+            })
+        })
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    Ok(if reply.is_empty() {
+        "(connected, empty reply)".to_string()
+    } else {
+        reply
+    })
 }
