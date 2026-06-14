@@ -532,7 +532,7 @@
     pttTimer = setTimeout(() => {
       pttTimer = null;
       pttActive = true;
-      void stt.start();
+      void stt.start(tabId);
     }, 300);
     return true;
   }
@@ -553,15 +553,18 @@
   // Voice command "send it" — the stt store commits the draft then raises the
   // flag; fire() runs the same path as the Send button.
   $effect(() => {
-    if (stt.sendRequested) {
+    // Only the pane the dictation was bound to fires — in split mode every
+    // composer mounts this effect, so gate on the STT target tab.
+    if (stt.sendRequested && stt.targetTabId === tabId) {
       stt.sendRequested = false;
       fire();
     }
   });
 
-  // S88: mic toggle. The stt store writes recognized text directly into the
-  // focused tab's draft (via `assistant.composerDraft` setter shim → activeTab.draft)
-  // as it arrives (interim + final), so we just start/stop and let the
+  // S88: mic toggle. The stt store writes recognized text into THIS tab's
+  // draft (bound via stt.start(tabId) → stt.targetTabId) as it arrives
+  // (interim + final), so dictation lands in the pane the mic was clicked in
+  // rather than the focused-pane shim. We just start/stop and let the
   // autosizer catch up. Composer focus is restored on stop so the user can
   // hit Enter without an extra click.
   let micBusy = $state(false);
@@ -574,7 +577,7 @@
         await stt.stop();
         void tick().then(() => { autosize(); ta?.focus(); });
       } else {
-        await stt.start();
+        await stt.start(tabId);
         void tick().then(() => ta?.focus());
       }
     } finally {

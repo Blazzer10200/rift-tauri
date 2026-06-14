@@ -39,6 +39,7 @@ export type SaveableTab = {
 export type LoadableTab = SaveableTab & {
   tasks: { id: string; content: string; status: "pending" | "in_progress" | "completed" }[];
   sessionCwd: string | null;
+  workspaceRoot: string | null;
   lastError: string | null;
   totalCostUsd: number | null;
   resetUsage(): void;
@@ -261,7 +262,13 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // pin so the tabs bar can badge a cwd that differs from the workspace.
     tab.sessionCwd = null;
     void invoke<string | null>("assistant_session_cwd", { id: cliSid })
-      .then((cwd) => { tab.sessionCwd = cwd ?? null; })
+      .then((cwd) => {
+        tab.sessionCwd = cwd ?? null;
+        // A resumed convo's folder is its pinned cwd — surface it as the tab's
+        // root so the per-pane display + @-mention walk reflect where its turns
+        // actually run (only when no explicit per-tab root is already set).
+        if (cwd && !tab.workspaceRoot) tab.workspaceRoot = cwd;
+      })
       .catch((e) => console.warn("assistant_session_cwd lookup failed:", e));
     tab.promptHistory = (convo.messages ?? [])
       .filter((m) => m.role === "user")

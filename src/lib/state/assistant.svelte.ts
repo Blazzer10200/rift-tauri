@@ -80,6 +80,8 @@ import {
 import {
   refreshWorkspace as wsRefresh,
   pickFolder as wsPickFolder,
+  pickTabFolder as wsPickTabFolder,
+  setTabRoot as wsSetTabRoot,
   setRoot as wsSetRoot,
   clearRoot as wsClearRoot,
   removeRecentRoot as wsRemoveRecentRoot,
@@ -217,6 +219,13 @@ export class TabState {
    *  folder). Hydrated on disk-load; null = no pin known / fresh tab. The tabs
    *  bar badges the active tab when this differs from workspace.current. */
   sessionCwd = $state<string | null>(null);
+  /** Per-tab project folder. The folder THIS tab's turns run in — set via the
+   *  per-pane folder picker, inherited on new/clear, hydrated from `sessionCwd`
+   *  on disk-load. null = follow the global workspace default. Distinct from
+   *  `sessionCwd` (the backend's pinned cwd readout): `workspaceRoot` is the
+   *  user-intended root the renderer passes to `assistant_send`, so two panes
+   *  / windows can work in different directories. */
+  workspaceRoot = $state<string | null>(null);
   promptHistory = $state<string[]>([]);
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
    *  already streaming; onDone() pops the next one. Per-tab so a queued msg
@@ -454,6 +463,19 @@ class AssistantStore {
    *  tab rather than the activeTab. Returns null for unknown ids. */
   tabFor(id: string | null): TabState | null {
     return id ? this.tabs.get(id) ?? null : null;
+  }
+
+  /** The folder a tab's turns run in: its own per-tab root, else the global
+   *  workspace default. Used for the per-pane picker display, the @-mention
+   *  walk, and the root passed to `assistant_send`. */
+  effectiveRoot(tab: TabState | null): string | null {
+    return tab?.workspaceRoot ?? this.workspace.current ?? null;
+  }
+
+  /** Effective root of the focused tab — drives the global @-mention walk +
+   *  branch probe (both modal to the focused composer). */
+  get activeRoot(): string | null {
+    return this.effectiveRoot(this.activeTab);
   }
 
   get splitActive(): boolean {
@@ -1072,6 +1094,9 @@ class AssistantStore {
     this.thinkingEffort = loadEffort(ws);
   }
   setRoot(path: string) { return wsSetRoot(this, path); }
+  /** Per-pane folder picker / setter — scopes the chosen folder to one tab. */
+  pickTabFolder(tabId: string | null) { return wsPickTabFolder(this, tabId); }
+  setTabRoot(tabId: string | null, path: string) { return wsSetTabRoot(this, tabId, path); }
   clearRoot() { return wsClearRoot(this); }
   removeRecentRoot(path: string) { return wsRemoveRecentRoot(this, path); }
   loadWorkspaceFiles() { return wsLoadFiles(this); }

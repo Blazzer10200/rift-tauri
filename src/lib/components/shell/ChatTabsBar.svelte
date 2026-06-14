@@ -221,9 +221,13 @@
   });
   // recent roots, current first removed (it's shown as the active row inline).
   const recentRoots = $derived(assistant.workspace.recent ?? []);
+  // The project-folder control reflects + sets the FOCUSED tab's folder so each
+  // pane keeps its own project dir. `activeRoot` = focused tab's effective root.
+  const activeRoot = $derived(assistant.activeRoot);
+  const activeTabId = $derived(assistant.currentConvoId);
   // Resolve the active workspace's git branch for the tab-bar chip (null = not a repo).
   $effect(() => {
-    if (assistant.workspace.current) void assistant.loadWorkspaceBranch();
+    if (assistant.activeRoot) void assistant.loadWorkspaceBranch();
   });
 
   let dragFromIdx = $state<number | null>(null);
@@ -364,7 +368,9 @@
   const normPath = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
   const cwdMismatch = $derived.by(() => {
     const pinned = assistant.activeTab?.sessionCwd;
-    const ws = assistant.workspace.current;
+    // Compare against the focused tab's OWN folder (the proj chip shows it now),
+    // not the global default — else every per-tab root reads as a mismatch.
+    const ws = assistant.activeRoot;
     if (!pinned || !ws) return null;
     return normPath(pinned) === normPath(ws) ? null : pinned;
   });
@@ -483,10 +489,10 @@
         onclick={() => { projMenuOpen ? (projMenuOpen = false) : openProjMenu(); }}
         aria-haspopup="menu"
         aria-expanded={projMenuOpen}
-        use:tooltip={assistant.workspace.current ? prettyPath(assistant.workspace.current) : "Open a project folder"}
+        use:tooltip={activeRoot ? prettyPath(activeRoot) : "Open a project folder"}
       >
         <FolderGit2 size={14} class="proj-ico"/>
-        <span class="proj-name">{assistant.workspace.current ? leafName(assistant.workspace.current) : "Open project"}</span>
+        <span class="proj-name">{activeRoot ? leafName(activeRoot) : "Open project"}</span>
         <ChevronDown size={13} class={projMenuOpen ? "proj-chev chev-open" : "proj-chev"}/>
       </button>
     </div>
@@ -741,28 +747,28 @@
     {#each recentRoots as path (path)}
       <button
         class="rift-menu-row"
-        class:current={path === assistant.workspace.current}
+        class:current={path === activeRoot}
         type="button"
         role="menuitem"
         use:tooltip={prettyPath(path)}
-        onclick={() => { projMenuOpen = false; if (path !== assistant.workspace.current) void assistant.setRoot(path); }}
+        onclick={() => { projMenuOpen = false; if (path !== activeRoot) void assistant.setTabRoot(activeTabId, path); }}
       >
         <Folder size={15} class="rift-menu-row-ic" />
         <span class="rift-menu-row-body">
           <span class="rift-menu-row-t">{leafName(path)}</span>
         </span>
-        {#if path === assistant.workspace.current}<Check size={14} class="rift-menu-row-chk" />{/if}
+        {#if path === activeRoot}<Check size={14} class="rift-menu-row-chk" />{/if}
       </button>
     {/each}
     {#if recentRoots.length > 0}<div class="rift-menu-divider" role="separator"></div>{/if}
-    <button class="rift-menu-row" type="button" role="menuitem" onclick={() => { projMenuOpen = false; void assistant.pickFolder(); }}>
+    <button class="rift-menu-row" type="button" role="menuitem" onclick={() => { projMenuOpen = false; void assistant.pickTabFolder(activeTabId); }}>
       <FolderOpen size={15} class="rift-menu-row-ic" />
       <span class="rift-menu-row-body"><span class="rift-menu-row-t">Open folder…</span></span>
     </button>
-    {#if assistant.workspace.current}
-      <button class="rift-menu-row" type="button" role="menuitem" onclick={() => { projMenuOpen = false; void assistant.clearRoot(); }}>
+    {#if assistant.activeTab?.workspaceRoot}
+      <button class="rift-menu-row" type="button" role="menuitem" onclick={() => { projMenuOpen = false; if (assistant.activeTab) assistant.activeTab.workspaceRoot = null; assistant.workspaceFiles = []; assistant.workspaceBranch = null; }}>
         <X size={15} class="rift-menu-row-ic" />
-        <span class="rift-menu-row-body"><span class="rift-menu-row-t">Close folder</span></span>
+        <span class="rift-menu-row-body"><span class="rift-menu-row-t">Use default folder</span></span>
       </button>
     {/if}
   </div>

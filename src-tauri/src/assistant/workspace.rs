@@ -54,6 +54,30 @@ pub fn assistant_set_root(path: String) -> Result<WorkspaceState, String> {
     Ok(workspace_state_from(&cfg))
 }
 
+/// Set a single tab/pane's project folder WITHOUT touching the global
+/// `current_root`. Validates + canonicalizes the path and records it in the
+/// shared recent-roots MRU (so the picker still offers it), then returns the
+/// canonical path so the renderer can store it on that tab. This is what keeps
+/// per-pane folders from leaking into each other: only the tab's own
+/// `workspaceRoot` changes, never the global default the way `assistant_set_root` does.
+#[tauri::command]
+pub fn assistant_set_tab_root(path: String) -> Result<String, String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let raw = PathBuf::from(&path);
+    if !raw.is_dir() {
+        return Err(format!("not a directory: {path}"));
+    }
+    let canonical = std::fs::canonicalize(&raw).unwrap_or(raw);
+    let mut cfg = load_config();
+    cfg.recent_roots.retain(|p| p != &canonical);
+    cfg.recent_roots.insert(0, canonical.clone());
+    if cfg.recent_roots.len() > RECENT_ROOTS_MAX {
+        cfg.recent_roots.truncate(RECENT_ROOTS_MAX);
+    }
+    save_config(&cfg)?;
+    Ok(canonical.to_string_lossy().into_owned())
+}
+
 #[tauri::command]
 pub fn assistant_clear_root() -> Result<WorkspaceState, String> {
     let mut cfg = load_config();
@@ -77,15 +101,27 @@ pub(crate) fn current_root() -> Option<PathBuf> {
     load_config().current_root
 }
 
+/// Resolve a per-tab root override (validated dir) or fall back to the global
+/// `current_root`. Lets the `@`-mention walk + branch probe scope to whichever
+/// pane the user is interacting with instead of always the global default.
+fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
+    override_path
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .or_else(|| load_config().current_root)
+}
+
 /// Enumerate file paths under the active workspace root, relative to the root,
 /// forward-slash normalized. Drives the composer's `@`-file mention picker.
 /// Capped at `MENTION_LIMIT` files.
 #[tauri::command]
-pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
+pub fn assistant_list_workspace_files(root: Option<String>) -> Result<Vec<String>, String> {
     const MENTION_LIMIT: usize = 4000;
     use super::mcp_server::SKIP_DIRS;
-    let cfg = load_config();
-    let root = match cfg.current_root {
+    let root = match resolve_root(root) {
         Some(p) => p,
         None => return Ok(Vec::new()),
     };
@@ -121,8 +157,8 @@ pub fn assistant_list_workspace_files() -> Result<Vec<String>, String> {
 /// isn't a git repo, is in detached-HEAD, or git isn't available. Surfaced in
 /// the assistant Welcome's context strip; never fabricated.
 #[tauri::command]
-pub fn assistant_workspace_branch() -> Option<String> {
-    let root = load_config().current_root?;
+pub fn assistant_workspace_branch(root: Option<String>) -> Option<String> {
+    let root = resolve_root(root)?;
     let mut cmd = std::process::Command::new("git");
     cmd.current_dir(&root)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])

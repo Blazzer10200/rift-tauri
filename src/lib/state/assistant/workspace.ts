@@ -21,6 +21,11 @@ type WorkspaceHost = {
   workspaceBranch: string | null;
   lastError: string | null;
   applyWorkspacePrefs: () => void;
+  // Per-tab root surface (split-pane): the @-mention walk + branch probe scope
+  // to the focused tab's effective root, and the per-pane picker writes the
+  // chosen folder onto the tab rather than the global default.
+  activeRoot: string | null;
+  tabFor: (id: string | null) => { workspaceRoot: string | null } | null;
 };
 
 export async function refreshWorkspace(host: WorkspaceHost): Promise<void> {
@@ -43,6 +48,49 @@ export async function pickFolder(host: WorkspaceHost): Promise<boolean> {
   } catch (e) {
     host.lastError = `Open folder failed: ${String(e)}`;
     return false;
+  }
+}
+
+/** Per-pane folder picker → set THIS tab's root without touching the global
+ *  default (so the choice can't leak into other panes). Returns false if
+ *  cancelled. */
+export async function pickTabFolder(host: WorkspaceHost, tabId: string | null): Promise<boolean> {
+  try {
+    const result = await openDialog({ directory: true, multiple: false });
+    const path = typeof result === "string" ? result : null;
+    if (!path) return false;
+    await setTabRoot(host, tabId, path);
+    return true;
+  } catch (e) {
+    host.lastError = `Open folder failed: ${String(e)}`;
+    return false;
+  }
+}
+
+/** Set a single tab's project folder. Canonicalizes + records the recent MRU
+ *  backend-side (no global `current_root` mutation), stores the canonical path
+ *  on the tab, then refreshes the recents list + the focused-pane file/branch
+ *  caches. */
+export async function setTabRoot(host: WorkspaceHost, tabId: string | null, path: string): Promise<void> {
+  const tab = host.tabFor(tabId);
+  if (!tab) return;
+  try {
+    const canonical = await invoke<string>("assistant_set_tab_root", { path });
+    tab.workspaceRoot = canonical;
+    // Pull the updated recent-roots MRU into the global workspace state so the
+    // picker still offers it; current_root is intentionally left unchanged.
+    await refreshWorkspace(host);
+    host.workspaceFiles = [];
+    host.workspaceBranch = null;
+    notify.info("Pane folder set", { detail: prettyPath(canonical), mono: true });
+  } catch (e) {
+    const msg = String(e);
+    if (/not a directory/i.test(msg) && host.workspace.recent.includes(path)) {
+      await removeRecentRoot(host, path);
+      notify.warn("Folder no longer exists", { detail: `Removed from recents: ${prettyPath(path)}`, mono: true });
+    } else {
+      host.lastError = `Set pane folder failed: ${msg}`;
+    }
   }
 }
 
@@ -89,13 +137,13 @@ export async function removeRecentRoot(host: WorkspaceHost, path: string): Promi
  *  per-root in `workspaceFiles`; concurrent calls are de-duped via the
  *  `workspaceFilesLoadingFor` guard. */
 export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
-  const root = host.workspace.current;
+  const root = host.activeRoot;
   if (!root) { host.workspaceFiles = []; return; }
   if (host.workspaceFilesLoadingFor === root) return;
   host.workspaceFilesLoadingFor = root;
   try {
-    const files = await invoke<string[]>("assistant_list_workspace_files");
-    if (host.workspace.current === root) host.workspaceFiles = files;
+    const files = await invoke<string[]>("assistant_list_workspace_files", { root });
+    if (host.activeRoot === root) host.workspaceFiles = files;
   } catch (e) {
     console.warn("assistant_list_workspace_files failed", e);
   } finally {
@@ -106,15 +154,15 @@ export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
 /** Lazy-load the active workspace's git branch (or null if not a git repo).
  *  Cheap (`git rev-parse`); surfaced in the Welcome context strip. */
 export async function loadWorkspaceBranch(host: WorkspaceHost): Promise<void> {
-  const root = host.workspace.current;
+  const root = host.activeRoot;
   if (!root) { host.workspaceBranch = null; return; }
   try {
-    const branch = await invoke<string | null>("assistant_workspace_branch");
+    const branch = await invoke<string | null>("assistant_workspace_branch", { root });
     // #190: discard a stale result if the root changed during the await.
-    if (host.workspace.current === root) host.workspaceBranch = branch;
+    if (host.activeRoot === root) host.workspaceBranch = branch;
   } catch (e) {
     // #191: surface the failure instead of silently blanking the branch.
-    if (host.workspace.current === root) {
+    if (host.activeRoot === root) {
       host.workspaceBranch = null;
       host.lastError = `Branch read failed: ${String(e)}`;
     }

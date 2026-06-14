@@ -183,6 +183,9 @@ export async function send(store: AssistantStore, prompt: string) {
       thinkingEffort: store.thinkingEffort,
       permissionMode: store.permissionMode,
       priorContextSummary: null,
+      // Per-tab root: each pane/window runs its turns in its own folder. Only
+      // read on the first turn backend-side (then pinned per-session).
+      root: store.effectiveRoot(tab),
     });
   } catch (e) {
     tab.onError(String(e));

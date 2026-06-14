@@ -428,6 +428,7 @@ pub async fn assistant_send(
     thinking_effort: Option<String>,
     permission_mode: Option<String>,
     prior_context_summary: Option<String>,
+    root: Option<String>,
 ) -> Result<(), String> {
     // #220: validate session_id is a canonical UUID (8-4-4-4-12 lowercase hex)
     // BEFORE any use. Renderer-supplied — must not flow into CLI args or
@@ -501,8 +502,20 @@ pub async fn assistant_send(
     } else {
         load_session_cwd(&session_id).filter(|p| p.is_dir())
     };
+    // Per-tab root: the renderer passes the tab's chosen folder so each pane
+    // (and each window) can run turns in a different directory. Wins over the
+    // global `current_root` on the first turn; subsequent turns ride the
+    // per-session pinned cwd above (which we save from this very value below).
+    let tab_root: Option<PathBuf> = root
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir());
     let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
         vec![p]
+    } else if let Some(r) = tab_root {
+        vec![r]
     } else if let Some(root) = cfg.current_root.as_ref().filter(|p| p.is_dir()) {
         vec![root.clone()]
     } else {
