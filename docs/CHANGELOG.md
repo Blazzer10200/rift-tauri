@@ -2,6 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased (infra, no ship)
+- **Self-hosted distribution (cont.125):** added `web/` static download site (Cloudflare Pages, Rift design tokens) + conditional Cloudflare R2 dual-publish block in `scripts/release.ps1` (fires only when R2 CI secrets present; GitHub feed untouched). App cutover (`update_service.rs` → `HttpSource`) staged for a later bridge release. See `docs/design/self-hosted-distribution-BUILD.md`.
+
 ## v0.9.3 — 2026-06-13 — Release-readiness hardening
 
 > **Why.** A pre-wider-distribution audit (`docs/release-readiness-2026-06-13.md`) surfaced two ship-blockers — at the new-user edge and in field crash observability — plus a small robustness backlog. This closes both T1 blockers, the T2 should-fixes, and every actionable T4 swallow. No feature changes.

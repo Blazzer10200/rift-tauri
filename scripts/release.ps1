@@ -295,6 +295,26 @@ if ($version -match '-(alpha|beta|rc)') {
 & vpk @uploadArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
 
+# --- Optional: dual-publish to Cloudflare R2 (self-hosted feed) -------------
+# Fires only when R2 creds are present (CI secrets). Until then, no-op -- the
+# GitHub path above remains the live feed. See docs/design/self-hosted-distribution.md.
+if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) {
+    Write-Host '=== vpk upload s3 (Cloudflare R2) ===' -ForegroundColor Cyan
+    $r2Args = @(
+        'upload', 's3',
+        '-o', 'Releases',
+        '--bucket', $(if ($env:R2_BUCKET) { $env:R2_BUCKET } else { 'rift-releases' }),
+        '--endpoint', $env:R2_ENDPOINT,
+        '--keyId', $env:R2_ACCESS_KEY_ID,
+        '--secret', $env:R2_SECRET_ACCESS_KEY,
+        '--channel', 'win'
+    )
+    & vpk @r2Args
+    if ($LASTEXITCODE -ne 0) { throw 'vpk upload s3 (R2) failed' }
+} else {
+    Write-Host 'R2 env not set -- skipping S3 dual-publish (GitHub feed only).' -ForegroundColor DarkGray
+}
+
 # --- Drop the portable zip from the published release --------------------
 # vpk's pack manifest lists the portable as an upload asset, so the file must
 # exist at upload time -- we remove it from the release afterward. We publish
