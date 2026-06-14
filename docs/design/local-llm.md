@@ -42,7 +42,7 @@ All UX/config lives in a yankable 4th workspace; the model still flows through t
 
 ## Caveats
 
-- **Tool-calling is make-or-break.** Rift leans hard on MCP tools + permissions; small local models often botch structured tool calls, so the assistant can feel broken even when "connected."
+- **Tool-calling is make-or-break — use `ollama_chat/`, not `ollama/` (cont.129).** The plain `ollama/` provider hits Ollama's `/api/generate` (text completion), where the model prints tool calls as raw JSON text (`{"name":"Read","arguments":{...}}`) that Rift can't execute — the agentic loop silently dies. `ollama_chat/` hits `/api/chat` (native function calling), so Ollama parses qwen3-coder's tool calls into real `tool_calls` that LiteLLM maps to Anthropic `tool_use`. config.yaml aliases the Rift-facing `ollama/qwen3-coder:30b` → `ollama_chat/qwen3-coder:30b` so the user-facing model name is unchanged. Verified in-app: "list the files here" → real `list_dir` execution → coherent answer. Still model-dependent; tiny models botch it regardless.
 - The 2026-06-12 minimal-core strip removed "custom providers" to go first-party-only — this partially reintroduces that surface, but as a single flat toggle, not a CRUD provider list.
 
 ## Yank steps
