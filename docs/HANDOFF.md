@@ -19,7 +19,7 @@ Executed `docs/design/self-hosted-distribution-BUILD.md` §0→§2 autonomously.
 2. **Setup.exe in bucket** — NOT yet uploaded (no local build existed). Auto-published to R2 by the next `release.ps1`/CI run via the dual-publish block. Until then the site CTA 404s.
 3. **Apply BUILD §3 staged diff** (`update_service.rs` `GithubSource`→`HttpSource`, set URL=`https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev`, confirm `HttpSource::new` arity vs velopack 1.2.0, `cargo check` dev-quit), then ship the **bridge release** via the GitHub path — that binary is the first to read R2.
 
-**Decisions (locked):** D1 R2+Pages · D2 domain DEFERRED (ship $0 on r2.dev, throttle accepted; baked-in URL → domain later = 2nd bridge) · D5 single `win` channel · D4 site in-repo `web/`. Plan: `docs/design/self-hosted-distribution.md`.
+**Decisions (locked, full in plan):** D1 R2+Pages · D2 domain DEFERRED (r2.dev, baked-in URL → domain later = 2nd bridge) · D5 single `win` channel. Plan: `docs/design/self-hosted-distribution.md`.
 
 ### Carried-over from cont.123 (v0.9.3 shipped — tail still open)
 - **RR-5/#29** CSP prod-verify: install v0.9.3, confirm animations + update bar + 0 CSP violations. · **RR-8** Allow/Deny round-trip needs `trust_level=standard`. · **Decisions:** RR-11 code-signing? RR-12 repo collapse (#17). · **Deferred polish:** single/double-node group card. · **Composer bug** above composer — re-point.
