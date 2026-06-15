@@ -163,6 +163,10 @@ class SttStore {
   private lastSpeechAt = 0;
   private silenceTimer: ReturnType<typeof setInterval> | null = null;
   private polishUndoTimer: ReturnType<typeof setTimeout> | null = null;
+  // Monotonic token guarding the in-flight Haiku polish. Bumped to invalidate a
+  // polish whose result/shimmer should no longer land (user typed, or the
+  // visual cap elapsed) — see polishWebSpeechFinal / cancelPolish (#40a/#40b).
+  private polishGuard = 0;
   private recognition: SpeechRecognitionInstance | null = null;
   private initStarted = false;
   private baseDraft = "";
@@ -621,6 +625,15 @@ class SttStore {
     this.polishUndo = null;
   }
 
+  /** Stop the polish shimmer immediately (e.g. the user started typing). The
+   *  raw transcript is already committed + editable, so we only need to drop
+   *  the visual and invalidate the late swap — #40b. */
+  cancelPolish() {
+    if (!this.polishing) return;
+    this.polishGuard++;
+    this.polishing = false;
+  }
+
   private onResult(e: SpeechRecognitionEvent) {
     if (this.consumed) return;
     this.lastSpeechAt = Date.now();
@@ -705,7 +718,11 @@ class SttStore {
     // #175: commit only if neither user-cancel nor composer-consume fired.
     const commit = !this.cancelRequested && !this.consumed;
     if (commit) {
-      this.writeDraft(this.composeDraft(this.finalText, ""));
+      // #40d: onResult already streamed the final text into the draft — only
+      // rewrite if there's an actual delta, so the textarea doesn't flash the
+      // whole phrase back in at stop.
+      const composed = this.composeDraft(this.finalText, "");
+      if (this.readDraft() !== composed) this.writeDraft(composed);
     }
     this.recording = false;
     this.transcribing = false;
@@ -735,9 +752,18 @@ class SttStore {
     // textarea shimmer; the result swaps in below only if the draft is
     // untouched.
     this.polishing = true;
+    const token = ++this.polishGuard;
+    // #40a: cap the *visual* well under the backend's 15s timeout — a slow
+    // Haiku call shouldn't pulse the committed (already-usable) transcript for
+    // that long. The swap below still lands if the result beats the cap.
+    const SHIMMER_CAP_MS = 6000;
+    const capTimer = setTimeout(() => {
+      if (token === this.polishGuard) this.polishing = false;
+    }, SHIMMER_CAP_MS);
     try {
       const cleaned = (await invoke<string>("stt_clean_transcript", { text: raw })).trim();
       if (
+        token === this.polishGuard && // not cancelled by typing / superseded
         cleaned &&
         cleaned !== raw &&
         !this.consumed &&
@@ -753,7 +779,8 @@ class SttStore {
     } catch (e) {
       console.warn("stt cleanup failed:", e);
     } finally {
-      this.polishing = false;
+      clearTimeout(capTimer);
+      if (token === this.polishGuard) this.polishing = false;
     }
   }
 }

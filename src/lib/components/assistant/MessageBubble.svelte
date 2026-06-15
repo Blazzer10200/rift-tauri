@@ -332,7 +332,13 @@
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
         {/if}
         {#if streaming}
-          {#if heartbeatLabel}
+          <!-- #39 P0-4: while a thinking block is on screen it carries its own
+               ticking timer one line below — don't stack a second live counter
+               in the head. Show the heartbeat only in non-thinking phases
+               (tool/text), falling back to the dot before the first tick. -->
+          {#if hasActiveThinking}
+            <span class="live-dot" aria-label="Streaming" use:tooltip={"Streaming response"}></span>
+          {:else if heartbeatLabel}
             <!-- Timer carries liveness (it ticks) — no separate pulsing dot
                  needed alongside it. The dot is a fallback only for the brief
                  window before turnStartedAt resolves a heartbeat number. -->
