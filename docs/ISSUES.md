@@ -29,6 +29,7 @@
 | #36 | Split-pane feature overhaul | T3 | 🚧 open (idea) — 2 concrete pains gathered + fixed (see #38) |
 | #37 | Multi-window — separate OS windows (VSCode-style, multi-monitor) | T3 | 🚧 open (idea) |
 | #38 | Per-pane STT routing + per-tab workspace root | T2 | ✅ resolved in-tree (🧪 live-verified via CDP; mic input untested) |
+| #39 | Full-app audit 2026-06-15 — deferred findings | T3/T4 | 🚧 catalogued (high-conf fixes shipped `086e403`) |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
 ---
@@ -43,6 +44,29 @@
 - **To re-enable when it comes back:** flip BOTH flags to `false` — `FABLE_DISABLED` in [state/assistant/helpers.ts](../src/lib/state/assistant/helpers.ts) (frontend) and `FABLE_DISABLED` in [src-tauri/src/assistant/config.rs](../src-tauri/src/assistant/config.rs) (backend). The date-based `FABLE_SUNSET_MS`/`fable_sunset_passed()` still applies underneath, so re-enabling only restores Fable through its original Jun 22 sunset.
 - **Why both sides:** frontend hide alone wasn't enough — a persisted *session pin* (`load_session_model`) can re-inject `claude-fable-5` on resume, bypassing the picker; the backend guard (`fable_unavailable()` in turn.rs) catches that. Previously the backend only swapped post-date, so a gov-disabled-but-pre-sunset Fable pin would have fired at the API.
 - **Verified:** svelte-check 0/0 · vitest 133/133 (fable test split into disabled/enabled cases, self-heals on re-enable) · cargo check clean. **No version bump** (rides the next ship).
+
+#### 39. Full-app audit 2026-06-15 — deferred findings (catalogued, not blind-fixed)
+
+Three parallel read-only audits (security · dead-code/dupes · UI/UX). High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LABELS dedupe · 2 aria-labels). The rest are catalogued here for a focused, verifiable pass — deliberately **not** mass-edited unattended.
+
+**Security (low real-risk — mostly same-user or by-design; review before changing):**
+- `turn.rs` `local_llm_base_url` injected verbatim as `ANTHROPIC_BASE_URL` — experimental/gated; add http(s)-scheme + localhost validation. (med)
+- `convo_store.rs assistant_export_save` accepts any renderer-supplied absolute path (null-byte check only) — by-design native-save, but a compromised WebView could overwrite user files. (med)
+- `mcp_server.rs` read_file/list_dir TOCTOU symlink race (acknowledged in-code); `git_local.rs` doesn't strip `GIT_CONFIG_GLOBAL`/system gitconfig (malicious `~/.gitconfig` hooks). (low, same-user)
+- `bridge.rs` ephemeral port is 192-bit-token-gated but has no connection-rate-limit. (low)
+- `capabilities/default.json` `opener:allow-open-url` permits `http://**` — consider https-only. (low)
+- **NOT a bug:** CSP `connect-src https://registry.npmjs.org` is the legit CLI-update npm version check; `open_in_vscode` Unix arg is shell-free (OS-quoted). Verified — leave.
+
+**Dead-code / duplicates (cargo: zero dead-code warnings):**
+- `leafName`/`shortPath` duplicated across `HomePage.svelte` + `AssistantWelcome.svelte` (and `leafName` in `tabsbar/helpers.ts`) — consolidate the pair into `tabsbar/helpers.ts` (or `lib/utils/path.ts`). SAFE pure-fn refactor.
+- `basenameOf` (ToolChip.svelte) vs `basename` (toolCaption.ts) — same logic, extract shared util.
+- `HistoryDrawer.svelte modelLabel` (title-cases raw string) — replace callsites with `statsHelpers.modelLabel`.
+
+**UI/UX token consistency (cosmetic, near-invisible; batch with live CDP eyeball):**
+- Hardcoded colors where a token exists: `Markdown.svelte:842` (#22272e→`--bg-inset`), `ToolChip.svelte` terminal bg/text oklch literals, `EnhanceBar`/`AssistantWelcome` text-on-accent → `--accent-fg`. (~10 sites)
+- Off-token radius (7px/11px/16px vs 6/10/12 scale) + font-size literals (9–10.5px below `--fs-xs`) — consider an `--fs-2xs`/`--r-*` token rather than per-site churn.
+- Wrong color-var fallbacks (`var(--danger,#e66)`, `var(--warn,#e2b340)`) — drop fallback (vars always in `:root`).
+- Scrollbar `scrollbar-width:thin` overrides are **no-ops** in WebView2 (global `::-webkit-scrollbar` wins) — either remove the dead declarations or commit to one style. Not user-visible today.
 
 ### Tier 1 — broken feature
 

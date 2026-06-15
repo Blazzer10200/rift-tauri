@@ -2,6 +2,17 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-15 (cont.134) — v0.10.0 SHIPPED: stats dashboard + audit-hardening pass
+
+Big session. Shipped **v0.10.0** (lockstep ×3 + Cargo.lock + CHANGELOG, tag pushed → CI release). Contents:
+- **Home stats dashboard** (cont.133 below) — new `assistant_stats` cmd + `HomeStats.svelte`/`statsHelpers.ts`/`homeStats` store. Live-CDP-verified Overview; **Models tab pixels still un-eyeballed** (static-green only).
+- **Fable 5 disabled** behind revertible `FABLE_DISABLED` two-flag kill-switch (helpers.ts + config.rs/turn.rs) — US-gov disablement, temporary. Re-enable = flip both flags.
+- **Composer fix** — attachment chips render inside the input card (was floating between rail + composer).
+- **Full-app audit** (3 parallel read-only agents: security · dead-code · UI/UX). Shipped high-confidence fixes (`086e403`): strict image MIME allowlist (turn.rs), MODEL_LABELS dedupe (HomePage→statsHelpers), 2 aria-labels. **Deferred findings catalogued in `docs/ISSUES.md` #39** (local_llm_base_url validation · export-path overwrite · path-helper dedupe · ~10 color-token nits) — NOT blind-fixed while AFK by design.
+- **Verified:** svelte-check 0/0 · vitest 154/154 · cargo check clean.
+- **Dev cleanup:** killed the dev tree by PID (4124 + cargo/node) — prod (33620/33732) preserved. cdp:serve down.
+- **RESUME HERE next session:** eyeball Models tab live · #39 follow-up pass (cosmetic token nits + path-helper dedupe) · confirm v0.10.0 CI release went green + R2 feed updated.
+
 ## Session 2026-06-14 (cont.133) — Home stats dashboard (Claude-Code-style) → COMMITTED, live-verified Overview
 
 Filled the empty lower-center of Home with a Rift-native stats dashboard (user req: "make it blend in, quality over quantity"). **Honest data only** — per-message tokens/timestamps aren't persisted, so NO fabricated token totals.
