@@ -52,15 +52,40 @@
     void now;
     return streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null;
   });
+  // Live activity label — the in-flight "what it's doing" word, moved down here
+  // from the message bubble so the whole live readout (label · elapsed · tokens)
+  // sits by the prompt. Prefers the real tool label ("Reading X", "cargo check");
+  // when it's the bare "Thinking" baseline, cycle a whimsical pool every ~2.4s so
+  // the heartbeat reads as alive instead of a frozen word.
+  const WHIM_WORDS = [
+    "Thinking", "Sussing", "Spelunking", "Pondering", "Brewing",
+    "Reckoning", "Mulling", "Cogitating", "Hatching", "Conjuring",
+    "Noodling", "Untangling",
+  ];
+  let whimTick = $state(0);
+  $effect(() => {
+    if (!streaming) return;
+    const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
+    return () => clearInterval(id);
+  });
+  const stageLabel = $derived.by(() => {
+    const raw = assistant.activity.currentLabel ?? "Thinking…";
+    if (/^thinking/i.test(raw)) return `${WHIM_WORDS[whimTick]}…`;
+    return raw;
+  });
   const showLivePills = $derived(streaming || agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
 </script>
 
 {#if showLivePills}
   <div class="live-pills" role="group" aria-label="Live turn activity">
-    {#if turnElapsed}
-      <span class="live-pill turn" use:tooltip={"Current turn — elapsed · output tokens."}>
+    {#if streaming}
+      <span class="live-pill turn" use:tooltip={"Current turn — activity · elapsed · output tokens."}>
         <span class="lp-dot" aria-hidden="true"></span>
-        <span class="mono">{turnElapsed}</span>
+        {#key stageLabel}<span class="lp-label" aria-live="polite">{stageLabel}</span>{/key}
+        {#if turnElapsed}
+          <span class="lp-sep" aria-hidden="true">·</span>
+          <span class="mono">{turnElapsed}</span>
+        {/if}
         {#if liveTokens != null}
           <span class="lp-sep" aria-hidden="true">·</span>
           <span class="mono">{fmtTokens(liveTokens)}<span class="lp-unit"> tokens</span></span>
@@ -138,6 +163,22 @@
   .live-pill :global(svg) { color: var(--fg-faint); transition: color 140ms ease-out; }
   .live-pill:hover :global(svg) { color: var(--fg-muted); }
   .live-pill .mono { font-variant-numeric: tabular-nums; color: var(--fg-2); }
+  /* Activity word ("Conjuring…", "Reading X", "cargo check") — the readout
+     relocated from the message bubble. Crossfades on change via {#key}. */
+  .live-pill .lp-label {
+    color: var(--fg-2);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    max-width: 30ch;
+    overflow: hidden; text-overflow: ellipsis;
+    animation: lp-label-in 280ms ease-out;
+  }
+  @keyframes lp-label-in {
+    from { opacity: 0; transform: translateY(-1px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .live-pill .lp-label { animation: none; } }
   .live-pill .lp-sep { color: var(--fg-faint); margin: 0 1px; }
   .live-pill .lp-unit { color: var(--fg-faint); font-weight: 500; margin-left: 2px; }
   /* The one accent — a pulsing model-tinted dot marking the live turn. */
