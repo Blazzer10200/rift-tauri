@@ -152,7 +152,7 @@
 
 <style>
   .stats {
-    flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 12px;
+    flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 12px;
     padding: 16px 18px 14px; border-radius: 16px;
     background: var(--surface); border: 1px solid var(--border);
     box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent);
@@ -185,10 +185,11 @@
   .k-u { font-size: 11px; font-weight: 600; color: var(--fg-subtle); }
   .k-sub { font-size: 9.5px; font-weight: 600; color: var(--fg-faint); letter-spacing: 0; text-transform: none; }
 
-  /* Heatmap */
-  .heat-wrap { flex: none; display: flex; flex-direction: column; gap: 7px; }
-  .heat { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 3px; }
-  .cell { aspect-ratio: 1; width: 100%; border-radius: 3px; background: color-mix(in oklab, var(--fg) 7%, transparent); }
+  /* Heatmap — flexes to fill the panel's leftover height so the dashboard
+     always fits its tile (no inner scrollbar); cells size to their grid track. */
+  .heat-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 7px; }
+  .heat { flex: 1; min-height: 44px; display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 1fr); grid-auto-columns: 1fr; gap: 3px; }
+  .cell { min-width: 0; border-radius: 2.5px; background: color-mix(in oklab, var(--fg) 7%, transparent); }
   .cell.pad { background: transparent; }
   .cell.sm { width: 10px; height: 10px; aspect-ratio: auto; border-radius: 2px; }
   .cell[data-l="0"] { background: color-mix(in oklab, var(--fg) 7%, transparent); }
