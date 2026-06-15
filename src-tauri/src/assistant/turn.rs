@@ -607,8 +607,11 @@ pub async fn assistant_send(
                 total, ATTACHMENT_BYTES_CAP
             ));
         }
+        // Strict allowlist (not a `image/` prefix) — blocks e.g. image/svg+xml,
+        // which can carry script, and any malformed `image/…\r\n…` smuggle.
+        const ALLOWED_IMAGE_MIMES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
         for a in &attachments {
-            if !a.mime.starts_with("image/") {
+            if !ALLOWED_IMAGE_MIMES.contains(&a.mime.as_str()) {
                 return Err(format!("Unsupported attachment mime: {}", a.mime));
             }
         }

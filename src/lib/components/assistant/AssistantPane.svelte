@@ -331,7 +331,7 @@
   {/if}
 
   {#if tabId && !showEmpty && !stickToBottom}
-    <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"}>
+    <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"} aria-label="Jump to latest message">
       <span class="jl-ic" aria-hidden="true"><ChevronDown size={13}/></span>
       <span class="jl-label">Latest</span>
     </button>

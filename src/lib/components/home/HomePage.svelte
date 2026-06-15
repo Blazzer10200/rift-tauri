@@ -11,6 +11,7 @@
   import { usage, type LimitWindow } from "$lib/state/usage.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import HomeStats from "./HomeStats.svelte";
+  import { modelLabel } from "./statsHelpers";
 
   // Claude Code CLI update — the dashboard is the launch surface, so kick the
   // (throttled) npm check here and surface a dismissible banner if one's live.
@@ -70,11 +71,8 @@
   }
 
   // Default model the composer opens a new chat with — display-only mirror.
-  const MODEL_LABELS: Record<string, string> = {
-    sonnet: "Sonnet 4.6", haiku: "Haiku 4.5", "claude-opus-4-7": "Opus 4.7", opus: "Opus 4.8",
-    "claude-fable-5": "Fable 5",
-  };
-  const modelLabel = $derived(MODEL_LABELS[assistant.model] ?? String(assistant.model));
+  // Labels come from the single source in statsHelpers.modelLabel (no local map).
+  const currentModel = $derived(modelLabel(assistant.model));
 
   // #189: tick the hour each minute so the greeting refreshes across day
   // boundaries instead of freezing at the value computed when first mounted.
@@ -152,7 +150,7 @@
     <button class="dash-ask" onclick={() => go()}>
       <span class="da-glyph"><Sparkles size={16} /></span>
       <span class="da-text">{assistant.composerDraft || (hasRoot ? `Ask Claude about ${leafName(root!)}…` : "Ask Claude anything…")}</span>
-      <span class="da-model"><span class="da-dot"></span>{modelLabel}</span>
+      <span class="da-model"><span class="da-dot"></span>{currentModel}</span>
       <span class="da-send"><Send size={14} /></span>
     </button>
 
@@ -263,7 +261,7 @@
                   <span class="hf-chat-s">{c.lastSnippet ?? `${c.messageCount} msg`}</span>
                 </span>
                 <span class="hf-chat-meta">
-                  <span class="hf-chat-model">{MODEL_LABELS[c.model] ?? c.model}</span>
+                  <span class="hf-chat-model">{modelLabel(c.model)}</span>
                   <span class="hf-chat-w">{fmtAgo(c.updatedAt)}</span>
                 </span>
               </button>
