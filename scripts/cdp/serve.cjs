@@ -485,6 +485,7 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'type': return typeText(params, t);
         case 'click': return click(params.selector, t);
         case 'wait': return waitFor(params, t);
+        case 'sleep': { const ms = Math.max(0, Math.min(params.ms ?? 300, 10000)); await new Promise(r => setTimeout(r, ms)); return { ok: true, sleptMs: ms }; }
         case 'key': return pressKey(params, t);
         case 'screenshot': return screenshot(params, t);
         case 'state': return assistantState(t);

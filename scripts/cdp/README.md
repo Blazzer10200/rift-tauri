@@ -60,6 +60,25 @@ bash scripts/cdp/c.sh look          # -> [look] /…  [errors] 0  <path-on-last-
 
 `look ".chat"` clips the shot to a selector. `look` is also a `/batch` op and a `POST /look` route (`{selector?, level?, noShot?}` — `noShot:true` skips the screenshot for a fast state+errors peek). Encoding is `jq` now, not a per-call `node -e` spawn (~37ms vs ~76ms cold), so every `eval`/`type`/`click`/`shot` is a touch snappier too.
 
+## act — act-then-verify in ONE call (2026-06-15)
+
+`look` only *observes*. The common UI-verify shape is *act* then observe — and the old habit was three round-trips: `click` → `sleep 1` (a wall-clock guess for the render) → `look`. `act` folds all three into one `/batch` call: it runs the action, waits a real `settle` op server-side for the UI to render, then returns the `look` summary (state + console errors + shot path on the last line).
+
+```bash
+bash scripts/cdp/c.sh act click '[aria-label="Settings"]'        # click + settle + look
+bash scripts/cdp/c.sh act key   "Control+4" ".sb-main"           # keypress + settle, shot clipped to sel
+bash scripts/cdp/c.sh act click ".sendbtn" "" 600                # custom settle (ms); default 350
+```
+
+```
+[act:click] settled 350ms
+[look] / · ws=local-llm · bubbles=0 · streaming=false
+[errors] 0
+/c/AI Workflow/projects/rift-tauri/scripts/cdp/.tmp/snap-2026-...-2.jpeg
+```
+
+Args: `act {click|key} <selector-or-key> [lookSel] [settleMs=350]`. Backed by a new `sleep` op on the `/batch` dispatcher (`{op:"sleep",params:{ms}}`, clamped 0–10000ms) — usable in any hand-authored batch too. Net: a UI change you'd verify in **3 shell calls + a 1s blind sleep** is now **1 call** (+ the `Read` of the shot). Foreground `sleep` is also blocked by the Bash tool now, so `act` is the supported way to wait for a render.
+
 ## /state — the swiss army snapshot
 
 One call returns: which page is active, current model, textarea contents, bubble count, per-bubble role + reasoning label + reasoning chars + text preview, streaming flag. Use this instead of multiple eval calls for "what is the assistant currently showing."

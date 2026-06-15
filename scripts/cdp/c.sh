@@ -7,6 +7,8 @@
 #   bash scripts/cdp/c.sh eval "document.title"
 #   bash scripts/cdp/c.sh type ".assistant textarea" "hello world" Enter
 #   bash scripts/cdp/c.sh click "button.sendbtn"
+#   bash scripts/cdp/c.sh act click '[aria-label="Settings"]'   # click+settle+look, ONE call
+#   bash scripts/cdp/c.sh act key "Control+4" ".sb-main"        # keypress+settle+look (clip to sel)
 #   bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
 #   bash scripts/cdp/c.sh state                          # assistant snapshot
 #   bash scripts/cdp/c.sh page                           # generic "where am I"
@@ -77,6 +79,32 @@ case "$cmd" in
       (.errors[]? | "  ✗ " + (.text // "?")),
       (.shot.path // (.shot.error // "(no shot)"))'
     ;;
+  act)
+    # act <click|key> <arg> [lookSel] [settleMs=350] — action + settle + look in
+    # ONE round-trip. Replaces the click;sleep;look 3-call dance: the server runs
+    # the action, waits settleMs for the UI to render, then returns the look
+    # summary (state + console errors + screenshot path on the LAST line).
+    av="${1:-}"; arg="${2:-}"; lookSel="${3:-}"; settle="${4:-350}"
+    case "$av" in
+      click) actop="$(jq -nc --arg s "$arg" '{op:"click",params:{selector:$s}}')" ;;
+      key)   actop="$(jq -nc --arg k "$arg" '{op:"key",params:{key:$k,modifiers:0}}')" ;;
+      *) echo "usage: $0 act {click|key} <arg> [lookSel] [settleMs]" >&2; exit 2 ;;
+    esac
+    body="$(jq -nc --argjson act "$actop" --argjson ms "$settle" --arg ls "$lookSel" \
+      '{ops:[ $act, {op:"sleep",params:{ms:$ms}}, ({op:"look"} + (if $ls=="" then {} else {params:{selector:$ls}} end)) ]}')"
+    resp="$(post batch "$body")"
+    printf '%s' "$resp" | jq -r --arg av "$av" '
+      .results as $r | ($r[-1]) as $l |
+      "[act:" + $av + "] settled " + (($r[1].sleptMs // 0)|tostring) + "ms",
+      "[look] " + ($l.page.location // $l.page.pathname // "?")
+        + " · ws=" + ($l.page.workspaceActiveId // "?")
+        + (if $l.page.model then " · model=" + $l.page.model else "" end)
+        + " · bubbles=" + (($l.page.bubbleCount // 0)|tostring)
+        + " · streaming=" + (($l.page.streaming // false)|tostring),
+      "[errors] " + ($l.errorCount|tostring),
+      ($l.errors[]? | "  ✗ " + (.text // "?")),
+      ($l.shot.path // ($l.shot.error // "(no shot)"))'
+    ;;
   eval)
     js="$1"
     post eval "$(jq -nc --arg js "$js" '{js:$js}')"
@@ -119,7 +147,7 @@ case "$cmd" in
     curl -fsS -X POST "$API/shutdown"
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
     exit 2
     ;;
 esac
