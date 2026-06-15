@@ -884,13 +884,6 @@
     onSteer={steer}
   />
 
-  <AttachmentsRow
-    {attachments}
-    {attachError}
-    onRemove={(id) => assistant.removeAttachment(id, tabId)}
-    onDismissError={() => (attachError = null)}
-  />
-
   <div
     class="composer-shell"
     class:drag-over={dragOver}
@@ -974,6 +967,12 @@
     {/if}
 
     <div class="composer" class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
+      <AttachmentsRow
+        {attachments}
+        {attachError}
+        onRemove={(id) => assistant.removeAttachment(id, tabId)}
+        onDismissError={() => (attachError = null)}
+      />
       <div class="textarea-wrap" class:polishing={stt.polishing}>
         <textarea
           bind:this={ta}
