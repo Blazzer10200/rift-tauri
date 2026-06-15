@@ -66,8 +66,11 @@ Claude can drive + observe the running Rift UI autonomously. No manual screensho
 
 1. `scripts/run-dev.bat` already sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`. Always start dev via this batch (not raw `npm run tauri dev`) so CDP is exposed.
 2. Start the wrapper once per dev session: `npm run cdp:serve` (background). It holds one persistent ws to WebView2 and exposes `127.0.0.1:9223`. ~40-60ms per call.
-3. Drive via `bash scripts/cdp/c.sh {look|health|state|page|eval|type|click|wait|shot|shot-sel|batch|key|shutdown}`. Full docs: `scripts/cdp/README.md`.
+3. Drive via `bash scripts/cdp/c.sh {look|act|health|state|page|eval|type|click|wait|shot|shot-sel|batch|key|shutdown}`. Full docs: `scripts/cdp/README.md`.
 4. **`look` = the verify primitive (fast path, 2026-06-09).** To check "did my change work," run `bash scripts/cdp/c.sh look` — ONE call returns page/assistant state + console **errors** + a screenshot with the path on the **last line**; then `Read` that path. Two turns, not the old 5-turn `wait→shot→Read→state→console` dance. `look "<selector>"` clips the shot. Use bare `state`/`eval` only for DOM facts WITHOUT pixels. **`shot` workflow** — `bash scripts/cdp/c.sh shot` prints just the path on stdout (use `--json` for `{path,bytes}`). `f=$(bash scripts/cdp/c.sh shot)` → `Read` $f; image renders inline (multimodal). `shot-sel "<selector>"` clips to a bounding rect. Server auto-prunes `.tmp/snap-*` to last 20 on boot. ~$0.07/shot at Opus 4.7 rates.
+   - **`act` = act-then-verify in ONE turn (2026-06-15, the measured fix).** When a check needs an *action first*, use `bash scripts/cdp/c.sh act {click|key} <arg> [lookSel] [settleMs=350]` — folds action + a real server-side settle + `look` into one `/batch` round-trip. **Do NOT hand-write the old `click` → `sleep 1` → `look` 3-call dance** (it was 36% of all bash across 59 sessions; transcript-measured). `act` is 1 turn vs 3 and a 350ms purposeful settle vs a 1000ms blind sleep.
+   - **No redundant `cd`:** the Bash tool cwd is ALREADY the project root — drop the `cd "C:/AI Workflow/projects/rift-tauri" &&` prefix (was on ~62% of commands; pure token noise). Only `cd` when changing to a *different* dir.
+   - **No foreground `sleep`** (the Bash tool blocks it): CDP render-waits → `act`; long builds/servers → `run_in_background: true` + poll, never a blind `sleep N`.
 5. **DOM vs shot decision table — DON'T skip the shot when these triggers fire:**
 
    | Trigger | Tool | Why |
