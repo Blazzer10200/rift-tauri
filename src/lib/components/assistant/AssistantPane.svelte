@@ -394,8 +394,9 @@
       <Composer
         {tabId}
         onsubmit={(text) => {
-          if (!focused) assistant.setFocusedPane(paneIdx);
-          assistant.send(text);
+          // Pass tabId so the turn targets THIS pane's tab — send() retargets
+          // currentConvoId synchronously, which also focuses the pane.
+          assistant.send(text, tabId);
         }}
       />
     </div>

@@ -1296,7 +1296,19 @@ class AssistantStore {
   }
 
   /** Turn dispatch (incl. client-side slash commands). M9: body in ./assistant/send. */
-  async send(prompt: string) {
+  async send(prompt: string, tabId?: string | null) {
+    // Split-pane: a pane's composer fires with its own tabId. send() (via
+    // sendImpl) and every activeTab-scoped getter it reads — streaming, queue,
+    // composerAttachments, effectiveModel — key off currentConvoId, so retarget
+    // it synchronously to the firing pane's tab first. Without this the turn
+    // lands in whichever pane is focused, not the one that fired (#split-send).
+    // The composer only renders for a loaded tab, so setFocusedPane never hits
+    // its async loadConversation path here.
+    if (tabId && tabId !== this.currentConvoId && this.tabFor(tabId)) {
+      const idx = this.panes.findIndex((p) => p.tabId === tabId);
+      if (idx >= 0) this.setFocusedPane(idx);
+      else this.currentConvoId = tabId;
+    }
     return sendImpl(this, prompt);
   }
 

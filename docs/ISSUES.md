@@ -22,7 +22,9 @@
 | #35 | Live shell + sub-agent streaming output panel | T3 | 🚧 open (idea) |
 | #36 | Split-pane feature overhaul | T3 | 🚧 open (idea) — dividers + per-pane head done; vertical/grid splits remain |
 | #37 | Multi-window — separate OS windows (VSCode-style, multi-monitor) | T3 | 🚧 open (idea) |
-| #39 | UI-consistency review + full-app audit 2026-06-15 — deferred findings | T3/T4 | 🚧 catalogued (high-conf fixes shipped) |
+| #39 | UI-consistency review + full-app audit 2026-06-15 — deferred findings | T3/T4 | 🚧 catalogued (P0-4 shipped; rest deferred) |
+| #40 | STT end-of-dictation polish UX — long shimmer + flash | T3/T4 | ✅ resolved in-tree (v0.12.1) |
+| #41 | Split-pane send routed to wrong pane | T1 | ✅ resolved in-tree (v0.12.1) |
 | #33 | Compaction tool broken | T1 | 🗄 closed (feature removed in minimal-core strip) |
 | #14 | No release CI — local-only path | — | 🗄 closed |
 
@@ -103,6 +105,7 @@
 High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LABELS dedupe · 2 aria-labels) and the v0.11.0 UI batch (shared `PageHero` [P0-2], Home + nav [P1]). **cont.139 (PR #5 + this session):** helper dedup, security hardening, token cleanup. Remaining items catalogued below.
 
 **Top of the backlog (deferred — needs desktop CDP eyeball):**
+- ✅ **P0-4 — double live timer in the assistant turn head (resolved v0.12.1).** While streaming, the role-row **heartbeat** (`9s`) ticked one line above the per-thinking-block timer (`Thinking for 6s`) → two stacked live counters. **Fixed:** `MessageBubble.svelte:334` now shows the `live-dot` (not the heartbeat) while `hasActiveThinking` — the thinking pill carries the only ticking number during the thinking phase; the heartbeat returns for tool/text phases. One live timer at all times.
 - **P0-3 — unify the CLI-update notice.** Surfaced 3 ways (Home `.dash-cli` banner, ChatTabsBar `.cli-badge` pill+popover, Settings inline button) with independent dismiss. Extract one `UpdateNotice` + a single shared dismiss state. ⚠️ touches the **Velopack** update-notification path, so verify carefully.
 - **P2 — shared size tokens.** Tab 36px / tab-item 26px / settings sub-tab 42px / Home buttons 38px each hardcoded → introduce `--control-h` / `--tab-h`. Rename the dual-meaning `.sb-bento` (column in Settings vs 2-col grid in Local LLM) so a third page can't inherit the wrong layout.
 
@@ -123,6 +126,20 @@ High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LAB
 - `ToolChip.svelte` terminal bg/text oklch literals — intentional terminal-look design; left as-is.
 - Off-token radius (7px/11px/16px vs 6/10/12 scale) + font-size literals (9–10.5px below `--fs-xs`).
 - Scrollbar `scrollbar-width:thin` overrides are **no-ops** in WebView2 — remove or commit to one style (your call).
+
+#### 40. STT end-of-dictation polish UX — long shimmer + end-of-phrase flash (✅ resolved v0.12.1)
+
+User report (Web Speech engine, default): "at the end of speech-to-text it shows my entire phrase, then keeps flashing for so long." All four sub-causes fixed in [stt.svelte.ts](../src/lib/state/stt.svelte.ts) + [Composer.svelte](../src/lib/components/assistant/Composer.svelte):
+
+- ✅ **40a — shimmer could run up to 15s.** `polishWebSpeechFinal()` pulsed `.textarea-wrap.polishing` for the entire `stt_clean_transcript` (Haiku) call, capped only by the backend's 15s `CLEANUP_TIMEOUT` ([cleanup.rs:28](../src-tauri/src/stt/cleanup.rs)). **Fixed:** a 6s frontend `SHIMMER_CAP_MS` timer drops the visual early; the cleaned-text swap still lands if the call beats the cap (the raw transcript is already committed + editable).
+- ✅ **40b — typing didn't stop the shimmer.** Added `stt.cancelPolish()` (bumps a `polishGuard` token + clears `polishing`); the composer `oninput` now calls it, so typing kills the pulse instantly and invalidates the late swap.
+- ✅ **40c — full-transcript pulse read as "loading."** Mitigated by 40a/40b — the pulse is now bounded and dismissible. (A scoped "polishing…" chip instead of animating the text is a possible future polish, not done.)
+- ✅ **40d — multiple full-textarea rewrites at stop.** `onEnd()` now skips its `composeDraft` rewrite when the draft already equals the streamed final (no delta), killing the end-of-phrase flash-in.
+- **Scope note:** Whisper engine polishes backend-side (`stt://final` arrives pre-cleaned) and never sets `polishing`, so the shimmer was Web-Speech-only.
+
+#### 41. Split-pane send routed to the wrong pane (✅ resolved v0.12.1)
+
+User report: "in split-pane, the message I send in pane 1 lands in the other pane." **Root cause:** `send()` ([send.ts:26](../src/lib/state/assistant/send.ts)) and every activeTab-scoped getter it reads (`streaming`/`queue`/`composerAttachments`/`effectiveModel`) key off the global `currentConvoId`, but the per-pane composer fired `assistant.send(text)` with **no** tabId — so the turn targeted whichever pane was focused/active, not the firing pane. The old `onsubmit` did `if (!focused) setFocusedPane(paneIdx)` first, but that left a desync window (and `setFocusedPane`'s async `loadConversation` branch doesn't set `currentConvoId` synchronously). Drafts/attachments were already pane-correct (keyed to `tabId`); only the send entry was wrong. **Fixed:** `assistant.send(prompt, tabId?)` ([assistant.svelte.ts:1299](../src/lib/state/assistant.svelte.ts)) now retargets `currentConvoId` to the firing pane's tab synchronously (via `setFocusedPane` on the matching pane index — the composer only renders for a loaded tab, so the async load path is never hit) before `sendImpl`. `AssistantPane` `onsubmit` passes its `tabId`. Verified: svelte-check 0/0, 162/162 vitest, 0 console errors live.
 
 ---
 
