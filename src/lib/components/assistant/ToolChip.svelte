@@ -1359,7 +1359,7 @@
     letter-spacing: 0.04em;
   }
   /* Answered = done = the one place green (success) is semantically right. */
-  .ask-status-text.answered { color: var(--ok, oklch(0.74 0.15 145)); font-weight: 600; }
+  .ask-status-text.answered { color: var(--ok); font-weight: 600; }
   .ask-status-text.submitting { color: var(--ask); }
   .ask-status-text.waiting { color: var(--fg-faint); font-style: italic; }
   .ask-status-text.awaiting { color: color-mix(in oklch, var(--ask) 70%, var(--fg-muted)); }
