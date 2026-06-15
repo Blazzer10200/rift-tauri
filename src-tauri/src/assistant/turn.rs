@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    current_api_key, effective_trust_level, fable_sunset_passed, is_valid_local_model_name,
+    current_api_key, effective_trust_level, fable_unavailable, is_valid_local_model_name,
     is_valid_model_name, is_valid_permission_mode, load_config, FABLE_MODEL,
 };
 use super::convo_store::{
@@ -468,10 +468,10 @@ pub async fn assistant_send(
                 }
             }
         }
-        // Fable sunset guard — after pin resolution so a pinned Fable session also
-        // falls back once the limited run ends.
-        if model == FABLE_MODEL && fable_sunset_passed() {
-            log::info!("assistant_send: {FABLE_MODEL} sunset passed — falling back to opus");
+        // Fable guard — after pin resolution so a pinned Fable session also falls
+        // back when Fable is unavailable (manual kill-switch or past its sunset).
+        if model == FABLE_MODEL && fable_unavailable() {
+            log::info!("assistant_send: {FABLE_MODEL} unavailable — falling back to opus");
             model = "opus".to_string();
         }
     }

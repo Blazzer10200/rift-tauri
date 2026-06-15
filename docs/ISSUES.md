@@ -13,6 +13,7 @@
 
 | ID | Title | Tier | Status |
 |----|-------|------|--------|
+| Fable-Off | Fable 5 manually pulled (US-gov disablement) — flip both kill-switches to re-enable | T2 | 🔒 disabled in-tree (revert-when-re-enabled) |
 | #33 | Compaction tool broken | T1 | 🗄 closed (feature removed in minimal-core strip) |
 | #34 | Session Diff overlay bugs out when a long session's edits pile up | T2 | ✅ resolved in-tree + live-verified (synthetic 20-file CDP repro) |
 | Auth-Rec | In-app sign-in recovery for 401 failures | T2 | 🧪 live-verify |
@@ -33,6 +34,15 @@
 ---
 
 ## 🚧 Open issues
+
+### Tier 2 — operational / revert-when-unblocked
+
+#### Fable-Off. Fable 5 manually disabled (US-gov disablement 2026-06-14 — temporary)
+
+- **What:** Fable 5 was pulled by US-gov action. Rather than rip the code out, it's gated off behind a manual kill-switch that reuses the existing sunset machinery (hides the picker row, coerces any stored/pinned Fable pref → default, backend swaps a pinned Fable session → opus before it can hit the API).
+- **To re-enable when it comes back:** flip BOTH flags to `false` — `FABLE_DISABLED` in [state/assistant/helpers.ts](../src/lib/state/assistant/helpers.ts) (frontend) and `FABLE_DISABLED` in [src-tauri/src/assistant/config.rs](../src-tauri/src/assistant/config.rs) (backend). The date-based `FABLE_SUNSET_MS`/`fable_sunset_passed()` still applies underneath, so re-enabling only restores Fable through its original Jun 22 sunset.
+- **Why both sides:** frontend hide alone wasn't enough — a persisted *session pin* (`load_session_model`) can re-inject `claude-fable-5` on resume, bypassing the picker; the backend guard (`fable_unavailable()` in turn.rs) catches that. Previously the backend only swapped post-date, so a gov-disabled-but-pre-sunset Fable pin would have fired at the API.
+- **Verified:** svelte-check 0/0 · vitest 133/133 (fable test split into disabled/enabled cases, self-heals on re-enable) · cargo check clean. **No version bump** (rides the next ship).
 
 ### Tier 1 — broken feature
 
@@ -76,7 +86,7 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Legacy provider commands (🗄 superseded 2026-06-12):** the entire custom-provider + compression surface was removed in the minimal-core strip (S6) — nothing left to migrate or sweep.
 - **401-detection duplicated in turn.rs (✅ resolved in-tree 2026-06-11):** extracted `is_auth_rejection()` + `auth_rejection_message()`; both the stdout result-frame and stderr-exit sites now share one detector + one remap (unified on the richer CLI-path message).
 - **Blocking fs reads in async commands (T4):** `load_config()` in `assistant_send` / `read_oauth_token()` in `usage_rate_limits` do sync disk I/O on the tokio executor. Tiny local files — wrap in `spawn_blocking` only if it ever shows up in traces.
-- **Fable sunset sweep (dated):** after Jun 22 (`FABLE_SUNSET_MS = Date.UTC(2026, 5, 23)` in `state/assistant/helpers.ts`), all Fable branches (`fableAvailable()` gates, `fableSunsetNoticed` toast in send.ts, `limited` rows in modelMatrix.ts) become permanently dead — sweep them out.
+- **Fable sunset sweep (dated → DEFERRED INDEFINITELY 2026-06-14):** the sweep is now **on hold** — Fable was manually disabled (see Fable-Off), not retired, and is expected back. Keep every Fable branch (`fableAvailable()`/`fable_unavailable()` gates, `fableSunsetNoticed` toast, `limited` rows, the type-union member, price entry) so re-enabling stays a two-flag flip. Only sweep if Fable is confirmed *permanently* gone.
 - **Optional split follow-ups (quality, not threshold — #20 closed at ship):** [messagebubble-split.md](design/messagebubble-split.md) B1-B6 + [chattabsbar-split.md](design/chattabsbar-split.md) T1-T6 stay mapped; `assistant_send` (917L fn inside turn.rs) can split internally later.
 
 #### 17. Two-repo split — historic, low-priority collapse (🔒 blocked)
@@ -113,7 +123,8 @@ Three audits (backend, frontend, orphan files) shipped a sweep this session; the
 - **Concrete pains gathered (user, 2026-06-14 cont.131) → FIXED in #38:** (1) STT dictation landed in the *other* pane; (2) switching a pane's project folder leaked to other panes (esp. visible after `/clear`). Both resolved — see #38.
 - **Pane identity (✅ in-tree 2026-06-14 cont.132, `3b28567`):** panes were identifiable only by a tiny 50%-opacity floating number. Replaced the floating `.pane-chrome` with an always-legible in-flow `.pane-head` strip (split mode only) — pane index + **conversation title** + ctx chip + close; focused pane = accent wash + brighter title. `AssistantPane.svelte`. svelte-check/vitest/CDP green.
 - **Resizable dividers already DONE** (`AssistantPage.svelte:29-132` — drag, double-click reset, arrow-key adjust). Don't re-scope as new.
-- **Still un-prioritized:** vertical/grid splits (2×2, not just a row) · drag-pane-to-reorder · raise `MAX_PANES`. **Keybinds are OUT** (user doesn't use them — don't add Ctrl/Alt pane shortcuts). Ask for specifics before the bigger overhaul.
+- **Still un-prioritized:** vertical/grid splits (2×2, not just a row) · drag-pane-to-reorder. **Keybinds are OUT** (user doesn't use them — don't add Ctrl/Alt pane shortcuts). Ask for specifics before the bigger overhaul.
+- **Raise `MAX_PANES` — DECIDED NO (2026-06-14):** cap stays 4. `MAX_PANES = 4` × 320px min-width = 1280px; a 5th pane makes every pane unusably narrow on a normal-width window. Not a safe unilateral bump — revisit only if paired with a min-width/scroll rethink.
 
 #### 37. Multi-window — separate OS windows (idea — user-requested 2026-06-14)
 
