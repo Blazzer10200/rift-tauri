@@ -428,6 +428,62 @@ describe("tab switching never kills background streams (multi-tab regression)", 
   });
 });
 
+describe("drag a tab onto a pane half enters split (single-pane)", () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return { id: args.id, title: "t", model: "sonnet", createdAt: 1, updatedAt: 1, messages: [], cliSessionId: args.id };
+      }
+      return undefined;
+    });
+    assistant.panes = [{ tabId: null }];
+    assistant.focusedPaneIdx = 0;
+  });
+
+  it("dragging the CURRENTLY-SHOWN tab still splits, pairing the other open tab (the reported bug)", () => {
+    assistant.ensureTab("drag-a", "drag-a");
+    assistant.ensureTab("drag-b", "drag-b");
+    assistant.openTabs = ["drag-a", "drag-b"];
+    assistant.currentConvoId = "drag-a";
+    assistant.panes = [{ tabId: "drag-a" }];
+
+    // Drop the visible tab (drag-a) onto the right half.
+    assistant.dropTabIntoPane("drag-a", 1);
+
+    expect(assistant.splitActive).toBe(true);
+    expect(assistant.panes.map((p) => p.tabId)).toEqual(["drag-b", "drag-a"]);
+    expect(assistant.focusedPaneIdx).toBe(1);
+  });
+
+  it("dragging a DIFFERENT tab pairs it with the current tab (existing behavior preserved)", () => {
+    assistant.ensureTab("pair-a", "pair-a");
+    assistant.ensureTab("pair-b", "pair-b");
+    assistant.openTabs = ["pair-a", "pair-b"];
+    assistant.currentConvoId = "pair-a";
+    assistant.panes = [{ tabId: "pair-a" }];
+
+    assistant.dropTabIntoPane("pair-b", 1);
+
+    expect(assistant.splitActive).toBe(true);
+    expect(assistant.panes.map((p) => p.tabId)).toEqual(["pair-a", "pair-b"]);
+  });
+
+  it("dragging the only open tab splits with an empty counterpart slot (no silent no-op)", () => {
+    assistant.ensureTab("solo", "solo");
+    assistant.openTabs = ["solo"];
+    assistant.currentConvoId = "solo";
+    assistant.panes = [{ tabId: "solo" }];
+
+    assistant.dropTabIntoPane("solo", 1);
+
+    expect(assistant.splitActive).toBe(true);
+    expect(assistant.panes.map((p) => p.tabId)).toEqual([null, "solo"]);
+  });
+});
+
 describe("assistant.sessionUsage default", () => {
   it("returns zeroed structure when no active tab", () => {
     // Test runs in node env with no tabs initialized → the getter falls back
