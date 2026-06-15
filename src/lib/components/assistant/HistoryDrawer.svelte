@@ -11,6 +11,7 @@
   import PageHeader from "../shell/PageHeader.svelte";
   import OpenInPaneMenu from "./OpenInPaneMenu.svelte";
   import { tooltip } from "$lib/actions/tooltip";
+  import { modelLabel } from "../home/statsHelpers";
 
   // `compact` collapses the page-style PageHeader into a slim popover header
   // so this same component can serve both the workspace surface (removed
@@ -144,10 +145,6 @@
     node.focus();
     node.select();
     return { destroy() {} };
-  }
-
-  function modelLabel(model: string): string {
-    return model.charAt(0).toUpperCase() + model.slice(1);
   }
 
   // Turn count: user messages only

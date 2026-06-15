@@ -5,6 +5,7 @@
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
+  import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
@@ -92,19 +93,6 @@
   function pick(prompt: string) {
     if (targetTab) targetTab.draft = prompt;
     else assistant.composerDraft = prompt;
-  }
-
-  function leafName(p: string): string {
-    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
-    const parts = norm.split("/");
-    return parts[parts.length - 1] || norm;
-  }
-
-  function shortPath(p: string): string {
-    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
-    const parts = norm.split("/");
-    if (parts.length <= 2) return norm;
-    return `…/${parts.slice(-2).join("/")}`;
   }
 
   // Per-pane root: this pane's own folder (or the global default), so two

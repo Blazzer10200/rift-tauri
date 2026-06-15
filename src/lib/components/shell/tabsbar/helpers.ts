@@ -26,6 +26,14 @@ export function leafName(p: string): string {
   return parts[parts.length - 1] || norm;
 }
 
+// Last two path segments, ellipsis-prefixed — compact path for recents lists.
+export function shortPath(p: string): string {
+  const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
+  const parts = norm.split("/");
+  if (parts.length <= 2) return norm;
+  return `…/${parts.slice(-2).join("/")}`;
+}
+
 // Cleaned path for tooltips — drops Windows extended-length `\\?\` noise.
 export function prettyPath(p: string): string {
   return p.replace(/^\\\\\?\\/, "").replace(/^\/\/\?\//, "");
