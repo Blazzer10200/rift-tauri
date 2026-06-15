@@ -624,6 +624,8 @@ pub async fn assistant_send(
 
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
+    // Default child cwd to temp so the CLI (and any daemon its SessionStart hooks spawn) never inherits Rift's install dir — a live handle on `…\current\` blocks Velopack's update apply. Overridden to the workspace root below when one exists.
+    cmd.current_dir(std::env::temp_dir());
     cmd.arg("-p")
         .arg("--append-system-prompt").arg(addendum)
         // Moves the CLI's own per-machine sections (cwd, env info, memory
