@@ -397,7 +397,7 @@
               <span class="cost-pill mono" use:tooltip={"Turn cost in USD — total for this assistant turn"}>{costLabel}</span>
             {/if}
             {#if plainText.length > 0}
-              <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"}>
+              <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"} aria-label="Copy message">
                 {#if copied}
                   <Check size={11} />
                 {:else}
