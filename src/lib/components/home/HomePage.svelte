@@ -12,6 +12,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   import HomeStats from "./HomeStats.svelte";
   import { modelLabel } from "./statsHelpers";
+  import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
 
   // Claude Code CLI update — the dashboard is the launch surface, so kick the
   // (throttled) npm check here and surface a dismissible banner if one's live.
@@ -41,17 +42,6 @@
     if (assistant.workspace.current) void assistant.loadWorkspaceBranch();
   });
 
-  function leafName(p: string): string {
-    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
-    const parts = norm.split("/");
-    return parts[parts.length - 1] || norm;
-  }
-  function shortPath(p: string): string {
-    const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
-    const parts = norm.split("/");
-    if (parts.length <= 2) return norm;
-    return `…/${parts.slice(-2).join("/")}`;
-  }
   // Display-only strip of Windows extended-length prefixes; stored value keeps them.
   function dispPath(p: string): string {
     return p.replace(/^\\\\\?\\UNC\\/, "\\\\").replace(/^\\\\\?\\/, "");
