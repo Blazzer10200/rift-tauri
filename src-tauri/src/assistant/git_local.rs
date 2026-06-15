@@ -175,6 +175,8 @@ fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
         .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
         .env_remove("GIT_NAMESPACE")
         .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("GIT_CONFIG_SYSTEM")
         .env_remove("GIT_EXEC_PATH")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());

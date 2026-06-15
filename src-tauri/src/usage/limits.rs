@@ -135,7 +135,9 @@ pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits
         }
     }
 
-    let token = read_oauth_token()?;
+    let token = tauri::async_runtime::spawn_blocking(read_oauth_token)
+        .await
+        .map_err(|e| format!("spawn_blocking failed: {e}"))??;
     // Sanitize the frontend-supplied version (header value, digits/dots only).
     let ver: String = cli_version
         .unwrap_or_default()

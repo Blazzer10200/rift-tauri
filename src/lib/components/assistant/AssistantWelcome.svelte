@@ -496,7 +496,7 @@
   }
   .auth-btn.primary {
     background: var(--accent); border-color: var(--accent);
-    color: oklch(0.99 0.01 163);
+    color: var(--accent-fg);
   }
   .auth-btn.primary:hover:not(:disabled) {
     background: color-mix(in oklab, var(--accent) 88%, white);

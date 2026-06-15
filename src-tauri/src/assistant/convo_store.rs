@@ -400,6 +400,15 @@ pub fn assistant_export_save(dest: String, contents: String) -> Result<(), Strin
     if !std::path::Path::new(&dest).is_absolute() {
         return Err("dest must be an absolute path".into());
     }
+    // Allowlist export extensions — prevents a compromised WebView from using
+    // this command to overwrite arbitrary files (e.g. .exe, config files).
+    let ext = std::path::Path::new(&dest)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+    if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "json" | "txt") {
+        return Err(format!("unsupported export extension: .{ext} (allowed: .md .json .txt)"));
+    }
     std::fs::write(&dest, contents.as_bytes()).map_err(|e| format!("write {dest}: {e}"))
 }
 
