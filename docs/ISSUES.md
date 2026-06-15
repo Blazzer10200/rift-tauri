@@ -68,6 +68,10 @@ Three parallel read-only audits (security · dead-code/dupes · UI/UX). High-con
 - Wrong color-var fallbacks (`var(--danger,#e66)`, `var(--warn,#e2b340)`) — drop fallback (vars always in `:root`).
 - Scrollbar `scrollbar-width:thin` overrides are **no-ops** in WebView2 (global `::-webkit-scrollbar` wins) — either remove the dead declarations or commit to one style. Not user-visible today.
 
+**UI consistency review 2026-06-15 (`docs/design/ui-review-2026-06-15.md`) — remaining backlog (P0-2 shared PageHero / P0-1 / P1 Home+nav shipped in v0.11.0):**
+- **P0-3 — unify the CLI-update notice.** Surfaced 3 ways (Home `.dash-cli` banner, ChatTabsBar `.cli-badge` pill+popover, Settings inline button) with independent dismiss. Extract one `UpdateNotice` + a single shared dismiss state. Deferred from v0.11.0 — touches the Velopack update-notification path, so verify carefully.
+- **P2 — shared size tokens.** Tab 36px / tab-item 26px / settings sub-tab 42px / Home buttons 38px each hardcoded → introduce `--control-h` / `--tab-h`. Fold in the color-token nits above. Rename the dual-meaning `.sb-bento` (column in Settings vs 2-col grid in Local LLM) so a third page can't inherit the wrong layout.
+
 ### Tier 1 — broken feature
 
 #### 34. Session Diff ("Changes") overlay bugs out on long-session pile-up (✅ resolved in-tree + LIVE-VERIFIED 2026-06-12)
