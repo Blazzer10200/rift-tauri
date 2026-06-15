@@ -62,7 +62,7 @@
 
 #### 31. Deferred remainder from the 2026-06-11 dead-code/debug audit (trimmed — most shipped)
 
-- **Blocking fs reads in async commands (T4 — still open):** `load_config()` in `assistant_send` / `read_oauth_token()` in `usage_rate_limits` do sync disk I/O on the tokio executor. Tiny local files — wrap in `spawn_blocking` only if it ever shows up in traces.
+- ✅ **Blocking fs reads in async commands:** `read_oauth_token()` in `usage_rate_limits` now uses `spawn_blocking` (this session). `load_config()` in `assistant_send` reads before the first yield — acceptable for a tiny local file.
 - **Optional split follow-ups (quality, not threshold):** [messagebubble-split.md](design/messagebubble-split.md) B1-B6 + [chattabsbar-split.md](design/chattabsbar-split.md) T1-T6 stay mapped; `assistant_send` (large fn inside turn.rs) can split internally later. Both target files already under threshold.
 - *(Shipped/superseded sub-items removed: legacy provider commands superseded by the minimal-core strip; 401-detection dedupe shipped `is_auth_rejection()` 2026-06-11; Fable sweep folded into Fable-Off above.)*
 
@@ -100,30 +100,29 @@
 
 #### 39. UI-consistency review + full-app audit 2026-06-15 — deferred findings (catalogued, not blind-fixed)
 
-High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LABELS dedupe · 2 aria-labels) and the v0.11.0 UI batch (shared `PageHero` [P0-2], Home + nav [P1]). The rest are catalogued here for a focused, verifiable pass — deliberately **not** mass-edited unattended.
+High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LABELS dedupe · 2 aria-labels) and the v0.11.0 UI batch (shared `PageHero` [P0-2], Home + nav [P1]). **cont.139 (PR #5 + this session):** helper dedup, security hardening, token cleanup. Remaining items catalogued below.
 
-**Top of the backlog (deferred from v0.11.0):**
+**Top of the backlog (deferred — needs desktop CDP eyeball):**
 - **P0-3 — unify the CLI-update notice.** Surfaced 3 ways (Home `.dash-cli` banner, ChatTabsBar `.cli-badge` pill+popover, Settings inline button) with independent dismiss. Extract one `UpdateNotice` + a single shared dismiss state. ⚠️ touches the **Velopack** update-notification path, so verify carefully.
 - **P2 — shared size tokens.** Tab 36px / tab-item 26px / settings sub-tab 42px / Home buttons 38px each hardcoded → introduce `--control-h` / `--tab-h`. Rename the dual-meaning `.sb-bento` (column in Settings vs 2-col grid in Local LLM) so a third page can't inherit the wrong layout.
 
-**Security (low real-risk — mostly same-user or by-design; review before changing):**
-- `turn.rs` `local_llm_base_url` injected verbatim as `ANTHROPIC_BASE_URL` — experimental/gated; add http(s)-scheme + localhost validation. (med)
-- `convo_store.rs assistant_export_save` accepts any renderer-supplied absolute path (null-byte check only) — by-design native-save, but a compromised WebView could overwrite user files. (med)
-- `mcp_server.rs` read_file/list_dir TOCTOU symlink race (acknowledged in-code); `git_local.rs` doesn't strip `GIT_CONFIG_GLOBAL`/system gitconfig. (low, same-user)
+**Security (remaining — low real-risk; mostly same-user or by-design):**
+- ✅ `local_llm_base_url` → `ANTHROPIC_BASE_URL` — http(s) + host validation added at setter + turn.rs sink (PR #5).
+- ✅ `convo_store.rs assistant_export_save` — extension allowlist (.md/.json/.txt) added (this session).
+- ✅ `git_local.rs` GIT_CONFIG_GLOBAL/SYSTEM env vars now stripped (this session).
+- ✅ `capabilities/default.json` `opener:allow-open-url` — dropped `http://**`, https-only (this session).
+- `mcp_server.rs` read_file/list_dir TOCTOU symlink race (acknowledged in-code). (low, same-user)
 - `bridge.rs` ephemeral port is 192-bit-token-gated but has no connection-rate-limit. (low)
-- `capabilities/default.json` `opener:allow-open-url` permits `http://**` — consider https-only. (low)
 - **NOT a bug:** CSP `connect-src https://registry.npmjs.org` is the legit CLI-update npm version check; `open_in_vscode` Unix arg is shell-free (OS-quoted). Verified — leave.
 
-**Dead-code / duplicates (cargo: zero dead-code warnings):**
-- `leafName`/`shortPath` duplicated across `HomePage.svelte` + `AssistantWelcome.svelte` (and `leafName` in `tabsbar/helpers.ts`) — consolidate the pair into `tabsbar/helpers.ts` (or `lib/utils/path.ts`). SAFE pure-fn refactor.
-- `basenameOf` (ToolChip.svelte) vs `basename` (toolCaption.ts) — same logic, extract shared util.
-- `HistoryDrawer.svelte modelLabel` (title-cases raw string) — replace callsites with `statsHelpers.modelLabel`.
-
-**UI/UX token consistency (cosmetic, near-invisible; batch with live CDP eyeball):**
-- Hardcoded colors where a token exists: `Markdown.svelte:842` (#22272e→`--bg-inset`), `ToolChip.svelte` terminal bg/text oklch literals, `EnhanceBar`/`AssistantWelcome` text-on-accent → `--accent-fg`. (~10 sites)
-- Off-token radius (7px/11px/16px vs 6/10/12 scale) + font-size literals (9–10.5px below `--fs-xs`) — consider an `--fs-2xs`/`--r-*` token rather than per-site churn.
-- Wrong color-var fallbacks (`var(--danger,#e66)`, `var(--warn,#e2b340)`) — drop fallback (vars always in `:root`).
-- Scrollbar `scrollbar-width:thin` overrides are **no-ops** in WebView2 (global `::-webkit-scrollbar` wins) — either remove the dead declarations or commit to one style.
+**UI/UX token consistency (remaining — cosmetic; batch with live CDP eyeball):**
+- ✅ Dead color-var fallbacks stripped (`var(--danger,#e66)`, `var(--warn,#e2b340)`) — PR #5.
+- ✅ `EnhanceBar`/`AssistantWelcome` text-on-accent → `var(--accent-fg)` (this session).
+- ✅ `ToolChip` `var(--ok, ...)` fallback dropped (this session).
+- `Markdown.svelte:842` `#22272e` — intentional Shiki github-dark-dimmed match; `--bg-inset` resolves lighter so left as-is.
+- `ToolChip.svelte` terminal bg/text oklch literals — intentional terminal-look design; left as-is.
+- Off-token radius (7px/11px/16px vs 6/10/12 scale) + font-size literals (9–10.5px below `--fs-xs`).
+- Scrollbar `scrollbar-width:thin` overrides are **no-ops** in WebView2 — remove or commit to one style (your call).
 
 ---
 

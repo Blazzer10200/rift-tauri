@@ -245,7 +245,7 @@
   .enhance-btn:active { transform: scale(0.96); }
   .enhance-accept {
     background: var(--model-color);
-    color: oklch(0.16 0.02 260);
+    color: var(--accent-fg);
     border: 1px solid transparent;
   }
   .enhance-accept:hover { background: color-mix(in oklch, var(--model-color) 88%, white 12%); }
