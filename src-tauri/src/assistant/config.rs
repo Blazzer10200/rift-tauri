@@ -98,6 +98,18 @@ pub(super) fn is_valid_local_model_name(s: &str) -> bool {
     s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/' | b':'))
 }
 
+/// The base URL is injected verbatim as `ANTHROPIC_BASE_URL`, so only allow
+/// `http`/`https` (no `file:`/`javascript:`/etc.) with a non-empty host.
+pub(super) fn is_valid_local_base_url(s: &str) -> bool {
+    let rest = match s.split_once("://") {
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https") => rest,
+        _ => return false,
+    };
+    // Host is everything up to the first path/query/fragment delimiter.
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    !host.is_empty()
+}
+
 /// Claude Fable 5 — limited run Rift offers only through 2026-06-22. Past
 /// sunset a stale pref/session pin falls back to `opus` instead of firing at
 /// a retired model id.
@@ -303,6 +315,11 @@ pub fn assistant_set_local_llm_base_url(value: Option<String>) -> Result<(), Str
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .map(|s| if s.contains("://") { s } else { format!("http://{s}") });
+    if let Some(ref url) = normalized {
+        if !is_valid_local_base_url(url) {
+            return Err(format!("invalid base URL (need http(s):// + host): {url}"));
+        }
+    }
     let mut cfg = load_config();
     cfg.local_llm_base_url = normalized;
     save_config(&cfg)
@@ -347,4 +364,25 @@ pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
         save_config(&cfg)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_local_base_url;
+
+    #[test]
+    fn accepts_http_and_https_with_host() {
+        assert!(is_valid_local_base_url("http://localhost:4000"));
+        assert!(is_valid_local_base_url("https://127.0.0.1:4000/v1"));
+        assert!(is_valid_local_base_url("HTTP://box.lan:8080"));
+    }
+
+    #[test]
+    fn rejects_other_schemes_and_empty_host() {
+        assert!(!is_valid_local_base_url("file:///etc/passwd"));
+        assert!(!is_valid_local_base_url("ftp://host"));
+        assert!(!is_valid_local_base_url("localhost:4000")); // no scheme
+        assert!(!is_valid_local_base_url("http:///nohost"));
+        assert!(!is_valid_local_base_url(""));
+    }
 }
