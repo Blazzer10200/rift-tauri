@@ -10,6 +10,7 @@
   import { WORKSPACES } from "./workspaces";
   import { workspace, type WorkspaceId } from "../state/workspace.svelte";
   import { browserDock } from "../state/browserDock.svelte";
+  import { activityDock } from "../state/activityDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { assistant } from "../state/assistant.svelte";
   import { toast, notify } from "../state/toast.svelte";
@@ -48,6 +49,7 @@
     // dashboard renders the empty-state lie until another workspace runs it.
     void assistant.init();
     browserDock.init();
+    activityDock.init();
     void updates.checkOnLaunch();
     // Dev-only: expose the update store so CDP can drive its visual states
     // (toast + dialog) without a live feed. Stripped from prod builds.

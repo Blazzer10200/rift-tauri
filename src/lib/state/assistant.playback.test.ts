@@ -242,6 +242,80 @@ describe("playback — tool_use → tool_result lifecycle", () => {
   });
 });
 
+// ── Sub-agent live routing ───────────────────────────────────────────────────
+// The CLI multiplexes Task/Agent sub-agent output into the same stream, tagging
+// each nested frame with parent_tool_use_id = the spawning tool_use id. Those
+// frames must land in the spawn's own `blocks` sub-transcript (the live dock),
+// never in the main bubble.
+const agentSpawnEnv = (id: string, subagent_type: string, description: string) => ({
+  type: "assistant",
+  message: { content: [{ type: "tool_use", id, name: "Task", input: { subagent_type, description } }] },
+});
+const nestedTextEnv = (parentId: string, text: string) => ({
+  type: "assistant",
+  parent_tool_use_id: parentId,
+  message: { content: [{ type: "text", text }] },
+});
+const nestedToolUseEnv = (parentId: string, id: string, name: string, input: Record<string, unknown> = {}) => ({
+  type: "assistant",
+  parent_tool_use_id: parentId,
+  message: { content: [{ type: "tool_use", id, name, input }] },
+});
+const nestedToolResultEnv = (parentId: string, toolUseId: string, content: unknown, isError = false) => ({
+  type: "user",
+  parent_tool_use_id: parentId,
+  message: { content: [{ type: "tool_result", tool_use_id: toolUseId, content, is_error: isError }] },
+});
+
+describe("playback — sub-agent live routing", () => {
+  it("diverts parent-tagged frames into the spawn's sub-transcript, not the main bubble", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      agentSpawnEnv("task-1", "recon", "map the files"),
+      nestedTextEnv("task-1", "scanning"),
+      nestedToolUseEnv("task-1", "n-tu-1", "Grep", { pattern: "foo" }),
+      nestedToolResultEnv("task-1", "n-tu-1", "3 matches", false),
+      nestedTextEnv("task-1", "found 3"),
+    ]);
+
+    // Zero sub-agent leakage into the main bubble (the Task chip lives in
+    // agentSpawns, not the message blocks).
+    expect(textBlocks(tab, id).filter((b) => b.type === "tool" || b.type === "text")).toEqual([]);
+
+    const agent = tab.agentSpawns.find((a) => a.id === "task-1")!;
+    expect(agent).toMatchObject({ subagentType: "recon", description: "map the files", completedAt: null });
+    expect(agent.blocks.map((b) => b.type)).toEqual(["text", "tool", "text"]);
+    expect(agent.blocks[0]).toEqual({ type: "text", text: "scanning" });
+    expect(agent.blocks[1]).toMatchObject({ type: "tool", id: "n-tu-1", name: "Grep", status: "done", result: "3 matches" });
+    expect(agent.blocks[2]).toEqual({ type: "text", text: "found 3" });
+  });
+
+  it("marks the spawn done when the top-level Task tool_result arrives (parent null)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-2", "scout", "research"),
+      nestedTextEnv("task-2", "working"),
+      toolResultEnv("task-2", "summary text", false), // top-level → completes spawn
+    ]);
+    const agent = tab.agentSpawns.find((a) => a.id === "task-2")!;
+    expect(agent.completedAt).not.toBeNull();
+    expect(agent.isError).toBe(false);
+    expect(agent.blocks.map((b) => b.type)).toEqual(["text"]); // sub-transcript intact
+  });
+
+  it("drops a frame whose parent matches no tracked spawn — no phantom agent, no main leak", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [nestedTextEnv("ghost", "orphan")]);
+    expect(tab.agentSpawns.find((a) => a.id === "ghost")).toBeUndefined();
+    expect(textBlocks(tab, id)).toEqual([]); // not leaked into the main bubble
+  });
+});
+
 // ── Thinking blocks ──────────────────────────────────────────────────────────
 describe("playback — thinking blocks", () => {
   it("opens, streams, signs, and closes a thinking block", () => {

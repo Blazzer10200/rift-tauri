@@ -3,8 +3,10 @@
   import { cubicOut } from "svelte/easing";
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
+  import { activityDock } from "../../state/activityDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
+  import SubAgentDock from "./SubAgentDock.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -24,6 +26,15 @@
     void assistant.init().then(() => {
       if (assistant.openTabs.length === 0) void assistant.newTab();
     });
+  });
+
+  // Smart visibility: reveal the sub-agent dock while Task/Agent work is in
+  // flight and slide it away once everything finishes. The dock controller
+  // handles the grace delay + user-pin overrides.
+  $effect(() => {
+    const sp = assistant.activeTab?.agentSpawns ?? [];
+    const running = sp.filter((a) => a.completedAt == null).length;
+    activityDock.syncActivity(running, sp.length);
   });
 
   // ── Resizable dividers ────────────────────────────────────────────────────
@@ -152,10 +163,29 @@
     dockDragging = false;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
   }
+
+  // ── Activity (sub-agent) dock resize ──────────────────────────────────────
+  // Mirrors the browser-dock drag, measured from the same workbench right edge.
+  let activityDragging = $state(false);
+  function onActivityPointerDown(e: PointerEvent) {
+    e.preventDefault();
+    activityDragging = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onActivityPointerMove(e: PointerEvent) {
+    if (!activityDragging || !workbenchEl) return;
+    const rect = workbenchEl.getBoundingClientRect();
+    activityDock.setWidth(rect.right - e.clientX);
+  }
+  function onActivityPointerUp(e: PointerEvent) {
+    if (!activityDragging) return;
+    activityDragging = false;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+  }
 </script>
 
 <div class="assistant">
-  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging}>
+  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging || activityDragging}>
   <div class="layout">
     {#if assistant.splitActive}
       <div
@@ -209,7 +239,7 @@
          drive the stage's ResizeObserver → syncBounds so the native child
          webview tracks the motion instead of only opacity animating. -->
     <div class="dock-wrap" transition:dockSlide>
-      <div class="dock-inner" style="width: {browserDock.width + 6}px">
+      <div class="dock-inner" style="width: {browserDock.width + 3}px">
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
         <div
@@ -227,6 +257,28 @@
         <div class="browser-dock">
           <WebBrowserPage />
         </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if activityDock.open}
+    <div class="dock-wrap" transition:dockSlide>
+      <div class="dock-inner" style="width: {activityDock.width + 3}px">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="dock-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sub-agent panel"
+          tabindex="0"
+          use:tooltip={"Drag to resize the sub-agent panel"}
+          onpointerdown={onActivityPointerDown}
+          onpointermove={onActivityPointerMove}
+          onpointerup={onActivityPointerUp}
+          onpointercancel={onActivityPointerUp}
+        ><span class="divider-grip" aria-hidden="true"></span></div>
+        <SubAgentDock />
       </div>
     </div>
   {/if}
@@ -280,9 +332,9 @@
   }
   .dock-divider {
     position: relative;
-    flex: 0 0 6px;
+    flex: 0 0 3px;
     cursor: col-resize;
-    background: var(--border);
+    background: color-mix(in oklch, var(--border) 70%, transparent);
     align-self: stretch;
     user-select: none;
     transition: background 120ms ease-out;
