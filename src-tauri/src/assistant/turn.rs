@@ -769,7 +769,13 @@ pub async fn assistant_send(
         if !use_api_key {
             cmd.arg("--bare");
         }
-        if let Some(base) = cfg.local_llm_base_url.as_deref().filter(|s| !s.is_empty()) {
+        // Re-validate at the sink: the setter guards writes, but a hand-edited
+        // config.json could still carry a non-http(s) scheme. Skip if invalid.
+        if let Some(base) = cfg
+            .local_llm_base_url
+            .as_deref()
+            .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
+        {
             cmd.env("ANTHROPIC_BASE_URL", base);
         }
         let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
