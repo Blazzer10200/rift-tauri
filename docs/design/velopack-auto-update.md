@@ -112,6 +112,30 @@ Both are best-effort (`let _ =`); a "no tasks" exit is fine. Only then `app.exit
 still hit the lock updating *to* 0.6.2 → one-time manual `Setup.exe`. From 0.6.2
 onward, in-app updates apply cleanly.
 
+### Second locker class (v0.12.3) — hook-spawned daemons that inherit the install-dir cwd
+
+The v0.6.2 reap kills `rift-tauri.exe`, but a user's reinstall still bricked with
+*"Failed to remove existing application directory"* (handle confirmed via
+Sysinternals `handle64` on `…\Rift\current`). The locker was **not** a Rift
+process at all: when Rift runs with **no workspace folder open**, `turn.rs`
+spawned the Claude CLI without setting a cwd, so the child inherited Rift's own
+install dir (`…\current\`). The CLI's SessionStart hook then launched a
+long-lived daemon (the user's Pulse telemetry daemon, `disown`ed) with that cwd.
+A `disown`ed daemon is **out of the claude process tree**, so neither
+`kill_all_session_children()` (tree-kill) nor the `rift-tauri.exe` image sweep
+can ever reap it — and a process holding a dir as its *working directory* blocks
+the rename just like an open file handle does.
+
+**Fix (`turn.rs`, at the spawn): `cmd.current_dir(std::env::temp_dir())` by
+default, overridden to the workspace root when one exists.** The child — and
+anything its hooks spawn — can no longer inherit `…\current\`. This is
+prevention, not reap: there is no reliable way to reap a disowned, out-of-tree
+daemon at apply-time, so the only robust cut is to never let the locker be
+created. (A cwd-scanning reaper in Rust would need `NtQueryInformationProcess`
+and risks killing unrelated processes — rejected.) Same bootstrap caveat as
+v0.6.2: clients on the old binary hit the lock once when updating *to* the fixed
+build (manual `Setup.exe` after clearing lockers); fixed builds apply cleanly.
+
 ### Resolved code details (closed during research)
 
 - **`VelopackApp::build().run()` ordering.** Must be near-first, BUT after the

@@ -981,6 +981,7 @@
             setDraft((e.currentTarget as HTMLTextAreaElement).value);
             undoDraft = null;
             stt.dismissPolishUndo();
+            stt.cancelPolish();
             resetRecall(); autosize(); refreshMention();
           }}
           onkeyup={() => refreshMention()}
