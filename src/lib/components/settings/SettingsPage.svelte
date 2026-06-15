@@ -1020,7 +1020,7 @@
   .st-btn :global(.st-spin) { animation: st-spin 0.8s linear infinite; }
   @keyframes st-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .st-btn :global(.st-spin) { animation: none; } }
-  .st-cli-err { margin-top: 7px; font-size: var(--fs-xs); color: var(--danger, #e66); white-space: pre-wrap; }
+  .st-cli-err { margin-top: 7px; font-size: var(--fs-xs); color: var(--danger); white-space: pre-wrap; }
   .st-cli-ok { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); white-space: pre-wrap; }
   .st-cli-warn { margin-top: 7px; font-size: var(--fs-xs); color: var(--warn); line-height: 1.4; }
 

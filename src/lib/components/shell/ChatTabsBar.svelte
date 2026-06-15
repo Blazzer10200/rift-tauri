@@ -1144,9 +1144,9 @@
     display: inline-flex; align-items: center; gap: 5px;
     height: 22px; padding: 0 8px;
     font-size: 11px; font-weight: 600;
-    color: var(--warn, #e2b340);
-    background: color-mix(in oklab, var(--warn, #e2b340) 10%, transparent);
-    border: 1px solid color-mix(in oklab, var(--warn, #e2b340) 32%, transparent);
+    color: var(--warn);
+    background: color-mix(in oklab, var(--warn) 10%, transparent);
+    border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent);
     border-radius: 999px;
     max-width: 180px;
   }

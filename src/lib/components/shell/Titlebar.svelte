@@ -205,8 +205,8 @@
   /* Experimental marker on the Local LLM nav item — inline amber dot. */
   .exp-dot {
     width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
-    background: var(--warn, #d9a441);
-    box-shadow: 0 0 6px color-mix(in oklab, var(--warn, #d9a441) 55%, transparent);
+    background: var(--warn);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 55%, transparent);
   }
 
   /* Horizontal workspace nav — replaced the vertical activity column. */
