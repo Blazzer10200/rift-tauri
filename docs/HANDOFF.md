@@ -9,12 +9,14 @@ Issue-logging session that turned into a ship. Three user-reported quirks fixed,
 - **#40 STT polish UX** — dictation shimmer ran up to the backend's 15s cap. Fix: 6s frontend `SHIMMER_CAP_MS`, `cancelPolish()` on typing (guard token kills the late swap), skip redundant `onEnd` rewrite.
 - **#39 P0-4 double timer** — role-row `9s` heartbeat now yields to a quiet dot while a thinking block is active (thinking pill owns the only ticking number in that phase).
 
-Verify: svelte-check 0/0 (4094) · vitest 162✓ · live app 0 console errors. Shipped `v0.12.1` (tag pushed → release CI).
+Verify: svelte-check 0/0 (4094) · vitest 162✓ · live app 0 console errors. Shipped **v0.12.1** (release CI ✅).
 
-**RESUME:** confirm the v0.12.1 release CI went green on `rift-releases`. Then PR #6 (CLI-update test net) review/merge, and the CDP-gated backlog below.
+Then **v0.12.2** — the `check` workflow's `npm audit --omit=dev` gate failed on a pre-existing moderate DOMPurify advisory (`dompurify <=3.4.8`, XSS vectors; backs Markdown `{@html}`). Bumped `dompurify 3.4.3 → ^3.4.10` (same-minor, no API change). Prod audit → 0 vulns. Shipped **v0.12.2** — release CI ✅ **and** check CI ✅ (both green). Note: `check.yml` runs `npm audit --omit=dev` as a hard gate — a new prod advisory will fail every push until the dep is bumped.
+
+**RESUME:** clean slate. PR #6 (CLI-update test net) review/merge, then the CDP-gated backlog below.
 
 ## Recent committed/shipped — detail in git log + CHANGELOG + `docs/ISSUES.md`
-- **cont.142 → v0.12.1** split-pane send fix (#41) + STT polish UX (#40) + double-timer (#39 P0-4).
+- **cont.142 → v0.12.1 + v0.12.2** split-pane send fix (#41) + STT polish UX (#40) + double-timer (#39 P0-4); then DOMPurify `3.4.3→^3.4.10` security bump (check CI gate). Both releases + check CI green.
 - **cont.141 → PR #6** (open) CLI-update test net: +23 vitest cases for `cliUpdate.svelte.ts`, exported `CliUpdate` for isolated tests (singleton unchanged), no runtime change. PR #5 merged (`300b6e0`).
 - **cont.140 → `300b6e0`** #39 security hardening (local_llm base_url validation · export ext allowlist · git_local env strip · opener https-only · oauth read `spawn_blocking`) + helper dedup + dead color-var cleanup.
 - **cont.139 → v0.12.0** Local LLM cockpit redesign.
@@ -40,4 +42,4 @@ cont.130 v0.9.5 R2 ship. cont.127–129 Local-LLM (shim+probe+picker) gated (`do
 - **IA: 3 core workspaces** (Home·Chat·Settings) + **experimental Local LLM** (kbd 4, gated).
 
 ## Live state pointer
-Read this + `docs/ISSUES.md` before assuming state. **v0.12.1 shipped** (tag pushed → release CI; confirm green on `rift-releases`). PR #6 open (CLI-update test net). Next: #39 P0-3 + P2 (needs desktop CDP); Local LLM backend pass; #37 multi-window Route A.
+Read this + `docs/ISSUES.md` before assuming state. **v0.12.2 shipped** (latest; release + check CI both green). PR #6 open (CLI-update test net). Next: #39 P0-3 + P2 (needs desktop CDP); Local LLM backend pass; #37 multi-window Route A.
