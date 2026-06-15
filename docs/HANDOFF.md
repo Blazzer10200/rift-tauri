@@ -2,6 +2,13 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
+## Session 2026-06-14 (cont.133) — Home stats dashboard (Claude-Code-style) → COMMITTED, live-verified Overview
+
+Filled the empty lower-center of Home with a Rift-native stats dashboard (user req: "make it blend in, quality over quantity"). **Honest data only** — per-message tokens/timestamps aren't persisted, so NO fabricated token totals.
+- **Backend:** new `assistant_stats` cmd (`convo_store.rs`) scans every saved transcript once → one lightweight `ConvoStat` row/convo (messages, userMessages, toolCalls, words, costUsd, model, created/updatedAt). Registered in `lib.rs`. All day/hour bucketing is FRONTEND so it lands in local tz.
+- **Frontend:** `statsHelpers.ts` (pure aggregation — range filter, summarize, streaks, peakHour, perModel, heatmap, funFact, formatters; +21 vitest) · `homeStats.svelte.ts` (cached store) · `HomeStats.svelte` (Overview = 8 KPI tiles [Sessions·Messages·Tool calls·Spend / Active days·Streak·Peak hour·Top model] + 18-week GitHub-style heatmap + Moby-Dick fun-fact; Models = daily message bars + per-model breakdown w/ colored share bars; All/30d/7d range chips; empty + skeleton states). Center column restructured to a flex stack (jump tile on top, stats fills rest) in `HomePage.svelte`.
+- **Verified:** svelte-check 0/0 · vitest 154/154 · cargo check clean · live CDP (Overview): real data (138 sessions · 1,841 msgs · 6,794 tools · $936 · 18d streak · 3 PM peak · Opus 4.8), 0 console errors. **Untested:** Models tab pixels (static-green only). No version bump.
+
 ## Session 2026-06-14 (cont.132) — split-pane header w/ convo title (#36 UX) → COMMITTED `3b28567`
 
 User dir: "do whatever's best for user-friendly + UI, make it look good"; **keybinds explicitly off the table** (rejected #36 kbd-nav). Picked the clearest split-pane UX gap: panes were identifiable only by a tiny 50%-opacity floating number — couldn't tell *which chat* was in *which pane*.

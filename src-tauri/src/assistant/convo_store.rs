@@ -282,6 +282,95 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
     Ok(out)
 }
 
+/// Lightweight per-conversation summary for the Home stats dashboard. One row
+/// per saved transcript; all day/hour bucketing happens frontend-side in LOCAL
+/// time (timezone-correct active-days, streaks, peak hour). Block-level counting
+/// (tool calls, words) stays in Rust so the frontend never loads full
+/// transcripts over IPC just to tally them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConvoStat {
+    pub updated_at: i64,
+    pub created_at: i64,
+    pub model: String,
+    /// user + assistant messages (system/boundary rows excluded).
+    pub messages: u32,
+    pub user_messages: u32,
+    /// tool-use blocks across the transcript — Rift's agentic-activity metric.
+    pub tool_calls: u32,
+    /// whitespace-delimited word count across text blocks (both roles).
+    pub words: u32,
+    /// Σ of per-message costUsd — accurate; 0 for convos predating cost capture.
+    pub cost_usd: f64,
+}
+
+/// Scan every saved conversation and return per-convo summaries for the Home
+/// dashboard. Cheap DTO (no transcript bodies) so the frontend can aggregate
+/// totals, per-model breakdowns, and the activity heatmap without re-reading
+/// disk. Unparseable files are skipped, mirroring `assistant_list_conversations`.
+#[tauri::command]
+pub fn assistant_stats() -> Result<Vec<ConvoStat>, String> {
+    let dir = conversations_dir()?;
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return Ok(out),
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let bytes = match std::fs::read(&p) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let convo: Conversation = match serde_json::from_slice(&bytes) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let Some(arr) = convo.messages.as_array() else {
+            continue;
+        };
+        let mut s = ConvoStat {
+            updated_at: convo.updated_at,
+            created_at: convo.created_at,
+            model: convo.model,
+            messages: 0,
+            user_messages: 0,
+            tool_calls: 0,
+            words: 0,
+            cost_usd: 0.0,
+        };
+        for m in arr {
+            match m.get("role").and_then(|r| r.as_str()) {
+                Some("user") => s.user_messages += 1,
+                Some("assistant") => {}
+                _ => continue, // skip system / boundary rows
+            }
+            s.messages += 1;
+            if let Some(c) = m.get("costUsd").and_then(|v| v.as_f64()) {
+                s.cost_usd += c;
+            }
+            if let Some(blocks) = m.get("blocks").and_then(|b| b.as_array()) {
+                for b in blocks {
+                    match b.get("type").and_then(|t| t.as_str()) {
+                        Some("tool") => s.tool_calls += 1,
+                        Some("text") => {
+                            if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                                s.words += t.split_whitespace().count() as u32;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        out.push(s);
+    }
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn assistant_load_conversation(id: String) -> Result<Conversation, String> {
     let p = convo_path(&id)?;

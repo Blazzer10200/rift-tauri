@@ -10,6 +10,7 @@
   import { workspace } from "$lib/state/workspace.svelte";
   import { usage, type LimitWindow } from "$lib/state/usage.svelte";
   import { tooltip } from "$lib/actions/tooltip";
+  import HomeStats from "./HomeStats.svelte";
 
   // Claude Code CLI update — the dashboard is the launch surface, so kick the
   // (throttled) npm check here and surface a dismissible banner if one's live.
@@ -238,6 +239,8 @@
         {/if}
       </div>
 
+      <!-- Center column: Jump back in (top) + stats dashboard (fills the rest) -->
+      <div class="t-center">
       <!-- Jump back in — wide tile -->
       <div class="tile t-jump">
         <div class="tile-head">
@@ -267,6 +270,9 @@
             {/each}
           {/if}
         </div>
+      </div>
+
+      <HomeStats />
       </div>
 
       <!-- Right rail: plan limits -->
@@ -407,7 +413,8 @@
     box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent);
   }
   .t-ws { grid-area: ws; padding: 20px 20px 16px; }
-  .t-jump { grid-area: jump; padding: 20px 20px 14px; }
+  .t-center { grid-area: jump; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
+  .t-jump { flex: 0 0 auto; max-height: 48%; padding: 20px 20px 14px; }
   .t-side { grid-area: side; min-height: 0; display: flex; flex-direction: column; gap: 14px; }
   .t-limits { flex: none; }
 
@@ -422,7 +429,9 @@
         "ws   jump"
         "side side";
     }
-    .t-ws, .t-jump { min-height: 280px; }
+    .t-ws { min-height: 280px; }
+    .t-jump { max-height: none; min-height: 240px; }
+    .t-center :global(.stats) { min-height: 380px; }
     .t-side { flex-direction: row; }
     .t-side > .tile { flex: 1; min-width: 0; }
   }
