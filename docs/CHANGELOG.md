@@ -2,14 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.9.5 — 2026-06-14 — R2 publish actually fires (feed populated)
+## v0.10.0 — 2026-06-15 — Home stats dashboard + audit-hardening pass
 
-> **Why.** v0.9.4 pointed the updater at the self-hosted Cloudflare R2 feed, but the CI `env:` block that passes the R2 secrets into `release.ps1` landed *after* the v0.9.4 tag was cut — so v0.9.4's own release run never reached the conditional `vpk upload s3`. The bucket stayed empty: the site download CTA 404'd and R2-reading clients had no feed. This is the first tag to run the corrected workflow.
+> **Why.** The Home page had a large empty lower-center region. This release fills it with a Rift-native stats dashboard (inspired by Claude Code desktop, built on honest data only), plus a full-app audit pass (security · dead-code · UI/UX) and a couple of composer/UX fixes.
 
-**Fixed:**
-- **R2 dual-publish now executes.** `release.yml`'s Release step exports the four `R2_*` secrets, so `release.ps1`'s conditional `vpk upload s3` runs and lands `Setup.exe` + `.nupkg` + `releases.win.json` in the `rift-releases` R2 bucket. Site CTA + R2 auto-update feed go live with this tag.
+**New:**
+- **Home stats dashboard.** New `assistant_stats` backend command scans every saved transcript once → per-conversation summaries; the frontend aggregates in local time. Overview = 8 KPI tiles (Sessions · Messages · Tool calls · Spend / Active days · Streak · Peak hour · Top model) + an 18-week GitHub-style activity heatmap + a Moby-Dick word-count fun-fact. Models tab = daily message bars + colored per-model breakdown. All/30d/7d range chips; empty + skeleton states. No fabricated token totals — per-message tokens aren't persisted, so only honest metrics are shown.
 
-**Verify.** version lockstep ×3 + `Cargo.lock` at 0.9.5.
+**Changed / Fixed:**
+- **Fable 5 disabled** (US-gov disablement, temporary) behind a revertible two-flag kill-switch — the picker hides it and any pinned/stored Fable session falls back to Opus before it can hit the API. Re-enable = flip `FABLE_DISABLED` on both sides.
+- **Composer attachments** now render inside the input card instead of floating between the queue rail and the composer (fixed the lifted-rail / detached-image layout when pasting mid-turn).
+- **Security:** attachment MIME is now a strict allowlist (png/jpeg/gif/webp) instead of an `image/` prefix.
+- **Tidy:** deduped a drift-prone model-label map; added a couple of icon-button aria-labels. Deferred audit findings catalogued in `docs/ISSUES.md` #39.
+
+**Verify.** version lockstep ×3 + `Cargo.lock` at 0.10.0 · svelte-check 0/0 · vitest 154/154 · cargo check clean · stats dashboard live-verified via CDP.
 
 ## Older versions
 
