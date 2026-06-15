@@ -2,36 +2,37 @@
 
 > Live = current session + RESUME HERE + CRITICAL DON'T-TOUCH. Older history via `git log -- docs/HANDOFF.md`. Cap ≤600 words.
 
-## Session 2026-06-15 (cont.138) — UI consistency batch → SHIPPED v0.11.0
+## Session 2026-06-15 (cont.139) — Local LLM cockpit redesign → SHIPPED v0.12.0
 
-Shipped the UI-review §3 P0/P1 backlog and folded in cont.135/137's in-flight work. All committed; tagged **`v0.11.0`** → CI building (`release.yml` → rift-releases).
-- **Shared `PageHero`** (`src/lib/components/shared/PageHero.svelte`) — Settings + Local LLM now consume one hero source; killed the copy-pasted chrome + the 880→820px `.sb-wrap` drift. [P0-2]
-- **P0-1** already in the recommended state — Local LLM header pill = status `<span>`, Mode-card switch = the control. No functional change needed.
-- **Home** (`HomePage.svelte`): Quick-actions card fills the dead right column; hero "New chat" → "＋ New tab" (launcher stays primary). **Nav** (`Titlebar.svelte`): experimental amber `.exp-dot` on the Local LLM item; Settings gear tooltip shows Ctrl+3 / Ctrl+,. [P1-4/5/6/7]
-- **Verified:** svelte-check 0/0 (4094 files) · Settings + Local LLM heroes live-CDP-verified · `Cargo.lock` auto-bumped to 0.11.0 by the running dev.
-- **Thinking-display finding (closed):** Opus 4.8 thinking text can't stream — model default `thinking.display:"omitted"` + CLI 2.1.177 exposes no override flag. Sonnet streams it because its default is `"summarized"`. `turn.rs:791` comment corrected (was wrongly "-p mode encryption"). Rift's pipeline already renders `thinking_delta` — works for free if the CLI ever adds a display flag.
-- **DEFERRED → `ISSUES.md #39`:** P0-3 unify the CLI-update notice (3 surfaces — touches the **Velopack** update path, verify carefully); P2 shared size/color tokens + `.sb-bento` rename.
-- **NOTE:** two operator subagents bailed mid-task (returned stale "result" text, skipped the required `npm run check`); finished + verified inline. Prefer inline + CDP-verify for UI work.
-- **RESUME:** P0-3 + P2 from ISSUES #39 when ready.
+Rebuilt the **Local LLM page** (`local-llm/LocalLlmPage.svelte`) from a flat 3-card form into a status-driven cockpit; pruned stale ISSUES; shipped **`v0.12.0`** (tag pushed → CI → rift-releases).
+- **Cockpit layout:** Mode master strip on top, then status/readiness **rail** (left) + **config** (right). Content vertically centers (`justify-content: safe center`) — killed the dead lower-half void.
+- **Readiness state machine** (`Off → Incomplete → Ready → Verified`) derived from live config — drives hero chip tint, status dot, and a 2px state-colored rail hairline. Setup checklist (endpoint/model/key/verified) with live values.
+- **Verify card:** client-side round-trip latency (`performance.now()`) + "checked HH:MM:SS" stamp + reply in an inset card; any endpoint/model edit invalidates the prior pass. **Quick-start presets** fill base URL; **detected models** are selectable chips (was a hidden datalist). Mode strip washes accent when on; off-state shows a Rift→Endpoint→Model flow explainer.
+- **Frontend-only** — no backend/config touched, fully reversible. svelte-check 0/0 (4094 files). User live-eyeballed on/off states.
+- **ISSUES prune:** deleted six shipped "resolved in-tree" blocks (#34, CR-UX, #29, #30, #32, #38 — all ≤ v0.11.0).
+- **RESUME:** #39 P0-3 (unify CLI-update notice — Velopack path) + P2 (shared size/color tokens). Local LLM **backend pass** (live health ping on load · model metadata · real tool-calling probe) deferred — frontend cockpit done, backend richness not started.
+- **Flagged for your call:** possibly-stale design docs `self-hosted-distribution*.md` / `ui-polish-arc.md` — not deleted (couldn't confirm completed). Catalogued #39 dead-code dupes deliberately kept out of this release (multi-file refactor, not night-ship material).
 
 ## Recent committed/shipped — detail in git log + CHANGELOG + `docs/ISSUES.md`
-- **cont.138 → v0.11.0 SHIPPED** (this session). Commits: `ab1eeb9` drag-split + non-blocking STT (was cont.135), `22272cb` live-status→composer (was cont.137), `fd10609` thinking-comment fix, `08acc86` PageHero/Home/nav feature.
-- **cont.136** `a3ab764` live sub-agent activity dock (Chat right-edge; `parent_tool_use_id` routing in `streaming.ts`/`SubAgentDock.svelte`/`activityDock.svelte.ts`).
-- **cont.134 → v0.10.0** Home stats dashboard, Fable disabled behind `FABLE_DISABLED` kill-switch, audit-hardening (`086e403`).
-- **cont.131–133** per-pane STT routing + per-tab workspace root, `.pane-head`, Home `assistant_stats`.
+- **cont.139 → v0.12.0** Local LLM cockpit (this session).
+- **cont.138 → v0.11.0** shared `PageHero` (Settings + Local LLM), Home quick-actions, nav experimental-dot, live-status→composer, drag-split fix, thinking-comment fix.
+- **cont.136** `a3ab764` live sub-agent activity dock (`parent_tool_use_id` routing).
+- **cont.134 → v0.10.0** Home stats dashboard, Fable disabled behind `FABLE_DISABLED` kill-switch, audit-hardening.
+- **cont.131–133** per-pane STT routing + per-tab workspace root, Home `assistant_stats`.
 
 ## Prior arcs — detail in git log + CHANGELOG
-cont.130 v0.9.5 R2 ship. cont.127–129 Local-LLM (shim+probe+picker) gated/unshipped (`docs/design/local-llm.md`). cont.123 → v0.9.3. cont.121 → v0.9.2. cont.119 minimal-core strip (3 workspaces) → v0.9.0. cont.94 Fable 5. PID-only kills, NEVER by image name.
+cont.130 v0.9.5 R2 ship. cont.127–129 Local-LLM (shim+probe+picker) gated (`docs/design/local-llm.md`). cont.119 minimal-core strip (3 workspaces) → v0.9.0. cont.94 Fable 5. PID-only kills, NEVER by image name.
 
 ## CRITICAL DON'T-TOUCH
-- **PageHero is the shared hero** (cont.138) — Settings + Local LLM consume `shared/PageHero.svelte`; page-local `.sb-chip` variants stay in each page (snippet CSS scopes to the defining component). Don't re-fork the hero chrome.
-- **Activity dock is GONE** (cont.122) — don't reintroduce `assistant.ui.dockOpen`/`dockWidth`. Live readout = composer LivePills; context = composer gauge + tabsbar ctx-pill; diff = Ctrl+Shift+D.
-- **Tool-group grouping (cont.121):** `coalesceToolGroups`; open = `expandedGroups.has(key) !== defaultOpen` (XOR). Card + left status-rail, NOT a spine bullet.
+- **Local LLM page is a cockpit** (cont.139) — status rail + config grid; readiness state machine drives the tinting. Frontend-only; backend pass not started.
+- **PageHero is the shared hero** (cont.138) — Settings + Local LLM consume `shared/PageHero.svelte`; page-local `.sb-chip` variants stay per-page. Don't re-fork the hero chrome.
+- **Activity dock is GONE** (cont.122) — don't reintroduce `assistant.ui.dockOpen`/`dockWidth`. Live readout = composer LivePills.
+- **Tool-group grouping (cont.121):** `coalesceToolGroups`; open = `expandedGroups.has(key) !== defaultOpen` (XOR).
 - **Live TabState authoritative over disk** — never re-add `stop()` to `loadConversation`.
 - **Trust enum 2-level** — `full` rejected for new writes, MIGRATE read-side.
 - **Effort mapping lockstep** (`effortToFlag` ↔ `turn.rs` ↔ `modelMatrix.ts` + vitest). **Right-click ownership** (`preventDefault()`).
-- **Accent via `--accent-h`** (emerald 163); tint `in oklab`. Surface tiers: page .142 · card .215 · wells .178 · field .25 · track .175.
-- **IA: 3 core workspaces** (Home·Chat·Settings) + **experimental Local LLM** (kbd 4, gated, not shipped). **Versions lockstep ×3 + Cargo.lock** — only at ship.
+- **Accent via `--accent-h`** (emerald 163). **Versions lockstep ×3 + Cargo.lock** — only at ship.
+- **IA: 3 core workspaces** (Home·Chat·Settings) + **experimental Local LLM** (kbd 4, gated).
 
 ## Live state pointer
-Before assuming current state, read this file + `docs/ISSUES.md`. v0.11.0 shipped; P0-3 + P2 remain in ISSUES #39.
+Read this + `docs/ISSUES.md` before assuming state. v0.12.0 shipped. Next: #39 P0-3 + P2; Local LLM backend pass.
