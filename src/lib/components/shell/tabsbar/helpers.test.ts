@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leafName, prettyPath, shortK } from "./helpers";
+import { leafName, prettyPath, shortK, shortPath } from "./helpers";
 
 describe("leafName", () => {
   it("returns the last segment for unix and windows paths", () => {
@@ -19,6 +19,18 @@ describe("prettyPath", () => {
   });
   it("leaves normal paths alone", () => {
     expect(prettyPath("C:\\Users\\x")).toBe("C:\\Users\\x");
+  });
+});
+
+describe("shortPath", () => {
+  it("keeps the last two segments with an ellipsis prefix", () => {
+    expect(shortPath("/home/user/projects/rift")).toBe("…/projects/rift");
+    expect(shortPath("C:\\AI Workflow\\projects\\rift")).toBe("…/projects/rift");
+  });
+  it("returns ≤2-segment paths unchanged and respects trailing slashes", () => {
+    expect(shortPath("/home")).toBe("/home");
+    expect(shortPath("a/b")).toBe("a/b");
+    expect(shortPath("/home/user/project/")).toBe("…/user/project");
   });
 });
 

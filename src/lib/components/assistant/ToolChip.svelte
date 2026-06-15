@@ -17,6 +17,7 @@
   import { slide } from "svelte/transition";
   import { untrack } from "svelte";
   import Markdown from "./Markdown.svelte";
+  import { basename } from "./toolCaption";
 
   import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
@@ -157,11 +158,6 @@
   function hostOf(u: string): string {
     try { return new URL(u).host; } catch { return u; }
   }
-  function basenameOf(p: string): string {
-    const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
-    return parts[parts.length - 1] ?? p;
-  }
-
   // Compact 1-line summary — file path, command, pattern, etc. Full BUILTINS
   // coverage so every tool name in `--allowed-tools` (assistant/mod.rs) has
   // a dedicated chip rendering instead of falling through to the generic
@@ -169,9 +165,9 @@
   const summary = $derived.by<string>(() => {
     const n = shortName(tool.name);
     const inp = tool.input ?? {};
-    const fp = typeof inp.file_path === "string" ? basenameOf(inp.file_path as string)
-             : typeof inp.path === "string" ? basenameOf(inp.path as string)
-             : typeof inp.notebook_path === "string" ? basenameOf(inp.notebook_path as string) : null;
+    const fp = typeof inp.file_path === "string" ? basename(inp.file_path as string)
+             : typeof inp.path === "string" ? basename(inp.path as string)
+             : typeof inp.notebook_path === "string" ? basename(inp.notebook_path as string) : null;
     // File ops.
     if (n === "Read" || n === "read_file") return fp ?? "file";
     if (n === "Write") {

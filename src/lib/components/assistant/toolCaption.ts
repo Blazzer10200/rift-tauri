@@ -3,7 +3,7 @@
 
 type Input = Record<string, unknown>;
 
-function basename(p: string): string {
+export function basename(p: string): string {
   const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
   return parts[parts.length - 1] ?? p;
 }
