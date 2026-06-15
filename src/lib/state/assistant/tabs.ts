@@ -156,8 +156,28 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
   if (!host.openTabs.includes(tabId)) return;
   if (paneIdx < 0) return;
 
-  // Sentinel: "add new pane at end". Cap-respecting.
-  if (paneIdx >= host.panes.length) {
+  if (host.panes.length === 1) {
+    // Single-pane → drop on a half = enter split. The half-detect passes
+    // paneIdx 0 (left) or 1 (right); the dragged tab fills that half. This
+    // MUST be checked before the add-new-pane sentinel below: with one pane,
+    // a right-half drop is paneIdx 1 and `1 >= panes.length` would otherwise
+    // mis-route into the sentinel and just clone the tab into a 2nd pane.
+    // The other half gets the current tab — or, when the user drags the tab
+    // that's already showing, the next different open tab (empty slot if
+    // none) so the gesture still splits instead of cloning/no-opping.
+    const other = paneIdx === 0 ? 1 : 0;
+    const counterpart =
+      tabId === host.currentConvoId
+        ? host.openTabs.find((t) => t !== tabId) ?? null
+        : host.currentConvoId;
+    const next: PaneState[] = [{ tabId: null }, { tabId: null }];
+    next[paneIdx] = { tabId };
+    next[other] = { tabId: counterpart };
+    host.panes = next;
+    host.telemetry.event("pane.split.on", { via: "drag", p0: next[0].tabId, p1: next[1].tabId });
+  } else if (paneIdx >= host.panes.length) {
+    // Sentinel: "add new pane at end". Cap-respecting. Multi-pane only —
+    // single-pane is handled above.
     if (host.panes.length >= MAX_PANES) return;
     const next = host.panes.slice();
     next.push({ tabId });
@@ -174,18 +194,6 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     host.restoreTabUi(tabId);
     host.persistTabs();
     return;
-  }
-
-  if (host.panes.length === 1) {
-    // Single-pane → drop on a half = enter split. paneIdx is 0 or 1 from
-    // the half-detect. If the dragged tab IS the only-pane tab, ignore.
-    if (tabId === host.currentConvoId) return;
-    const other = paneIdx === 0 ? 1 : 0;
-    const next: PaneState[] = [{ tabId: null }, { tabId: null }];
-    next[paneIdx] = { tabId };
-    next[other] = { tabId: host.currentConvoId };
-    host.panes = next;
-    host.telemetry.event("pane.split.on", { via: "drag", p0: next[0].tabId, p1: next[1].tabId });
   } else {
     // Already split: same tab in target = focus only.
     if (host.panes[paneIdx].tabId === tabId) {

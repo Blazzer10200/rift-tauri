@@ -728,7 +728,12 @@ class SttStore {
     const raw = this.finalText.trim();
     if (!this.config.cleanup_enabled || raw.split(/\s+/).length < 3) return;
     const committed = this.composeDraft(raw, "");
-    this.transcribing = true;
+    // Non-blocking: the raw transcript is already committed to the draft and
+    // is immediately editable/sendable. The Haiku pass is cosmetic, so it must
+    // NOT raise `transcribing` (that disables the mic + blocks the composer,
+    // which read as "loading forever"). `polishing` drives only the quiet
+    // textarea shimmer; the result swaps in below only if the draft is
+    // untouched.
     this.polishing = true;
     try {
       const cleaned = (await invoke<string>("stt_clean_transcript", { text: raw })).trim();
@@ -748,7 +753,6 @@ class SttStore {
     } catch (e) {
       console.warn("stt cleanup failed:", e);
     } finally {
-      this.transcribing = false;
       this.polishing = false;
     }
   }
