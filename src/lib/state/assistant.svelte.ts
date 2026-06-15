@@ -241,9 +241,13 @@ export class TabState {
   /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
    *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
   attachments = $state<{ id: string; mime: string; dataBase64: string; sizeBytes: number }[]>([]);
-  /** S124: in-flight sub-agent spawns. Pushed on Task tool_use, marked done
-   *  on the matching tool_result. CLI does NOT stream intermediate sub-agent
-   *  activity — we only know spawn + final result. */
+  /** S124: in-flight sub-agent spawns. Pushed on Task/Agent tool_use, marked
+   *  done on the matching tool_result. The CLI DOES multiplex sub-agent output
+   *  into the same stream — nested frames carry `parent_tool_use_id` = this
+   *  spawn's id (verified 2026-06-14). `blocks` accumulates that sub-agent's
+   *  own transcript (text / thinking / tool steps) at envelope granularity —
+   *  no token-level deltas for sub-agents — and feeds the live sub-agent dock.
+   *  See applySubAgentFrame in streaming.ts. */
   agentSpawns = $state<{
     id: string;
     subagentType: string;
@@ -251,6 +255,7 @@ export class TabState {
     startedAt: number;
     completedAt: number | null;
     isError: boolean;
+    blocks: Block[];
   }[]>([]);
 
   /** Live bindings for `mcp__rift__ask_user` tool calls: toolUseId →

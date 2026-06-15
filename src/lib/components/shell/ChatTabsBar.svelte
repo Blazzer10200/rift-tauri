@@ -4,12 +4,13 @@
   // between the wire-error banner and the .body grid whenever the Chat
   // workspace is active.
 
-  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, History, ChevronDown, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff, Loader2 } from "lucide-svelte";
+  import { MessageSquare, Plus, X, PanelRight, FolderOpen, Folder, FolderGit2, GitBranch, SplitSquareHorizontal, History, ChevronDown, Globe, Check, ArrowUpCircle, Copy, ExternalLink, FileDiff, Loader2, Bot } from "lucide-svelte";
   import { onDestroy, onMount } from "svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
   import { browserDock } from "../../state/browserDock.svelte";
+  import { activityDock } from "../../state/activityDock.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
@@ -594,7 +595,7 @@
       use:tooltip={"Panels & layout"}
     >
       <PanelRight size={13} />
-      {#if browserDock.open || splitActive}
+      {#if browserDock.open || activityDock.open || splitActive}
         <span class="view-dot" aria-hidden="true"></span>
       {/if}
       <ChevronDown size={10} class={viewMenuOpen ? "chev-open" : ""} />
@@ -808,6 +809,19 @@
       <Globe size={14} class="vm-icon" />
       <span class="vm-label">Web browser</span>
       <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;B</kbd>
+      <Check size={13} class="vm-check" />
+    </button>
+    <button
+      class="vm-item"
+      class:on={activityDock.open}
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={activityDock.open}
+      onclick={() => { activityDock.toggle(); viewMenuOpen = false; }}
+    >
+      <Bot size={14} class="vm-icon" />
+      <span class="vm-label">Sub-agents</span>
+      {#if (assistant.activeTab?.agentSpawns.length ?? 0) > 0}<span class="vm-count">{assistant.activeTab?.agentSpawns.length}</span>{/if}
       <Check size={13} class="vm-check" />
     </button>
     <button

@@ -177,8 +177,12 @@ export type StreamEvent = {
 export type StreamEnvelope =
   | { type: "system"; subtype?: string; [k: string]: unknown }
   | { type: "stream_event"; event?: StreamEvent; [k: string]: unknown }
-  | { type: "assistant"; message: { content: ContentBlock[]; usage?: Record<string, unknown> } }
-  | { type: "user"; message: { content: ContentBlock[] } }
+  // `parent_tool_use_id`: set to the spawning Task/Agent tool_use id when this
+  // envelope is a NESTED sub-agent frame (the CLI multiplexes sub-agent output
+  // into the same stream). Null/absent for top-level turn frames. Drives the
+  // sub-agent live dock — see applySubAgentFrame in streaming.ts.
+  | { type: "assistant"; message: { content: ContentBlock[]; usage?: Record<string, unknown> }; parent_tool_use_id?: string | null }
+  | { type: "user"; message: { content: ContentBlock[] }; parent_tool_use_id?: string | null }
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
 
 /** Extended-thinking tier, mirroring the CLI's effort ladder: none→low ·

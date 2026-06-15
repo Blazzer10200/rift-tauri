@@ -16,7 +16,7 @@
 // the envelope-vs-result usage split driving the ctx pill.
 
 import type { TabState } from "../assistant.svelte";
-import type { ChatMessage, StreamEnvelope, ThinkingBlock } from "./types";
+import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock } from "./types";
 import { flattenToolResult, previewToolInput } from "./helpers";
 
 /** Called at the start of every send(). Clears per-turn pacer / thinking
@@ -348,7 +348,7 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
     const description = String(block.input?.description ?? "(no description)");
     tab.agentSpawns = [
       ...tab.agentSpawns,
-      { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false },
+      { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false, blocks: [] },
     ];
     return;
   }
@@ -482,6 +482,67 @@ function fillToolResult(tab: TabState, toolUseId: string, content: string, isErr
   }));
 }
 
+/** Update one sub-agent's block sub-transcript immutably (reactive reassign). */
+function mutateAgent(tab: TabState, agentId: string, fn: (blocks: Block[]) => Block[]) {
+  const idx = tab.agentSpawns.findIndex((a) => a.id === agentId);
+  if (idx === -1) return;
+  const next = tab.agentSpawns.slice();
+  next[idx] = { ...next[idx], blocks: fn(next[idx].blocks.slice()) };
+  tab.agentSpawns = next;
+}
+
+/** A nested sub-agent frame (parent_tool_use_id === a known spawn's id). The CLI
+ *  multiplexes Task/Agent sub-agent output into the same stream; we divert it
+ *  here into that agent's own transcript for the live dock — and OUT of the main
+ *  bubble (pre-routing these leaked in as stray main-turn chips/text). Sub-agent
+ *  content arrives at envelope granularity only (no token deltas), so each
+ *  assistant/user envelope maps straight to appended/filled blocks. */
+function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope) {
+  if (env.type === "assistant") {
+    for (const block of env.message?.content ?? []) {
+      if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+        const text = block.text;
+        mutateAgent(tab, agentId, (blocks) => [...blocks, { type: "text", text }]);
+      } else if (block.type === "thinking") {
+        const text = typeof block.thinking === "string" ? block.thinking : "";
+        const hasSignature = typeof block.signature === "string" && block.signature.length > 0;
+        mutateAgent(tab, agentId, (blocks) => [
+          ...blocks,
+          { type: "thinking", text, hasSignature, startedAt: Date.now(), durationMs: null, status: "done" },
+        ]);
+      } else if (block.type === "tool_use") {
+        const { id, name } = block;
+        const input = block.input ?? {};
+        mutateAgent(tab, agentId, (blocks) => [
+          ...blocks,
+          { type: "tool", id, name, input, result: null, isError: false, status: "pending", startedAt: Date.now() },
+        ]);
+      }
+    }
+  } else if (env.type === "user") {
+    for (const block of env.message?.content ?? []) {
+      if (block.type === "tool_result") {
+        const targetId = block.tool_use_id;
+        const content = flattenToolResult(block.content);
+        const isError = block.is_error === true;
+        mutateAgent(tab, agentId, (blocks) =>
+          blocks.map((b) =>
+            b.type === "tool" && b.id === targetId
+              ? {
+                  ...b,
+                  result: content,
+                  isError,
+                  status: isError ? "error" : "done",
+                  durationMs: typeof b.startedAt === "number" ? Date.now() - b.startedAt : undefined,
+                }
+              : b,
+          ),
+        );
+      }
+    }
+  }
+}
+
 export function onStreamLine(tab: TabState, raw: string) {
   if (tab.rawLineLog.length >= 200) tab.rawLineLog.shift();
   tab.rawLineLog.push(raw);
@@ -509,6 +570,18 @@ export function onStreamLine(tab: TabState, raw: string) {
       // #182: post-done CLI dribble was silently dropped — surface in console
       // for observability so we know if a known CLI bug regresses.
       console.debug("[assistant] orphaned non-JSON line (post-done)", raw.slice(0, 80));
+    }
+    return;
+  }
+  // Nested sub-agent frame: a non-empty parent_tool_use_id means this belongs to
+  // a spawned Task/Agent, never the main bubble. Route to that agent's own
+  // sub-transcript (live dock) if we're tracking the spawn; otherwise drop it
+  // (e.g. a deeper nested sub-agent we don't surface yet) rather than let it leak
+  // into the main message. Either way, STOP — don't fall through to the switch.
+  const parentId = (env as { parent_tool_use_id?: string | null }).parent_tool_use_id;
+  if (typeof parentId === "string" && parentId.length > 0) {
+    if (tab.agentSpawns.some((a) => a.id === parentId)) {
+      applySubAgentFrame(tab, parentId, env);
     }
     return;
   }
