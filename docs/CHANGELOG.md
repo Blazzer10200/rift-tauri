@@ -2,6 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.12.2 — 2026-06-15 — Security: DOMPurify patch (CI `check` green)
+
+> **Why.** The `check` workflow's `npm audit --omit=dev` gate flagged a moderate DOMPurify advisory (multiple XSS vectors in `IN_PLACE`/template/shadow-root sanitization, `dompurify <=3.4.8`). Pre-existing — it also failed the prior commit. DOMPurify backs Markdown's `{@html}` sanitization, so the bump is load-bearing.
+
+**Changed:**
+- **`dompurify` `3.4.3 → ^3.4.10`** (patched; same-minor, no API change). Prod audit now reports **0 vulnerabilities**; the `check` workflow's frontend job goes green.
+
+**Verify.** version lockstep ×3 + `Cargo.lock` · `npm audit --omit=dev` 0 vulns · svelte-check 0/0 (4094) · vitest 162/162.
+
 ## v0.12.1 — 2026-06-15 — Split-pane send fix + STT/timer polish
 
 > **Why.** Three user-spotted quirks during real use. All frontend-only, no backend or config touched.
