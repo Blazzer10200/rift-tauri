@@ -14,7 +14,6 @@
   import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, statusOf, nodeKind,
     formatBoundaryAt, formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel, lineDelta,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
-  import { fmtTokens } from "../../state/assistant/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
   import { portal } from "$lib/actions/portal";
@@ -83,38 +82,9 @@
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   });
 
-  // Whimsical fallbacks for the bare "Thinking…" stage label. Cycles
-  // every ~2.4s while streaming so the user feels the heartbeat is real
-  // instead of staring at a static word. Per-tool labels ("Reading X",
-  // "Running cargo check") flow through unchanged — only the plain
-  // "Thinking" baseline gets the swap.
-  const WHIM_WORDS = [
-    "Thinking", "Sussing", "Spelunking", "Pondering", "Brewing",
-    "Reckoning", "Mulling", "Cogitating", "Hatching", "Conjuring",
-    "Noodling", "Untangling",
-  ];
-  let whimTick = $state(0);
-  $effect(() => {
-    if (!streaming) return;
-    const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
-    return () => clearInterval(id);
-  });
-  // Empty-bubble stage label: prefer the global activity.currentLabel
-  // ("Reading auto_sync.rs", "Running cargo check", …); when it's the
-  // bare "Thinking" baseline, cycle through the whim pool.
-  const stageLabel = $derived.by(() => {
-    if (!streaming) return null;
-    const raw = assistant.activity.currentLabel ?? "Thinking…";
-    if (/^thinking/i.test(raw)) return `${WHIM_WORDS[whimTick]}…`;
-    return raw;
-  });
-  // Live cumulative output tokens for this turn (CC-style "1.2k tokens"),
-  // shown trailing the spinner label while streaming.
-  const liveTokenLabel = $derived(
-    streaming && assistant.liveOutputTokens > 0
-      ? `${fmtTokens(assistant.liveOutputTokens)} tokens`
-      : null,
-  );
+  // Live activity label + token tally now live in the composer's LivePills
+  // (single source of in-flight truth, down by the prompt) — the in-bubble
+  // strips were de-duplicated to a quiet dots pulse (see .stage-strip below).
 
   const plainText = $derived(
     message.blocks
@@ -295,26 +265,6 @@
     return numberActions(coalesceToolGroups(folded));
   });
 
-  // Trailing activity row — fills the "blank while working" gap the bare
-  // bubble had once text started streaming (the stage-strip only shows
-  // pre-first-block). Walk from the end of the block list: if the tail is a
-  // pending tool or active thinking, that node ALREADY pulses (its own bullet
-  // / spinner) — suppress the trailing row to avoid a double "working" signal.
-  // If the tail is prose (model composing more text / a code block), nothing
-  // else signals liveness down there → show the compact trailing pulse.
-  const tailIsPending = $derived.by<boolean>(() => {
-    for (let i = message.blocks.length - 1; i >= 0; i--) {
-      const b = message.blocks[i];
-      if (b.type === "tool") return b.status === "pending";
-      if (b.type === "thinking") return b.status === "active";
-      if (b.type === "text" && b.text.length > 0) return false;
-    }
-    return false;
-  });
-  const showTrailingActivity = $derived(
-    !isUser && streaming && grouped.length > 0 && !tailIsPending,
-  );
-
   // Key of the last in-flight or final node — drives the bullet pulse for
   // the streaming bubble (last node = "current activity").
   const lastBlockKey = $derived.by<string | null>(() => {
@@ -421,21 +371,12 @@
     {/if}
 
     {#if !isUser && streaming && grouped.length === 0}
-      <div class="stage-strip" aria-live="polite" out:fade={{ duration: 220 }}>
-        <div class="stage-line">
-          <span class="stage-dots" aria-hidden="true">
-            <span class="stage-dot"></span>
-            <span class="stage-dot"></span>
-            <span class="stage-dot"></span>
-          </span>
-          {#key stageLabel}
-            <span class="stage-label">{stageLabel ?? "Thinking…"}</span>
-          {/key}
-          {#if liveTokenLabel}
-            <span class="stage-sep" aria-hidden="true">·</span>
-            <span class="stage-tokens mono">{liveTokenLabel}</span>
-          {/if}
-        </div>
+      <div class="stage-strip" out:fade={{ duration: 220 }}>
+        <span class="stage-dots" aria-hidden="true">
+          <span class="stage-dot"></span>
+          <span class="stage-dot"></span>
+          <span class="stage-dot"></span>
+        </span>
       </div>
     {/if}
 
@@ -580,21 +521,6 @@
           </div>
         {/if}
       {/each}
-
-      {#if showTrailingActivity}
-        <div class="trailing-activity" aria-live="polite" in:fade={{ duration: reducedMotion ? 0 : 160 }} out:fade={{ duration: reducedMotion ? 0 : 160 }}>
-          <span class="ta-dots" aria-hidden="true">
-            <span class="ta-dot"></span><span class="ta-dot"></span><span class="ta-dot"></span>
-          </span>
-          {#key stageLabel}
-            <span class="ta-label">{stageLabel ?? "Working…"}</span>
-          {/key}
-          {#if liveTokenLabel}
-            <span class="stage-sep" aria-hidden="true">·</span>
-            <span class="stage-tokens mono">{liveTokenLabel}</span>
-          {/if}
-        </div>
-      {/if}
 
       {#if showSummary}
         <div class="turn-summary" data-auto={autoApplied ? "true" : null} class:mode-bypass={bypassApplied} in:fade={{ duration: reducedMotion ? 0 : 160 }}>
@@ -858,16 +784,9 @@
      Replaces the composer-top StatusHub strip — single source of in-flight
      truth in the bubble itself. */
   .stage-strip {
-    display: flex; flex-direction: column;
-    gap: 9px;
+    display: flex; align-items: center;
     padding: 2px 0 6px;
     animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  .stage-line {
-    display: inline-flex; align-items: center; gap: 9px;
-    color: var(--fg-2);
-    font-size: var(--fs-sm);
-    min-height: 14px;
   }
   .stage-dots {
     display: inline-flex; gap: 4px; align-items: center;
@@ -886,29 +805,8 @@
     0%, 80%, 100% { opacity: 0.35; transform: translateY(0) scale(0.85); }
     40%           { opacity: 1;    transform: translateY(-2px) scale(1.1); }
   }
-  /* Live token tally trailing the spinner label — quiet, muted, tabular so the
-     digits don't jitter as the count climbs. */
-  .stage-sep { color: var(--fg-faint); }
-  .stage-tokens {
-    color: var(--fg-muted);
-    font-size: var(--fs-sm);
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-  }
-  .stage-label {
-    color: var(--fg);
-    font-weight: 500;
-    letter-spacing: 0.01em;
-    /* Crossfade when stageLabel changes (whim rotation: Thinking → Sussing
-       → Spelunking …). Keyed via {#key stageLabel} in the template. */
-    animation: stage-label-in 320ms ease-out;
-  }
-  @keyframes stage-label-in {
-    from { opacity: 0; transform: translateY(-1px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
   @media (prefers-reduced-motion: reduce) {
-    .stage-dot, .stage-label { animation: none; }
+    .stage-dot { animation: none; }
   }
 
   /* Cost chip — lives in the turn header's action cluster (see .turn-actions),
@@ -928,49 +826,6 @@
   }
   .bubble:hover .cost-pill { opacity: 1; }
   .body { display: flex; flex-direction: column; }
-
-  /* Trailing activity row — the live "still working" cue that trails the last
-     emitted block while streaming (prose composing, between code blocks, etc).
-     Reuses the stage-strip's dot+label vocabulary at a smaller scale so the
-     body never reads as dead mid-turn. Suppressed when the tail node already
-     pulses (pending tool / active thinking) — see showTrailingActivity. Sits
-     on the rail like any node via the bullet below. */
-  .trailing-activity {
-    position: relative;
-    display: inline-flex; align-items: center; gap: 8px;
-    margin-top: 0.5rem;
-    color: var(--fg-muted);
-    font-size: var(--fs-xs);
-    min-height: 16px;
-  }
-  .trailing-activity::before {
-    content: "";
-    position: absolute;
-    left: -19px; top: 4px;
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 45%, transparent);
-    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
-  }
-  .ta-dots { display: inline-flex; gap: 4px; align-items: center; }
-  .ta-dot {
-    width: 4px; height: 4px;
-    border-radius: 50%;
-    background: var(--accent);
-    animation: stage-bounce 1.1s ease-in-out infinite;
-  }
-  .ta-dot:nth-child(2) { animation-delay: 0.18s; }
-  .ta-dot:nth-child(3) { animation-delay: 0.36s; }
-  .ta-label {
-    color: color-mix(in oklch, var(--fg-2) 85%, var(--accent));
-    font-weight: 500;
-    letter-spacing: 0.01em;
-    animation: stage-label-in 320ms ease-out;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .trailing-activity::before, .ta-dot, .ta-label { animation: none; }
-  }
 
   /* Timeline node — every block sits on the 2px turn-rail via an absolutely
      positioned bullet. Bullet color = status; thinking = hollow. The chain
