@@ -789,10 +789,15 @@ pub async fn assistant_send(
     // `max` is deliberately not exposed — per Anthropic's guidance it shows
     // diminishing returns and is prone to overthinking vs xhigh.
     // Earlier impl set `MAX_THINKING_TOKENS` env, but the CLI doesn't honor
-    // that env directly — `--effort` is the documented API. The plaintext
-    // reasoning is encrypted by the API in -p mode; what reaches us is
-    // `content_block_start` of type `thinking` + `signature_delta` w/
-    // `thinking_delta` text in some scenarios.
+    // that env directly — `--effort` is the documented API.
+    // Thinking-display caveat (verified 2026-06-15, CLI 2.1.177): whether we get
+    // plaintext reasoning is NOT a -p-mode encryption thing — it's the model's
+    // `thinking.display` default. Sonnet 4.6 defaults to "summarized" and DOES
+    // stream `thinking_delta` text headless; Opus 4.8/4.7 default to "omitted"
+    // and stream only `content_block_start{type:thinking}` + `signature_delta`
+    // (empty text). The CLI exposes no flag to override display to "summarized"
+    // (`claude --help` has only `--effort`/`--include-partial-messages`), so
+    // Opus thinking text can't be surfaced today — gated upstream, not here.
     // #237: normalize effort BEFORE logging so newlines/ANSI in the raw
     // renderer-supplied string can't reach the log stream. The CLI flag itself
     // was safe (string-arg passthrough) but the log line was unredacted.
