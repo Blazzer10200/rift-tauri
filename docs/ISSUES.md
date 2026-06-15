@@ -104,7 +104,7 @@ High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LAB
 
 **Top of the backlog (deferred — needs desktop CDP eyeball):**
 - **P0-3 — unify the CLI-update notice.** Surfaced 3 ways (Home `.dash-cli` banner, ChatTabsBar `.cli-badge` pill+popover, Settings inline button) with independent dismiss. Extract one `UpdateNotice` + a single shared dismiss state. ⚠️ touches the **Velopack** update-notification path, so verify carefully.
-- **P2 — shared size tokens.** Tab 36px / tab-item 26px / settings sub-tab 42px / Home buttons 38px each hardcoded → introduce `--control-h` / `--tab-h`. Rename the dual-meaning `.sb-bento` (column in Settings vs 2-col grid in Local LLM) so a third page can't inherit the wrong layout.
+- **P2 — shared size tokens.** Tab 36px / tab-item 26px / settings sub-tab 42px / Home buttons 38px each hardcoded → introduce `--control-h` / `--tab-h`. *(cont.140: the `.sb-bento` rename is **moot** — grep confirms it now lives only in `SettingsPage.svelte` as a flex column; the cont.139 Local-LLM cockpit redesign dropped its 2-col-grid use, so the dual-meaning footgun is already gone. The size-token extraction across surfaces stays a CDP-eyeball job.)*
 
 **Security (remaining — low real-risk; mostly same-user or by-design):**
 - ✅ `local_llm_base_url` → `ANTHROPIC_BASE_URL` — http(s) + host validation added at setter + turn.rs sink (PR #5).
@@ -122,7 +122,7 @@ High-confidence, safe items were fixed in `086e403` (MIME allowlist · MODEL_LAB
 - `Markdown.svelte:842` `#22272e` — intentional Shiki github-dark-dimmed match; `--bg-inset` resolves lighter so left as-is.
 - `ToolChip.svelte` terminal bg/text oklch literals — intentional terminal-look design; left as-is.
 - Off-token radius (7px/11px/16px vs 6/10/12 scale) + font-size literals (9–10.5px below `--fs-xs`).
-- Scrollbar `scrollbar-width:thin` overrides are **no-ops** in WebView2 — remove or commit to one style (your call).
+- Scrollbar `scrollbar-width:thin` (4 sites: `CommandPalette`/`SessionDiff`/`SlashMenu`/`SubAgentDock`) — the "no-op in WebView2" premise is likely **stale**: Chromium supports standard `scrollbar-width` since Chrome 121, so these may now actually render thin scrollbars and the global `::-webkit-scrollbar` may not unconditionally win. Needs a CDP eyeball to decide remove-vs-keep — don't blind-strip. (your call)
 
 ---
 

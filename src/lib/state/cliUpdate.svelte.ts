@@ -52,7 +52,7 @@ function cmpSemver(a: string, b: string): number {
   return 0;
 }
 
-class CliUpdate {
+export class CliUpdate {
   /** Newest version on npm (null until a successful check). */
   latest = $state<string | null>(null);
   /** Epoch ms of the last successful check. */
