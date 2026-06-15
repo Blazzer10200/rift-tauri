@@ -21,6 +21,7 @@
   import { scrubUser } from "$lib/utils/redact";
   import { tooltip } from "$lib/actions/tooltip";
   import Select from "../Select.svelte";
+  import PageHero from "../shared/PageHero.svelte";
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
 
@@ -221,49 +222,40 @@
 
 <div class="sb-main">
   <!-- ── Hero + sticky tab bar ── -->
-  <div class="sb-topbar">
-    <div class="sb-hero">
-      <div class="sb-hero-l">
-        <div class="sb-hero-ic"><HeroIcon size={22} strokeWidth={1.75} /></div>
-        <div class="sb-hero-tx">
-          <div class="sb-eyebrow">Settings</div>
-          <div class="sb-hero-tt">{activeMeta.label}</div>
-          <div class="sb-hero-sub">{activeMeta.sub}</div>
-        </div>
+  <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false}>
+    {#snippet icon()}<HeroIcon size={22} strokeWidth={1.75} />{/snippet}
+    {#snippet chip()}
+      <span class="sb-chip"><span class="mono">local workspace</span></span>
+      <button
+        class="sb-chip {updates.summary.kind}"
+        type="button"
+        onclick={() => updates.open()}
+        use:tooltip={"Check for updates"}
+      >
+        {#if updates.summary.kind === "warn"}
+          <ArrowUpCircle size={14} />
+        {:else if updates.summary.kind === "busy"}
+          <Loader2 size={14} class="spin" />
+        {:else}
+          <CircleCheck size={14} />
+        {/if}
+        {appVersion}{updates.summary.label ? ` · ${updates.summary.label}` : ""}
+      </button>
+    {/snippet}
+    {#snippet children()}
+      <div class="sb-tabs" role="tablist">
+        {#each ST_SECTIONS as s (s.id)}
+          {@const Icon = s.icon}
+          {@const dot = s.id === "assistant" ? assistantDot : s.dot}
+          <button class="sb-tab" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
+            <Icon size={16} strokeWidth={1.75} />
+            <span>{s.label}</span>
+            {#if dot}<span class="sb-tab-dot {dot}"></span>{/if}
+          </button>
+        {/each}
       </div>
-      <div class="sb-hero-r">
-        <span class="sb-chip"><span class="mono">local workspace</span></span>
-        <!-- UI-drift fix: status derives from updates.summary — never hard-coded,
-             so this chip can't say "up to date" while the pill offers an update. -->
-        <button
-          class="sb-chip {updates.summary.kind}"
-          type="button"
-          onclick={() => updates.open()}
-          use:tooltip={"Check for updates"}
-        >
-          {#if updates.summary.kind === "warn"}
-            <ArrowUpCircle size={14} />
-          {:else if updates.summary.kind === "busy"}
-            <Loader2 size={14} class="spin" />
-          {:else}
-            <CircleCheck size={14} />
-          {/if}
-          {appVersion}{updates.summary.label ? ` · ${updates.summary.label}` : ""}
-        </button>
-      </div>
-    </div>
-    <div class="sb-tabs" role="tablist">
-      {#each ST_SECTIONS as s (s.id)}
-        {@const Icon = s.icon}
-        {@const dot = s.id === "assistant" ? assistantDot : s.dot}
-        <button class="sb-tab" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
-          <Icon size={16} strokeWidth={1.75} />
-          <span>{s.label}</span>
-          {#if dot}<span class="sb-tab-dot {dot}"></span>{/if}
-        </button>
-      {/each}
-    </div>
-  </div>
+    {/snippet}
+  </PageHero>
 
   <!-- ── Scrolling bento canvas ── -->
   <div class="sb-scroll" bind:this={scrollEl}>
@@ -882,16 +874,7 @@
 <style>
   .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
 
-  /* ── Hero + sticky tab bar ── */
-  .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 3%, var(--bg)), var(--bg) 120px); border-bottom: 1px solid var(--border); }
-  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 820px; margin: 0 auto; }
-  .sb-hero-l { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .sb-hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
-  .sb-hero-ic :global(svg) { color: var(--accent); }
-  .sb-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-subtle); }
-  .sb-hero-tt { font-size: 24px; font-weight: 760; letter-spacing: -0.025em; line-height: 1.1; margin-top: 1px; }
-  .sb-hero-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; line-height: 1.45; max-width: 64ch; }
-  .sb-hero-r { display: flex; align-items: center; gap: 8px; flex: none; }
+  /* ── Hero tab bar (hero chrome via PageHero component) ── */
   .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
   button.sb-chip { cursor: pointer; transition: background 120ms, border-color 120ms; }
   button.sb-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
@@ -901,7 +884,6 @@
   .sb-chip.warn :global(svg) { color: var(--warn); }
   .sb-chip.danger { background: var(--danger-soft); border-color: color-mix(in oklch, var(--danger) 28%, transparent); color: var(--danger); }
   .sb-chip.danger :global(svg) { color: var(--danger); }
-  /* busy = neutral chip, spinner only — no status color while unknown */
   .sb-chip .mono { font-family: var(--font-mono); }
 
   .sb-tabs { display: flex; gap: 4px; max-width: 820px; margin: 22px auto 0; }

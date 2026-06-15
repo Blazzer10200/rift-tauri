@@ -42,12 +42,15 @@
           type="button"
           data-active={isActive}
           onclick={() => workspace.setActive(id)}
-          use:tooltip={`${def.title} · Ctrl+${def.kbd}`}
+          use:tooltip={id === "local-llm" ? `${def.title} · Experimental · Ctrl+${def.kbd}` : `${def.title} · Ctrl+${def.kbd}`}
           aria-label={def.title}
           aria-pressed={isActive}
         >
           <def.icon size={15} />
           <span class="navitem-label">{def.title}</span>
+          {#if id === "local-llm"}
+            <span class="exp-dot" aria-hidden="true"></span>
+          {/if}
         </button>
       {/each}
     </nav>
@@ -198,6 +201,12 @@
     background: var(--accent);
     border: 1.5px solid var(--bg-elev-1, var(--bg));
     box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 60%, transparent);
+  }
+  /* Experimental marker on the Local LLM nav item — inline amber dot. */
+  .exp-dot {
+    width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+    background: var(--warn, #d9a441);
+    box-shadow: 0 0 6px color-mix(in oklab, var(--warn, #d9a441) 55%, transparent);
   }
 
   /* Horizontal workspace nav — replaced the vertical activity column. */

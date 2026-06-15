@@ -2,7 +2,7 @@
   import {
     MessageSquare, Sparkles, Send, FolderOpen, Folder, FolderGit2,
     GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check, Loader2,
-    Gauge,
+    Gauge, Plus, Settings as SettingsIcon, Cpu,
   } from "lucide-svelte";
   import { onMount } from "svelte";
   import { assistant } from "$lib/state/assistant.svelte";
@@ -101,6 +101,10 @@
     if (draft != null) assistant.composerDraft = draft;
     workspace.setActive("chat");
   }
+  function goNewTab() {
+    void assistant.newTab();
+    workspace.setActive("chat");
+  }
   function resume(id: string) {
     void assistant.openTab(id);
     workspace.setActive("chat");
@@ -143,7 +147,7 @@
           <h1 class="hf-title">Open a project to begin</h1>
         {/if}
       </div>
-      <button class="hf-btn primary" onclick={() => go()}><Sparkles size={15} />New chat</button>
+      <button class="hf-btn" onclick={goNewTab}><Plus size={15} />New tab</button>
     </header>
 
     <!-- Ask Claude -->
@@ -301,6 +305,27 @@
           {/if}
         </div>
 
+        <div class="tile t-links">
+          <div class="tile-head slim">
+            <span class="ci"><Sparkles size={13} /></span>
+            <span class="t">Quick actions</span>
+          </div>
+          <div class="ql-rows">
+            <button class="ql-row" type="button" onclick={goNewTab}>
+              <span class="ql-ic"><Plus size={14} /></span>
+              <span class="ql-label">New tab</span>
+            </button>
+            <button class="ql-row" type="button" onclick={() => workspace.setActive("settings")}>
+              <span class="ql-ic"><SettingsIcon size={14} /></span>
+              <span class="ql-label">Open Settings</span>
+            </button>
+            <button class="ql-row" type="button" onclick={() => workspace.setActive("local-llm")}>
+              <span class="ql-ic"><Cpu size={14} /></span>
+              <span class="ql-label">Local LLM</span>
+              <span class="ql-badge">Experimental</span>
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -323,8 +348,6 @@
 
   .hf-btn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 15px; border-radius: var(--radius-lg); font: inherit; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg); transition: background 140ms, border-color 140ms; flex-shrink: 0; }
   .hf-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-  .hf-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; box-shadow: 0 4px 16px -4px color-mix(in oklab, var(--accent) 55%, transparent); }
-  .hf-btn.primary:hover { background: var(--accent-hover); }
 
   .dash-ask {
     flex: none; display: flex; align-items: center; gap: 13px; width: 100%; text-align: left;
@@ -515,4 +538,21 @@
   .hf-chat-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; flex-shrink: 0; }
   .hf-chat-model { font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; color: var(--fg-muted); padding: 1px 7px; border-radius: 999px; background: var(--bg-elev-2); border: 1px solid var(--border); }
   .hf-chat-w { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); }
+
+  /* Quick links card */
+  .t-links { flex: none; }
+  .ql-rows { display: flex; flex-direction: column; gap: 2px; }
+  .ql-row {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 8px 10px; border-radius: 9px;
+    background: transparent; border: 0; color: var(--fg-muted);
+    font: inherit; font-size: var(--fs-sm); font-weight: 500;
+    cursor: pointer; text-align: left;
+    transition: background 120ms, color 120ms;
+  }
+  .ql-row:hover { background: var(--surface-hover); color: var(--fg); }
+  .ql-ic { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--bg-elev-2); color: var(--fg-muted); flex-shrink: 0; transition: color 120ms; }
+  .ql-row:hover .ql-ic { color: var(--accent); }
+  .ql-label { flex: 1; }
+  .ql-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: var(--warn); flex-shrink: 0; }
 </style>
