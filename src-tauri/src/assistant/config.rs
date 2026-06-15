@@ -103,12 +103,23 @@ pub(super) fn is_valid_local_model_name(s: &str) -> bool {
 /// a retired model id.
 pub(super) const FABLE_MODEL: &str = "claude-fable-5";
 pub(super) const FABLE_SUNSET_EPOCH_SECS: u64 = 1_782_172_800; // 2026-06-23T00:00:00Z
+/// Manual kill-switch — Fable pulled 2026-06-14 (US-gov disablement, temporary).
+/// Mirrors the frontend `FABLE_DISABLED` (state/assistant/helpers.ts). While
+/// true a pinned/stale Fable session falls back to opus even before the date
+/// sunset, so a gov-disabled model id never reaches the API. Flip back to false
+/// (both sides) the moment it's re-enabled.
+pub(super) const FABLE_DISABLED: bool = true;
 
 pub(super) fn fable_sunset_passed() -> bool {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() >= FABLE_SUNSET_EPOCH_SECS)
         .unwrap_or(false)
+}
+
+/// Fable can't be used right now — either manually killed or past its sunset.
+pub(super) fn fable_unavailable() -> bool {
+    FABLE_DISABLED || fable_sunset_passed()
 }
 
 pub(super) fn load_config() -> AssistantConfig {

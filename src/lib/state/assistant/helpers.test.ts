@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
-  FABLE_SUNSET_MS, effortToFlag, fableAvailable, firstLine, flattenToolResult, shellLabel,
-  liveActivity, messagesHaveContextSignals, modelFamily, previewToolInput,
+  FABLE_DISABLED, FABLE_SUNSET_MS, effortToFlag, fableAvailable, firstLine, flattenToolResult,
+  shellLabel, liveActivity, messagesHaveContextSignals, modelFamily, previewToolInput,
 } from "./helpers";
 
 const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBlock> = {}): ToolBlock =>
@@ -12,7 +12,18 @@ const msg = (blocks: ChatMessage["blocks"], id = "m1"): ChatMessage => ({ id, ro
 afterEach(() => vi.useRealTimers());
 
 describe("fableAvailable", () => {
-  it("flips at the Jun 22 2026 EOD-UTC sunset", () => {
+  it("manual kill-switch forces unavailable regardless of date", () => {
+    // Fable pulled 2026-06-14 (US-gov disablement). While FABLE_DISABLED the
+    // gate is false even before the date sunset; this test self-heals when the
+    // flag flips back to re-enable.
+    if (!FABLE_DISABLED) return;
+    vi.useFakeTimers();
+    vi.setSystemTime(FABLE_SUNSET_MS - 1);
+    expect(fableAvailable()).toBe(false);
+  });
+
+  it("flips at the Jun 22 2026 EOD-UTC sunset when enabled", () => {
+    if (FABLE_DISABLED) return; // kill-switch overrides the date gate
     vi.useFakeTimers();
     vi.setSystemTime(FABLE_SUNSET_MS - 1);
     expect(fableAvailable()).toBe(true);

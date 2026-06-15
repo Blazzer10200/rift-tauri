@@ -12,8 +12,13 @@ const MODEL_SELS: readonly ModelSel[] = [
 // Claude Fable 5 — limited run, offered only through Jun 22 2026 (EOD UTC).
 // After sunset the picker hides it and a stored pref self-heals to the default.
 export const FABLE_SUNSET_MS = Date.UTC(2026, 5, 23);
+// Manual kill-switch — Fable pulled 2026-06-14 (US-gov disablement, temporary).
+// While true the picker hides Fable and any stored/selected Fable pref coerces
+// to the default, exactly as a post-sunset state would. Flip back to false the
+// moment it's re-enabled; the date-based sunset still applies underneath.
+export const FABLE_DISABLED = true;
 export function fableAvailable(): boolean {
-  return Date.now() < FABLE_SUNSET_MS;
+  return !FABLE_DISABLED && Date.now() < FABLE_SUNSET_MS;
 }
 
 const MODEL_KEY = "rift.assistant.model";
