@@ -258,7 +258,14 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .elapsed { flex: 0 0 auto; font-size: 10px; color: var(--fg-subtle); }
-  .desc { font-size: var(--fs-xs); line-height: 1.45; color: var(--fg-muted); }
+  /* The spawn `description` is the full prompt — for a skill spawn (/plan) it's a
+     wall of text. Clamp to 2 lines so the head stays a scannable label; the full
+     prompt lives in the main transcript's Task tool-call. */
+  .desc {
+    font-size: var(--fs-xs); line-height: 1.45; color: var(--fg-muted);
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; text-overflow: ellipsis;
+  }
 
   .agent-summary {
     padding: 0 11px 9px 33px;
@@ -267,8 +274,8 @@
 
   /* ── Transcript body ── */
   .agent-body {
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 2px 12px 13px 13px;
+    display: flex; flex-direction: column; gap: 5px;
+    padding: 4px 12px 13px 13px;
     margin-left: 18px;
     border-left: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
     transition: border-color var(--dur-base) var(--ease-soft);
@@ -287,20 +294,22 @@
 
   .text-block { font-size: var(--fs-md); line-height: 1.55; }
 
+  /* Lighter than a stack of bordered cards: each step is a borderless checklist
+     row (status icon + label) so a long tool list reads as one clean column.
+     Only an in-flight step gets a subtle accent wash; results stay expandable. */
   .tool {
-    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-left-width: 2px; border-radius: var(--radius-sm);
-    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
+    border-radius: var(--radius-sm);
     overflow: hidden;
-    transition: border-color var(--dur-fast) ease-out, opacity var(--dur-fast) ease-out;
+    transition: background var(--dur-fast) ease-out;
   }
-  .tool[data-status="done"] { opacity: 0.9; }
-  .tool[data-status="done"]:hover { opacity: 1; }
-  .tool[data-status="pending"] { border-left-color: var(--accent); animation: tool-pulse 1.9s var(--ease-soft) infinite; }
-  .tool[data-status="error"] { border-left-color: var(--danger); }
+  .tool[data-status="pending"] {
+    background: color-mix(in oklch, var(--accent-soft) 16%, transparent);
+    animation: tool-pulse 1.9s var(--ease-soft) infinite;
+  }
+  .tool[data-status="error"] { background: color-mix(in oklch, var(--danger) 9%, transparent); }
   .tool-head {
-    width: 100%; display: flex; align-items: center; gap: 8px;
-    padding: 6px 9px; text-align: left;
+    width: 100%; display: flex; align-items: center; gap: 7px;
+    padding: 3px 7px; text-align: left;
     background: transparent; border: 0; cursor: pointer; color: var(--fg-2);
     font-size: var(--fs-sm); transition: background var(--dur-fast) ease-out;
   }
@@ -313,8 +322,9 @@
   .tool-dur { flex: 0 0 auto; font-size: 10px; color: var(--fg-subtle); }
   .tool-chev { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
   .tool-result {
-    margin: 0; padding: 8px 10px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    margin: 4px 0 2px; padding: 8px 10px;
+    border-left: 2px solid color-mix(in oklch, var(--border) 70%, transparent);
+    border-radius: var(--radius-xs);
     background: var(--bg-inset);
     font-size: var(--fs-xs); line-height: 1.5;
     white-space: pre-wrap; word-break: break-word;

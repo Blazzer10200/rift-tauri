@@ -140,6 +140,7 @@ fn write_mcp_config(
     session_id: &str,
     roots: &[PathBuf],
     trust_level: &str,
+    window_label: &str,
 ) -> Result<PathBuf, String> {
     let home = dirs_home()?;
     let dir = home.join(".rift").join("assistant");
@@ -184,6 +185,9 @@ fn write_mcp_config(
     if let Some(info) = bridge::bridge_info() {
         env_map.insert("RIFT_BRIDGE_PORT".into(), Value::from(info.port.to_string()));
         env_map.insert("RIFT_BRIDGE_TOKEN".into(), Value::from(info.token.clone()));
+        // #37: window label so the MCP child can tag bridge requests, letting the
+        // bridge emit_to the originating window instead of broadcasting app-wide.
+        env_map.insert("RIFT_BRIDGE_WINDOW".into(), Value::from(window_label.to_string()));
     }
 
     let payload = serde_json::json!({

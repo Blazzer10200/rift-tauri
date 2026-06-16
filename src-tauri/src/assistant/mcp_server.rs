@@ -460,6 +460,8 @@ fn bridge_call(op: &str, extra: Value, read_timeout: Duration) -> Result<Value, 
         "op": op,
         "token": token,
         "session_id": std::env::var("RIFT_SESSION_ID").unwrap_or_default(),
+        // #37: originating window so the bridge emits_to it, not app-wide.
+        "window_label": std::env::var("RIFT_BRIDGE_WINDOW").unwrap_or_default(),
     });
     if let (Value::Object(base), Value::Object(extra)) = (&mut req, extra) {
         for (k, v) in extra {

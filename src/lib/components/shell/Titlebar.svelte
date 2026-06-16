@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Minus, Square, X, Search, Settings as SettingsIcon } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { Minus, Square, X, Search, Settings as SettingsIcon, AppWindow } from "lucide-svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
   import { updates } from "$lib/state/updates.svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
@@ -75,6 +76,15 @@
 
   <div class="right">
     {#if !setupMode}
+    <button
+      class="navtoggle"
+      type="button"
+      onclick={() => invoke("open_new_window").catch(console.error)}
+      use:tooltip={"New window"}
+      aria-label="New window"
+    >
+      <AppWindow size={15}/>
+    </button>
     <button
       class="navtoggle settings-btn"
       type="button"

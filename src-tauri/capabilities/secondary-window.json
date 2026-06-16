@@ -1,0 +1,50 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "secondary-window",
+  "description": "Capability for secondary windows spawned via open_new_window (#37 Route A). Mirrors the main window's grants for the window-* label glob.",
+  "windows": ["window-*"],
+  "permissions": [
+    "core:event:default",
+    "core:path:default",
+    "core:webview:default",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://**" },
+        { "url": "mailto:*" }
+      ]
+    },
+    {
+      "identifier": "opener:allow-open-path",
+      "comment": "Workspace root is user-chosen, so the allow-glob can't be narrowed without breaking file-open. Instead deny OS-execute-by-default extensions: 'Open' via the shell would RUN these, never edit them (use reveal-in-dir / the in-app editor for those). RR-4.",
+      "allow": [{ "path": "**" }],
+      "deny": [
+        { "path": "**/*.exe" },
+        { "path": "**/*.msi" },
+        { "path": "**/*.bat" },
+        { "path": "**/*.cmd" },
+        { "path": "**/*.com" },
+        { "path": "**/*.scr" },
+        { "path": "**/*.pif" },
+        { "path": "**/*.vbs" },
+        { "path": "**/*.vbe" },
+        { "path": "**/*.wsf" },
+        { "path": "**/*.wsh" },
+        { "path": "**/*.msc" },
+        { "path": "**/*.cpl" },
+        { "path": "**/*.jar" }
+      ]
+    },
+    {
+      "identifier": "opener:allow-reveal-item-in-dir",
+      "allow": [{ "path": "**" }]
+    },
+    "dialog:default",
+    "clipboard-manager:allow-read-text"
+  ]
+}

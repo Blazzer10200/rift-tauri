@@ -5,6 +5,8 @@
   import { assistant } from "../../state/assistant.svelte";
   import { git } from "../../state/git.svelte";
   import { environmentDock } from "../../state/environmentDock.svelte";
+  import { browserDock } from "../../state/browserDock.svelte";
+  import { activityDock } from "../../state/activityDock.svelte";
   import EnvironmentPanel from "./EnvironmentPanel.svelte";
 
   // Canonical git refresher (mounted whenever the box is open, so the collapsed
@@ -18,6 +20,17 @@
 
   const status = $derived(git.status);
   const dirty = $derived((status?.total_adds ?? 0) > 0 || (status?.total_dels ?? 0) > 0);
+
+  // The collapsed pill is absolute-anchored to .workbench's right edge, but the
+  // browser / sub-agent docks open as in-flow flex columns pinned to that same
+  // edge (each occupies its inner width + 3px divider). Without an offset the
+  // pill floats over the open dock's header. Shift it left past any open dock so
+  // it stays over the chat pane's top-right.
+  const pillRight = $derived(
+    8 +
+      (browserDock.open ? browserDock.width + 3 : 0) +
+      (activityDock.open ? activityDock.width + 3 : 0),
+  );
 </script>
 
 {#if environmentDock.open && status}
@@ -29,7 +42,7 @@
     </div>
   {:else}
     <!-- Collapsed: a floating pill over the chat's top-right (no reserved space). -->
-    <div class="env-pill" transition:fly={{ y: -6, duration: 140 }}>
+    <div class="env-pill" style="right: {pillRight}px" transition:fly={{ y: -6, duration: 140 }}>
       <button
         class="pill-main"
         type="button"
@@ -86,7 +99,7 @@
     border-radius: var(--radius-lg);
     box-shadow: 0 4px 16px -6px rgb(0 0 0 / 0.4);
     overflow: hidden;
-    transition: border-color 120ms ease;
+    transition: border-color 120ms ease, right 200ms var(--ease-soft, ease);
   }
   .env-pill:hover { border-color: color-mix(in oklab, var(--accent) 35%, var(--border)); }
   .pill-main {

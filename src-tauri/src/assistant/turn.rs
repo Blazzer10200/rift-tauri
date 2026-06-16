@@ -331,6 +331,7 @@ async fn write_control_response(
 async fn handle_permission_request(
     app: &AppHandle,
     session_id: &str,
+    window_label: &str,
     stdin: &mut tokio::process::ChildStdin,
     msg: &Value,
 ) {
@@ -366,7 +367,7 @@ async fn handle_permission_request(
     // B4: if the UI is unreachable (window closed mid-turn) the emit fails and
     // the user never sees the prompt — deny immediately rather than let the
     // request hang for the full 30-min timeout while the CLI waits on us.
-    if let Err(e) = app.emit(PERMISSION_EVENT, serde_json::json!({
+    if let Err(e) = app.emit_to(window_label, PERMISSION_EVENT, serde_json::json!({
         "session_id": session_id,
         "request_id": request_id,
         "tool_use_id": tool_use_id,
@@ -419,6 +420,7 @@ async fn handle_permission_request(
 #[tauri::command]
 pub async fn assistant_send(
     app: AppHandle,
+    window: tauri::Window,
     prompt: String,
     session_id: String,
     is_first_turn: bool,
@@ -438,6 +440,9 @@ pub async fn assistant_send(
     if !is_valid_session_id(&session_id) {
         return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
     }
+    // #37: the window that fired this turn — all turn events (stream/done/error/
+    // permission) emit_to this label so a second window never sees another's turn.
+    let window_label = window.label().to_string();
     let cfg = load_config();
     let api_key = current_api_key();
     let use_api_key = api_key.is_some();
@@ -550,7 +555,7 @@ pub async fn assistant_send(
     let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
         (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(&session_id, &roots, &trust_level) {
+        match write_mcp_config(&session_id, &roots, &trust_level, &window_label) {
             Ok(p) => {
                 let guard = McpConfigGuard(p.clone());
                 (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
@@ -981,6 +986,7 @@ pub async fn assistant_send(
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
 
     let app_out = app.clone();
+    let win_label = window_label.clone();
     let stream_sid = session_id.clone();
     // #242: turn-completion is signaled by the `result` frame, NOT process exit.
     // A `run_in_background` child (e.g. a dev server / localhost) keeps `claude`
@@ -1003,7 +1009,7 @@ pub async fn assistant_send(
         //    auto-deny short-circuit. Mirrors what the Agent SDK sends.
         const INIT: &[u8] = b"{\"type\":\"control_request\",\"request_id\":\"rift-init\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}\n";
         if let Err(e) = stdin.write_all(INIT).await {
-            let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+            let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                 "session_id": stream_sid, "message": format!("write initialize: {e}"),
             }));
             return;
@@ -1032,7 +1038,7 @@ pub async fn assistant_send(
                         if !user_sent && ty == Some("control_response") {
                             user_sent = true;
                             if let Err(e) = stdin.write_all(&user_line).await {
-                                let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                                     "session_id": stream_sid, "message": format!("write user turn: {e}"),
                                 }));
                                 break;
@@ -1046,7 +1052,7 @@ pub async fn assistant_send(
                                 match build_user_envelope(&m.text, &m.attachments) {
                                     Ok(env) => {
                                         if let Err(e) = stdin.write_all(&env).await {
-                                            let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                            let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                                                 "session_id": stream_sid,
                                                 "message": format!("write steer: {e}"),
                                             }));
@@ -1054,7 +1060,7 @@ pub async fn assistant_send(
                                         }
                                     }
                                     Err(e) => {
-                                        let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                        let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                                             "session_id": stream_sid, "message": e,
                                         }));
                                     }
@@ -1071,7 +1077,7 @@ pub async fn assistant_send(
                                 .and_then(|s| s.as_str())
                                 == Some("can_use_tool");
                         if is_perm {
-                            handle_permission_request(&app_out, &stream_sid, &mut stdin, &v).await;
+                            handle_permission_request(&app_out, &stream_sid, &win_label, &mut stdin, &v).await;
                             continue;
                         }
                         // `result` is the last frame — forward it, signal DONE
@@ -1089,15 +1095,15 @@ pub async fn assistant_send(
                                 || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);
                             let res_text = v.get("result").and_then(|s| s.as_str()).unwrap_or("");
                             if res_is_err && is_auth_rejection(res_text) {
-                                let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                                     "session_id": stream_sid, "message": auth_rejection_message(),
                                 }));
                             }
-                            let _ = app_out.emit(STREAM_EVENT, serde_json::json!({
+                            let _ = app_out.emit_to(&win_label,STREAM_EVENT, serde_json::json!({
                                 "session_id": stream_sid, "line": trimmed,
                             }));
                             result_seen_task.store(true, Ordering::SeqCst);
-                            let _ = done_app.emit(DONE_EVENT, serde_json::json!({
+                            let _ = done_app.emit_to(&win_label,DONE_EVENT, serde_json::json!({
                                 "session_id": done_sid, "exit_code": 0,
                             }));
                             break;
@@ -1115,14 +1121,14 @@ pub async fn assistant_send(
                     }
                     // Forward raw NDJSON line, tagged with the CLI session_id
                     // so multi-tab UIs route the event to the right bubble.
-                    let _ = app_out.emit(
+                    let _ = app_out.emit_to(&win_label,
                         STREAM_EVENT,
                         serde_json::json!({ "session_id": stream_sid, "line": trimmed }),
                     );
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    let _ = app_out.emit(
+                    let _ = app_out.emit_to(&win_label,
                         ERROR_EVENT,
                         serde_json::json!({
                             "session_id": stream_sid,
@@ -1152,7 +1158,7 @@ pub async fn assistant_send(
                     match build_user_envelope(&msg.text, &msg.attachments) {
                         Ok(env) => {
                             if let Err(e) = stdin.write_all(&env).await {
-                                let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                                let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                                     "session_id": stream_sid,
                                     "message": format!("write steer: {e}"),
                                 }));
@@ -1161,7 +1167,7 @@ pub async fn assistant_send(
                             let _ = stdin.flush().await;
                         }
                         Err(e) => {
-                            let _ = app_out.emit(ERROR_EVENT, serde_json::json!({
+                            let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
                                 "session_id": stream_sid, "message": e,
                             }));
                         }
@@ -1305,7 +1311,7 @@ pub async fn assistant_send(
     let status = match status {
         Some(s) => s,
         None => {
-            let _ = app.emit(ERROR_EVENT, serde_json::json!({
+            let _ = app.emit_to(&window_label,ERROR_EVENT, serde_json::json!({
                 "session_id": session_id,
                 "message": "claude was killed before producing a result",
             }));
@@ -1314,7 +1320,7 @@ pub async fn assistant_send(
     };
 
     if status.success() {
-        let _ = app.emit(
+        let _ = app.emit_to(&window_label,
             DONE_EVENT,
             serde_json::json!({ "session_id": session_id, "exit_code": 0 }),
         );
@@ -1323,7 +1329,7 @@ pub async fn assistant_send(
         // User clicked Stop → assistant_stop killed the child. Emit done
         // (not error) so the UI clears the streaming flag and pops the
         // next queued message cleanly.
-        let _ = app.emit(
+        let _ = app.emit_to(&window_label,
             DONE_EVENT,
             serde_json::json!({
                 "session_id": session_id,
@@ -1349,7 +1355,7 @@ pub async fn assistant_send(
             // in the frontend's last-message slot; re-broadcasting it over the
             // Tauri bus risks leaking via diag listeners and inflates the
             // event payload for no benefit.
-            let _ = app.emit(
+            let _ = app.emit_to(&window_label,
                 SESSION_LOST_EVENT,
                 serde_json::json!({ "session_id": session_id }),
             );
@@ -1380,7 +1386,7 @@ pub async fn assistant_send(
                 raw
             )
         };
-        let _ = app.emit(
+        let _ = app.emit_to(&window_label,
             ERROR_EVENT,
             serde_json::json!({ "session_id": session_id, "message": msg.clone() }),
         );

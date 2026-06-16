@@ -47,3 +47,30 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
         .map(|_| ())
         .map_err(|e| format!("Couldn't launch VS Code (is `code` on PATH?): {e}"))
 }
+
+/// #37 Route A — spawn a second native window so a session can live on a
+/// separate monitor. Same app URL, unique `window-<n>` label (matched by the
+/// `secondary-window` capability glob). Each window boots its own store and
+/// namespaces its persisted tab state by label (see `persistence.ts`).
+// Must be `async`: on Windows, `WebviewWindowBuilder::build()` deadlocks WebView2
+// when called from a *synchronous* command — the window opens but stays at
+// about:blank (tauri-apps/tauri#13963). An async command runs off the main
+// thread, so the build dispatches cleanly.
+#[tauri::command]
+pub async fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static WINDOW_SEQ: AtomicU32 = AtomicU32::new(1);
+    let label = format!("window-{}", WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
+    let w = tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("/".into()))
+        .title("Rift")
+        .decorations(false)
+        .inner_size(1600.0, 1000.0)
+        .min_inner_size(1100.0, 800.0)
+        .visible(false)
+        .build()
+        .map_err(|e| format!("open_new_window: {e}"))?;
+    crate::center_in_work_area(&w);
+    let _ = w.show();
+    let _ = w.set_focus();
+    Ok(())
+}

@@ -13,6 +13,7 @@
 // (racy openTab during delete), #181 (persistTabs in finally on restore).
 
 import { MAX_PANES, type PaneState } from "./types";
+import { tabsStorageKey } from "./persistence";
 import { notify } from "../toast.svelte";
 
 /** Subset of AssistantStore the tab/pane lifecycle touches. Structural —
@@ -247,7 +248,7 @@ export async function restoreTabs(host: TabsHost) {
   // #181: persistTabs() in finally so a throw mid-restore doesn't leave the
   // disk record diverged from in-memory state.
   try {
-    const raw = localStorage.getItem("rift.ui.tabs.v1");
+    const raw = localStorage.getItem(tabsStorageKey());
     if (!raw) return;
     const parsed = JSON.parse(raw) as {
       openTabs?: unknown;

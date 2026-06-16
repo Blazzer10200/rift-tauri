@@ -25,6 +25,45 @@ pub mod usage;
 
 use tauri::Manager;
 
+// Center a window inside the primary monitor's WORK AREA (screen minus the
+// taskbar / dock). Tauri's built-in `center: true` uses full monitor size,
+// which shifts the window visually low when the taskbar eats the bottom band.
+// SPI_GETWORKAREA returns the taskbar-excluded rect. Shared by the main-window
+// setup + the `open_new_window` command.
+#[cfg(target_os = "windows")]
+pub(crate) fn center_in_work_area(window: &tauri::WebviewWindow) {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Rect { left: i32, top: i32, right: i32, bottom: i32 }
+    extern "system" {
+        fn SystemParametersInfoW(
+            ui_action: u32,
+            ui_param: u32,
+            pv_param: *mut std::ffi::c_void,
+            f_win_ini: u32,
+        ) -> i32;
+    }
+    const SPI_GETWORKAREA: u32 = 0x0030;
+    let mut wa = Rect::default();
+    let ok = unsafe {
+        SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            &mut wa as *mut _ as *mut std::ffi::c_void,
+            0,
+        )
+    };
+    if ok == 0 { return; }
+    let Ok(size) = window.outer_size() else { return; };
+    let work_w = wa.right - wa.left;
+    let work_h = wa.bottom - wa.top;
+    let x = wa.left + (work_w - size.width as i32) / 2;
+    let y = wa.top + (work_h - size.height as i32) / 2;
+    let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+}
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn center_in_work_area(_window: &tauri::WebviewWindow) {}
+
 /// Application entry point. Registers managed state + Tauri commands and
 /// blocks on the event loop. Update flow lives in `commands/update.rs` —
 /// frontend pulls GitHub release metadata, opens Setup.exe URL on confirm.
@@ -62,44 +101,6 @@ pub fn run() {
             serde_json::json!({ "location": location, "payload": payload }),
         );
     }));
-
-    // Center the main window inside the primary monitor's WORK AREA (screen
-    // minus the taskbar / dock). Tauri's built-in `center: true` uses full
-    // monitor size, which shifts the window visually low when the taskbar eats
-    // the bottom band. SPI_GETWORKAREA returns the taskbar-excluded rect.
-    #[cfg(target_os = "windows")]
-    fn center_in_work_area(window: &tauri::WebviewWindow) {
-        #[repr(C)]
-        #[derive(Default)]
-        struct Rect { left: i32, top: i32, right: i32, bottom: i32 }
-        extern "system" {
-            fn SystemParametersInfoW(
-                ui_action: u32,
-                ui_param: u32,
-                pv_param: *mut std::ffi::c_void,
-                f_win_ini: u32,
-            ) -> i32;
-        }
-        const SPI_GETWORKAREA: u32 = 0x0030;
-        let mut wa = Rect::default();
-        let ok = unsafe {
-            SystemParametersInfoW(
-                SPI_GETWORKAREA,
-                0,
-                &mut wa as *mut _ as *mut std::ffi::c_void,
-                0,
-            )
-        };
-        if ok == 0 { return; }
-        let Ok(size) = window.outer_size() else { return; };
-        let work_w = wa.right - wa.left;
-        let work_h = wa.bottom - wa.top;
-        let x = wa.left + (work_w - size.width as i32) / 2;
-        let y = wa.top + (work_h - size.height as i32) / 2;
-        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
-    }
-    #[cfg(not(target_os = "windows"))]
-    fn center_in_work_area(_window: &tauri::WebviewWindow) {}
 
     // Assistant α2: when launched by the Claude CLI as an MCP server (env
     // RIFT_MCP_SERVER=1), serve JSON-RPC on stdio and skip Tauri entirely.
@@ -162,6 +163,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::open_in_vscode,
+            commands::open_new_window,
             commands::check_for_updates,
             commands::download_update,
             commands::apply_pending_update,

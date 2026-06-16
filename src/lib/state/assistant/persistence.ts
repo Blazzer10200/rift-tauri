@@ -12,6 +12,7 @@
 // (M6 tabs lifecycle). Move them in M5b after M6 lands.
 
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { asModelSel } from "./helpers";
 import type {
   ChatMessage,
@@ -346,10 +347,20 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
   }
 }
 
+// #37: namespace the open-tabs record per window label. Two windows share the
+// same web origin, so a single key would let them stomp each other's tab list.
+// The `main` window keeps the legacy key for backward compat; secondary windows
+// (`window-<n>`) get a per-label suffix.
+export function tabsStorageKey(): string {
+  let label = "main";
+  try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
+  return label === "main" ? "rift.ui.tabs.v1" : `rift.ui.tabs.${label}.v1`;
+}
+
 export function persistTabs(host: PersistenceHost): void {
   try {
     localStorage.setItem(
-      "rift.ui.tabs.v1",
+      tabsStorageKey(),
       JSON.stringify({
         openTabs: host.openTabs,
         activeTabId: host.currentConvoId,

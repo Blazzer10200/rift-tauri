@@ -55,6 +55,10 @@ struct Request {
     /// events to the right chat tab.
     #[serde(default)]
     session_id: Option<String>,
+    /// #37: originating window label (MCP child reads `RIFT_BRIDGE_WINDOW`) so
+    /// bridge events emit_to that window instead of broadcasting app-wide.
+    #[serde(default)]
+    window_label: Option<String>,
     /// `ask_user`: pass-through questions payload — same shape the built-in
     /// `AskUserQuestion` tool emits.
     #[serde(default)]
@@ -87,6 +91,16 @@ fn err(msg: impl Into<String>) -> Response {
 
 fn ok_with(data: Value) -> Response {
     Response { ok: true, data: Some(data), ..Response::default() }
+}
+
+/// #37: the window to emit_to — the request's label, or "main" when absent
+/// (single-window installs / a child that predates the env var).
+fn window_of(req: &Request) -> String {
+    req.window_label
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("main")
+        .to_string()
 }
 
 /// Spawn the bridge listener exactly once. Idempotent. Returns the cached
@@ -207,6 +221,7 @@ fn session_id_or_warn(id: Option<String>, op: &str) -> String {
 }
 
 async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
+    let window = window_of(&req);
     let request_id = match req.request_id {
         Some(s) if !s.trim().is_empty() => s,
         _ => return err("ask_user: missing `request_id`"),
@@ -222,7 +237,8 @@ async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
 
     // Emit AFTER registering — guarantees the receiver is in the map before
     // the frontend can possibly fire an answer back.
-    let _ = app.emit(
+    let _ = app.emit_to(
+        window.as_str(),
         "assistant://ask-user",
         serde_json::json!({
             "request_id": request_id,
@@ -256,7 +272,8 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
     if let Err(e) = crate::browser::parse_url(&url) {
         return err(format!("open_browser: {e}"));
     }
-    let _ = app.emit(
+    let _ = app.emit_to(
+        &window_of(&req),
         "assistant://open-browser",
         serde_json::json!({
             "url": url,
@@ -285,7 +302,8 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
         Some("danger") => "danger",
         _ => "info",
     };
-    let _ = app.emit(
+    let _ = app.emit_to(
+        &window_of(&req),
         "assistant://notify",
         serde_json::json!({
             "title": title,

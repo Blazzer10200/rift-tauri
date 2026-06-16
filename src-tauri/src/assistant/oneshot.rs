@@ -227,7 +227,9 @@ names), then output the rewritten prompt. Keep lookups minimal."
     // config file after the child exits (held until this fn returns).
     let _mcp_guard: Option<McpConfigGuard> = if let Some(root) = ground_root {
         let trust = effective_trust_level(&None);
-        match write_mcp_config(&request_id, std::slice::from_ref(&root), &trust) {
+        // oneshot exposes only read tools (no bridge ask_user/notify), so window
+        // routing is moot — pass "main".
+        match write_mcp_config(&request_id, std::slice::from_ref(&root), &trust, "main") {
             Ok(p) => {
                 cmd.arg("--strict-mcp-config")
                     .arg("--mcp-config").arg(&p)
