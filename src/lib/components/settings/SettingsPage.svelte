@@ -1031,7 +1031,7 @@
   .st-kv-v { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .st-about-row { display: flex; align-items: center; gap: 12px; padding: 13px 17px; width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }
   .st-about-row + .st-about-row { border-top: 1px solid var(--border); }
-  .st-about-ic { width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; background: var(--field); border: 1px solid var(--field-border); color: var(--fg-muted); flex: none; }
+  .st-about-ic { width: 32px; height: 32px; border-radius: var(--radius); display: grid; place-items: center; background: var(--field); border: 1px solid var(--field-border); color: var(--fg-muted); flex: none; }
   .st-about-body { flex: 1; min-width: 0; }
   .st-about-t { font-size: var(--fs-sm); font-weight: 600; display: block; color: var(--fg); }
   .st-about-s { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 2px; display: block; }
@@ -1041,7 +1041,7 @@
   .st-swatch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 16px; }
   .st-swatch { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 8px 4px 6px; background: transparent; border: 0; border-radius: 10px; cursor: pointer; font: inherit; transition: background .13s ease; }
   .st-swatch:hover { background: var(--surface-hover); }
-  .st-swatch-chip { width: 100%; height: 42px; border-radius: 9px; display: grid; place-items: center; background: var(--sw); color: rgba(0,0,0,0.82); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); transition: box-shadow .15s ease, transform .12s ease; }
+  .st-swatch-chip { width: 100%; height: 42px; border-radius: var(--radius); display: grid; place-items: center; background: var(--sw); color: rgba(0,0,0,0.82); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); transition: box-shadow .15s ease, transform .12s ease; }
   .st-swatch:hover .st-swatch-chip { transform: translateY(-1px); }
   .st-swatch.on .st-swatch-chip { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22), 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--sw) 80%, transparent); }
   .st-swatch-label { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }

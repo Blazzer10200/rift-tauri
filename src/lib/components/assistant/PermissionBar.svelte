@@ -65,7 +65,7 @@
     max-width: min(100%, 78ch);
     margin: 3px 0 5px;
     padding: 6px 10px;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     background: color-mix(in oklch, var(--warn-soft) 55%, var(--bg-elev-1));
     border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--border));
     border-left-width: 3px;

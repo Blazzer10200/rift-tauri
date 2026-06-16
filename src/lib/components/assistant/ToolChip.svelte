@@ -1428,7 +1428,7 @@
     padding: 6px 11px;
     background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     text-align: left;
     cursor: pointer;
     transition: background 120ms ease-out, border-color 120ms ease-out, transform 80ms ease-out;
@@ -1496,7 +1496,7 @@
   }
   .ask-btn {
     padding: 6px 14px;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--bg-elev-1);
     color: var(--fg-2);

@@ -145,7 +145,7 @@
 </div>
 
 <style>
-  .card { border: 1px solid var(--border); border-radius: 9px; background: var(--surface); overflow: hidden; }
+  .card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); overflow: hidden; }
   .card.open { border-color: color-mix(in oklab, var(--accent) 28%, var(--border)); }
   .head { display: flex; align-items: center; }
   .head:hover { background: color-mix(in oklab, var(--accent) 6%, transparent); }

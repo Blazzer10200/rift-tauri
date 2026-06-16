@@ -907,7 +907,7 @@
     margin: 0;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     color: var(--fg-muted);
     cursor: pointer;
     font-size: var(--fs-sm);
@@ -1123,7 +1123,7 @@
     height: 26px; padding: 0 9px;
     background: transparent;
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     color: var(--fg);
     cursor: pointer;
     font: inherit; font-size: var(--fs-xs);
@@ -1547,7 +1547,7 @@
   .panels-btn {
     gap: 4px;
     padding: 3px 7px;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
   }
   .panels-btn.open {
     background: var(--accent-soft);

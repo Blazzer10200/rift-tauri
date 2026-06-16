@@ -121,7 +121,7 @@
   }
   :global(.perm-menu .perm-row) {
     position: relative; display: flex; align-items: flex-start; gap: 9px; width: 100%;
-    padding: 6px 8px; border-radius: 7px; border: 0; background: transparent;
+    padding: 6px 8px; border-radius: var(--radius-sm); border: 0; background: transparent;
     color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
     transition: background 120ms;
   }

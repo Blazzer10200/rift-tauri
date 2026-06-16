@@ -153,7 +153,7 @@
 <style>
   .stats {
     flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 12px;
-    padding: 16px 18px 14px; border-radius: 16px;
+    padding: 16px 18px 14px; border-radius: var(--radius-2xl);
     background: var(--surface); border: 1px solid var(--border);
     box-shadow: inset 0 1px 0 color-mix(in oklch, white 2.5%, transparent);
   }
@@ -162,7 +162,7 @@
   .st-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex: none; }
   .seg, .ranges { display: inline-flex; align-items: center; gap: 2px; padding: 3px; border-radius: 10px; background: var(--bg-inset); border: 1px solid var(--border); }
   .seg button, .ranges button {
-    display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border: 0; border-radius: 7px;
+    display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border: 0; border-radius: var(--radius-sm);
     background: transparent; color: var(--fg-muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
     transition: background 120ms, color 120ms;
   }
@@ -175,7 +175,7 @@
   .kpis { flex: none; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
   .kpi {
     display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 0 8px;
-    align-items: center; padding: 10px 12px; border-radius: 11px;
+    align-items: center; padding: 10px 12px; border-radius: var(--radius-xl);
     background: var(--bg-inset); border: 1px solid var(--border);
   }
   .kpi .k-ic { grid-row: 1 / 3; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
@@ -234,7 +234,7 @@
   .se-t { font-size: var(--fs-md); font-weight: 650; color: var(--fg); }
   .se-s { font-size: var(--fs-xs); color: var(--fg-subtle); max-width: 280px; }
   .st-skeleton { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
-  .sk-cell { height: 54px; border-radius: 11px; background: linear-gradient(90deg, var(--bg-inset), var(--surface-hover), var(--bg-inset)); background-size: 200% 100%; animation: sk 1.3s ease-in-out infinite; }
+  .sk-cell { height: 54px; border-radius: var(--radius-xl); background: linear-gradient(90deg, var(--bg-inset), var(--surface-hover), var(--bg-inset)); background-size: 200% 100%; animation: sk 1.3s ease-in-out infinite; }
   @keyframes sk { to { background-position: -200% 0; } }
   @media (prefers-reduced-motion: reduce) { .sk-cell { animation: none; } }
 

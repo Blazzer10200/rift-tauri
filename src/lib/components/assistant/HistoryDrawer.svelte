@@ -755,7 +755,7 @@
     padding: 5px 9px;
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     color: var(--fg-faint);
     transition: border-color 120ms, color 120ms;
   }

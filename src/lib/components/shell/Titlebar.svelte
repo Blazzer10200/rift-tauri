@@ -178,7 +178,7 @@
   .navtoggle {
     display: grid; place-items: center;
     width: 26px; height: 26px; flex: none;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     border: 1px solid transparent;
     background: transparent;
     color: var(--fg-subtle);

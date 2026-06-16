@@ -335,7 +335,7 @@
   }
   .wel-mark {
     width: 52px; height: 52px;
-    border-radius: 16px;
+    border-radius: var(--radius-2xl);
     display: grid; place-items: center;
     margin-bottom: 3px;
     box-shadow: 0 16px 42px color-mix(in oklab, var(--accent) 16%, transparent);
@@ -416,7 +416,7 @@
   }
   .wel-recent:hover { background: var(--surface-hover); border-color: var(--border); }
   .wel-recent-ic {
-    width: 24px; height: 24px; border-radius: 7px;
+    width: 24px; height: 24px; border-radius: var(--radius-sm);
     display: grid; place-items: center;
     background: var(--bg-elev-2); color: var(--fg-muted);
     transition: color 130ms ease;
@@ -471,7 +471,7 @@
   }
   .wel-open:active { transform: translateY(0) scale(0.99); }
   .wel-open-ic {
-    width: 40px; height: 40px; border-radius: 11px;
+    width: 40px; height: 40px; border-radius: var(--radius-xl);
     display: grid; place-items: center;
     background: var(--accent-soft); color: var(--accent);
   }

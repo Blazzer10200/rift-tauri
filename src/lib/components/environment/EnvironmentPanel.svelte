@@ -163,7 +163,7 @@
   .commit-actions { display: flex; gap: 6px; }
   .ca {
     display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px;
-    border: 1px solid var(--border); border-radius: 7px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface);
     color: var(--fg); font: inherit; font-size: var(--fs-xs); font-weight: 550; cursor: pointer;
   }
   .ca:hover:not(:disabled) { border-color: color-mix(in oklab, var(--accent) 40%, var(--border)); }
@@ -182,7 +182,7 @@
 
   .empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 32px 18px; color: var(--fg-2); font-size: var(--fs-xs); text-align: center; }
   .retry {
-    padding: 5px 12px; border: 1px solid var(--border); border-radius: 7px;
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
     background: var(--surface); color: var(--fg); font: inherit; font-size: var(--fs-xs); cursor: pointer;
   }
   .retry:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--border)); }

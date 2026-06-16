@@ -381,7 +381,7 @@
     flex: 1; min-width: 0;
     padding: 3px 7px; margin-left: -2px;
     border: 0; background: transparent;
-    border-radius: 7px;
+    border-radius: var(--radius-sm);
     font: inherit;
     font-size: 11.5px;
     text-align: left;

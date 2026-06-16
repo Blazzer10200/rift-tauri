@@ -300,7 +300,7 @@
   }
   .effort-head .effort-help:hover { color: var(--fg-muted); }
   .effort-slider {
-    padding: 13px 16px 8px; margin: 0 2px; border-radius: 11px;
+    padding: 13px 16px 8px; margin: 0 2px; border-radius: var(--radius-xl);
     transition: background 160ms ease, box-shadow 160ms ease;
   }
   .effort-slider.active {
