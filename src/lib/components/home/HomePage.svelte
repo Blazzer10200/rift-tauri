@@ -2,7 +2,7 @@
   import {
     MessageSquare, Sparkles, Send, FolderOpen, Folder, FolderGit2,
     GitBranch, ChevronRight, History, X, ArrowUpCircle, Copy, Check, Loader2,
-    Gauge, Plus, Settings as SettingsIcon, Cpu,
+    Gauge, Plus, Settings as SettingsIcon,
   } from "lucide-svelte";
   import { onMount } from "svelte";
   import { assistant } from "$lib/state/assistant.svelte";
@@ -225,7 +225,7 @@
 
     {#if cliUpdAvail}
       <div class="dash-cli" role="status" data-tone={cliSummary.tone}>
-        <span class="dc-ic"><ArrowUpCircle size={17} /></span>
+        <span class="dc-ic"><ArrowUpCircle size={15} /></span>
         <span class="dc-body">
           <span class="dc-t">{cliSummary.headline}</span>
           <span class="dc-s">
@@ -378,16 +378,15 @@
           <div class="ql-rows">
             <button class="ql-row" type="button" onclick={goNewTab}>
               <span class="ql-ic"><Plus size={14} /></span>
-              <span class="ql-label">New tab</span>
+              <span class="ql-label">New chat</span>
+            </button>
+            <button class="ql-row" type="button" onclick={() => void assistant.pickFolder()}>
+              <span class="ql-ic"><FolderOpen size={14} /></span>
+              <span class="ql-label">Change folder</span>
             </button>
             <button class="ql-row" type="button" onclick={() => workspace.setActive("settings")}>
               <span class="ql-ic"><SettingsIcon size={14} /></span>
               <span class="ql-label">Open Settings</span>
-            </button>
-            <button class="ql-row" type="button" onclick={() => workspace.setActive("local-llm")}>
-              <span class="ql-ic"><Cpu size={14} /></span>
-              <span class="ql-label">Local LLM</span>
-              <span class="ql-badge">Experimental</span>
             </button>
           </div>
         </div>
@@ -457,8 +456,8 @@
 
   /* CLI update banner — slim accent strip under the Ask bar. */
   .dash-cli {
-    flex: none; display: flex; align-items: center; gap: 13px;
-    padding: 11px 12px 11px 14px; border-radius: 14px;
+    flex: none; display: flex; align-items: center; gap: 11px;
+    padding: 8px 10px 8px 12px; border-radius: 12px;
     background: color-mix(in oklab, var(--accent) 9%, var(--surface));
     border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
     animation: dash-cli-in 240ms var(--ease-page, ease);
@@ -474,14 +473,14 @@
   @keyframes dash-cli-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
   @media (prefers-reduced-motion: reduce) { .dash-cli { animation: none; } }
   .dash-cli .dc-ic {
-    width: 32px; height: 32px; border-radius: var(--radius); flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: var(--radius); flex-shrink: 0;
     display: grid; place-items: center;
     background: var(--accent-soft); color: var(--accent);
   }
   .dash-cli[data-tone="warn"] .dc-ic { background: color-mix(in oklab, var(--warn) 14%, transparent); color: var(--warn); }
   .dash-cli[data-tone="danger"] .dc-ic { background: color-mix(in oklab, var(--danger) 14%, transparent); color: var(--danger); }
-  .dash-cli .dc-body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .dash-cli .dc-t { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
+  .dash-cli .dc-body { min-width: 0; display: flex; flex-direction: row; align-items: baseline; gap: 9px; }
+  .dash-cli .dc-t { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); white-space: nowrap; flex-shrink: 0; }
   .dash-cli .dc-s { font-size: var(--fs-xs); color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dash-cli .dc-s code { font-family: var(--font-mono); color: var(--fg-2); }
   .dash-cli[data-tone="warn"] .dc-detail { color: var(--warn); }
@@ -650,5 +649,4 @@
   .ql-ic { width: 24px; height: 24px; border-radius: var(--radius-sm); display: grid; place-items: center; background: var(--bg-elev-2); color: var(--fg-muted); flex-shrink: 0; transition: color 120ms; }
   .ql-row:hover .ql-ic { color: var(--accent); }
   .ql-label { flex: 1; }
-  .ql-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 999px; background: color-mix(in oklab, var(--warn) 12%, transparent); color: var(--warn); flex-shrink: 0; }
 </style>

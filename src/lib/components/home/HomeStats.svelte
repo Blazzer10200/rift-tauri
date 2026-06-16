@@ -2,6 +2,9 @@
   import { onMount } from "svelte";
   import { BarChart3, Flame, MessageSquare, Wrench, CalendarDays, Clock, Sparkles, Cpu, Coins } from "lucide-svelte";
   import { homeStats } from "$lib/state/homeStats.svelte";
+  import { assistant } from "$lib/state/assistant.svelte";
+  import { MODEL_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
+  import type { ModelSel } from "$lib/state/assistant/types";
   import { tooltip } from "$lib/actions/tooltip";
   import {
     type StatRange,
@@ -10,6 +13,11 @@
   } from "./statsHelpers";
 
   let tab = $state<"overview" | "models">("overview");
+
+  // A stats model key ("opus"/"sonnet"/…) is selectable only when it maps to a
+  // real composer model (local passthrough ids like "qwen3-coder" don't).
+  const selectableModel = (key: string): ModelSel | null =>
+    (MODEL_OPTIONS.find((m) => m.id === key)?.id as ModelSel | undefined) ?? null;
   let range = $state<StatRange>("all");
   const now = Date.now();
 
@@ -94,7 +102,7 @@
         <span class="k-v">{strk.current}<span class="k-u">d</span>{#if strk.longest > strk.current}<span class="k-sub">best {strk.longest}d</span>{/if}</span>
       </div>
       <div class="kpi"><span class="k-ic"><Clock size={13} /></span><span class="k-l">Peak hour</span><span class="k-v">{hourLabel(peak)}</span></div>
-      <div class="kpi"><span class="k-ic"><Cpu size={13} /></span><span class="k-l">Top model</span><span class="k-v sm">{fav ?? "—"}</span></div>
+      <button class="kpi kpi-btn" type="button" onclick={() => (tab = "models")} use:tooltip={"See the model breakdown"}><span class="k-ic"><Cpu size={13} /></span><span class="k-l">Top model</span><span class="k-v sm">{fav ?? "—"}</span></button>
     </div>
 
     <div class="heat-wrap">
@@ -137,13 +145,22 @@
         <div class="st-empty mini">No model activity in this range.</div>
       {:else}
         {#each models.slice(0, 6) as m, i (m.model)}
-          <div class="mdl-row">
+          {@const sel = selectableModel(m.model)}
+          <button
+            class="mdl-row"
+            class:clickable={!!sel}
+            class:active={sel != null && assistant.model === sel}
+            type="button"
+            disabled={!sel}
+            onclick={() => sel && assistant.setModel(sel)}
+            use:tooltip={sel ? (assistant.model === sel ? `${m.label} — current composer model` : `Set composer to ${m.label}`) : m.label}
+          >
             <span class="mdl-dot" style="background: {modelColor(i)};"></span>
             <span class="mdl-name">{m.label}</span>
             <span class="mdl-bar"><span class="mdl-fill" style="width: {Math.max(2, m.share * 100)}%; background: {modelColor(i)};"></span></span>
             <span class="mdl-meta mono">{fmtCompact(m.messages)} msg · {fmtCost(m.cost)}</span>
             <span class="mdl-pct mono">{(m.share * 100).toFixed(m.share >= 0.1 ? 0 : 1)}%</span>
-          </div>
+          </button>
         {/each}
       {/if}
     </div>
@@ -179,6 +196,10 @@
     background: var(--bg-inset); border: 1px solid var(--border);
   }
   .kpi .k-ic { grid-row: 1 / 3; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+  /* Top-model KPI is a button that jumps to the Models tab. */
+  .kpi-btn { font: inherit; text-align: left; cursor: pointer; transition: background 120ms, border-color 120ms; }
+  .kpi-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+  .kpi-btn:hover .k-ic { background: var(--accent); color: var(--accent-fg); }
   .k-l { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--fg-faint); align-self: end; }
   .k-v { font-size: 19px; font-weight: 720; letter-spacing: -0.02em; color: var(--fg); line-height: 1.05; font-variant-numeric: tabular-nums; align-self: start; display: flex; align-items: baseline; gap: 5px; min-width: 0; }
   .k-v.sm { font-size: 14px; font-weight: 680; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
@@ -217,8 +238,17 @@
   .ba-mid { color: var(--fg-subtle); }
 
   /* Models tab — per-model breakdown */
-  .mdl-list { display: flex; flex-direction: column; gap: 7px; margin-top: 4px; }
-  .mdl-row { display: grid; grid-template-columns: 10px minmax(64px, auto) 1fr auto auto; align-items: center; gap: 10px; }
+  .mdl-list { display: flex; flex-direction: column; gap: 3px; margin-top: 4px; }
+  .mdl-row {
+    display: grid; grid-template-columns: 10px minmax(64px, auto) 1fr auto auto; align-items: center; gap: 10px;
+    width: 100%; padding: 5px 7px; margin: 0; border: 1px solid transparent; border-radius: var(--radius);
+    background: transparent; font: inherit; text-align: left; cursor: default;
+    transition: background 120ms, border-color 120ms;
+  }
+  .mdl-row.clickable { cursor: pointer; }
+  .mdl-row.clickable:hover { background: var(--surface-hover); }
+  .mdl-row.active { background: var(--accent-soft); border-color: var(--ghost-border); }
+  .mdl-row.active .mdl-name { color: var(--accent); }
   .mdl-dot { width: 9px; height: 9px; border-radius: 3px; }
   .mdl-name { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .mdl-bar { height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
