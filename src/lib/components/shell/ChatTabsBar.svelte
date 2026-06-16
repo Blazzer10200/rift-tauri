@@ -509,13 +509,6 @@
       </span>
     {/if}
 
-    {#if assistant.workspaceBranch}
-      <span class="branch-chip mono" use:tooltip={`On branch ${assistant.workspaceBranch}`}>
-        <GitBranch size={12} />
-        <span class="branch-name">{assistant.workspaceBranch}</span>
-      </span>
-    {/if}
-
     {#if authWarn}
       <span
         class="auth-warn"
@@ -796,9 +789,9 @@
       <History size={14} class="vm-icon" />
       <span class="vm-label">History</span>
       {#if assistant.conversations.length > 0}<span class="vm-count">{assistant.conversations.length}</span>{/if}
-      <Check size={13} class="vm-check" aria-hidden="true" />
     </button>
-    <div class="vm-sep" role="separator"></div>
+
+    <div class="vm-head" role="presentation">Panels</div>
     <button
       class="vm-item"
       class:on={browserDock.open}
@@ -850,7 +843,8 @@
       <span class="vm-label">Environment</span>
       <Check size={13} class="vm-check" />
     </button>
-    <div class="vm-sep" role="separator"></div>
+
+    <div class="vm-head" role="presentation">Layout</div>
     <button
       class="vm-item"
       type="button"
@@ -862,7 +856,6 @@
       <span class="vm-label">{canAddPane ? "Split pane" : "Max panes"}</span>
       {#if splitActive}<span class="vm-count">{paneCount}/4</span>{/if}
       <kbd class="vm-kbd">Ctrl&nbsp;\</kbd>
-      <Check size={13} class="vm-check" aria-hidden="true" />
     </button>
   </div>
 {/if}
@@ -1141,16 +1134,6 @@
   }
   .proj-pill :global(.proj-chev) { color: var(--fg-faint); flex-shrink: 0; transition: transform 180ms var(--ease-page), color 140ms ease; }
   .proj-pill :global(.chev-open) { transform: rotate(180deg); color: var(--fg-muted); }
-
-  /* ── Branch chip — read-only git branch beside the project pill (mockup `⎇ main`). */
-  .branch-chip {
-    display: inline-flex; align-items: center; gap: 5px;
-    height: 26px; padding: 0 8px;
-    font-size: 11px; color: var(--fg-muted);
-    max-width: 160px;
-  }
-  .branch-chip :global(svg) { color: var(--fg-faint); flex-shrink: 0; }
-  .branch-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* #30: active tab pinned to a different folder than the workspace chip. */
   .cwd-badge {
@@ -1630,11 +1613,18 @@
     transition: opacity 110ms ease;
   }
   .vm-item.on :global(.vm-check) { opacity: 1; }
-  .vm-sep {
-    height: 1px;
-    margin: 4px 6px;
-    background: color-mix(in oklch, var(--border) 70%, transparent);
+  /* Section labels group the menu into Navigate (History) · Panels · Layout
+     so the toggles read as one family and Split pane no longer looks like a
+     panel. First head needs extra top margin to clear the History row. */
+  .vm-head {
+    padding: 5px 9px 3px;
+    margin-top: 5px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+    user-select: none;
   }
+  .vm-head:first-of-type { margin-top: 3px; }
 
   /* New-chat affordance sits flush after the last tab — browser convention
      puts the + there, not buried after the right-side action chips. Idle

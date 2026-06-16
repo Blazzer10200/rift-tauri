@@ -15,6 +15,19 @@
     paneIdx,
   }: { tabId: string | null; focused: boolean; paneIdx: number } = $props();
 
+  // Park the jump-to-latest button just above the composer no matter how tall it
+  // grows (queue rail / attachments / enhance bar). A fixed px offset hid the
+  // button behind a tall composer.
+  let composerSlotEl = $state<HTMLDivElement | undefined>();
+  let composerH = $state(72);
+  $effect(() => {
+    const el = composerSlotEl;
+    if (!el) return;
+    const ro = new ResizeObserver(() => { composerH = el.offsetHeight; });
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
   const tab = $derived(assistant.tabFor(tabId));
   const messages = $derived(tab?.messages ?? []);
   const streaming = $derived(tab?.streaming ?? false);
@@ -331,7 +344,7 @@
   {/if}
 
   {#if tabId && !showEmpty && !stickToBottom}
-    <button class="jump-latest" type="button" onclick={jumpToLatest} aria-label="Jump to latest message">
+    <button class="jump-latest" type="button" style="bottom: {composerH + 12}px" onclick={jumpToLatest} aria-label="Jump to latest message">
       <span class="jl-ic" aria-hidden="true"><ChevronDown size={17}/></span>
     </button>
   {/if}
@@ -389,7 +402,7 @@
        region above and no composer. Send focuses this pane first so the
        store's activeTab-driven send() targets the right tab. -->
   {#if tabId}
-    <div class="composer-slot">
+    <div class="composer-slot" bind:this={composerSlotEl}>
       <Composer
         {tabId}
         onsubmit={(text) => {

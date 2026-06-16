@@ -8,7 +8,7 @@
   import AssistantPane from "./AssistantPane.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
   import SubAgentDock from "./SubAgentDock.svelte";
-  import EnvironmentPanel from "../environment/EnvironmentPanel.svelte";
+  import EnvironmentFloat from "../environment/EnvironmentFloat.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -185,27 +185,17 @@
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
   }
 
-  // ── Environment (source-control) dock resize ──────────────────────────────
-  let envDragging = $state(false);
-  function onEnvPointerDown(e: PointerEvent) {
-    e.preventDefault();
-    envDragging = true;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-  function onEnvPointerMove(e: PointerEvent) {
-    if (!envDragging || !workbenchEl) return;
-    const rect = workbenchEl.getBoundingClientRect();
-    environmentDock.setWidth(rect.right - e.clientX);
-  }
-  function onEnvPointerUp(e: PointerEvent) {
-    if (!envDragging) return;
-    envDragging = false;
-    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
-  }
+  // ── Environment float auto-show ───────────────────────────────────────────
+  // Surface the floating source-control box once a chat actually starts (the
+  // active tab has messages), unless the user dismissed it. The float itself
+  // self-hides when the workspace isn't a git repo.
+  $effect(() => {
+    if ((assistant.activeTab?.messages.length ?? 0) > 0) environmentDock.autoShow();
+  });
 </script>
 
 <div class="assistant">
-  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging || activityDragging || envDragging}>
+  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging || activityDragging}>
   <div class="layout">
     {#if assistant.splitActive}
       <div
@@ -251,6 +241,8 @@
       />
     {/if}
   </div>
+
+  <EnvironmentFloat />
 
   {#if browserDock.open}
     <!-- CR1: the transition animates .dock-wrap's width (no competing inline
@@ -303,26 +295,6 @@
     </div>
   {/if}
 
-  {#if environmentDock.open}
-    <div class="dock-wrap" transition:dockSlide>
-      <div class="dock-inner" style="width: {environmentDock.width + 3}px">
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-          class="dock-divider"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize environment panel"
-          tabindex="0"
-          onpointerdown={onEnvPointerDown}
-          onpointermove={onEnvPointerMove}
-          onpointerup={onEnvPointerUp}
-          onpointercancel={onEnvPointerUp}
-        ><span class="divider-grip" aria-hidden="true"></span></div>
-        <EnvironmentPanel />
-      </div>
-    </div>
-  {/if}
   </div>
 </div>
 
@@ -338,6 +310,7 @@
     flex: 1; min-height: 0; min-width: 0;
     display: flex;
     overflow: hidden;
+    position: relative; /* anchors the floating Environment pill */
   }
   .layout {
     flex: 1; min-height: 0; min-width: 0;

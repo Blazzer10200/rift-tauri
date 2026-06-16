@@ -83,7 +83,7 @@ Svelte-5 runes-class singletons (the `export const store = new Store()` pattern)
 | `tabs.ts` · `types.ts` | Multi-tab / multi-pane state (`PaneState`, `MAX_PANES=4`), persisted to `localStorage`. |
 | `persistence.ts` · `telemetry.ts` · `attachments.ts` · `workspace.ts` · `healthAlerts.ts` · `helpers.ts` | disk save · usage rollups · file attachments · per-tab workspace root · health banners · effort/model mapping. |
 
-Other stores: `git.svelte.ts` + `environmentDock.svelte.ts` (Environment panel), `usage.svelte.ts` (rate-limit gauges), `cliUpdate.svelte.ts` + `updates.svelte.ts` (CLI + app update notices), `stt.svelte.ts`, `browserDock` / `activityDock`, `workspace.svelte.ts`, `toast.svelte.ts`.
+Other stores: `git.svelte.ts` + `environmentDock.svelte.ts` (Environment floating widget — `EnvironmentFloat` pill/expanded-panel; `open` auto-managed, `expanded` persisted), `usage.svelte.ts` (rate-limit gauges), `cliUpdate.svelte.ts` + `updates.svelte.ts` (CLI + app update notices), `stt.svelte.ts`, `browserDock` / `activityDock`, `workspace.svelte.ts`, `toast.svelte.ts`.
 
 ### Components (`src/lib/components/`)
 - `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `PermissionBar`, `SubAgentDock`.

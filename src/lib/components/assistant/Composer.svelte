@@ -1016,19 +1016,15 @@
         {/if}
       </div>
 
-      <!-- Divider + context gauge in one. Base hairline separates the input
-           zone from the toolbar; the fill tracks context-window usage, and the
-           trailing readout puts the live ctx% next to the bar (only once the
-           conversation has tokens, so a fresh composer stays clean). -->
+      <!-- Divider doubles as an ambient context gauge: base hairline separates
+           the input zone from the toolbar; the fill tracks context-window usage.
+           The numeric % lives only in the header gauge now (no duplicate readout). -->
       <div class="composer-gauge">
         <div class="composer-divider" data-tone={ctxTone} use:tooltip={ctxTitle} role="img" aria-label={ctxTitle}>
           {#if ctxTokens > 0}
             <span class="composer-divider-fill" style="width: {Math.min(100, ctxPct)}%" aria-hidden="true"></span>
           {/if}
         </div>
-        {#if ctxTokens > 0}
-          <span class="ctx-readout" data-tone={ctxTone} aria-hidden="true">{ctxPct < 1 ? "<1" : Math.round(ctxPct)}% context</span>
-        {/if}
       </div>
 
       <div class="composer-toolbar">
@@ -1420,18 +1416,6 @@
     background: color-mix(in oklch, var(--border) 55%, transparent);
     overflow: hidden;
   }
-  /* Trailing ctx% — tabular so it doesn't jitter as the number ticks; tone
-     steps mirror the fill (yellow ≥70, red ≥90). */
-  .ctx-readout {
-    flex-shrink: 0; white-space: nowrap;
-    font-family: var(--font-mono);
-    font-size: 10px; line-height: 1;
-    font-variant-numeric: tabular-nums;
-    color: var(--fg-faint);
-    transition: color 240ms ease-out;
-  }
-  .ctx-readout[data-tone="yellow"] { color: var(--warn); }
-  .ctx-readout[data-tone="red"] { color: var(--danger); }
   .composer-divider-fill {
     position: absolute;
     inset: 0 auto 0 0;
@@ -1481,6 +1465,7 @@
   }
   .toolbar-cluster {
     display: flex; align-items: center; gap: 4px;
+    min-width: 0; /* let clusters shrink in narrow panes instead of clipping the send button */
   }
   .toolbar-right { gap: 6px; }
 
@@ -1971,6 +1956,7 @@
   .perm-pill {
     align-self: center;
     display: inline-flex; align-items: center; gap: 5px;
+    min-width: 0; /* shrink + ellipsis the label under pressure, never clip the send button */
     height: 26px; padding: 0 7px 0 9px;
     background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
@@ -1982,7 +1968,7 @@
     color: var(--fg); border-color: var(--border);
   }
   .perm-pill > :global(svg:first-child) { color: var(--fg-muted); flex-shrink: 0; }
-  .perm-label { font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; }
+  .perm-label { font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   /* acceptEdits + auto read as "edits flow" → accent; bypass → warn; rest neutral. */
   .perm-pill[data-mode="acceptEdits"], .perm-pill[data-mode="auto"] {
     color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, var(--border));

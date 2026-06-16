@@ -1,22 +1,16 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { GitBranch, RefreshCw, X, ArrowUp, ArrowDown, Loader2, FolderGit2, Cloud } from "lucide-svelte";
+  import { GitBranch, RefreshCw, Minimize2, ArrowUp, ArrowDown, Loader2, FolderGit2, Cloud } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { git } from "../../state/git.svelte";
   import { environmentDock } from "../../state/environmentDock.svelte";
   import FileDiffCard from "./FileDiffCard.svelte";
 
+  // git.refresh is driven by EnvironmentFloat (always mounted while open) so the
+  // collapsed pill has counts too — this panel just renders from git state.
   const root = $derived(assistant.activeTab?.workspaceRoot ?? null);
 
   let message = $state("");
   let pushing = $state(false);
-
-  onMount(() => { void git.refresh(root); });
-  // Re-pull whenever the focused tab's workspace root changes.
-  $effect(() => {
-    const r = root;
-    void git.refresh(r);
-  });
 
   const status = $derived(git.status);
   const hasChanges = $derived((status?.files.length ?? 0) > 0);
@@ -35,8 +29,8 @@
     <button class="hd-btn" type="button" title="Refresh" aria-label="Refresh git status" disabled={git.loading} onclick={() => git.refresh(root)}>
       {#if git.loading}<Loader2 size={14} class="spin" />{:else}<RefreshCw size={14} />{/if}
     </button>
-    <button class="hd-btn" type="button" title="Close" aria-label="Close panel" onclick={() => environmentDock.toggle()}>
-      <X size={15} />
+    <button class="hd-btn" type="button" title="Collapse" aria-label="Collapse to pill" onclick={() => environmentDock.setExpanded(false)}>
+      <Minimize2 size={14} />
     </button>
   </div>
 
