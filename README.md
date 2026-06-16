@@ -10,6 +10,7 @@ Pre-1.0 (`-alpha`). Pure-assistant — the former SFTP/sync/server/RCON half was
 
 ## Quick links
 
+- **How it fits together:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **Install, build, contribute:** [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
 - **Release history:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
 - **Issue tracker:** [`docs/ISSUES.md`](docs/ISSUES.md)
