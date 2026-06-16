@@ -254,8 +254,13 @@ async function evalJs(js, timeoutMs = 30000, target = 'main') {
 }
 
 async function typeText({ selector, text, key }, target = 'main') {
-    const keyCode = key === 'Enter' ? 13 : key === 'CtrlEnter' ? -1 : key === 'Tab' ? 9 : key === 'Escape' ? 27 : 0;
-    const js = `
+    // Set the value (native setter so Svelte's input binding picks it up), then —
+    // if a key was requested — fire it through the REAL Input domain below, not a
+    // synthetic KeyboardEvent. A `new KeyboardEvent('keydown')` is untrusted, so a
+    // send-on-Enter handler that gates on isTrusted (or any real-key pipeline)
+    // ignored it: the textarea filled but the message never sent. The await lets
+    // the framework flush the input before the trusted key lands.
+    const setRes = await evalJs(`
         (async () => {
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return { error: 'selector not found' };
@@ -265,24 +270,20 @@ async function typeText({ selector, text, key }, target = 'main') {
             setter.call(el, ${JSON.stringify(text)});
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
-            // Let the framework flush the input before the key fires — same-task
-            // input+Enter reads as a net-unchanged value to batched reactivity
-            // (Svelte skips the DOM write-back), leaving a stale textarea.
             await new Promise(r => setTimeout(r, 0));
-            const k = ${keyCode};
-            const fire = (type, ctrl) => el.dispatchEvent(new KeyboardEvent(type, {
-                key: ${JSON.stringify(key || '')},
-                code: ${JSON.stringify(key || '')},
-                keyCode: Math.abs(k) || 0, which: Math.abs(k) || 0,
-                ctrlKey: !!ctrl, bubbles: true,
-            }));
-            if (k === 13) { fire('keydown', false); fire('keyup', false); }
-            else if (k === -1) { fire('keydown', true); fire('keyup', true); }
-            else if (k) { fire('keydown', false); fire('keyup', false); }
             return { ok: true, len: el.value?.length ?? 0 };
         })()
-    `;
-    return evalJs(js, 30000, target);
+    `, 30000, target);
+    if (setRes.error) return { error: setRes.error };
+    if (setRes.value?.error) return { error: setRes.value.error };
+    if (key) {
+        // CtrlEnter = Enter + Ctrl modifier (CDP modifier bitmask: Alt=1 Ctrl=2 Meta=4 Shift=8).
+        const k = key === 'CtrlEnter' ? 'Enter' : key;
+        const modifiers = key === 'CtrlEnter' ? 2 : 0;
+        const kr = await pressKey({ key: k, modifiers }, target);
+        if (kr.error) return { ...setRes.value, keyError: kr.error };
+    }
+    return setRes.value;
 }
 
 // Real pointer click via the CDP Input domain — dispatches the full
