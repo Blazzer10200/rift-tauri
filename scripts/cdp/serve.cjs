@@ -285,15 +285,43 @@ async function typeText({ selector, text, key }, target = 'main') {
     return evalJs(js, 30000, target);
 }
 
+// Real pointer click via the CDP Input domain — dispatches the full
+// mouseMoved→mousePressed→mouseReleased sequence at the element's center, so the
+// page sees genuine pointerdown/mousedown/focus/mouseup/click events (and real
+// hover/active states) exactly like a user. The old impl called el.click(), which
+// fires ONLY a synthetic `click` event — any UI bound to mousedown/pointerdown
+// (model picker, permission menu, dropdowns, sliders, drag handles) silently
+// no-op'd, and nothing was observable on screen. Coords are CSS px (Input domain
+// + getBoundingClientRect share that space, DSF-independent). Falls back to
+// el.click() only when the element has no hittable on-screen rect.
 async function click(selector, target = 'main') {
-    return evalJs(`
+    const loc = await evalJs(`
         (() => {
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return { error: 'selector not found' };
-            el.click();
-            return { ok: true };
+            el.scrollIntoView({ block: 'center', inline: 'center' });
+            const r = el.getBoundingClientRect();
+            if (!r.width || !r.height) return { error: 'zero-size element' };
+            const x = r.left + r.width / 2, y = r.top + r.height / 2;
+            const inView = x >= 0 && y >= 0 && x <= innerWidth && y <= innerHeight;
+            const hit = document.elementFromPoint(x, y);
+            const covered = !!(hit && hit !== el && !el.contains(hit) && !hit.contains(el));
+            return { x, y, inView, covered, coveredBy: covered ? (hit.className || hit.tagName) : null };
         })()
     `, 30000, target);
+    if (loc.error) return { error: loc.error };
+    const v = loc.value;
+    if (!v || v.error) return { error: v?.error || 'click target resolution failed' };
+    if (!v.inView) {
+        // Off-viewport even after scroll — synthetic click so the action still lands.
+        const fb = await evalJs(`(() => { const el=document.querySelector(${JSON.stringify(selector)}); if(!el) return {error:'gone'}; el.click(); return {ok:true}; })()`, 30000, target);
+        return { ok: !fb.value?.error, via: 'js-fallback', reason: 'offscreen', error: fb.value?.error };
+    }
+    const { x, y, covered, coveredBy } = v;
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 }, 30000, target);
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }, 30000, target);
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', buttons: 0, clickCount: 1 }, 30000, target);
+    return { ok: true, via: 'input', x: Math.round(x), y: Math.round(y), covered, coveredBy };
 }
 
 async function waitFor({ js, timeoutMs = 60000, intervalMs = 200 }, target = 'main') {
