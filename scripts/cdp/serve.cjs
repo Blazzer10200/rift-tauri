@@ -45,6 +45,13 @@ const API_PORT = Number(process.env.RIFT_CDP_API_PORT || 9223);
 const TMP_DIR = path.join(__dirname, '.tmp');
 const TMP_KEEP = Number(process.env.RIFT_CDP_TMP_KEEP || 20);
 const LOG_KEEP = Number(process.env.RIFT_CDP_LOG_KEEP || 200);
+// Whole-page screenshots are capped to this CSS long-edge before capture. A raw
+// HiDPI surface is ~2000x1250 (2.5MP) — over Anthropic's vision envelope (long
+// edge ≤1568, ≤~1.15MP), so every Read uploaded an oversized image that their
+// API resized server-side anyway, taxing latency for zero legibility gain. CSS-px
+// clip + deviceScaleFactor=1 makes the output size deterministic + DPR-independent.
+// 1280 long edge ≈ 1.0MP, lands inside the envelope, stays legible for UI checks.
+const MAX_EDGE = Number(process.env.RIFT_CDP_MAX_EDGE || 1280);
 
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 
@@ -326,6 +333,22 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, v
         if (!r.value) throw new Error(`selector not found or zero-size: ${selector}`);
         clip = r.value;
     }
+    // Whole-page default: clamp the CSS long-edge to MAX_EDGE and pin DSF=1 so the
+    // captured pixels land inside Anthropic's vision envelope at the source (no
+    // oversized upload, no server-side resize). Skipped when a selector/explicit
+    // clip/viewport override is in play — those callers chose their own framing.
+    let autoScaled = false;
+    if (!clip && !selector && !overrideViewport) {
+        const vp = await evalJs('({w: innerWidth, h: innerHeight})', 8000, target);
+        const w = vp.value?.w, h = vp.value?.h;
+        if (w && h) {
+            const scale = Math.min(1, MAX_EDGE / Math.max(w, h));
+            await cdp('Emulation.setDeviceMetricsOverride',
+                { width: w, height: h, deviceScaleFactor: 1, mobile: false }, 8000, target);
+            autoScaled = true;
+            clip = { x: 0, y: 0, width: w, height: h, scale };
+        }
+    }
     // optimizeForSpeed: we JPEG-downscale anyway, so faster encoding beats smaller
     // bytes. captureBeyondViewport (with a clip) lets us shoot below-the-fold
     // elements that getBoundingClientRect places outside the visible viewport.
@@ -336,7 +359,7 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, v
         params.captureBeyondViewport = true;
     }
     const resp = await cdp('Page.captureScreenshot', params, 15000, target);
-    if (overrideViewport) {
+    if (overrideViewport || autoScaled) {
         await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
     }
     if (!resp.result?.data) throw new Error('CDP returned no data');

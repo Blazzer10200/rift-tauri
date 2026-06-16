@@ -12,7 +12,9 @@
 #   bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
 #   bash scripts/cdp/c.sh state                          # assistant snapshot
 #   bash scripts/cdp/c.sh page                           # generic "where am I"
-#   bash scripts/cdp/c.sh shot                           # jpeg q65, prints path only
+#   bash scripts/cdp/c.sh shot                           # jpeg q65, long-edge capped ~1280px, prints path only
+#     (whole-page shots auto-clamp to RIFT_CDP_MAX_EDGE=1280 CSS-px @ DSF=1 — keeps
+#      every Read inside Anthropic's vision envelope; raise the env knob for detail)
 #   bash scripts/cdp/c.sh shot png 0                     # png lossless
 #   bash scripts/cdp/c.sh shot jpeg 65 --json            # full JSON response
 #   bash scripts/cdp/c.sh shot-sel ".tabs-rail"          # clip to a selector

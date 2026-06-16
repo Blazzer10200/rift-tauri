@@ -111,13 +111,14 @@ bash scripts/cdp/c.sh console "" 50 1      # last 50 of any level, then clear
 
 Each entry: `{ kind: console|exception|log, level, text, ts, url, line, source? }`. `console` is also a `/batch` op, so a single batched call can fire an action then read what it threw. **Workflow:** after any UI action that should mutate state but didn't, pull `console` before guessing — an async throw is the usual culprit, and it was previously unseeable.
 
-## Cost discipline (Opus 4.7)
+## Cost discipline
 
-Per-screenshot ~$0.07 + image input tokens. Image cost tripled vs Opus 4.6.
+Per-screenshot ~$0.07 + image input tokens.
 
 1. **`/state` or `/eval` first.** Reads DOM for free. Covers most "did it render?" questions.
 2. **Screenshot only when pixels matter** — layout bugs, animations, contrast, drag region.
 3. **JPEG q50-70** when you DO screenshot. Half the tokens of PNG.
+4. **Whole-page shots auto-cap to ~1280px long-edge** (see below) — measured 1280×800 ≈ 1.0MP / ~19KB, vs an uncapped 2000×1250 ≈ 2.5MP HiDPI surface. Anthropic's vision API resizes anything over ~1.15MP server-side, so the cap removes a pure-latency oversized upload with no legibility loss.
 
 ## Server-side behavior
 
@@ -127,6 +128,7 @@ Per-screenshot ~$0.07 + image input tokens. Image cost tripled vs Opus 4.6.
 - **`/health`** — fires a real `Runtime.evaluate('1')` ping; reports `pingMs`. Half-broken socket (port open, no response) surfaces as `ok:false`.
 - **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `key`, `screenshot`, `state`, `page`, `console`.
 - **Screenshots** now pass `optimizeForSpeed:true` + `fromSurface:true`; clipped/selector shots add `captureBeyondViewport:true` so below-the-fold elements capture correctly.
+- **Auto-cap (whole-page shots)** — capture clamps to `RIFT_CDP_MAX_EDGE` CSS long-edge (default 1280) at `deviceScaleFactor:1`, via a full-viewport clip with `scale`. Output size is DPR-independent + deterministic (1280×800 on a 16:10 window) and lands inside Anthropic's vision envelope (≤1568px / ≤~1.15MP) so no oversized upload + server resize. Selector/explicit-`clip`/`vw,vh` shots are exempt — those callers framed it themselves.
 
 ## Limits
 
