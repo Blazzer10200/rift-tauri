@@ -91,10 +91,14 @@ pub(crate) fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
     // remains under root. Non-existent paths (new files) skip this block.
     let joined = root.join(&p);
     if joined.symlink_metadata().is_ok() {
-        match std::fs::canonicalize(&joined) {
-            Ok(real) if real.starts_with(root) => {}
-            Ok(_) => return Err(format!("path `{raw}` resolves outside the workspace root (symlink)")),
-            Err(e) => return Err(format!("path `{raw}`: canonicalize failed: {e}")),
+        // Canonicalize BOTH sides: on Windows `canonicalize` returns a verbatim
+        // `\\?\C:\…` UNC path, so comparing a canonical `real` against a plain
+        // `root` would false-reject every in-workspace symlink. Canonicalizing
+        // root puts both in the same form (resolve_root already proved it exists).
+        match (std::fs::canonicalize(&joined), std::fs::canonicalize(root)) {
+            (Ok(real), Ok(croot)) if real.starts_with(&croot) => {}
+            (Ok(_), Ok(_)) => return Err(format!("path `{raw}` resolves outside the workspace root (symlink)")),
+            (Err(e), _) | (_, Err(e)) => return Err(format!("path `{raw}`: canonicalize failed: {e}")),
         }
     }
     Ok(raw.to_string())
