@@ -436,7 +436,7 @@
               {/if}
             </button>
             {#if hasText && isOpen}
-              <div class="tn-think-body"><Markdown text={b.text} /></div>
+              <div class="tn-think-body" transition:slide={{ duration: reducedMotion ? 0 : 180 }}><Markdown text={b.text} /></div>
             {/if}
           </div>
         {:else if b.type === "steer"}
