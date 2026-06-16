@@ -12,6 +12,8 @@
   import { tooltip } from "$lib/actions/tooltip";
   import HomeStats from "./HomeStats.svelte";
   import { modelLabel } from "./statsHelpers";
+  import { MODEL_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
+  import type { ModelSel } from "$lib/state/assistant/types";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
 
   // Claude Code CLI update — the dashboard is the launch surface, so kick the
@@ -100,6 +102,41 @@
     workspace.setActive("chat");
   }
 
+  // ── Inline composer — a real "Ask Claude" surface, not a fake jump button ──
+  // Enter fires a brand-new chat (Shift+Enter = newline); the model pill is a
+  // live switcher backed by the shared store, so the new tab opens on the
+  // chosen model.
+  let askDraft = $state("");
+  let askEl = $state<HTMLTextAreaElement | null>(null);
+  let modelMenuOpen = $state(false);
+  const homeModels = $derived(MODEL_OPTIONS.filter((m) => !m.legacy));
+
+  function autogrow() {
+    if (!askEl) return;
+    askEl.style.height = "auto";
+    askEl.style.height = Math.min(askEl.scrollHeight, 132) + "px";
+  }
+  function pickModel(id: ModelSel) {
+    assistant.setModel(id);
+    modelMenuOpen = false;
+    askEl?.focus();
+  }
+  async function submitAsk() {
+    const text = askDraft.trim();
+    if (!text) return;
+    askDraft = "";
+    if (askEl) askEl.style.height = "auto";
+    await assistant.newTab();
+    workspace.setActive("chat");
+    void assistant.send(text);
+  }
+  function askKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void submitAsk();
+    }
+  }
+
   // ── Plan-limit gauges — read off the shared usage store ──
   const gauges = $derived.by(() => {
     const rl = usage.rateLimits;
@@ -140,13 +177,51 @@
       <button class="hf-btn" onclick={goNewTab}><Plus size={15} />New tab</button>
     </header>
 
-    <!-- Ask Claude -->
-    <button class="dash-ask" onclick={() => go()}>
+    <!-- Ask Claude — real inline composer -->
+    <div class="dash-ask" class:filled={askDraft.trim().length > 0}>
       <span class="da-glyph"><Sparkles size={16} /></span>
-      <span class="da-text">{assistant.composerDraft || (hasRoot ? `Ask Claude about ${leafName(root!)}…` : "Ask Claude anything…")}</span>
-      <span class="da-model"><span class="da-dot"></span>{currentModel}</span>
-      <span class="da-send"><Send size={14} /></span>
-    </button>
+      <textarea
+        bind:this={askEl}
+        bind:value={askDraft}
+        class="da-input"
+        rows="1"
+        placeholder={hasRoot ? `Ask Claude about ${leafName(root!)}…` : "Ask Claude anything…"}
+        oninput={autogrow}
+        onkeydown={askKeydown}
+      ></textarea>
+      <div class="da-model-wrap">
+        <button
+          class="da-model"
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={modelMenuOpen}
+          onclick={() => (modelMenuOpen = !modelMenuOpen)}
+        >
+          <span class="da-dot"></span>{currentModel}
+        </button>
+        {#if modelMenuOpen}
+          <button class="da-model-backdrop" type="button" aria-label="Close model menu" onclick={() => (modelMenuOpen = false)}></button>
+          <div class="da-model-menu" role="menu">
+            {#each homeModels as m (m.id)}
+              <button
+                class="da-mm-row"
+                class:on={assistant.model === m.id}
+                role="menuitemradio"
+                aria-checked={assistant.model === m.id}
+                type="button"
+                onclick={() => pickModel(m.id)}
+              >
+                <span class="da-mm-name">{m.label}<span class="da-mm-ver">{m.version}</span></span>
+                <span class="da-mm-blurb">{m.blurb}</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+      <button class="da-send" type="button" disabled={!askDraft.trim()} onclick={submitAsk} use:tooltip={"Send · Enter"} aria-label="Send">
+        <Send size={14} />
+      </button>
+    </div>
 
     {#if cliUpdAvail}
       <div class="dash-cli" role="status" data-tone={cliSummary.tone}>
@@ -340,17 +415,45 @@
   .hf-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
 
   .dash-ask {
-    flex: none; display: flex; align-items: center; gap: 13px; width: 100%; text-align: left;
-    height: 58px; padding: 0 14px 0 16px;
+    flex: none; display: flex; align-items: flex-end; gap: 11px; width: 100%;
+    min-height: 58px; padding: 10px 12px 10px 14px;
     background: var(--bg-inset); border: 1px solid var(--border-strong); border-radius: var(--radius-2xl);
-    cursor: text; transition: border-color 140ms ease, box-shadow 140ms ease;
+    transition: border-color 140ms ease, box-shadow 140ms ease;
   }
-  .dash-ask:hover { border-color: var(--ghost-border); box-shadow: 0 0 0 3px var(--ring); }
+  .dash-ask:focus-within { border-color: var(--ghost-border); box-shadow: 0 0 0 3px var(--ring); }
   .da-glyph { width: 32px; height: 32px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; flex-shrink: 0; }
-  .da-text { flex: 1; color: var(--fg-subtle); font-size: var(--fs-lg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .da-model { display: inline-flex; align-items: center; gap: 7px; flex-shrink: 0; height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); color: var(--fg); font-size: var(--fs-sm); font-weight: 600; }
+  .da-input {
+    flex: 1; min-width: 0; resize: none; border: 0; background: transparent; color: var(--fg);
+    font: inherit; font-size: var(--fs-lg); line-height: 1.4; padding: 5px 0; max-height: 132px;
+    overflow-y: auto; align-self: center;
+  }
+  .da-input::placeholder { color: var(--fg-subtle); }
+  .da-input:focus { outline: none; }
+
+  .da-model-wrap { position: relative; flex-shrink: 0; align-self: center; }
+  .da-model { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); color: var(--fg); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; transition: background 120ms, border-color 120ms; }
+  .da-model:hover { background: var(--surface-hover); border-color: var(--border-strong); }
   .da-model .da-dot { width: 7px; height: 7px; border-radius: 999px; background: var(--accent); flex-shrink: 0; }
-  .da-send { width: 36px; height: 32px; border-radius: 8px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex-shrink: 0; box-shadow: 0 2px 10px -2px color-mix(in oklab, var(--accent) 50%, transparent); }
+  .da-model-backdrop { position: fixed; inset: 0; z-index: 40; background: transparent; border: 0; cursor: default; }
+  .da-model-menu {
+    position: absolute; z-index: 41; top: calc(100% + 8px); right: 0; min-width: 248px;
+    display: flex; flex-direction: column; gap: 1px; padding: 5px;
+    background: var(--bg-elev-2, var(--surface)); border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg); box-shadow: 0 12px 32px -8px color-mix(in oklab, black 55%, transparent);
+    animation: da-mm-in 130ms var(--ease-page, ease);
+  }
+  @keyframes da-mm-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { .da-model-menu { animation: none; } }
+  .da-mm-row { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border: 0; border-radius: var(--radius); background: transparent; color: var(--fg); text-align: left; cursor: pointer; transition: background 110ms; }
+  .da-mm-row:hover { background: var(--surface-hover); }
+  .da-mm-row.on { background: var(--accent-soft); }
+  .da-mm-name { font-size: var(--fs-sm); font-weight: 650; display: flex; align-items: baseline; gap: 6px; }
+  .da-mm-row.on .da-mm-name { color: var(--accent); }
+  .da-mm-ver { font-family: var(--font-mono); font-size: 10px; font-weight: 600; color: var(--fg-subtle); }
+  .da-mm-blurb { font-size: var(--fs-xs); color: var(--fg-muted); }
+  .da-send { width: 36px; height: 32px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; flex-shrink: 0; align-self: center; cursor: pointer; box-shadow: 0 2px 10px -2px color-mix(in oklab, var(--accent) 50%, transparent); transition: background 130ms, opacity 130ms; }
+  .da-send:hover:not(:disabled) { background: var(--accent-hover); }
+  .da-send:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
 
   /* CLI update banner — slim accent strip under the Ask bar. */
   .dash-cli {
@@ -445,6 +548,7 @@
     .t-center :global(.stats) { min-height: 380px; }
     .t-side { flex-direction: row; }
     .t-side > .tile { flex: 1; min-width: 0; }
+    .t-links { margin-top: 0; }
   }
 
   .tile-head { display: flex; align-items: center; gap: 9px; flex: none; margin-bottom: 16px; min-width: 0; }
@@ -529,8 +633,10 @@
   .hf-chat-model { font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; color: var(--fg-muted); padding: 1px 7px; border-radius: 999px; background: var(--bg-elev-2); border: 1px solid var(--border); }
   .hf-chat-w { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); }
 
-  /* Quick links card */
-  .t-links { flex: none; }
+  /* Quick links card — anchored to the rail's bottom so the column reads as
+     plan-limits (top) + actions (bottom) instead of a top-stacked pair with
+     dead space underneath. */
+  .t-links { flex: none; margin-top: auto; }
   .ql-rows { display: flex; flex-direction: column; gap: 2px; }
   .ql-row {
     display: flex; align-items: center; gap: 10px;
