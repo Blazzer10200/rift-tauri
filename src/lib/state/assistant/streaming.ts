@@ -16,7 +16,7 @@
 // the envelope-vs-result usage split driving the ctx pill.
 
 import type { TabState } from "../assistant.svelte";
-import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock } from "./types";
+import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } from "./types";
 import { flattenToolResult, previewToolInput } from "./helpers";
 
 /** Called at the start of every send(). Clears per-turn pacer / thinking
@@ -543,6 +543,50 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
   }
 }
 
+/** Find an in-flight Skill/SlashCommand tool block by id — the lazy-promotion
+ *  lookup for forking slash commands (/plan etc.) whose sub-agents multiplex
+ *  under the skill's tool_use id. */
+function findPendingSkillBlock(tab: TabState, id: string): ToolBlock | null {
+  for (const m of tab.messages) {
+    for (const b of m.blocks) {
+      if (b.type === "tool" && b.id === id && (b.name === "Skill" || b.name === "SlashCommand")) {
+        return b;
+      }
+    }
+  }
+  return null;
+}
+
+/** Spin up a live dock spawn for a forking skill on its first nested frame.
+ *  The Skill ToolBlock stays in the bubble (its final result persists there);
+ *  this spawn carries only the live sub-transcript and is dropped at turn end.
+ *  Lazy (not eager in appendToolUse) so a non-forking skill — /check, /handoff —
+ *  never leaves a dead, empty dock section. */
+function promoteSkillSpawn(tab: TabState, block: ToolBlock) {
+  if (tab.agentSpawns.some((a) => a.id === block.id)) return;
+  const isSkill = block.name === "Skill";
+  const subagentType = isSkill
+    ? String(block.input?.skill ?? "skill")
+    : String(block.input?.command ?? "command");
+  const args = isSkill && typeof block.input?.args === "string" ? (block.input.args as string) : "";
+  const description = isSkill
+    ? `/${String(block.input?.skill ?? "")}${args ? ` ${args}` : ""}`.trim()
+    : String(block.input?.command ?? "(command)");
+  tab.agentSpawns = [
+    ...tab.agentSpawns,
+    {
+      id: block.id,
+      subagentType,
+      description,
+      startedAt: typeof block.startedAt === "number" ? block.startedAt : Date.now(),
+      completedAt: null,
+      isError: false,
+      blocks: [],
+      kind: "skill",
+    },
+  ];
+}
+
 export function onStreamLine(tab: TabState, raw: string) {
   if (tab.rawLineLog.length >= 200) tab.rawLineLog.shift();
   tab.rawLineLog.push(raw);
@@ -582,6 +626,16 @@ export function onStreamLine(tab: TabState, raw: string) {
   if (typeof parentId === "string" && parentId.length > 0) {
     if (tab.agentSpawns.some((a) => a.id === parentId)) {
       applySubAgentFrame(tab, parentId, env);
+    } else {
+      // A forking skill (/plan etc.) multiplexes its sub-agent output under the
+      // Skill tool_use id, which isn't a registered spawn. Promote it lazily on
+      // this first nested frame, then route — so the live dock fills instead of
+      // the frame being silently dropped.
+      const skill = findPendingSkillBlock(tab, parentId);
+      if (skill) {
+        promoteSkillSpawn(tab, skill);
+        applySubAgentFrame(tab, parentId, env);
+      }
     }
     return;
   }

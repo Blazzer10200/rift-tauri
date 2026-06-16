@@ -223,7 +223,9 @@ export function liveActivity(
       }
       if (b.type !== "tool" || b.status !== "pending") continue;
       // Agent launches ride agentSpawns below — skip here to avoid double-list.
-      if (AGENT_TOOL_NAMES.has(b.name)) continue;
+      // Same for a forking skill once it's been promoted to a spawn (a matching
+      // agentSpawn id exists); a non-forking skill has no spawn and still shows.
+      if (AGENT_TOOL_NAMES.has(b.name) || agentSpawns.some((a) => a.id === b.id)) continue;
       if (b.name === "Bash") {
         const cmd = typeof b.input.command === "string" ? b.input.command : "";
         out.push({ id: b.id, kind: "shell", label: shellLabel(cmd) || "shell", sub: null, startedAt: b.startedAt ?? fallbackTs });

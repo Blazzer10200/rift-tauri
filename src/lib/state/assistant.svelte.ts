@@ -256,6 +256,10 @@ export class TabState {
     completedAt: number | null;
     isError: boolean;
     blocks: Block[];
+    // "agent" = Task/Agent delegation; "skill" = a forking slash-command
+    // (/plan etc.) lazily promoted when its first nested frame arrives. Omitted
+    // on legacy/Task entries → treated as "agent" by the dock.
+    kind?: "agent" | "skill";
   }[]>([]);
 
   /** Live bindings for `mcp__rift__ask_user` tool calls: toolUseId →

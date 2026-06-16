@@ -9,7 +9,7 @@
   import { captionForTool } from "./toolCaption";
   import { tooltip } from "$lib/actions/tooltip";
   import Markdown from "./Markdown.svelte";
-  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, X } from "lucide-svelte";
+  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, X } from "lucide-svelte";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -105,6 +105,9 @@
             </span>
             <span class="meta">
               <span class="meta-top">
+                <span class="kind-icon" data-kind={a.kind === "skill" ? "skill" : "agent"}>
+                  {#if a.kind === "skill"}<Sparkles size={12} />{:else}<Bot size={12} />{/if}
+                </span>
                 <span class="type">{a.subagentType}</span>
                 <span class="elapsed mono">{elapsed(a)}</span>
               </span>
@@ -246,7 +249,9 @@
   .stat[data-status="done"] { color: var(--ok); }
   .stat[data-status="error"] { color: var(--danger); }
   .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
-  .meta-top { display: flex; align-items: baseline; gap: 8px; }
+  .meta-top { display: flex; align-items: center; gap: 6px; }
+  .kind-icon { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
+  .kind-icon[data-kind="skill"] { color: var(--accent); }
   .type {
     flex: 1 1 auto; min-width: 0;
     font-size: var(--fs-sm); font-weight: 600; color: var(--fg);
