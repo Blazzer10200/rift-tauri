@@ -331,9 +331,8 @@
   {/if}
 
   {#if tabId && !showEmpty && !stickToBottom}
-    <button class="jump-latest" type="button" onclick={jumpToLatest} use:tooltip={"Jump to latest"} aria-label="Jump to latest message">
-      <span class="jl-ic" aria-hidden="true"><ChevronDown size={13}/></span>
-      <span class="jl-label">Latest</span>
+    <button class="jump-latest" type="button" onclick={jumpToLatest} aria-label="Jump to latest message">
+      <span class="jl-ic" aria-hidden="true"><ChevronDown size={17}/></span>
     </button>
   {/if}
 
@@ -728,26 +727,23 @@
     color: var(--fg-subtle);
   }
 
-  /* Glass affordance that floats above the composer — same emerald-tinted glass
-     language as the chat menus, lifted clear of the composer's top edge. The
-     chevron sits in an accent disc that gently bobs to signal "new below". */
+  /* Compact circular "scroll to latest" affordance, parked at the bottom-right
+     of the message area just clear of the composer's top edge — the chat-app
+     convention (Slack/Discord/ChatGPT). Icon-only; the chevron gently bobs to
+     signal "new below". Replaced the centered text-pill, which read as bulky. */
   .jump-latest {
     position: absolute;
-    left: 50%;
+    right: 14px;
     bottom: 96px;
-    transform: translateX(-50%);
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 4px 13px 4px 5px;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px;
+    padding: 0;
     background: color-mix(in oklch, var(--surface) 84%, transparent);
     backdrop-filter: blur(14px) saturate(140%);
     -webkit-backdrop-filter: blur(14px) saturate(140%);
     border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--border));
     border-radius: 999px;
-    color: var(--fg-2);
-    font: inherit;
-    font-size: var(--fs-xs);
-    font-weight: 550;
-    letter-spacing: 0.01em;
+    color: var(--accent);
     cursor: pointer;
     box-shadow:
       0 8px 22px -6px oklch(0 0 0 / 0.5),
@@ -764,20 +760,15 @@
       0 10px 26px -6px oklch(0 0 0 / 0.55),
       0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent),
       0 0 22px -2px color-mix(in oklab, var(--accent) 32%, transparent);
-    transform: translateX(-50%) translateY(-1px);
+    transform: translateY(-1px);
   }
   .jl-ic {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 19px; height: 19px; border-radius: 999px;
-    background: color-mix(in oklab, var(--accent) 18%, transparent);
-    color: var(--accent);
     animation: jl-bob 1.9s ease-in-out infinite;
   }
-  .jump-latest:hover .jl-ic { background: color-mix(in oklab, var(--accent) 28%, transparent); }
-  .jl-label { padding-right: 1px; }
   @keyframes jump-in {
-    from { opacity: 0; transform: translate(-50%, 8px) scale(0.96); }
-    to   { opacity: 1; transform: translate(-50%, 0) scale(1); }
+    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
   }
   @keyframes jl-bob {
     0%, 100% { transform: translateY(0); }

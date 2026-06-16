@@ -4,9 +4,11 @@
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
   import { activityDock } from "../../state/activityDock.svelte";
+  import { environmentDock } from "../../state/environmentDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
   import SubAgentDock from "./SubAgentDock.svelte";
+  import EnvironmentPanel from "../environment/EnvironmentPanel.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -182,10 +184,28 @@
     activityDragging = false;
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
   }
+
+  // ── Environment (source-control) dock resize ──────────────────────────────
+  let envDragging = $state(false);
+  function onEnvPointerDown(e: PointerEvent) {
+    e.preventDefault();
+    envDragging = true;
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+  function onEnvPointerMove(e: PointerEvent) {
+    if (!envDragging || !workbenchEl) return;
+    const rect = workbenchEl.getBoundingClientRect();
+    environmentDock.setWidth(rect.right - e.clientX);
+  }
+  function onEnvPointerUp(e: PointerEvent) {
+    if (!envDragging) return;
+    envDragging = false;
+    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
+  }
 </script>
 
 <div class="assistant">
-  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging || activityDragging}>
+  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging || activityDragging || envDragging}>
   <div class="layout">
     {#if assistant.splitActive}
       <div
@@ -279,6 +299,27 @@
           onpointercancel={onActivityPointerUp}
         ><span class="divider-grip" aria-hidden="true"></span></div>
         <SubAgentDock />
+      </div>
+    </div>
+  {/if}
+
+  {#if environmentDock.open}
+    <div class="dock-wrap" transition:dockSlide>
+      <div class="dock-inner" style="width: {environmentDock.width + 3}px">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="dock-divider"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize environment panel"
+          tabindex="0"
+          onpointerdown={onEnvPointerDown}
+          onpointermove={onEnvPointerMove}
+          onpointerup={onEnvPointerUp}
+          onpointercancel={onEnvPointerUp}
+        ><span class="divider-grip" aria-hidden="true"></span></div>
+        <EnvironmentPanel />
       </div>
     </div>
   {/if}

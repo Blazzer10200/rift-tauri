@@ -6,10 +6,12 @@
 
 pub mod assistant;
 pub mod browser;
+pub mod git;
 pub mod update;
 
 pub use assistant::*;
 pub use browser::*;
+pub use git::*;
 pub use update::*;
 
 /// #248: surface frontend-side failures (wire/runtime errors) to the DiagBus so

@@ -58,7 +58,7 @@ fn validate_ref(kind: &str, s: &str) -> Result<String, String> {
 /// leading-dash flag injection; confirms the joined path stays under `root`.
 /// Does NOT require the path to exist (a freshly-created file being `git add`ed
 /// may have just appeared on disk; existence is git's job to report).
-fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
+pub(crate) fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
     if raw.is_empty() || raw.len() > 1024 {
         return Err("invalid path: must be 1-1024 chars".into());
     }
@@ -100,7 +100,7 @@ fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
     Ok(raw.to_string())
 }
 
-fn validate_message(s: &str) -> Result<String, String> {
+pub(crate) fn validate_message(s: &str) -> Result<String, String> {
     if s.trim().is_empty() {
         return Err("commit message is empty".into());
     }
@@ -122,18 +122,18 @@ fn workspace_root(roots: &[PathBuf]) -> Result<&PathBuf, String> {
 }
 
 /// Output of a single git invocation.
-struct GitOut {
-    stdout: String,
+pub(crate) struct GitOut {
+    pub(crate) stdout: String,
     stderr: String,
     code: Option<i32>,
 }
 
 impl GitOut {
-    fn ok(&self) -> bool {
+    pub(crate) fn ok(&self) -> bool {
         self.code == Some(0)
     }
     /// stderr (or stdout) trimmed for surfacing as an error message.
-    fn err_text(&self) -> String {
+    pub(crate) fn err_text(&self) -> String {
         let s = if !self.stderr.trim().is_empty() { &self.stderr } else { &self.stdout };
         let s = s.trim();
         if s.is_empty() {
@@ -146,7 +146,7 @@ impl GitOut {
 
 /// Run `git <args>` in `root` with the hardened env from brief §11. `args` are
 /// pre-split (no shell). Never includes `force`/`-f`.
-fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
+pub(crate) fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
     let mut cmd = Command::new("git");
     cmd.current_dir(root)
         .args(args)

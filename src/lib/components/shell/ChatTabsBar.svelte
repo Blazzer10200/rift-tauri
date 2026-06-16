@@ -11,6 +11,7 @@
   import { modelFamily } from "../../state/assistant/helpers";
   import { browserDock } from "../../state/browserDock.svelte";
   import { activityDock } from "../../state/activityDock.svelte";
+  import { environmentDock } from "../../state/environmentDock.svelte";
   import OpenInPaneMenu from "../assistant/OpenInPaneMenu.svelte";
   import HistoryDrawer from "../assistant/HistoryDrawer.svelte";
 
@@ -835,6 +836,18 @@
       <FileDiff size={14} class="vm-icon" />
       <span class="vm-label">Session diff</span>
       <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;D</kbd>
+      <Check size={13} class="vm-check" />
+    </button>
+    <button
+      class="vm-item"
+      class:on={environmentDock.open}
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={environmentDock.open}
+      onclick={() => { environmentDock.toggle(); viewMenuOpen = false; }}
+    >
+      <GitBranch size={14} class="vm-icon" />
+      <span class="vm-label">Environment</span>
       <Check size={13} class="vm-check" />
     </button>
     <div class="vm-sep" role="separator"></div>
