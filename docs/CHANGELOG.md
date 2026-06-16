@@ -2,6 +2,23 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.13.0 — 2026-06-16 — Environment panel (source control) + UI/doc hardening
+
+> **Why.** Rift could already run git *as Claude's tools*, but had no first-class place for **you** to see and act on the working tree. v0.13.0 adds an Environment panel, plus a consolidation/polish/hardening pass and a real architecture + security-model doc set.
+
+**Added:**
+- **Environment panel** — a source-control dock for the Chat workspace (toggle from the tab-bar view menu). Shows the active tab's git working tree: branch + ahead/behind tracking, aggregate +/− totals, per-file status, an inline Shiki-highlighted context-folding diff per file, and a commit / commit-and-push box. Read-only except the commit action; the backend ([commands/git.rs](../src-tauri/src/commands/git.rs)) reuses `git_local`'s hardened `run_git` (no shell, args pre-split, env stripped, non-interactive credentials).
+
+**Changed / fixed:**
+- **Tooltips pulled** app-wide — the themed glass popover read as visual noise; `tooltip.ts` is now an accessibility-preserving no-op shim (promotes text to `aria-label` only when the host has no accessible name). ~77 lines of dead `.tip` CSS removed.
+- **Design-token consistency** — added `--radius-2xl`; replaced 36 off-scale `border-radius` literals (7/9/11/16px) with scale tokens across 15 files. Slide-transition the thinking-block body to match the tool-group collapsible. Compact circular jump-to-latest button.
+- **Security:** `git_local.rs validate_path` symlink guard now canonicalizes both sides — on Windows `canonicalize` returns a `\\?\` UNC path, so the old check false-rejected every in-workspace symlink (fail-closed). Surfaced by a full backend security review (0 critical / 0 high).
+
+**Docs:**
+- New [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) — end-to-end system map (turn lifecycle, backend modules, frontend stores, event channels, UI bridge, self-update). [`docs/SECURITY.md`](SECURITY.md) gains a **Security model** section (threat model + defenses). README links both.
+
+**Verify.** version lockstep ×3 + `Cargo.lock` · `cargo check` clean · svelte-check 0/0 (4100) · vitest 185/185 · CDP: all 3 workspaces render clean, 0 console errors.
+
 ## v0.12.3 — 2026-06-15 — Self-update no longer bricked by hook-spawned daemons
 
 > **Why.** A user's in-app update + reinstall failed with *"Failed to remove existing application directory."* Velopack couldn't rename `…\Rift\current\` because a live process held it as a working directory. Root cause: with **no workspace folder open**, Rift spawned the Claude CLI without a cwd, so the child inherited Rift's own install dir (`current\`). The CLI's SessionStart hook then launched a long-lived daemon (the user's Pulse telemetry daemon, `disown`ed) there — surviving app exit and locking `current\` forever. The apply-time reap only kills `rift-tauri.exe`, so it never caught the orphaned, out-of-tree daemon, and every update/reinstall died.
@@ -11,15 +28,6 @@
 
 **Verify.** version lockstep ×3 + `Cargo.lock` · `cargo check` clean · live repro fixed (orphan dir + lockers cleared, daemon re-anchored to a safe cwd).
 
-## v0.12.2 — 2026-06-15 — Security: DOMPurify patch (CI `check` green)
-
-> **Why.** The `check` workflow's `npm audit --omit=dev` gate flagged a moderate DOMPurify advisory (XSS vectors, `dompurify <=3.4.8`). DOMPurify backs Markdown's `{@html}` sanitization, so the bump is load-bearing.
-
-**Changed:**
-- **`dompurify` `3.4.3 → ^3.4.10`** (patched; same-minor, no API change). Prod audit now reports **0 vulnerabilities**; the `check` workflow's frontend job goes green.
-
-**Verify.** version lockstep ×3 + `Cargo.lock` · `npm audit --omit=dev` 0 vulns · svelte-check 0/0 (4094) · vitest 162/162.
-
 ## Older versions
 
-v0.12.1 split-pane send routed to wrong pane (#41 — `send(prompt, tabId?)` retargets the firing pane synchronously) + STT polish shimmer 6s cap & typing-cancel (#40) + single live timer in turn head (#39 P0-4). · v0.12.0 Local LLM page cockpit redesign (status-driven readiness rail + config split, verify-latency card, quick-start presets, active-mode tint; frontend-only). · v0.11.0 UI consistency pass: shared `PageHero` (Settings + Local LLM, width unified 880→820) · Home quick-actions balance + collapsed dup "new chat" · nav experimental-dot + Settings shortcut tooltip · live-status consolidated to the composer · drag-to-split routing fix + non-blocking STT · thinking-display diagnosis corrected in `turn.rs`. · v0.10.0 Home stats dashboard (`assistant_stats` + KPI tiles/heatmap, honest-data-only) + audit-hardening pass (strict image MIME allowlist · model-label dedupe · aria-labels) + Fable kill-switch · v0.9.4 self-hosted update feed (R2 bridge: updater → Cloudflare R2 `HttpSource` + `release.ps1` dual-publish + `web/` Pages site) · v0.9.3 release-readiness hardening (new-user auth dead-end RR-1 · field crash file RR-2 · open-path exec-deny RR-4 · steer/oneshot/zombie-download robustness · T4 swallow sweep) · v0.9.2 Concept-D tool-group cards + composer auto-correct · v0.9.1 UI polish arc (token counter climbs mid-turn · notifications→severity toasts · in-app image lightbox · drag-drop window guard · Activity declutter · streaming pacer tuning) · v0.9.0 minimal core (buddy release): −7,407-line strip (Harness/Swarm/cost-cockpit/compaction/custom-providers removed → 3 workspaces) + #33 closed by removal + #34 SessionDiff fix · v0.8.x composer slim + dictation/PTT fixes + loopback UI bridge + Fable 5 + backend split + tag-driven CI · v0.7.0 cost cockpit · v0.6.0 browser dock · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
+v0.12.2 security: DOMPurify `3.4.3→^3.4.10` (prod audit 0 vulns; `check` CI green). · v0.12.1 split-pane send routed to wrong pane (#41 — `send(prompt, tabId?)` retargets the firing pane synchronously) + STT polish shimmer 6s cap & typing-cancel (#40) + single live timer in turn head (#39 P0-4). · v0.12.0 Local LLM page cockpit redesign (status-driven readiness rail + config split, verify-latency card, quick-start presets, active-mode tint; frontend-only). · v0.11.0 UI consistency pass: shared `PageHero` (Settings + Local LLM, width unified 880→820) · Home quick-actions balance + collapsed dup "new chat" · nav experimental-dot + Settings shortcut tooltip · live-status consolidated to the composer · drag-to-split routing fix + non-blocking STT · thinking-display diagnosis corrected in `turn.rs`. · v0.10.0 Home stats dashboard + audit-hardening + Fable kill-switch · v0.9.x self-hosted R2 update feed, release-readiness hardening, Concept-D tool cards, UI-polish arc, and the minimal-core strip (−7,407 lines → 3 workspaces) · v0.8.x composer slim + dictation/PTT + loopback UI bridge + Fable 5 + backend split + tag-driven CI · v0.7.0 cost cockpit · v0.6.0 browser dock · v0.5.0 Harness telemetry + Steer. Full detail: `git log -- docs/CHANGELOG.md`.
