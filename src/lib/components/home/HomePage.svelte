@@ -95,6 +95,10 @@
     if (draft != null) assistant.composerDraft = draft;
     workspace.setActive("chat");
   }
+  function goHistory() {
+    workspace.setActive("chat");
+    assistant.ui.historyOpen = true;
+  }
   function goNewTab() {
     void assistant.newTab();
     workspace.setActive("chat");
@@ -316,7 +320,7 @@
           <span class="ci"><MessageSquare size={14} /></span>
           <span class="t">Jump back in</span>
           <span class="badge ok">{recentChats.length} saved</span>
-          <button class="tile-link" type="button" onclick={() => go()}>
+          <button class="tile-link" type="button" onclick={goHistory}>
             <History size={12} />Browse all<ChevronRight size={12} />
           </button>
         </div>

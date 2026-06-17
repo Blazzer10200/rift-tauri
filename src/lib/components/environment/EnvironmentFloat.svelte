@@ -11,7 +11,9 @@
 
   // Canonical git refresher (mounted whenever the box is open, so the collapsed
   // pill has counts too). EnvironmentPanel just renders from git state.
-  const root = $derived(assistant.activeTab?.workspaceRoot ?? null);
+  // effectiveRoot (not the raw tab.workspaceRoot) so a tab inheriting the global
+  // workspace default still gets a git pill — matches the proj-pill / assistant_send root.
+  const root = $derived(assistant.activeRoot);
   onMount(() => { void git.refresh(root); });
   $effect(() => {
     const r = root;

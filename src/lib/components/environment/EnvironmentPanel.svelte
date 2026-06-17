@@ -7,7 +7,7 @@
 
   // git.refresh is driven by EnvironmentFloat (always mounted while open) so the
   // collapsed pill has counts too — this panel just renders from git state.
-  const root = $derived(assistant.activeTab?.workspaceRoot ?? null);
+  const root = $derived(assistant.activeRoot);
 
   let message = $state("");
   let pushing = $state(false);
