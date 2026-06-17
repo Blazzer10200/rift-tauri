@@ -2,7 +2,7 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Local LLM page: more knobs + layout cleanup
+## v0.18.0 — 2026-06-17 — Local LLM page: more knobs + layout cleanup
 
 **Added (Local LLM page):** context-size selector (16K/32K/64K/128K, disabled above the model ceiling → `assistant_optimize_local_model`); model card (family · params · quant from `/api/show` via `LocalCtxInfo`); approximate **tok/s** on Test (`assistant_test_local_llm` now returns `output_tokens`); a "Good for tools:" recommended-models row when nothing's detected.
 
