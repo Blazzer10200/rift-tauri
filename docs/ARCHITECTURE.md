@@ -49,7 +49,7 @@ Key properties:
 
 ## 4. Backend (`src-tauri/src/`)
 
-`lib.rs` is the Tauri entry: it registers ~63 `#[tauri::command]`s (handlers live per-domain in `commands/*.rs`) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
+`lib.rs` is the Tauri entry: it registers ~78 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
 
 ### `assistant/` — the engine
 | File | Role |
@@ -64,11 +64,12 @@ Key properties:
 
 ### Other backend domains
 - `commands/` — frontend-facing IPC: `assistant.rs`, `browser.rs`, `git.rs` (typed working-tree state for the Environment panel), `update.rs`.
+- `state/` — app-paths module (`paths.rs`): canonical `~/.rift/` locations (config, models).
 - `diagnostics/` — `DiagBus` + log forwarder + panic hook; pumps to the frontend over `diag://event`.
 - `usage/limits.rs` — OAuth `/usage` rate-limit fetch (the only usage module; read-only on the CLI token).
 - `stt/` — speech-to-text (Web Speech bridge + local Whisper), events on `stt://*`.
 - `browser/` — in-app browser dock control.
-- `secrets.rs` — OS keychain wrapper (`keyring`) for the API key. `update_service.rs` — Velopack `UpdateManager` over a GitHub/R2 source.
+- `secrets.rs` — OS keychain wrapper (`keyring`) for the API key. `update_service.rs` — Velopack `UpdateManager` over an `HttpSource` (Cloudflare R2 feed).
 
 ## 5. Frontend (`src/`)
 

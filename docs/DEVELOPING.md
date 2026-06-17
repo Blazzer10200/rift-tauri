@@ -6,6 +6,7 @@ One doc for everything between "I want to use this" and "I want to contribute." 
 2. [Building from source (Contributing)](#2-building-from-source-contributing)
 3. [Claude Code w/ Rift on the Pro plan](#3-claude-code-w-rift-on-the-pro-plan)
 4. [Releases](#4-releases)
+5. [Configuration & environment variables](#5-configuration--environment-variables)
 
 ---
 
@@ -123,8 +124,7 @@ Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-so
   "skillOverrides": {
     "plan": "user-invocable-only",
     "quick-review": "user-invocable-only",
-    "diagnose": "user-invocable-only",
-    "dream": "user-invocable-only"
+    "diagnose": "user-invocable-only"
   },
   "permissions": {
     "deny": ["Read(./.env)", "Bash(curl *)"]
@@ -136,7 +136,7 @@ Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-so
 - Sonnet 4.6 default — handles 90%+ of coding at ~3× lower quota burn than Opus.
 - Haiku for subagents — recon/grep agents fire at ~5% of Sonnet cost.
 - `effortLevel: medium` — caps output ~2500 tok. Xhigh burns the 5-hour window ~3× faster.
-- `DISABLE_AUTO_COMPACT: "0"` — let Claude Code auto-compact at ~83% ctx. Pro plan can't afford the 300K cliff.
+- `DISABLE_AUTO_COMPACT: "0"` — let Claude Code auto-compact at ~83% ctx. Pro plan can't afford the 300K cliff. (This is the `claude` CLI's own built-in compaction — Rift's in-app compaction UI was removed in the 2026-06-12 minimal-core strip.)
 - Skill overrides — fork-mode skills user-invocable-only; auto-firing burns 10-30K tokens each.
 - `autoUpdatesChannel: stable` — avoids regression releases (v2.1.89+ caused 3-50x quota burn for some).
 - Opus on-demand only — every Opus turn competes w/ your Sonnet budget. `/model claude-opus-4-7` per-session, then `/model claude-sonnet-4-6` back.
