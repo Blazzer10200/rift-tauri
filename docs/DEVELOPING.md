@@ -165,7 +165,7 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 
 Maintainers only. Versions bumped manually (or via `/git-ship`) across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
 
-`release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish to the public `rift-releases` repo, with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin). See `docs/design/velopack-auto-update.md` for the full update flow and lineage.
+`release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish to the public `rift-releases` repo, with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin). Full update flow + lineage: `git log -- docs/design/velopack-auto-update.md` (arc doc retired after ship).
 
 ---
 

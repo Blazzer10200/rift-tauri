@@ -31,7 +31,7 @@ pub use ask_user::AskUserRegistry;
 pub use auth_update::*;
 // R1 split (2026-06-09): CLI discovery/ranking/cache + spawn-command builder
 // in `cli_install.rs`. Re-exports keep `assistant::ClaudeInstall` (DTO) and
-// `crate::assistant::claude_command()` (stt/swarm callers) path-stable.
+// `crate::assistant::claude_command()` (turn/oneshot/stt callers) path-stable.
 pub use cli_install::ClaudeInstall;
 pub(crate) use cli_install::claude_command;
 // R2 split (2026-06-09): AssistantConfig + config get/set
