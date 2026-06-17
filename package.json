@@ -1,7 +1,7 @@
 {
   "name": "rift-tauri",
   "version": "0.16.0",
-  "description": "",
+  "description": "A local-workspace coding assistant for Windows — wraps the Claude CLI in a native Tauri shell.",
   "type": "module",
   "scripts": {
     "dev": "vite dev",
@@ -13,7 +13,8 @@
     "test": "vitest run",
     "cdp:serve": "node scripts/cdp/serve.cjs"
   },
-  "license": "MIT",
+  "license": "UNLICENSED",
+  "private": true,
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",

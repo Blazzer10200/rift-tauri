@@ -34,4 +34,4 @@ Windows 11 (primary). macOS / Linux are buildable from source but not packaged o
 
 ## License
 
-Private — not yet published for general distribution.
+**Proprietary — © 2026 Blazzer10200. All rights reserved.** This source is private and not licensed for use, modification, or redistribution. The distributed binaries (via [`rift-releases`](https://github.com/Blazzer10200/rift-releases)) are provided for use as-is; the source carries no open-source grant.
