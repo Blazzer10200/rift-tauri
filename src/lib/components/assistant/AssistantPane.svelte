@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, Plus, X } from "lucide-svelte";
+  import { ChevronDown, Plus, X, MessageSquarePlus, ChevronRight } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
@@ -290,9 +290,10 @@
     {#if !tabId}
       <div class="pane-empty">
         <div class="pane-empty-card">
+          <div class="pane-empty-mark"><MessageSquarePlus size={20}/></div>
           <div class="pane-empty-title">Empty pane</div>
           <div class="pane-empty-hint">
-            Start a chat, drag a tab from the bar, or close the pane.
+            Start a fresh chat here, or drag a tab from the bar into this pane.
           </div>
           <div class="pane-empty-actions">
             <button class="btn primary sm" type="button" onclick={onEmptyNew}>
@@ -306,7 +307,7 @@
           </div>
           {#if emptyRecents.length > 0}
             <div class="pane-empty-recent">
-              <div class="pane-empty-recent-label">RECENT</div>
+              <div class="pane-empty-recent-label">RESUME</div>
               {#each emptyRecents as c (c.id)}
                 <button
                   class="pane-empty-recent-row"
@@ -316,6 +317,7 @@
                 >
                   <span class="pane-empty-recent-title">{c.title}</span>
                   <span class="pane-empty-recent-meta">{c.messageCount} msg</span>
+                  <ChevronRight class="pane-empty-recent-chev" size={13}/>
                 </button>
               {/each}
             </div>
@@ -669,52 +671,72 @@
     padding: 24px;
   }
   .pane-empty-card {
-    display: flex; flex-direction: column;
-    gap: 10px;
-    padding: 18px 20px;
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-lg);
-    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
-    max-width: 360px; width: 100%;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 9px;
+    padding: 22px 22px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-card, var(--radius-lg));
+    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
+    box-shadow: 0 14px 38px -18px rgba(0, 0, 0, 0.55);
+    max-width: 340px; width: 100%;
+    animation: pane-empty-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pane-empty-card { animation: none; }
+  }
+  @keyframes pane-empty-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+  }
+  .pane-empty-mark {
+    width: 44px; height: 44px;
+    border-radius: var(--radius-xl, 14px);
+    display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent);
+    margin-bottom: 1px;
   }
   .pane-empty-title {
     font-size: var(--fs-md);
     color: var(--fg);
-    font-weight: 600;
+    font-weight: 650;
     text-align: center;
+    letter-spacing: -0.01em;
   }
   .pane-empty-hint {
     font-size: var(--fs-sm);
     color: var(--fg-muted);
     text-align: center;
     line-height: 1.45;
+    max-width: 240px;
   }
   .pane-empty-actions {
     display: flex; gap: 8px;
     justify-content: center;
-    margin-top: 4px;
+    margin-top: 6px;
   }
   .pane-empty-recent {
     display: flex; flex-direction: column;
-    gap: 4px;
-    margin-top: 6px;
-    padding-top: 12px;
+    gap: 3px;
+    margin-top: 12px;
+    padding-top: 14px;
     border-top: 1px solid var(--border);
+    width: 100%;
   }
   .pane-empty-recent-label {
-    font-size: var(--fs-xs);
+    font-size: 10px;
     letter-spacing: 0.08em;
-    color: var(--fg-subtle);
+    text-transform: uppercase;
+    color: var(--fg-faint);
     font-weight: 600;
-    margin-bottom: 2px;
+    margin-bottom: 3px;
+    padding: 0 4px;
   }
   .pane-empty-recent-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 8px;
-    padding: 6px 8px;
-    border-radius: var(--radius-sm);
+    padding: 7px 9px;
+    border-radius: 9px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--fg);
@@ -722,7 +744,7 @@
     font-size: var(--fs-sm);
     cursor: pointer;
     text-align: left;
-    transition: background 100ms ease, border-color 100ms ease;
+    transition: background 120ms ease, border-color 120ms ease;
   }
   .pane-empty-recent-row:hover {
     background: var(--surface-hover);
@@ -737,7 +759,20 @@
   .pane-empty-recent-meta {
     flex-shrink: 0;
     font-size: var(--fs-xs);
-    color: var(--fg-subtle);
+    color: var(--fg-faint);
+    font-family: var(--font-mono, monospace);
+  }
+  :global(.pane-empty-recent-chev) {
+    flex-shrink: 0;
+    color: var(--fg-faint);
+    opacity: 0;
+    transform: translateX(-3px);
+    transition: opacity 120ms ease, transform 120ms ease, color 120ms ease;
+  }
+  .pane-empty-recent-row:hover :global(.pane-empty-recent-chev) {
+    opacity: 1;
+    transform: none;
+    color: var(--accent);
   }
 
   /* Compact circular "scroll to latest" affordance, parked at the bottom-right

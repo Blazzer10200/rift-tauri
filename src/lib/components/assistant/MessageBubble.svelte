@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle, Navigation, X } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle, Navigation, X, Ban } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -107,6 +107,10 @@
   );
   let boundaryExpanded = $state(false);
 
+  // Terminal stop reason, surfaced only once the turn settles. max_tokens =
+  // output truncated at the cap; refusal = model declined. Normal completions
+  // carry no stopReason, so the notice stays hidden.
+  const stopNotice = $derived(!isUser && !streaming ? message.stopReason ?? null : null);
 
   function toggleThinking(i: string) {
     const next = new Set(expandedThinking);
@@ -276,7 +280,27 @@
   });
 </script>
 
-{#if isSystem && boundaryBlock}
+{#if isSystem && boundaryBlock && boundaryBlock.source === "cli"}
+  {@const hasPct =
+    typeof boundaryBlock.ctxPctBefore === "number" &&
+    typeof boundaryBlock.ctxPctEstAfter === "number"}
+  <div class="boundary boundary-cli" data-role="system">
+    <span class="boundary-line" aria-hidden="true"></span>
+    <span
+      class="boundary-pill"
+      use:tooltip={"Claude Code automatically summarized older messages to free up the context window. The conversation continues normally — nothing on screen was deleted."}
+    >
+      <Sparkles size={11} />
+      <span>Conversation compacted{boundaryBlock.trigger === "manual" ? " · manual" : ""}</span>
+      {#if hasPct}
+        <span class="boundary-meta mono">
+          Ctx {Math.round(boundaryBlock.ctxPctBefore ?? 0)}% → {Math.round(boundaryBlock.ctxPctEstAfter ?? 0)}%
+        </span>
+      {/if}
+    </span>
+    <span class="boundary-line" aria-hidden="true"></span>
+  </div>
+{:else if isSystem && boundaryBlock}
   {@const isCompacting = boundaryBlock.streaming === true}
   {@const showBody = isCompacting || boundaryExpanded}
   <div class="boundary" data-role="system" class:streaming={isCompacting}>
@@ -528,6 +552,26 @@
         {/if}
       {/each}
 
+      {#if stopNotice === "max_tokens"}
+        <div class="stop-notice" data-kind="truncated" in:fade={{ duration: reducedMotion ? 0 : 160 }}>
+          <AlertCircle size={13} class="stop-notice-ic" />
+          <span class="stop-notice-txt">Response cut off — it reached the output length limit.</span>
+          {#if isLast}
+            <button
+              type="button"
+              class="stop-notice-btn"
+              onclick={() => assistant.send("Continue from where you left off.")}
+              use:tooltip={"Ask Claude to continue the truncated response"}
+            >Continue</button>
+          {/if}
+        </div>
+      {:else if stopNotice === "refusal"}
+        <div class="stop-notice" data-kind="refusal" in:fade={{ duration: reducedMotion ? 0 : 160 }}>
+          <Ban size={13} class="stop-notice-ic" />
+          <span class="stop-notice-txt">The model declined to complete this response.</span>
+        </div>
+      {/if}
+
       {#if showSummary}
         <div class="turn-summary" data-auto={autoApplied ? "true" : null} class:mode-bypass={bypassApplied} in:fade={{ duration: reducedMotion ? 0 : 160 }}>
           <div class="ts-stats">
@@ -584,6 +628,46 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
+  }
+  .boundary-cli {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  .stop-notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 7px 11px;
+    border-radius: 10px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
+  }
+  .stop-notice[data-kind="truncated"] {
+    border-color: color-mix(in oklab, var(--warn) 40%, var(--border));
+    background: var(--warn-soft);
+  }
+  .stop-notice :global(.stop-notice-ic) { flex-shrink: 0; }
+  .stop-notice[data-kind="truncated"] :global(.stop-notice-ic) { color: var(--warn); }
+  .stop-notice[data-kind="refusal"] :global(.stop-notice-ic) { color: var(--fg-faint); }
+  .stop-notice-txt { color: var(--fg-muted); flex: 1; }
+  .stop-notice-btn {
+    flex-shrink: 0;
+    font-size: 11.5px;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 7px;
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 140ms ease, border-color 140ms ease;
+  }
+  .stop-notice-btn:hover {
+    background: color-mix(in oklab, var(--accent) 20%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
   }
   .boundary-head {
     display: flex;

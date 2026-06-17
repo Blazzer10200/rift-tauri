@@ -802,7 +802,6 @@
     >
       <Globe size={14} class="vm-icon" />
       <span class="vm-label">Web browser</span>
-      <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;B</kbd>
       <Check size={13} class="vm-check" />
     </button>
     <button
@@ -828,7 +827,6 @@
     >
       <FileDiff size={14} class="vm-icon" />
       <span class="vm-label">Session diff</span>
-      <kbd class="vm-kbd">Ctrl&nbsp;⇧&nbsp;D</kbd>
       <Check size={13} class="vm-check" />
     </button>
     <button
@@ -855,7 +853,6 @@
       <SplitSquareHorizontal size={14} class="vm-icon" />
       <span class="vm-label">{canAddPane ? "Split pane" : "Max panes"}</span>
       {#if splitActive}<span class="vm-count">{paneCount}/4</span>{/if}
-      <kbd class="vm-kbd">Ctrl&nbsp;\</kbd>
     </button>
   </div>
 {/if}
@@ -1551,7 +1548,7 @@
   .view-menu {
     position: fixed;
     z-index: 50;
-    min-width: 230px;
+    min-width: 244px;
     display: flex; flex-direction: column; gap: 1px;
     animation: history-pop-in 150ms var(--ease-page);
     transform-origin: top right;
@@ -1563,11 +1560,11 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 7px 9px;
+    gap: 10px;
+    padding: 7px 10px;
     background: transparent;
     border: 0;
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     color: var(--fg);
     font: inherit;
     font-size: var(--fs-sm);
@@ -1594,32 +1591,20 @@
     background: color-mix(in oklab, var(--accent) 18%, transparent);
     color: var(--accent);
   }
-  .vm-kbd {
-    font-size: 10px;
-    font-variant-numeric: tabular-nums;
-    color: var(--fg-faint);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 5px;
-    line-height: 1;
-    white-space: nowrap;
-  }
   /* The check column always reserves space (auto) so rows align; the glyph
      only paints for active toggles. menuitem rows (Split) have no check. */
   .vm-item :global(.vm-check) {
     color: var(--accent);
-    opacity: 0;
-    transition: opacity 110ms ease;
+    flex-shrink: 0;
   }
-  .vm-item.on :global(.vm-check) { opacity: 1; }
+  .vm-item:not(.on) :global(.vm-check) { display: none; }
   /* Section labels group the menu into Navigate (History) · Panels · Layout
      so the toggles read as one family and Split pane no longer looks like a
      panel. First head needs extra top margin to clear the History row. */
   .vm-head {
-    padding: 5px 9px 3px;
+    padding: 6px 10px 3px;
     margin-top: 5px;
-    font-size: 9.5px; font-weight: 700; letter-spacing: 0.07em;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em;
     text-transform: uppercase;
     color: var(--fg-faint);
     user-select: none;

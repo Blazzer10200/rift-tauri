@@ -97,6 +97,14 @@ export type BoundaryBlock = {
   // estimated ctx% the new session starts at (post = summary tokens / window).
   ctxPctBefore?: number;
   ctxPctEstAfter?: number;
+  // CLI-emitted compaction (Claude Code's own `compact_boundary` event). The
+  // CLI keeps the summary internal, so source==="cli" boundaries carry no
+  // summary/archivedCount/cost — they render a lean info pill instead of the
+  // legacy expandable summary path.
+  source?: "cli";
+  trigger?: "auto" | "manual";
+  preTokens?: number;
+  postTokens?: number;
 };
 
 /** User-attached image — pasted/dropped into the composer, persisted on the
@@ -125,6 +133,10 @@ export type ChatMessage = {
   blocks: Block[];
   costUsd?: number | null;
   model?: string | null;
+  // Terminal stop reason when noteworthy: "max_tokens" (response truncated at
+  // the output cap) or "refusal" (model declined). Null/absent for normal
+  // completions. Drives the truncation/refusal notice in MessageBubble.
+  stopReason?: "max_tokens" | "refusal" | null;
 };
 
 export type ConversationMeta = {
@@ -165,6 +177,10 @@ export type StreamDelta = {
   text?: string;
   thinking?: string;
   signature?: string;
+  // message_delta carries the terminal stop reason for the current assistant
+  // message — `max_tokens` (output truncated) / `refusal` are surfaced to the
+  // user; `end_turn`/`tool_use`/`stop_sequence` are normal and ignored.
+  stop_reason?: string | null;
 };
 
 export type StreamEvent = {

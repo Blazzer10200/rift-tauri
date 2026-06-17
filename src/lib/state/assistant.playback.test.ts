@@ -379,11 +379,28 @@ describe("playback — usage, cost, model attribution", () => {
     expect(rec.modelId).toBe("claude-opus-4-8");
   });
 
-  it("surfaces a known error result.subtype as lastError", () => {
+  it("surfaces a known error result.subtype as a plain-English lastError", () => {
     const tab = freshTab();
     beginTurn(tab);
     feed(tab, [resultEnv({ subtype: "error_max_turns" })]);
-    expect(tab.lastError).toBe("Run ended with subtype: error_max_turns");
+    expect(tab.lastError).toBe("The run hit its maximum number of turns and stopped.");
+  });
+
+  it("surfaces model_context_window_exceeded with a recovery hint", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [resultEnv({ subtype: "model_context_window_exceeded" })]);
+    expect(tab.lastError).toContain("fresh chat");
+  });
+
+  it("flags a max_tokens stop_reason on the streaming message", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      { type: "stream_event", event: { type: "message_delta", delta: { stop_reason: "max_tokens" } } },
+    ]);
+    const last = tab.messages[tab.messages.length - 1];
+    expect(last?.stopReason).toBe("max_tokens");
   });
 });
 

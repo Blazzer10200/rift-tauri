@@ -58,6 +58,53 @@ function mutateStreaming(tab: TabState, fn: (m: ChatMessage) => ChatMessage) {
   tab.messages = tab.messages.map((m) => (m.id === tab.streamingMsgId ? fn(m) : m));
 }
 
+// Mirror of assistant.ctxWindowFor() — kept local so the pump has no runtime
+// dep on the store. Converts CLI compaction token counts into ctx% for the pill.
+function ctxWindowForModel(model: string | null): number {
+  if (!model) return 200_000;
+  if (/\[1m\]/i.test(model)) return 1_000_000;
+  const id = model.toLowerCase();
+  if (id.includes("haiku")) return 200_000;
+  if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
+  return 200_000;
+}
+
+/** Synthesize a visible system-role boundary message for a CLI `compact_boundary`
+ *  event. Inserted just before the in-flight assistant bubble (keeping
+ *  streamingMsgIdx valid) so it lands at the point compaction actually fired. */
+function appendCliCompaction(tab: TabState, env: StreamEnvelope) {
+  const meta =
+    (env as { compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number } })
+      .compact_metadata ?? {};
+  const model = tab.lastModelId ?? "";
+  const w = ctxWindowForModel(model);
+  const pre = typeof meta.pre_tokens === "number" ? meta.pre_tokens : undefined;
+  const post = typeof meta.post_tokens === "number" ? meta.post_tokens : undefined;
+  const boundary: Block = {
+    type: "boundary",
+    summary: "",
+    at: Date.now(),
+    archivedCount: 0,
+    costUsd: 0,
+    summaryModel: model,
+    streaming: false,
+    source: "cli",
+    trigger: meta.trigger === "manual" ? "manual" : "auto",
+    preTokens: pre,
+    postTokens: post,
+    ctxPctBefore: pre !== undefined && w > 0 ? (pre / w) * 100 : undefined,
+    ctxPctEstAfter: post !== undefined && w > 0 ? (post / w) * 100 : undefined,
+  };
+  const msg: ChatMessage = { id: crypto.randomUUID(), role: "system", blocks: [boundary] };
+  const idx = tab.streamingMsgIdx;
+  if (idx !== null && idx >= 0 && idx < tab.messages.length && tab.messages[idx]?.id === tab.streamingMsgId) {
+    tab.messages = [...tab.messages.slice(0, idx), msg, ...tab.messages.slice(idx)];
+    tab.streamingMsgIdx = idx + 1;
+  } else {
+    tab.messages = [...tab.messages, msg];
+  }
+}
+
 function beginThinking(tab: TabState, index: number) {
   if (tab.thinkingByIndex.has(index)) return;
   tab.activeThinkingIndex = index;
@@ -676,6 +723,13 @@ export function onStreamLine(tab: TabState, raw: string) {
         }
       } else if (evType === "content_block_stop" && idx !== null) {
         endThinking(tab, idx);
+      } else if (evType === "message_delta") {
+        // Terminal stop reason for this assistant message. Only the noteworthy
+        // ones land on the bubble — a normal end_turn/tool_use is silent.
+        const sr = ev?.delta?.stop_reason;
+        if (sr === "max_tokens" || sr === "refusal") {
+          mutateStreaming(tab, (m) => ({ ...m, stopReason: sr }));
+        }
       }
       break;
     }
@@ -718,15 +772,18 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (resultUsage) recordTurnUsage(tab, resultUsage, true);
       if (env.subtype && env.subtype !== "success") {
         // Whitelist (S105 A3): known CLI error subtypes surface as user-visible
-        // errors; anything else logs but doesn't false-alarm. Pre-emptive guard
-        // for post-compaction CLI subtypes we haven't seen yet.
-        const KNOWN_ERRORS = new Set([
-          "error_max_turns",
-          "error_during_execution",
-          "error_max_thinking_tokens",
-        ]);
-        if (KNOWN_ERRORS.has(env.subtype)) {
-          tab.lastError = `Run ended with subtype: ${env.subtype}`;
+        // errors w/ a plain-English message; anything else logs but doesn't
+        // false-alarm. Pre-emptive guard for CLI subtypes we haven't seen yet.
+        const ERROR_MESSAGES: Record<string, string> = {
+          error_max_turns: "The run hit its maximum number of turns and stopped.",
+          error_during_execution: "The run stopped on an execution error.",
+          error_max_thinking_tokens: "The run hit its thinking-token budget and stopped.",
+          model_context_window_exceeded:
+            "The context window filled up and couldn't be compacted further. Start a fresh chat to keep going.",
+        };
+        const msg = ERROR_MESSAGES[env.subtype];
+        if (msg) {
+          tab.lastError = msg;
         } else {
           console.warn("[assistant] unrecognized result.subtype", env.subtype, env);
         }
@@ -740,6 +797,12 @@ export function onStreamLine(tab: TabState, raw: string) {
         mutateStreaming(tab, (m) => ({ ...m, model: sysModel }));
         if (tab.currentTurnRecord) tab.currentTurnRecord.modelId = sysModel;
       }
+      // The CLI auto-compacts when its context window fills and emits a
+      // `compact_boundary` system event. Surface it as a visible transcript
+      // marker so the conversation never silently resets under the user.
+      // (microcompact_boundary — the lighter tool-output trim — is intentionally
+      // not surfaced; it fires often and would clutter the transcript.)
+      if (env.subtype === "compact_boundary") appendCliCompaction(tab, env);
       break;
     }
     default:

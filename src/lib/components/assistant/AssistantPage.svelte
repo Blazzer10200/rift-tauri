@@ -30,6 +30,16 @@
     });
   });
 
+  // Single-pane must never strand on a dead "Empty pane" card: closing the
+  // last tab nulls currentConvoId, and there's no page-level chat browser to
+  // fall back to. Re-seed a fresh chat so Chat always lands on the welcome
+  // (with composer). The split-pane empty slot is deliberate and left alone.
+  $effect(() => {
+    if (!assistant.splitActive && assistant.currentConvoId == null) {
+      void assistant.newTab();
+    }
+  });
+
   // Smart visibility: reveal the sub-agent dock while Task/Agent work is in
   // flight and slide it away once everything finishes. The dock controller
   // handles the grace delay + user-pin overrides.

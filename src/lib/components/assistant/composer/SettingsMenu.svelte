@@ -287,12 +287,20 @@
   .effort-head .effort-head-flag {
     margin-left: 8px;
     font-family: var(--font-mono);
-    font-size: 9.5px;
-    font-weight: 500;
+    font-size: 9px;
+    font-weight: 600;
     color: var(--fg-faint);
     letter-spacing: 0.02em;
+    padding: 1px 5px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    line-height: 1.4;
   }
-  .effort-head.ultra .effort-head-flag { color: color-mix(in oklab, var(--accent) 55%, var(--fg-faint)); }
+  .effort-head.ultra .effort-head-flag {
+    color: color-mix(in oklab, var(--accent) 70%, var(--fg-faint));
+    border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
+  }
   .effort-head .effort-help {
     margin-left: auto; display: inline-flex; padding: 2px; border: 0;
     background: transparent; color: var(--fg-faint); cursor: help;
