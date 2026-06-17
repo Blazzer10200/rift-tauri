@@ -1,5 +1,5 @@
 # Tag-driven release. Push a `v*` tag -> this builds, packs with Velopack, and
-# publishes to the public `Blazzer10200/rift-releases` repo. Replaces running
+# publishes to the public `Blazzer10200/rift` repo. Replaces running
 # `scripts/release.ps1` by hand on a dev machine.
 #
 # Ship flow:
