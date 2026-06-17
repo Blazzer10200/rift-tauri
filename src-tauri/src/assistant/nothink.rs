@@ -193,9 +193,13 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
                     "thinking".into(),
                     serde_json::json!({ "type": "disabled" }),
                 );
-                if let Ok(reser) = serde_json::to_vec(&j) {
-                    body = reser;
-                }
+            }
+            // The CLI also ships a `clear_thinking_*` context-management strategy,
+            // which 400s ("requires thinking to be enabled or adaptive") once we
+            // force thinking off. Strip any clear_thinking edit from the body.
+            strip_clear_thinking(&mut j);
+            if let Ok(reser) = serde_json::to_vec(&j) {
+                body = reser;
             }
         }
     }
@@ -262,6 +266,44 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
     }
     let _ = stream.shutdown().await;
     Ok(())
+}
+
+/// Recursively remove any `clear_thinking*` context-management strategy from a
+/// /v1/messages body. The CLI emits `context_management.edits[{type:
+/// "clear_thinking_20251015", …}]`; that strategy requires thinking to be
+/// enabled/adaptive and 400s once we force `thinking:{disabled}`. We walk the
+/// whole value (structure-agnostic) and drop array elements whose `type` starts
+/// with `clear_thinking`, then prune any `edits`/`context_management` left empty.
+fn strip_clear_thinking(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::Array(arr) => {
+            arr.retain(|el| {
+                !el.get("type")
+                    .and_then(|t| t.as_str())
+                    .is_some_and(|t| t.starts_with("clear_thinking"))
+            });
+            for el in arr.iter_mut() {
+                strip_clear_thinking(el);
+            }
+        }
+        serde_json::Value::Object(obj) => {
+            for val in obj.values_mut() {
+                strip_clear_thinking(val);
+            }
+            obj.retain(|k, val| match k.as_str() {
+                "edits" => !val.as_array().is_some_and(|a| a.is_empty()),
+                // Drop context_management if its edits list is now empty OR the
+                // object itself is empty (its only `edits` key was just pruned
+                // above, since values recurse before this retain runs).
+                "context_management" => !val.as_object().is_some_and(|o| {
+                    o.is_empty()
+                        || matches!(o.get("edits").and_then(|e| e.as_array()), Some(a) if a.is_empty())
+                }),
+                _ => true,
+            });
+        }
+        _ => {}
+    }
 }
 
 async fn write_plain(stream: &mut TcpStream, code: u16, msg: &str) -> Result<(), String> {
