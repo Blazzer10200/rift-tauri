@@ -355,8 +355,8 @@
   <div class="body">
     {#if !isUser}
       <div class="turn-head">
-        <span class="role-name">{isLocalModel ? "Local model" : "Claude"}</span>
-        {#if modelLabel}
+        <span class="role-name">{isLocalModel ? (modelLabel ?? "Local model") : "Claude"}</span>
+        {#if modelLabel && !isLocalModel}
           <span class="head-sep" aria-hidden="true">·</span>
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
         {/if}

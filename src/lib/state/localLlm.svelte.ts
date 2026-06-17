@@ -62,7 +62,7 @@ class LocalLlmStore {
   /** Who the composer is addressing — drives "Ask …" placeholders so they
    *  don't say "Claude" while local mode routes turns to a local model. */
   get askLabel(): string {
-    return this.enabled ? "your local model" : "Claude";
+    return this.enabled ? this.pillLabel : "Claude";
   }
 
   async refresh() {
