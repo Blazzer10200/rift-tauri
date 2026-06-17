@@ -30,6 +30,12 @@ class LocalLlmStore {
     return this.model.trim() || "Local model";
   }
 
+  /** Who the composer is addressing — drives "Ask …" placeholders so they
+   *  don't say "Claude" while local mode routes turns to a local model. */
+  get askLabel(): string {
+    return this.enabled ? "your local model" : "Claude";
+  }
+
   async refresh() {
     try {
       const cfg = await invoke<LocalLlmDto>("assistant_get_local_llm_config");

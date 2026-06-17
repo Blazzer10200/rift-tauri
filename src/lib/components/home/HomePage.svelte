@@ -9,6 +9,7 @@
   import { cliUpdate } from "$lib/state/cliUpdate.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { usage, type LimitWindow } from "$lib/state/usage.svelte";
+  import { localLlm } from "$lib/state/localLlm.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import HomeStats from "./HomeStats.svelte";
   import { modelLabel } from "./statsHelpers";
@@ -24,6 +25,7 @@
   onMount(() => {
     void cliUpdate.maybeCheck();
     void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    void localLlm.refresh();
   });
   // Keep the update command method-aware (npm vs native).
   $effect(() => { cliUpdate.setMethod(assistant.auth?.installMethod ?? null); });
@@ -185,7 +187,7 @@
         bind:value={askDraft}
         class="da-input"
         rows="1"
-        placeholder={hasRoot ? `Ask Claude about ${leafName(root!)}…` : "Ask Claude anything…"}
+        placeholder={hasRoot ? `Ask ${localLlm.askLabel} about ${leafName(root!)}…` : `Ask ${localLlm.askLabel} anything…`}
         oninput={autogrow}
         onkeydown={askKeydown}
       ></textarea>

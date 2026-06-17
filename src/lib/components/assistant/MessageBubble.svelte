@@ -141,6 +141,11 @@
   }
 
   const modelLabel = $derived(message.model ? shortModel(message.model) : null);
+  // Local-LLM turns run a non-Anthropic model (id never starts with "claude").
+  // Label them "Local model" so the header identity matches what the model
+  // actually is — derived per-message so history stays correct when the live
+  // toggle later flips.
+  const isLocalModel = $derived(!!message.model && !/^claude/i.test(message.model));
   // Family key for aurora tinting — drives the bubble's left rail + avatar
   // halo color so each assistant turn carries the same hue as the composer
   // that produced it.
@@ -350,7 +355,7 @@
   <div class="body">
     {#if !isUser}
       <div class="turn-head">
-        <span class="role-name">Claude</span>
+        <span class="role-name">{isLocalModel ? "Local model" : "Claude"}</span>
         {#if modelLabel}
           <span class="head-sep" aria-hidden="true">·</span>
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>

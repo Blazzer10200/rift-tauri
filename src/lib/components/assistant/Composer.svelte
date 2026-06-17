@@ -998,7 +998,7 @@
           rows="1"
         ></textarea>
         {#if draft.length === 0 && !streaming && attachments.length === 0}
-          <span class="placeholder-ghost static" aria-hidden="true">Ask Claude · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · hold <span class="ph-k">Space</span> to talk{/if}</span>
+          <span class="placeholder-ghost static" aria-hidden="true">Ask {localLlm.askLabel} · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · hold <span class="ph-k">Space</span> to talk{/if}</span>
         {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Type to queue for after this turn · <span class="ph-k">/stop</span> halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
