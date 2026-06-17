@@ -4,7 +4,7 @@
 # public `rift-releases` GitHub repo (`vpk upload github`). Installed clients
 # run Velopack's UpdateManager over the native GithubSource: check on launch +
 # every 6h, one-click download, then unattended apply-on-exit + relaunch.
-# See src-tauri/src/update_service.rs + docs/design/velopack-auto-update.md.
+# See src-tauri/src/update_service.rs (arc: git log -- docs/design/velopack-auto-update.md).
 #
 # Two-repo split: source lives in private `rift-tauri`; releases publish to
 # public `rift-releases` so unauthenticated GithubSource fetches succeed.
@@ -310,7 +310,7 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
 
 # --- Optional: dual-publish to Cloudflare R2 (self-hosted feed) -------------
 # Fires only when R2 creds are present (CI secrets). Until then, no-op -- the
-# GitHub path above remains the live feed. See docs/design/self-hosted-distribution.md.
+# GitHub path above remains the live feed. (arc: git log -- docs/design/self-hosted-distribution.md)
 if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) {
     Write-Host '=== vpk upload s3 (Cloudflare R2) ===' -ForegroundColor Cyan
     $r2Args = @(

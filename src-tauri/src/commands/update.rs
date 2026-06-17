@@ -6,7 +6,7 @@
 //! (schedules the swap, exits the app; Velopack relaunches the new version).
 //!
 //! All `UpdateManager` calls are blocking I/O, so each runs on `spawn_blocking`.
-//! See `update_service.rs` + `docs/design/velopack-auto-update.md`.
+//! See `update_service.rs` (arc history: `git log -- docs/design/velopack-auto-update.md`).
 
 use crate::update_service::{UpdateInfoDto, UpdateService};
 use std::sync::Arc;

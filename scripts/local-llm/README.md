@@ -1,45 +1,36 @@
-# Local-LLM proxy stack (experimental)
+# Local-LLM tooling
 
-Run a local model through Rift's **Local LLM** workspace. Rift shells out to the
-`claude` CLI with `ANTHROPIC_BASE_URL` pointed here, so the proxy just has to
-speak the Anthropic `/v1/messages` API.
+Rift's **Local LLM** workspace (kbd 4, off by default) shells out to the `claude`
+CLI with `ANTHROPIC_BASE_URL` pointed at a local Anthropic `/v1/messages`-compatible
+endpoint. As of **v0.19.0** the thinking-suppression shim is **baked into the Rust
+backend** (`src-tauri/src/assistant/nothink.rs`) — there is no external proxy to run.
 
-## Why two processes
-
-The `claude` CLI sends an Anthropic `thinking` block on every turn (no flag
-disables it). Non-thinking local models (e.g. `ollama/qwen3-coder:30b`) make
-LiteLLM forward it to Ollama, which 500s with
-`"qwen3-coder:30b" does not support thinking`. LiteLLM's `drop_params` can't
-strip it on the `/v1/messages` adapter path, so a tiny **thinking-aware** shim
-handles it one hop earlier: it keeps `thinking` for thinking-capable models (so
-their reasoning shows up as "Thought for Ns" in Rift) and drops it only for the
-`NO_THINK_MARKERS` denylist (currently `coder`).
+## Current stack (v0.19.0+)
 
 ```
-CLI ──/v1/messages (+thinking)──▶ shim :4000 ──▶ LiteLLM :4001 ──▶ Ollama :11434
-                                    └ thinking dropped ONLY for no-think models
+CLI ──/v1/messages (+thinking)──▶ nothink.rs shim (in-process loopback)
+                                    └ injects thinking:{type:disabled} ──▶ Ollama :11434
 ```
 
-## Run
+Just run Ollama; Rift handles the rest:
 
 ```sh
-# 1. LiteLLM behind the shim
-pip install "litellm[proxy]"          # or: uv tool install litellm
-litellm --config config.yaml --port 4001
-
-# 2. Strip-thinking shim on :4000 (what Rift points at)
-python strip_thinking_proxy.py 4000 4001
+ollama serve            # :11434
 ```
 
-Then in Rift → **Local LLM**: base `http://localhost:4000`, **Detect** the
-model (default `ollama/qwen3:14b` — thinking + tools; `ollama/qwen3-coder:30b`
-for heavier coding, no thinking), any non-empty key, **Test connection** (green).
+In Rift → **Local LLM**: toggle on, base `http://localhost:11434` (raw Ollama),
+**Detect** → pick the model (shipped default `qwen3.6-iq3-rift`), any non-empty key,
+**Test connection** (green). **Optimize for Rift** bakes a `num_ctx`-bumped
+`<model>-rift` variant so the prompt + MCP tool defs aren't truncated mid-turn.
 
-## Files
+Design doc: `docs/design/local-llm.md`. The superseded LiteLLM + Python
+`strip_thinking_proxy.py` era (cont.127-129) lives in that doc's lineage sections and
+in `git log`.
 
-- `strip_thinking_proxy.py` — stdlib reverse proxy; always strips
-  `context_management` / `output_config`, strips `thinking` only for
-  `NO_THINK_MARKERS` models (`coder`), streams everything else through (SSE-safe).
-  Args: `[listen_port] [upstream_port]` (default 4000 4001).
-- `config.yaml` — LiteLLM config: both models via `ollama_chat/` (native tools),
-  `num_ctx: 32768` (Ollama's 4K default truncates Rift's prompt), `drop_params`.
+## `stress-test/`
+
+The local-mode prompt-iteration harness — `harness-rift.mjs` faithfully replicates
+Rift's local mode (exact tool surface + CLI name-rejections + Read-before-Write guard
++ workspace path-jail) running the LIVE addendum extracted from `turn.rs`. Use it
+whenever you change `RIFT_SYSTEM_ADDENDUM_LOCAL`. See `stress-test/README.md` +
+`stress-test/RESULTS.md`.

@@ -73,7 +73,7 @@ tokio-util = { version = "0.7", features = ["rt"] }
 # Auto-updater: Velopack (v0.4.47+). Background download + apply-on-exit +
 # relaunch via Velopack's Update.exe — one-click then unattended. v1.x ships a
 # native GithubSource so no custom REST source is needed. See update_service.rs
-# + docs/design/velopack-auto-update.md. PINNED EXACT: the `vpk` CLI version
+# (arc: `git log -- docs/design/velopack-auto-update.md`). PINNED EXACT: the `vpk` CLI version
 # MUST equal this crate version (both 1.2.0) so the packed Update runtime ==
 # the linked runtime. Bump vpk (`dotnet tool update -g vpk`) and this pin together.
 velopack = "=1.2.0"
