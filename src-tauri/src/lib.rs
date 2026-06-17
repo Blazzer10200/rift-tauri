@@ -150,6 +150,15 @@ pub fn run() {
                     log::error!("assistant bridge failed to start: {e}");
                 }
             });
+            // No-think loopback shim (local-LLM mode only): injects
+            // thinking:disabled into /v1/messages so Ollama-class models skip
+            // their forced reasoning dump. Replaces the external Node proxy.
+            // Non-fatal — turn.rs falls back to the raw base URL if it can't bind.
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = assistant::nothink::start().await {
+                    log::error!("assistant nothink shim failed to start: {e}");
+                }
+            });
             // Phase E4: best-effort sweep of CLI JSONLs whose sessions were
             // retired by compaction >30 days ago.
             tauri::async_runtime::spawn_blocking(|| {

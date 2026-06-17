@@ -808,7 +808,14 @@ pub async fn assistant_send(
             .as_deref()
             .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
         {
-            cmd.env("ANTHROPIC_BASE_URL", base);
+            // Route through Rift's in-process no-think shim when it's bound: it
+            // injects `thinking:{type:"disabled"}` into /v1/messages (the only
+            // switch that suppresses Ollama's forced reasoning) and forwards to
+            // `base`, read fresh per-request. This replaces the external
+            // `rift-nothink-proxy.mjs`. If the shim failed to bind, fall back to
+            // the raw base URL (user can still run the external proxy).
+            let target = super::nothink::shim_base_url().unwrap_or_else(|| base.to_string());
+            cmd.env("ANTHROPIC_BASE_URL", target);
         }
         let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
             .unwrap_or_else(|| "local".to_string());

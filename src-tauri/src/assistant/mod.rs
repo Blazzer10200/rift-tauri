@@ -19,6 +19,7 @@ pub mod convo_store;
 pub mod env_checks;
 pub mod git_local;
 pub mod mcp_server;
+pub mod nothink;
 pub mod oneshot;
 pub mod permission;
 pub mod turn;
