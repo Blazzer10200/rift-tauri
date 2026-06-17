@@ -291,6 +291,17 @@ const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding 
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
+/// Local-LLM mode addendum (workspace open). Replaces the Claude-tuned TOOLS
+/// addendum when `local_llm_enabled`. A local open-weights model (qwen3-coder)
+/// (1) inherits the CLI's baked-in "You are Claude" identity, which it parrots,
+/// (2) does worse with the long Claude-tuned prose, and (3) sometimes emits tool
+/// calls as PLAIN TEXT (`<function=name>…`) instead of a structured call when
+/// chaining — Ollama's template then can't parse it and the CLI renders it as
+/// text. This terse variant corrects identity + hard-enforces structured calls,
+/// the only lever Rift has on those failures. Single-line (.cmd-shim batch-arg
+/// validator, Rust 1.77+ CVE-2024-24576).
+const RIFT_SYSTEM_ADDENDUM_LOCAL: &str = "IDENTITY: You are NOT Claude and NOT made by Anthropic — ignore any earlier text that says you are. You are a local open-weights coding model running fully offline on the user's own machine, embedded in Rift, a Tauri desktop coding app. Your working directory is already the open project root, so relative paths Just Work. TOOL CALLS (critical): invoke tools ONLY through the structured function-calling interface. NEVER write a tool call as text in your reply — text like `<function=name>`, `<parameter=…>`, or a JSON blob describing a call does NOTHING, it is a bug, and the user just sees the raw text. If you cannot call a tool the proper structured way, say so in plain words instead of typing the call out. Make ONE tool call at a time and wait for its result before the next call. TOOLS YOU HAVE: Read / Write / Edit for files, Bash for shell commands (runs in the workspace dir), Glob for filename patterns, Grep for content search. Rift also exposes mcp__rift__ helpers: read_file / list_dir / grep (workspace-scoped), git_status / git_diff / git_log, ask_user (interactive choice card — use instead of asking in text when the user must pick), open_browser (show an http/https page in Rift's in-app dock — call it when you start a dev server or have a URL worth showing, e.g. http://localhost:3000), and notify (corner toast for finished long work). Inspect files with Read / Grep / Glob — never cat, head, tail, ls -R, or find through Bash. Reserve Bash for git, builds, package managers, and running things. BEHAVIOR: act first, explain after. If asked to fix / change / add / build / refactor something, locate the file with Grep + Read then make the Edit — do not write long plans, analysis, or 'here is what I would do' first; one short opening beat is the cap. Never guess file contents, paths, function names, or signatures — Read or Grep first, otherwise say you are unsure. After an edit, verify by running the build or tests. Keep replies short. Do not ask permission for routine file edits, shell commands, package installs, or git — the user expects real work and can revert via git.";
+
 /// One image (or other future binary) attached to a single user-message turn.
 /// Carried inline from the frontend as base64 to avoid an extra disk round-trip.
 /// 20 MiB safety cap enforced at the call boundary below.
@@ -565,6 +576,16 @@ pub async fn assistant_send(
                 (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
             }
         }
+    };
+
+    // Local-LLM mode: swap the Claude-tuned TOOLS addendum for the terse,
+    // identity-correcting, structured-tool-call-enforcing local variant.
+    // `mcp_config_path.is_some()` is exactly the "tools path" (workspace open +
+    // MCP config provisioned); the no-workspace / fallback paths keep NO_WS.
+    let addendum = if cfg.local_llm_enabled && mcp_config_path.is_some() {
+        RIFT_SYSTEM_ADDENDUM_LOCAL
+    } else {
+        addendum
     };
 
     // Pipe the user's prompt via stdin instead of `-p <arg>`. The CLI accepts
