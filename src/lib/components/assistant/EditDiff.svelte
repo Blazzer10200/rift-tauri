@@ -44,8 +44,13 @@
     | { kind: "gap";  lines: number };
 
   const pairs = $derived.by<DiffPair[] | null>(() => {
-    const oldStr = typeof input.old_string === "string" ? input.old_string : null;
-    const newStr = typeof input.new_string === "string" ? input.new_string : null;
+    // Write (new-file creation) has `content`, not old/new_string — render it
+    // as an all-additions diff so the file body is actually shown, not hidden
+    // behind a bare "N chars" chip. Only treat as write when content exists
+    // AND new_string is absent.
+    const isWrite = typeof input.content === "string" && !input.new_string;
+    const oldStr = isWrite ? "" : (typeof input.old_string === "string" ? input.old_string : null);
+    const newStr = isWrite ? (input.content as string) : (typeof input.new_string === "string" ? input.new_string : null);
     if (oldStr === null || newStr === null) return null;
     const out: DiffPair[] = [];
     if (input.replace_all === true) out.push({ kind: "meta", text: "replace_all: true" });
@@ -183,8 +188,9 @@
       // the `counts` $derived here — reading a derived inside a $state
       // initializer is order-fragile). Cheap line-set diff is enough to
       // decide auto-expand; the precise +N/-M still comes from `counts`.
-      const oldStr = typeof input.old_string === "string" ? input.old_string : "";
-      const newStr = typeof input.new_string === "string" ? input.new_string : "";
+      const isWrite = typeof input.content === "string" && !input.new_string;
+      const oldStr = isWrite ? "" : (typeof input.old_string === "string" ? input.old_string : "");
+      const newStr = isWrite ? (input.content as string) : (typeof input.new_string === "string" ? input.new_string : "");
       // Skip diffing huge blocks — default collapsed to avoid mount-time cost.
       if (oldStr.length + newStr.length > 200_000) return false;
       const _chunks = diffArrays(oldStr.split("\n"), newStr.split("\n"));
@@ -241,7 +247,8 @@
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
   function copyDiff(e: MouseEvent) {
     e.stopPropagation();
-    const text = typeof input.new_string === "string" ? input.new_string : "";
+    const text = typeof input.new_string === "string" ? input.new_string
+      : typeof input.content === "string" ? input.content : "";
     navigator.clipboard?.writeText(text).catch(() => {});
     copied = true;
     if (copyTimer) clearTimeout(copyTimer);

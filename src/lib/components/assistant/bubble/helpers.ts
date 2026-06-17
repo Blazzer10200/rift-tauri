@@ -8,7 +8,7 @@ import { captionForTool, captionForGroup } from "../toolCaption";
 // compact ToolChip). Edit-family only — everything else gets a chip.
 export function isInlineDiffTool(name: string): boolean {
   const sn = name.replace(/^mcp__rift__/, "");
-  return sn === "Edit" || sn === "MultiEdit";
+  return sn === "Edit" || sn === "MultiEdit" || sn === "Write";
 }
 export function shortToolName(name: string): string { return name.replace(/^mcp__rift__/, ""); }
 // Card-style tools render first-class chrome (their body IS the message) —

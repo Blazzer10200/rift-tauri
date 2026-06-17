@@ -18,6 +18,7 @@ describe("tool classifiers", () => {
   it("classifies edit-family as inline diff, with and without the MCP prefix", () => {
     expect(isInlineDiffTool("Edit")).toBe(true);
     expect(isInlineDiffTool("mcp__rift__MultiEdit")).toBe(true);
+    expect(isInlineDiffTool("Write")).toBe(true);
     expect(isInlineDiffTool("Read")).toBe(false);
   });
   it("classifies card tools and excludes both families from grouping", () => {
