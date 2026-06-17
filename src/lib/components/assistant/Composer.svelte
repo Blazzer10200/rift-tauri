@@ -958,7 +958,7 @@
       />
     {/if}
 
-    {#if settingsOpen}
+    {#if settingsOpen && !localLlm.enabled}
       <SettingsMenu
         {settingsIdx}
         activeKind={settingsRows[settingsIdx]?.kind ?? null}
@@ -1167,6 +1167,11 @@
             />
           {/if}
 
+          <!-- Cloud model + effort picker. Hidden in local mode — local routing
+               bypasses the model pin + effort entirely, so showing cloud options
+               (e.g. "Opus 4.8") would misrepresent what the turn runs against.
+               The local-pill above already names the active local model. -->
+          {#if !localLlm.enabled}
           <button
             type="button"
             class="settings-pill"
@@ -1191,6 +1196,7 @@
             {/if}
             <ChevronUp size={13} class="pill-chev" />
           </button>
+          {/if}
           <button
             class="sendbtn"
             class:stop={mode === "stop"}

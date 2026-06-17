@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { Cpu, FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, ArrowRight } from "lucide-svelte";
+  import { Cpu, FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, ArrowRight, Gauge, Sparkles, AlertTriangle } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { localLlm } from "../../state/localLlm.svelte";
 
@@ -13,12 +13,13 @@
   let testMs = $state<number | null>(null);
   let lastChecked = $state<Date | null>(null);
   let modelHint = $state("");
+  let optimizeResult = $state<{ ok: boolean; msg: string } | null>(null);
 
-  // Common LiteLLM front-doors. The endpoint must speak the Anthropic API, so
-  // these are proxy addresses — NOT raw Ollama (:11434), which the desc warns against.
+  // Both speak the Anthropic /v1/messages API: current Ollama serves it natively
+  // at :11434, and a LiteLLM proxy fronts it at :4000.
   const PRESETS = [
+    { label: "Ollama", url: "http://localhost:11434" },
     { label: "LiteLLM", url: "http://localhost:4000" },
-    { label: "LiteLLM (127.0.0.1)", url: "http://127.0.0.1:4000" },
   ] as const;
 
   // Test needs a target — gate the button so an empty probe can't fire.
@@ -45,7 +46,12 @@
     { label: "Verified", done: verified, hint: verified && testMs != null ? `${testMs} ms round-trip` : "Not tested", optional: false },
   ]);
 
-  onMount(() => { void localLlm.refresh(); });
+  // Context guidance — only meaningful for an Ollama endpoint with a model set.
+  const ctx = $derived(localLlm.ctxInfo);
+  const showCtx = $derived(localLlm.enabled && !!ctx && ctx.is_ollama);
+  const fmt = (n: number) => n.toLocaleString();
+
+  onMount(() => { void localLlm.refresh().then(() => localLlm.refreshCtx()); });
 
   // A config change invalidates a prior pass — drop the verified state so the
   // rail never claims "live" against settings that were never tested.
@@ -61,12 +67,19 @@
     await localLlm.saveBaseUrl();
   }
 
-  async function saveBaseUrl() { invalidateTest(); await localLlm.saveBaseUrl(); }
+  async function saveBaseUrl() { invalidateTest(); await localLlm.saveBaseUrl(); void localLlm.refreshCtx(); }
 
   async function saveModel() {
     invalidateTest();
-    try { await localLlm.saveModel(); }
+    optimizeResult = null;
+    try { await localLlm.saveModel(); void localLlm.refreshCtx(); }
     catch (e) { testResult = { ok: false, msg: String(e) }; }
+  }
+
+  async function optimizeCtx() {
+    optimizeResult = null;
+    invalidateTest();
+    optimizeResult = await localLlm.optimize();
   }
 
   async function selectModel(m: string) {
@@ -206,7 +219,7 @@
           <div class="st-row">
             <div class="st-row-body">
               <label class="st-row-label" for="ll-base">Base URL</label>
-              <div class="st-row-desc">Must speak the Anthropic <code>/v1/messages</code> API — a <strong>LiteLLM proxy</strong> (default <code>:4000</code>), <em>not</em> raw Ollama (<code>:11434</code>). Sets <code>ANTHROPIC_BASE_URL</code>.</div>
+              <div class="st-row-desc">Must speak the Anthropic <code>/v1/messages</code> API — <strong>Ollama</strong> serves it natively (<code>:11434</code>), or a <strong>LiteLLM proxy</strong> (<code>:4000</code>). Sets <code>ANTHROPIC_BASE_URL</code>.</div>
             </div>
             <div class="st-row-ctl">
               <input
@@ -257,6 +270,46 @@
               </div>
             {/if}
           </div>
+
+          <!-- Context window — Ollama's 4096 default silently truncates Rift's
+               prompt + tools + files → stalls / refused edits. Detect + one-click fix. -->
+          {#if showCtx && ctx}
+            <div class="st-row ctx-row" class:bad={localLlm.ctxUndersized}>
+              <div class="st-row-body">
+                <label class="st-row-label">
+                  <Gauge size={14} strokeWidth={2} />
+                  Context window
+                </label>
+                <div class="st-row-desc">
+                  {#if localLlm.ctxUndersized}
+                    Ollama is serving this model at
+                    <strong>{ctx.num_ctx == null ? "the 4096-token default" : `only ${fmt(ctx.num_ctx)} tokens`}</strong>
+                    — too small for Rift's system prompt, tools, and files. This is the
+                    <strong>#1 cause of stalls and refused edits</strong> in local mode.
+                    {#if ctx.max_ctx}This model supports up to {fmt(ctx.max_ctx)}.{/if}
+                  {:else}
+                    Serving <strong>{fmt(ctx.num_ctx ?? 0)} tokens</strong> — enough headroom for
+                    agentic edits.{#if ctx.max_ctx} Model ceiling {fmt(ctx.max_ctx)}.{/if}
+                  {/if}
+                </div>
+                {#if optimizeResult}
+                  <div class="ctx-result mono" class:err={!optimizeResult.ok}>
+                    {optimizeResult.ok ? `Created ${optimizeResult.msg} (32,768 tokens) — now active.` : optimizeResult.msg}
+                  </div>
+                {/if}
+              </div>
+              <div class="st-row-ctl">
+                {#if localLlm.ctxUndersized}
+                  <span class="st-pill warn"><AlertTriangle size={12} strokeWidth={2.5} />Too small</span>
+                  <button class="st-btn primary" type="button" disabled={localLlm.optimizing} onclick={optimizeCtx}>
+                    {#if localLlm.optimizing}<Loader2 size={14} class="st-spin" /> Optimizing…{:else}<Sparkles size={14} /> Optimize for Rift{/if}
+                  </button>
+                {:else}
+                  <span class="st-pill ok"><Check size={12} strokeWidth={3} />{fmt(ctx.num_ctx ?? 0)}</span>
+                {/if}
+              </div>
+            </div>
+          {/if}
 
           <!-- API key -->
           <div class="st-row">
@@ -387,6 +440,13 @@
   .chip-btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
   .chip-btn.active { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 32%, transparent); color: var(--ok); }
   .chip-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ── Context-window guidance row ── */
+  .ctx-row .st-row-label { display: inline-flex; align-items: center; gap: 6px; }
+  .ctx-row.bad { background: var(--warn-soft); }
+  .ctx-row.bad .st-row-label :global(svg) { color: var(--warn); }
+  .ctx-result { flex-basis: 100%; margin-top: 8px; white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px; }
+  .ctx-result.err { color: var(--danger); }
 
   .st-note { padding: 10px 17px; font-size: var(--fs-xs); color: var(--fg-muted); }
   .st-detect-hint { color: var(--accent); font-weight: 600; margin-left: 2px; }

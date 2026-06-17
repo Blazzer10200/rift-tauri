@@ -13,7 +13,9 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::cli_install::claude_command;
-use super::config::{effective_trust_level, is_valid_local_model_name, load_config};
+use super::config::{
+    effective_trust_level, is_valid_local_model_name, load_config, save_config, CONFIG_WRITE_LOCK,
+};
 use super::turn::ENHANCE_STREAM_EVENT;
 use super::{write_mcp_config, McpConfigGuard};
 
@@ -721,4 +723,192 @@ pub async fn assistant_list_local_models() -> Result<Vec<String>, String> {
         .unwrap_or_default();
 
     Ok(models)
+}
+
+/// Effective context window for the configured local model, probed via Ollama's
+/// native `/api/show`. THE dominant local-mode failure: Ollama defaults `num_ctx`
+/// to 4096 regardless of the model's true ceiling, silently truncating Rift's
+/// system prompt + tools + open files mid-turn — the model loses its instructions
+/// and the user's question, then stalls or refuses edits. This surfaces the gap
+/// so the Local LLM page can warn + offer the one-click fix below.
+#[derive(serde::Serialize)]
+pub struct LocalCtxInfo {
+    /// False when the endpoint isn't Ollama (e.g. a LiteLLM proxy with no
+    /// `/api/show`) — the UI then skips the Ollama-specific guidance.
+    is_ollama: bool,
+    model: String,
+    /// `num_ctx` set via a Modelfile PARAMETER. `None` = falls back to the
+    /// server default (`OLLAMA_CONTEXT_LENGTH`, 4096 unless overridden) — the bug.
+    num_ctx: Option<u64>,
+    /// The model's architectural ceiling (e.g. 262144). `None` if `/api/show`
+    /// didn't advertise one.
+    max_ctx: Option<u64>,
+}
+
+/// `parameters` is a flat text blob (`num_ctx   32768\ntemperature  0.7\n…`).
+fn parse_num_ctx(params: &str) -> Option<u64> {
+    params.lines().find_map(|line| {
+        let mut it = line.split_whitespace();
+        match it.next() {
+            Some("num_ctx") => it.next().and_then(|n| n.parse::<u64>().ok()),
+            _ => None,
+        }
+    })
+}
+
+#[tauri::command]
+pub async fn assistant_local_model_context() -> Result<LocalCtxInfo, String> {
+    let cfg = load_config();
+    let base_url = cfg
+        .local_llm_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("No base URL configured")?
+        .trim_end_matches('/')
+        .to_string();
+    let model = cfg
+        .local_llm_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && is_valid_local_model_name(s))
+        .ok_or("No (valid) model configured")?
+        .to_string();
+
+    let url = format!("{base_url}/api/show");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&serde_json::json!({ "model": model }))
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_connect() {
+                format!("can't reach {base_url} — is the endpoint up?")
+            } else {
+                format!("request to {url} failed: {e}")
+            }
+        })?;
+
+    // Non-Ollama endpoints (LiteLLM proxy) have no `/api/show` → 404/405. Treat
+    // as "not Ollama" rather than an error so the page degrades gracefully.
+    if resp.status() == reqwest::StatusCode::NOT_FOUND
+        || resp.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
+    {
+        return Ok(LocalCtxInfo { is_ollama: false, model, num_ctx: None, max_ctx: None });
+    }
+    if !resp.status().is_success() {
+        return Err(format!("/api/show returned HTTP {}", resp.status().as_u16()));
+    }
+
+    let text = resp.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&text).map_err(|e| format!("bad /api/show JSON: {e}"))?;
+
+    let num_ctx = v
+        .get("parameters")
+        .and_then(Value::as_str)
+        .and_then(parse_num_ctx);
+    // The arch prefix varies (`qwen3moe.context_length`, `llama.context_length`,
+    // …) — take the first `*.context_length` key.
+    let max_ctx = v.get("model_info").and_then(Value::as_object).and_then(|mi| {
+        mi.iter()
+            .find(|(k, _)| k.ends_with(".context_length"))
+            .and_then(|(_, val)| val.as_u64())
+    });
+
+    Ok(LocalCtxInfo { is_ollama: true, model, num_ctx, max_ctx })
+}
+
+/// One-click "Optimize for Rift": create an Ollama variant of the configured
+/// model baking in a Rift-sized `num_ctx`, then repoint the config at it. This
+/// is the fix for the 4096 truncation — Ollama can't take `num_ctx` per-request
+/// over the Anthropic `/v1/messages` adapter, so a baked-in Modelfile variant is
+/// the only lever Rift has. Variant name = `<base-without-tag>-rift` (idempotent:
+/// re-running rebuilds it). `target_ctx` clamps to [8192, min(max, 131072)].
+#[tauri::command]
+pub async fn assistant_optimize_local_model(target_ctx: Option<u64>) -> Result<String, String> {
+    let cfg = load_config();
+    let base_url = cfg
+        .local_llm_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or("No base URL configured")?
+        .trim_end_matches('/')
+        .to_string();
+    let from = cfg
+        .local_llm_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && is_valid_local_model_name(s))
+        .ok_or("No (valid) model configured")?
+        .to_string();
+
+    // Strip any `:tag`, append `-rift` (skip if already a `-rift` variant).
+    let stem = from.split(':').next().unwrap_or(&from);
+    let variant = if stem.ends_with("-rift") {
+        stem.to_string()
+    } else {
+        format!("{stem}-rift")
+    };
+    if !is_valid_local_model_name(&variant) {
+        return Err(format!("derived variant name is invalid: {variant}"));
+    }
+
+    // Clamp into a sane band. 131072 caps the upper end so a 262k-ceiling model
+    // doesn't allocate a KV cache that won't fit in VRAM.
+    let target = target_ctx.unwrap_or(32768).clamp(8192, 131072);
+
+    let url = format!("{base_url}/api/create");
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .json(&serde_json::json!({
+            "model": variant,
+            "from": from,
+            "parameters": { "num_ctx": target },
+            "stream": false,
+        }))
+        // Create copies a manifest (blobs are shared) — usually fast, but bound
+        // generously so a cold model pull doesn't trip the timeout.
+        .timeout(std::time::Duration::from_secs(180))
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_connect() {
+                format!("can't reach {base_url} — is Ollama up?")
+            } else {
+                format!("/api/create failed: {e}")
+            }
+        })?;
+
+    let status = resp.status();
+    let text = resp.text().await.unwrap_or_default();
+    if !status.is_success() {
+        let snippet: String = text.trim().chars().take(400).collect();
+        return Err(if snippet.is_empty() {
+            format!("/api/create returned HTTP {}", status.as_u16())
+        } else {
+            format!("/api/create HTTP {}: {snippet}", status.as_u16())
+        });
+    }
+    // With `stream:false` Ollama returns a single `{"status":"success"}`; an
+    // error object means the create didn't complete.
+    let ok = serde_json::from_str::<Value>(&text)
+        .ok()
+        .and_then(|v| v.get("status").and_then(Value::as_str).map(|s| s == "success"))
+        .unwrap_or(false);
+    if !ok {
+        let snippet: String = text.trim().chars().take(400).collect();
+        return Err(format!("/api/create did not report success: {snippet}"));
+    }
+
+    // Repoint config at the new variant so the next turn uses it.
+    {
+        let _guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let mut cfg = load_config();
+        cfg.local_llm_model = Some(variant.clone());
+        save_config(&cfg)?;
+    }
+
+    Ok(variant)
 }

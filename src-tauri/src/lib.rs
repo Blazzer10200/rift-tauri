@@ -185,6 +185,8 @@ pub fn run() {
             commands::assistant_set_local_llm_key,
             commands::assistant_test_local_llm,
             commands::assistant_list_local_models,
+            commands::assistant_local_model_context,
+            commands::assistant_optimize_local_model,
             commands::environment_check,
             commands::assistant_send,
             commands::assistant_enhance_prompt,
