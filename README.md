@@ -10,7 +10,7 @@ Pre-1.0 (`-alpha`). Pure-assistant — the former SFTP/sync/server/RCON half was
 
 ## Quick links
 
-- **Download (end users):** latest `Rift-Setup.exe` on the [releases page](https://github.com/Blazzer10200/rift-releases/releases). Per-user install, no admin — see [`docs/DEVELOPING.md` §1](docs/DEVELOPING.md#1-end-user-install-onboarding).
+- **Download (end users):** latest `Rift-Setup.exe` on the [releases page](https://github.com/Blazzer10200/rift/releases). Per-user install, no admin — see [`docs/DEVELOPING.md` §1](docs/DEVELOPING.md#1-end-user-install-onboarding).
 - **How it fits together:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **Install, build, contribute:** [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
 - **Release history:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
@@ -34,4 +34,4 @@ Windows 11 (primary). macOS / Linux are buildable from source but not packaged o
 
 ## License
 
-**Proprietary — © 2026 Blazzer10200. All rights reserved.** This source is private and not licensed for use, modification, or redistribution. The distributed binaries (via [`rift-releases`](https://github.com/Blazzer10200/rift-releases)) are provided for use as-is; the source carries no open-source grant.
+**Proprietary — © 2026 Blazzer10200. All rights reserved.** This source is private and not licensed for use, modification, or redistribution. The distributed binaries (via [`rift`](https://github.com/Blazzer10200/rift)) are provided for use as-is; the source carries no open-source grant.

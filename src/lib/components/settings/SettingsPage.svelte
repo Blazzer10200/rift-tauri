@@ -801,7 +801,7 @@
           <div class="st-block sb-s4">
             <div class="st-block-label">Build</div>
             <div class="st-card">
-              {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "MIT · github.com/Blazzer10200/rift-releases"]] as kv (kv[0])}
+              {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "Proprietary · github.com/Blazzer10200/rift"]] as kv (kv[0])}
                 <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
               {/each}
             </div>

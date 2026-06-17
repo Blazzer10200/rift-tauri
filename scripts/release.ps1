@@ -208,7 +208,7 @@ if (-not $Ci) {
 }
 
 # --- Preflight: tag does not already exist ------------------------------
-$releaseRepo = 'Blazzer10200/rift-releases'
+$releaseRepo = 'Blazzer10200/rift'
 try {
     $null = gh release view $tag --repo $releaseRepo --json tagName 2>&1
     if ($LASTEXITCODE -eq 0) {
