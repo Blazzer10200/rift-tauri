@@ -130,8 +130,25 @@
     </button>
   {/if}
 
-  <div class="rift-menu-divider"></div>
   {#if effortApplies}
+    <div class="rift-menu-divider"></div>
+    <button
+      type="button"
+      class="rift-menu-row toggle-row"
+      onmousedown={(e) => { e.preventDefault(); assistant.toggleThinking(); }}
+      role="menuitemcheckbox"
+      aria-checked={assistant.thinkingEnabled}
+    >
+      <span class="rift-menu-row-body">
+        <span class="rift-menu-row-t">Extended thinking</span>
+        <span class="rift-menu-row-d">{assistant.thinkingEnabled ? "Reasons before replying" : "Off — replies immediately, faster"}</span>
+      </span>
+      <span class="rift-toggle" class:on={assistant.thinkingEnabled} aria-hidden="true">
+        <span class="rift-toggle-knob"></span>
+      </span>
+    </button>
+  {/if}
+  {#if effortApplies && assistant.thinkingEnabled}
     <div class="effort-head" class:ultra={currentEffort.id === "ultra"}>
       <span class="effort-head-l">Effort <b>{currentEffort.label}</b>{#if effortFlagLabel}<span class="effort-head-flag" use:tooltip={"The --effort level actually sent to Claude"}>--effort {effortFlagLabel}</span>{/if}</span>
       <button

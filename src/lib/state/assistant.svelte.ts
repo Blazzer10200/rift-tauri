@@ -62,6 +62,8 @@ import {
   saveModel,
   loadEffort,
   saveEffort,
+  loadThinkingEnabled,
+  saveThinkingEnabled,
   loadPermissionMode,
   savePermissionMode,
   messagesHaveContextSignals,
@@ -631,6 +633,9 @@ class AssistantStore {
   // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
   // Haiku ignores this server-side. Persisted to localStorage.
   thinkingEffort = $state<ThinkingEffort>(loadEffort());
+  // Extended-thinking master switch. On (default) = current behavior; off routes
+  // the cloud turn through the no-think shim for fastest TTFT. Persisted, per-ws.
+  thinkingEnabled = $state<boolean>(loadThinkingEnabled());
   // Permission mode passed to the CLI's `--permission-mode`. Global (matches
   // model/effort). `bypassPermissions` until the user picks otherwise so
   // existing behavior is unchanged. Persisted to localStorage.
@@ -735,6 +740,15 @@ class AssistantStore {
     if (midConvo) this.cacheBustHint("effort");
   }
 
+  toggleThinking() {
+    const v = !this.thinkingEnabled;
+    this.thinkingEnabled = v;
+    saveThinkingEnabled(v, this.workspace.current);
+    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    this.telemetry.event("thinking.toggle", { to: v, midConvo });
+    if (midConvo) this.cacheBustHint("thinking");
+  }
+
   setPermissionMode(v: PermissionMode) {
     if (this.permissionMode === v) return;
     const prev = this.permissionMode;
@@ -748,8 +762,8 @@ class AssistantStore {
    *  effort changes (S106 measurement: 0 cacheRead on 3 consecutive sonnet
    *  turns w/ effort flips vs healthy reuse without). Opus is more forgiving.
    *  Notice is fire-once so it's a hint, not a nag. */
-  private cacheBustHintShown = { model: false, effort: false };
-  private cacheBustHint(kind: "model" | "effort") {
+  private cacheBustHintShown = { model: false, effort: false, thinking: false };
+  private cacheBustHint(kind: "model" | "effort" | "thinking") {
     if (this.cacheBustHintShown[kind]) return;
     this.cacheBustHintShown[kind] = true;
     // Ephemeral heads-up → toast stack (top-right), not the composer notice
@@ -759,10 +773,14 @@ class AssistantStore {
       severity: "info",
       // icon omitted — ToastHost supplies the info-severity default (CR5: keeps
       // lucide-svelte UI imports out of this state module).
-      title: kind === "effort" ? "Effort changed mid-conversation" : "Model switched mid-conversation",
-      detail: kind === "effort"
-        ? "May bust the prompt cache (esp. Sonnet) — next turn could pay full cache_create."
-        : "Rebuilds the prefix cache — next turn will pay full cache_create.",
+      title: kind === "effort"
+        ? "Effort changed mid-conversation"
+        : kind === "thinking"
+        ? "Thinking toggled mid-conversation"
+        : "Model switched mid-conversation",
+      detail: kind === "model"
+        ? "Rebuilds the prefix cache — next turn will pay full cache_create."
+        : "May bust the prompt cache (esp. Sonnet) — next turn could pay full cache_create.",
     });
   }
 
@@ -1101,6 +1119,7 @@ class AssistantStore {
     const ws = this.workspace.current;
     this.model = loadModel(ws);
     this.thinkingEffort = loadEffort(ws);
+    this.thinkingEnabled = loadThinkingEnabled(ws);
   }
   setRoot(path: string) { return wsSetRoot(this, path); }
   /** Per-pane folder picker / setter — scopes the chosen folder to one tab. */

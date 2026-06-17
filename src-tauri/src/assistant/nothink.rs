@@ -1,4 +1,4 @@
-//! In-process "no-think" loopback shim for local-LLM mode.
+//! In-process "no-think" loopback shim — local-LLM mode + cloud "thinking off".
 //!
 //! Replaces the external `tools/rift-nothink-proxy.mjs` (Node, :11435→:11434).
 //! Ollama forces thinking ON; the ONLY switch that suppresses it on the
@@ -14,10 +14,11 @@
 //! Ollama's native Anthropic-protocol rendering (incl. tool calls) is unaffected.
 //!
 //! Wiring: bound once at boot on `127.0.0.1:<random-port>`; turn.rs points the
-//! CLI's `ANTHROPIC_BASE_URL` at this shim (instead of the user's base URL)
-//! only in local mode. The upstream target is read fresh per-request from the
-//! live config, so the Base-URL setter takes effect with no restart. Off =
-//! never touched (the cloud path never sets ANTHROPIC_BASE_URL here).
+//! CLI's `ANTHROPIC_BASE_URL` at this shim instead of the real base URL in two
+//! cases — local mode (always), and cloud mode when the user toggles thinking
+//! OFF. The upstream is resolved fresh per-request: local endpoint in local
+//! mode, else Anthropic (`RIFT_CLOUD_UPSTREAM`, default api.anthropic.com).
+//! Default cloud (thinking on) never sets ANTHROPIC_BASE_URL → byte-identical.
 
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -152,18 +153,31 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
     let req = read_request(&mut stream).await?;
 
     // Resolve the upstream target fresh each request — the Base-URL setter can
-    // change it mid-session. Mirror turn.rs's validation; bail clean if invalid.
+    // change it mid-session. Two callers point the CLI here (turn.rs):
+    //   • local mode → forward to the configured local endpoint;
+    //   • cloud "thinking off" → forward to Anthropic (the injected
+    //     `thinking:{disabled}` is the only switch that suppresses extended
+    //     thinking, since the CLI always sends a thinking block).
     let cfg = super::config::load_config();
-    let target = match cfg
-        .local_llm_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
-    {
-        Some(t) => t.trim_end_matches('/').to_string(),
-        None => {
-            return write_plain(&mut stream, 502, "nothink shim: no valid local_llm_base_url").await;
+    let target = if cfg.local_llm_enabled {
+        match cfg
+            .local_llm_base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
+        {
+            Some(t) => t.trim_end_matches('/').to_string(),
+            None => {
+                return write_plain(&mut stream, 502, "nothink shim: no valid local_llm_base_url").await;
+            }
         }
+    } else {
+        std::env::var("RIFT_CLOUD_UPSTREAM")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+            .trim_end_matches('/')
+            .to_string()
     };
 
     let is_messages = req.method.eq_ignore_ascii_case("POST")

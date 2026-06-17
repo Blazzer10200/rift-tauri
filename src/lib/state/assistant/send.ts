@@ -181,6 +181,7 @@ export async function send(store: AssistantStore, prompt: string) {
       attachments: turnAttachments.length > 0 ? turnAttachments : null,
       dyslexiaMode: accessibility.dyslexiaMode,
       thinkingEffort: store.thinkingEffort,
+      thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
       priorContextSummary: null,
       // Per-tab root: each pane/window runs its turns in its own folder. Only

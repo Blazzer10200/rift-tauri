@@ -439,6 +439,7 @@ pub async fn assistant_send(
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
+    thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
     prior_context_summary: Option<String>,
     root: Option<String>,
@@ -496,6 +497,11 @@ pub async fn assistant_send(
     let effort = thinking_effort
         .or_else(|| cfg.thinking_effort.clone())
         .unwrap_or_else(|| "smart".to_string());
+    // Extended-thinking master switch (per-send, default on). When off on the
+    // cloud path we route the CLI through the no-think shim — the CLI always
+    // sends a thinking block and no flag disables it, so injecting
+    // `thinking:{disabled}` into /v1/messages is the only real off switch.
+    let thinking_on = thinking_enabled.unwrap_or(true);
 
     // Permission mode: per-turn override wins, else stored default, else
     // "bypassPermissions" (Rift's historical behavior). Renderer-supplied —
@@ -827,6 +833,15 @@ pub async fn assistant_send(
         // output length limit / Continue". 8192 lets a real turn finish while
         // staying well inside the model's 16384 num_ctx (input + output).
         cmd.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "8192");
+    } else if !thinking_on && model != "haiku" {
+        // Cloud "thinking off": point the CLI at the in-process shim, which
+        // injects `thinking:{type:"disabled"}` into /v1/messages and forwards to
+        // Anthropic. Haiku has no extended thinking, so there's nothing to
+        // disable (and it would only add a needless hop). If the shim failed to
+        // bind, leave ANTHROPIC_BASE_URL unset → falls back to normal thinking.
+        if let Some(shim) = super::nothink::shim_base_url() {
+            cmd.env("ANTHROPIC_BASE_URL", shim);
+        }
     }
 
     // Effort-gated extended thinking via the CLI's `--effort` flag (the CLI
@@ -861,7 +876,9 @@ pub async fn assistant_send(
     };
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
-    if !cfg.local_llm_enabled && model != "haiku" {
+    // Thinking-off also skips it: the shim disables thinking entirely, so an
+    // effort tier would be moot (and the CLI would still emit a thinking block).
+    if !cfg.local_llm_enabled && thinking_on && model != "haiku" {
         cmd.arg("--effort").arg(effort_level);
         // Ultracode tier: xhigh effort + autonomous dynamic-workflow
         // orchestration. The workflow behavior rides the CLI's `ultracode`

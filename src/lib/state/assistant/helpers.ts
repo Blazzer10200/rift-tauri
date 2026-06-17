@@ -23,6 +23,7 @@ export function fableAvailable(): boolean {
 
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
+const THINKING_KEY = "rift.assistant.thinkingEnabled";
 const PERMISSION_KEY = "rift.assistant.permissionMode";
 
 // Per-workspace override keys for model + effort. A `base::<root>` key holds a
@@ -102,6 +103,33 @@ export function saveEffort(v: ThinkingEffort, ws?: string | null) {
     const k = wsKey(EFFORT_KEY, ws);
     if (k) localStorage.setItem(k, v); // per-workspace pin — never touches the global baseline
     else localStorage.setItem(EFFORT_KEY, v); // no workspace → set the baseline default
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/** Extended-thinking master switch. Default on (current behavior). Per-workspace
+ *  like effort — a `base::<root>` pin overrides the global baseline. */
+export function loadThinkingEnabled(ws?: string | null): boolean {
+  try {
+    if (typeof localStorage !== "undefined") {
+      const k = wsKey(THINKING_KEY, ws);
+      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(THINKING_KEY);
+      if (v === "off") return false;
+      if (v === "on") return true;
+    }
+  } catch {
+    /* SSR or storage disabled */
+  }
+  return true;
+}
+
+export function saveThinkingEnabled(v: boolean, ws?: string | null) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const k = wsKey(THINKING_KEY, ws);
+    if (k) localStorage.setItem(k, v ? "on" : "off"); // per-workspace pin — never touches the global baseline
+    else localStorage.setItem(THINKING_KEY, v ? "on" : "off"); // no workspace → set the baseline default
   } catch {
     /* storage disabled */
   }
