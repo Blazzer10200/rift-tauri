@@ -627,8 +627,12 @@ pub async fn assistant_send(
     // allowlist + auto-allow behavior unchanged.
     let prompting_mode = matches!(permission_mode.as_str(), "default" | "acceptEdits" | "plan");
 
-    let mut cmd = claude_command()
-        .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
+    let mut cmd = claude_command().ok_or_else(|| {
+        "Claude CLI not found on this machine. Install Claude Code from https://claude.ai/download \
+         (or run `irm https://claude.ai/install.ps1 | iex`), then reopen Rift — or add an Anthropic \
+         API key in Settings → CLI session."
+            .to_string()
+    })?;
     // Default child cwd to temp so the CLI (and any daemon its SessionStart hooks spawn) never inherits Rift's install dir — a live handle on `…\current\` blocks Velopack's update apply. Overridden to the workspace root below when one exists.
     cmd.current_dir(std::env::temp_dir());
     cmd.arg("-p")

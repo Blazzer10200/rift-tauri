@@ -130,13 +130,10 @@ impl Default for SttConfig {
 }
 
 fn dirs_home() -> PathBuf {
-    if let Some(p) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
-        return p;
-    }
-    if let Some(p) = std::env::var_os("HOME").map(PathBuf::from) {
-        return p;
-    }
-    PathBuf::from(".")
+    // Delegate to the canonical USERPROFILE→HOME helper; fall back to an absolute
+    // temp path rather than "." so stt-config.json never lands CWD-relative next
+    // to the exe (which is update-wiped on a Velopack install).
+    crate::state::paths::dirs_home().unwrap_or_else(|_| std::env::temp_dir())
 }
 
 fn config_path() -> PathBuf {

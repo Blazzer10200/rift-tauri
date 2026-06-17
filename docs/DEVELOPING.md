@@ -116,7 +116,7 @@ Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-so
   "autoUpdatesChannel": "stable",
   "effortLevel": "medium",
   "env": {
-    "CLAUDE_CODE_GIT_BASH_PATH": "C:\\Program Files\\Git\\bin\\bash.exe",
+    "CLAUDE_CODE_GIT_BASH_PATH": "<your Git bash.exe, e.g. C:\\Program Files\\Git\\bin\\bash.exe>",
     "CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-4-5",
     "DISABLE_AUTO_COMPACT": "0"
   },
@@ -166,3 +166,21 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 Maintainers only. Versions bumped manually (or via `/git-ship`) across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
 
 `release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish to the public `rift-releases` repo, with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin). See `docs/design/velopack-auto-update.md` for the full update flow and lineage.
+
+---
+
+## 5. Configuration & environment variables
+
+**End users need ZERO environment variables.** Rift is self-contained: secrets (an optional `ANTHROPIC_API_KEY`) live in the OS keychain via Settings, never in env or files; app config is written to `~/.rift/`; downloaded Whisper STT models land in `~/.rift/models/`. Nothing reads a machine-specific path or port at runtime.
+
+Every variable below is **optional** and scoped to development or release tooling:
+
+| Variable | Scope | Purpose |
+|---|---|---|
+| `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | dev | Set by `scripts/run-dev.bat` to expose CDP on `localhost:9222` for live-UI verification. Not used in prod. |
+| `WEBVIEW2_USER_DATA_FOLDER` | dev | Isolates the dev WebView2 profile from an installed Rift so the two don't share cookies/state. |
+| `RIFT_CDP_MAX_EDGE` | dev | Overrides the 1280px screenshot long-edge clamp in `scripts/cdp/serve.cjs`. Cosmetic. |
+| `RIFT_MCP_SERVER` | internal | Set by Rift on itself when it re-spawns as the stdio MCP child for a turn. **Do not set manually.** |
+| `RELEASES_TOKEN` | CI/release | Fine-grained PAT (`rift-releases` Contents:write) used by the tag-driven release workflow. Repo secret, never local. |
+
+CLI-side knobs (`CLAUDE_CODE_*`, `ANTHROPIC_API_KEY`) belong to the `claude` CLI, not Rift — see §3. Rift actively **strips** `ANTHROPIC_API_KEY` from the CLI's environment on every turn so the in-app keychain key (or the CLI's own browser login) is the single source of auth truth.

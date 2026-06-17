@@ -77,11 +77,15 @@ struct ModelEntry {
 }
 
 pub fn models_dir() -> PathBuf {
-    let home = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."));
-    home.join(".rift").join("models")
+    // Resolve via the canonical USERPROFILE→HOME helper. Last-resort fallback is
+    // the OS temp dir (an absolute, writable path) rather than "." — a CWD-
+    // relative ".rift/models" would land next to the exe under
+    // %LOCALAPPDATA%\…\current\ on a Velopack install and be wiped on every
+    // update. temp is never wiped mid-session and is always absolute.
+    crate::state::paths::dirs_home()
+        .unwrap_or_else(|_| std::env::temp_dir())
+        .join(".rift")
+        .join("models")
 }
 
 pub fn known_models() -> Vec<ModelInfo> {

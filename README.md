@@ -10,6 +10,7 @@ Pre-1.0 (`-alpha`). Pure-assistant — the former SFTP/sync/server/RCON half was
 
 ## Quick links
 
+- **Download (end users):** latest `Rift-Setup.exe` on the [releases page](https://github.com/Blazzer10200/rift-releases/releases). Per-user install, no admin — see [`docs/DEVELOPING.md` §1](docs/DEVELOPING.md#1-end-user-install-onboarding).
 - **How it fits together:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - **Install, build, contribute:** [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
 - **Release history:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md)

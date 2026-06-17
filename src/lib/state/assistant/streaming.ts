@@ -657,9 +657,8 @@ export function onStreamLine(tab: TabState, raw: string) {
         }
       }
       enqueueText(tab, prefix + raw);
-    } else if (raw.length > 0) {
-      // #182: post-done CLI dribble was silently dropped — surface in console
-      // for observability so we know if a known CLI bug regresses.
+    } else if (raw.length > 0 && import.meta.env.DEV) {
+      // #182: post-done CLI dribble — logged in dev only.
       console.debug("[assistant] orphaned non-JSON line (post-done)", raw.slice(0, 80));
     }
     return;
