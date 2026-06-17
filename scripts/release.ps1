@@ -151,6 +151,10 @@ if (Test-Path $changelogPath) {
             # (date optional); strip the leading separator AND the date segment via an
             # ASCII-only pattern -> GitHub release name. Titles start with a letter.
             $titleClean = ($m.Groups['titleline'].Value -replace '^[^A-Za-z0-9]+(?:\d{4}-\d{2}-\d{2}[^A-Za-z0-9]+)?', '').Trim()
+            # Strip embedded double-quotes: PS 5.1 mangles native-exe args that
+            # contain them, so vpk's --releaseName splits the title mid-string
+            # ("'/' was not matched" on a quoted title). Belt for any future title.
+            $titleClean = $titleClean -replace '"', ''
             if ($titleClean) { $releaseTitle = Convert-ToAsciiSafe $titleClean }
             $body = $m.Groups['body'].Value.Trim()
             # Strip relative markdown links (../src-tauri/...) -- they 404 on the

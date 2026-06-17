@@ -2,7 +2,7 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.17.0 — 2026-06-17 — Local-LLM mode hardened (the "won't edit / stalls" fix)
+## v0.17.0 — 2026-06-17 — Local-LLM mode hardened (num_ctx truncation fix)
 
 > **Why.** Experimental local mode (Ollama/LiteLLM) would make a tool call and then return no answer, or refuse/stall on edits. Root cause: **Ollama's `num_ctx` defaults to 4096**, silently truncating Rift's prompt + tools + open files so the model loses its instructions mid-turn. Fully off by default — **no behavior change for cloud users.**
 
