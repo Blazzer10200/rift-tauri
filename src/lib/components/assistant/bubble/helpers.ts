@@ -114,6 +114,60 @@ export function reconcileSplitHeaders(blocks: Block[]): Block[] {
   return out;
 }
 
+// Local/open-weights models sometimes emit a tool_use ONE text-delta early:
+// the model is mid-sentence ("…the current state of your projec"), the
+// tool_use envelope lands, then the final fragment ("t.") arrives as a fresh
+// text block AFTER the tool chip. The stream pump can't merge across the tool
+// (it only coalesces with the immediately-preceding block), so the bubble
+// renders the sentence split with an orphan fragment dangling below the chip.
+// This pre-pass detects that signature — a head text block that does NOT end
+// on a sentence terminator, separated from a tail text block ONLY by tool
+// blocks, where the tail begins mid-sentence (lowercase / contraction) — and
+// stitches the sentence back together, placing the whole line AFTER the tools
+// (the model's intent: finish the thought, then the tool result follows).
+// Narrowly gated so deliberate "Let me check X." → tool → "Found it." prose is
+// left untouched: the head must look truncated and the tail must look like a
+// continuation, not a new sentence.
+const SENTENCE_END = /[.!?:)\]}"'`\n]\s*$/;
+const TAIL_CONTINUES = /^\s*(?:[a-z]|['’](?:s|t|re|ve|ll|d|m)\b|[,.;:!?)\]}])/;
+export function mergeSplitProse(blocks: Block[]): Block[] {
+  const out: Block[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    const b = blocks[i];
+    // Head must be a text block that looks cut off mid-sentence.
+    if (b.type !== "text" || b.text.length === 0 || SENTENCE_END.test(b.text)) {
+      out.push(b);
+      i++;
+      continue;
+    }
+    // Collect interim blocks until the next text block; bail if anything but
+    // tools sits between (thinking/boundary = a real structural break).
+    let j = i + 1;
+    const interim: Block[] = [];
+    while (j < blocks.length && blocks[j].type !== "text") {
+      if (blocks[j].type !== "tool") break;
+      interim.push(blocks[j]);
+      j++;
+    }
+    const tail = j < blocks.length && blocks[j].type === "text" ? blocks[j] : null;
+    // Only stitch when tools (≥1) actually intervened AND the tail reads as a
+    // continuation of the same sentence — otherwise leave the blocks alone.
+    if (interim.length === 0 || !tail || tail.type !== "text" || !TAIL_CONTINUES.test(tail.text)) {
+      out.push(b);
+      i++;
+      continue;
+    }
+    // The split is mid-word/mid-sentence (the stream cut between deltas), so
+    // the fragments rejoin with no separator — any real space was already in
+    // one of the two chunks.
+    out.push(...interim);
+    out.push({ type: "text", text: b.text + tail.text });
+    i = j + 1;
+  }
+  return out;
+}
+
 // Timeline-flat units. Step-N headers from prose become dividers (small
 // inline labels on the rail) instead of numbered groups. Every other
 // block becomes its own node on the chain.

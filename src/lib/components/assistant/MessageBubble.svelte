@@ -11,7 +11,7 @@
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
   import PermissionBar from "./PermissionBar.svelte";
-  import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, statusOf, nodeKind,
+  import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, mergeSplitProse, statusOf, nodeKind,
     formatBoundaryAt, formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel, lineDelta,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
 
@@ -219,7 +219,7 @@
   // prose become dividers; everything else becomes a node on the chain.
   const grouped = $derived.by<TimelineUnit[]>(() => {
     const units: TimelineUnit[] = [];
-    const blocks = reconcileSplitHeaders(message.blocks);
+    const blocks = mergeSplitProse(reconcileSplitHeaders(message.blocks));
     for (let i = 0; i < blocks.length; i++) {
       const b = blocks[i];
       // Builtin AskUserQuestion is always auto-denied + steered to ask_user (see

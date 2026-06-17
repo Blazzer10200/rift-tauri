@@ -4,7 +4,7 @@ import {
   coalesceToolGroups, elapsedFor, formatDuration, formatDurationMs, groupDurationMs,
   isCardTool, isGroupableChip,
   isInlineDiffTool, lineDelta, nodeKind, numberActions, parseTextBlock, previewOf,
-  reconcileSplitHeaders, shortModel, shortToolName, statusOf, summarizeGroup,
+  mergeSplitProse, reconcileSplitHeaders, shortModel, shortToolName, statusOf, summarizeGroup,
   type TimelineUnit,
 } from "./helpers";
 
@@ -70,6 +70,33 @@ describe("reconcileSplitHeaders", () => {
   it("leaves a partial with no following text block untouched", () => {
     const blocks: Block[] = [text("## S"), tool("Bash")];
     expect(reconcileSplitHeaders(blocks)).toEqual(blocks);
+  });
+});
+
+describe("mergeSplitProse", () => {
+  it("stitches a sentence split mid-word by an early tool_use, placing it after the tool", () => {
+    const blocks: Block[] = [text("Let me check the current state of your projec"), tool("git_status"), text("t.")];
+    const out = mergeSplitProse(blocks);
+    expect(out.map((b) => b.type)).toEqual(["tool", "text"]);
+    expect((out[1] as { text: string }).text).toBe("Let me check the current state of your project.");
+  });
+  it("stitches across multiple interim tools", () => {
+    const blocks: Block[] = [text("Reading the config and the"), tool("Read"), tool("Grep"), text(" lockfile now.")];
+    const out = mergeSplitProse(blocks);
+    expect(out.map((b) => b.type)).toEqual(["tool", "tool", "text"]);
+    expect((out[2] as { text: string }).text).toBe("Reading the config and the lockfile now.");
+  });
+  it("leaves deliberate sentence→tool→new-sentence prose untouched", () => {
+    const blocks: Block[] = [text("Let me check the repo."), tool("git_status"), text("Found three commits.")];
+    expect(mergeSplitProse(blocks)).toEqual(blocks);
+  });
+  it("does not stitch when the tail starts a new capitalized sentence", () => {
+    const blocks: Block[] = [text("Checking now"), tool("Bash"), text("Done — all clean.")];
+    expect(mergeSplitProse(blocks)).toEqual(blocks);
+  });
+  it("leaves a head with no interim tool untouched", () => {
+    const blocks: Block[] = [text("ends mid"), text("sentence")];
+    expect(mergeSplitProse(blocks)).toEqual(blocks);
   });
 });
 
