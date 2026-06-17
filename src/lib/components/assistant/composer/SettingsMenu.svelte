@@ -52,6 +52,7 @@
     const m = currentModel;
     if (!m) return "";
     if (!m.effort) return `${m.label} ${m.version} answers right away — it doesn't use extended-thinking effort modes.`;
+    if (!assistant.thinkingEnabled) return `${m.label} ${m.version} replies without extended thinking — fastest, no reasoning step.`;
     return currentEffort.hint;
   });
   // Pointer-drag the slider: map clientX → nearest stop. Pointer-capture on the
@@ -101,11 +102,13 @@
           {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
         </span>
       </span>
-      {#if m.id === assistant.effectiveModel}
-        <Check size={14} class="rift-menu-row-chk" />
-      {:else}
-        <kbd class="model-num">{modelShortcut(m.id)}</kbd>
-      {/if}
+      <span class="model-trail">
+        {#if m.id === assistant.effectiveModel}
+          <Check size={14} class="rift-menu-row-chk" />
+        {:else}
+          <kbd class="model-num">{modelShortcut(m.id)}</kbd>
+        {/if}
+      </span>
     </button>
   {/each}
 
@@ -202,7 +205,7 @@
       <div class="effort-ends"><span>Faster</span><span>Smarter</span></div>
     </div>
   {/if}
-  <p class="model-caption" class:warn={effortApplies && currentEffort.id === "ultra"}>{modelCaption}</p>
+  <p class="model-caption" class:warn={effortApplies && assistant.thinkingEnabled && currentEffort.id === "ultra"}>{modelCaption}</p>
 
   <div class="rift-menu-hint">
     <span><kbd>1–{MODEL_OPTIONS.length}</kbd>model</span>
@@ -262,6 +265,12 @@
     border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
   }
   .model-row.current .model-suffix { color: color-mix(in oklab, var(--accent) 65%, var(--fg-muted)); }
+  /* Fixed-width trailing slot so the ✓ (selected) and the number badge
+     (unselected) occupy identical space — selecting a row never reflows it. */
+  .model-trail {
+    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+    width: 22px;
+  }
   .model-num {
     flex-shrink: 0;
     font-family: var(--font-mono); font-size: 10px; font-weight: 600; line-height: 1;
