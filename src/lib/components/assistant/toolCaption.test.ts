@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { captionForGroup, captionForTool } from "./toolCaption";
+import { basename, captionForGroup, captionForTool } from "./toolCaption";
+
+// basename is a deliberate sibling of tabsbar/helpers.ts::leafName — these cases
+// mirror leafName's vitest so the two cannot silently drift.
+describe("basename", () => {
+  it("returns the last path segment for posix and windows paths", () => {
+    expect(basename("/home/user/project")).toBe("project");
+    expect(basename("C:\\AI Workflow\\projects\\rift-tauri")).toBe("rift-tauri");
+  });
+  it("ignores a single trailing slash and survives a bare name", () => {
+    expect(basename("/home/user/project/")).toBe("project");
+    expect(basename("rift")).toBe("rift");
+  });
+});
 
 describe("captionForTool", () => {
   it("names the file for read/write/edit families, falling back when absent", () => {

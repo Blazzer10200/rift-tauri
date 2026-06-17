@@ -3,9 +3,13 @@
 
 type Input = Record<string, unknown>;
 
+// Sibling of tabsbar/helpers.ts::leafName — same path-leaf extraction, kept
+// local so the assistant family doesn't import across the shell boundary.
+// Behavior must match leafName (its vitest + toolCaption.test.ts cover both).
 export function basename(p: string): string {
-  const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
-  return parts[parts.length - 1] ?? p;
+  const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
+  const parts = norm.split("/");
+  return parts[parts.length - 1] || norm;
 }
 function shortName(name: string): string {
   return name.replace(/^mcp__rift__/, "");
