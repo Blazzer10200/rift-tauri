@@ -137,16 +137,25 @@ function Convert-ToAsciiSafe([string]$s) {
 }
 
 $releaseNotesFile = $null
+$releaseTitle = $null
 $changelogPath = 'docs/CHANGELOG.md'
 if (Test-Path $changelogPath) {
     $clText = [System.IO.File]::ReadAllText($changelogPath)
-    $entryPattern = '(?ms)^## v(?<ver>[^\s]+)[^\r\n]*\r?\n(?<body>.*?)(?=^## v|\z)'
+    $entryPattern = '(?ms)^## v(?<ver>[^\s]+)(?<titleline>[^\r\n]*)\r?\n(?<body>.*?)(?=^## v|\z)'
     $entryRx = New-Object System.Text.RegularExpressions.Regex $entryPattern
     $m = $entryRx.Match($clText)
     if ($m.Success) {
         $topVer = $m.Groups['ver'].Value
         if ($topVer -eq $version) {
+            # Release title from the header tail. Header is "vX.Y.Z — YYYY-MM-DD — Title"
+            # (date optional); strip the leading separator AND the date segment via an
+            # ASCII-only pattern -> GitHub release name. Titles start with a letter.
+            $titleClean = ($m.Groups['titleline'].Value -replace '^[^A-Za-z0-9]+(?:\d{4}-\d{2}-\d{2}[^A-Za-z0-9]+)?', '').Trim()
+            if ($titleClean) { $releaseTitle = Convert-ToAsciiSafe $titleClean }
             $body = $m.Groups['body'].Value.Trim()
+            # Strip relative markdown links (../src-tauri/...) -- they 404 on the
+            # public releases repo, which carries no source tree.
+            $body = [regex]::Replace($body, '\[([^\]]+)\]\((?:\.{1,2}[\\/])[^)]*\)', '$1')
             if ($body) {
                 $bodyAscii = Convert-ToAsciiSafe $body
                 # Sanity: synthesize the nuspec releaseNotes element + parse as
@@ -285,7 +294,7 @@ $uploadArgs = @(
     '--repoUrl', "https://github.com/$releaseRepo",
     '--channel', 'win',
     '--publish',
-    '--releaseName', $tag,
+    '--releaseName', $(if ($releaseTitle) { "$tag $([char]0x2014) $releaseTitle" } else { $tag }),
     '--tag', $tag,
     '--token', $ghToken
 )
