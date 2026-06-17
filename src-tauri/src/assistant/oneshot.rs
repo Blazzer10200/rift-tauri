@@ -573,9 +573,17 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
 /// upstream HTTP status + body verbatim, so an upstream 500 (e.g. LiteLLM
 /// rejecting a `thinking` param Ollama can't honour) shows the real cause
 /// instead of hanging behind a generic CLI timeout.
-/// Returns the model's reply on success, the upstream error on failure.
+/// Returns the model's reply + output-token count on success, the upstream error
+/// on failure. The renderer pairs `output_tokens` with its measured round-trip to
+/// surface an approximate tok/s — the timing the user actually cares about.
+#[derive(serde::Serialize)]
+pub struct LocalTestResult {
+    reply: String,
+    output_tokens: Option<u64>,
+}
+
 #[tauri::command]
-pub async fn assistant_test_local_llm() -> Result<String, String> {
+pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
     let cfg = load_config();
     let base_url = cfg
         .local_llm_base_url
@@ -650,9 +658,11 @@ pub async fn assistant_test_local_llm() -> Result<String, String> {
         });
     }
 
-    // Anthropic Messages response: { "content": [ { "type": "text", "text": "OK" }, ... ] }
-    let reply = serde_json::from_str::<Value>(&text)
-        .ok()
+    // Anthropic Messages response: { "content": [ { "type": "text", "text": "OK" }, ... ],
+    //   "usage": { "output_tokens": N } }
+    let parsed = serde_json::from_str::<Value>(&text).ok();
+    let reply = parsed
+        .as_ref()
         .and_then(|v| {
             v.get("content")?.as_array().map(|blocks| {
                 blocks
@@ -665,11 +675,13 @@ pub async fn assistant_test_local_llm() -> Result<String, String> {
         })
         .map(|s| s.trim().to_string())
         .unwrap_or_default();
+    let output_tokens = parsed
+        .as_ref()
+        .and_then(|v| v.get("usage")?.get("output_tokens")?.as_u64());
 
-    Ok(if reply.is_empty() {
-        "(connected, empty reply)".to_string()
-    } else {
-        reply
+    Ok(LocalTestResult {
+        reply: if reply.is_empty() { "(connected, empty reply)".to_string() } else { reply },
+        output_tokens,
     })
 }
 
@@ -743,6 +755,11 @@ pub struct LocalCtxInfo {
     /// The model's architectural ceiling (e.g. 262144). `None` if `/api/show`
     /// didn't advertise one.
     max_ctx: Option<u64>,
+    /// Model-card facts from `/api/show` `details` — the "what am I running"
+    /// readout. All `None` for non-Ollama endpoints.
+    params: Option<String>,
+    quant: Option<String>,
+    family: Option<String>,
 }
 
 /// `parameters` is a flat text blob (`num_ctx   32768\ntemperature  0.7\n…`).
@@ -795,7 +812,15 @@ pub async fn assistant_local_model_context() -> Result<LocalCtxInfo, String> {
     if resp.status() == reqwest::StatusCode::NOT_FOUND
         || resp.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
     {
-        return Ok(LocalCtxInfo { is_ollama: false, model, num_ctx: None, max_ctx: None });
+        return Ok(LocalCtxInfo {
+            is_ollama: false,
+            model,
+            num_ctx: None,
+            max_ctx: None,
+            params: None,
+            quant: None,
+            family: None,
+        });
     }
     if !resp.status().is_success() {
         return Err(format!("/api/show returned HTTP {}", resp.status().as_u16()));
@@ -816,7 +841,26 @@ pub async fn assistant_local_model_context() -> Result<LocalCtxInfo, String> {
             .and_then(|(_, val)| val.as_u64())
     });
 
-    Ok(LocalCtxInfo { is_ollama: true, model, num_ctx, max_ctx })
+    // `details`: model card. `parameter_size` ("30.5B"), `quantization_level`
+    // ("Q4_K_M"), `family` ("qwen3moe") — the "what am I running" readout.
+    let details = v.get("details").and_then(Value::as_object);
+    let card = |key: &str| {
+        details
+            .and_then(|d| d.get(key))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .filter(|s| !s.is_empty())
+    };
+
+    Ok(LocalCtxInfo {
+        is_ollama: true,
+        model,
+        num_ctx,
+        max_ctx,
+        params: card("parameter_size"),
+        quant: card("quantization_level"),
+        family: card("family"),
+    })
 }
 
 /// One-click "Optimize for Rift": create an Ollama variant of the configured

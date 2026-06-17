@@ -23,6 +23,9 @@ export type LocalCtxInfo = {
   model: string;
   num_ctx: number | null;
   max_ctx: number | null;
+  params: string | null;
+  quant: string | null;
+  family: string | null;
 };
 
 /** Below this, Rift's prompt + tools + open files don't fit → the model loses
@@ -170,7 +173,8 @@ class LocalLlmStore {
   /** One-click fix: bake a Rift-sized `num_ctx` variant of the configured model
    *  via Ollama `/api/create`, adopt it as the active model, and re-probe. The
    *  only lever for the 4096 default — Ollama can't take num_ctx per-request over
-   *  the Anthropic adapter. Returns the new model name or the error to surface. */
+   *  the Anthropic adapter. `targetCtx` is clamped server-side to
+   *  [8192, min(max,131072)]. Returns the new model name or the error to surface. */
   async optimize(targetCtx = 32768): Promise<{ ok: boolean; msg: string }> {
     this.optimizing = true;
     try {
@@ -186,8 +190,10 @@ class LocalLlmStore {
   }
 
   /** Round-trip a one-line prompt through the configured endpoint. Persists the
-   *  current base + model first so the headless probe reads fresh config. */
-  async test(): Promise<{ ok: boolean; msg: string }> {
+   *  current base + model first so the headless probe reads fresh config.
+   *  `tokens` = output-token count (when the endpoint reports usage), paired
+   *  with the caller's measured round-trip ms for an approximate tok/s. */
+  async test(): Promise<{ ok: boolean; msg: string; tokens?: number | null }> {
     await this.saveBaseUrl();
     try {
       await this.saveModel();
@@ -195,8 +201,8 @@ class LocalLlmStore {
       return { ok: false, msg: String(e) };
     }
     try {
-      const reply = await invoke<string>("assistant_test_local_llm");
-      return { ok: true, msg: reply };
+      const r = await invoke<{ reply: string; output_tokens: number | null }>("assistant_test_local_llm");
+      return { ok: true, msg: r.reply, tokens: r.output_tokens };
     } catch (e) {
       return { ok: false, msg: String(e) };
     }

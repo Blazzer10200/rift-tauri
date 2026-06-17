@@ -11,15 +11,34 @@
   let testing = $state(false);
   let testResult = $state<{ ok: boolean; msg: string } | null>(null);
   let testMs = $state<number | null>(null);
+  let testTokens = $state<number | null>(null);
   let lastChecked = $state<Date | null>(null);
   let modelHint = $state("");
   let optimizeResult = $state<{ ok: boolean; msg: string } | null>(null);
+  let optimizeTarget = $state(32768);
 
   // Both speak the Anthropic /v1/messages API: current Ollama serves it natively
   // at :11434, and a LiteLLM proxy fronts it at :4000.
   const PRESETS = [
     { label: "Ollama", url: "http://localhost:11434" },
     { label: "LiteLLM", url: "http://localhost:4000" },
+  ] as const;
+
+  // Curated Ollama tags that hold up under Rift's MCP tool surface + agentic
+  // edits. Free-text field stays authoritative — these are one-click conveniences.
+  const RECOMMENDED = [
+    "qwen3-coder:30b",
+    "qwen2.5-coder:14b",
+    "qwen2.5-coder:7b",
+    "devstral:24b",
+  ] as const;
+
+  // Optimize targets. Disabled above the model's advertised ceiling.
+  const CTX_TARGETS = [
+    { label: "16K", value: 16384 },
+    { label: "32K", value: 32768 },
+    { label: "64K", value: 65536 },
+    { label: "128K", value: 131072 },
   ] as const;
 
   // Test needs a target — gate the button so an empty probe can't fire.
@@ -51,11 +70,25 @@
   const showCtx = $derived(localLlm.enabled && !!ctx && ctx.is_ollama);
   const fmt = (n: number) => n.toLocaleString();
 
+  // Model card line — any subset of family / params / quant the probe surfaced.
+  const cardBits = $derived(
+    [ctx?.family, ctx?.params, ctx?.quant].filter((s): s is string => !!s),
+  );
+
+  // Approximate throughput: output tokens over the measured round-trip. Includes
+  // connect + first-token latency so it under-reads true generation speed — a
+  // floor, not a benchmark. Hidden when the endpoint reports no usage.
+  const tokPerSec = $derived(
+    testTokens != null && testMs != null && testMs > 0
+      ? Math.round(testTokens / (testMs / 1000))
+      : null,
+  );
+
   onMount(() => { void localLlm.refresh().then(() => localLlm.refreshCtx()); });
 
   // A config change invalidates a prior pass — drop the verified state so the
   // rail never claims "live" against settings that were never tested.
-  function invalidateTest() { testResult = null; testMs = null; lastChecked = null; }
+  function invalidateTest() { testResult = null; testMs = null; testTokens = null; lastChecked = null; }
 
   async function toggleEnabled() {
     try { await localLlm.setEnabled(!localLlm.enabled); } catch { /* reverted in store */ }
@@ -79,7 +112,7 @@
   async function optimizeCtx() {
     optimizeResult = null;
     invalidateTest();
-    optimizeResult = await localLlm.optimize();
+    optimizeResult = await localLlm.optimize(optimizeTarget);
   }
 
   async function selectModel(m: string) {
@@ -111,9 +144,12 @@
     testing = true;
     testResult = null;
     testMs = null;
+    testTokens = null;
     const t0 = performance.now();
-    testResult = await localLlm.test();
+    const r = await localLlm.test();
     testMs = Math.round(performance.now() - t0);
+    testTokens = r.tokens ?? null;
+    testResult = { ok: r.ok, msg: r.msg };
     lastChecked = new Date();
     testing = false;
   }
@@ -178,9 +214,14 @@
             <div class="rail-verify">
               <div class="rv-head">
                 <span class="rv-title">Verify connection</span>
-                {#if testMs != null}
-                  <span class="rv-latency"><Zap size={11} strokeWidth={2.5} />{testMs} ms</span>
-                {/if}
+                <span class="rv-metrics">
+                  {#if tokPerSec != null}
+                    <span class="rv-latency" title="Approximate — output tokens over total round-trip"><Gauge size={11} strokeWidth={2.5} />~{tokPerSec} tok/s</span>
+                  {/if}
+                  {#if testMs != null}
+                    <span class="rv-latency"><Zap size={11} strokeWidth={2.5} />{testMs} ms</span>
+                  {/if}
+                </span>
               </div>
               <div class="rv-desc">Round-trips a one-line prompt and reports the reply.</div>
               <div class="rv-actions">
@@ -197,6 +238,35 @@
               {#if testResult}
                 <div class="ll-result mono" class:err={!testResult.ok}>{testResult.msg}</div>
               {/if}
+            </div>
+
+            <!-- API key — lives in the rail so the config column stays balanced -->
+            <div class="rail-key">
+              <div class="rk-head">
+                <span class="rv-title">API key</span>
+                {#if localLlm.hasKey}<span class="st-pill ok"><span class="dot"></span>Set</span>{/if}
+              </div>
+              <div class="rv-desc">OS keychain, never in config. Most local proxies accept any non-empty value. Sets <code>ANTHROPIC_API_KEY</code>.</div>
+              <div class="rk-actions">
+                {#if localLlm.hasKey}
+                  <button class="st-btn" type="button" disabled={!localLlm.enabled || keySaving} onclick={clearKey}>Clear key</button>
+                {:else}
+                  <span class="st-secret">
+                    <input
+                      id="ll-key" class="st-input mono" type={keyVisible ? "text" : "password"}
+                      bind:value={keyInput} disabled={!localLlm.enabled}
+                      placeholder="any non-empty value" style="width:158px;"
+                      spellcheck="false" autocapitalize="off" autocomplete="off"
+                    />
+                    <button class="st-eye" type="button" onclick={() => (keyVisible = !keyVisible)} aria-label={keyVisible ? "Hide key" : "Show key"}>
+                      {#if keyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
+                    </button>
+                  </span>
+                  <button class="st-btn primary" type="button" disabled={!localLlm.enabled || keySaving || !keyInput.trim()} onclick={saveKey}>
+                    {keySaving ? "Saving…" : "Save"}
+                  </button>
+                {/if}
+              </div>
             </div>
           {:else}
             <!-- Off-state flow explainer -->
@@ -268,6 +338,15 @@
                   </button>
                 {/each}
               </div>
+            {:else}
+              <div class="model-list">
+                <span class="preset-lead">Good for tools:</span>
+                {#each RECOMMENDED as m (m)}
+                  <button class="chip-btn" type="button" disabled={!localLlm.enabled} onclick={() => selectModel(m)} class:active={localLlm.model.trim() === m}>
+                    {#if localLlm.model.trim() === m}<Check size={12} strokeWidth={3} />{/if}{m}
+                  </button>
+                {/each}
+              </div>
             {/if}
           </div>
 
@@ -292,9 +371,28 @@
                     agentic edits.{#if ctx.max_ctx} Model ceiling {fmt(ctx.max_ctx)}.{/if}
                   {/if}
                 </div>
+                {#if cardBits.length > 0}
+                  <div class="model-card">
+                    {#each cardBits as b (b)}<span class="mc-tag mono">{b}</span>{/each}
+                  </div>
+                {/if}
+                {#if localLlm.ctxUndersized}
+                  <div class="ctx-targets">
+                    <span class="preset-lead">Target:</span>
+                    {#each CTX_TARGETS as t (t.value)}
+                      <button
+                        class="chip-btn" type="button"
+                        disabled={localLlm.optimizing || (!!ctx.max_ctx && t.value > ctx.max_ctx)}
+                        class:active={optimizeTarget === t.value}
+                        title={!!ctx.max_ctx && t.value > ctx.max_ctx ? "Exceeds this model's ceiling" : ""}
+                        onclick={() => (optimizeTarget = t.value)}
+                      >{t.label}</button>
+                    {/each}
+                  </div>
+                {/if}
                 {#if optimizeResult}
                   <div class="ctx-result mono" class:err={!optimizeResult.ok}>
-                    {optimizeResult.ok ? `Created ${optimizeResult.msg} (32,768 tokens) — now active.` : optimizeResult.msg}
+                    {optimizeResult.ok ? `Created ${optimizeResult.msg} (${fmt(optimizeTarget)} tokens) — now active.` : optimizeResult.msg}
                   </div>
                 {/if}
               </div>
@@ -311,38 +409,11 @@
             </div>
           {/if}
 
-          <!-- API key -->
-          <div class="st-row">
-            <div class="st-row-body">
-              <label class="st-row-label" for="ll-key">API key</label>
-              <div class="st-row-desc">Stored in the OS keychain, never in config. Most local proxies accept any non-empty value. Sets <code>ANTHROPIC_API_KEY</code>.</div>
-            </div>
-            <div class="st-row-ctl">
-              {#if localLlm.hasKey}
-                <span class="st-pill ok"><span class="dot"></span>Configured</span>
-                <button class="st-btn" type="button" disabled={!localLlm.enabled || keySaving} onclick={clearKey}>Clear</button>
-              {:else}
-                <span class="st-secret">
-                  <input
-                    id="ll-key" class="st-input mono" type={keyVisible ? "text" : "password"}
-                    bind:value={keyInput} disabled={!localLlm.enabled}
-                    placeholder="any non-empty value" style="width:188px;"
-                    spellcheck="false" autocapitalize="off" autocomplete="off"
-                  />
-                  <button class="st-eye" type="button" onclick={() => (keyVisible = !keyVisible)} aria-label={keyVisible ? "Hide key" : "Show key"}>
-                    {#if keyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
-                  </button>
-                </span>
-                <button class="st-btn primary" type="button" disabled={!localLlm.enabled || keySaving || !keyInput.trim()} onclick={saveKey}>
-                  {keySaving ? "Saving…" : "Save"}
-                </button>
-              {/if}
-            </div>
-          </div>
+        </div>
 
-          <div class="st-warn">
-            Tool-calling fidelity depends on the local model — small models may struggle with Rift's MCP tools.
-          </div>
+        <!-- Full-width footer — spans both cockpit columns -->
+        <div class="st-warn cockpit-foot">
+          Tool-calling fidelity depends on the local model — small models may struggle with Rift's MCP tools.
         </div>
 
       </div>
@@ -364,7 +435,7 @@
   .sb-chip.verified .dot { background: var(--ok); }
 
   .sb-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
-  .sb-wrap { max-width: 940px; min-height: 100%; margin: 0 auto; padding: 22px 40px 28px; display: flex; flex-direction: column; justify-content: safe center; gap: 16px; }
+  .sb-wrap { max-width: 820px; margin: 0 auto; padding: 18px 40px 22px; display: flex; flex-direction: column; gap: 12px; }
 
   /* ── Mode master strip ── */
   .mode-bar { transition: border-color 200ms var(--ease-soft), background 200ms var(--ease-soft); }
@@ -376,8 +447,9 @@
   .mode-desc code { font-family: var(--font-mono); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 6%, transparent); padding: 0 4px; border-radius: 4px; font-size: 0.9em; }
 
   /* ── Cockpit grid ── */
-  .cockpit { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 16px; align-items: start; }
-  @media (max-width: 820px) { .cockpit { grid-template-columns: 1fr; } }
+  .cockpit { display: grid; grid-template-columns: minmax(0, 286px) minmax(0, 1fr); gap: 12px; align-items: start; }
+  .cockpit-foot { grid-column: 1 / -1; }
+  @media (max-width: 760px) { .cockpit { grid-template-columns: 1fr; } }
 
   /* ── Status rail ── */
   .rail { position: relative; padding: 16px 17px; gap: 16px; overflow: hidden; }
@@ -414,6 +486,14 @@
   .ll-result { white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; max-height: 160px; overflow: auto; }
   .ll-result.err { color: var(--danger); }
 
+  /* ── API key (rail-resident) ── */
+  .rail-key { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .rk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .rk-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+  .rk-actions > .st-btn:only-child { margin-left: auto; }
+  .rail-key .st-btn.primary { margin-left: auto; }
+  .rk-actions .st-secret .st-input { width: 158px; }
+
   .rail-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
   .flow-node { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); padding: 5px 11px; border-radius: 999px; background: var(--field); border: 1px solid var(--border); }
   .rail-flow :global(.flow-arrow) { color: var(--fg-faint); }
@@ -423,7 +503,6 @@
   .st-block { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent), var(--shadow-sm); }
   .st-block-label { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); padding: 13px 17px; border-bottom: 1px solid var(--border); }
   .config[data-disabled="true"] { opacity: 0.55; }
-  .config > .st-warn { margin: 4px 17px 14px; }
 
   .st-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 17px; }
   .st-row + .st-row { border-top: 1px solid var(--border); }
@@ -447,6 +526,16 @@
   .ctx-row.bad .st-row-label :global(svg) { color: var(--warn); }
   .ctx-result { flex-basis: 100%; margin-top: 8px; white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px; }
   .ctx-result.err { color: var(--danger); }
+
+  /* Model card — family / params / quant tags from /api/show */
+  .model-card { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .mc-tag { font-size: var(--fs-2xs, 10.5px); font-weight: 600; color: var(--fg-2); background: var(--field); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; }
+
+  /* Optimize target selector */
+  .ctx-targets { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+
+  /* Verify-head metrics cluster (tok/s + latency) */
+  .rv-metrics { display: inline-flex; align-items: center; gap: 10px; }
 
   .st-note { padding: 10px 17px; font-size: var(--fs-xs); color: var(--fg-muted); }
   .st-detect-hint { color: var(--accent); font-weight: 600; margin-left: 2px; }
