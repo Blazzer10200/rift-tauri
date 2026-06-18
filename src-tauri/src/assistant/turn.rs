@@ -733,7 +733,11 @@ pub async fn assistant_send(
         // user saw two collapsed error bubbles on every question turn.
         // Excluding it makes the model fall back to asking in plain text,
         // which works correctly in `-p` mode.
-        const BUILTINS: &str = "Agent,Bash,BashOutput,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
+        // `DesignSync` (claude.ai/design sync, driven by /design-sync) is the
+        // built-in for the Claude Design integration; kept out of SAFE_BUILTINS
+        // so its cloud writes ride the can_use_tool prompt. OAuth-path only —
+        // it has no auth under --bare.
+        const BUILTINS: &str = "Agent,Bash,BashOutput,DesignSync,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
         // Read-only / non-mutating subset always auto-approved even in a
         // prompting mode — these shouldn't interrupt the user. Everything
         // omitted (Bash, Edit, Write, MultiEdit, NotebookEdit, Agent, Skill,

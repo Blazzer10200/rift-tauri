@@ -216,6 +216,22 @@
       const todos = Array.isArray(inp.todos) ? (inp.todos as Array<{content?: string}>).length : 0;
       return `${todos} task${todos === 1 ? "" : "s"}`;
     }
+    if (n === "DesignSync") {
+      const m = typeof inp.method === "string" ? inp.method as string : "sync";
+      const files = Array.isArray(inp.files) ? (inp.files as unknown[]).length : 0;
+      const paths = Array.isArray(inp.paths) ? (inp.paths as unknown[]).length : 0;
+      const writes = Array.isArray(inp.writes) ? (inp.writes as unknown[]).length : 0;
+      if (m === "write_files") return `write_files · ${files} file${files === 1 ? "" : "s"}`;
+      if (m === "delete_files") return `delete_files · ${paths} path${paths === 1 ? "" : "s"}`;
+      if (m === "finalize_plan") return `finalize_plan · ${writes} write${writes === 1 ? "" : "s"}`;
+      if (m === "create_project" && typeof inp.name === "string") return `create_project · ${inp.name}`;
+      if (m === "get_file" && typeof inp.path === "string") return `get_file · ${basename(inp.path as string)}`;
+      if (m === "register_assets") {
+        const a = Array.isArray(inp.assets) ? (inp.assets as unknown[]).length : 0;
+        return `register_assets · ${a} card${a === 1 ? "" : "s"}`;
+      }
+      return m;
+    }
     return n;
   });
 
@@ -229,6 +245,11 @@
     if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
     if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand") return "agent";
     if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ExitPlanMode") return "meta";
+    if (n === "DesignSync") {
+      const m = typeof tool.input?.method === "string" ? tool.input.method as string : "";
+      // Cloud-publishing methods read as consequential (write tint); reads stay cheap.
+      return ["finalize_plan","write_files","delete_files","create_project","register_assets","unregister_assets"].includes(m) ? "write" : "read";
+    }
     return "read";
   });
 
