@@ -64,6 +64,12 @@ export type UpdateState =
 const DISMISSED_KEY = "rift.updates.dismissed-version";
 const SNOOZE_MS = 24 * 60 * 60 * 1000; // 24h — snooze is a delay, never a kill switch
 
+// Bounded backoff for a transient check failure. Without it, an offline-at-launch
+// (or a momentary R2 feed blip) lands in "error" and gets no re-check until the
+// 6h auto-tick — a user could sit a whole work session unaware a release shipped.
+// Mirrors the CLI-update store's retry (v0.20.5).
+const REFRESH_RETRY_MS = [30_000, 120_000, 300_000];
+
 type Snooze = { version: string; until: number };
 
 function loadSnooze(): Snooze | null {
@@ -104,6 +110,9 @@ class UpdateStore {
    *  checking would never surface a release shipped mid-session. */
   private autoTimer: ReturnType<typeof setInterval> | null = null;
   private readonly AUTO_MS = 6 * 60 * 60 * 1000; // every 6h
+  /** Backoff state for auto-retrying a failed check before the 6h auto-tick. */
+  private refreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private refreshRetries = 0;
 
   /** Static "latest release" page — usable even when a check failed (so we have
    *  no `info.releaseUrl`), e.g. a corrupted install that needs a manual Setup.exe. */
@@ -188,6 +197,7 @@ class UpdateStore {
     } catch (e) {
       this.error = String(e);
       this.state = "error";
+      this.scheduleRefreshRetry();
       return;
     }
     try {
@@ -202,10 +212,33 @@ class UpdateStore {
         this.info = null;
         this.state = "uptodate";
       }
+      this.resetRefreshRetry();
     } catch (e) {
       this.error = String(e);
       this.state = "error";
+      this.scheduleRefreshRetry();
     }
+  }
+
+  /** Arm the next bounded-backoff re-check after a failed `refresh()`. No-op
+   *  once the backoff list is exhausted (the 6h auto-tick takes over) or while a
+   *  retry is already pending. */
+  private scheduleRefreshRetry() {
+    const delay = REFRESH_RETRY_MS[this.refreshRetries];
+    if (delay == null || this.refreshRetryTimer != null) return;
+    this.refreshRetries++;
+    this.refreshRetryTimer = setTimeout(() => {
+      this.refreshRetryTimer = null;
+      // Don't stomp an in-flight download or an open dialog — mirror autoTick.
+      if (this.state === "downloading" || this.state === "installing" || this.dialogOpen) return;
+      void this.refresh();
+    }, delay);
+  }
+
+  /** A check succeeded — clear the backoff so the next failure starts fresh. */
+  private resetRefreshRetry() {
+    this.refreshRetries = 0;
+    if (this.refreshRetryTimer != null) { clearTimeout(this.refreshRetryTimer); this.refreshRetryTimer = null; }
   }
 
   /** Download the update (with progress) then apply it. Velopack stages the
@@ -338,6 +371,10 @@ class UpdateStore {
     if (this.snoozeTimer != null) {
       clearTimeout(this.snoozeTimer);
       this.snoozeTimer = null;
+    }
+    if (this.refreshRetryTimer != null) {
+      clearTimeout(this.refreshRetryTimer);
+      this.refreshRetryTimer = null;
     }
   }
 }

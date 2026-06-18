@@ -58,6 +58,18 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     if let Some(i) = active {
         installs[i].active = true;
     }
+    // Sync the spawn-path cache (`claude_command` → `resolve_claude_exe`) to this
+    // fresh enumeration. That cache stickily returns a prior "not found"
+    // (cli_install.rs `CLAUDE_EXE` inner `None`) until restart — the `#64` re-stat
+    // only re-resolves a cached path that *vanished*, not a cached `None`. So a
+    // CLI installed AFTER the first failed resolve stayed invisible to every real
+    // turn spawn even though this probe now reports it present: green pill, yet
+    // sends fail "Claude CLI not found". Writing the authoritative pick here (from
+    // the already-offloaded enumeration — no extra spawn, no async-thread block)
+    // closes that divergence; the next turn resolves the right binary.
+    if let Ok(mut g) = CLAUDE_EXE.lock() {
+        *g = Some(active.map(|i| std::path::PathBuf::from(&installs[i].path)));
+    }
     log::info!(
         "auth-probe: {} claude install(s){}",
         installs.len(),
