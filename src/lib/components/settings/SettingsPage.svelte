@@ -134,6 +134,7 @@
   const cliInstalled = $derived(fmtCliVer(assistantStore.auth?.cliVersion));
   const cliInstalls = $derived(assistantStore.auth?.installs ?? []);
   const cliNewer = $derived(cliUpdate.isAnyStale(assistantStore.auth?.installs, cliInstalled));
+  const cliSummary = $derived(cliUpdate.summary(assistantStore.auth?.installs));
   const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
   $effect(() => { cliUpdate.setMethod(assistantStore.auth?.installMethod ?? null); });
   async function runCliUpdate() {
@@ -486,7 +487,7 @@
               <div class="st-cli-ok">{cliUpdate.updateOutput}</div>
             {/if}
             {#if cliUpdate.updateStuck}
-              <div class="st-cli-warn">Update ran, but a copy is still behind. A native install sometimes reports success without bumping — copy its command above and run it in a terminal, or reinstall it.</div>
+              <div class="st-cli-warn">{cliSummary.detail}</div>
             {/if}
           {/if}
         </div>

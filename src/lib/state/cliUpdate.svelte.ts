@@ -94,8 +94,14 @@ export class CliUpdate {
 
   /** The exact upgrade command for the detected install method. Native installs
    *  self-update + accept `claude update`; everything else uses npm's `@latest`
-   *  (NOT `npm update -g`, which respects the original semver range). */
+   *  (NOT `npm update -g`, which respects the original semver range).
+   *
+   *  Stuck-native exception: once `claude update` has run and the version still
+   *  didn't move (`updateStuck`), re-suggesting `claude update` is useless — a
+   *  native install's update applies on RESTART, or its managed dir isn't
+   *  writable. Hand the user the documented reinstall command instead. */
   get updateCommand(): string {
+    if (this.updateStuck && this.method === "native") return this.reinstallCommand;
     return this.commandFor(this.method);
   }
 
@@ -104,6 +110,17 @@ export class CliUpdate {
    *  one's. */
   commandFor(method: string | null | undefined): string {
     return method === "native" ? "claude update" : `npm install -g ${PKG}@latest`;
+  }
+
+  /** Official native (re)install command for the current OS — the documented fix
+   *  for a native install whose `claude update` no-ops. Per code.claude.com/docs:
+   *  Windows PowerShell uses the `.ps1` one-liner; macOS/Linux/WSL use the shell
+   *  installer. UA sniff is best-effort; npm users never hit this path. */
+  get reinstallCommand(): string {
+    const ua = (typeof navigator !== "undefined" && navigator.userAgent) || "";
+    return /Win(dows|32|64)/i.test(ua)
+      ? "irm https://claude.ai/install.ps1 | iex"
+      : "curl -fsSL https://claude.ai/install.sh | bash";
   }
 
   setMethod(m: string | null) {
@@ -176,13 +193,26 @@ export class CliUpdate {
     const count = installs?.length ?? 0;
     if (this.updateError)
       return { tone: "danger", headline: "Update failed", detail: this.updateError };
-    if (this.updateStuck)
+    if (this.updateStuck) {
+      // A native update applies on the NEXT launch — so an unchanged version
+      // right after `claude update` is almost always "staged, pending restart,"
+      // not "broken." Say so, and only escalate to reinstall if a restart
+      // doesn't clear it. npm/unknown apply immediately, so for those an
+      // unchanged version really is a failed update.
+      if (this.method === "native")
+        return {
+          tone: "warn",
+          headline: "Restart to finish updating",
+          detail:
+            "The native CLI update was staged — it applies the next time Claude Code starts. Restart, then re-check. Still behind afterward? Reinstall with the command below.",
+        };
       return {
         tone: "warn",
         headline: "Still behind after update",
         detail:
-          "A native install reported success without bumping. Copy its command and run it in a terminal, or reinstall it.",
+          "The update ran but the version didn't change. Copy the command below and run it in a terminal, or reinstall.",
       };
+    }
     if (count > 1)
       return {
         tone: "accent",

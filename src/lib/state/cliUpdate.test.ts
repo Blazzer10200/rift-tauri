@@ -113,6 +113,23 @@ describe("commandFor / updateCommand", () => {
     cu.setMethod("npm");
     expect(cu.updateCommand).toBe("npm install -g @anthropic-ai/claude-code@latest");
   });
+  it("a STUCK native install gets the reinstall command, not `claude update` again", () => {
+    cu.setMethod("native");
+    cu.updateStuck = true;
+    expect(cu.updateCommand).toBe(cu.reinstallCommand);
+    expect(cu.updateCommand).not.toBe("claude update");
+  });
+  it("a stuck npm install still gets the npm @latest command", () => {
+    cu.setMethod("npm");
+    cu.updateStuck = true;
+    expect(cu.updateCommand).toBe("npm install -g @anthropic-ai/claude-code@latest");
+  });
+  it("reinstallCommand is one of the documented native installers", () => {
+    expect([
+      "irm https://claude.ai/install.ps1 | iex",
+      "curl -fsSL https://claude.ai/install.sh | bash",
+    ]).toContain(cu.reinstallCommand);
+  });
 });
 
 describe("summary — contextual line precedence", () => {
@@ -124,10 +141,18 @@ describe("summary — contextual line precedence", () => {
     expect(s.headline).toBe("Update failed");
     expect(s.detail).toBe("npm exploded");
   });
-  it("stuck-after-update is a warning", () => {
+  it("stuck-after-update (npm/unknown) is a warning that says it didn't change", () => {
     cu.updateStuck = true;
     expect(cu.summary(null).tone).toBe("warn");
     expect(cu.summary(null).headline).toBe("Still behind after update");
+  });
+  it("stuck native reframes as restart-to-apply, not broken", () => {
+    cu.setMethod("native");
+    cu.updateStuck = true;
+    const s = cu.summary(null);
+    expect(s.tone).toBe("warn");
+    expect(s.headline).toBe("Restart to finish updating");
+    expect(s.detail).toContain("next time Claude Code starts");
   });
   it("multi-install reports the count", () => {
     const s = cu.summary([{ version: "1" }, { version: "2" }]);
