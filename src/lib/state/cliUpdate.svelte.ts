@@ -31,6 +31,10 @@ const LATEST_URL = `https://registry.npmjs.org/${PKG}/latest`;
 const LS_KEY = "rift.cliUpdate.v1";
 const STALE_MS = 6 * 60 * 60 * 1000; // re-check at most every 6 hours
 const FETCH_TIMEOUT_MS = 10_000;
+// A failed check used to stick for the whole session — the only re-trigger was a
+// component remount, so a blip (offline at launch, npm hiccup) left the badge
+// silently absent. Auto-retry a few times with backoff before giving up.
+const RETRY_DELAYS_MS = [30_000, 120_000, 300_000];
 
 type Persisted = { latest: string | null; checkedAt: number; dismissed: string | null };
 
@@ -64,6 +68,9 @@ export class CliUpdate {
   /** Transient flag for the "Copied!" affordance on the copy-command button. */
   copied = $state(false);
   private _copyTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Backoff state for auto-retrying a failed npm check. */
+  private _retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private _retries = 0;
 
   /** Install method from the auth probe ("npm" | "native" | "unknown" | null).
    *  Components sync this via setMethod() so the command shown matches reality. */
@@ -215,6 +222,10 @@ export class CliUpdate {
       const res = await fetch(LATEST_URL, {
         signal: ctrl.signal,
         headers: { Accept: "application/json" },
+        // The registry's `latest` manifest is CDN-fronted (cache headers set);
+        // without this the webview can serve a stale version and miss a new
+        // release. We already throttle to once / 6h, so a forced round-trip is cheap.
+        cache: "no-store",
       });
       if (!res.ok) throw new Error(`npm registry returned HTTP ${res.status}`);
       const json = (await res.json()) as { version?: string };
@@ -229,6 +240,9 @@ export class CliUpdate {
       this.checkedAt = Date.now();
       this.status = "ok";
       this.persist();
+      // Recovered — drop any pending retry + reset the backoff ladder.
+      this._retries = 0;
+      if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
     } catch (e) {
       this.status = "error";
       this.error =
@@ -237,6 +251,16 @@ export class CliUpdate {
           : e instanceof Error
             ? e.message
             : String(e);
+      // Schedule a bounded auto-retry so a transient failure doesn't leave
+      // detection silently dead until the next app restart / page remount.
+      const delay = RETRY_DELAYS_MS[this._retries];
+      if (delay != null && this._retryTimer == null) {
+        this._retries++;
+        this._retryTimer = setTimeout(() => {
+          this._retryTimer = null;
+          void this.maybeCheck(true);
+        }, delay);
+      }
     } finally {
       clearTimeout(timer);
     }
@@ -315,6 +339,7 @@ export class CliUpdate {
   dispose() {
     if (this._copyTimer != null) { clearTimeout(this._copyTimer); this._copyTimer = null; }
     if (this._rowCopyTimer != null) { clearTimeout(this._rowCopyTimer); this._rowCopyTimer = null; }
+    if (this._retryTimer != null) { clearTimeout(this._retryTimer); this._retryTimer = null; }
   }
 }
 
