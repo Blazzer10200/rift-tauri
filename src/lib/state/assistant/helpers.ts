@@ -56,7 +56,7 @@ export function loadModel(ws?: string | null): ModelSel {
       const k = wsKey(MODEL_KEY, ws);
       const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
       if (v && (MODEL_SELS as readonly string[]).includes(v)) {
-        if (v === "claude-fable-5" && !fableAvailable()) return "sonnet";
+        if (v === "claude-fable-5" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
         return v as ModelSel;
       }
     }
@@ -279,17 +279,47 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
+/** Effort tiers low→high — canonical order for clamping + ladder UIs. */
+export const EFFORT_ORDER: readonly ThinkingEffort[] = [
+  "none", "quick", "smart", "deep", "ultra",
+] as const;
+
+/** Highest effort tier each model honors server-side — the single source of
+ *  truth for the capability ceiling. `MODEL_OPTIONS.maxEffort` (the picker's
+ *  slider) and `clampEffort` (the value actually sent) both derive from this so
+ *  they can't disagree. Opus/Fable reach `ultra` (xhigh + ultracode); Sonnet 4.6
+ *  tops out at `smart` (high); Haiku rejects effort wholesale (`none`). Mirror
+ *  the Sonnet ceiling in src-tauri/src/assistant/turn.rs. */
+export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
+  opus: "ultra",
+  "claude-opus-4-7": "ultra",
+  "claude-fable-5": "ultra",
+  sonnet: "smart",
+  haiku: "none",
+};
+
+/** Clamp an effort tier to a model's ceiling. Pure. Fixes the slider hiding
+ *  out-of-range stops while a stored pref still carried (e.g. an Opus workspace
+ *  pinned to `ultra`, switched to Sonnet, kept sending xhigh). */
+export function clampEffort(effort: ThinkingEffort, model: ModelSel): ThinkingEffort {
+  const cap = MODEL_MAX_EFFORT[model] ?? "ultra";
+  return EFFORT_ORDER.indexOf(effort) > EFFORT_ORDER.indexOf(cap) ? cap : effort;
+}
+
 /** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/turn.rs.
  *  Ladder: none→low · quick→medium · smart→high (API default) · deep→xhigh
  *  (Claude Code's own agentic default) · ultra→xhigh; ultra's autonomous-workflow
- *  behavior rides the separate `ultracode` settings key, set in turn.rs. */
+ *  behavior rides the separate `ultracode` settings key, set in turn.rs. The
+ *  effort is clamped to the model's ceiling first, so an out-of-range tier can
+ *  never emit a flag the model rejects. */
 export function effortToFlag(
   effort: ThinkingEffort,
   model: ModelSel,
 ): "low" | "medium" | "high" | "xhigh" | null {
   if (model === "haiku") return null;
-  if (effort === "none") return "low";
-  if (effort === "quick") return "medium";
-  if (effort === "deep" || effort === "ultra") return "xhigh";
+  const e = clampEffort(effort, model);
+  if (e === "none") return "low";
+  if (e === "quick") return "medium";
+  if (e === "deep" || e === "ultra") return "xhigh";
   return "high"; // "smart" — the default tier
 }

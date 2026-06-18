@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
-  FABLE_DISABLED, FABLE_SUNSET_MS, effortToFlag, fableAvailable, firstLine, flattenToolResult,
-  shellLabel, liveActivity, messagesHaveContextSignals, modelFamily, previewToolInput,
+  FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable, firstLine,
+  flattenToolResult, shellLabel, liveActivity, messagesHaveContextSignals, modelFamily,
+  previewToolInput,
 } from "./helpers";
 
 const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBlock> = {}): ToolBlock =>
@@ -52,6 +53,24 @@ describe("effortToFlag (must mirror src-tauri assistant turn.rs mapping)", () =>
     expect(effortToFlag("smart", "sonnet")).toBe("high");
     expect(effortToFlag("deep", "opus")).toBe("xhigh");
     expect(effortToFlag("ultra", "claude-fable-5")).toBe("xhigh");
+  });
+  it("clamps an out-of-range tier to the model ceiling before mapping", () => {
+    // Sonnet tops out at smart(high): a stale deep/ultra pref must NOT send xhigh.
+    expect(effortToFlag("deep", "sonnet")).toBe("high");
+    expect(effortToFlag("ultra", "sonnet")).toBe("high");
+  });
+});
+
+describe("clampEffort (model effort ceiling)", () => {
+  it("caps Sonnet at smart and leaves Opus/Fable untouched", () => {
+    expect(clampEffort("ultra", "sonnet")).toBe("smart");
+    expect(clampEffort("deep", "sonnet")).toBe("smart");
+    expect(clampEffort("quick", "sonnet")).toBe("quick"); // already in range
+    expect(clampEffort("ultra", "opus")).toBe("ultra");
+    expect(clampEffort("ultra", "claude-fable-5")).toBe("ultra");
+  });
+  it("floors Haiku to none (rejects effort wholesale)", () => {
+    expect(clampEffort("ultra", "haiku")).toBe("none");
   });
 });
 

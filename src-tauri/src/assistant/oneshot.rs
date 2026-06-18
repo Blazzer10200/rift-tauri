@@ -14,7 +14,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::cli_install::claude_command;
 use super::config::{
-    effective_trust_level, is_valid_local_model_name, load_config, save_config, CONFIG_WRITE_LOCK,
+    effective_trust_level, is_valid_local_model_name, load_config, save_config, DEFAULT_MODEL,
+    CONFIG_WRITE_LOCK,
 };
 use super::turn::ENHANCE_STREAM_EVENT;
 use super::{write_mcp_config, McpConfigGuard};
@@ -145,7 +146,7 @@ pub async fn assistant_enhance_prompt(
     let model = model
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| "sonnet".to_string());
+        .unwrap_or_else(|| DEFAULT_MODEL.to_string());
     // Optional steering for the refine loop (Concise / Detailed / freeform).
     let directive_line = match directive.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => format!(" Adjustment for this rewrite: {d}."),

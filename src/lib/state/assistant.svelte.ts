@@ -62,6 +62,7 @@ import {
   saveModel,
   loadEffort,
   saveEffort,
+  clampEffort,
   loadThinkingEnabled,
   saveThinkingEnabled,
   loadPermissionMode,
@@ -632,7 +633,7 @@ class AssistantStore {
   // Extended-thinking budget tier. "none" = no extended thinking (fastest);
   // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
   // Haiku ignores this server-side. Persisted to localStorage.
-  thinkingEffort = $state<ThinkingEffort>(loadEffort());
+  thinkingEffort = $state<ThinkingEffort>(clampEffort(loadEffort(), this.model));
   // Extended-thinking master switch. On (default) = current behavior; off routes
   // the cloud turn through the no-think shim for fastest TTFT. Persisted, per-ws.
   thinkingEnabled = $state<boolean>(loadThinkingEnabled());
@@ -725,6 +726,11 @@ class AssistantStore {
     this.model = v;
     if (this.activeTab) this.activeTab.modelOverride = v;
     saveModel(v, this.workspace.current);
+    // Coerce effort down to the new model's ceiling so the slider and the tier
+    // we actually send can't exceed what the model honors (e.g. Opus@ultra →
+    // Sonnet caps at smart). No-op when already in range. setThinkingEffort
+    // handles the persist + cache-bust + telemetry and early-returns on no change.
+    this.setThinkingEffort(clampEffort(this.thinkingEffort, v));
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("model.change", { from: prev, to: v, midConvo });
     if (midConvo && prev !== v) this.cacheBustHint("model");
@@ -1118,7 +1124,9 @@ class AssistantStore {
   applyWorkspacePrefs() {
     const ws = this.workspace.current;
     this.model = loadModel(ws);
-    this.thinkingEffort = loadEffort(ws);
+    // A workspace's effort pin is stored independently of its model pin, so it
+    // can outrank the model's ceiling — clamp on load too.
+    this.thinkingEffort = clampEffort(loadEffort(ws), this.model);
     this.thinkingEnabled = loadThinkingEnabled(ws);
   }
   setRoot(path: string) { return wsSetRoot(this, path); }

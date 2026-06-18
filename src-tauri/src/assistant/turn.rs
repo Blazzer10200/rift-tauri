@@ -18,8 +18,9 @@ use tokio::sync::mpsc;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    current_api_key, effective_trust_level, fable_unavailable, is_valid_local_model_name,
-    is_valid_model_name, is_valid_permission_mode, load_config, FABLE_MODEL,
+    clamp_effort, current_api_key, effective_trust_level, fable_unavailable, is_valid_effort_tier,
+    is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
+    DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
@@ -458,7 +459,7 @@ pub async fn assistant_send(
     let cfg = load_config();
     let api_key = current_api_key();
     let use_api_key = api_key.is_some();
-    let mut model = model.unwrap_or_else(|| "sonnet".to_string());
+    let mut model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
     if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
     }
@@ -488,8 +489,8 @@ pub async fn assistant_send(
         // Fable guard — after pin resolution so a pinned Fable session also falls
         // back when Fable is unavailable (manual kill-switch or past its sunset).
         if model == FABLE_MODEL && fable_unavailable() {
-            log::info!("assistant_send: {FABLE_MODEL} unavailable — falling back to opus");
-            model = "opus".to_string();
+            log::info!("assistant_send: {FABLE_MODEL} unavailable — falling back to {FABLE_FALLBACK_MODEL}");
+            model = FABLE_FALLBACK_MODEL.to_string();
         }
     }
     // Effort tier: per-turn override wins, else stored default, else "smart"
@@ -868,7 +869,19 @@ pub async fn assistant_send(
     // #237: normalize effort BEFORE logging so newlines/ANSI in the raw
     // renderer-supplied string can't reach the log stream. The CLI flag itself
     // was safe (string-arg passthrough) but the log line was unredacted.
-    let effort_level = match effort.as_str() {
+    // Clamp the requested tier to the model's ceiling before mapping to a flag,
+    // and reject a tier the ladder doesn't define. Sonnet 4.6 tops out at
+    // "smart" (high); xhigh + the ultracode workflow key are Opus-tier only — so
+    // a stale out-of-range tier (e.g. a workspace pinned to `ultra` under Opus,
+    // then switched to Sonnet) can't push Sonnet to xhigh/ultracode. This is the
+    // only point that builds the actual CLI args, so it's the authoritative
+    // gate; the frontend coerces too. `clamp_effort`/`model_max_effort` mirror
+    // MODEL_MAX_EFFORT in src/lib/state/assistant/helpers.ts.
+    if !is_valid_effort_tier(&effort) {
+        log::warn!("assistant_send: unknown effort tier {effort:?} — treating as smart (high)");
+    }
+    let effort_tier = clamp_effort(&effort, &model);
+    let effort_level = match effort_tier {
         "none" => "low",
         "quick" => "medium",
         "deep" | "ultra" => "xhigh",
@@ -887,7 +900,7 @@ pub async fn assistant_send(
         // user/project/local settings — when unentitled the CLI ignores it and
         // the session simply runs at xhigh effort. Haiku is excluded (it skips
         // extended thinking + workflow orchestration wholesale).
-        if effort == "ultra" {
+        if effort_tier == "ultra" {
             cmd.arg("--settings").arg(r#"{"ultracode":true}"#);
         }
     }

@@ -88,6 +88,48 @@ pub(super) fn is_valid_model_name(s: &str) -> bool {
     s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
+/// Default model when the renderer sends none. Mirrors the `loadModel` default
+/// in state/assistant/helpers.ts.
+pub(super) const DEFAULT_MODEL: &str = "sonnet";
+
+/// Substitute when a selected/pinned Fable session is unavailable. Fable is an
+/// Opus-tier model, so Opus is the closest match. MUST match the frontend Fable
+/// fallback in state/assistant/helpers.ts (`loadModel`) — a divergence here
+/// runs one model while the UI shows another.
+pub(super) const FABLE_FALLBACK_MODEL: &str = "opus";
+
+/// Effort tiers low→high. Mirrors `EFFORT_ORDER` in state/assistant/helpers.ts.
+pub(super) const EFFORT_ORDER: [&str; 5] = ["none", "quick", "smart", "deep", "ultra"];
+
+/// Reject an effort tier the ladder doesn't define (renderer-supplied).
+pub(super) fn is_valid_effort_tier(s: &str) -> bool {
+    EFFORT_ORDER.contains(&s)
+}
+
+/// Highest effort tier a model honors server-side. Mirrors `MODEL_MAX_EFFORT`
+/// in state/assistant/helpers.ts. Unknown ids default to the top (no clamp).
+pub(super) fn model_max_effort(model: &str) -> &'static str {
+    match model {
+        "haiku" => "none",
+        "sonnet" => "smart",
+        _ => "ultra", // opus / claude-opus-4-7 / claude-fable-5 / unknown
+    }
+}
+
+/// Clamp an effort tier to a model's ceiling. Mirrors `clampEffort` in
+/// state/assistant/helpers.ts. An unknown tier is left untouched (the flag
+/// match treats it as the default).
+pub(super) fn clamp_effort<'a>(effort: &'a str, model: &str) -> &'a str {
+    let cap = model_max_effort(model);
+    match (
+        EFFORT_ORDER.iter().position(|&t| t == effort),
+        EFFORT_ORDER.iter().position(|&t| t == cap),
+    ) {
+        (Some(e), Some(c)) if e > c => cap,
+        _ => effort,
+    }
+}
+
 /// Local-LLM model names carry provider prefixes + tags the cloud allowlist
 /// rejects (`ollama/llama3`, `ollama_chat/qwen2.5:7b`). Same anti-flag-injection
 /// guard (no leading dash, no empty) but also allows `/` and `:`.
@@ -368,7 +410,10 @@ pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::is_valid_local_base_url;
+    use super::{
+        clamp_effort, is_valid_effort_tier, is_valid_local_base_url, model_max_effort,
+        DEFAULT_MODEL, FABLE_FALLBACK_MODEL,
+    };
 
     #[test]
     fn accepts_http_and_https_with_host() {
@@ -384,5 +429,47 @@ mod tests {
         assert!(!is_valid_local_base_url("localhost:4000")); // no scheme
         assert!(!is_valid_local_base_url("http:///nohost"));
         assert!(!is_valid_local_base_url(""));
+    }
+
+    // The effort-ceiling contract — MUST stay in lockstep with the vitest cases
+    // in src/lib/state/assistant/helpers.test.ts (clampEffort + effortToFlag).
+    // Two independent suites encoding the same mappings surfaces one-sided drift
+    // across the Rust/TS boundary in review.
+    #[test]
+    fn model_ceilings_match_capability_matrix() {
+        assert_eq!(model_max_effort("opus"), "ultra");
+        assert_eq!(model_max_effort("claude-opus-4-7"), "ultra");
+        assert_eq!(model_max_effort("claude-fable-5"), "ultra");
+        assert_eq!(model_max_effort("sonnet"), "smart");
+        assert_eq!(model_max_effort("haiku"), "none");
+        assert_eq!(model_max_effort("some-future-model"), "ultra"); // unknown → top
+    }
+
+    #[test]
+    fn clamp_caps_sonnet_and_leaves_opus_untouched() {
+        // Sonnet tops out at smart: a stale deep/ultra pref must come down.
+        assert_eq!(clamp_effort("ultra", "sonnet"), "smart");
+        assert_eq!(clamp_effort("deep", "sonnet"), "smart");
+        assert_eq!(clamp_effort("quick", "sonnet"), "quick"); // already in range
+        assert_eq!(clamp_effort("ultra", "opus"), "ultra");
+        assert_eq!(clamp_effort("ultra", "claude-fable-5"), "ultra");
+        assert_eq!(clamp_effort("ultra", "haiku"), "none"); // floored
+    }
+
+    #[test]
+    fn clamp_leaves_unknown_tier_untouched() {
+        // An undefined tier isn't in EFFORT_ORDER; clamp passes it through so the
+        // flag match downstream applies its "smart"/high default.
+        assert_eq!(clamp_effort("bogus", "sonnet"), "bogus");
+        assert!(!is_valid_effort_tier("bogus"));
+        assert!(is_valid_effort_tier("ultra"));
+    }
+
+    #[test]
+    fn fallback_consts_are_sane() {
+        // Fable substitute must be a real non-Fable model; default must be set.
+        assert_eq!(FABLE_FALLBACK_MODEL, "opus");
+        assert_eq!(DEFAULT_MODEL, "sonnet");
+        assert_ne!(FABLE_FALLBACK_MODEL, "claude-fable-5");
     }
 }
