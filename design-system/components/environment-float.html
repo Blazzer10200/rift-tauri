@@ -1,76 +1,54 @@
-<!-- @dsCard group="Components" name="Environment float" subtitle="Collapsed git pill over the chat's top-right — branch + dirty/clean state" -->
+<!-- @dsCard group="Components" name="Environment float" subtitle="Collapsed git pill over the chat's top-right — neutral surface, branch + dirty/clean state, dismiss" -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Rift — Environment float</title>
+<link rel="stylesheet" href="../styles.css" />
 <style>
-  :root {
-    --bg: oklch(0.142 0.003 250);
-    --surface: oklch(0.215 0.004 250);
-    --border: oklch(0.300 0.006 255);
-    --fg: oklch(0.925 0.004 250);
-    --fg-3: oklch(0.700 0.013 258);
-    --ok: oklch(0.73 0.18 150);
-    --danger: oklch(0.71 0.17 22);
-    --accent: oklch(0.78 0.15 163);
-    --radius-lg: 10px;
-    --fs-xs: 11px;
-    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 32px; background: var(--bg); color: var(--fg);
-    font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; letter-spacing: -0.005em; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .lede { color: var(--fg-3); margin: 0 0 24px; max-width: 64ch; }
-  .section-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-    color: oklch(0.430 0.010 260); margin: 22px 0 12px; }
-  .row { display: flex; gap: 20px; flex-wrap: wrap; align-items: center; }
+  .stage { position: relative; height: 150px; border: 1px solid var(--border); border-radius: var(--radius-lg); background:
+    repeating-linear-gradient(0deg, transparent 0 17px, color-mix(in oklch, var(--border) 30%, transparent) 17px 18px), var(--bg); overflow: hidden; margin-bottom: 16px; }
+  .stage .corner { position: absolute; top: 8px; right: 8px; }
 
-  .env-pill { display: inline-flex; align-items: center; background: var(--surface);
-    border: 1px solid var(--border); border-radius: var(--radius-lg);
-    box-shadow: 0 4px 16px -6px rgb(0 0 0 / 0.4); overflow: hidden; }
-  .pill-main { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; border: 0;
-    background: none; color: var(--fg); font: inherit; font-size: var(--fs-xs); cursor: pointer; max-width: 240px; }
-  .pill-ic { color: var(--fg-3); flex: none; width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .env-pill { display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 4px 16px -6px rgb(0 0 0 / 0.4); overflow: hidden; }
+  .env-pill:hover { border-color: color-mix(in oklab, var(--accent) 35%, var(--border)); }
+  .pill-main { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; color: var(--fg); font-size: var(--fs-xs); max-width: 240px; }
+  .pill-main .ic { color: var(--fg-subtle); flex: none; }
   .pill-branch { font-weight: 600; }
-  .pill-stat { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; flex: none; }
-  .pill-clean { color: var(--fg-3); flex: none; }
-  .adds { color: var(--ok); }
-  .dels { color: var(--danger); }
-  .pill-x { display: grid; place-items: center; width: 26px; align-self: stretch; border: 0;
-    border-left: 1px solid var(--border); background: none; color: var(--fg-3); cursor: pointer; }
-  .xic { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; }
+  .pill-stat { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
+  .pill-clean { color: var(--fg-subtle); }
+  .adds { color: var(--ok); } .dels { color: var(--danger); }
+  .pill-x { display: grid; place-items: center; width: 26px; align-self: stretch; border-left: 1px solid var(--border); color: var(--fg-subtle); }
+  .pill-x:hover { color: var(--fg); background: color-mix(in oklab, var(--accent) 10%, transparent); }
+  .ic { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 </style>
 </head>
 <body>
   <h1>Environment float</h1>
-  <p class="lede">A floating git pill anchored over the chat's top-right — not a dock. Shows the current branch and a
-  live dirty count (<span style="color:var(--ok)">+adds</span> / <span style="color:var(--danger)">−dels</span>), or
-  <i>clean</i>. Click to expand into the in-flow source-control panel; the ✕ dismisses it.</p>
+  <p class="lede">A collapsed git status pill anchored to the chat pane's top-right. It reads as quiet
+  chrome — a <strong>neutral surface</strong> pill, not a tinted one — and only warms its border toward accent on
+  hover. A <code>GitBranch</code> glyph, the branch name in semibold, then either <code>+adds −dels</code> (ok /
+  danger) or a muted <code>clean</code>, and a divider-separated dismiss. Click expands it into the full source-control
+  panel; it shifts left to clear any open dock.</p>
 
-  <div class="section-label">Dirty</div>
-  <div class="row">
-    <div class="env-pill">
-      <button class="pill-main">
-        <svg class="pill-ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5a6 6 0 0 1-6 6h-3.5"/></svg>
-        <span class="pill-branch">main</span>
-        <span class="pill-stat"><span class="adds">+128</span><span class="dels">−24</span></span>
-      </button>
-      <button class="pill-x"><svg class="xic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div class="section-label">Dirty — uncommitted changes</div>
+  <div class="stage">
+    <div class="corner">
+      <div class="env-pill">
+        <span class="pill-main"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="8" r="3"/><path d="M6 9v6M18 11a6 6 0 0 1-6 6H9"/></svg><span class="pill-branch">main</span><span class="pill-stat"><span class="adds">+276</span><span class="dels">−523</span></span></span>
+        <span class="pill-x"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></span>
+      </div>
     </div>
   </div>
 
-  <div class="section-label">Clean</div>
-  <div class="row">
-    <div class="env-pill">
-      <button class="pill-main">
-        <svg class="pill-ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5a6 6 0 0 1-6 6h-3.5"/></svg>
-        <span class="pill-branch">main</span>
-        <span class="pill-clean">clean</span>
-      </button>
-      <button class="pill-x"><svg class="xic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <div class="section-label">Clean — nothing staged</div>
+  <div class="stage">
+    <div class="corner">
+      <div class="env-pill">
+        <span class="pill-main"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="8" r="3"/><path d="M6 9v6M18 11a6 6 0 0 1-6 6H9"/></svg><span class="pill-branch">release/0.20</span><span class="pill-clean">clean</span></span>
+        <span class="pill-x"><svg class="ic" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></span>
+      </div>
     </div>
   </div>
 </body>

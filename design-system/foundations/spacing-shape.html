@@ -1,95 +1,77 @@
-<!-- @dsCard group="Foundations" name="Spacing, Shape & Motion" subtitle="Radius ladder, density rows, elevation shadows, motion vocabulary" -->
+<!-- @dsCard group="Foundations" name="Shape, Elevation & Motion" subtitle="Radius ladder · density modes · shadow ladder · shared motion vocabulary" -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Rift — Spacing, Shape &amp; Motion</title>
+<title>Rift — Shape, Elevation &amp; Motion</title>
+<link rel="stylesheet" href="../styles.css" />
 <style>
-  :root {
-    --bg: oklch(0.142 0.003 250);
-    --bg-elev-1: oklch(0.215 0.004 250);
-    --bg-elev-2: oklch(0.262 0.005 250);
-    --surface: oklch(0.215 0.004 250);
-    --border: oklch(0.300 0.006 255);
-    --border-strong: oklch(0.365 0.007 255);
-    --fg: oklch(0.925 0.004 250);
-    --fg-muted: oklch(0.700 0.013 258);
-    --fg-subtle: oklch(0.545 0.016 262);
-    --fg-faint: oklch(0.430 0.010 260);
-    --accent: oklch(0.78 0.15 163);
-    --radius-xs: 4px; --radius-sm: 6px; --radius: 8px; --radius-lg: 10px; --radius-xl: 12px; --radius-2xl: 16px;
-    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
-    --shadow: 0 4px 14px oklch(0 0 0 / 0.45);
-    --shadow-lg: 0 24px 64px oklch(0 0 0 / 0.60);
-    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
-    --font-mono: "JetBrains Mono", Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 32px; background: var(--bg); color: var(--fg);
-    font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; letter-spacing: -0.005em; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .lede { color: var(--fg-muted); margin: 0 0 28px; max-width: 60ch; }
-  .section-label { display: flex; align-items: center; gap: 10px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--fg-faint); margin: 28px 0 14px; }
-  .section-label::after { content: ""; flex: 1; height: 1px;
-    background: linear-gradient(to right, color-mix(in oklch, var(--border) 80%, transparent), transparent); }
-  .radii { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
-  .radii figure { margin: 0; text-align: center; }
-  .radii .box { width: 72px; height: 72px; background: var(--bg-elev-2); border: 1px solid var(--border-strong); }
-  .radii figcaption { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 8px; }
-  .density { display: flex; flex-direction: column; gap: 14px; }
-  .drow { display: flex; align-items: center; gap: 12px; }
-  .drow .bar { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
-    display: flex; align-items: center; padding: 0 10px; color: var(--fg-muted); font-size: 12px; }
-  .drow .tok { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); width: 130px; }
-  .shadows { display: flex; gap: 28px; flex-wrap: wrap; }
-  .shadows figure { margin: 0; text-align: center; }
-  .shadows .box { width: 120px; height: 72px; background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: 10px; }
-  .shadows figcaption { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 12px; }
-  .motion { display: grid; grid-template-columns: 130px 1fr; gap: 6px 16px; font-size: 12px; align-items: center; }
-  .motion .k { font-family: var(--font-mono); font-size: 10.5px; color: var(--accent); }
-  .motion .v { color: var(--fg-muted); }
+  .radii { display: flex; gap: 14px; flex-wrap: wrap; }
+  .rad { text-align: center; }
+  .rad .box { width: 72px; height: 72px; background: var(--surface); border: 1px solid var(--border-strong); }
+  .rad .lbl { font-size: 11px; margin-top: 8px; }
+  .rad .tk { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); }
+
+  .dens { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .dcol { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
+  .dcol .h { padding: 8px 12px; font-size: 11px; font-weight: 600; background: var(--bg-elev-2); border-bottom: 1px solid var(--border); }
+  .drow { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); padding: 0 12px; color: var(--fg-2); font-size: var(--fs-sm); }
+  .drow .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .dcol[data-density="compact"] .drow { height: 26px; }
+  .dcol[data-density="regular"] .drow { height: 30px; }
+  .dcol[data-density="comfy"]   .drow { height: 36px; }
+
+  .shadows { display: flex; gap: 22px; flex-wrap: wrap; }
+  .sh { width: 130px; height: 80px; border-radius: var(--radius-lg); background: var(--bg-elev-1); border: 1px solid var(--border); display: flex; align-items: flex-end; padding: 8px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); }
+
+  .motion { display: flex; flex-direction: column; gap: 8px; }
+  .mo { display: flex; align-items: center; gap: 14px; padding: 9px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+  .mo .tk { font-family: var(--font-mono); font-size: 11px; color: var(--accent); width: 150px; flex: none; }
+  .mo .d { color: var(--fg-muted); font-size: var(--fs-sm); }
+  .track { width: 130px; height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; margin-left: auto; }
+  .track i { display: block; height: 100%; width: 40%; border-radius: 999px; background: var(--accent); animation: slide 2.4s var(--ease-page) infinite; }
+  @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(360%); } }
 </style>
 </head>
 <body>
-  <h1>Spacing, Shape &amp; Motion</h1>
-  <p class="lede">Softened corners (Graphite Ink), a compact density default with two looser steps, layered
-  elevation shadows, and one shared motion vocabulary — reuse the curves, never hand-roll.</p>
+  <h1>Shape, Elevation &amp; Motion</h1>
+  <p class="lede">Softened corners, three density modes, a three-step shadow ladder, and one shared motion
+  vocabulary every component reuses instead of hand-rolling curves.</p>
 
   <div class="section-label">Radius ladder</div>
   <div class="radii">
-    <figure><div class="box" style="border-radius:var(--radius-xs)"></div><figcaption>xs · 4</figcaption></figure>
-    <figure><div class="box" style="border-radius:var(--radius-sm)"></div><figcaption>sm · 6</figcaption></figure>
-    <figure><div class="box" style="border-radius:var(--radius)"></div><figcaption>base · 8</figcaption></figure>
-    <figure><div class="box" style="border-radius:var(--radius-lg)"></div><figcaption>lg · 10</figcaption></figure>
-    <figure><div class="box" style="border-radius:var(--radius-xl)"></div><figcaption>xl · 12</figcaption></figure>
-    <figure><div class="box" style="border-radius:var(--radius-2xl)"></div><figcaption>2xl · 16</figcaption></figure>
+    <div class="rad"><div class="box" style="border-radius:var(--radius-xs)"></div><div class="lbl">xs</div><div class="tk">4px</div></div>
+    <div class="rad"><div class="box" style="border-radius:var(--radius-sm)"></div><div class="lbl">sm · buttons</div><div class="tk">6px</div></div>
+    <div class="rad"><div class="box" style="border-radius:var(--radius)"></div><div class="lbl">base · nav</div><div class="tk">8px</div></div>
+    <div class="rad"><div class="box" style="border-radius:var(--radius-lg)"></div><div class="lbl">lg</div><div class="tk">10px</div></div>
+    <div class="rad"><div class="box" style="border-radius:var(--r-card)"></div><div class="lbl">card</div><div class="tk">12px</div></div>
+    <div class="rad"><div class="box" style="border-radius:var(--radius-2xl)"></div><div class="lbl">2xl · hero</div><div class="tk">16px</div></div>
   </div>
 
-  <div class="section-label">Density · row height</div>
-  <div class="density">
-    <div class="drow"><div class="tok">compact (default)</div><div class="bar" style="height:26px">26px row · gap 6</div></div>
-    <div class="drow"><div class="tok">regular</div><div class="bar" style="height:30px">30px row · gap 9</div></div>
-    <div class="drow"><div class="tok">comfy</div><div class="bar" style="height:36px">36px row · gap 12</div></div>
+  <div class="section-label">Density</div>
+  <div class="dens">
+    <div class="dcol" data-density="compact"><div class="h">Compact · default</div><div class="drow"><span class="dot"></span>Row 26px</div><div class="drow"><span class="dot"></span>Row 26px</div><div class="drow"><span class="dot"></span>Row 26px</div></div>
+    <div class="dcol" data-density="regular"><div class="h">Regular</div><div class="drow"><span class="dot"></span>Row 30px</div><div class="drow"><span class="dot"></span>Row 30px</div><div class="drow"><span class="dot"></span>Row 30px</div></div>
+    <div class="dcol" data-density="comfy"><div class="h">Comfy</div><div class="drow"><span class="dot"></span>Row 36px</div><div class="drow"><span class="dot"></span>Row 36px</div><div class="drow"><span class="dot"></span>Row 36px</div></div>
   </div>
 
-  <div class="section-label">Elevation</div>
+  <div class="section-label">Shadow ladder</div>
   <div class="shadows">
-    <figure><div class="box" style="box-shadow:var(--shadow-sm)"></div><figcaption>--shadow-sm</figcaption></figure>
-    <figure><div class="box" style="box-shadow:var(--shadow)"></div><figcaption>--shadow</figcaption></figure>
-    <figure><div class="box" style="box-shadow:var(--shadow-lg)"></div><figcaption>--shadow-lg</figcaption></figure>
+    <div class="sh" style="box-shadow:var(--shadow-sm)">--shadow-sm</div>
+    <div class="sh" style="box-shadow:var(--shadow)">--shadow</div>
+    <div class="sh" style="box-shadow:var(--shadow-lg)">--shadow-lg</div>
   </div>
 
-  <div class="section-label">Motion vocabulary</div>
+  <div class="section-label">Motion</div>
   <div class="motion">
-    <div class="k">--ease-page</div><div class="v">cubic-bezier(0.22, 1, 0.36, 1) · entrances, decelerate</div>
-    <div class="k">--ease-soft</div><div class="v">cubic-bezier(0.4, 0, 0.2, 1) · layout shifts</div>
-    <div class="k">--dur-fast</div><div class="v">140ms · control hover / small state flip</div>
-    <div class="k">--dur-base</div><div class="v">240ms · default transition</div>
-    <div class="k">--dur-page</div><div class="v">400ms · a screen enters</div>
-    <div class="k">--dur-slow</div><div class="v">520ms · large data reveal (bars, gauge)</div>
+    <div class="mo"><span class="tk">--ease-page</span><span class="d">Decelerate — screen &amp; block entrances</span><span class="track"><i></i></span></div>
+    <div class="mo"><span class="tk">--dur-fast · 140</span><span class="d">Control hover / small state flip</span></div>
+    <div class="mo"><span class="tk">--dur-base · 240</span><span class="d">Default transition · layout shift</span></div>
+    <div class="mo"><span class="tk">--dur-page · 400</span><span class="d">A screen enters</span></div>
+    <div class="mo"><span class="tk">--dur-slow · 520</span><span class="d">Large data reveal — bars, gauges, timelines</span></div>
   </div>
+  <p class="note">Staggered blocks share <code>--stagger 62ms</code>; the global <code>.enter</code> keyframe
+  (rise + fade) replaces every per-component entrance. All motion respects <code>prefers-reduced-motion</code>.</p>
 </body>
 </html>

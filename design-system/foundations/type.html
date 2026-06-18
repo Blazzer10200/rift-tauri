@@ -1,74 +1,68 @@
-<!-- @dsCard group="Foundations" name="Typography" subtitle="Inter UI / JetBrains mono, 11–22px scale, weights & section labels" -->
+<!-- @dsCard group="Foundations" name="Typography" subtitle="Inter UI / JetBrains Mono · 11–22px scale · weights · section labels" -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Rift — Typography</title>
+<link rel="stylesheet" href="../styles.css" />
 <style>
-  :root {
-    --bg: oklch(0.142 0.003 250);
-    --bg-elev-1: oklch(0.215 0.004 250);
-    --border: oklch(0.300 0.006 255);
-    --fg: oklch(0.925 0.004 250);
-    --fg-2: oklch(0.825 0.008 255);
-    --fg-muted: oklch(0.700 0.013 258);
-    --fg-subtle: oklch(0.545 0.016 262);
-    --fg-faint: oklch(0.430 0.010 260);
-    --accent: oklch(0.78 0.15 163);
-    --font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-    --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
-    --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px; --fs-2xl: 22px;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 32px; background: var(--bg); color: var(--fg);
-    font-family: var(--font-ui); font-size: 13px;
-    -webkit-font-smoothing: antialiased; letter-spacing: -0.005em;
-  }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .lede { color: var(--fg-muted); margin: 0 0 28px; max-width: 60ch; }
-  .section-label {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--fg-faint); margin: 28px 0 14px;
-  }
-  .section-label::after { content: ""; flex: 1; height: 1px;
-    background: linear-gradient(to right, color-mix(in oklch, var(--border) 80%, transparent), transparent); }
-  .row { display: flex; align-items: baseline; gap: 16px; padding: 10px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
-  .tok { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); width: 88px; flex-shrink: 0; }
-  .specimen { color: var(--fg); }
-  .weights { display: flex; gap: 24px; flex-wrap: wrap; }
-  .weights div { font-size: 18px; }
-  .mono-sample { font-family: var(--font-mono); font-size: 13px; color: var(--fg-2);
-    background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .families { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .fam { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; background: var(--surface); }
+  .fam .label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); font-weight: 600; }
+  .fam .stack { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); margin-top: 4px; }
+  .fam .sample { font-size: 30px; font-weight: 600; margin-top: 12px; letter-spacing: -0.02em; }
+  .fam.m .sample { font-family: var(--font-mono); letter-spacing: 0; font-weight: 500; }
+
+  .scale { display: flex; flex-direction: column; gap: 4px; }
+  .sc { display: flex; align-items: baseline; gap: 16px; padding: 6px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent); }
+  .sc .px { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); width: 92px; flex: none; }
+  .weights { display: flex; gap: 22px; flex-wrap: wrap; }
+  .wt { font-size: 22px; }
+  .wt span { display: block; font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); margin-top: 2px; }
 </style>
 </head>
 <body>
   <h1>Typography</h1>
-  <p class="lede"><b>Inter</b> drives the UI (with <code>cv02/cv03/cv04/cv11/ss01</code> features, ligatures off);
-  <b>JetBrains Mono</b> for code, tokens, and keycaps. Compact 13px base, tight −0.005em tracking.</p>
+  <p class="lede">Two families: <code>Inter</code> for all UI (with OpenType features <code>cv02 cv03 cv04 cv11 ss01</code>
+  and tight <code>-0.005em</code> tracking) and <code>JetBrains Mono</code> for code, paths, numerics and keycaps.
+  A compact six-step pixel scale carries the whole product.</p>
 
-  <div class="section-label">Scale</div>
-  <div class="row"><div class="tok">--fs-2xl</div><div class="specimen" style="font-size:var(--fs-2xl);font-weight:600">22 · Page hero title</div></div>
-  <div class="row"><div class="tok">--fs-xl</div><div class="specimen" style="font-size:var(--fs-xl);font-weight:600">18 · Section heading</div></div>
-  <div class="row"><div class="tok">--fs-lg</div><div class="specimen" style="font-size:var(--fs-lg)">15 · Emphasized body</div></div>
-  <div class="row"><div class="tok">--fs-md</div><div class="specimen" style="font-size:var(--fs-md)">13 · Default body &amp; controls</div></div>
-  <div class="row"><div class="tok">--fs-sm</div><div class="specimen" style="font-size:var(--fs-sm);color:var(--fg-2)">12 · Buttons, dense rows</div></div>
-  <div class="row"><div class="tok">--fs-xs</div><div class="specimen" style="font-size:var(--fs-xs);color:var(--fg-muted)">11 · Captions, help, pills</div></div>
-
-  <div class="section-label">Weights · Inter</div>
-  <div class="weights">
-    <div style="font-weight:400">Regular 400</div>
-    <div style="font-weight:500">Medium 500</div>
-    <div style="font-weight:600">Semibold 600</div>
-    <div style="font-weight:700">Bold 700</div>
+  <div class="section-label">Families</div>
+  <div class="families">
+    <div class="fam">
+      <div class="label">UI · --font-ui</div>
+      <div class="stack">"Inter", "Segoe UI", system-ui</div>
+      <div class="sample">What's next for rift-tauri?</div>
+    </div>
+    <div class="fam m">
+      <div class="label">Mono · --font-mono</div>
+      <div class="stack">"JetBrains Mono", "Cascadia Code"</div>
+      <div class="sample">cargo check --release</div>
+    </div>
   </div>
 
-  <div class="section-label">Section label primitive</div>
-  <div class="section-label" style="margin:0">Recent conversations</div>
+  <div class="section-label">Scale</div>
+  <div class="scale">
+    <div class="sc"><span class="px">--fs-2xl · 22</span><span style="font-size:22px;font-weight:600;letter-spacing:-0.02em">Page hero titles</span></div>
+    <div class="sc"><span class="px">--fs-xl · 18</span><span style="font-size:18px;font-weight:700">Conversation headings</span></div>
+    <div class="sc"><span class="px">--fs-lg · 15</span><span style="font-size:15px">Emphasis &amp; large rows</span></div>
+    <div class="sc"><span class="px">--fs-md · 13</span><span style="font-size:13px">Body / default UI text</span></div>
+    <div class="sc"><span class="px">--fs-sm · 12</span><span style="font-size:12px;color:var(--fg-2)">Controls, tabs, chips</span></div>
+    <div class="sc"><span class="px">--fs-xs · 11</span><span style="font-size:11px;color:var(--fg-muted)">Captions, eyebrows, metadata</span></div>
+  </div>
 
-  <div class="section-label">Mono</div>
-  <div class="mono-sample">const turn = spawn("claude", ["--allowed-tools", BUILTINS]);<br>// DesignSync · finalize_plan → write_files</div>
+  <div class="section-label">Weights</div>
+  <div class="weights">
+    <div class="wt" style="font-weight:400">Regular<span>400</span></div>
+    <div class="wt" style="font-weight:500">Medium<span>500</span></div>
+    <div class="wt" style="font-weight:600">Semibold<span>600</span></div>
+    <div class="wt" style="font-weight:700">Bold<span>700</span></div>
+  </div>
+
+  <div class="section-label">Section label</div>
+  <div class="section-label" style="margin:0">Recent · the canonical eyebrow</div>
+  <p class="note">10px / 600 / uppercase / <code>0.08em</code> tracking in <code>--fg-faint</code>, with a trailing
+  gradient rule. Used by Settings sections, the chat landing (RECENT / TRY ASKING), and the model picker.</p>
 </body>
 </html>

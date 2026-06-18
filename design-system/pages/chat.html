@@ -1,0 +1,172 @@
+<!-- @dsCard group="Pages" name="Chat" subtitle="Conversation workspace — titlebar nav, tab strip + context gauge, tool chips & headings, applied footer, composer" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rift — Chat</title>
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { padding: 0; height: 800px; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ── titlebar (shared chrome) ── */
+  .tb { display: grid; grid-template-columns: auto 1fr auto; align-items: center; height: 34px; background: var(--bg-elev-1); border-bottom: 1px solid var(--border-strong); padding-left: 12px; flex: none; }
+  .tb .l { display: flex; align-items: center; gap: 8px; }
+  .brand { display: inline-flex; align-items: center; gap: 8px; }
+  .brand .mk { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, var(--accent), oklch(0.6 0.12 250)); }
+  .brand .app { font-weight: 600; letter-spacing: -0.01em; }
+  .nav-sep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 4px; }
+  .topnav { display: flex; gap: 2px; }
+  .navitem { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border-radius: 8px; color: var(--fg-muted); font-size: var(--fs-xs); font-weight: 500; }
+  .navitem.on { background: var(--accent-soft); color: var(--accent); }
+  .navitem .ex { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 55%, transparent); }
+  .cmdk { display: inline-flex; align-items: center; gap: 8px; width: 100%; max-width: 300px; height: 26px; margin: 0 auto; padding: 0 8px 0 10px; background: var(--field); border: 1px solid var(--field-border); border-radius: 8px; color: var(--fg-subtle); font-size: var(--fs-xs); }
+  .cmdk .kb { margin-left: auto; display: inline-flex; gap: 3px; }
+  .cmdk .kb b { font-family: var(--font-mono); font-size: 10px; font-weight: 500; color: var(--fg-muted); background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; }
+  .tb .r { display: flex; align-items: center; gap: 6px; }
+  .ntog { width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--fg-subtle); }
+  .winctl { display: flex; margin-left: 4px; }
+  .winctl span { width: 38px; height: 34px; display: grid; place-items: center; color: var(--fg-muted); }
+  .ic { stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ── tab strip ── */
+  .tabstrip { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; background: var(--bg); border-bottom: 1px solid var(--border); flex: none; }
+  .tab { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px 0 11px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border-strong); font-size: 12px; color: var(--fg); }
+  .tab .ti { color: var(--accent); display: inline-flex; }
+  .tab .tx { color: var(--fg-faint); display: grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; }
+  .tab-add { width: 24px; height: 24px; display: grid; place-items: center; border-radius: var(--radius); color: var(--fg-subtle); }
+  .ts-right { margin-left: auto; display: inline-flex; align-items: center; gap: 10px; }
+  .ws-pill { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--fg-2); }
+  .ctx-warn { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; }
+  .gauge { display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+  .gauge .bar { width: 46px; height: 5px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
+  .gauge .bar i { display: block; height: 100%; width: 73%; background: linear-gradient(90deg, var(--warn), oklch(0.78 0.16 50)); }
+  .ptog { width: 24px; height: 24px; display: grid; place-items: center; color: var(--fg-subtle); }
+
+  /* ── conversation ── */
+  .convo { flex: 1; min-height: 0; overflow: hidden; position: relative; display: flex; flex-direction: column; }
+  .stream { flex: 1; overflow: hidden; padding: 20px 0 12px; }
+  .turn { max-width: 720px; margin: 0 auto; padding: 0 24px; position: relative; }
+  .thought { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--fg-subtle); margin-bottom: 4px; }
+  .gutter { position: absolute; left: 2px; top: 36px; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-size: 10px; font-weight: 700; }
+  .turn p { color: var(--fg-2); line-height: 1.6; margin: 10px 0; font-size: 14px; }
+  .turn h2 { font-size: 17px; font-weight: 700; margin: 18px 0 4px; display: flex; align-items: center; gap: 8px; }
+  .turn h2::before { content: ""; width: 3px; height: 15px; border-radius: 2px; background: var(--accent); }
+  .turn ul { margin: 6px 0; padding-left: 18px; }
+  .turn li { color: var(--fg-2); line-height: 1.6; font-size: 13.5px; margin: 3px 0; }
+  .turn li::marker { color: var(--accent); }
+  .gp { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
+
+  .chip { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0; padding: 3px 10px; border-radius: 5px; background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); border-left: 2px solid color-mix(in oklab, var(--accent) 48%, var(--border)); font-size: 11px; color: var(--fg-2); }
+  .chip .cv { color: var(--fg-muted); } .chip .ci { color: var(--accent); }
+  .chip .tool { font-weight: 600; font-size: 10.5px; } .chip .dur { color: var(--fg-faint); font-family: var(--font-mono); font-size: 10px; }
+
+  pre.code { margin: 10px 0; padding: 12px 14px; border-radius: var(--radius-lg); background: var(--bg-inset); border: 1px solid var(--border); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: var(--fg-2); }
+  pre.code .m { color: var(--fg-faint); } pre.code .a { color: var(--ok); }
+
+  .applied { display: flex; align-items: center; gap: 12px; margin: 16px 0 4px; padding: 9px 14px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--ok) 7%, var(--surface)); border: 1px solid color-mix(in oklab, var(--ok) 26%, var(--border)); font-size: 12px; }
+  .applied .ok { color: var(--ok); font-weight: 650; display: inline-flex; align-items: center; gap: 6px; }
+  .applied .plus { color: var(--ok); font-family: var(--font-mono); } .applied .minus { color: var(--danger); font-family: var(--font-mono); }
+  .applied .meta { color: var(--fg-subtle); font-family: var(--font-mono); }
+  .applied .acts { margin-left: auto; display: inline-flex; gap: 8px; }
+  .applied .acts button { height: 28px; padding: 0 11px; border-radius: var(--radius); font: inherit; font-size: 11px; font-weight: 600; border: 1px solid var(--border); background: var(--surface); color: var(--fg-2); display: inline-flex; align-items: center; gap: 6px; }
+  .applied .acts .bypass { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+
+  /* ── environment float ── */
+  .envfloat { position: absolute; top: 8px; right: 16px; display: inline-flex; align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 4px 16px -6px rgb(0 0 0 / 0.4); overflow: hidden; z-index: 5; }
+  .envfloat .m { display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px; font-size: 11px; color: var(--fg); }
+  .envfloat .m svg { color: var(--fg-subtle); }
+  .envfloat .b { font-weight: 600; } .envfloat .plus { color: var(--ok); } .envfloat .minus { color: var(--danger); }
+  .envfloat .x { display: grid; place-items: center; width: 24px; align-self: stretch; border-left: 1px solid var(--border); color: var(--fg-subtle); }
+
+  /* ── composer ── */
+  .composer { flex: none; max-width: 720px; width: 100%; margin: 0 auto 16px; padding: 0 24px; }
+  .composer-inner { border: 1px solid var(--border-strong); border-radius: var(--radius-xl); background: var(--bg-inset); box-shadow: var(--shadow); overflow: hidden; }
+  .ctext { padding: 13px 16px 6px; color: var(--fg-subtle); font-size: 14px; min-height: 38px; }
+  .crow { display: flex; align-items: center; gap: 8px; padding: 6px 10px; }
+  .crow .ico { width: 30px; height: 30px; border-radius: var(--radius); display: grid; place-items: center; color: var(--fg-subtle); }
+  .crow .grow { flex: 1; }
+  .perm-pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-size: 11px; font-weight: 600; }
+  .model-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border-radius: var(--radius); background: var(--surface); border: 1px solid var(--border); font-size: 12px; color: var(--fg-2); }
+  .model-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); } .model-pill .eff { color: var(--fg-faint); }
+  .csend { width: 38px; height: 30px; border-radius: var(--radius); background: var(--accent); color: var(--accent-fg); display: grid; place-items: center; box-shadow: var(--shadow-sm); }
+</style>
+</head>
+<body>
+  <!-- titlebar -->
+  <div class="tb">
+    <div class="l">
+      <span class="brand"><span class="mk"></span><span class="app">Rift</span></span>
+      <span class="nav-sep"></span>
+      <nav class="topnav">
+        <span class="navitem"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</span>
+        <span class="navitem on"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</span>
+        <span class="navitem"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>Local LLM<span class="ex"></span></span>
+      </nav>
+    </div>
+    <div class="cmdk"><svg class="ic" width="13" height="13" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><span>Search or run a command…</span><span class="kb"><b>Ctrl</b><b>K</b></span></div>
+    <div class="r">
+      <span class="ntog"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg></span>
+      <span class="ntog"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1z"/></svg></span>
+      <span class="winctl"><span>—</span><span>▢</span><span>✕</span></span>
+    </div>
+  </div>
+
+  <!-- tab strip -->
+  <div class="tabstrip">
+    <span class="tab"><span class="ti"><svg class="ic" width="13" height="13" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>Rift Claude Design Work<span class="tx">✕</span></span>
+    <span class="tab-add">+</span>
+    <div class="ts-right">
+      <span class="ws-pill"><svg class="ic" width="12" height="12" viewBox="0 0 24 24"><path d="M3 7h7l2 2h9v9a2 2 0 0 1-2 2H3z"/></svg>rift-tauri</span>
+      <span class="ctx-warn">⚠ Context filling up (Ctrl+T)</span>
+      <span class="gauge"><span class="bar"><i></i></span>146K / 200K · 73%</span>
+      <span class="ptog"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></svg></span>
+    </div>
+  </div>
+
+  <!-- conversation -->
+  <div class="convo">
+    <div class="envfloat"><span class="m"><svg class="ic" width="13" height="13" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="8" r="3"/><path d="M6 9v6M18 11a6 6 0 0 1-6 6H9"/></svg><span class="b">main</span> <span class="plus">+376</span> <span class="minus">−532</span></span><span class="x">✕</span></div>
+    <div class="stream">
+      <div class="turn">
+        <span class="gutter">✦</span>
+        <div class="thought"><svg class="ic" width="12" height="12" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 1 4 10.5c-.7.7-1 1.2-1 2.5H9c0-1.3-.3-1.8-1-2.5A6 6 0 0 1 12 3z"/></svg>Thought for 3s</div>
+        <p>Docs updated. Final state check before you head off:</p>
+        <div class="chip"><span class="cv">▸</span><span class="ci"><svg class="ic" width="12" height="12" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg></span><span class="tool">Bash</span> Show uncommitted state + final word count <span class="dur">2.2s</span></div>
+        <p>All set on my end. Here's the wrap-up:</p>
+        <h2>Docs — updated</h2>
+        <ul>
+          <li><span class="gp">docs/HANDOFF.md</span> — added <strong>cont.167</strong>: Home redesign port, CDP-verified, DesignSync sync state.</li>
+          <li><span class="gp">design-system/README.md</span> — documents styles.css + the chosen Home pointer.</li>
+          <li><span class="gp">CHANGELOG.md</span> — deliberately untouched (that's <span class="gp">/git-ship</span> territory).</li>
+        </ul>
+        <h2>Uncommitted (yours to commit)</h2>
+        <pre class="code"><span class="m"> M</span> design-system/README.md
+<span class="m"> M</span> src/lib/components/home/HomePage.svelte
+<span class="a">??</span> design-system/styles.css</pre>
+        <div class="applied">
+          <span class="ok"><svg class="ic" width="13" height="13" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>Applied automatically</span>
+          <span class="plus">+11</span> <span class="minus">−3</span>
+          <span class="meta">⏱ 1m 53s · $1.87</span>
+          <span class="acts"><button>⤺ Review diff</button><button class="bypass">⟳ bypass</button></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- composer -->
+    <div class="composer">
+      <div class="composer-inner">
+        <div class="ctext">Ask Claude · <code style="color:var(--fg-muted);background:none;border:none">/</code> for commands · <code style="color:var(--fg-muted);background:none;border:none">@</code> to mention a file · hold Space to talk</div>
+        <div class="crow">
+          <span class="ico"><svg class="ic" width="16" height="16" viewBox="0 0 24 24"><path d="M21 15l-5-5L5 21M21 8a2 2 0 0 0-2-2h-2l-2-2H9L7 6H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2z"/></svg></span>
+          <span class="ico"><svg class="ic" width="16" height="16" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3"/></svg></span>
+          <span class="grow"></span>
+          <span class="perm-pill"><svg class="ic" width="13" height="13" viewBox="0 0 24 24"><path d="M18 8h1a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2h1M8 8V6a4 4 0 0 1 8 0v2"/></svg> Bypass permissions ▴</span>
+          <span class="model-pill"><span class="dot"></span>Opus 4.8 <span class="eff">Smart ▴</span></span>
+          <span class="csend"><svg class="ic" width="16" height="16" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

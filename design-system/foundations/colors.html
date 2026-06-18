@@ -1,112 +1,73 @@
-<!-- @dsCard group="Foundations" name="Color & Accent" subtitle="Surface stack, emerald accent ramp, status semantics, text ladder" -->
+<!-- @dsCard group="Foundations" name="Color & Accent" subtitle="Graphite-Ink surface stack · emerald accent ramp · status semantics · 5-step text ladder" -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Rift — Color &amp; Accent</title>
+<title>Rift — Color & Accent</title>
+<link rel="stylesheet" href="../styles.css" />
 <style>
-  :root {
-    --bg:            oklch(0.142 0.003 250);
-    --bg-inset:      oklch(0.178 0.004 250);
-    --bg-elev-1:     oklch(0.215 0.004 250);
-    --bg-elev-2:     oklch(0.262 0.005 250);
-    --bg-elev-3:     oklch(0.300 0.006 255);
-    --border:        oklch(0.300 0.006 255);
-    --border-strong: oklch(0.365 0.007 255);
-    --fg:            oklch(0.925 0.004 250);
-    --fg-2:          oklch(0.825 0.008 255);
-    --fg-muted:      oklch(0.700 0.013 258);
-    --fg-subtle:     oklch(0.545 0.016 262);
-    --fg-faint:      oklch(0.430 0.010 260);
-    --accent-h:      163;
-    --accent:        oklch(0.78 0.15 var(--accent-h));
-    --accent-hover:  oklch(0.86 0.13 var(--accent-h));
-    --accent-active: oklch(0.70 0.15 var(--accent-h));
-    --accent-soft:   oklch(0.78 0.15 var(--accent-h) / 0.12);
-    --ghost-border:  oklch(0.78 0.15 var(--accent-h) / 0.35);
-    --ok:            oklch(0.73 0.18 150);
-    --warn:          oklch(0.78 0.16 70);
-    --danger:        oklch(0.71 0.17 22);
-    --info:          oklch(0.76 0.13 230);
-    --font-ui: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-    --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 32px;
-    background:
-      radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%),
-      var(--bg);
-    color: var(--fg);
-    font-family: var(--font-ui);
-    font-size: 13px;
-    -webkit-font-smoothing: antialiased;
-    letter-spacing: -0.005em;
-  }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .lede { color: var(--fg-muted); font-size: 13px; margin: 0 0 28px; max-width: 60ch; }
-  .section-label {
-    display: flex; align-items: center; gap: 10px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--fg-faint); margin: 28px 0 14px;
-  }
-  .section-label::after { content: ""; flex: 1; height: 1px;
-    background: linear-gradient(to right, color-mix(in oklch, var(--border) 80%, transparent), transparent); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
-  .sw {
-    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
-    background: var(--bg-elev-1);
-  }
-  .chip { height: 64px; }
-  .meta { padding: 8px 10px; }
-  .name { font-size: 11.5px; font-weight: 600; color: var(--fg); }
-  .val { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 2px; }
-  .ramp { display: flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-  .ramp > div { flex: 1; height: 56px; display: flex; align-items: flex-end; padding: 6px;
-    font-family: var(--font-mono); font-size: 9px; color: oklch(0.25 0.05 163); }
-  .text-row { display: flex; flex-direction: column; gap: 6px; }
-  .text-row div { font-size: 15px; }
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  .sw { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); }
+  .sw .chip { height: 62px; }
+  .sw .meta { padding: 8px 10px; }
+  .sw .name { font-size: var(--fs-sm); font-weight: 600; }
+  .sw .val { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 2px; }
+  .sw .role { font-size: 10px; color: var(--fg-faint); margin-top: 3px; }
+
+  .ramp { display: flex; border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border); }
+  .ramp > div { flex: 1; height: 64px; display: flex; align-items: flex-end; padding: 7px; font-family: var(--font-mono); font-size: 10px; }
+
+  .ladder { display: flex; flex-direction: column; gap: 2px; }
+  .lad { display: flex; align-items: baseline; gap: 14px; padding: 7px 12px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
+  .lad .t { font-size: 15px; flex: 1; }
+  .lad .tk { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); }
 </style>
 </head>
 <body>
   <h1>Color &amp; Accent</h1>
-  <p class="lede">Graphite Ink — a true-neutral graphite surface stack, dark only, with a single themeable hue
-  (<code>--accent-h: 163</code>, emerald) driving the whole accent ramp. Solid accent is rare; everything else is ghost.</p>
+  <p class="lede">Dark-only, true-neutral graphite (<code>Graphite Ink</code>). One themeable hue
+  (<code>--accent-h</code>, emerald <code>163</code> by default) drives the entire accent ramp; status
+  colors are accent-independent and never recolor with the theme. Solid accent is rare — reserved for the
+  primary action; everything else is a ghost wash that only colors on hover.</p>
 
   <div class="section-label">Surface stack</div>
-  <div class="grid">
-    <div class="sw"><div class="chip" style="background:var(--bg)"></div><div class="meta"><div class="name">--bg</div><div class="val">window · 0.142</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--bg-inset)"></div><div class="meta"><div class="name">--bg-inset</div><div class="val">wells · 0.178</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--bg-elev-1)"></div><div class="meta"><div class="name">--bg-elev-1</div><div class="val">cards · 0.215</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--bg-elev-2)"></div><div class="meta"><div class="name">--bg-elev-2</div><div class="val">raised · 0.262</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--bg-elev-3)"></div><div class="meta"><div class="name">--bg-elev-3</div><div class="val">highest · 0.300</div></div></div>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:var(--bg)"></div><div class="meta"><div class="name">--bg</div><div class="val">oklch(0.142 .003 250)</div><div class="role">window</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--bg-inset)"></div><div class="meta"><div class="name">--bg-inset</div><div class="val">oklch(0.178 .004 250)</div><div class="role">wells · composer · code</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--bg-elev-1)"></div><div class="meta"><div class="name">--bg-elev-1</div><div class="val">oklch(0.215 .004 250)</div><div class="role">cards · --surface</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--bg-elev-2)"></div><div class="meta"><div class="name">--bg-elev-2</div><div class="val">oklch(0.262 .005 250)</div><div class="role">raised · hover</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--bg-elev-3)"></div><div class="meta"><div class="name">--bg-elev-3</div><div class="val">oklch(0.300 .006 255)</div><div class="role">highest · active</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--border);"></div><div class="meta"><div class="name">--border</div><div class="val">oklch(0.300 .006 255)</div><div class="role">hairline</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--border-strong)"></div><div class="meta"><div class="name">--border-strong</div><div class="val">oklch(0.365 .007 255)</div><div class="role">standard line</div></div></div>
   </div>
 
-  <div class="section-label">Accent ramp · emerald (h 163)</div>
+  <div class="section-label">Accent ramp — emerald</div>
   <div class="ramp">
-    <div style="background:var(--accent-active)">active</div>
-    <div style="background:var(--accent)">base</div>
-    <div style="background:var(--accent-hover)">hover</div>
-    <div style="background:var(--accent-soft); color:var(--accent)">soft 12%</div>
-    <div style="background:transparent; border-left:1px solid var(--ghost-border); color:var(--accent)">ghost</div>
+    <div style="background:var(--accent-soft);color:var(--accent)">soft .12</div>
+    <div style="background:var(--accent-active);color:var(--accent-fg)">active</div>
+    <div style="background:var(--accent);color:var(--accent-fg)">accent</div>
+    <div style="background:var(--accent-hover);color:var(--accent-fg)">hover</div>
+    <div style="background:var(--ghost-border);color:var(--fg)">ghost .35</div>
   </div>
+  <p class="note"><code>--accent-fg</code> is the dark ink used on top of solid accent. <code>--accent-soft</code> is
+  the default ghost fill; <code>--ring</code> (.45 alpha) is the focus ring on every control.</p>
 
-  <div class="section-label">Status semantics · accent-independent</div>
-  <div class="grid">
-    <div class="sw"><div class="chip" style="background:var(--ok)"></div><div class="meta"><div class="name">--ok</div><div class="val">h 150</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--warn)"></div><div class="meta"><div class="name">--warn</div><div class="val">h 70</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--danger)"></div><div class="meta"><div class="name">--danger</div><div class="val">h 22</div></div></div>
-    <div class="sw"><div class="chip" style="background:var(--info)"></div><div class="meta"><div class="name">--info</div><div class="val">h 230</div></div></div>
+  <div class="section-label">Status semantics — accent-independent</div>
+  <div class="swatches">
+    <div class="sw"><div class="chip" style="background:var(--ok-soft);color:var(--ok);display:flex;align-items:center;justify-content:center;font-weight:600">OK</div><div class="meta"><div class="name" style="color:var(--ok)">--ok</div><div class="val">oklch(0.73 .18 150)</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--warn-soft);color:var(--warn);display:flex;align-items:center;justify-content:center;font-weight:600">WARN</div><div class="meta"><div class="name" style="color:var(--warn)">--warn</div><div class="val">oklch(0.78 .16 70)</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--danger-soft);color:var(--danger);display:flex;align-items:center;justify-content:center;font-weight:600">DANGER</div><div class="meta"><div class="name" style="color:var(--danger)">--danger</div><div class="val">oklch(0.71 .17 22)</div></div></div>
+    <div class="sw"><div class="chip" style="background:var(--info-soft);color:var(--info);display:flex;align-items:center;justify-content:center;font-weight:600">INFO</div><div class="meta"><div class="name" style="color:var(--info)">--info</div><div class="val">oklch(0.76 .13 230)</div></div></div>
   </div>
 
   <div class="section-label">Text ladder</div>
-  <div class="text-row">
-    <div style="color:var(--fg)">--fg · primary reading text</div>
-    <div style="color:var(--fg-2)">--fg-2 · secondary</div>
-    <div style="color:var(--fg-muted)">--fg-muted · labels &amp; captions</div>
-    <div style="color:var(--fg-subtle)">--fg-subtle · help text</div>
-    <div style="color:var(--fg-faint)">--fg-faint · section headers</div>
+  <div class="ladder">
+    <div class="lad"><span class="t" style="color:var(--fg)">Primary — headings &amp; body</span><span class="tk">--fg · 0.925</span></div>
+    <div class="lad"><span class="t" style="color:var(--fg-2)">Secondary — long-form reading text</span><span class="tk">--fg-2 · 0.825</span></div>
+    <div class="lad"><span class="t" style="color:var(--fg-muted)">Muted — labels, captions, sublines</span><span class="tk">--fg-muted · 0.700</span></div>
+    <div class="lad"><span class="t" style="color:var(--fg-subtle)">Subtle — placeholders, metadata</span><span class="tk">--fg-subtle · 0.545</span></div>
+    <div class="lad"><span class="t" style="color:var(--fg-faint)">Faint — section eyebrows, hairline labels</span><span class="tk">--fg-faint · 0.430</span></div>
   </div>
 </body>
 </html>

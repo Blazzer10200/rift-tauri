@@ -1,0 +1,146 @@
+<!-- @dsCard group="Pages" name="Local LLM" subtitle="Experimental workspace — PageHero with toggle, mode card, endpoint/model two-column config, fidelity warning banner" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rift — Local LLM</title>
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { padding: 0; height: 800px; overflow: hidden; display: flex; flex-direction: column; }
+
+  /* titlebar (shared chrome) */
+  .tb { display: grid; grid-template-columns: auto 1fr auto; align-items: center; height: 34px; background: var(--bg-elev-1); border-bottom: 1px solid var(--border-strong); padding-left: 12px; flex: none; }
+  .tb .l { display: flex; align-items: center; gap: 8px; }
+  .brand { display: inline-flex; align-items: center; gap: 8px; }
+  .brand .mk { width: 18px; height: 18px; border-radius: 5px; background: linear-gradient(135deg, var(--accent), oklch(0.6 0.12 250)); }
+  .brand .app { font-weight: 600; letter-spacing: -0.01em; }
+  .nav-sep { width: 1px; height: 18px; background: var(--border-strong); margin: 0 4px; }
+  .topnav { display: flex; gap: 2px; }
+  .navitem { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 10px; border-radius: 8px; color: var(--fg-muted); font-size: var(--fs-xs); font-weight: 500; }
+  .navitem.on { background: var(--accent-soft); color: var(--accent); }
+  .navitem .ex { width: 6px; height: 6px; border-radius: 50%; background: var(--warn); box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 55%, transparent); }
+  .navitem.on .ex { background: var(--warn); }
+  .cmdk { display: inline-flex; align-items: center; gap: 8px; width: 100%; max-width: 300px; height: 26px; margin: 0 auto; padding: 0 8px 0 10px; background: var(--field); border: 1px solid var(--field-border); border-radius: 8px; color: var(--fg-subtle); font-size: var(--fs-xs); }
+  .cmdk .kb { margin-left: auto; display: inline-flex; gap: 3px; }
+  .cmdk .kb b { font-family: var(--font-mono); font-size: 10px; font-weight: 500; color: var(--fg-muted); background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; }
+  .tb .r { display: flex; align-items: center; gap: 6px; }
+  .ntog { width: 26px; height: 26px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--fg-subtle); }
+  .winctl { display: flex; margin-left: 4px; }
+  .winctl span { width: 38px; height: 34px; display: grid; place-items: center; color: var(--fg-muted); }
+  .ic { stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* page hero */
+  .sb-topbar { padding: 24px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 3%, var(--bg)), var(--bg) 120px); border-bottom: 1px solid var(--border); flex: none; }
+  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 860px; margin: 0 auto; padding-bottom: 24px; }
+  .sb-hero-l { display: flex; align-items: center; gap: 14px; }
+  .sb-hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .sb-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-subtle); }
+  .sb-hero-tt { font-size: 24px; font-weight: 760; letter-spacing: -0.025em; line-height: 1.1; margin-top: 1px; }
+  .sb-hero-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; max-width: 60ch; }
+  .sb-hero-r { display: flex; align-items: center; gap: 10px; flex: none; }
+  .lbl { font-size: 11px; color: var(--fg-muted); }
+  .toggle { width: 38px; height: 22px; border-radius: 999px; background: var(--track); border: 1px solid var(--border-strong); position: relative; flex: none; }
+  .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--fg-muted); }
+
+  /* body */
+  .body { flex: 1; overflow: hidden; }
+  .col { max-width: 860px; margin: 0 auto; padding: 22px 40px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-card); padding: 16px 18px; margin-bottom: 16px; }
+  .card-hd { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .card-tt { font-size: 14px; font-weight: 650; }
+  .card-sub { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 3px; max-width: 70ch; }
+
+  .twocol { display: grid; grid-template-columns: 1fr 1.3fr; gap: 16px; align-items: start; }
+  .flow { display: flex; flex-direction: column; gap: 0; }
+  .flow .st { display: flex; align-items: center; gap: 10px; }
+  .flow .node { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 13px; border-radius: 999px; background: var(--bg-elev-1); border: 1px solid var(--border-strong); font-size: 12px; color: var(--fg-2); }
+  .flow .node .d { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-faint); }
+  .flow .arrow { height: 16px; width: 1px; background: var(--border-strong); margin: 4px 0 4px 19px; }
+  .off-row { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-muted); margin-bottom: 14px; }
+  .off-row .o { width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--fg-faint); }
+
+  .field-label { display: block; font-size: var(--fs-xs); color: var(--fg-muted); margin-bottom: 5px; }
+  .input { height: 30px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-elev-1); color: var(--fg); font: inherit; font-family: var(--font-mono); font-size: var(--fs-sm); width: 100%; }
+  .input-row { display: flex; gap: 8px; }
+  .btn-detect { height: 30px; padding: 0 13px; border-radius: var(--radius-sm); background: var(--bg-elev-2); border: 1px solid var(--border-strong); color: var(--fg-2); font-size: var(--fs-sm); font-weight: 500; flex: none; }
+  .chiprow { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .gchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--bg-elev-1); border: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); }
+  .gchip.on { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+  .field-gap { margin-top: 14px; }
+
+  .warn-banner { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-lg); background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 28%, transparent); font-size: 12.5px; line-height: 1.5; color: color-mix(in oklab, var(--warn) 80%, var(--fg)); }
+  .warn-banner svg { color: var(--warn); flex: none; margin-top: 1px; }
+</style>
+</head>
+<body>
+  <!-- titlebar -->
+  <div class="tb">
+    <div class="l">
+      <span class="brand"><span class="mk"></span><span class="app">Rift</span></span>
+      <span class="nav-sep"></span>
+      <nav class="topnav">
+        <span class="navitem"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg>Home</span>
+        <span class="navitem"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Chat</span>
+        <span class="navitem on"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg>Local LLM<span class="ex"></span></span>
+      </nav>
+    </div>
+    <div class="cmdk"><svg class="ic" width="13" height="13" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg><span>Search or run a command…</span><span class="kb"><b>Ctrl</b><b>K</b></span></div>
+    <div class="r">
+      <span class="ntog"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg></span>
+      <span class="ntog"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1l-.4-2.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6c.1-.3.1-.7.1-1z"/></svg></span>
+      <span class="winctl"><span>—</span><span>▢</span><span>✕</span></span>
+    </div>
+  </div>
+
+  <!-- page hero -->
+  <div class="sb-topbar"><div class="sb-hero">
+    <div class="sb-hero-l">
+      <div class="sb-hero-ic"><svg class="ic" width="22" height="22" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg></div>
+      <div><div class="sb-eyebrow">Experimental</div><div class="sb-hero-tt">Local LLM</div><div class="sb-hero-sub">Route turns through a local Anthropic-compatible endpoint instead of your Claude session.</div></div>
+    </div>
+    <div class="sb-hero-r"><span class="lbl">Off</span><span class="toggle"></span></div>
+  </div></div>
+
+  <!-- body -->
+  <div class="body"><div class="col">
+    <div class="card">
+      <div class="card-hd">
+        <div><div class="card-tt">Local LLM mode</div><div class="card-sub">When on, Rift launches the CLI with <code>--bare</code> and points it at the endpoint below. Turn it off to fall back to your Claude session.</div></div>
+        <span class="toggle"></span>
+      </div>
+    </div>
+
+    <div class="twocol">
+      <div class="card">
+        <div class="off-row"><span class="o"></span>Local mode off</div>
+        <div class="flow">
+          <div class="st"><span class="node"><span class="d"></span>Rift</span></div>
+          <div class="arrow"></div>
+          <div class="st"><span class="node"><span class="d"></span>Endpoint</span></div>
+          <div class="arrow"></div>
+          <div class="st"><span class="node"><span class="d"></span>Local model</span></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-tt" style="margin-bottom:14px">Endpoint &amp; model</div>
+        <label class="field-label">Base URL</label>
+        <input class="input" value="http://localhost:11435" readonly />
+        <div class="chiprow"><span class="gchip on">Ollama</span><span class="gchip">LiteLLM</span><span class="gchip">llama.cpp</span></div>
+
+        <div class="field-gap">
+          <label class="field-label">Model</label>
+          <div class="input-row"><input class="input" value="qwen3.6-iq3-rift" readonly /><button class="btn-detect">Detect</button></div>
+          <div class="chiprow"><span class="gchip">Good for tools</span><span class="gchip">Qwen 3.6</span><span class="gchip">Devstral</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="warn-banner">
+      <svg class="ic" width="16" height="16" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/></svg>
+      <span>Tool-calling fidelity depends on the local model — small models may struggle with Rift's MCP tools (file reads, grep, git). Prefer a tool-tuned model and verify before trusting unattended runs.</span>
+    </div>
+  </div></div>
+</body>
+</html>

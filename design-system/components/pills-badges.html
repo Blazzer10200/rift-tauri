@@ -1,79 +1,48 @@
-<!-- @dsCard group="Components" name="Pills & badges" subtitle="Status pills with breathing dot · count pips · keycaps" -->
+<!-- @dsCard group="Components" name="Pills & Badges" subtitle="Status pills with breathing dot · count pips · keycaps · context gauge" -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Rift — Pills &amp; badges</title>
+<title>Rift — Pills &amp; Badges</title>
+<link rel="stylesheet" href="../styles.css" />
 <style>
-  :root {
-    --bg: oklch(0.142 0.003 250);
-    --bg-elev-2: oklch(0.262 0.005 250);
-    --bg-elev-3: oklch(0.300 0.006 255);
-    --border: oklch(0.300 0.006 255);
-    --border-strong: oklch(0.365 0.007 255);
-    --fg: oklch(0.925 0.004 250);
-    --fg-2: oklch(0.825 0.008 255);
-    --fg-muted: oklch(0.700 0.013 258);
-    --fg-faint: oklch(0.430 0.010 260);
-    --ok: oklch(0.73 0.18 150); --ok-soft: oklch(0.73 0.18 150 / 0.14);
-    --warn: oklch(0.78 0.16 70); --warn-soft: oklch(0.78 0.16 70 / 0.14);
-    --danger: oklch(0.71 0.17 22); --danger-soft: oklch(0.71 0.17 22 / 0.14);
-    --info: oklch(0.76 0.13 230); --info-soft: oklch(0.76 0.13 230 / 0.14);
-    --radius-xs: 4px;
-    --fs-xs: 11px;
-    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
-    --font-mono: "JetBrains Mono", Consolas, monospace;
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px;
+    border-radius: 999px; font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.01em;
+    border: 1px solid transparent;
   }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 32px; background: var(--bg); color: var(--fg);
-    font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; letter-spacing: -0.005em; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .lede { color: var(--fg-muted); margin: 0 0 24px; max-width: 64ch; }
-  .section-label { display: flex; align-items: center; gap: 10px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--fg-faint); margin: 24px 0 14px; }
-  .section-label::after { content: ""; flex: 1; height: 1px;
-    background: linear-gradient(to right, color-mix(in oklch, var(--border) 80%, transparent), transparent); }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-
-  .pill { display: inline-flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px;
-    border-radius: 999px; font-size: var(--fs-xs); font-weight: 500; letter-spacing: 0.01em; border: 1px solid transparent; }
-  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor;
-    box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); }
+  .pill .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); }
   .pill.ok .dot { animation: breathe 2.6s ease-in-out infinite; }
-  @keyframes breathe {
-    0%, 100% { box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); }
-    50%      { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 14%, transparent); }
-  }
-  .pill.ok    { color: var(--ok);     background: var(--ok-soft);     border-color: color-mix(in oklch, var(--ok) 30%, transparent); }
-  .pill.warn  { color: var(--warn);   background: var(--warn-soft);   border-color: color-mix(in oklab, var(--warn) 30%, transparent); }
-  .pill.danger{ color: var(--danger); background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 30%, transparent); }
-  .pill.info  { color: var(--info);   background: var(--info-soft);   border-color: color-mix(in oklch, var(--info) 30%, transparent); }
-  .pill.muted { color: var(--fg-muted); background: var(--bg-elev-2); border-color: var(--border); }
+  @keyframes breathe { 0%,100% { box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 22%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in oklch, currentColor 14%, transparent); } }
+  .pill.ok     { color: var(--ok);     background: var(--ok-soft);     border-color: color-mix(in oklch, var(--ok) 30%, transparent); }
+  .pill.warn   { color: var(--warn);   background: var(--warn-soft);   border-color: color-mix(in oklab, var(--warn) 30%, transparent); }
+  .pill.danger { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in oklab, var(--danger) 30%, transparent); }
+  .pill.info   { color: var(--info);   background: var(--info-soft);   border-color: color-mix(in oklch, var(--info) 30%, transparent); }
+  .pill.muted  { color: var(--fg-muted); background: var(--bg-elev-2); border-color: var(--border); }
 
-  .count-pip { display: inline-flex; align-items: center; justify-content: center;
-    min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px;
-    background: var(--bg-elev-3); color: var(--fg-2); font-size: 10px; font-weight: 600; }
+  .count-pip { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--bg-elev-3); color: var(--fg-2); font-size: 10px; font-weight: 600; }
   .count-pip.danger { background: var(--danger-soft); color: var(--danger); }
 
-  .kbd { display: inline-flex; align-items: center; justify-content: center;
-    min-width: 18px; height: 18px; padding: 0 5px; border: 1px solid var(--border-strong);
-    border-radius: var(--radius-xs); background: var(--bg-elev-2); color: var(--fg-2);
-    font-family: var(--font-mono); font-size: 10.5px; line-height: 1; }
+  .kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border: 1px solid var(--border-strong); border-radius: var(--radius-xs); background: var(--bg-elev-2); color: var(--fg-2); font-family: var(--font-mono); font-size: 10.5px; line-height: 1; }
+
+  .gauge { display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+  .gauge .bar { width: 46px; height: 5px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
+  .gauge .bar i { display: block; height: 100%; width: 73%; background: linear-gradient(90deg, var(--warn), oklch(0.78 0.16 50)); }
 </style>
 </head>
 <body>
-  <h1>Pills &amp; badges</h1>
-  <p class="lede">Status pills carry the four accent-independent semantics. The <b>ok</b> dot breathes (live/healthy);
-  the rest are static. Count pips mark tab counts; keycaps render shortcuts in mono.</p>
+  <h1>Pills &amp; Badges</h1>
+  <p class="lede">Small state carriers. Status pills use a soft semantic fill, a hairline tinted border, and a
+  6px dot — the <code>ok</code> dot breathes to signal "live". Count pips mark tab/queue counts; keycaps render
+  shortcuts; the context gauge tracks token budget.</p>
 
   <div class="section-label">Status pills</div>
   <div class="row">
-    <span class="pill ok"><span class="dot"></span>Connected</span>
-    <span class="pill warn"><span class="dot"></span>Rate limited</span>
-    <span class="pill danger"><span class="dot"></span>Error</span>
-    <span class="pill info"><span class="dot"></span>Updating</span>
+    <span class="pill ok"><span class="dot"></span>Still up</span>
+    <span class="pill info"><span class="dot"></span>Connected</span>
+    <span class="pill warn"><span class="dot"></span>Context filling</span>
+    <span class="pill danger"><span class="dot"></span>Reinstall needed</span>
     <span class="pill muted"><span class="dot"></span>Idle</span>
   </div>
 
@@ -87,8 +56,15 @@
   <div class="section-label">Keycaps</div>
   <div class="row">
     <span class="kbd">⌘</span><span class="kbd">K</span>
-    <span class="kbd">⇧</span><span class="kbd">⏎</span>
-    <span class="kbd">Esc</span>
+    <span style="color:var(--fg-faint);font-size:11px">·</span>
+    <span class="kbd">Ctrl</span><span class="kbd">T</span>
+    <span style="color:var(--fg-faint);font-size:11px">·</span>
+    <span class="kbd">⏎</span>
+  </div>
+
+  <div class="section-label">Context gauge</div>
+  <div class="row">
+    <span class="gauge"><span class="bar"><i></i></span>146K / 200K · 73%</span>
   </div>
 </body>
 </html>

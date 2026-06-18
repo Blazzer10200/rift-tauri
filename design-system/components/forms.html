@@ -1,0 +1,94 @@
+<!-- @dsCard group="Components" name="Forms & Controls" subtitle="Inputs · field label + help · segmented control · toggle · select · accent swatches" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rift — Forms &amp; Controls</title>
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start; }
+  .field-label { display: block; font-size: var(--fs-xs); color: var(--fg-muted); margin-bottom: 4px; letter-spacing: 0.01em; }
+  .input { height: 28px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-elev-1); color: var(--fg); font: inherit; font-size: var(--fs-md); width: 100%; }
+  .input.focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
+  .input.mono { font-family: var(--font-mono); font-size: var(--fs-sm); }
+  .help { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 4px; }
+
+  /* segmented control — the density / tab-width pattern */
+  .seg { display: inline-flex; padding: 2px; background: var(--track); border: 1px solid var(--border); border-radius: var(--radius); gap: 2px; }
+  .seg button { height: 24px; padding: 0 14px; border: 0; background: transparent; color: var(--fg-muted); font: inherit; font-size: var(--fs-sm); border-radius: var(--radius-sm); cursor: pointer; }
+  .seg button.on { background: var(--surface-active); color: var(--fg); box-shadow: var(--shadow-sm); }
+
+  /* toggle */
+  .toggle { width: 38px; height: 22px; border-radius: 999px; background: var(--track); border: 1px solid var(--border-strong); position: relative; cursor: pointer; transition: background 140ms var(--ease-soft); }
+  .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--fg-muted); transition: transform 140ms var(--ease-soft); }
+  .toggle.on { background: var(--accent); border-color: transparent; }
+  .toggle.on::after { transform: translateX(16px); background: var(--accent-fg); }
+
+  /* select */
+  .select { display: inline-flex; align-items: center; gap: 10px; height: 28px; padding: 0 8px 0 11px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-elev-1); color: var(--fg); font-size: var(--fs-sm); }
+  .select .cv { color: var(--fg-subtle); }
+
+  .ctl-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent); }
+  .ctl-row .t { font-size: var(--fs-md); font-weight: 500; }
+  .ctl-row .s { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 2px; }
+
+  .swatches { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .sw { height: 44px; border-radius: var(--radius); border: 1px solid var(--border); position: relative; display: grid; place-items: center; }
+  .sw.sel { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+  .sw .ck { color: oklch(0.2 0.05 163); }
+  .cv { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ck { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+  <h1>Forms &amp; Controls</h1>
+  <p class="lede">The input vocabulary used across Settings, Local LLM, and the composer. Form controls sit in
+  the card's lightness range (<code>--bg-elev-1</code> / <code>--field</code>), never the near-black
+  <code>--bg-inset</code> well. Focus is a 3px <code>--ring</code>. The selected segment lifts on
+  <code>--surface-active</code> with a small shadow; toggles fill solid accent when on.</p>
+
+  <div class="grid">
+    <div>
+      <div class="section-label" style="margin-top:8px">Text input</div>
+      <label class="field-label">Base URL</label>
+      <input class="input mono" value="http://localhost:11435" readonly />
+      <div class="help">Must speak the Anthropic <code>/v1/messages</code> API.</div>
+
+      <div class="section-label">Focused</div>
+      <input class="input focus" value="qwen3.6-iq3-rift" readonly />
+
+      <div class="section-label">Select</div>
+      <span class="select">12px <svg class="cv" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg></span>
+    </div>
+
+    <div>
+      <div class="section-label" style="margin-top:8px">Segmented control</div>
+      <div class="ctl-row"><div><div class="t">Density</div><div class="s">Spacing of rows and cards</div></div>
+        <span class="seg"><button class="on">Compact</button><button>Regular</button><button>Comfy</button></span></div>
+      <div class="ctl-row"><div><div class="t">Tab width</div><div class="s">Spaces per indentation level</div></div>
+        <span class="seg"><button class="on">2</button><button>4</button></span></div>
+      <div class="ctl-row" style="border-bottom:0"><div><div class="t">Font ligatures</div><div class="s">Render <code>≠ →</code> as joined glyphs</div></div>
+        <span class="toggle"></span></div>
+
+      <div class="section-label">Toggle states</div>
+      <div class="row"><span class="toggle"></span><span style="color:var(--fg-muted);font-size:12px">Off</span>
+        <span class="toggle on" style="margin-left:14px"></span><span style="color:var(--fg-muted);font-size:12px">On</span></div>
+    </div>
+  </div>
+
+  <div class="section-label">Accent swatch picker</div>
+  <div class="swatches">
+    <div class="sw sel" style="background:linear-gradient(135deg,oklch(0.78 0.15 163),oklch(0.7 0.15 163))"><svg class="ck" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.82 0.13 195),oklch(0.74 0.14 195))"></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.78 0.14 230),oklch(0.7 0.15 250))"></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.78 0.13 285),oklch(0.72 0.15 290))"></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.78 0.16 330),oklch(0.72 0.17 340))"></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.74 0.17 18),oklch(0.7 0.18 20))"></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.8 0.15 70),oklch(0.74 0.16 60))"></div>
+    <div class="sw" style="background:linear-gradient(135deg,oklch(0.82 0.16 130),oklch(0.76 0.17 135))"></div>
+  </div>
+  <p class="note">Emerald · Teal · Sky · Violet · Magenta · Rose · Amber · Lime — each re-themes the whole accent
+  ramp by swapping <code>--accent-h</code>. The selected swatch carries a double ring (page-gap + accent).</p>
+</body>
+</html>

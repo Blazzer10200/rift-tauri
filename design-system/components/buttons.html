@@ -1,53 +1,21 @@
-<!-- @dsCard group="Components" name="Buttons" subtitle="Default · primary · ghost · danger / warn / info · sm & xs sizes · states" -->
+<!-- @dsCard group="Components" name="Buttons" subtitle="One .btn base · primary / ghost / danger / warn / info · sm & xs · documented states" -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Rift — Buttons</title>
+<link rel="stylesheet" href="../styles.css" />
 <style>
-  :root {
-    --bg: oklch(0.142 0.003 250);
-    --surface: oklch(0.215 0.004 250);
-    --surface-hover: oklch(0.262 0.005 250);
-    --surface-active: oklch(0.300 0.006 255);
-    --border: oklch(0.300 0.006 255);
-    --border-strong: oklch(0.365 0.007 255);
-    --fg: oklch(0.925 0.004 250);
-    --fg-muted: oklch(0.700 0.013 258);
-    --fg-faint: oklch(0.430 0.010 260);
-    --accent: oklch(0.78 0.15 163);
-    --accent-hover: oklch(0.86 0.13 163);
-    --accent-fg: oklch(0.25 0.05 163);
-    --warn: oklch(0.78 0.16 70);
-    --warn-soft: oklch(0.78 0.16 70 / 0.14);
-    --danger: oklch(0.71 0.17 22);
-    --danger-soft: oklch(0.71 0.17 22 / 0.14);
-    --info: oklch(0.76 0.13 230);
-    --info-soft: oklch(0.76 0.13 230 / 0.14);
-    --ring: oklch(0.78 0.15 163 / 0.45);
-    --radius-sm: 6px;
-    --fs-xs: 11px; --fs-sm: 12px;
-    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; padding: 32px; background: var(--bg); color: var(--fg);
-    font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; letter-spacing: -0.005em; }
-  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
-  .lede { color: var(--fg-muted); margin: 0 0 24px; max-width: 64ch; }
-  .section-label { display: flex; align-items: center; gap: 10px;
-    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--fg-faint); margin: 24px 0 14px; }
-  .section-label::after { content: ""; flex: 1; height: 1px;
-    background: linear-gradient(to right, color-mix(in oklch, var(--border) 80%, transparent), transparent); }
-  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-
-  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     height: 26px; padding: 0 10px; border-radius: var(--radius-sm);
     border: 1px solid var(--border); background: var(--surface); color: var(--fg);
     font: inherit; font-size: var(--fs-sm); cursor: pointer;
-    transition: background 100ms ease, border-color 100ms ease, box-shadow 120ms ease, color 100ms ease; }
+    transition: background 100ms ease, border-color 100ms ease, box-shadow 120ms ease, color 100ms ease;
+  }
   .btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+  .btn:active { background: var(--surface-active); transform: translateY(1px); }
   .btn:disabled { cursor: not-allowed; opacity: 0.55; }
   .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
   .btn.primary:hover { background: var(--accent-hover); box-shadow: 0 4px 14px color-mix(in oklab, var(--accent) 22%, transparent); }
@@ -61,16 +29,16 @@
   .btn.info:hover { background: var(--info-soft); border-color: var(--info); color: var(--info); }
   .btn.sm { height: 22px; padding: 0 8px; font-size: var(--fs-xs); }
   .btn.xs { height: 20px; padding: 0 6px; font-size: var(--fs-xs); }
+  .btn.icon { width: 26px; padding: 0; }
   .btn.focus { box-shadow: 0 0 0 2px var(--ring); }
   .ic { width: 13px; height: 13px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-  .note { font-size: 11px; color: var(--fg-faint); margin-top: 8px; }
 </style>
 </head>
 <body>
   <h1>Buttons</h1>
-  <p class="lede">One <code>.btn</code> base with semantic + size modifiers. Solid accent is reserved for the
-  primary action (Send, one CTA per screen); every other action is quiet — neutral surface or ghost — and only
-  picks up color on hover.</p>
+  <p class="lede">One <code>.btn</code> base (26px, 6px radius) with semantic + size modifiers. Solid accent is
+  reserved for the single primary action per screen — Send, one CTA. Every other action stays quiet (neutral
+  surface or ghost) and only picks up its semantic color on hover.</p>
 
   <div class="section-label">Variants</div>
   <div class="row">
@@ -87,6 +55,7 @@
     <button class="btn">26px · base</button>
     <button class="btn sm">22px · sm</button>
     <button class="btn xs">20px · xs</button>
+    <button class="btn icon"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   </div>
 
   <div class="section-label">States</div>
@@ -96,6 +65,7 @@
     <button class="btn primary focus">Focus ring</button>
     <button class="btn" disabled>Disabled</button>
   </div>
-  <p class="note">Focus ring = <code>0 0 0 2px var(--ring)</code> on every interactive control (buttons, inputs, menu rows).</p>
+  <p class="note">Focus ring = <code>0 0 0 2px var(--ring)</code> on every interactive control. Active press
+  nudges <code>translateY(1px)</code>.</p>
 </body>
 </html>
