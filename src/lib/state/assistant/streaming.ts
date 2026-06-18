@@ -18,6 +18,14 @@
 import type { TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } from "./types";
 import { flattenToolResult, previewToolInput } from "./helpers";
+import { browserDock } from "../browserDock.svelte";
+
+// DesignSync writes land in the cloud claude.ai/design project — pop the
+// browser dock to it the first time a sync mutates this tab, so the result is
+// visible without the user hunting for it. Once-per-tab (WeakSet) so repeat
+// syncs in one conversation don't keep stealing the dock.
+const DESIGN_DOCK_OPENED = new WeakSet<TabState>();
+const DESIGN_WRITE_METHODS = new Set(["create_project", "write_files", "finalize_plan"]);
 
 /** Called at the start of every send(). Clears per-turn pacer / thinking
  *  / dedupe state and flips streaming on. */
@@ -401,6 +409,14 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   }
   const DENY = new Set(["ToolSearch"]);
   if (DENY.has(block.name)) return;
+  if (
+    block.name === "DesignSync" &&
+    !DESIGN_DOCK_OPENED.has(tab) &&
+    DESIGN_WRITE_METHODS.has(String(block.input?.method ?? ""))
+  ) {
+    DESIGN_DOCK_OPENED.add(tab);
+    browserDock.openUrl("https://claude.ai/design");
+  }
   tab.activity = {
     ...tab.activity,
     currentLabel: tab.shortToolLabel ? tab.shortToolLabel(block.name, block.input) : block.name,

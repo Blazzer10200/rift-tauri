@@ -96,6 +96,10 @@
     { name: "openincli", desc: "Print the claude --resume command for this session" },
     { name: "diag",      desc: "Copy full telemetry JSON to clipboard" },
     { name: "help",      desc: "List slash commands" },
+    // CLI passthrough (Claude Design) — runSlash doesn't match these, so they
+    // ride straight to the Claude CLI as skills. Listed here for discoverability.
+    { name: "design-sync",  desc: "Sync this workspace with a claude.ai/design project" },
+    { name: "design-login", desc: "Authorize Claude Design access (terminal sessions only)" },
   ];
 
   // Model picker rows — version + tagline + context window. The CLI takes
@@ -299,6 +303,15 @@
       stt.consume();
       settingsOpen = true;
       void tick().then(() => ta?.focus());
+      return;
+    }
+    // Claude Design rides the user's claude.ai login — it can't authenticate
+    // under local-LLM mode (--bare strips the cloud session). Warn instead of
+    // firing a turn that's doomed to fail at the design OAuth step.
+    if (c.name.startsWith("design-") && localLlm.enabled) {
+      notify.warn("Claude Design needs cloud Claude", {
+        detail: "Turn off local-LLM mode in Settings to sync with claude.ai/design.",
+      });
       return;
     }
     // Direct-fire commands skip the textarea round-trip entirely.

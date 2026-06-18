@@ -7,6 +7,7 @@
   import {
     Plus, Eraser, History, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
+    Palette, LogIn,
   } from "lucide-svelte";
 
   type Icon = typeof Plus;
@@ -39,6 +40,8 @@
     openincli: { icon: Terminal,      group: "Info" },
     diag:      { icon: ClipboardCopy, group: "Info" },
     help:      { icon: HelpCircle,    group: "Info" },
+    "design-sync":  { icon: Palette, group: "Design" },
+    "design-login": { icon: LogIn,   group: "Design" },
   };
   const groupOf = (name: string) => META[name]?.group ?? "Commands";
 
