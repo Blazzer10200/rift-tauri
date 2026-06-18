@@ -21,8 +21,11 @@ change, update the matching preview here.
 | `components/environment-float.html` | Components | `environment/EnvironmentFloat.svelte` |
 
 The first line of every preview is a `<!-- @dsCard group="…" name="…" subtitle="…" -->`
-marker — that drives the card index in the Design System pane (no explicit
-`register_assets` needed).
+marker. In theory that auto-builds the card index. **In practice it did NOT render
+on the cloud side (2026-06-18)** — files uploaded fine but the pane stayed "No cards
+yet" through hard refreshes. The fix that worked: an explicit `register_assets` call
+after `write_files`. So treat `register_assets` as **required**, not legacy — the
+`@dsCard` markers are kept as documentation + a fallback, not the load-bearing path.
 
 ## Sync workflow (in Rift)
 
@@ -33,8 +36,11 @@ Ordering is enforced: **read → finalize_plan → write/delete**.
 2. Edit / add previews under this directory.
 3. `finalize_plan` with the exact `writes` (+ `deletes`) — fires a permission prompt
    showing the path list and source dir.
-4. `write_files` with each `{ path, localPath }` — `localPath` is relative to the repo
-   root (the plan's `localDir`); the tool reads from disk and uploads directly.
+4. `write_files` with each `{ path, localPath }` — `localPath` is relative to the
+   plan's `localDir`; the tool reads from disk and uploads directly.
+5. `register_assets` (same `planId`, paths must be in the plan's `writes`) — **don't
+   skip this.** Without it the cards don't appear in the pane even though the files
+   uploaded. Each asset = `{ name, path, group, subtitle, viewport }`.
 
 Auth: rides the user's claude.ai login (design scopes are granted on first use) —
 no separate `/design-login` needed in Rift. Cloud-only; dead under local-LLM/`--bare`.
