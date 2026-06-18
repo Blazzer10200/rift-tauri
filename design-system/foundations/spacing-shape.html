@@ -1,0 +1,95 @@
+<!-- @dsCard group="Foundations" name="Spacing, Shape & Motion" subtitle="Radius ladder, density rows, elevation shadows, motion vocabulary" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rift — Spacing, Shape &amp; Motion</title>
+<style>
+  :root {
+    --bg: oklch(0.142 0.003 250);
+    --bg-elev-1: oklch(0.215 0.004 250);
+    --bg-elev-2: oklch(0.262 0.005 250);
+    --surface: oklch(0.215 0.004 250);
+    --border: oklch(0.300 0.006 255);
+    --border-strong: oklch(0.365 0.007 255);
+    --fg: oklch(0.925 0.004 250);
+    --fg-muted: oklch(0.700 0.013 258);
+    --fg-subtle: oklch(0.545 0.016 262);
+    --fg-faint: oklch(0.430 0.010 260);
+    --accent: oklch(0.78 0.15 163);
+    --radius-xs: 4px; --radius-sm: 6px; --radius: 8px; --radius-lg: 10px; --radius-xl: 12px; --radius-2xl: 16px;
+    --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
+    --shadow: 0 4px 14px oklch(0 0 0 / 0.45);
+    --shadow-lg: 0 24px 64px oklch(0 0 0 / 0.60);
+    --font-ui: "Inter", "Segoe UI", system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 32px; background: var(--bg); color: var(--fg);
+    font-family: var(--font-ui); font-size: 13px; -webkit-font-smoothing: antialiased; letter-spacing: -0.005em; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 4px; }
+  .lede { color: var(--fg-muted); margin: 0 0 28px; max-width: 60ch; }
+  .section-label { display: flex; align-items: center; gap: 10px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--fg-faint); margin: 28px 0 14px; }
+  .section-label::after { content: ""; flex: 1; height: 1px;
+    background: linear-gradient(to right, color-mix(in oklch, var(--border) 80%, transparent), transparent); }
+  .radii { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+  .radii figure { margin: 0; text-align: center; }
+  .radii .box { width: 72px; height: 72px; background: var(--bg-elev-2); border: 1px solid var(--border-strong); }
+  .radii figcaption { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 8px; }
+  .density { display: flex; flex-direction: column; gap: 14px; }
+  .drow { display: flex; align-items: center; gap: 12px; }
+  .drow .bar { background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    display: flex; align-items: center; padding: 0 10px; color: var(--fg-muted); font-size: 12px; }
+  .drow .tok { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); width: 130px; }
+  .shadows { display: flex; gap: 28px; flex-wrap: wrap; }
+  .shadows figure { margin: 0; text-align: center; }
+  .shadows .box { width: 120px; height: 72px; background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: 10px; }
+  .shadows figcaption { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 12px; }
+  .motion { display: grid; grid-template-columns: 130px 1fr; gap: 6px 16px; font-size: 12px; align-items: center; }
+  .motion .k { font-family: var(--font-mono); font-size: 10.5px; color: var(--accent); }
+  .motion .v { color: var(--fg-muted); }
+</style>
+</head>
+<body>
+  <h1>Spacing, Shape &amp; Motion</h1>
+  <p class="lede">Softened corners (Graphite Ink), a compact density default with two looser steps, layered
+  elevation shadows, and one shared motion vocabulary — reuse the curves, never hand-roll.</p>
+
+  <div class="section-label">Radius ladder</div>
+  <div class="radii">
+    <figure><div class="box" style="border-radius:var(--radius-xs)"></div><figcaption>xs · 4</figcaption></figure>
+    <figure><div class="box" style="border-radius:var(--radius-sm)"></div><figcaption>sm · 6</figcaption></figure>
+    <figure><div class="box" style="border-radius:var(--radius)"></div><figcaption>base · 8</figcaption></figure>
+    <figure><div class="box" style="border-radius:var(--radius-lg)"></div><figcaption>lg · 10</figcaption></figure>
+    <figure><div class="box" style="border-radius:var(--radius-xl)"></div><figcaption>xl · 12</figcaption></figure>
+    <figure><div class="box" style="border-radius:var(--radius-2xl)"></div><figcaption>2xl · 16</figcaption></figure>
+  </div>
+
+  <div class="section-label">Density · row height</div>
+  <div class="density">
+    <div class="drow"><div class="tok">compact (default)</div><div class="bar" style="height:26px">26px row · gap 6</div></div>
+    <div class="drow"><div class="tok">regular</div><div class="bar" style="height:30px">30px row · gap 9</div></div>
+    <div class="drow"><div class="tok">comfy</div><div class="bar" style="height:36px">36px row · gap 12</div></div>
+  </div>
+
+  <div class="section-label">Elevation</div>
+  <div class="shadows">
+    <figure><div class="box" style="box-shadow:var(--shadow-sm)"></div><figcaption>--shadow-sm</figcaption></figure>
+    <figure><div class="box" style="box-shadow:var(--shadow)"></div><figcaption>--shadow</figcaption></figure>
+    <figure><div class="box" style="box-shadow:var(--shadow-lg)"></div><figcaption>--shadow-lg</figcaption></figure>
+  </div>
+
+  <div class="section-label">Motion vocabulary</div>
+  <div class="motion">
+    <div class="k">--ease-page</div><div class="v">cubic-bezier(0.22, 1, 0.36, 1) · entrances, decelerate</div>
+    <div class="k">--ease-soft</div><div class="v">cubic-bezier(0.4, 0, 0.2, 1) · layout shifts</div>
+    <div class="k">--dur-fast</div><div class="v">140ms · control hover / small state flip</div>
+    <div class="k">--dur-base</div><div class="v">240ms · default transition</div>
+    <div class="k">--dur-page</div><div class="v">400ms · a screen enters</div>
+    <div class="k">--dur-slow</div><div class="v">520ms · large data reveal (bars, gauge)</div>
+  </div>
+</body>
+</html>
