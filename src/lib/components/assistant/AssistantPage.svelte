@@ -304,7 +304,8 @@
     min-height: 0;
     /* transparent so the app dot-field (.app::before) shows through on the
        home/conversation surface — spec `.csurf.is-home/.is-convo` are both
-       transparent. Settings/Local-LLM repaint their own opaque `.sb-main`. */
+       transparent. Settings/Local-LLM `.sb-main` are transparent too, so the
+       texture is continuous across every surface. */
     background: transparent;
     color: var(--fg);
   }
