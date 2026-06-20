@@ -80,31 +80,32 @@
   <div class="rift-menu-head">Model</div>
   {#each MODEL_OPTIONS as m, i (m.id)}
     {#if m.legacy && (i === 0 || !MODEL_OPTIONS[i - 1].legacy)}
-      <div class="rift-menu-sub">Legacy</div>
+      <div class="pop-label pop-label-sub">Legacy</div>
     {/if}
+    {@const sel = m.id === assistant.effectiveModel}
     <button
       type="button"
       role="menuitemradio"
-      aria-checked={m.id === assistant.effectiveModel}
-      class="rift-menu-row model-row"
+      aria-checked={sel}
+      class="pop-item rich model-row"
+      class:sel
       class:active={i === settingsIdx}
-      class:current={m.id === assistant.effectiveModel}
+      class:limited={m.limited}
       use:tooltip={m.tagline}
       onmousedown={(e) => { e.preventDefault(); onPickModel(m); }}
     >
-      <span class="rift-menu-row-body">
-        <span class="model-row-top">
-          <span class="rift-menu-row-t model-row-name" class:limited={m.limited}>{m.label} {m.version}</span>
-          {#if m.limited}<span class="model-badge">Until Jun 22</span>{/if}
+      <span class="pi-ic dot"><span class="model-dot"></span></span>
+      <span class="pi-text">
+        <span class="pi-name">
+          <span class="model-name">{m.label} {m.version}</span>
+          {#if m.limited}<span class="pi-tag accent">Until Jun 22</span>
+          {:else if m.suffix}<span class="pi-tag">{m.suffix}</span>{/if}
         </span>
-        <span class="model-row-sub">
-          <span class="model-blurb">{m.blurb}</span>
-          {#if m.suffix}<span class="model-suffix" class:legacy={m.legacy}>{m.suffix}</span>{/if}
-        </span>
+        <span class="pi-sub">{m.blurb}</span>
       </span>
       <span class="model-trail">
-        {#if m.id === assistant.effectiveModel}
-          <Check size={14} class="rift-menu-row-chk" />
+        {#if sel}
+          <Check size={15} class="pop-ck" />
         {:else}
           <kbd class="model-num">{modelShortcut(m.id)}</kbd>
         {/if}
@@ -219,60 +220,96 @@
   /* Unified settings panel — flat single-column list (Claude-Code-Desktop
      layout) on the shared .rift-menu chrome: model rows, a fast-mode toggle,
      and a Faster↔Smarter effort slider. Right-anchored, content-width. */
-  .settings-menu {
+  /* Panel — spec `.pop` glass popover (docs/design/rift-redesign.html). The
+     compound selector overrides the shared .rift-menu base chrome. */
+  .rift-menu.settings-menu {
     position: absolute;
-    bottom: calc(100% + 8px);
+    bottom: calc(100% + 9px);
     left: auto; right: 0;
-    width: 320px;
+    width: 320px; min-width: 264px;
     max-height: min(82vh, 600px);
     overflow-y: auto;
     z-index: 10;
-    animation: slash-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    padding: 7px; border-radius: 16px;
+    transform-origin: bottom right;
+    background: color-mix(in oklab, var(--bg-elev-2) 56%, transparent);
+    -webkit-backdrop-filter: blur(26px) saturate(1.6);
+    backdrop-filter: blur(26px) saturate(1.6);
+    border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+    box-shadow:
+      inset 0 1px 0 oklch(1 0 0 / 0.08),
+      0 28px 64px -28px oklch(0 0 0 / 0.7),
+      var(--shadow-lg);
+    animation: pop-in 0.26s var(--ease-page) both;
   }
-  @keyframes slash-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
+  @keyframes pop-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.96); }
+    to { opacity: 1; transform: none; }
   }
-  /* Model row — two lines: name + badge up top, blurb + right-aligned ctx
-     below, number shortcut / ✓ trailing. */
-  .model-row { align-items: center; gap: 8px; }
-  .model-row .model-row-top { display: flex; align-items: center; gap: 7px; min-width: 0; }
-  .model-row .model-row-name { flex: 0 0 auto; }
-  .model-row .model-row-sub {
-    display: flex; align-items: baseline; gap: 8px; min-width: 0;
+  /* spec section-label spacing on this panel's shared heads/subheads */
+  :global(.settings-menu .rift-menu-head) {
+    font-size: 10px; letter-spacing: 0.09em; color: var(--fg-faint); padding: 7px 9px 5px;
   }
-  .model-blurb {
-    flex: 1; min-width: 0;
-    font-size: 10.5px; color: var(--fg-subtle);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .pop-label-sub {
+    font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--fg-faint); padding: 9px 9px 4px;
   }
-  .model-row:hover .model-blurb, .model-row.active .model-blurb { color: var(--fg-muted); }
-  .model-suffix {
-    flex-shrink: 0;
-    font-size: 10px; font-weight: 600; color: var(--fg-faint);
-    font-variant-numeric: tabular-nums;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+
+  /* Rich two-line items — spec `.pop-item.rich` (model rows). */
+  .pop-item {
+    display: flex; align-items: center; gap: 11px; width: 100%;
+    padding: 9px 10px; border-radius: 11px; border: 0; background: transparent;
+    color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
+    transition: background var(--dur-fast);
   }
-  .model-suffix.legacy { color: var(--fg-faint); }
-  /* Limited-run row (Fable) — accent name + uppercase "until" chip. */
-  .model-row-name.limited { color: var(--accent); }
-  .model-badge {
-    flex-shrink: 0;
-    font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
-    line-height: 1; padding: 3px 6px; border-radius: 999px;
-    color: var(--accent);
+  .pop-item:hover, .pop-item.active { background: var(--surface-hover); color: var(--fg); }
+  .pi-ic {
+    flex: none; width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 9px; background: var(--surface); color: var(--fg-muted);
+    border: 1px solid var(--border);
+    transition: transform 0.34s var(--ease-page), background var(--dur-fast), border-color var(--dur-fast);
+  }
+  .pop-item:hover .pi-ic, .pop-item.active .pi-ic { border-color: var(--border-strong); transform: scale(1.06); }
+  .model-dot {
+    width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint);
+    transition: background var(--dur-fast), box-shadow var(--dur-fast);
+  }
+  .pi-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .pi-name { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; color: var(--fg-2); line-height: 1.2; }
+  .pi-name .model-name { flex: 0 0 auto; }
+  .pi-tag {
+    margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--fg-faint); font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .pi-tag.accent {
+    color: var(--accent); padding: 2px 6px; border-radius: 999px; text-transform: none; letter-spacing: 0.02em;
     background: color-mix(in oklab, var(--accent) 14%, transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
   }
-  .model-row.current .model-suffix { color: color-mix(in oklab, var(--accent) 65%, var(--fg-muted)); }
+  .pi-sub {
+    font-size: 11.5px; color: var(--fg-faint); line-height: 1.3;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .pop-item:hover .pi-name, .pop-item.active .pi-name { color: var(--fg); }
+  /* selected model — accent-soft slab + lit dot + tinted tile + checkmark */
+  .model-row.sel { background: var(--accent-soft); }
+  .model-row.sel .pi-name { color: var(--fg); }
+  .model-row.sel .pi-ic { background: color-mix(in oklab, var(--accent) 14%, transparent); border-color: transparent; }
+  .model-row.sel .model-dot,
+  .model-row.limited .model-dot {
+    background: var(--accent);
+    box-shadow: 0 0 7px color-mix(in oklab, var(--accent) 70%, transparent);
+  }
+  .model-row.limited .model-name { color: var(--accent); }
+  :global(.settings-menu .pop-ck) { flex: none; color: var(--accent); }
+
   /* Fixed-width trailing slot so the ✓ (selected) and the number badge
      (unselected) occupy identical space — selecting a row never reflows it. */
   .model-trail {
-    flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
-    width: 22px;
+    flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px;
   }
   .model-num {
-    flex-shrink: 0;
+    flex: none;
     font-family: var(--font-mono); font-size: 10px; font-weight: 600; line-height: 1;
     color: var(--fg-faint); background: var(--bg-inset);
     border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px;

@@ -89,3 +89,14 @@ export const MODE_OPTIONS: ModeOpt[] = [
   { id: "auto",              label: "Auto mode",        icon: Zap,           hint: "Auto mode — pick the best permission mode per task" },
   { id: "bypassPermissions", label: "Bypass permissions", icon: InfinityIcon, hint: "Bypass permissions — never ask before running anything" },
 ];
+
+// Per-mode semantic tone for the spec `.pop-item.tone-*` tinting + the composer
+// bar's perm-button tone (ok = safe automation, warn = guardrails off, info =
+// non-editing). Single source so the menu, the bar pill, and Composer agree.
+export type PermTone = "ok" | "warn" | "info" | "";
+export function permToneFor(id: PermissionMode): PermTone {
+  if (id === "acceptEdits" || id === "auto") return "ok";
+  if (id === "bypassPermissions") return "warn";
+  if (id === "plan") return "info";
+  return "";
+}

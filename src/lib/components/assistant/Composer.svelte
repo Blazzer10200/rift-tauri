@@ -21,7 +21,7 @@
   import PermMenu from "./composer/PermMenu.svelte";
   import {
     EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, FAST_MODE_WIRED,
-    effortStopsFor, clampEffortIdx,
+    effortStopsFor, clampEffortIdx, permToneFor,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
   import { stt } from "../../state/stt.svelte";
@@ -255,14 +255,9 @@
   // Permission-mode picker — option table in modelMatrix.ts (C7).
   const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
   const PermIcon = $derived(currentMode.icon);
-  // Flat-bar perm button tone (Claude-Code style): edits-flow → ok, bypass →
-  // warn, plan → info, ask → neutral. Drives `.cbtn.cperm.tone-*`.
-  const permTone = $derived(
-    currentMode.id === "acceptEdits" || currentMode.id === "auto" ? "ok"
-    : currentMode.id === "bypassPermissions" ? "warn"
-    : currentMode.id === "plan" ? "info"
-    : "",
-  );
+  // Flat-bar perm button tone — shared with the PermMenu rows (permToneFor) so
+  // the bar pill + popover can't disagree. Drives `.cbtn.cperm.tone-*`.
+  const permTone = $derived(permToneFor(currentMode.id));
   function pickMode(m: ModeOpt) {
     assistant.setPermissionMode(m.id);
     permOpen = false;
