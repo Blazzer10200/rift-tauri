@@ -32,6 +32,21 @@ export const VIVIDNESS_MIN = 0.05;
 export const VIVIDNESS_MAX = 0.26;
 const DEFAULT_VIVIDNESS = 0.15;
 
+// Screen tint — a full-viewport comfort-filter overlay (`.app-tint` in AppShell)
+// painted oklch(0.70 0.16 --tint-h) at --tint-a. Strength 0 = filter off.
+const TINT_HUE_KEY = "rift.ui.tint-hue.v1";
+const TINT_STRENGTH_KEY = "rift.ui.tint-strength.v1";
+export const TINT_MAX = 0.12;
+const DEFAULT_TINT_STRENGTH = 0.05;
+export const TINT_OPTS: { id: string; label: string; hue: number | null }[] = [
+  { id: "none", label: "None", hue: null },
+  { id: "amber", label: "Amber", hue: 70 },
+  { id: "sepia", label: "Sepia", hue: 45 },
+  { id: "rose", label: "Rose", hue: 18 },
+  { id: "sky", label: "Sky", hue: 232 },
+  { id: "mint", label: "Mint", hue: 158 },
+];
+
 // 8 curated accent hues — one hue drives the whole accent ramp via --accent-h.
 export type AccentSwatch = { id: string; label: string; hue: number };
 export const ACCENTS: AccentSwatch[] = [
@@ -53,6 +68,8 @@ class UiPrefs {
   accentHue = $state(163);
   vividness = $state(DEFAULT_VIVIDNESS);
   dotField = $state<DotField>("dots");
+  tintHue = $state(70);
+  tintStrength = $state(0);
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
   // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
   // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
@@ -80,6 +97,17 @@ class UiPrefs {
 
     const dotRaw = localStorage.getItem(DOTFIELD_KEY);
     if (dotRaw !== null && DOT_FIELD_IDS.has(dotRaw)) this.dotField = dotRaw as DotField;
+
+    const tintHueRaw = localStorage.getItem(TINT_HUE_KEY);
+    if (tintHueRaw !== null) {
+      const h = Number(tintHueRaw);
+      if (Number.isFinite(h) && h >= 0 && h <= 360) this.tintHue = h;
+    }
+    const tintStrRaw = localStorage.getItem(TINT_STRENGTH_KEY);
+    if (tintStrRaw !== null) {
+      const a = Number(tintStrRaw);
+      if (Number.isFinite(a)) this.tintStrength = Math.min(TINT_MAX, Math.max(0, a));
+    }
 
     try {
       const c = JSON.parse(localStorage.getItem(CODE_KEY) ?? "null");
@@ -132,6 +160,22 @@ class UiPrefs {
     localStorage.setItem(DOTFIELD_KEY, d);
   }
 
+  // Selecting a tint hue (or null = None). Picking a hue turns the filter on at
+  // a gentle default if it was off; None forces strength to 0 but keeps the hue.
+  setTintHue(h: number | null) {
+    if (h === null) { this.setTintStrength(0); return; }
+    this.tintHue = h;
+    localStorage.setItem(TINT_HUE_KEY, String(h));
+    if (this.tintStrength === 0) this.setTintStrength(DEFAULT_TINT_STRENGTH);
+    else this.applyTint();
+  }
+
+  setTintStrength(a: number) {
+    this.tintStrength = Math.min(TINT_MAX, Math.max(0, a));
+    localStorage.setItem(TINT_STRENGTH_KEY, String(this.tintStrength));
+    this.applyTint();
+  }
+
   setCode(patch: Partial<CodePrefs>) {
     this.code = { ...this.code, ...patch };
     localStorage.setItem(CODE_KEY, JSON.stringify(this.code));
@@ -150,6 +194,14 @@ class UiPrefs {
     this.applyRail();
     this.applyAccent();
     this.applyCode();
+    this.applyTint();
+  }
+
+  private applyTint() {
+    if (typeof document === "undefined") return;
+    const r = document.documentElement;
+    r.style.setProperty("--tint-h", String(this.tintHue));
+    r.style.setProperty("--tint-a", String(this.tintStrength));
   }
 
   private applyRail() {

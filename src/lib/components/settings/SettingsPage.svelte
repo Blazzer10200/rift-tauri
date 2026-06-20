@@ -14,7 +14,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX, TINT_OPTS, TINT_MAX } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -314,6 +314,42 @@
                     <span class="st-dot-label">{df.label}</span>
                   </button>
                 {/each}
+              </div>
+            </div>
+          </div>
+
+          <div class="st-block sb-s5">
+            <div class="st-block-label">Screen tint</div>
+            <div class="st-card">
+              <div class="st-tint-grid">
+                {#each TINT_OPTS as o (o.id)}
+                  {@const sel = o.hue === null ? uiPrefs.tintStrength === 0 : (uiPrefs.tintStrength > 0 && uiPrefs.tintHue === o.hue)}
+                  <button
+                    class="st-tint" class:on={sel} type="button"
+                    onclick={() => uiPrefs.setTintHue(o.hue)}
+                    aria-pressed={sel} use:tooltip={o.label}
+                  >
+                    <span class="st-tint-chip" class:none={o.hue === null}
+                      style={o.hue === null ? "" : `background: oklch(0.70 0.16 ${o.hue})`}></span>
+                    <span class="st-tint-lbl">{o.label}</span>
+                  </button>
+                {/each}
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Strength</div>
+                  <div class="st-row-desc">Intensity of the comfort filter over the whole window.</div>
+                </div>
+                <div class="st-row-ctl st-range-wrap">
+                  <input
+                    class="st-range" type="range"
+                    min="0" max={TINT_MAX} step="0.005"
+                    value={uiPrefs.tintStrength}
+                    oninput={(e) => uiPrefs.setTintStrength(Number(e.currentTarget.value))}
+                    aria-label="Screen tint strength"
+                  />
+                  <span class="st-range-val">{Math.round(uiPrefs.tintStrength / TINT_MAX * 100)}%</span>
+                </div>
               </div>
             </div>
           </div>
@@ -1110,6 +1146,18 @@
   .st-dot-swatch[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px); }
   .st-dot-swatch[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 62%); }
   .st-dot-swatch[data-dots="off"] { background-image: none; }
+
+  /* ── Appearance: screen-tint picker ── */
+  .st-tint-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 16px; }
+  .st-tint { position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 8px 4px 6px; background: transparent; border: 0; border-radius: 10px; cursor: pointer; font: inherit; transition: background .13s ease; }
+  .st-tint:hover { background: var(--surface-hover); }
+  .st-tint-chip { width: 100%; height: 42px; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--border); transition: box-shadow .15s ease, transform .12s ease; }
+  .st-tint-chip.none { background: var(--bg-inset); position: relative; }
+  .st-tint-chip.none::after { content: ""; position: absolute; left: 12%; right: 12%; top: 50%; height: 1.5px; background: var(--fg-faint); transform: rotate(-18deg); transform-origin: center; }
+  .st-tint:hover .st-tint-chip { transform: translateY(-1px); }
+  .st-tint.on .st-tint-chip { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+  .st-tint-lbl { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }
+  .st-tint.on .st-tint-lbl { color: var(--fg); }
 
   /* ── Keyboard shortcut table ── */
   .kbd-grid { display: flex; flex-direction: column; padding: 4px 0; }
