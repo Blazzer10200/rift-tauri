@@ -412,6 +412,15 @@
                   <button class="st-switch" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}></button>
                 </div>
               </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Stream view</div>
+                  <div class="st-row-desc">Render assistant turns as a boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div>
+                </div>
+                <div class="st-row-ctl">
+                  <button class="st-switch" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}></button>
+                </div>
+              </div>
             </div>
           </div>
 

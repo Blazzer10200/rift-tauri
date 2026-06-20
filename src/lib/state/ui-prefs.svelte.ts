@@ -6,6 +6,7 @@ const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
 const CODE_KEY = "rift.ui.code.v1";
 const FAST_MODE_KEY = "rift.ui.fast-mode.v1";
+const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
 const DOTFIELD_KEY = "rift.ui.dotfield.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
 
@@ -74,6 +75,9 @@ class UiPrefs {
   // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
   // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
   fastMode = $state(false);
+  // Stream mode = the Codex-flavored boxless turn render (Phase 4). Additive +
+  // default-off; the shipping MessageBubble path is untouched when false.
+  streamMode = $state(false);
 
   init() {
     if (typeof window === "undefined") return;
@@ -125,6 +129,7 @@ class UiPrefs {
     }
 
     this.fastMode = localStorage.getItem(FAST_MODE_KEY) === "1";
+    this.streamMode = localStorage.getItem(STREAM_MODE_KEY) === "1";
 
     this.apply();
   }
@@ -185,6 +190,11 @@ class UiPrefs {
   toggleFastMode() {
     this.fastMode = !this.fastMode;
     localStorage.setItem(FAST_MODE_KEY, this.fastMode ? "1" : "0");
+  }
+
+  toggleStreamMode() {
+    this.streamMode = !this.streamMode;
+    localStorage.setItem(STREAM_MODE_KEY, this.streamMode ? "1" : "0");
   }
 
 

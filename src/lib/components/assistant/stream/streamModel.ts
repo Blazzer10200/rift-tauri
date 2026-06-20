@@ -1,0 +1,246 @@
+// Phase 4 — Codex-flavored STREAM mode adapter. Maps the live `ChatMessage`
+// (Block[] from streaming.ts) onto the prototype `StreamTurn` render model
+// (app/stream.jsx). Boxless, text-first turn: a "Working for Ns" header,
+// collapsed reasoning, grouped tool lines, file-write batches, live footer.
+//
+// The live ToolBlock carries only { name, input, result, status, durationMs }
+// — no kind/cap/diff/plan/sources — so this derives kind+caption from the tool
+// name+input (mirroring ToolChip.svelte) and renders rich blocks (plan/web/
+// agent) from whatever input is available, degrading to the lean form when the
+// backend doesn't emit the extra metadata (sources, diff counts, pass/fail).
+
+import type { Block, ChatMessage, ToolBlock } from "$lib/state/assistant.svelte";
+
+export type TKind =
+  | "read" | "grep" | "edit" | "create" | "shell"
+  | "agent" | "web" | "fetch" | "test" | "lint" | "mcp" | "plan";
+
+export type PlanItem = { text: string; status: "done" | "active" | "todo" };
+
+export type StreamTool = {
+  id: string;
+  kind: TKind;
+  cap: string;
+  name: string;
+  status: "pending" | "done" | "error";
+  durSecs: number;
+  add: number | null;
+  del: number | null;
+  items?: PlanItem[]; // plan
+  query?: string; sources?: string[]; count?: number | null; // web/fetch
+  fail?: number | null; pass?: number | null; // test/lint
+  steps?: string[]; task?: string; result?: string | null; // agent
+};
+
+export type StreamBlock =
+  | { type: "say"; text: string }
+  | { type: "tool"; tool: StreamTool }
+  | { type: "steer"; text: string };
+
+export type TurnModel = {
+  blocks: StreamBlock[];
+  thinking: { active: boolean; durSecs: number; text: string } | null;
+  applied: { add: number | null; del: number | null; time: string; cost: string } | null;
+  totalSecs: number;
+};
+
+export type WorkSeg =
+  | { seg: "rich"; tool: StreamTool }
+  | { seg: "edit"; tools: StreamTool[] }
+  | { seg: "other"; tools: StreamTool[] };
+
+export type Group =
+  | { type: "work"; segs: WorkSeg[] }
+  | { type: "say"; text: string }
+  | { type: "steer"; text: string };
+
+// ── helpers (mirror ToolChip.svelte) ────────────────────────────────────────
+const shortName = (n: string) => n.replace(/^mcp__rift__/, "");
+const basename = (p: string) => p.split(/[\\/]/).pop() || p;
+const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+
+export function fmtDur(t: number): string {
+  t = Math.max(0, Math.round(t));
+  if (t < 60) return t + "s";
+  const m = Math.floor(t / 60), s = t % 60;
+  return m + "m" + (s ? " " + s + "s" : "");
+}
+
+function nameToKind(name: string): TKind {
+  const n = shortName(name);
+  if (n === "Read" || n === "read_file" || n === "list_dir" || n === "NotebookRead") return "read";
+  if (n === "Grep" || n === "grep" || n === "Glob") return "grep";
+  if (n === "Edit" || n === "MultiEdit" || n === "NotebookEdit") return "edit";
+  if (n === "Write") return "create";
+  if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
+  if (n === "Agent" || n === "Task") return "agent";
+  if (n === "WebSearch") return "web";
+  if (n === "WebFetch") return "fetch";
+  if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate") return "plan";
+  return "mcp";
+}
+
+function caption(tb: ToolBlock): string {
+  const n = shortName(tb.name);
+  const inp = tb.input ?? {};
+  const fp = typeof inp.file_path === "string" ? basename(inp.file_path)
+    : typeof inp.path === "string" ? basename(inp.path)
+    : typeof inp.notebook_path === "string" ? basename(inp.notebook_path) : null;
+  if (n === "Read" || n === "read_file") return fp ?? "file";
+  if (n === "Write") return fp ?? "file";
+  if (n === "Edit") return fp ?? "file";
+  if (n === "MultiEdit") {
+    const c = Array.isArray(inp.edits) ? inp.edits.length : 0;
+    return fp ? `${fp} · ${c} edits` : `${c} edits`;
+  }
+  if (n === "NotebookEdit") return fp ?? "notebook";
+  if (n === "Bash" || n === "remote_bash") return typeof inp.command === "string" ? trim(inp.command, 70) : "shell";
+  if (n === "Glob") {
+    const pat = typeof inp.pattern === "string" ? inp.pattern : "?";
+    const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+    return `${pat}${scope}`;
+  }
+  if (n === "Grep" || n === "grep") {
+    const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "?";
+    const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+    return `${pat}${scope}`;
+  }
+  if (n === "list_dir") return typeof inp.path === "string" ? inp.path : "directory";
+  if (n === "WebFetch") return typeof inp.url === "string" ? hostOf(inp.url) : "url";
+  if (n === "WebSearch") return typeof inp.query === "string" ? trim(inp.query, 50) : "search";
+  if (n === "Agent" || n === "Task") {
+    const sa = typeof inp.subagent_type === "string" ? inp.subagent_type : "task";
+    const desc = typeof inp.description === "string" ? ` · ${trim(inp.description, 40)}` : "";
+    return `${sa}${desc}`;
+  }
+  if (n === "TodoWrite") {
+    const c = Array.isArray(inp.todos) ? inp.todos.length : 0;
+    return `${c} task${c === 1 ? "" : "s"}`;
+  }
+  return n;
+}
+
+function planItems(tb: ToolBlock): PlanItem[] {
+  const raw = tb.input?.todos;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((t: Record<string, unknown>) => {
+      const text = typeof t.content === "string" ? t.content : "";
+      const s = t.status;
+      const status: PlanItem["status"] = s === "completed" ? "done" : s === "in_progress" ? "active" : "todo";
+      return { text, status };
+    })
+    .filter((t) => t.text.length > 0);
+}
+
+function adaptTool(tb: ToolBlock): StreamTool {
+  const kind = nameToKind(tb.name);
+  const durSecs = typeof tb.durationMs === "number" ? tb.durationMs / 1000 : 0;
+  const t: StreamTool = {
+    id: tb.id, kind, name: shortName(tb.name), cap: caption(tb),
+    status: tb.status, durSecs, add: null, del: null,
+  };
+  if (kind === "plan") t.items = planItems(tb);
+  if (kind === "web" || kind === "fetch") {
+    t.query = t.cap; t.sources = []; t.count = null;
+  }
+  if (kind === "agent") {
+    t.task = t.cap; t.steps = [];
+    t.result = tb.result && !tb.isError ? trim(tb.result.trim().split("\n")[0] ?? "", 90) : null;
+  }
+  return t;
+}
+
+// Map one live assistant ChatMessage → the StreamTurn render model.
+export function messageToTurn(m: ChatMessage): TurnModel {
+  const blocks: StreamBlock[] = [];
+  let thinkText: string[] = [];
+  let thinkSecs = 0;
+  let thinkActive = false;
+  let totalSecs = 0;
+
+  for (const b of m.blocks as Block[]) {
+    if (b.type === "text") {
+      if (b.text.trim()) blocks.push({ type: "say", text: b.text });
+    } else if (b.type === "thinking") {
+      if (b.text.trim()) thinkText.push(b.text.trim());
+      if (typeof b.durationMs === "number") { thinkSecs += b.durationMs / 1000; totalSecs += b.durationMs / 1000; }
+      if (b.status === "active") thinkActive = true;
+    } else if (b.type === "tool") {
+      const tool = adaptTool(b);
+      totalSecs += tool.durSecs;
+      blocks.push({ type: "tool", tool });
+    } else if (b.type === "steer") {
+      blocks.push({ type: "steer", text: b.text });
+    }
+    // boundary / image blocks are not part of a stream turn body
+  }
+
+  const thinking = (thinkText.length || thinkActive)
+    ? { active: thinkActive, durSecs: thinkSecs, text: thinkText.join("\n\n") }
+    : null;
+
+  const applied = typeof m.costUsd === "number" && m.costUsd > 0
+    ? { add: null, del: null, time: fmtDur(totalSecs), cost: `$${m.costUsd.toFixed(2)}` }
+    : null;
+
+  return { blocks, thinking, applied, totalSecs };
+}
+
+// Group consecutive tool blocks into work runs (say/steer pass through).
+export function groupBlocks(blocks: StreamBlock[]): Group[] {
+  const out: Group[] = [];
+  let work: StreamTool[] | null = null;
+  for (const b of blocks) {
+    if (b.type === "tool") {
+      if (!work) work = [];
+      work.push(b.tool);
+    } else {
+      if (work) { out.push({ type: "work", segs: segmentWork(work) }); work = null; }
+      out.push(b.type === "say" ? { type: "say", text: b.text } : { type: "steer", text: b.text });
+    }
+  }
+  if (work) out.push({ type: "work", segs: segmentWork(work) });
+  return out;
+}
+
+const isRich = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent";
+
+// Split a work run: rich tools each get their own block; edits batch; the rest
+// collapse to one quiet WorkLine. Order preserved.
+export function segmentWork(tools: StreamTool[]): WorkSeg[] {
+  const segs: WorkSeg[] = [];
+  let cur: { seg: "edit" | "other"; tools: StreamTool[] } | null = null;
+  for (const t of tools) {
+    if (isRich(t.kind)) { cur = null; segs.push({ seg: "rich", tool: t }); continue; }
+    const grp = t.kind === "edit" || t.kind === "create" ? "edit" : "other";
+    if (!cur || cur.seg !== grp) { cur = { seg: grp, tools: [] }; segs.push(cur); }
+    cur.tools.push(t);
+  }
+  return segs;
+}
+
+export function groupSummary(tools: StreamTool[]): string {
+  const kinds = new Set(tools.map((t) => t.kind));
+  const n = tools.length;
+  if (kinds.size === 1) {
+    const k = [...kinds][0];
+    if (k === "shell") return `Ran ${n} command${n > 1 ? "s" : ""}`;
+    if (k === "read") return `Read ${n} file${n > 1 ? "s" : ""}`;
+    if (k === "grep") return n > 1 ? `Searched ${n} times` : "Searched the repo";
+    if (k === "mcp") return `Ran ${n} tool${n > 1 ? "s" : ""}`;
+  }
+  return `Ran ${n} steps`;
+}
+
+export const VERB_PAST: Record<TKind, string> = {
+  read: "Read", grep: "Searched", edit: "Edited", create: "Created", shell: "Ran",
+  agent: "Delegated", web: "Searched the web", fetch: "Fetched", test: "Tested",
+  lint: "Checked", mcp: "Called", plan: "Planned",
+};
+export const VERB_ING: Record<TKind, string> = {
+  read: "Reading", grep: "Searching", edit: "Editing", create: "Creating", shell: "Running",
+  agent: "Delegating", web: "Searching the web", fetch: "Fetching", test: "Running tests",
+  lint: "Type-checking", mcp: "Calling", plan: "Planning",
+};

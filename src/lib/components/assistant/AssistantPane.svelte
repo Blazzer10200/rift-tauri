@@ -4,6 +4,8 @@
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
+  import StreamTurn from "./stream/StreamTurn.svelte";
+  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
   import SessionDiff from "./SessionDiff.svelte";
@@ -329,13 +331,20 @@
     {:else}
       <div class="messages" bind:this={messagesEl}>
         {#each messages as m, mi (m.id)}
-          <MessageBubble
-            message={m}
-            isLast={mi === messages.length - 1}
-            streaming={streaming
-              && mi === messages.length - 1
-              && m.role === "assistant"}
-          />
+          {#if uiPrefs.streamMode && m.role === "assistant"}
+            <StreamTurn
+              message={m}
+              streaming={streaming && mi === messages.length - 1}
+            />
+          {:else}
+            <MessageBubble
+              message={m}
+              isLast={mi === messages.length - 1}
+              streaming={streaming
+                && mi === messages.length - 1
+                && m.role === "assistant"}
+            />
+          {/if}
         {/each}
       </div>
     {/if}
