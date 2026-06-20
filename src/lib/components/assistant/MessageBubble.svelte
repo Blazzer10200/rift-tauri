@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle, Navigation, X, Ban } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, Navigation, X, Ban } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -503,30 +503,30 @@
           {@const open = expandedGroups.has(unit.key) !== defaultOpen}
           {@const groupMs = groupDurationMs(unit.blocks)}
           <div
-            class="tl-node tl-toolgroup"
+            class="tl-node work"
+            class:live={nodeStatus === "pending"}
             data-kind="tool"
             data-status={nodeStatus}
             data-open={open ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
-            <button class="tg-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
-              <span class="tg-chev" class:open><ChevronRight size={11} /></span>
-              {#if unit.stepNum}<span class="tg-num mono" aria-hidden="true">{unit.stepNum}</span>{/if}
-              <span class="tg-cap">{unit.caption ?? `${unit.blocks.length} tools`}</span>
-              <span class="tg-sep" aria-hidden="true">·</span>
-              <span class="tg-sum mono">{summarizeGroup(unit.blocks)}</span>
-              {#if groupMs > 0}<span class="tg-meta mono">{formatDurationMs(groupMs)}</span>{/if}
-              <span class="tg-status">
-                {#if unit.status === "pending"}<Loader2 size={11} class="tg-spin" />
-                {:else if unit.status === "error"}<AlertCircle size={11} />
-                {:else}<CheckCircle2 size={11} />{/if}
+            <button class="work-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
+              <span class="work-chev" class:open><ChevronRight size={12} /></span>
+              <span class="work-spark" aria-hidden="true"><Sparkles size={12} /></span>
+              <span class="work-sum">
+                <span class="work-sum-t">{unit.caption ?? `${unit.blocks.length} tools`}</span>
+                <span class="work-sum-s">{summarizeGroup(unit.blocks)}</span>
               </span>
+              {#if groupMs > 0}<span class="work-dur">{formatDurationMs(groupMs)}</span>{/if}
+              <span class="work-count">{unit.blocks.length}</span>
             </button>
             {#if open}
-              <div class="tg-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
-                {#each unit.blocks.filter((gb) => gb.type !== "thinking") as gb, gi (gb.type === "tool" ? gb.id : gi)}
-                  {@render renderBlock(gb, `tg_inner_${ui}_${gi}`)}
-                {/each}
+              <div class="work-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
+                <div class="work-rail">
+                  {#each unit.blocks.filter((gb) => gb.type !== "thinking") as gb, gi (gb.type === "tool" ? gb.id : gi)}
+                    {@render renderBlock(gb, `tg_inner_${ui}_${gi}`)}
+                  {/each}
+                </div>
               </div>
             {/if}
           </div>
@@ -1079,105 +1079,73 @@
      the spine, carrying a left status rail (quiet green when done, accent while
      running, loud red + tinted on error). Replaces the spine bullet so the rail
      isn't double-signalled. */
-  .tl-toolgroup {
+  /* Grouped work block (the agentic timeline) — ported 1:1 from the redesign
+     spec (.work / .work-head / .work-body / .work-rail). The card hangs free in
+     the turn (no spine bullet); live state pulses the spark, error tints border. */
+  .work {
     position: relative;
+    margin: 11px 0;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    border-radius: 11px;
     overflow: hidden;
-    transition: border-color 160ms ease-out, background 160ms ease-out;
+    background: color-mix(in oklab, var(--bg-elev-1) 60%, transparent);
+    transition: border-color var(--dur-fast);
   }
-  .tl-toolgroup::before { display: none; }
-  .tl-toolgroup::after {
-    content: "";
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 3px;
-    background: var(--ok, oklch(0.74 0.15 145));
-    transition: background 200ms ease-out;
-  }
-  .tl-toolgroup[data-status="pending"]::after { background: var(--accent); }
-  .tl-toolgroup[data-status="error"]::after { background: var(--danger); }
-  .tl-toolgroup[data-status="error"] {
+  .work::before { display: none; }
+  .work.live { border-color: color-mix(in oklab, var(--accent) 26%, var(--border)); }
+  .work[data-status="error"] {
     border-color: color-mix(in oklab, var(--danger) 42%, var(--border));
-    background: color-mix(in oklab, var(--danger) 7%, var(--bg));
+    background: color-mix(in oklab, var(--danger) 6%, var(--bg));
   }
-  .tg-head {
-    display: flex; align-items: center; gap: 7px;
-    width: 100%;
-    padding: 7px 11px;
-    min-height: 22px;
-    background: transparent;
-    border: 0;
-    color: var(--fg-2);
-    font: inherit; font-size: 11px; text-align: left;
-    cursor: pointer;
-    transition: background 140ms ease-out;
+  .work-head {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 9px 12px; min-height: 38px;
+    background: transparent; border: 0; cursor: pointer;
+    color: inherit; font: inherit; text-align: left;
+    transition: background var(--dur-fast);
   }
-  .tg-head:hover { background: color-mix(in oklch, var(--surface-hover) 45%, transparent); }
-  /* Group step-number — echoes the single-node .tl-stepdot ring so a step reads
-     the same whether it's one chip or a folded group (cont.121 keeps the card +
-     left status rail; only the number marker is unified, not moved to the spine). */
-  .tg-num {
-    flex: none;
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 15px; height: 15px; padding: 0 3px;
-    border-radius: 999px;
-    border: 1.5px solid color-mix(in oklch, var(--fg-faint) 55%, transparent);
-    background: var(--bg);
-    color: var(--fg-muted);
-    font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1;
-    transition: background 200ms ease-out, border-color 200ms ease-out, color 200ms ease-out;
+  .work-head:hover { background: var(--surface-hover); }
+  .work-chev { display: inline-flex; color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
+  .work-chev.open { transform: rotate(90deg); }
+  .work-spark {
+    display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; flex: none;
+    background: var(--accent-soft); color: var(--accent);
   }
-  .tl-toolgroup[data-status="done"] .tg-num {
-    background: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 18%, var(--bg));
-    border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 58%, transparent);
-    color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 90%, var(--fg));
+  .work.live .work-spark { animation: nodePulse var(--pulse-live) var(--ease-soft) infinite; }
+  @keyframes nodePulse {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 20%, transparent); }
   }
-  .tl-toolgroup[data-status="pending"] .tg-num {
-    background: color-mix(in oklab, var(--accent) 26%, var(--bg));
-    border-color: color-mix(in oklab, var(--accent) 70%, transparent);
-    color: color-mix(in oklab, var(--accent) 92%, var(--fg));
+  .work-sum { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .work-sum-t { font-size: 12px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .work-sum-s { font-size: 10.5px; color: var(--fg-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .work-dur { font-size: 10.5px; color: var(--fg-faint); font-family: var(--font-mono); flex: none; font-variant-numeric: tabular-nums; }
+  .work-count {
+    display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; flex: none;
+    background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--fg-muted); font-size: 10px; font-weight: 700;
   }
-  .tl-toolgroup[data-status="error"] .tg-num {
-    background: color-mix(in oklab, var(--danger) 24%, var(--bg));
-    border-color: color-mix(in oklab, var(--danger) 65%, transparent);
-    color: color-mix(in oklab, var(--danger) 90%, var(--fg));
+  .work-body {
+    border-top: 1px solid var(--border); padding: 10px 12px 11px; background: var(--bg-inset);
+    animation: workOpen 0.34s var(--ease-page) both; overflow: hidden;
   }
-  .tg-chev { display: inline-flex; color: var(--fg-faint); transition: transform 140ms ease-out; flex-shrink: 0; }
-  .tg-chev.open { transform: rotate(90deg); }
-  .tg-cap {
-    font-weight: 500; color: var(--fg); font-size: 11px;
-    flex: 0 1 auto; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  @keyframes workOpen { from { transform: translateY(-4px); } to { transform: none; } }
+  /* chips-rail variant — each chip threaded on a vertical rail (spec L389-398) */
+  .work-rail { position: relative; margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 7px; }
+  .work-rail::before {
+    content: ""; position: absolute; left: 9px; top: 6px; bottom: 6px; width: 1.5px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 30%, var(--border)), var(--border) 70%, transparent);
   }
-  .tl-toolgroup[data-status="error"] .tg-cap { color: oklch(0.85 0.10 22); }
-  .tg-sep { color: var(--fg-faint); font-size: 10px; flex-shrink: 0; }
-  .tg-sum {
-    flex: 1; min-width: 0;
-    color: var(--fg-muted); font-size: 10.5px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  .work-rail :global(.chip) { position: relative; margin: 0; }
+  .work-rail :global(.chip::before) {
+    content: ""; position: absolute; left: -17px; top: 13px; width: 9px; height: 1.5px; background: var(--border-strong);
   }
-  .tg-meta {
-    flex: none;
-    color: var(--fg-faint); font-size: 10px;
-    font-variant-numeric: tabular-nums;
+  .work-rail :global(.chip::after) {
+    content: ""; position: absolute; left: -22px; top: 9px; width: 9px; height: 9px; border-radius: 50%;
+    background: var(--bg-inset); border: 1.5px solid var(--border-strong);
   }
-  .tg-status { display: inline-flex; flex-shrink: 0; }
-  .tl-toolgroup[data-status="pending"] .tg-status { color: var(--accent); }
-  .tl-toolgroup[data-status="error"] .tg-status { color: var(--danger); }
-  .tl-toolgroup[data-status="done"] .tg-status { color: var(--ok); }
-  .tg-status :global(.tg-spin) { animation: tg-spin 1s linear infinite; }
-  @keyframes tg-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
-  .tg-body {
-    display: flex; flex-direction: column;
-    gap: 4px;
-    margin-top: 0;
-    padding: 1px 11px 9px 13px;
-  }
-  /* No per-child rail bullet inside a group, so re-show each chip's own status
-     icon (the timeline variant hides it, assuming the rail bullet carries it). */
-  .tg-body :global(.chip[data-variant="timeline"] .chip-status) { display: inline-flex; }
+  .work-rail :global(.chip[data-status="pending"]::after) { border-color: var(--accent); background: var(--accent-soft); }
+  /* re-show each chip's own status icon (timeline variant hides it for the spine) */
+  .work-rail :global(.chip[data-variant="timeline"] .chip-status) { display: inline-flex; }
 
   /* Step divider — uppercased label flanked by a faint line, sitting on
      the rail. Quiet visual punctuation between turn sections. */
