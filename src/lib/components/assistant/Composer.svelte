@@ -67,19 +67,6 @@
   // Pending rail (queue chips + steer/clear) extracted to composer/QueueRail.svelte
   // (C3) — `steer()`/`steerFlash` stay here and flow down as props.
 
-  // Context gauge — feeds the composer divider's fill. Per-tab so each pane
-  // shows its own conversation's window usage. Tone steps mirror the tab-bar
-  // ctx-pill (yellow ≥70, red ≥90) so the two readouts never disagree.
-  const ctxPct = $derived(tab ? assistant.ctxPctFor(tab) : 0);
-  const ctxTokens = $derived(tab ? assistant.ctxTokensFor(tab) : 0);
-  const ctxWindow = $derived(tab ? assistant.ctxWindowFor(tab) : 0);
-  const ctxTone = $derived(ctxPct >= 90 ? "red" : ctxPct >= 70 ? "yellow" : "ok");
-  const ctxTitle = $derived(
-    ctxTokens > 0
-      ? `Context: ${ctxTokens.toLocaleString()} / ${ctxWindow.toLocaleString()} tokens (${ctxPct.toFixed(1)}%) — fills as the conversation grows`
-      : "Context window — fills as the conversation grows",
-  );
-
   // Live-activity pills + idle kbd-hint (the toolbar's middle slot) extracted
   // to composer/LivePills.svelte (C4) — incl. the 1s `now` ticker.
 
@@ -91,6 +78,9 @@
   }
 
   let ta = $state<HTMLTextAreaElement | undefined>();
+  // Tracks whether the input has grown past one line — flips the well to
+  // bottom-align so the inline send arrow rides the textarea's last line.
+  let multiline = $state(false);
 
   type SlashCmd = { name: string; desc: string };
   // Grouped: conversation lifecycle → model + composition → flow control → info.
@@ -127,7 +117,9 @@
   function autosize() {
     if (!ta) return;
     ta.style.height = "auto";
-    ta.style.height = Math.min(ta.scrollHeight, 340) + "px";
+    const h = Math.min(ta.scrollHeight, 340);
+    ta.style.height = h + "px";
+    multiline = h > 40;
   }
 
   $effect(() => {
@@ -263,6 +255,14 @@
   // Permission-mode picker — option table in modelMatrix.ts (C7).
   const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
   const PermIcon = $derived(currentMode.icon);
+  // Flat-bar perm button tone (Claude-Code style): edits-flow → ok, bypass →
+  // warn, plan → info, ask → neutral. Drives `.cbtn.cperm.tone-*`.
+  const permTone = $derived(
+    currentMode.id === "acceptEdits" || currentMode.id === "auto" ? "ok"
+    : currentMode.id === "bypassPermissions" ? "warn"
+    : currentMode.id === "plan" ? "info"
+    : "",
+  );
   function pickMode(m: ModeOpt) {
     assistant.setPermissionMode(m.id);
     permOpen = false;
@@ -1002,12 +1002,16 @@
     {/if}
 
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
+      <!-- WELL: attachments + input + inline send arrow (Claude-Code style).
+           All chrome (border/glass/focus-ring/streaming edge) lives here now. -->
+      <div class="composer-box" class:multiline={multiline}>
       <AttachmentsRow
         {attachments}
         {attachError}
         onRemove={(id) => assistant.removeAttachment(id, tabId)}
         onDismissError={() => (attachError = null)}
       />
+      <div class="cbox-row">
       <div class="textarea-wrap" class:polishing={stt.polishing}>
         <textarea
           bind:this={ta}
@@ -1053,19 +1057,70 @@
         {/if}
       </div>
 
-      <!-- Divider doubles as an ambient context gauge: base hairline separates
-           the input zone from the toolbar; the fill tracks context-window usage.
-           The numeric % lives only in the header gauge now (no duplicate readout). -->
-      <div class="composer-gauge">
-        <div class="composer-divider" data-tone={ctxTone} use:tooltip={ctxTitle} role="img" aria-label={ctxTitle}>
-          {#if ctxTokens > 0}
-            <span class="composer-divider-fill" style="width: {Math.min(100, ctxPct)}%" aria-hidden="true"></span>
-          {/if}
-        </div>
+        <!-- Inline send — bare arrow riding the trailing edge of the well.
+             Same multi-mode action button (send / queue / stop), restyled. -->
+        <button
+          class="send-inline"
+          class:ready={canFire && mode !== "stop"}
+          class:stop={mode === "stop"}
+          class:queue={mode === "queue"}
+          type="button"
+          onclick={onBtnClick}
+          disabled={!canFire}
+          aria-label={mode === 'stop' ? 'Stop current turn' : mode === 'queue' ? 'Queue message' : 'Send message'}
+          use:tooltip={mode === "stop"
+            ? { text: "Halt the current turn", kbd: "Esc" }
+            : mode === "queue"
+            ? { text: "Queue after current turn", kbd: "Enter" }
+            : { text: "Send", kbd: "Enter" }}
+        >
+          <span class="icon-stack">
+            <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
+            <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
+          </span>
+          {#key fireKey}
+            {#if fireKey > 0}
+              <span class="send-ripple" aria-hidden="true"></span>
+              <span class="send-ripple send-ripple-2" aria-hidden="true"></span>
+            {/if}
+          {/key}
+        </button>
+      </div>
       </div>
 
-      <div class="composer-toolbar">
-        <div class="toolbar-cluster">
+      <!-- FLAT control bar below the well (Claude-Code style): perm + tool
+           icons on the left, live pills in the middle, model pill on the right.
+           No border, no internal ctx-gauge hairline. -->
+      <div class="composer-bar">
+        <div class="cbar-l">
+          <button
+            type="button"
+            class="cbtn cperm"
+            class:open={permOpen}
+            class:tone-ok={permTone === "ok"}
+            class:tone-warn={permTone === "warn"}
+            class:tone-info={permTone === "info"}
+            bind:this={permWrap}
+            onclick={() => { permOpen = !permOpen; settingsOpen = false; void tick().then(() => ta?.focus()); }}
+            aria-haspopup="listbox"
+            aria-expanded={permOpen}
+            aria-label="Permission mode"
+            use:tooltip={{ text: `Permission mode — ${currentMode.label}`, kbd: "⇧Tab" }}
+          >
+            <PermIcon size={13} />
+            <span class="perm-label">{currentMode.label}</span>
+            <ChevronUp size={12} class="cbtn-chev" />
+          </button>
+
+          {#if permOpen}
+            <PermMenu
+              {permIdx}
+              anchor={permWrap}
+              onPick={pickMode}
+              onRequestClose={() => (permOpen = false)}
+            />
+          {/if}
+
           <input
             bind:this={fileInput}
             type="file"
@@ -1078,19 +1133,19 @@
           />
           <button
             type="button"
-            class="iconbtn attachbtn"
+            class="cbtn ic attachbtn"
             onclick={openFilePicker}
             use:tooltip={"Attach image — or paste / drag-drop"}
             aria-label="Attach image"
           >
-            <Paperclip size={14} />
+            <Paperclip size={15} />
           </button>
           {#if stt.config.enabled && (
             (stt.config.engine === "web_speech" && stt.supported) ||
             (stt.config.engine === "whisper" && stt.backendAvailable)
           )}
           <button
-            class="iconbtn micbtn"
+            class="cbtn ic micbtn"
             class:recording={stt.recording}
             class:transcribing={stt.transcribing}
             type="button"
@@ -1104,20 +1159,19 @@
             aria-label={stt.recording ? "Stop recording" : "Start recording"}
           >
             {#if stt.transcribing}
-              <Loader2 size={14} class="mic-spin" />
+              <Loader2 size={15} class="mic-spin" />
             {:else if stt.recording}
               <span class="mic-wave" aria-hidden="true">
                 <span></span><span></span><span></span>
               </span>
             {:else}
-              <Mic size={14} />
+              <Mic size={15} />
             {/if}
           </button>
           {/if}
           {#if draft.trim().length > 0}
-          <span class="tb-div reveal" aria-hidden="true"></span>
           <button
-            class="iconbtn wandbtn reveal"
+            class="cbtn ic enhance wandbtn reveal"
             class:enhancing
             type="button"
             onclick={() => runEnhance()}
@@ -1125,27 +1179,27 @@
             use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify (Ctrl+E)"}
             aria-label="Improve prompt"
           >
-            <Wand2 size={14} />
+            <Wand2 size={15} />
           </button>
           <button
-            class="iconbtn previewbtn reveal"
-            class:on={previewing}
+            class="cbtn ic previewbtn reveal"
+            class:active={previewing}
             type="button"
             onclick={() => (previewing = !previewing)}
             aria-pressed={previewing}
             use:tooltip={previewing ? "Hide preview" : "Preview as Markdown"}
             aria-label="Preview message"
           >
-            <Eye size={14} />
+            <Eye size={15} />
           </button>
           <button
-            class="iconbtn clearbtn reveal"
+            class="cbtn ic clearbtn reveal"
             type="button"
             onclick={() => { setDraft(""); ta?.focus(); }}
             use:tooltip={"Clear draft"}
             aria-label="Clear draft"
           >
-            <X size={14} />
+            <X size={15} />
           </button>
           {/if}
           {#if draft.length > 500}
@@ -1161,7 +1215,7 @@
 
         <LivePills tab={tab ?? null} {queue} {streaming} {composerFocused} />
 
-        <div class="toolbar-cluster toolbar-right">
+        <div class="cbar-r">
           {#if localLlm.enabled}
             <!-- Experimental local-mode indicator (cont.127). The model/effort
                  pill lies in local mode (cloud model pin is bypassed), so this
@@ -1178,32 +1232,6 @@
             </button>
           {/if}
 
-          <button
-            type="button"
-            class="perm-pill"
-            class:open={permOpen}
-            data-mode={currentMode.id}
-            bind:this={permWrap}
-            onclick={() => { permOpen = !permOpen; settingsOpen = false; void tick().then(() => ta?.focus()); }}
-            aria-haspopup="listbox"
-            aria-expanded={permOpen}
-            aria-label="Permission mode"
-            use:tooltip={{ text: `Permission mode — ${currentMode.label}`, kbd: "⇧Tab" }}
-          >
-            <PermIcon size={13} />
-            <span class="perm-label">{currentMode.label}</span>
-            <ChevronUp size={12} class="pill-chev" />
-          </button>
-
-          {#if permOpen}
-            <PermMenu
-              {permIdx}
-              anchor={permWrap}
-              onPick={pickMode}
-              onRequestClose={() => (permOpen = false)}
-            />
-          {/if}
-
           <!-- Cloud model + effort picker. Hidden in local mode — local routing
                bypasses the model pin + effort entirely, so showing cloud options
                (e.g. "Opus 4.8") would misrepresent what the turn runs against.
@@ -1211,7 +1239,7 @@
           {#if !localLlm.enabled}
           <button
             type="button"
-            class="settings-pill"
+            class="model-pill"
             class:open={settingsOpen}
             class:ultra={effortApplies && assistant.thinkingEffort === "ultra"}
             data-model={currentModel ? modelFamily(currentModel.id) : ""}
@@ -1223,7 +1251,7 @@
               ? `Model · thinking depth\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort.label}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
-            <span class="mode-dot" aria-hidden="true"></span>
+            <span class="model-dot" aria-hidden="true"></span>
             <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel}</span>
             {#if effortApplies}
               <span class="pill-effort">· {currentEffort.label}</span>
@@ -1234,31 +1262,6 @@
             <ChevronUp size={13} class="pill-chev" />
           </button>
           {/if}
-          <button
-            class="sendbtn"
-            class:stop={mode === "stop"}
-            class:queue={mode === "queue"}
-            type="button"
-            onclick={onBtnClick}
-            disabled={!canFire}
-            aria-label={mode === 'stop' ? 'Stop current turn' : mode === 'queue' ? 'Queue message' : 'Send message'}
-            use:tooltip={mode === "stop"
-              ? { text: "Halt the current turn", kbd: "Esc" }
-              : mode === "queue"
-              ? { text: "Queue after current turn", kbd: "Enter" }
-              : { text: "Send", kbd: "Enter" }}
-          >
-            <span class="icon-stack">
-              <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
-              <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
-            </span>
-            {#key fireKey}
-              {#if fireKey > 0}
-                <span class="send-ripple" aria-hidden="true"></span>
-                <span class="send-ripple send-ripple-2" aria-hidden="true"></span>
-              {/if}
-            {/key}
-          </button>
         </div>
       </div>
     </div>
@@ -1280,7 +1283,7 @@
      identity lives on the model-card swatch in the picker. */
   .composer-wrap                      { --model-color: var(--accent); }
   .composer-shell { position: relative; z-index: 1; }
-  .composer-shell.drag-over .composer {
+  .composer-shell.drag-over .composer-box {
     border-color: color-mix(in oklch, var(--model-color) 70%, transparent);
     border-style: dashed;
     box-shadow:
@@ -1325,15 +1328,20 @@
     50%      { transform: scale(1.3); opacity: 0.7; }
   }
 
-  /* ── Composer v3 ─────────────────────────────────────────────────────
-     Two-row layout: textarea up top, toolbar below.  Glass-blur surface
-     w/ soft accent focus ring + animated streaming edge.  All controls
-     unified under .iconbtn (mic/help) + .settings-pill (model/effort/mode) +
-     .sendbtn.  Replaces the v2 single-row design. */
+  /* ── Composer v4 (Claude-Code flat bar) ──────────────────────────────
+     The outer .composer is now a transparent column shell. All chrome
+     (glass surface / focus ring / streaming edge) lives on the .composer-box
+     WELL; controls sit on a flat .composer-bar BELOW the well. */
   .composer {
     position: relative;
     display: flex; flex-direction: column;
-    padding: 6px;
+  }
+  /* WELL — the bordered glass surface that holds attachments + input + the
+     inline send arrow. */
+  .composer-box {
+    position: relative;
+    display: flex; flex-direction: column;
+    padding: 2px;
     background: color-mix(in oklch, var(--surface) 88%, transparent);
     backdrop-filter: blur(14px) saturate(135%);
     -webkit-backdrop-filter: blur(14px) saturate(135%);
@@ -1347,10 +1355,11 @@
                 transform 140ms ease-out;
     overflow: hidden;
   }
-  /* Calm focus ring — a tight 2px tint + a soft, low halo. The old glow
-     (3px ring + 32% halo) stacked with the streaming treatment into a busy
-     purple blob; this keeps focus legible without competing. */
-  .composer:focus-within {
+  /* Input row inside the well: textarea grows, send arrow rides the edge. */
+  .cbox-row { display: flex; align-items: center; gap: 4px; }
+  .composer-box.multiline .cbox-row { align-items: flex-end; }
+  /* Calm focus ring — a tight 2px tint + a soft, low halo. */
+  .composer-box:focus-within {
     border-color: color-mix(in oklch, var(--model-color) 45%, transparent);
     box-shadow:
       0 0 0 2px color-mix(in oklch, var(--model-color) 13%, transparent),
@@ -1382,20 +1391,20 @@
   .quick-chip:active { transform: translateY(0) scale(0.97); }
   @media (prefers-reduced-motion: reduce) { .quick-chip { transition: none; } }
 
-  .composer.hero { border-radius: 18px; padding: 8px; }
+  .composer.hero .composer-box { border-radius: 18px; padding: 4px; }
   .composer.hero textarea { font-size: 16px; padding: 13px 10px 13px 14px; min-height: 34px; }
 
   /* Streaming = ONE coherent signal: a thin model-tinted border + the
      animated top-edge bar below (synced 2.6s with the model-pill breathe).
      No aurora swirl, no extra glow — calm and in-sync. */
-  .composer.streaming {
+  .composer.streaming .composer-box {
     border-color: color-mix(in oklch, var(--model-color) 42%, var(--border));
   }
   /* Full-frame streaming ring — a model-tinted border that breathes around
      the entire composer (synced 2.6s with the model-pill breathe). Sits as a
      border-only overlay (transparent center, pointer-events none) so it traces
      the frame without crossing the input text. */
-  .composer.streaming::before {
+  .composer.streaming .composer-box::before {
     content: "";
     position: absolute;
     inset: 0;
@@ -1413,13 +1422,15 @@
     50%      { opacity: 1; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .composer.streaming::before { animation: none; opacity: 0.7; }
+    .composer.streaming .composer-box::before { animation: none; opacity: 0.7; }
   }
 
   .textarea-wrap {
     position: relative;
     z-index: 1;
     display: flex;
+    flex: 1;
+    min-width: 0;
   }
   textarea {
     position: relative;
@@ -1459,57 +1470,13 @@
   }
   .placeholder-ghost.static { animation: none; }
   .placeholder-ghost .ph-k { font-family: var(--font-mono); color: var(--fg-faint); font-size: 11px; padding: 0 2px; }
-  .composer:focus-within .placeholder-ghost { color: var(--fg-faint); }
+  .composer-box:focus-within .placeholder-ghost { color: var(--fg-faint); }
   @keyframes placeholder-fade {
     from { opacity: 0; transform: translateY(8px); filter: blur(3px); }
     to   { opacity: 1; transform: translateY(0);   filter: blur(0); }
   }
   @media (prefers-reduced-motion: reduce) {
     .placeholder-ghost { animation: none; }
-  }
-
-  /* Divider between the input zone and the toolbar — doubles as a context
-     gauge. The base hairline always shows (structure); the fill sweeps across
-     proportional to context-window usage, tinted by the active model and
-     stepping to warn/danger as the window fills. One element, two jobs. */
-  /* Gauge row: the hairline track takes all remaining width, the ctx% readout
-     sits flush to its right. Margin lives here now (was on the divider). */
-  .composer-gauge {
-    display: flex; align-items: center; gap: 8px;
-    margin: 5px 8px 3px;
-  }
-  .composer-divider {
-    position: relative;
-    flex: 1;
-    height: 1.5px;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--border) 55%, transparent);
-    overflow: hidden;
-  }
-  .composer-divider-fill {
-    position: absolute;
-    inset: 0 auto 0 0;
-    height: 100%;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--model-color) 75%, transparent);
-    box-shadow: 0 0 6px color-mix(in oklch, var(--model-color) 45%, transparent);
-    transition: width 360ms cubic-bezier(0.22, 1, 0.36, 1), background 240ms ease-out;
-  }
-  .composer-divider[data-tone="yellow"] .composer-divider-fill {
-    background: var(--warn);
-    box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 50%, transparent);
-  }
-  .composer-divider[data-tone="red"] .composer-divider-fill {
-    background: var(--danger);
-    box-shadow: 0 0 8px color-mix(in oklab, var(--danger) 55%, transparent);
-    animation: ctx-pulse 1.6s ease-in-out infinite;
-  }
-  @keyframes ctx-pulse {
-    0%, 100% { opacity: 1; }
-    50%      { opacity: 0.6; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .composer-divider-fill { animation: none; transition: none; }
   }
 
   /* Hidden native file input — driven by the paperclip .attachbtn. */
@@ -1523,55 +1490,53 @@
     border: 0;
   }
 
-  /* Toolbar row — left cluster (input affordances) + right cluster (action). */
-  .composer-toolbar {
+  /* ── Flat control bar (Claude-Code style) ─────────────────────────────
+     Sits below the well, no border. Left cluster = perm + tool icons;
+     LivePills float in the middle; right cluster = model pill. */
+  .composer-bar {
     position: relative;
     z-index: 1;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 2px 4px 2px 4px;
+    display: flex; align-items: center; gap: 3px;
+    padding: 7px 2px 0;
   }
-  .toolbar-cluster {
-    display: flex; align-items: center; gap: 4px;
-    min-width: 0; /* let clusters shrink in narrow panes instead of clipping the send button */
-  }
-  .toolbar-right { gap: 6px; }
+  .cbar-l { display: flex; align-items: center; gap: 2px; min-width: 0; }
+  .cbar-r { margin-left: auto; display: flex; align-items: center; gap: 5px; position: relative; }
 
-  /* Unified icon button — base for mic + help + (future attach). */
-  .iconbtn {
-    width: 28px; height: 28px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: transparent;
-    color: var(--fg-subtle);
-    border: 1px solid transparent;
+  /* Flat control button — transparent base; .ic = square icon variant. */
+  .cbtn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 9px;
     border-radius: 8px;
+    font: inherit; font-size: 12px;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid transparent;
     cursor: pointer;
     flex-shrink: 0;
-    opacity: 0.9;
-    padding: 0;
-    transition: color 140ms, background 140ms, border-color 140ms, opacity 140ms, transform 140ms;
+    transition: background 140ms, color 140ms, border-color 140ms, transform 140ms;
   }
-  .iconbtn:hover:not(:disabled) {
-    color: var(--fg-2);
-    background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    opacity: 1;
-  }
-  .iconbtn:active:not(:disabled) { transform: scale(0.94); }
-  .iconbtn:disabled { opacity: 0.4; cursor: default; }
-  .iconbtn:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 2px var(--ring);
-  }
-  /* Hairline splitting compose-tools (attach/improve/mic) from view-tools (preview/help). */
-  .tb-div {
-    width: 1px; height: 16px; flex-shrink: 0;
-    margin: 0 3px;
-    background: color-mix(in oklch, var(--border) 80%, transparent);
-  }
+  .cbtn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
+  .cbtn:active:not(:disabled) { transform: scale(0.96); }
+  .cbtn:disabled { opacity: 0.4; cursor: default; }
+  .cbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .cbtn.ic { width: 32px; padding: 0; justify-content: center; color: var(--fg-subtle); }
+  .cbtn.ic:hover:not(:disabled) { color: var(--fg-2); }
+  .cbtn.ic.active { background: var(--accent-soft); color: var(--accent); }
+  .cbtn.enhance:hover:not(:disabled) { color: var(--accent); }
+  :global(.cbtn .cbtn-chev) { color: var(--fg-faint); transition: color 140ms, transform 140ms; }
+  /* Permission button — colored text by posture, no border (flat). */
+  .cbtn.cperm { font-weight: 600; }
+  .cbtn.cperm .perm-label { font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .cbtn.cperm > :global(svg:first-child) { color: currentColor; flex-shrink: 0; }
+  .cbtn.cperm.tone-ok   { color: var(--ok);   }
+  .cbtn.cperm.tone-warn { color: var(--warn); }
+  .cbtn.cperm.tone-info { color: var(--info); }
+  .cbtn.cperm.tone-ok:hover:not(:disabled)   { background: var(--ok-soft);   color: var(--ok);   }
+  .cbtn.cperm.tone-warn:hover:not(:disabled) { background: var(--warn-soft); color: var(--warn); }
+  .cbtn.cperm.tone-info:hover:not(:disabled) { background: var(--info-soft); color: var(--info); }
+  .cbtn.cperm.open :global(.cbtn-chev) { transform: rotate(180deg); }
 
-  /* Mic — recording / transcribing states inherit .iconbtn base + override. */
+  /* Mic — recording / transcribing states inherit .cbtn.ic base + override. */
   .micbtn.recording {
     background: var(--danger);
     color: oklch(0.98 0.01 22);
@@ -1651,43 +1616,30 @@
   /* Inline-blend send (spec `.send-inline`): a bare arrow that lives in the
      well — subtle grey when idle, accent when ready, soft-bg on hover. No
      filled box / glow. */
-  .sendbtn {
+  .send-inline {
     position: relative;
     width: 34px; height: 34px;
+    margin: 0 4px 0 2px;
     display: flex; align-items: center; justify-content: center;
     background: transparent;
-    color: var(--accent);
+    color: var(--fg-subtle);
     border: 1px solid transparent; border-radius: 50%;
     cursor: pointer;
     flex-shrink: 0;
     overflow: hidden;
-    transition: color 140ms ease-out, background 140ms ease-out,
-                transform 140ms ease-out, opacity 140ms ease-out;
-    box-shadow: none;
+    transition: color 140ms ease-out, background 140ms ease-out, transform 140ms ease-out;
   }
-  .sendbtn:hover:not(:disabled) {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
-  .sendbtn:active:not(:disabled) { transform: scale(0.88); }
-  .sendbtn:disabled {
-    opacity: 1; cursor: default;
-    color: var(--fg-subtle);
-    box-shadow: none;
-  }
-  .sendbtn:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px var(--ring);
-  }
-  .sendbtn.stop {
-    background: var(--danger-soft);
-    color: var(--danger);
-  }
-  .sendbtn.stop:hover { background: var(--danger-soft); filter: brightness(1.08); }
-  .sendbtn.queue {
-    background: var(--accent-soft);
-    color: var(--accent);
-  }
+  .composer-box.multiline .send-inline { align-self: flex-end; margin-bottom: 5px; }
+  .send-inline:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
+  .send-inline:active:not(:disabled) { transform: scale(0.88); }
+  .send-inline:disabled { cursor: default; color: var(--fg-subtle); }
+  .send-inline:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+  /* ready (send / queue) → bare accent arrow; soft-bg only on hover. */
+  .send-inline.ready { color: var(--accent); }
+  .send-inline.ready:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+  /* stop → danger tint while a run is in flight. */
+  .send-inline.stop { background: var(--danger-soft); color: var(--danger); }
+  .send-inline.stop:hover { background: var(--danger-soft); filter: brightness(1.08); }
   /* Launch ripple — two concentric rings expand outward on every fire().
      Mounted by {#key fireKey}; self-removed when the animation ends via
      the unmount on the next key flip. */
@@ -1779,7 +1731,6 @@
     overflow-y: auto;
     padding: 2px 4px;
   }
-  .previewbtn.on { color: var(--accent); background: var(--accent-soft); }
 
   /* ── Magic "enchanting" state ─────────────────────────────────────────
      While the wand call is in flight, the effect lands on the message itself:
@@ -1924,9 +1875,9 @@
 
   /* Compose-tools (improve/preview) reveal once the draft has text — the empty
      composer stays calm. Reuses the global `enter` keyframe. */
-  .iconbtn.reveal, .tb-div.reveal { animation: enter 160ms ease-out; }
+  .cbtn.reveal { animation: enter 160ms ease-out; }
   @media (prefers-reduced-motion: reduce) {
-    .iconbtn.reveal, .tb-div.reveal { animation: none; }
+    .cbtn.reveal { animation: none; }
   }
   /* kbd-hint styles moved to composer/LivePills.svelte (C4). */
 
@@ -1934,30 +1885,28 @@
      thinking-depth / permission-mode panel. `data-mode` faintly tints the
      icon so the current permission posture (unguarded vs cautious) reads at
      a glance without spelling it out. */
-  .settings-pill {
+  .model-pill {
     align-self: center;
-    display: inline-flex; align-items: center; gap: 3px;
-    padding: 0 8px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
-    border-radius: 999px;
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
     color: var(--fg-2);
     cursor: pointer;
     font: inherit;
-    height: 26px;
     overflow: hidden;
     transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
   }
-  .settings-pill:hover {
-    background: color-mix(in oklch, var(--bg-elev-2) 90%, transparent);
+  .model-pill:hover {
+    background: var(--surface-hover);
     color: var(--fg);
-    border-color: var(--border);
   }
-  .settings-pill.open {
+  .model-pill.open {
     border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
     color: var(--fg);
   }
-  .settings-pill:hover :global(.pill-chev) { color: var(--fg-muted); }
+  .model-pill:hover :global(.pill-chev) { color: var(--fg-muted); }
   /* Current-model label on the pill. */
   .pill-label {
     font-size: 11px;
@@ -1974,22 +1923,20 @@
   /* Permission-mode dot — one consistent at-a-glance signal for all five
      modes (the pill's text-tint only covered ask/bypass). Colored per mode:
      ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */
-  /* Leading dot on the collapsed settings-pill — emerald (model identity lives
-     in the model-card dropdown, not the always-visible pill). */
-  .mode-dot {
-    width: 6px; height: 6px; border-radius: 50%;
+  /* Leading dot on the model pill — emerald (model identity lives in the
+     model-card dropdown, not the always-visible pill). */
+  .model-dot {
+    width: 7px; height: 7px; border-radius: 50%;
     flex-shrink: 0;
     background: var(--accent);
     transition: background 140ms ease-out;
   }
-  /* Chevron-up caret on both composer pills; rotates 180° when its menu opens. */
-  :global(.settings-pill .pill-chev),
-  :global(.perm-pill .pill-chev) {
+  /* Chevron-up caret on the model pill; rotates 180° when its menu opens. */
+  :global(.model-pill .pill-chev) {
     color: var(--fg-faint);
     transition: color 140ms ease-out, transform 140ms ease-out;
   }
-  .settings-pill.open :global(.pill-chev),
-  .perm-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
+  .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
 
   /* Experimental local-mode pill (cont.127) — accent-tinted so the active
      "talking to a local model" state reads at a glance, distinct from the
@@ -1997,10 +1944,10 @@
   .local-pill {
     align-self: center;
     display: inline-flex; align-items: center; gap: 5px;
-    height: 26px; padding: 0 9px;
+    height: 30px; padding: 0 10px;
     background: var(--accent-soft);
     border: 1px solid color-mix(in oklab, var(--accent) 38%, transparent);
-    border-radius: 999px;
+    border-radius: 9px;
     color: var(--accent);
     cursor: pointer; font: inherit;
     transition: background 140ms ease-out, border-color 140ms ease-out;
@@ -2012,41 +1959,8 @@
     max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
 
-  /* ── Permission-mode pill + menu (mock split from the model pill) ──────── */
-  .toolbar-right { position: relative; }
-  .perm-pill {
-    align-self: center;
-    display: inline-flex; align-items: center; gap: 5px;
-    min-width: 0; /* shrink + ellipsis the label under pressure, never clip the send button */
-    height: 26px; padding: 0 7px 0 9px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 75%, transparent);
-    border-radius: 999px; color: var(--fg-2); cursor: pointer; font: inherit;
-    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
-  }
-  .perm-pill:hover, .perm-pill.open {
-    background: color-mix(in oklch, var(--bg-elev-2) 90%, transparent);
-    color: var(--fg); border-color: var(--border);
-  }
-  .perm-pill > :global(svg:first-child) { color: var(--fg-muted); flex-shrink: 0; }
-  .perm-label { font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  /* acceptEdits + auto read as "edits flow" → accent; bypass → warn; rest neutral. */
-  .perm-pill[data-mode="acceptEdits"], .perm-pill[data-mode="auto"] {
-    color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, var(--border));
-    background: color-mix(in oklab, var(--accent) 11%, transparent);
-  }
-  .perm-pill[data-mode="acceptEdits"] > :global(svg:first-child),
-  .perm-pill[data-mode="auto"] > :global(svg:first-child),
-  .perm-pill[data-mode="acceptEdits"] :global(.pill-chev),
-  .perm-pill[data-mode="auto"] :global(.pill-chev) { color: var(--accent); }
-  .perm-pill[data-mode="bypassPermissions"] {
-    color: var(--warn); border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
-    background: color-mix(in oklab, var(--warn) 10%, transparent);
-  }
-  .perm-pill[data-mode="bypassPermissions"] > :global(svg:first-child),
-  .perm-pill[data-mode="bypassPermissions"] :global(.pill-chev) { color: var(--warn); }
-
-  /* Perm-menu popover styles moved to composer/PermMenu.svelte (C7). */
+  /* Perm-menu popover styles moved to composer/PermMenu.svelte (C7).
+     The flat perm button itself = .cbtn.cperm (see flat control bar above). */
 
   /* Settings panel (model rows + effort slider) styles moved to composer/SettingsMenu.svelte (C7). */
 
@@ -2059,7 +1973,7 @@
     filter: drop-shadow(0 0 4px color-mix(in oklab, var(--accent) 55%, transparent));
     animation: ultra-pulse 2.6s ease-in-out infinite;
   }
-  .settings-pill.ultra {
+  .model-pill.ultra {
     border-color: color-mix(in oklab, var(--accent) 42%, var(--border));
   }
   @keyframes ultra-pulse {
