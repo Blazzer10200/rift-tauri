@@ -199,10 +199,6 @@
   <ToastHost />
 
   <CommandPalette />
-
-  <!-- Screen-tint comfort filter (Settings → Appearance). Hue/strength driven
-       by --tint-h / --tint-a on :root; opacity 0 when the filter is off. -->
-  <div class="app-tint" aria-hidden="true"></div>
 </div>
 
 <style>
@@ -307,17 +303,6 @@
   }
   @keyframes wsIn { from { transform: translateY(7px); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) { .workspace { animation: none; } }
-
-  /* Screen-tint comfort filter — full viewport, never intercepts input. */
-  .app-tint {
-    position: fixed;
-    inset: 0;
-    z-index: 90;
-    pointer-events: none;
-    background: oklch(0.70 0.16 var(--tint-h, 70));
-    opacity: var(--tint-a, 0);
-    transition: opacity 0.4s var(--ease-soft);
-  }
 
   /* Onboarding takes the full surface below a minimal (brand + winctls) titlebar. */
   .ob-host {

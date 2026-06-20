@@ -14,15 +14,15 @@
   --gi-ghost-bg-hover: color-mix(in oklab, var(--accent) 16%, transparent);
 
   height: 100%; width: 100%; min-width: 0; min-height: 0;
-  display: grid; place-items: center; padding: 36px; box-sizing: border-box;
+  display: grid; place-items: center; padding: clamp(24px, 3.5vw, 56px); box-sizing: border-box;
   background:
-    radial-gradient(820px 480px at 50% -6%, color-mix(in oklab, var(--accent) 11%, transparent), transparent 62%),
+    radial-gradient(1000px 560px at 50% -6%, color-mix(in oklab, var(--accent) 11%, transparent), transparent 62%),
     var(--bg);
 }
 
 /* centered card holding the rail + stage */
 .ob-card {
-  width: 100%; max-width: 880px; height: min(580px, calc(100vh - 72px));
+  width: 100%; max-width: 1180px; height: min(820px, calc(100vh - 96px));
   display: flex; min-width: 0; overflow: hidden;
   background: var(--surface); border: 1px solid var(--border-strong);
   border-radius: var(--radius-2xl); box-shadow: var(--shadow-lg);
@@ -33,9 +33,9 @@
 
 /* ── Left rail — brand + vertical stepper ─────────────────────────────────── */
 .ob-rail {
-  width: 250px; flex: none;
+  width: 312px; flex: none;
   display: flex; flex-direction: column;
-  padding: 26px 24px 22px;
+  padding: 34px 30px 28px;
   background:
     radial-gradient(420px 280px at 8% -8%, color-mix(in oklab, var(--accent) 10%, transparent) 0%, transparent 62%),
     var(--bg-inset);
@@ -98,12 +98,12 @@
 .ob-body {
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; justify-content: center;
-  padding: 0 clamp(28px, 5%, 44px);
+  padding: 0 clamp(40px, 6%, 76px);
 }
 .ob-step-wrap {
-  width: 100%; max-width: 540px;
-  display: flex; flex-direction: column; gap: 22px;
-  margin: auto 0; padding: 44px 0 32px;
+  width: 100%; max-width: 660px;
+  display: flex; flex-direction: column; gap: 26px;
+  margin: auto 0; padding: 56px 0 44px;
 }
 @media (prefers-reduced-motion: no-preference) {
   .ob-enter .ob-step-wrap > * { animation: ob-rise 440ms var(--ease-page) both; }
@@ -116,7 +116,7 @@
 /* step header */
 .ob-head { display: flex; flex-direction: column; gap: 10px; }
 .ob-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); opacity: 0.92; }
-.ob-title { margin: 1px 0 0; font-size: 25px; font-weight: 680; letter-spacing: -0.02em; color: var(--fg); line-height: 1.1; }
+.ob-title { margin: 1px 0 0; font-size: 29px; font-weight: 680; letter-spacing: -0.02em; color: var(--fg); line-height: 1.1; }
 .ob-sub { margin: 2px 0 0; font-size: var(--fs-md); line-height: 1.55; color: var(--fg-muted); }
 .ob-sub code, .ob-mono-i { font-family: var(--font-mono); font-size: 11.5px; padding: 1px 5px; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius-xs); color: var(--code-fg); }
 
@@ -296,7 +296,7 @@
 
 /* ── Animated explainer stage (per-step looping visual) ───────────────────── */
 .ob-stage {
-  position: relative; height: 166px; border-radius: var(--r-card); overflow: hidden;
+  position: relative; height: 220px; border-radius: var(--r-card); overflow: hidden;
   display: grid; place-items: center;
   background:
     radial-gradient(440px 210px at 50% 128%, color-mix(in oklab, var(--accent) 13%, transparent), transparent 72%),

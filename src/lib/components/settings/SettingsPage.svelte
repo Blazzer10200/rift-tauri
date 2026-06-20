@@ -15,7 +15,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX, TINT_OPTS, TINT_MAX } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -52,23 +52,21 @@
   let spchSec = $state<"engine" | "composer">("engine");
   let abtSec = $state<"about" | "help">("about");
 
-  // Appearance "Looks" presets — one tap sets accent + texture + density + tint together.
-  type Look = { id: string; name: string; h: number; vib: number; dots: (typeof DOT_FIELDS)[number]["id"]; density: (typeof DENSITIES)[number]; tint: number | null; amt: number };
+  // Appearance "Looks" presets — one tap sets accent + texture + density together.
+  type Look = { id: string; name: string; h: number; vib: number; dots: (typeof DOT_FIELDS)[number]["id"]; density: (typeof DENSITIES)[number] };
   const LOOKS: Look[] = [
-    { id: "graphite", name: "Graphite", h: 163, vib: 30, dots: "off",   density: "regular", tint: null, amt: 0 },
-    { id: "midnight", name: "Midnight", h: 250, vib: 55, dots: "dots",  density: "regular", tint: 245,  amt: 0.30 },
-    { id: "ember",    name: "Ember",    h: 40,  vib: 72, dots: "glow",  density: "comfy",   tint: 70,   amt: 0.22 },
-    { id: "orchid",   name: "Orchid",   h: 320, vib: 64, dots: "dots",  density: "regular", tint: 18,   amt: 0.18 },
-    { id: "forest",   name: "Forest",   h: 150, vib: 58, dots: "grid",  density: "regular", tint: 150,  amt: 0.20 },
-    { id: "focus",    name: "Focus",    h: 220, vib: 42, dots: "off",   density: "compact", tint: null, amt: 0 },
+    { id: "graphite", name: "Graphite", h: 163, vib: 30, dots: "off",   density: "regular" },
+    { id: "midnight", name: "Midnight", h: 250, vib: 55, dots: "dots",  density: "regular" },
+    { id: "ember",    name: "Ember",    h: 40,  vib: 72, dots: "glow",  density: "comfy"   },
+    { id: "orchid",   name: "Orchid",   h: 320, vib: 64, dots: "dots",  density: "regular" },
+    { id: "forest",   name: "Forest",   h: 150, vib: 58, dots: "grid",  density: "regular" },
+    { id: "focus",    name: "Focus",    h: 220, vib: 42, dots: "off",   density: "compact" },
   ];
   function applyLook(p: Look) {
     uiPrefs.setAccentHue(p.h);
     uiPrefs.setVividness(VIVIDNESS_MIN + (p.vib / 100) * (VIVIDNESS_MAX - VIVIDNESS_MIN));
     uiPrefs.setDotField(p.dots);
     uiPrefs.setDensity(p.density);
-    if (p.tint == null) uiPrefs.setTintHue(null);
-    else { uiPrefs.setTintHue(p.tint); uiPrefs.setTintStrength(p.amt * TINT_MAX); }
   }
   const lookSel = (p: Look) => uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots;
 
@@ -298,7 +296,7 @@
           {#if apprSec === "theme"}
           <div class="card">
             <div class="card-tt">Looks</div>
-            <div class="card-sub">One tap sets accent, texture, density, and tint together.</div>
+            <div class="card-sub">One tap sets accent, texture, and density together.</div>
             <div class="looks">
               {#each LOOKS as p (p.id)}
                 <button class="look" class:sel={lookSel(p)} type="button" onclick={() => applyLook(p)} style="--lk: oklch(0.72 0.16 {p.h}); --lkh: {p.h};" use:tooltip={p.name}>
@@ -346,27 +344,6 @@
                   <span class="bg-name">{df.label}</span>
                 </button>
               {/each}
-            </div>
-          </div>
-
-          <div class="card">
-            <div class="card-tt">Screen tint</div>
-            <div class="card-sub">A comfort filter over the whole window.</div>
-            <div class="tint-grid">
-              {#each TINT_OPTS as o (o.id)}
-                {@const sel = o.hue === null ? uiPrefs.tintStrength === 0 : (uiPrefs.tintStrength > 0 && uiPrefs.tintHue === o.hue)}
-                <button class="tint-opt" class:sel type="button" onclick={() => uiPrefs.setTintHue(o.hue)} aria-pressed={sel} use:tooltip={o.label}>
-                  {#if o.hue === null}<span class="tint-none-ic">—</span>{:else}<span class="tint-chip" style="background: oklch(0.70 0.16 {o.hue});"></span>{/if}
-                  <span class="tint-lbl">{o.label}</span>
-                </button>
-              {/each}
-            </div>
-            <div class="ctl-row tight" style="margin-top:14px;">
-              <div><div class="ctl-t">Strength</div><div class="ctl-s">Intensity of the comfort filter.</div></div>
-              <div class="range-wrap">
-                <input class="set-range" type="range" min="0" max={TINT_MAX} step="0.005" value={uiPrefs.tintStrength} oninput={(e) => uiPrefs.setTintStrength(Number(e.currentTarget.value))} aria-label="Screen tint strength" />
-                <span class="range-val">{Math.round(uiPrefs.tintStrength / TINT_MAX * 100)}%</span>
-              </div>
             </div>
           </div>
 
@@ -918,15 +895,6 @@
   .bg-name { font-size: 11.5px; color: var(--fg-muted); text-align: center; transition: color var(--dur-fast); }
   .bg-opt:hover .bg-name { color: var(--fg-2); }
   .bg-opt.sel .bg-name { color: var(--fg-2); font-weight: 550; }
-
-  /* screen-tint picker */
-  .tint-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
-  .tint-opt { position: relative; height: 52px; border-radius: 10px; border: 1px solid var(--border); overflow: hidden; cursor: pointer; transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
-  .tint-opt:hover { transform: translateY(-2px); border-color: var(--border-strong); }
-  .tint-opt.sel { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-  .tint-opt .tint-chip { position: absolute; inset: 0; }
-  .tint-opt .tint-lbl { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 0 5px; text-align: center; font-size: 10.5px; color: var(--fg-2); background: linear-gradient(to top, color-mix(in oklab, var(--bg) 75%, transparent), transparent); }
-  .tint-opt .tint-none-ic { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-faint); font-size: 16px; }
 
   /* looks (one-tap presets) */
   .looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
