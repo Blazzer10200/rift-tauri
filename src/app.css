@@ -34,7 +34,7 @@
   /* lines */
   --border:        oklch(0.300 0.006 255);   /* hairline #26292D */
   --border-strong: oklch(0.365 0.007 255);   /* standard #33373C */
-  --border-focus:  oklch(0.78 0.15 var(--accent-h));
+  --border-focus:  oklch(0.78 var(--accent-c) var(--accent-h));
 
   /* type */
   --fg:            oklch(0.925 0.004 250);   /* #E5E7EB */
@@ -43,16 +43,26 @@
   --fg-subtle:     oklch(0.545 0.016 262);   /* #6B7280 */
   --fg-faint:      oklch(0.430 0.010 260);   /* #4B5056 */
 
-  /* brand / accent — themeable: one hue (--accent-h) drives the whole ramp.
+  /* brand / accent — themeable: hue (--accent-h) + vividness (--accent-c, chroma)
+     + strength (--accent-a, ghost alpha) drive the whole ramp. Settings exposes
+     all three as dials. Defaults reproduce the pre-redesign ramp exactly.
      Solid accent is RARE (Send + one CTA/screen); everything else is ghost. */
-  --accent-h:      163;                                      /* emerald default */
-  --accent:        oklch(0.78 0.15 var(--accent-h));
-  --accent-hover:  oklch(0.86 0.13 var(--accent-h));
-  --accent-active: oklch(0.70 0.15 var(--accent-h));
+  --accent-h:      163;     /* emerald default */
+  --accent-c:      0.15;    /* vividness — chroma of the accent ramp */
+  --accent-a:      0.12;    /* strength — alpha of accent ghost fills */
+  --accent:        oklch(0.78 var(--accent-c) var(--accent-h));
+  --accent-hover:  oklch(0.86 max(0.02, calc(var(--accent-c) - 0.02)) var(--accent-h));
+  --accent-active: oklch(0.70 var(--accent-c) var(--accent-h));
   --accent-fg:     oklch(0.25 0.05 var(--accent-h));         /* text/icon ON solid accent */
-  --accent-soft:   oklch(0.78 0.15 var(--accent-h) / 0.12);  /* ghost fill (default treatment) */
-  --ghost-border:  oklch(0.78 0.15 var(--accent-h) / 0.35);
-  --ring:          oklch(0.78 0.15 var(--accent-h) / 0.45);
+  --accent-soft:   oklch(0.78 var(--accent-c) var(--accent-h) / var(--accent-a));  /* ghost fill (default treatment) */
+  --ghost-border:  oklch(0.78 var(--accent-c) var(--accent-h) / calc(var(--accent-a) * 2.9));
+  --ring:          oklch(0.78 var(--accent-c) var(--accent-h) / calc(var(--accent-a) * 3.75));
+
+  /* activity semantics — live/queued/warn states (stream + status dots). Distinct
+     from the alert ramp below; these read as "system is doing something". */
+  --status-busy:    #22c55e;   /* working / live */
+  --status-pending: #3b82f6;   /* queued */
+  --status-warn:    #e5a54b;   /* amber warning */
 
   /* status semantics — accent-INDEPENDENT (theme never recolors these) */
   --ok:            oklch(0.73 0.18 150);
@@ -88,6 +98,7 @@
   --dur-fast:     140ms;   /* control hover / small state flip */
   --dur-base:     240ms;   /* default transition */
   --dur-slow:     520ms;   /* large data reveal (bars, gauge, timeline) */
+  --pulse-live:   1.6s;    /* shared breathing period for live status dots */
 
   /* density (compact default; overridden below by data-density) */
   --row-h: 28px;

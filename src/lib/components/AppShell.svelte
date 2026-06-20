@@ -2,11 +2,13 @@
   import { commandPalette } from "../state/command-palette.svelte";
   import CommandPalette from "./dialogs/CommandPalette.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
+  import Sidebar from "./shell/Sidebar.svelte";
+  import Topbar from "./shell/Topbar.svelte";
   import ToastHost from "./ToastHost.svelte";
   import UpdatePill from "./UpdatePill.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
-  import ChatTabsBar from "./shell/ChatTabsBar.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
+  import { shell } from "../state/shell.svelte";
   import { WORKSPACES } from "./workspaces";
   import { workspace, type WorkspaceId } from "../state/workspace.svelte";
   import { browserDock } from "../state/browserDock.svelte";
@@ -49,6 +51,7 @@
     // assistant store — init here, not just on Chat/Settings mount, or the
     // dashboard renders the empty-state lie until another workspace runs it.
     void assistant.init();
+    shell.init();
     browserDock.init();
     activityDock.init();
     environmentDock.init();
@@ -142,7 +145,7 @@
       }
     }
     const k = e.key.toLowerCase();
-    // View toggles, mirrored in the ChatTabsBar View dropdown.
+    // View toggles (browser dock, diff drawer) — keyboard mirror of the topbar.
     if (e.shiftKey && k === "b") { e.preventDefault(); browserDock.toggle(); return; }
     if (e.shiftKey && k === "d" && workspace.activeId === "chat") {
       e.preventDefault();
@@ -173,25 +176,23 @@
   }
 </script>
 
-<div class="shell">
-  <Titlebar setupMode={showOnboarding} />
-
-  <div class="middle">
-    {#if showOnboarding}
+<div class="app">
+  {#if showOnboarding}
+    <Titlebar setupMode={true} />
+    <div class="ob-host">
       <OnboardingFlow onDone={finishOnboarding} />
-    {:else}
-      <div class="body">
-        <div class="content">
-          <div class="tabs-rail" data-show={workspace.activeId === "chat"} aria-hidden={workspace.activeId !== "chat"}>
-            <ChatTabsBar />
-          </div>
-          <main class="pane">
-            <WorkspaceShell />
-          </main>
-        </div>
+    </div>
+  {:else}
+    <div class="app-body">
+      <Sidebar />
+      <div class="main">
+        <Topbar />
+        <main class="workspace">
+          <WorkspaceShell />
+        </main>
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 
   <UpdateDialog />
 
@@ -204,66 +205,73 @@
 </div>
 
 <style>
-  /* S136: pin .shell to the viewport via position:fixed instead of a
-     percentage height chain — the chain intermittently collapses in prod. */
-  .shell {
+  /* One continuous surface across home, conversation, and settings: a single
+     base tone + a static dotted field span the whole window, so there's no hard
+     seam between the reading column and the rest of the app. Pinned to the
+     viewport via position:fixed (the percentage height chain collapses in prod). */
+  .app {
     position: fixed;
     inset: 0;
-    display: grid;
-    grid-template-rows: var(--titlebar-h) 1fr;
-    min-width: 0;
-    overflow: hidden;
-    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    background: var(--app-bg, var(--bg));
     color: var(--fg);
-  }
-  .middle {
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    min-width: 0;
-    overflow: visible;
-    position: relative;
-  }
-  /* Chat tabs rail collapses to 0 height when non-chat workspace is active.
-     Always mounted so tab state survives workspace hops without remount jitter. */
-  .tabs-rail {
+    font-family: var(--font-ui);
+    font-size: 13px;
+    letter-spacing: -0.005em;
     overflow: hidden;
-    max-height: 0;
-    opacity: 0;
-    transform: translateY(-4px);
-    transition:
-      max-height 180ms cubic-bezier(.2,.7,.2,1),
-      opacity 140ms ease,
-      transform 180ms cubic-bezier(.2,.7,.2,1);
+    transition: background 1s var(--ease-soft);
   }
-  .tabs-rail[data-show="true"] {
-    max-height: 48px;
-    opacity: 1;
-    transform: none;
+  .app::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: var(--dots-opacity, 1);
+    background: radial-gradient(circle at center, color-mix(in oklab, var(--dots-ink, var(--fg)) 4.5%, transparent) 0.8px, transparent 1.5px);
+    background-size: calc(30px * var(--dots-scale, 1)) calc(30px * var(--dots-scale, 1));
+    -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%);
+    mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%);
   }
-  @media (prefers-reduced-motion: reduce) {
-    .tabs-rail { transition: none; transform: none; }
-  }
-  .body {
+  :global(.app[data-dots="off"])::before { display: none; }
+
+  .app-body {
     flex: 1;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
-    min-width: 0;
-    overflow: visible;
+    display: flex;
+    flex-direction: row;
     position: relative;
+    z-index: 1;
   }
-  .content {
+  .main {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
-    min-height: 0; min-width: 0;
-    overflow: visible;
-    position: relative;
   }
-  .pane {
-    flex: 1 1 0;
-    min-height: 0; min-width: 0;
+  .workspace {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
-    display: flex; flex-direction: column;
+    animation: wsIn var(--dur-page) var(--ease-page);
+  }
+  @keyframes wsIn { from { transform: translateY(7px); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .workspace { animation: none; } }
+
+  /* Onboarding takes the full surface below a minimal (brand + winctls) titlebar. */
+  .ob-host {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
   }
 </style>
