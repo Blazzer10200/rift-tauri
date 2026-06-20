@@ -5,6 +5,7 @@
     Cog, Info, RefreshCw, Sparkles, Palette,
     FolderOpen, Copy, Check, Eye, EyeOff, Mic, Accessibility as A11yIcon,
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
+    SlidersHorizontal, Bot, KeyRound, Wrench, Keyboard,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { openPath } from "@tauri-apps/plugin-opener";
@@ -39,11 +40,37 @@
   const activeMeta = $derived(ST_SECTIONS.find((s) => s.id === activeSec) ?? ST_SECTIONS[0]);
   const HeroIcon = $derived(activeMeta.icon);
 
-  // Bento layout shows one section per tab — switching resets the scroll.
+  // Switching tabs resets the scroll position.
   function selectSec(id: Section) {
     activeSec = id;
     scrollEl?.scrollTo({ top: 0 });
   }
+
+  // Per-tab rail sub-section (RailShell left nav).
+  let apprSec = $state<"theme" | "layout">("theme");
+  let asstSec = $state<"session" | "keys">("session");
+  let spchSec = $state<"engine" | "composer">("engine");
+  let abtSec = $state<"about" | "help">("about");
+
+  // Appearance "Looks" presets — one tap sets accent + texture + density + tint together.
+  type Look = { id: string; name: string; h: number; vib: number; dots: (typeof DOT_FIELDS)[number]["id"]; density: (typeof DENSITIES)[number]; tint: number | null; amt: number };
+  const LOOKS: Look[] = [
+    { id: "graphite", name: "Graphite", h: 163, vib: 30, dots: "off",   density: "regular", tint: null, amt: 0 },
+    { id: "midnight", name: "Midnight", h: 250, vib: 55, dots: "dots",  density: "regular", tint: 245,  amt: 0.30 },
+    { id: "ember",    name: "Ember",    h: 40,  vib: 72, dots: "glow",  density: "comfy",   tint: 70,   amt: 0.22 },
+    { id: "orchid",   name: "Orchid",   h: 320, vib: 64, dots: "dots",  density: "regular", tint: 18,   amt: 0.18 },
+    { id: "forest",   name: "Forest",   h: 150, vib: 58, dots: "grid",  density: "regular", tint: 150,  amt: 0.20 },
+    { id: "focus",    name: "Focus",    h: 220, vib: 42, dots: "off",   density: "compact", tint: null, amt: 0 },
+  ];
+  function applyLook(p: Look) {
+    uiPrefs.setAccentHue(p.h);
+    uiPrefs.setVividness(VIVIDNESS_MIN + (p.vib / 100) * (VIVIDNESS_MAX - VIVIDNESS_MIN));
+    uiPrefs.setDotField(p.dots);
+    uiPrefs.setDensity(p.density);
+    if (p.tint == null) uiPrefs.setTintHue(null);
+    else { uiPrefs.setTintHue(p.tint); uiPrefs.setTintStrength(p.amt * TINT_MAX); }
+  }
+  const lookSel = (p: Look) => uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots;
 
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
@@ -244,264 +271,203 @@
       </button>
     {/snippet}
     {#snippet children()}
-      <div class="sb-tabs" role="tablist">
+      <div class="tabnav" role="tablist">
         {#each ST_SECTIONS as s (s.id)}
           {@const Icon = s.icon}
           {@const dot = s.id === "assistant" ? assistantDot : s.dot}
-          <button class="sb-tab" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
-            <Icon size={16} strokeWidth={1.75} />
+          <button class="snav" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
+            <Icon size={15} strokeWidth={1.75} />
             <span>{s.label}</span>
-            {#if dot}<span class="sb-tab-dot {dot}"></span>{/if}
+            {#if dot}<span class="snav-dot" class:warn={dot === "warn"}></span>{/if}
           </button>
         {/each}
       </div>
     {/snippet}
   </PageHero>
 
-  <!-- ── Scrolling bento canvas ── -->
-  <div class="sb-scroll" bind:this={scrollEl}>
-    <div class="sb-wrap">
+  <div class="surface-body" bind:this={scrollEl}>
 
-      {#if activeSec === "appearance"}
-        <div class="sb-bento">
+    {#if activeSec === "appearance"}
+      <div class="set-surface"><div class="set-rail">
+        <nav class="set-railnav">
+          <button class:on={apprSec === "theme"} type="button" onclick={() => (apprSec = "theme")}><Palette size={16} strokeWidth={1.75} /> Theme</button>
+          <button class:on={apprSec === "layout"} type="button" onclick={() => (apprSec = "layout")}><SlidersHorizontal size={16} strokeWidth={1.75} /> Layout</button>
+        </nav>
+        <div class="set-railbody">
 
-          <div class="st-block sb-s7">
-            <div class="st-block-label">Accent color</div>
-            <div class="st-card">
-              <div class="st-swatch-grid">
-                {#each ACCENTS as a (a.id)}
-                  <button
-                    class="st-swatch" class:on={uiPrefs.accentHue === a.hue}
-                    style="--sw: oklch(0.78 0.15 {a.hue})" type="button"
-                    onclick={() => uiPrefs.setAccentHue(a.hue)}
-                    aria-pressed={uiPrefs.accentHue === a.hue} use:tooltip={a.label}
-                  >
-                    <span class="st-swatch-chip">{#if uiPrefs.accentHue === a.hue}<Check size={15} strokeWidth={3} />{/if}</span>
-                    <span class="st-swatch-label">{a.label}</span>
-                  </button>
+          {#if apprSec === "theme"}
+          <div class="card">
+            <div class="card-tt">Looks</div>
+            <div class="card-sub">One tap sets accent, texture, density, and tint together.</div>
+            <div class="looks">
+              {#each LOOKS as p (p.id)}
+                <button class="look" class:sel={lookSel(p)} type="button" onclick={() => applyLook(p)} style="--lk: oklch(0.72 0.16 {p.h}); --lkh: {p.h};" use:tooltip={p.name}>
+                  <span class="look-tile">
+                    <span class="look-orb"></span>
+                    <span class="look-bar"></span>
+                    <span class="look-ck"><Check size={11} strokeWidth={3} /></span>
+                  </span>
+                  <span class="look-name">{p.name}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Accent</div>
+            <div class="card-sub">The signature colour across buttons, links, and focus rings.</div>
+            <div class="swatches">
+              {#each ACCENTS as a (a.id)}
+                <button class="sw" class:sel={uiPrefs.accentHue === a.hue} type="button" style="background: oklch(0.72 0.16 {a.hue});" onclick={() => uiPrefs.setAccentHue(a.hue)} aria-pressed={uiPrefs.accentHue === a.hue} use:tooltip={a.label}>
+                  {#if uiPrefs.accentHue === a.hue}<Check size={15} strokeWidth={3} color="rgba(0,0,0,0.82)" />{/if}
+                </button>
+              {/each}
+            </div>
+            <input class="hue-range" type="range" min="0" max="360" step="1" value={uiPrefs.accentHue} oninput={(e) => uiPrefs.setAccentHue(Number(e.currentTarget.value))} aria-label="Custom accent hue" />
+            <div class="ctl-row tight" style="margin-top:14px;">
+              <div><div class="ctl-t">Vividness</div><div class="ctl-s">How saturated the accent reads across the app.</div></div>
+              <div class="range-wrap">
+                <input class="set-range" type="range" min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005" value={uiPrefs.vividness} oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))} aria-label="Accent vividness" />
+                <span class="range-val">{Math.round((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN) * 100)}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Background texture</div>
+            <div class="card-sub">A faint pattern behind the workspace.</div>
+            <div class="bg-grid">
+              {#each DOT_FIELDS as df (df.id)}
+                <button class="bg-opt" class:sel={uiPrefs.dotField === df.id} type="button" onclick={() => uiPrefs.setDotField(df.id)} aria-pressed={uiPrefs.dotField === df.id}>
+                  <span class="bg-tile">
+                    {#if df.id === "off"}<span class="bg-tile-none">—</span>{:else}<span class="bg-tile-pat" data-dots={df.id}></span>{/if}
+                    <span class="bg-tile-ck"><Check size={11} strokeWidth={3} /></span>
+                  </span>
+                  <span class="bg-name">{df.label}</span>
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Screen tint</div>
+            <div class="card-sub">A comfort filter over the whole window.</div>
+            <div class="tint-grid">
+              {#each TINT_OPTS as o (o.id)}
+                {@const sel = o.hue === null ? uiPrefs.tintStrength === 0 : (uiPrefs.tintStrength > 0 && uiPrefs.tintHue === o.hue)}
+                <button class="tint-opt" class:sel type="button" onclick={() => uiPrefs.setTintHue(o.hue)} aria-pressed={sel} use:tooltip={o.label}>
+                  {#if o.hue === null}<span class="tint-none-ic">—</span>{:else}<span class="tint-chip" style="background: oklch(0.70 0.16 {o.hue});"></span>{/if}
+                  <span class="tint-lbl">{o.label}</span>
+                </button>
+              {/each}
+            </div>
+            <div class="ctl-row tight" style="margin-top:14px;">
+              <div><div class="ctl-t">Strength</div><div class="ctl-s">Intensity of the comfort filter.</div></div>
+              <div class="range-wrap">
+                <input class="set-range" type="range" min="0" max={TINT_MAX} step="0.005" value={uiPrefs.tintStrength} oninput={(e) => uiPrefs.setTintStrength(Number(e.currentTarget.value))} aria-label="Screen tint strength" />
+                <span class="range-val">{Math.round(uiPrefs.tintStrength / TINT_MAX * 100)}%</span>
+              </div>
+            </div>
+          </div>
+
+          {:else}
+          <div class="card">
+            <div class="card-tt">Density</div>
+            <div class="card-sub">Spacing of rows and cards across the app.</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Interface density</div><div class="ctl-s">Compact fits more on screen; comfy breathes.</div></div>
+              <div class="seg">
+                {#each DENSITIES as d (d)}
+                  <button class:on={uiPrefs.density === d} type="button" onclick={() => uiPrefs.setDensity(d)}>{d[0].toUpperCase() + d.slice(1)}</button>
                 {/each}
               </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Vividness</div>
-                  <div class="st-row-desc">How saturated the accent reads across the app.</div>
-                </div>
-                <div class="st-row-ctl st-range-wrap">
-                  <input
-                    class="st-range" type="range"
-                    min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005"
-                    value={uiPrefs.vividness}
-                    oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))}
-                    aria-label="Accent vividness"
-                  />
-                  <span class="st-range-val">{Math.round((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN) * 100)}%</span>
-                </div>
-              </div>
             </div>
           </div>
 
-          <div class="st-block sb-s7">
-            <div class="st-block-label">Background texture</div>
-            <div class="st-card">
-              <div class="st-dot-grid">
-                {#each DOT_FIELDS as df (df.id)}
-                  <button
-                    class="st-dot" class:on={uiPrefs.dotField === df.id}
-                    type="button" onclick={() => uiPrefs.setDotField(df.id)}
-                    aria-pressed={uiPrefs.dotField === df.id} use:tooltip={df.label}
-                  >
-                    <span class="st-dot-swatch" data-dots={df.id}></span>
-                    <span class="st-dot-label">{df.label}</span>
-                  </button>
-                {/each}
+          <div class="card">
+            <div class="card-tt">Code blocks</div>
+            <div class="card-sub">How code renders in Claude's replies.</div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Font size</div><div class="ctl-s">Size of code blocks in Claude's chat replies.</div></div>
+                <div style="min-width:130px;">
+                  <Select value={String(uiPrefs.code.fontSize)} options={[11,12,13,14].map((n) => ({ value: String(n), label: `${n}px` }))} onChange={(v) => uiPrefs.setCode({ fontSize: Number(v) })} ariaLabel="Code font size" />
+                </div>
               </div>
-            </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Tab width</div><div class="ctl-s">Spaces per indentation level.</div></div>
+                <div class="seg">
+                  {#each [2, 4] as w (w)}<button class:on={uiPrefs.code.tabWidth === w} type="button" onclick={() => uiPrefs.setCode({ tabWidth: w })}>{w}</button>{/each}
+                </div>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Font ligatures</div><div class="ctl-s">Render <code>→ ≠ &gt;=</code> as joined glyphs in JetBrains Mono.</div></div>
+                <button class="toggle" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}><span class="toggle-knob"></span></button>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Stream view</div><div class="ctl-s">Boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div></div>
+                <button class="toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="toggle-knob"></span></button>
+              </div>
           </div>
 
-          <div class="st-block sb-s5">
-            <div class="st-block-label">Screen tint</div>
-            <div class="st-card">
-              <div class="st-tint-grid">
-                {#each TINT_OPTS as o (o.id)}
-                  {@const sel = o.hue === null ? uiPrefs.tintStrength === 0 : (uiPrefs.tintStrength > 0 && uiPrefs.tintHue === o.hue)}
-                  <button
-                    class="st-tint" class:on={sel} type="button"
-                    onclick={() => uiPrefs.setTintHue(o.hue)}
-                    aria-pressed={sel} use:tooltip={o.label}
-                  >
-                    <span class="st-tint-chip" class:none={o.hue === null}
-                      style={o.hue === null ? "" : `background: oklch(0.70 0.16 ${o.hue})`}></span>
-                    <span class="st-tint-lbl">{o.label}</span>
-                  </button>
-                {/each}
+          <div class="card">
+            <div class="card-tt">Keyboard shortcuts</div>
+            <div class="card-sub">Move around Rift without the mouse.</div>
+            {#each SHORTCUTS as sc (sc.label)}
+              <div class="kbd-row">
+                <span>{sc.label}</span>
+                <span class="keys">
+                  {#each sc.combo as k}<b>{k}</b>{/each}
+                  {#if sc.alt}<span class="kbd-or">or</span>{#each sc.alt as k}<b>{k}</b>{/each}{/if}
+                </span>
               </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Strength</div>
-                  <div class="st-row-desc">Intensity of the comfort filter over the whole window.</div>
-                </div>
-                <div class="st-row-ctl st-range-wrap">
-                  <input
-                    class="st-range" type="range"
-                    min="0" max={TINT_MAX} step="0.005"
-                    value={uiPrefs.tintStrength}
-                    oninput={(e) => uiPrefs.setTintStrength(Number(e.currentTarget.value))}
-                    aria-label="Screen tint strength"
-                  />
-                  <span class="st-range-val">{Math.round(uiPrefs.tintStrength / TINT_MAX * 100)}%</span>
-                </div>
+            {/each}
+          </div>
+          {/if}
+        </div>
+      </div></div>
+    {/if}
+
+    {#if activeSec === "accessibility"}
+      <div class="set-surface"><div class="set-rail">
+        <nav class="set-railnav">
+          <button class="on" type="button"><A11yIcon size={16} strokeWidth={1.75} /> Reading comfort</button>
+        </nav>
+        <div class="set-railbody">
+          <div class="card">
+            <div class="card-tt">Reading comfort</div>
+            <div class="card-sub">Reading-comfort options for the Assistant chat.</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Dyslexia-friendly mode</div><div class="ctl-s">Lexend font + wider line spacing, and tells Claude to interpret phonetic typos / voice-to-text artifacts charitably.</div></div>
+              <button class="toggle" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
+              <div><div class="ctl-t">UI font</div><div class="ctl-s">Lexend has the strongest research backing for reading-rate improvement on dyslexic readers.</div></div>
+              <div class="seg" role="radiogroup" aria-label="UI font">
+                <button class:on={accessibility.font === "system"} role="radio" aria-checked={accessibility.font === "system"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("system")}>Inter</button>
+                <button class:on={accessibility.font === "lexend"} role="radio" aria-checked={accessibility.font === "lexend"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("lexend")}>Lexend</button>
               </div>
             </div>
-          </div>
-
-          <div class="st-block sb-s5">
-            <div class="st-block-label">Interface</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Density</div>
-                  <div class="st-row-desc">Spacing of rows and cards across the app.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <div class="st-seg">
-                    {#each DENSITIES as d (d)}
-                      <button class="st-seg-btn" class:on={uiPrefs.density === d} type="button" onclick={() => uiPrefs.setDensity(d)}>{d[0].toUpperCase() + d.slice(1)}</button>
-                    {/each}
-                  </div>
-                </div>
-              </div>
+            <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
+              <div><div class="ctl-t">Wider line + letter spacing</div><div class="ctl-s">Bumps line-height to 1.85 inside Assistant bubbles and the composer.</div></div>
+              <button class="toggle" class:on={accessibility.lineHeightBoost} role="switch" aria-checked={accessibility.lineHeightBoost} aria-label="Increased line and letter spacing" disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}><span class="toggle-knob"></span></button>
             </div>
-          </div>
-
-          <div class="st-block sb-s5">
-            <div class="st-block-label">Code preview</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Font size</div>
-                  <div class="st-row-desc">Size of code blocks in Claude's chat replies.</div>
-                </div>
-                <div class="st-row-ctl" style="min-width:150px;">
-                  <Select
-                    value={String(uiPrefs.code.fontSize)}
-                    options={[11,12,13,14].map((n) => ({ value: String(n), label: `${n}px` }))}
-                    onChange={(v) => uiPrefs.setCode({ fontSize: Number(v) })}
-                    ariaLabel="Code font size"
-                  />
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Tab width</div>
-                  <div class="st-row-desc">Spaces per indentation level.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <div class="st-seg">
-                    {#each [2, 4] as w (w)}
-                      <button class="st-seg-btn" class:on={uiPrefs.code.tabWidth === w} type="button" onclick={() => uiPrefs.setCode({ tabWidth: w })}>{w}</button>
-                    {/each}
-                  </div>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Font ligatures</div>
-                  <div class="st-row-desc">Render <span class="mono">→ ≠ &gt;=</span> as joined glyphs in JetBrains Mono.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}></button>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Stream view</div>
-                  <div class="st-row-desc">Render assistant turns as a boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}></button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="st-block sb-s7">
-            <div class="st-block-label">Keyboard shortcuts</div>
-            <div class="st-card">
-              <div class="kbd-grid">
-                {#each SHORTCUTS as sc (sc.label)}
-                  <div class="kbd-row">
-                    <span class="kbd-combo">
-                      {#each sc.combo as k, i}
-                        {#if i > 0}<span class="kbd-plus">+</span>{/if}
-                        <kbd class="kbd">{k}</kbd>
-                      {/each}
-                      {#if sc.alt}
-                        <span class="kbd-or">or</span>
-                        {#each sc.alt as k, i}
-                          {#if i > 0}<span class="kbd-plus">+</span>{/if}
-                          <kbd class="kbd">{k}</kbd>
-                        {/each}
-                      {/if}
-                    </span>
-                    <span class="kbd-label">{sc.label}</span>
-                  </div>
-                {/each}
-              </div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Warm reading tint</div><div class="ctl-s">Sepia overlay on Assistant message bubbles — softens bright-white-on-dark glare. UI chrome keeps the dark theme.</div></div>
+              <button class="toggle" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}><span class="toggle-knob"></span></button>
             </div>
           </div>
         </div>
-      {/if}
+      </div></div>
+    {/if}
 
-      {#if activeSec === "accessibility"}
-        <div class="sb-bento">
-          <div class="st-block sb-s8">
-            <div class="st-block-label">Reading comfort</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Dyslexia-friendly mode</div>
-                  <div class="st-row-desc">Lexend font + wider line spacing, and tells Claude to interpret phonetic typos / voice-to-text artifacts charitably.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}></button>
-                </div>
-              </div>
-              <div class="st-row" data-disabled={!accessibility.dyslexiaMode}>
-                <div class="st-row-body">
-                  <div class="st-row-label">UI font</div>
-                  <div class="st-row-desc">Lexend has the strongest research backing for reading-rate improvement on dyslexic readers.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <div class="st-seg" role="radiogroup" aria-label="UI font">
-                    <button class="st-seg-btn" class:on={accessibility.font === "system"} role="radio" aria-checked={accessibility.font === "system"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("system")}>Inter</button>
-                    <button class="st-seg-btn" class:on={accessibility.font === "lexend"} role="radio" aria-checked={accessibility.font === "lexend"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("lexend")}>Lexend</button>
-                  </div>
-                </div>
-              </div>
-              <div class="st-row" data-disabled={!accessibility.dyslexiaMode}>
-                <div class="st-row-body">
-                  <div class="st-row-label">Wider line + letter spacing</div>
-                  <div class="st-row-desc">Bumps line-height to 1.85 inside Assistant bubbles and the composer.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={accessibility.lineHeightBoost} role="switch" aria-checked={accessibility.lineHeightBoost} aria-label="Increased line and letter spacing" disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}></button>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Warm reading tint</div>
-                  <div class="st-row-desc">Sepia overlay on Assistant message bubbles — softens bright-white-on-dark glare. UI chrome keeps the dark theme.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}></button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      {/if}
-
-      {#if activeSec === "assistant"}
+    {#if activeSec === "assistant"}
+      <div class="set-surface"><div class="set-rail">
+        <nav class="set-railnav">
+          <button class:on={asstSec === "session"} type="button" onclick={() => (asstSec = "session")}><Bot size={16} strokeWidth={1.75} /> Session</button>
+          <button class:on={asstSec === "keys"} type="button" onclick={() => (asstSec = "keys")}><KeyRound size={16} strokeWidth={1.75} /> Cost &amp; keys</button>
+        </nav>
+        <div class="set-railbody">
+        {#if asstSec === "session"}
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
         <div class="sb-status {assistantDot ?? 'ok'}">
           <div class="sb-status-l">
@@ -571,158 +537,119 @@
           {/if}
         </div>
 
-        <div class="sb-bento">
-          <div class="st-block sb-s7">
-            <div class="st-block-label">Claude session</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Use my full Claude Code config</div>
-                  <div class="st-row-desc">Layers <code>~/.claude/CLAUDE.md</code>, slash commands, skills, and MCP servers into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only).</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}></button>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Git tools</div>
-                  <div class="st-row-desc">Local <code>git</code> tools for the model. Read-only = status, diff, log. Standard adds commit, pull, and push.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <div class="st-seg" role="radiogroup" aria-label="Git tools trust level">
-                    <button class="st-seg-btn" class:on={assistantStore.trustLevel === "readonly"} role="radio" aria-checked={assistantStore.trustLevel === "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("readonly")}>Read-only</button>
-                    <button class="st-seg-btn" class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
-                  </div>
-                </div>
-              </div>
+        <div class="card">
+          <div class="card-tt">Claude session</div>
+          <div class="ctl-row tight">
+            <div><div class="ctl-t">Use my full Claude Code config</div><div class="ctl-s">Layers <code>~/.claude/CLAUDE.md</code>, slash commands, skills, and MCP servers into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only).</div></div>
+            <button class="toggle" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}><span class="toggle-knob"></span></button>
+          </div>
+          <div class="ctl-row tight">
+            <div><div class="ctl-t">Git tools</div><div class="ctl-s">Local <code>git</code> tools for the model. Read-only = status, diff, log. Standard adds commit, pull, and push.</div></div>
+            <div class="seg" role="radiogroup" aria-label="Git tools trust level">
+              <button class:on={assistantStore.trustLevel === "readonly"} role="radio" aria-checked={assistantStore.trustLevel === "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("readonly")}>Read-only</button>
+              <button class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
             </div>
           </div>
-
-          <div class="st-block sb-s5">
-            <div class="st-block-label">Cost guard</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <label class="st-row-label" for="asst-budget">Per-turn cost cap</label>
-                  <div class="st-row-desc">Stops a turn before it spends more than this dollar amount. Leave blank for no cap.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <input id="asst-budget" class="st-input mono" type="number" min="0" step="0.01" placeholder="5.00" style="width:88px; text-align:right;" bind:value={asstMaxBudgetDraft} />
-                  <button class="st-btn primary" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving || !asstMaxBudgetDirty}>{asstMaxBudgetSaving ? "Saving…" : "Save"}</button>
-                  {#if assistantStore.maxBudgetUsd != null}
-                    <button class="st-btn" type="button" disabled={asstMaxBudgetSaving} onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}>Clear</button>
-                  {/if}
-                </div>
-              </div>
-              {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
-            </div>
-          </div>
-
-          <div class="st-block sb-s12">
-            <div class="st-block-label">Model &amp; routing</div>
-            <div class="st-card">
-              <div class="st-row-desc" style="padding:14px 17px 0;">
-                By default, turns run on your Claude session above. Setting an <strong>API key</strong> overrides that and bills pay-per-token instead. The key is stored in your OS keychain.
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <label class="st-row-label" for="asst-apikey">API-key fallback</label>
-                  <div class="st-row-desc">Bill pay-per-token through the Anthropic Console instead of your Claude session. Overrides the session whenever a key is set. Key turns run the CLI bare — your personal <code>~/.claude</code> config, MCP servers, and CLAUDE.md won't load.</div>
-                </div>
-                <div class="st-row-ctl">
-                  {#if assistantStore.hasApiKey}
-                    <span class="st-pill ok"><span class="dot"></span>Configured</span>
-                    <button class="st-btn" type="button" disabled={asstApiKeySaving} onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}>Clear</button>
-                  {:else}
-                    <span class="st-secret">
-                      <input id="asst-apikey" class="st-input mono" type={asstApiKeyVisible ? "text" : "password"} placeholder="sk-ant-api03-…" style="width:188px;" bind:value={asstApiKeyDraft} autocomplete="off" spellcheck="false" />
-                      <button class="st-eye" type="button" onclick={() => (asstApiKeyVisible = !asstApiKeyVisible)} aria-label={asstApiKeyVisible ? "Hide API key" : "Show API key"}>{#if asstApiKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
-                    </span>
-                    <button class="st-btn primary" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving || !asstApiKeyDirty}>{asstApiKeySaving ? "Saving…" : "Save"}</button>
-                  {/if}
-                </div>
-              </div>
-              {#if asstApiKeyMsg}<div class="st-note">{asstApiKeyMsg}</div>{/if}
-              {#if assistantStore.auth?.envApiKeyPresent && !assistantStore.auth?.apiKeyConfigured}
-                <div class="st-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it above; otherwise remove it from your environment.</div>
-              {/if}
-            </div>
-          </div>
-
         </div>
-      {/if}
-
-      {#if activeSec === "speech"}
-        <div class="sb-bento">
-          <div class="st-block sb-s7">
-            <div class="st-block-label">Engine</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Speech-to-text</div>
-                  <div class="st-row-desc">Master switch. When off, the mic button in the composer is hidden.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={stt.config.enabled} role="switch" aria-checked={stt.config.enabled} aria-label="Enable speech-to-text" type="button" onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}></button>
-                </div>
+        {:else}
+          <div class="card">
+            <div class="card-tt">Cost guard</div>
+            <div class="ctl-row tight">
+              <div><label class="ctl-t" for="asst-budget">Per-turn cost cap</label><div class="ctl-s">Stops a turn before it spends more than this dollar amount. Leave blank for no cap.</div></div>
+              <div class="ctl-actions">
+                <input id="asst-budget" class="st-input mono" type="number" min="0" step="0.01" placeholder="5.00" style="width:88px; text-align:right;" bind:value={asstMaxBudgetDraft} />
+                <button class="st-btn primary" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving || !asstMaxBudgetDirty}>{asstMaxBudgetSaving ? "Saving…" : "Save"}</button>
+                {#if assistantStore.maxBudgetUsd != null}
+                  <button class="st-btn" type="button" disabled={asstMaxBudgetSaving} onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}>Clear</button>
+                {/if}
               </div>
-              <div class="st-row st-row-stack">
-                <div class="st-row-body">
-                  <div class="st-row-label">Recognition engine</div>
-                  <div class="st-row-desc">Web Speech is zero-install via Edge / Azure. Whisper runs on-device with stronger accent tolerance and vocabulary priming.</div>
-                </div>
-                <div class="set-pick-grid set-pick-grid-2">
-                  {#each STT_ENGINES as eng (eng.id)}
-                    <button type="button" class="set-pick" data-active={stt.config.engine === eng.id} disabled={!stt.config.enabled || (eng.id === "whisper" && !stt.backendAvailable)} onclick={() => void stt.setConfig({ engine: eng.id })}>
-                      <span class="set-pick-label">{eng.label}</span>
-                      <span class="set-pick-sub mono">{eng.sub}</span>
+            </div>
+            {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Model &amp; routing</div>
+            <div class="card-sub">By default, turns run on your Claude session above. Setting an <strong>API key</strong> overrides that and bills pay-per-token instead. The key is stored in your OS keychain.</div>
+            <div class="ctl-row tight">
+              <div><label class="ctl-t" for="asst-apikey">API-key fallback</label><div class="ctl-s">Bill pay-per-token through the Anthropic Console instead of your Claude session. Overrides the session whenever a key is set. Key turns run the CLI bare — your personal <code>~/.claude</code> config, MCP servers, and CLAUDE.md won't load.</div></div>
+              <div class="ctl-actions">
+                {#if assistantStore.hasApiKey}
+                  <span class="st-pill ok"><span class="dot"></span>Configured</span>
+                  <button class="st-btn" type="button" disabled={asstApiKeySaving} onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}>Clear</button>
+                {:else}
+                  <span class="st-secret">
+                    <input id="asst-apikey" class="st-input mono" type={asstApiKeyVisible ? "text" : "password"} placeholder="sk-ant-api03-…" style="width:188px;" bind:value={asstApiKeyDraft} autocomplete="off" spellcheck="false" />
+                    <button class="st-eye" type="button" onclick={() => (asstApiKeyVisible = !asstApiKeyVisible)} aria-label={asstApiKeyVisible ? "Hide API key" : "Show API key"}>{#if asstApiKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
+                  </span>
+                  <button class="st-btn primary" type="button" onclick={saveAsstApiKey} disabled={asstApiKeySaving || !asstApiKeyDirty}>{asstApiKeySaving ? "Saving…" : "Save"}</button>
+                {/if}
+              </div>
+            </div>
+            {#if asstApiKeyMsg}<div class="st-note">{asstApiKeyMsg}</div>{/if}
+            {#if assistantStore.auth?.envApiKeyPresent && !assistantStore.auth?.apiKeyConfigured}
+              <div class="st-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it above; otherwise remove it from your environment.</div>
+            {/if}
+          </div>
+        {/if}
+        </div>
+      </div></div>
+    {/if}
+
+    {#if activeSec === "speech"}
+      <div class="set-surface"><div class="set-rail">
+        <nav class="set-railnav">
+          <button class:on={spchSec === "engine"} type="button" onclick={() => (spchSec = "engine")}><Mic size={16} strokeWidth={1.75} /> Engine &amp; models</button>
+          <button class:on={spchSec === "composer"} type="button" onclick={() => (spchSec = "composer")}><Keyboard size={16} strokeWidth={1.75} /> Composer</button>
+        </nav>
+        <div class="set-railbody">
+        {#if spchSec === "engine"}
+          <div class="card">
+            <div class="card-tt">Engine</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Speech-to-text</div><div class="ctl-s">Master switch. When off, the mic button in the composer is hidden.</div></div>
+              <button class="toggle" class:on={stt.config.enabled} role="switch" aria-checked={stt.config.enabled} aria-label="Enable speech-to-text" type="button" onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row stack">
+              <div><div class="ctl-t">Recognition engine</div><div class="ctl-s">Web Speech is zero-install via Edge / Azure. Whisper runs on-device with stronger accent tolerance and vocabulary priming.</div></div>
+              <div class="set-pick-grid set-pick-grid-2">
+                {#each STT_ENGINES as eng (eng.id)}
+                  <button type="button" class="set-pick" data-active={stt.config.engine === eng.id} disabled={!stt.config.enabled || (eng.id === "whisper" && !stt.backendAvailable)} onclick={() => void stt.setConfig({ engine: eng.id })}>
+                    <span class="set-pick-label">{eng.label}</span>
+                    <span class="set-pick-sub mono">{eng.sub}</span>
+                  </button>
+                {/each}
+              </div>
+            </div>
+            {#if !stt.backendAvailable}
+              <div class="st-warn">Whisper backend not built into this Rift release. To enable: install LLVM (<code>winget install LLVM.LLVM</code>, admin required), optionally the NVIDIA CUDA Toolkit for GPU, then rebuild with <code>cargo build --release --features whisper-rs</code>.</div>
+            {/if}
+          </div>
+
+          {#if stt.config.engine === "web_speech"}
+            <div class="card">
+              <div class="card-tt">Web Speech</div>
+              <div class="ctl-row stack">
+                <div><div class="ctl-t">Language</div><div class="ctl-s">BCP-47 tag passed to the recogniser. Pick another language if you speak something other than English.</div></div>
+                <div class="set-pick-grid" role="radiogroup" aria-label="Speech recognition language">
+                  {#each STT_LANGS as l (l.id)}
+                    <button type="button" role="radio" aria-checked={stt.config.language === l.id} class="set-pick" data-active={stt.config.language === l.id} onclick={() => void stt.setConfig({ language: l.id })}>
+                      <span class="set-pick-label">{l.label}</span>
+                      <span class="set-pick-sub mono">{l.id}</span>
                     </button>
                   {/each}
                 </div>
               </div>
-              {#if !stt.backendAvailable}
-                <div class="st-warn">Whisper backend not built into this Rift release. To enable: install LLVM (<code>winget install LLVM.LLVM</code>, admin required), optionally the NVIDIA CUDA Toolkit for GPU, then rebuild with <code>cargo build --release --features whisper-rs</code>.</div>
-              {/if}
-            </div>
-          </div>
-
-          {#if stt.config.engine === "web_speech"}
-            <div class="st-block sb-s5">
-              <div class="st-block-label">Web Speech</div>
-              <div class="st-card">
-                <div class="st-row st-row-stack">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Language</div>
-                    <div class="st-row-desc">BCP-47 tag passed to the recogniser. Pick another language if you speak something other than English.</div>
-                  </div>
-                  <div class="set-pick-grid" role="radiogroup" aria-label="Speech recognition language">
-                    {#each STT_LANGS as l (l.id)}
-                      <button type="button" role="radio" aria-checked={stt.config.language === l.id} class="set-pick" data-active={stt.config.language === l.id} onclick={() => void stt.setConfig({ language: l.id })}>
-                        <span class="set-pick-label">{l.label}</span>
-                        <span class="set-pick-sub mono">{l.id}</span>
-                      </button>
-                    {/each}
-                  </div>
-                </div>
-                <div class="st-row">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Continuous mode</div>
-                    <div class="st-row-desc">Keep listening across pauses until you click stop.</div>
-                  </div>
-                  <div class="st-row-ctl">
-                    <button class="st-switch" class:on={stt.config.continuous} role="switch" aria-checked={stt.config.continuous} aria-label="Continuous mode" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ continuous: !stt.config.continuous })}></button>
-                  </div>
-                </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Continuous mode</div><div class="ctl-s">Keep listening across pauses until you click stop.</div></div>
+                <button class="toggle" class:on={stt.config.continuous} role="switch" aria-checked={stt.config.continuous} aria-label="Continuous mode" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ continuous: !stt.config.continuous })}><span class="toggle-knob"></span></button>
               </div>
             </div>
           {/if}
 
           {#if stt.config.engine === "whisper"}
-            <div class="st-block sb-s12">
-              <div class="st-block-label">Whisper model</div>
-              <div class="st-card">
-                <div class="set-model-list">
+            <div class="card">
+              <div class="card-tt">Whisper model</div>
+              <div class="set-model-list">
                   {#each stt.models as m (m.id)}
                     {@const prog = stt.modelDownloads[m.id]}
                     {@const isActive = stt.config.whisper_model === m.id}
@@ -758,201 +685,277 @@
                     </div>
                   {/each}
                   {#if stt.models.length === 0}<div class="st-note">Loading model catalogue…</div>{/if}
-                </div>
               </div>
             </div>
 
-            <div class="st-block">
-              <div class="st-block-label">Capture &amp; cleanup</div>
-              <div class="st-card">
-                <div class="st-row">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Input device</div>
-                    <div class="st-row-desc">Microphone used by Whisper capture. System default is usually correct.</div>
+            <div class="card">
+              <div class="card-tt">Capture &amp; cleanup</div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Input device</div><div class="ctl-s">Microphone used by Whisper capture. System default is usually correct.</div></div>
+                <div class="ctl-actions set-mic-r">
+                  <div class="set-mic-select">
+                    <Select
+                      value={stt.config.input_device ?? ""}
+                      options={[{ value: "", label: "System default" }, ...stt.inputDevices.map((d) => ({ value: d, label: d }))]}
+                      onChange={(v) => void stt.setConfig({ input_device: v === "" ? null : v })}
+                      disabled={!stt.config.enabled}
+                      ariaLabel="Whisper input device"
+                    />
                   </div>
-                  <div class="st-row-ctl set-mic-r">
-                    <div class="set-mic-select">
-                      <Select
-                        value={stt.config.input_device ?? ""}
-                        options={[{ value: "", label: "System default" }, ...stt.inputDevices.map((d) => ({ value: d, label: d }))]}
-                        onChange={(v) => void stt.setConfig({ input_device: v === "" ? null : v })}
-                        disabled={!stt.config.enabled}
-                        ariaLabel="Whisper input device"
-                      />
-                    </div>
-                    <button type="button" class="st-btn" onclick={() => void stt.refreshInputDevices()} use:tooltip={"Refresh device list"} aria-label="Refresh"><RefreshCw size={14} /></button>
-                  </div>
+                  <button type="button" class="st-btn" onclick={() => void stt.refreshInputDevices()} use:tooltip={"Refresh device list"} aria-label="Refresh"><RefreshCw size={14} /></button>
                 </div>
-                <div class="st-row">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Clean with Claude Haiku</div>
-                    <div class="st-row-desc">Polishes the final transcript via Haiku — fixes punctuation, capitalises proper nouns. ~200-400ms tail, ~$0.0001/utterance.</div>
-                  </div>
-                  <div class="st-row-ctl">
-                    <button class="st-switch" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean transcripts with Claude Haiku" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}></button>
-                  </div>
-                </div>
-                <div class="st-row">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Beam search</div>
-                    <div class="st-row-desc">Higher-accuracy decode (beam width 5) instead of greedy — sharper on technical terms, ~2-4× slower. GPU recommended.</div>
-                  </div>
-                  <div class="st-row-ctl">
-                    <button class="st-switch" class:on={(stt.config.beam_size ?? 1) > 1} role="switch" aria-checked={(stt.config.beam_size ?? 1) > 1} aria-label="Use beam search decoding" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ beam_size: (stt.config.beam_size ?? 1) > 1 ? null : 5 })}></button>
-                  </div>
-                </div>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Clean with Claude Haiku</div><div class="ctl-s">Polishes the final transcript via Haiku — fixes punctuation, capitalises proper nouns. ~200-400ms tail, ~$0.0001/utterance.</div></div>
+                <button class="toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean transcripts with Claude Haiku" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="toggle-knob"></span></button>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Beam search</div><div class="ctl-s">Higher-accuracy decode (beam width 5) instead of greedy — sharper on technical terms, ~2-4× slower. GPU recommended.</div></div>
+                <button class="toggle" class:on={(stt.config.beam_size ?? 1) > 1} role="switch" aria-checked={(stt.config.beam_size ?? 1) > 1} aria-label="Use beam search decoding" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ beam_size: (stt.config.beam_size ?? 1) > 1 ? null : 5 })}><span class="toggle-knob"></span></button>
               </div>
             </div>
 
-            <div class="st-block">
-              <div class="st-block-label">Vocabulary priming</div>
-              <div class="st-card">
-                <div class="st-row st-row-stack">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Style prompt</div>
-                    <div class="st-row-desc">Whisper's <code>initial_prompt</code> biases the decoder toward your speaking style.</div>
-                  </div>
-                  <textarea class="set-textarea" rows="3" disabled={!stt.config.enabled} value={stt.config.initial_prompt} oninput={(e) => void stt.setConfig({ initial_prompt: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
-                </div>
-                <div class="st-row st-row-stack">
-                  <div class="st-row-body">
-                    <div class="st-row-label">Vocabulary</div>
-                    <div class="st-row-desc">Comma- or newline-separated. Add project names, server names. Budget ~800 chars (Whisper's 224-token prompt limit).</div>
-                  </div>
-                  <textarea class="set-textarea" rows="4" placeholder="Project names, libraries, jargon — e.g. Tauri, SvelteKit, oklch, my_project" disabled={!stt.config.enabled} value={stt.config.vocab_text} oninput={(e) => void stt.setConfig({ vocab_text: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
-                </div>
+            <div class="card">
+              <div class="card-tt">Vocabulary priming</div>
+              <div class="ctl-row stack">
+                <div><div class="ctl-t">Style prompt</div><div class="ctl-s">Whisper's <code>initial_prompt</code> biases the decoder toward your speaking style.</div></div>
+                <textarea class="set-textarea" rows="3" disabled={!stt.config.enabled} value={stt.config.initial_prompt} oninput={(e) => void stt.setConfig({ initial_prompt: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
+              </div>
+              <div class="ctl-row stack">
+                <div><div class="ctl-t">Vocabulary</div><div class="ctl-s">Comma- or newline-separated. Add project names, server names. Budget ~800 chars (Whisper's 224-token prompt limit).</div></div>
+                <textarea class="set-textarea" rows="4" placeholder="Project names, libraries, jargon — e.g. Tauri, SvelteKit, oklch, my_project" disabled={!stt.config.enabled} value={stt.config.vocab_text} oninput={(e) => void stt.setConfig({ vocab_text: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
               </div>
             </div>
           {/if}
-
-          <div class="st-block sb-s12">
-            <div class="st-block-label">Composer integration</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Live partial transcripts</div>
-                  <div class="st-row-desc">Words appear in the composer as you speak. Off = wait for each sentence to commit.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={stt.config.show_interim} role="switch" aria-checked={stt.config.show_interim} aria-label="Live partial transcripts" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ show_interim: !stt.config.show_interim })}></button>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Insertion mode</div>
-                  <div class="st-row-desc">Append preserves what's typed; off = transcript replaces composer contents (mic-first workflow).</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={stt.config.append_to_draft} role="switch" aria-checked={stt.config.append_to_draft} aria-label="Append transcript to existing draft" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ append_to_draft: !stt.config.append_to_draft })}></button>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Voice commands</div>
-                  <div class="st-row-desc">"send it" fires the message, "new line" / "new paragraph" insert breaks, "scratch that" deletes the last phrase.</div>
-                </div>
-                <div class="st-row-ctl">
-                  <button class="st-switch" class:on={stt.config.voice_commands} role="switch" aria-checked={stt.config.voice_commands} aria-label="Voice commands" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ voice_commands: !stt.config.voice_commands })}></button>
-                </div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Auto-stop on silence</div>
-                  <div class="st-row-desc">Ends the recording by itself after a pause — hands-free dictation. Needs live partials on the Web Speech engine.</div>
-                </div>
-                <div class="st-row-ctl">
-                  {#each [{ v: 0, label: "Off" }, { v: 3, label: "3s" }, { v: 5, label: "5s" }, { v: 10, label: "10s" }] as opt (opt.v)}
-                    <button type="button" class="set-pick" data-active={stt.config.auto_stop_secs === opt.v} disabled={!stt.config.enabled} onclick={() => void stt.setConfig({ auto_stop_secs: opt.v })}>{opt.label}</button>
-                  {/each}
-                </div>
-              </div>
-            </div>
-          </div>
 
           {#if stt.config.engine === "web_speech" && !stt.supported}
-            <div class="st-warn sb-s12">Your WebView does not expose <code>SpeechRecognition</code>; Web Speech is unavailable — switch to Whisper or install LLVM and rebuild.</div>
+            <div class="st-warn">Your WebView does not expose <code>SpeechRecognition</code>; Web Speech is unavailable — switch to Whisper or install LLVM and rebuild.</div>
           {/if}
-          {#if stt.lastError}<div class="st-warn sb-s12">{stt.lastError}</div>{/if}
-        </div>
-      {/if}
-
-      {#if activeSec === "about"}
-        <div class="sb-bento">
-          <div class="st-block sb-s4">
-            <div class="st-block-label">Build</div>
-            <div class="st-card">
-              {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "Proprietary · github.com/Blazzer10200/rift"]] as kv (kv[0])}
-                <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
-              {/each}
+          {#if stt.lastError}<div class="st-warn">{stt.lastError}</div>{/if}
+        {:else}
+          <div class="card">
+            <div class="card-tt">Composer integration</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Live partial transcripts</div><div class="ctl-s">Words appear in the composer as you speak. Off = wait for each sentence to commit.</div></div>
+              <button class="toggle" class:on={stt.config.show_interim} role="switch" aria-checked={stt.config.show_interim} aria-label="Live partial transcripts" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ show_interim: !stt.config.show_interim })}><span class="toggle-knob"></span></button>
             </div>
-          </div>
-
-          <div class="st-block sb-s8">
-            <div class="st-block-label">Paths</div>
-            <div class="st-card">
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Config</div>
-                  <div class="st-row-desc"><span class="mono" use:tooltip={configDir}>{configDir || "—"}</span></div>
-                </div>
-                <div class="st-row-ctl"><button class="st-btn" type="button" disabled={!configDir} onclick={() => openDir(configDir)}><FolderOpen size={14} /> Open</button></div>
-              </div>
-              <div class="st-row">
-                <div class="st-row-body">
-                  <div class="st-row-label">Logs</div>
-                  <div class="st-row-desc"><span class="mono" use:tooltip={logDir}>{logDir || "—"}</span></div>
-                </div>
-                <div class="st-row-ctl"><button class="st-btn" type="button" disabled={!logDir} onclick={() => openDir(logDir)}><FolderOpen size={14} /> Open</button></div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Insertion mode</div><div class="ctl-s">Append preserves what's typed; off = transcript replaces composer contents (mic-first workflow).</div></div>
+              <button class="toggle" class:on={stt.config.append_to_draft} role="switch" aria-checked={stt.config.append_to_draft} aria-label="Append transcript to existing draft" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ append_to_draft: !stt.config.append_to_draft })}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Voice commands</div><div class="ctl-s">"send it" fires the message, "new line" / "new paragraph" insert breaks, "scratch that" deletes the last phrase.</div></div>
+              <button class="toggle" class:on={stt.config.voice_commands} role="switch" aria-checked={stt.config.voice_commands} aria-label="Voice commands" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ voice_commands: !stt.config.voice_commands })}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Auto-stop on silence</div><div class="ctl-s">Ends the recording by itself after a pause — hands-free dictation. Needs live partials on the Web Speech engine.</div></div>
+              <div class="set-pick-grid">
+                {#each [{ v: 0, label: "Off" }, { v: 3, label: "3s" }, { v: 5, label: "5s" }, { v: 10, label: "10s" }] as opt (opt.v)}
+                  <button type="button" class="set-pick" data-active={stt.config.auto_stop_secs === opt.v} disabled={!stt.config.enabled} onclick={() => void stt.setConfig({ auto_stop_secs: opt.v })}>{opt.label}</button>
+                {/each}
               </div>
             </div>
           </div>
-
-          <div class="st-block sb-s12">
-            <div class="st-block-label">Local tools</div>
-            <div class="st-card">
-              {#each LOCAL_TOOLS as t (t.key)}
-                {@const present = environment[t.key]}
-                <div class="st-row">
-                  <div class="st-row-body">
-                    <div class="st-row-label">{t.label}</div>
-                    <div class="st-row-desc">{t.use}{present ? "" : ` · ${t.hint}`}</div>
-                  </div>
-                  <div class="st-row-ctl">
-                    <span class="env-stat" class:ok={present} class:warn={!present}>
-                      <span class="env-dot"></span>{present ? "Installed" : "Not found"}
-                    </span>
-                  </div>
-                </div>
-              {/each}
-            </div>
-          </div>
-
-          <div class="st-block sb-s12">
-            <div class="st-block-label">Help &amp; diagnostics</div>
-            <div class="st-card">
-              <button class="st-about-row" type="button" onclick={() => updates.open()}>
-                <span class="st-about-ic"><RefreshCw size={15} /></span>
-                <span class="st-about-body"><span class="st-about-t">Check for updates</span><span class="st-about-s">Compare against the latest GitHub release</span></span>
-              </button>
-              <button class="st-about-row" type="button" onclick={copyDiagnostic}>
-                <span class="st-about-ic">{#if diagCopied}<Check size={15} />{:else}<Copy size={15} />{/if}</span>
-                <span class="st-about-body"><span class="st-about-t">{diagCopied ? "Copied to clipboard" : "Copy diagnostic"}</span><span class="st-about-s">Version, platform, and paths — username-scrubbed</span></span>
-              </button>
-              <button class="st-about-row" type="button" onclick={() => { onboarding.reset(); betaNotice.reset(); }}>
-                <span class="st-about-ic"><RotateCcw size={15} /></span>
-                <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Shows the welcome walkthrough — including the beta &amp; AI-disclaimer notice — again on next launch</span></span>
-              </button>
-            </div>
-          </div>
+        {/if}
         </div>
-      {/if}
+      </div></div>
+    {/if}
 
-    </div>
+    {#if activeSec === "about"}
+      <div class="set-surface"><div class="set-rail">
+        <nav class="set-railnav">
+          <button class:on={abtSec === "about"} type="button" onclick={() => (abtSec = "about")}><Info size={16} strokeWidth={1.75} /> About</button>
+          <button class:on={abtSec === "help"} type="button" onclick={() => (abtSec = "help")}><Wrench size={16} strokeWidth={1.75} /> Tools &amp; help</button>
+        </nav>
+        <div class="set-railbody">
+        {#if abtSec === "about"}
+          <div class="card">
+            <div class="card-tt">Build</div>
+            {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "Proprietary · github.com/Blazzer10200/rift"]] as kv (kv[0])}
+              <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
+            {/each}
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Paths</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Config</div><div class="ctl-s"><span class="mono" use:tooltip={configDir}>{configDir || "—"}</span></div></div>
+              <button class="st-btn" type="button" disabled={!configDir} onclick={() => openDir(configDir)}><FolderOpen size={14} /> Open</button>
+            </div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Logs</div><div class="ctl-s"><span class="mono" use:tooltip={logDir}>{logDir || "—"}</span></div></div>
+              <button class="st-btn" type="button" disabled={!logDir} onclick={() => openDir(logDir)}><FolderOpen size={14} /> Open</button>
+            </div>
+          </div>
+        {:else}
+          <div class="card">
+            <div class="card-tt">Local tools</div>
+            {#each LOCAL_TOOLS as t (t.key)}
+              {@const present = environment[t.key]}
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">{t.label}</div><div class="ctl-s">{t.use}{present ? "" : ` · ${t.hint}`}</div></div>
+                <span class="env-stat" class:ok={present} class:warn={!present}>
+                  <span class="env-dot"></span>{present ? "Installed" : "Not found"}
+                </span>
+              </div>
+            {/each}
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Help &amp; diagnostics</div>
+            <button class="st-about-row" type="button" onclick={() => updates.open()}>
+              <span class="st-about-ic"><RefreshCw size={15} /></span>
+              <span class="st-about-body"><span class="st-about-t">Check for updates</span><span class="st-about-s">Compare against the latest GitHub release</span></span>
+            </button>
+            <button class="st-about-row" type="button" onclick={copyDiagnostic}>
+              <span class="st-about-ic">{#if diagCopied}<Check size={15} />{:else}<Copy size={15} />{/if}</span>
+              <span class="st-about-body"><span class="st-about-t">{diagCopied ? "Copied to clipboard" : "Copy diagnostic"}</span><span class="st-about-s">Version, platform, and paths — username-scrubbed</span></span>
+            </button>
+            <button class="st-about-row" type="button" onclick={() => { onboarding.reset(); betaNotice.reset(); }}>
+              <span class="st-about-ic"><RotateCcw size={15} /></span>
+              <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Shows the welcome walkthrough — including the beta &amp; AI-disclaimer notice — again on next launch</span></span>
+            </button>
+          </div>
+        {/if}
+        </div>
+      </div></div>
+    {/if}
+
   </div>
 </div>
 
 <style>
   .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
+
+  /* ════════ Redesign RailShell (spec: rift-redesign.html) ════════ */
+  @keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* hero tab bar */
+  .tabnav { display: flex; gap: 4px; padding: 0 40px; flex: none; border-bottom: 1px solid var(--border); }
+  .snav { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 4px; margin: 0 8px; background: none; border: 0; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color var(--dur-fast); }
+  .snav:hover { color: var(--fg-2); }
+  .snav.on { color: var(--fg); border-bottom-color: var(--accent); }
+  .snav :global(svg) { flex: none; color: var(--fg-subtle); transition: color var(--dur-fast); }
+  .snav.on :global(svg) { color: var(--accent); }
+  .snav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .snav-dot.warn { background: var(--warn); }
+
+  .surface-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+
+  /* shared rail layout */
+  .set-surface { max-width: 1040px; margin: 0 auto; padding: 26px 40px 48px; }
+  .set-rail { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 34px; align-items: start; }
+  .set-railnav { position: sticky; top: 22px; display: flex; flex-direction: column; gap: 3px; }
+  .set-railnav button { display: flex; align-items: center; gap: 11px; height: 40px; padding: 0 12px; border: 0; background: none; border-radius: 9px; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 13px; font-weight: 500; text-align: left; transition: background var(--dur-fast), color var(--dur-fast); }
+  .set-railnav button :global(svg) { color: var(--fg-subtle); flex: none; transition: color var(--dur-fast); }
+  .set-railnav button:hover { background: var(--bg-elev-1); color: var(--fg-2); }
+  .set-railnav button:hover :global(svg) { color: var(--fg-2); }
+  .set-railnav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  .set-railnav button.on :global(svg) { color: var(--accent); }
+  .set-railbody { min-width: 0; min-height: 440px; }
+  .set-railbody > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
+  .set-railbody > .card:last-child { margin-bottom: 0; }
+
+  /* card */
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
+  .card-tt { font-size: 14px; font-weight: 650; margin-bottom: 3px; }
+  .card-sub { font-size: 11.5px; color: var(--fg-subtle); margin-bottom: 14px; }
+  .card-sub code, .ctl-s code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
+
+  /* control rows */
+  .ctl-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent); }
+  .ctl-row:last-child { border-bottom: 0; padding-bottom: 0; }
+  .ctl-row.tight { padding: 9px 0; }
+  .ctl-row.stack { flex-direction: column; align-items: stretch; gap: 10px; }
+  .ctl-row[data-disabled="true"] { opacity: 0.5; }
+  .ctl-t { font-size: 13px; font-weight: 500; }
+  .ctl-s { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; }
+  .ctl-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+
+  /* segmented control */
+  .seg { display: inline-flex; padding: 2px; background: var(--track); border: 1px solid var(--border); border-radius: 9px; gap: 2px; flex: none; }
+  .seg button { height: 26px; padding: 0 14px; border: 0; background: none; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 12px; border-radius: 7px; transition: background var(--dur-fast), color var(--dur-fast); }
+  .seg button:hover:not(:disabled) { color: var(--fg); }
+  .seg button.on { background: var(--surface-active); color: var(--fg); box-shadow: var(--shadow-sm); }
+  .seg button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* toggle */
+  .toggle { width: 40px; height: 23px; border-radius: 999px; background: var(--track); border: 1px solid var(--border-strong); position: relative; flex: none; cursor: pointer; padding: 0; transition: background var(--dur-base); }
+  .toggle.on { background: var(--accent); border-color: transparent; }
+  .toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+  .toggle:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring); }
+  .toggle-knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: var(--fg-muted); transition: transform var(--dur-base) var(--ease-page), background var(--dur-base); }
+  .toggle.on .toggle-knob { transform: translateX(17px); background: var(--accent-fg); }
+
+  /* accent swatches + hue spectrum + vividness */
+  .swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 9px; max-width: 460px; }
+  .sw { aspect-ratio: 1.4; border-radius: 9px; border: 1px solid var(--border); cursor: pointer; display: grid; place-items: center; transition: transform var(--dur-fast); }
+  .sw:hover { transform: translateY(-2px); }
+  .sw.sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+  .hue-range { -webkit-appearance: none; appearance: none; width: 100%; height: 12px; border-radius: 999px; cursor: pointer; margin-top: 12px; border: 1px solid var(--border);
+    background: linear-gradient(90deg, oklch(0.72 0.17 20), oklch(0.78 0.16 70), oklch(0.80 0.16 110), oklch(0.78 0.15 160), oklch(0.74 0.13 200), oklch(0.70 0.15 250), oklch(0.68 0.18 300), oklch(0.72 0.18 340), oklch(0.72 0.17 380)); }
+  .hue-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: oklch(0.82 var(--accent-c) var(--accent-h)); border: 3px solid var(--bg-inset); box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-sm); cursor: pointer; transition: transform var(--dur-fast) var(--ease-page); }
+  .hue-range::-webkit-slider-thumb:hover { transform: scale(1.12); }
+  .hue-range:focus { outline: none; }
+  .range-wrap { display: flex; align-items: center; gap: 12px; }
+  .range-val { font-size: 11.5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
+  .set-range { -webkit-appearance: none; appearance: none; width: 150px; height: 4px; border-radius: 999px; background: var(--track); cursor: pointer; }
+  .set-range::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-inset); box-shadow: var(--shadow-sm); cursor: pointer; transition: transform var(--dur-fast) var(--ease-page); }
+  .set-range::-webkit-slider-thumb:hover { transform: scale(1.14); }
+  .set-range:focus { outline: none; }
+  .set-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--ring); }
+
+  /* background-texture picker */
+  .bg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .bg-opt { display: flex; flex-direction: column; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+  .bg-tile { position: relative; aspect-ratio: 1.75; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background-color: oklch(0.135 0.004 258); transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
+  .bg-opt:hover .bg-tile { transform: translateY(-2px); border-color: var(--border-strong); }
+  .bg-opt.sel .bg-tile { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+  .bg-tile-pat { position: absolute; inset: 0; }
+  .bg-tile-none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-faint); font-size: 18px; }
+  .bg-tile-ck { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); opacity: 0; transform: scale(0.5); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
+  .bg-opt.sel .bg-tile-ck { opacity: 1; transform: none; }
+  .bg-name { font-size: 11.5px; color: var(--fg-muted); text-align: center; transition: color var(--dur-fast); }
+  .bg-opt:hover .bg-name { color: var(--fg-2); }
+  .bg-opt.sel .bg-name { color: var(--fg-2); font-weight: 550; }
+
+  /* screen-tint picker */
+  .tint-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 9px; }
+  .tint-opt { position: relative; height: 52px; border-radius: 10px; border: 1px solid var(--border); overflow: hidden; cursor: pointer; transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
+  .tint-opt:hover { transform: translateY(-2px); border-color: var(--border-strong); }
+  .tint-opt.sel { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+  .tint-opt .tint-chip { position: absolute; inset: 0; }
+  .tint-opt .tint-lbl { position: absolute; left: 0; right: 0; bottom: 0; padding: 4px 0 5px; text-align: center; font-size: 10.5px; color: var(--fg-2); background: linear-gradient(to top, color-mix(in oklab, var(--bg) 75%, transparent), transparent); }
+  .tint-opt .tint-none-ic { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-faint); font-size: 16px; }
+
+  /* looks (one-tap presets) */
+  .looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .look { display: flex; flex-direction: column; gap: 9px; padding: 0; background: none; border: 0; cursor: pointer; text-align: left; border-radius: 12px; transition: transform var(--dur-fast) var(--ease-page); }
+  .look:hover { transform: translateY(-2px); }
+  .look:active { transform: translateY(0) scale(0.985); }
+  .look-tile { position: relative; aspect-ratio: 1.62; border-radius: 11px; overflow: hidden; border: 1px solid var(--border); background: linear-gradient(150deg, color-mix(in oklab, var(--lk) 16%, oklch(0.16 0.004 250)), oklch(0.135 0.004 250) 78%); transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
+  .look:hover .look-tile { border-color: var(--border-strong); }
+  .look.sel .look-tile { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--lk); }
+  .look-orb { position: absolute; left: 13px; bottom: 12px; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 32% 30%, oklch(0.88 0.15 var(--lkh)), oklch(0.66 0.15 var(--lkh))); box-shadow: 0 4px 16px -2px color-mix(in oklab, var(--lk) 60%, transparent), inset 0 1px 0 oklch(1 0 0 / 0.3); }
+  .look-bar { position: absolute; right: 12px; bottom: 16px; left: 50px; height: 7px; border-radius: 999px; background: color-mix(in oklab, var(--lk) 22%, oklch(0.30 0.005 250)); overflow: hidden; }
+  .look-bar::after { content: ""; position: absolute; inset: 0; right: 38%; border-radius: 999px; background: var(--lk); }
+  .look-ck { position: absolute; top: 7px; right: 7px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--lk); color: oklch(0.22 0.05 var(--lkh)); opacity: 0; transform: scale(0.5); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
+  .look.sel .look-ck { opacity: 1; transform: none; }
+  .look-name { font-size: 12px; color: var(--fg-muted); text-align: center; transition: color var(--dur-fast); }
+  .look:hover .look-name { color: var(--fg-2); }
+  .look.sel .look-name { color: var(--fg); font-weight: 600; }
+
+  /* keyboard shortcut rows (spec flex variant) */
+  .keys { display: inline-flex; gap: 4px; }
+  .keys b { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 7px; }
+  .kbd-or { color: var(--fg-faint); font-size: 10px; margin: 0 2px; }
+  .mono { font-family: var(--font-mono); }
+
+  @media (max-width: 980px) {
+    .set-rail { grid-template-columns: 1fr; gap: 16px; }
+    .set-railnav { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+    .set-railnav button { height: 34px; }
+  }
 
   /* ── Hero tab bar (hero chrome via PageHero component) ── */
   .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
@@ -966,24 +969,6 @@
   .sb-chip.danger :global(svg) { color: var(--danger); }
   .sb-chip .mono { font-family: var(--font-mono); }
 
-  .sb-tabs { display: flex; gap: 4px; max-width: 820px; margin: 22px auto 0; }
-  .sb-tab { display: inline-flex; align-items: center; gap: 9px; height: 42px; padding: 0 15px; border: 0; background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-md); font-weight: 600; cursor: pointer; position: relative; border-radius: 8px 8px 0 0; transition: color 120ms; }
-  .sb-tab:hover { color: var(--fg-2); }
-  .sb-tab.on { color: var(--fg); }
-  .sb-tab.on::after { content: ""; position: absolute; left: 9px; right: 9px; bottom: -1px; height: 2px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 55%, transparent); }
-  .sb-tab :global(svg) { flex: none; color: var(--fg-subtle); transition: color 120ms; }
-  .sb-tab.on :global(svg) { color: var(--accent); }
-  .sb-tab-dot { width: 6px; height: 6px; border-radius: 999px; flex: none; }
-  .sb-tab-dot.ok { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
-  .sb-tab-dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
-
-  /* ── Scrolling bento canvas ── */
-  .sb-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
-  .sb-wrap { max-width: 820px; margin: 0 auto; padding: 26px 40px 90px; }
-  /* Single readable column — cards stack vertically; no ragged bento bottoms. */
-  .sb-bento { display: flex; flex-direction: column; gap: 16px; }
-  .sb-bento > .st-block { min-width: 0; }
-
   /* ── Session status banner ── */
   .sb-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 18px; border-radius: var(--r-card); background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 6%, var(--surface)), var(--surface)); border: 1px solid color-mix(in oklab, var(--ok) 20%, var(--border)); }
   .sb-status.warn { background: linear-gradient(180deg, color-mix(in oklab, var(--warn) 7%, var(--surface)), var(--surface)); border-color: color-mix(in oklab, var(--warn) 24%, var(--border)); }
@@ -995,28 +980,6 @@
   .sb-status-main .sub { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; }
   .sb-status-r { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 
-  /* Titled-card container system: the section title is a header band inside the card,
-     not a label floating above a slab. .st-block IS the card; .st-card is its body. */
-  .st-block { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent), var(--shadow-sm); }
-  .st-block-label { font-size: var(--fs-sm); font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--fg); padding: 13px 17px; border-bottom: 1px solid var(--border); }
-  .st-card { background: transparent; border: 0; border-radius: 0; }
-  /* Loose (non-row) content sits flush to the body edge — give it the row/header inset. */
-  .st-card > .st-row-desc { padding: 14px 17px 0; }
-  .st-card > .st-warn { margin: 4px 17px 14px; }
-  /* In-card sub-section heading (e.g. "Custom providers" within Model & routing). */
-
-  /* ── Rows ── */
-  .st-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 17px; }
-  .st-row + .st-row, .st-row + .st-note { border-top: 1px solid var(--border); }
-  .st-row-stack { flex-direction: column; align-items: stretch; gap: 10px; }
-  .st-row-stack > .st-row-body { flex: 0 0 auto; }
-  .st-row-body { flex: 1 1 300px; min-width: 0; }
-  .st-row-label { font-size: var(--fs-md); font-weight: 600; color: var(--fg); display: block; }
-  .st-row-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; max-width: 60ch; }
-  /* Calm inline code: monospace + faint wash, no boxed border — keeps descriptions readable, not noisy. */
-  .st-row-desc .mono, .st-row-desc code { font-family: var(--font-mono); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 6%, transparent); padding: 0 4px; border-radius: 4px; font-size: 0.9em; }
-  .st-row-ctl { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-  .st-row[data-disabled="true"] { opacity: 0.55; }
   /* Tool-presence pill (About → Local tools). Dot + label, tinted by status. */
   .env-stat { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; border: 1px solid transparent; }
   .env-stat .env-dot { width: 7px; height: 7px; border-radius: 999px; flex: none; }
@@ -1117,65 +1080,20 @@
   .st-about-s { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 2px; display: block; }
   .st-about-row:hover { background: var(--surface-hover); }
 
-  /* ── Appearance: accent swatch picker ── */
-  .st-swatch-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; padding: 16px; }
-  .st-swatch { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 8px 4px 6px; background: transparent; border: 0; border-radius: 10px; cursor: pointer; font: inherit; transition: background .13s ease; }
-  .st-swatch:hover { background: var(--surface-hover); }
-  .st-swatch-chip { width: 100%; height: 42px; border-radius: var(--radius); display: grid; place-items: center; background: var(--sw); color: rgba(0,0,0,0.82); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); transition: box-shadow .15s ease, transform .12s ease; }
-  .st-swatch:hover .st-swatch-chip { transform: translateY(-1px); }
-  .st-swatch.on .st-swatch-chip { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22), 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--sw) 80%, transparent); }
-  .st-swatch-label { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }
-  .st-swatch.on .st-swatch-label { color: var(--fg); }
+  /* ── Appearance: background-texture preview tiles (live field on .app[data-dots]::before) ── */
+  .bg-tile-pat[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 24%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; }
+  .bg-tile-pat[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 22%, transparent) 0.9px, transparent 1.4px); background-size: 7px 7px; }
+  .bg-tile-pat[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 28%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; -webkit-mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); }
+  .bg-tile-pat[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 12px 12px; }
+  .bg-tile-pat[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 100% 10px; }
+  .bg-tile-pat[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 18%, transparent) 0 1px, transparent 1px 9px); }
+  .bg-tile-pat[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px); }
+  .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 62%); }
+  .bg-tile-pat[data-dots="off"] { background-image: none; }
 
-  /* ── Appearance: vividness slider ── */
-  .st-range-wrap { display: flex; align-items: center; gap: 12px; }
-  .st-range { -webkit-appearance: none; appearance: none; width: 150px; height: 4px; border-radius: 999px; background: var(--bg-elev-2); cursor: pointer; }
-  .st-range::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-inset); box-shadow: var(--shadow-sm); cursor: pointer; transition: transform .12s ease; }
-  .st-range::-webkit-slider-thumb:hover { transform: scale(1.14); }
-  .st-range:focus { outline: none; }
-  .st-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--ring); }
-  .st-range-val { font-size: var(--fs-xs); color: var(--fg-muted); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
-
-  /* ── Appearance: background-texture picker (preview tiles paint each
-     texture directly; the live field lives on .app[data-dots]::before) ── */
-  .st-dot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 16px; }
-  .st-dot { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 8px 4px 6px; background: transparent; border: 0; border-radius: 10px; cursor: pointer; font: inherit; transition: background .13s ease; }
-  .st-dot:hover { background: var(--surface-hover); }
-  .st-dot-swatch { width: 100%; height: 42px; border-radius: var(--radius); background-color: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--border); transition: box-shadow .15s ease, transform .12s ease; }
-  .st-dot:hover .st-dot-swatch { transform: translateY(-1px); }
-  .st-dot.on .st-dot-swatch { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-  .st-dot-label { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }
-  .st-dot.on .st-dot-label { color: var(--fg); }
-  .st-dot-swatch[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 24%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; }
-  .st-dot-swatch[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 22%, transparent) 0.9px, transparent 1.4px); background-size: 7px 7px; }
-  .st-dot-swatch[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 28%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; -webkit-mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); }
-  .st-dot-swatch[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 12px 12px; }
-  .st-dot-swatch[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 100% 10px; }
-  .st-dot-swatch[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 18%, transparent) 0 1px, transparent 1px 9px); }
-  .st-dot-swatch[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px); }
-  .st-dot-swatch[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 62%); }
-  .st-dot-swatch[data-dots="off"] { background-image: none; }
-
-  /* ── Appearance: screen-tint picker ── */
-  .st-tint-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 16px; }
-  .st-tint { position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 8px 4px 6px; background: transparent; border: 0; border-radius: 10px; cursor: pointer; font: inherit; transition: background .13s ease; }
-  .st-tint:hover { background: var(--surface-hover); }
-  .st-tint-chip { width: 100%; height: 42px; border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--border); transition: box-shadow .15s ease, transform .12s ease; }
-  .st-tint-chip.none { background: var(--bg-inset); position: relative; }
-  .st-tint-chip.none::after { content: ""; position: absolute; left: 12%; right: 12%; top: 50%; height: 1.5px; background: var(--fg-faint); transform: rotate(-18deg); transform-origin: center; }
-  .st-tint:hover .st-tint-chip { transform: translateY(-1px); }
-  .st-tint.on .st-tint-chip { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-  .st-tint-lbl { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }
-  .st-tint.on .st-tint-lbl { color: var(--fg); }
-
-  /* ── Keyboard shortcut table ── */
-  .kbd-grid { display: flex; flex-direction: column; padding: 4px 0; }
-  .kbd-row { display: grid; grid-template-columns: 184px 1fr; align-items: center; gap: 12px; padding: 9px 17px; border-bottom: 1px solid var(--border); }
-  .kbd-row:last-child { border-bottom: none; }
-  .kbd-combo { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-  .kbd-plus { color: var(--fg-faint); font-size: 10px; }
-  .kbd-or { color: var(--fg-faint); font-size: 10px; margin: 0 4px; }
-  .kbd-label { font-size: var(--fs-sm); color: var(--fg-2); }
+  /* ── Keyboard shortcut rows ── */
+  .kbd-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent); font-size: 13px; color: var(--fg-2); }
+  .kbd-row:last-child { border-bottom: 0; padding-bottom: 0; }
 
   /* ── Speech: pick grid / models / textarea (lifted from legacy) ── */
   .set-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; width: 100%; }
