@@ -600,6 +600,15 @@ const routes = {
         }
         return { results, elapsedMs: Date.now() - t0 };
     },
+    'POST /reload': async (body, target) => {
+        // Hard reload: bust WebView2's HTTP cache then reload ignoring cache, so
+        // Vite re-serves importers fresh (304-cached importers otherwise keep
+        // stale child ?t= URLs that pin a broken HMR transform).
+        try { await cdp('Network.clearBrowserCache', {}, 5000, target); } catch {}
+        await cdp('Page.enable', {}, 5000, target).catch(() => {});
+        await cdp('Page.reload', { ignoreCache: true }, 10000, target);
+        return { ok: true, reloaded: target };
+    },
     'POST /shutdown': async () => { setTimeout(() => process.exit(0), 100); return { ok: true }; },
 };
 

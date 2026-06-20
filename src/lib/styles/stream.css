@@ -118,6 +118,17 @@
 .sapplied .del { color: var(--fg-faint); }
 .sapplied .sapplied-meta { color: var(--fg-faint); font-family: var(--font-mono); font-size: 11px; }
 
+/* per-turn hover actions (copy / retry) */
+.msg-acts { display: flex; align-items: center; gap: 2px; margin-top: 13px; height: 28px;
+  opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-fast), transform var(--dur-fast); }
+.sturn:hover .msg-acts, .sturn:focus-within .msg-acts { opacity: 1; transform: none; }
+.msg-act { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 9px; border-radius: 7px;
+  font-size: 11px; font-weight: 500; color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
+.msg-act:hover { background: var(--surface-hover); color: var(--fg-2); }
+.msg-act.copied { color: var(--ok); }
+.msg-act svg { flex: none; }
+@media (prefers-reduced-motion: reduce) { .msg-acts { transition: none; } }
+
 /* steer note */
 .ssteer { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);
   animation: blockIn var(--dur-base) var(--ease-page) both; }

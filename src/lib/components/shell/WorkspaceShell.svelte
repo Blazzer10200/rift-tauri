@@ -70,7 +70,9 @@
     min-height: 0; min-width: 0;
     position: relative;
     overflow: hidden;
-    background: var(--bg);
+    /* transparent so the app dot-field shows through; per-workspace roots
+       (assistant transparent, settings/local-llm opaque) decide their own fill. */
+    background: transparent;
   }
   .ws-page {
     position: absolute;

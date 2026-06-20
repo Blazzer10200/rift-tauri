@@ -9,6 +9,7 @@
   import Markdown from "./Markdown.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
   import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach } from "./composer/helpers";
+  import { quickStartsFor } from "./composer/quickStarts";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -36,10 +37,22 @@
   let {
     onsubmit,
     tabId = null,
+    hero = false,
   }: {
     onsubmit: (text: string) => void;
     tabId?: string | null;
+    hero?: boolean;
   } = $props();
+
+  // Hero-mode quick-starts — stack-aware launchpad chips that sit above the
+  // input on the home surface. Reads the workspace-file walk that
+  // AssistantWelcome (always mounted alongside the hero composer) kicks off, so
+  // there's a single writer of `workspaceFiles`.
+  const quickStarts = $derived(quickStartsFor(assistant.workspaceFiles));
+  function pickChip(prompt: string) {
+    setDraft(prompt);
+    void tick().then(() => { ta?.focus(); autosize(); });
+  }
 
   // Per-pane composer: bind to THIS tab's draft/attachments/queue/streaming
   // rather than the focused-pane shims, so two panes can compose & stream
@@ -979,7 +992,17 @@
       />
     {/if}
 
-    <div class="composer" class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
+    {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
+      <div class="quick-chips">
+        {#each quickStarts as s (s.title)}
+          <button class="quick-chip" type="button" onclick={() => pickChip(s.prompt)}>
+            <span class="qc-ic"><s.icon size={14}/></span>{s.title}
+          </button>
+        {/each}
+      </div>
+    {/if}
+
+    <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
       <AttachmentsRow
         {attachments}
         {attachError}
@@ -1010,7 +1033,9 @@
           placeholder=""
           rows="1"
         ></textarea>
-        {#if draft.length === 0 && !streaming && attachments.length === 0}
+        {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
+          <span class="placeholder-ghost static" aria-hidden="true">What are we working on today?</span>
+        {:else if draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask {localLlm.askLabel} · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · hold <span class="ph-k">Space</span> to talk{/if}</span>
         {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Type to queue for after this turn · <span class="ph-k">/stop</span> halts</span>
@@ -1333,6 +1358,33 @@
       0 8px 22px -12px color-mix(in oklch, var(--model-color) 20%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
   }
+
+  /* Hero mode — home surface. The composer is the centerpiece: a larger,
+     more rounded card with stack-aware quick-start chips floating above it on
+     the column's transparent background (mockup `.quick-chips`). */
+  .quick-chips {
+    display: flex; flex-wrap: wrap; gap: 7px;
+    padding: 0 2px 12px;
+  }
+  .quick-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 28px; padding: 0 12px 0 10px;
+    border-radius: 8px;
+    font: inherit; font-size: 12px; color: var(--fg-muted);
+    background: transparent; border: 1px solid var(--border);
+    cursor: pointer;
+    transition: background var(--dur-fast, 140ms), color var(--dur-fast, 140ms),
+                border-color var(--dur-fast, 140ms),
+                transform var(--dur-fast, 140ms) var(--ease-page, ease-out);
+  }
+  .qc-ic { display: inline-flex; color: var(--fg-faint); flex: none; transition: color var(--dur-fast, 140ms); }
+  .quick-chip:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); transform: translateY(-1px); }
+  .quick-chip:hover .qc-ic { color: var(--accent); }
+  .quick-chip:active { transform: translateY(0) scale(0.97); }
+  @media (prefers-reduced-motion: reduce) { .quick-chip { transition: none; } }
+
+  .composer.hero { border-radius: 18px; padding: 8px; }
+  .composer.hero textarea { font-size: 16px; padding: 13px 10px 13px 14px; min-height: 34px; }
 
   /* Streaming = ONE coherent signal: a thin model-tinted border + the
      animated top-edge bar below (synced 2.6s with the model-pill breathe).

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, Plus, X, MessageSquarePlus, ChevronRight } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
@@ -93,11 +93,45 @@
   let scrolledTop = $state(false);
   let lastTabId: string | null = null;
 
+  // ── turn-rail: right-edge exchange scrubber (shows at 2+ exchanges) ────────
+  // One tick per user message (the anchor of an exchange). The active tick is
+  // the last user bubble whose top has scrolled past the viewport top.
+  const exchangeCount = $derived(messages.filter((m) => m.role === "user").length);
+  let activeXch = $state(0);
+
+  function userBubbles(): HTMLElement[] {
+    if (!scrollEl) return [];
+    return [...scrollEl.querySelectorAll<HTMLElement>('.bubble[data-role="user"]')];
+  }
+  function updateActiveXch() {
+    if (!scrollEl) return;
+    const top = scrollEl.getBoundingClientRect().top;
+    const bs = userBubbles();
+    let idx = 0;
+    for (let k = 0; k < bs.length; k++) {
+      if (bs[k].getBoundingClientRect().top - top <= 48) idx = k;
+      else break;
+    }
+    activeXch = idx;
+  }
+  function scrollToXch(i: number) {
+    const bs = userBubbles();
+    const el = bs[i];
+    if (!el || !scrollEl) return;
+    const offset =
+      el.getBoundingClientRect().top - scrollEl.getBoundingClientRect().top + scrollEl.scrollTop - 16;
+    scrollEl.scrollTo({ top: Math.max(0, offset), behavior: "smooth" });
+  }
+  function stepXch(dir: -1 | 1) {
+    scrollToXch(Math.min(exchangeCount - 1, Math.max(0, activeXch + dir)));
+  }
+
   function onScroll() {
     if (!scrollEl) return;
     const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
     stickToBottom = gap < 80;
     scrolledTop = scrollEl.scrollTop > 8;
+    updateActiveXch();
     if (tabId) assistant.setTabScroll(tabId, scrollEl.scrollTop);
   }
 
@@ -146,6 +180,50 @@
     scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
     stickToBottom = true;
   }
+
+  // ── Composer FLIP: home (centered hero) → conversation (docked bottom) ────
+  // The composer-host is a persistent node in `.csurf-col` (outside the
+  // home/convo {#if}), so the SAME element survives the first send. We snapshot
+  // its rect before the send mutates state, then invert+animate to the docked
+  // position once the layout settles (mirrors the comp `chat.jsx` FLIP).
+  let flipFirst: DOMRect | null = null;
+  let prevEmpty: boolean | null = null;
+
+  function handleSend(text: string) {
+    if (showEmpty && composerSlotEl) flipFirst = composerSlotEl.getBoundingClientRect();
+    assistant.send(text, tabId);
+  }
+
+  function runComposerFlip() {
+    const host = composerSlotEl;
+    const first = flipFirst;
+    flipFirst = null;
+    if (!host || !first) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    void tick().then(() => {
+      if (!host) return;
+      const last = host.getBoundingClientRect();
+      const dy = Math.round(first.top - last.top);
+      if (!dy) return;
+      host.style.transition = "none";
+      host.style.transform = `translateY(${dy}px)`;
+      void host.offsetHeight;
+      host.style.transition = "transform 380ms cubic-bezier(0.22, 1, 0.36, 1)";
+      host.style.transform = "translateY(0)";
+      const clear = () => { host.style.transition = ""; host.style.transform = ""; };
+      host.addEventListener("transitionend", clear, { once: true });
+      setTimeout(clear, 460);
+    });
+  }
+
+  $effect(() => {
+    const empty = showEmpty;
+    const was = prevEmpty;
+    prevEmpty = empty;
+    if (was === null || was === empty) return;
+    if (was && !empty) runComposerFlip();
+    else flipFirst = null;
+  });
 
   function onPaneClick() {
     if (!focused) assistant.setFocusedPane(paneIdx);
@@ -291,8 +369,8 @@
     </div>
   {/if}
 
-  <div class="scroll" bind:this={scrollEl} onscroll={onScroll}>
-    {#if !tabId}
+  {#if !tabId}
+    <div class="scroll">
       <div class="pane-empty">
         <div class="pane-empty-card">
           <div class="pane-empty-mark"><MessageSquarePlus size={20}/></div>
@@ -329,29 +407,92 @@
           {/if}
         </div>
       </div>
-    {:else if showEmpty}
-      <AssistantWelcome {needsAuth} {tabId} />
-    {:else}
-      <div class="messages" bind:this={messagesEl}>
-        {#each messages as m, mi (m.id)}
-          {#if uiPrefs.streamMode && m.role === "assistant"}
-            <StreamTurn
-              message={m}
-              streaming={streaming && mi === messages.length - 1}
-            />
-          {:else}
-            <MessageBubble
-              message={m}
-              isLast={mi === messages.length - 1}
-              streaming={streaming
-                && mi === messages.length - 1
-                && m.role === "assistant"}
-            />
+    </div>
+  {:else}
+    <!-- Merged surface: HOME (centered hero) ⇄ CONVERSATION. The composer-host
+         is a persistent node so it FLIPs from center → bottom on the first send
+         (mirrors comp `chat.jsx`). Welcome/stream swap inside; alerts +
+         composer stay below the content within the same column. -->
+    <div class="csurf-col" class:is-home={showEmpty} class:is-convo={!showEmpty}>
+      {#if showEmpty}
+        <AssistantWelcome {needsAuth} {tabId} />
+      {:else}
+        <div class="stream" bind:this={scrollEl} onscroll={onScroll}>
+          <div class="messages" bind:this={messagesEl}>
+            {#each messages as m, mi (m.id)}
+              {#if uiPrefs.streamMode && m.role === "assistant"}
+                <StreamTurn
+                  message={m}
+                  isLast={mi === messages.length - 1}
+                  streaming={streaming && mi === messages.length - 1}
+                />
+              {:else}
+                <MessageBubble
+                  message={m}
+                  isLast={mi === messages.length - 1}
+                  streaming={streaming
+                    && mi === messages.length - 1
+                    && m.role === "assistant"}
+                />
+              {/if}
+            {/each}
+          </div>
+        </div>
+      {/if}
+
+      {#if showError || showNotice}
+        <div class="alerts">
+          {#if showNotice}
+            <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} use:tooltip={"Click to dismiss"}>
+              <span class="notice-icon">ℹ</span>
+              <span class="notice-text">{assistant.lastNotice}</span>
+            </button>
           {/if}
-        {/each}
+          {#if showError && isAuthError}
+            <div class="alert error recovery">
+              <span class="notice-icon">⚠</span>
+              <div class="recovery-body">
+                <span class="notice-text">{lastError}</span>
+                <div class="recovery-actions">
+                  {#if isKeyError}
+                    <button class="recovery-btn primary" type="button" onclick={() => workspace.setActive("settings")}>
+                      Open Settings
+                    </button>
+                  {:else}
+                    <button
+                      class="recovery-btn primary"
+                      type="button"
+                      disabled={assistant.loginInProgress}
+                      onclick={() => assistant.startLogin()}
+                    >
+                      {assistant.loginInProgress ? "Signing in…" : "Sign in"}
+                    </button>
+                  {/if}
+                  <button
+                    class="recovery-btn"
+                    type="button"
+                    disabled={assistant.authChecking || assistant.loginInProgress}
+                    onclick={() => assistant.recheckAuth()}
+                  >
+                    Re-check
+                  </button>
+                </div>
+              </div>
+            </div>
+          {:else if showError}
+            <div class="alert error">
+              <span class="notice-icon">⚠</span>
+              <span class="notice-text">{lastError}</span>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <div class="composer-host" class:is-home={showEmpty} bind:this={composerSlotEl}>
+        <Composer {tabId} hero={showEmpty} onsubmit={handleSend} />
       </div>
-    {/if}
-  </div>
+    </div>
+  {/if}
 
   {#if tabId && !showEmpty}
     <div class="scroll-fade-top" class:visible={scrolledTop} aria-hidden="true"></div>
@@ -359,72 +500,31 @@
 
   {#if tabId && !showEmpty && !stickToBottom}
     <button class="jump-latest" type="button" style="bottom: {composerH + 12}px" onclick={jumpToLatest} aria-label="Jump to latest message">
-      <span class="jl-ic" aria-hidden="true"><ChevronDown size={17}/></span>
+      <span class="jl-ic" aria-hidden="true"><ChevronDown size={13}/></span>
+      Jump to latest
     </button>
   {/if}
 
-  {#if showError || showNotice}
-    <div class="alerts">
-      {#if showNotice}
-        <button class="alert notice" type="button" onclick={() => assistant.dismissNotice()} use:tooltip={"Click to dismiss"}>
-          <span class="notice-icon">ℹ</span>
-          <span class="notice-text">{assistant.lastNotice}</span>
-        </button>
-      {/if}
-      {#if showError && isAuthError}
-        <div class="alert error recovery">
-          <span class="notice-icon">⚠</span>
-          <div class="recovery-body">
-            <span class="notice-text">{lastError}</span>
-            <div class="recovery-actions">
-              {#if isKeyError}
-                <button class="recovery-btn primary" type="button" onclick={() => workspace.setActive("settings")}>
-                  Open Settings
-                </button>
-              {:else}
-                <button
-                  class="recovery-btn primary"
-                  type="button"
-                  disabled={assistant.loginInProgress}
-                  onclick={() => assistant.startLogin()}
-                >
-                  {assistant.loginInProgress ? "Signing in…" : "Sign in"}
-                </button>
-              {/if}
-              <button
-                class="recovery-btn"
-                type="button"
-                disabled={assistant.authChecking || assistant.loginInProgress}
-                onclick={() => assistant.recheckAuth()}
-              >
-                Re-check
-              </button>
-            </div>
-          </div>
-        </div>
-      {:else if showError}
-        <div class="alert error">
-          <span class="notice-icon">⚠</span>
-          <span class="notice-text">{lastError}</span>
-        </div>
-      {/if}
-    </div>
-  {/if}
-
-  <!-- Composer renders for every non-empty pane so two panes can compose
-       concurrently. Empty pane (no tab) still shows the EmptyState scroll
-       region above and no composer. Send focuses this pane first so the
-       store's activeTab-driven send() targets the right tab. -->
-  {#if tabId}
-    <div class="composer-slot" bind:this={composerSlotEl}>
-      <Composer
-        {tabId}
-        onsubmit={(text) => {
-          // Pass tabId so the turn targets THIS pane's tab — send() retargets
-          // currentConvoId synchronously, which also focuses the pane.
-          assistant.send(text, tabId);
-        }}
-      />
+  {#if tabId && !showEmpty && exchangeCount >= 2}
+    <div class="turnrail" aria-label="Jump between turns">
+      <button class="tr-chev" type="button" disabled={activeXch <= 0} onclick={() => stepXch(-1)} aria-label="Previous turn">
+        <ChevronUp size={14} />
+      </button>
+      <div class="tr-ticks">
+        {#each Array(exchangeCount) as _, i (i)}
+          <button
+            class="tr-tick"
+            class:on={i === activeXch}
+            type="button"
+            onclick={() => scrollToXch(i)}
+            aria-label={`Turn ${i + 1}`}
+            aria-current={i === activeXch ? "true" : undefined}
+          ></button>
+        {/each}
+      </div>
+      <button class="tr-chev" type="button" disabled={activeXch >= exchangeCount - 1} onclick={() => stepXch(1)} aria-label="Next turn">
+        <ChevronDown size={14} />
+      </button>
     </div>
   {/if}
 
@@ -648,10 +748,53 @@
     background-size: 200px 200px;
     mix-blend-mode: overlay;
   }
-  .composer-slot {
+  /* ── Merged home ⇄ conversation column ──────────────────────────────────
+     One flex column per pane. HOME centers its content (welcome + hero
+     composer) as a unit and scrolls if it overflows; CONVERSATION lets the
+     stream take the height with the composer docked at the bottom. The
+     composer-host is shared across both so it FLIPs between the two. */
+  .csurf-col {
     position: relative;
     z-index: 1;
+    flex: 1; min-width: 0; min-height: 0;
+    display: flex; flex-direction: column;
   }
+  .csurf-col.is-home {
+    justify-content: safe center;
+    overflow-y: auto;
+    padding: 30px 32px;
+    scrollbar-width: none;
+  }
+  .csurf-col.is-home::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  .csurf-col.is-home > :global(*) {
+    width: 100%; max-width: 680px;
+    margin-left: auto; margin-right: auto;
+    flex: none;
+  }
+  .csurf-col.is-home .composer-host { margin-top: 16px; }
+
+  .composer-host {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    will-change: transform;
+  }
+
+  /* Conversation scroll region — replaces the old single `.scroll` wrapper for
+     the message timeline. Keeps the hidden-scrollbar + flex-column behavior. */
+  .stream {
+    position: relative;
+    z-index: 1;
+    flex: 1; min-height: 0;
+    overflow-y: auto;
+    padding: 16px 18px 8px;
+    scroll-padding-bottom: 28px;
+    display: flex; flex-direction: column;
+    scrollbar-width: none;
+  }
+  .stream::-webkit-scrollbar { width: 0; height: 0; display: none; }
+  .stream::-webkit-scrollbar-button { display: none; }
+
   .scroll {
     position: relative;
     z-index: 1;
@@ -818,50 +961,61 @@
      signal "new below". Replaced the centered text-pill, which read as bulky. */
   .jump-latest {
     position: absolute;
-    right: 14px;
-    bottom: 96px;
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 32px; height: 32px;
-    padding: 0;
-    background: color-mix(in oklch, var(--surface) 84%, transparent);
-    backdrop-filter: blur(14px) saturate(140%);
-    -webkit-backdrop-filter: blur(14px) saturate(140%);
-    border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--border));
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 32px; padding: 0 14px 0 12px;
     border-radius: 999px;
-    color: var(--accent);
+    background: color-mix(in oklch, var(--surface) 82%, transparent);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    border: 1px solid var(--border-strong);
+    color: var(--fg-2);
+    font-size: 12px; font-weight: 550;
     cursor: pointer;
-    box-shadow:
-      0 8px 22px -6px oklch(0 0 0 / 0.5),
-      0 0 0 1px color-mix(in oklab, var(--accent) 9%, transparent),
-      0 0 16px -2px color-mix(in oklab, var(--accent) 20%, transparent);
+    box-shadow: 0 12px 30px -14px oklch(0 0 0 / 0.6), 0 8px 22px -10px oklch(0 0 0 / 0.45);
     z-index: 3;
     animation: jump-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
-    transition: color 140ms ease, border-color 140ms ease, box-shadow 160ms ease, transform 160ms ease;
+    transition: color 140ms ease, border-color 140ms ease;
   }
-  .jump-latest:hover {
-    color: var(--fg);
-    border-color: color-mix(in oklab, var(--accent) 52%, var(--border));
-    box-shadow:
-      0 10px 26px -6px oklch(0 0 0 / 0.55),
-      0 0 0 1px color-mix(in oklab, var(--accent) 15%, transparent),
-      0 0 22px -2px color-mix(in oklab, var(--accent) 32%, transparent);
-    transform: translateY(-1px);
-  }
+  .jump-latest:hover { color: var(--fg); border-color: var(--accent); }
   .jl-ic {
-    display: inline-flex; align-items: center; justify-content: center;
-    animation: jl-bob 1.9s ease-in-out infinite;
+    display: grid; place-items: center;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent); color: var(--accent-fg);
   }
   @keyframes jump-in {
-    from { opacity: 0; transform: translateY(8px) scale(0.96); }
-    to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  @keyframes jl-bob {
-    0%, 100% { transform: translateY(0); }
-    50%      { transform: translateY(1.5px); }
+    from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .jump-latest, .jl-ic { animation: none; }
+    .jump-latest { animation: none; }
   }
+  .turnrail {
+    position: absolute; right: 9px; top: 50%; transform: translateY(-50%); z-index: 4;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 5px; padding: 5px 3px;
+    opacity: 0.45; transition: opacity var(--dur-base);
+  }
+  .turnrail:hover { opacity: 1; }
+  .tr-chev {
+    width: 24px; height: 18px; display: grid; place-items: center;
+    background: none; border: 0; cursor: pointer;
+    color: var(--fg-faint); border-radius: 6px;
+    transition: color var(--dur-fast), background var(--dur-fast);
+  }
+  .tr-chev:hover:not(:disabled) { color: var(--fg-2); background: var(--surface-hover); }
+  .tr-chev:disabled { opacity: 0.3; cursor: default; }
+  .tr-ticks { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 3px 6px; }
+  .tr-tick {
+    position: relative; height: 11px; display: flex; align-items: center; justify-content: flex-end;
+    background: none; border: 0; padding: 0; cursor: pointer;
+  }
+  .tr-tick::after {
+    content: ""; height: 2px; width: 12px; border-radius: 2px; background: var(--fg-faint); opacity: 0.55;
+    transition: width var(--dur-fast), background var(--dur-fast), opacity var(--dur-fast);
+  }
+  .tr-tick:hover::after { width: 18px; opacity: 1; background: var(--fg-muted); }
+  .tr-tick.on::after { width: 20px; background: var(--accent); opacity: 1; }
 
   .alerts {
     position: relative;
@@ -990,3 +1144,4 @@
     .drop-zone { animation: none; }
   }
 </style>
+

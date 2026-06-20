@@ -313,7 +313,10 @@
     flex: 1;
     display: flex; flex-direction: column;
     min-height: 0;
-    background: var(--bg);
+    /* transparent so the app dot-field (.app::before) shows through on the
+       home/conversation surface — spec `.csurf.is-home/.is-convo` are both
+       transparent. Settings/Local-LLM repaint their own opaque `.sb-main`. */
+    background: transparent;
     color: var(--fg);
   }
   .workbench {
