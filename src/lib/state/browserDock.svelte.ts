@@ -1,5 +1,5 @@
 // In-assistant web browser dock. A thin, isolated UI-state singleton (kept out
-// of the large AssistantStore) shared by ChatTabsBar (the toggle) and
+// of the large AssistantStore) shared by the topbar/Shift+B toggle and
 // AssistantPage (the dock layout). The actual browser lives in the Rust
 // `browser` module, driven via the `browser_*` Tauri commands; this only tracks
 // whether the dock is shown and how wide it is.

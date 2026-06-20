@@ -1,5 +1,5 @@
 // Sub-agent live-activity dock. A thin UI-state singleton (kept out of the large
-// AssistantStore) shared by ChatTabsBar (the toggle) and AssistantPage (the dock
+// AssistantStore) shared by SubAgentDock (the toggle) and AssistantPage (the dock
 // layout + activity sync). It tracks whether the dock is shown and how wide it
 // is; the data lives on the active tab's `agentSpawns`. The dock is SMART: it
 // auto-reveals while sub-agents run and auto-dismisses a few seconds after they

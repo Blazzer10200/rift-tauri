@@ -312,7 +312,7 @@
     flex: 1; min-height: 0; min-width: 0;
     display: flex;
     overflow: hidden;
-    position: relative; /* anchors the floating Environment pill */
+    position: relative;
   }
   .layout {
     flex: 1; min-height: 0; min-width: 0;

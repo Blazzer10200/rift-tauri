@@ -27,8 +27,8 @@
     input: Record<string, unknown>;
     compact?: boolean;
     defaultExpanded?: boolean;
-    // Suppress the breadcrumb header + chrome and force the body open. Used by
-    // SessionDiff, which renders its own per-file header above stacked bodies.
+    // Suppress the breadcrumb header + chrome and force the body open (e.g.
+    // EnhanceBar's inline before/after preview).
     hideHead?: boolean;
     // #34: cap rendered diff rows; the rest hides behind a "Show N more lines"
     // button. null = unlimited (chat-bubble default).
@@ -346,7 +346,7 @@
     margin: 0;
     border-radius: 8px;
   }
-  /* Embedded in a SessionDiff file group — no card chrome, the group owns it. */
+  /* Header-suppressed (hideHead) — no card chrome, the host owns it. */
   .edit-diff.embedded {
     margin: 0;
     border: 0;
