@@ -34,7 +34,7 @@
 </div>
 
 <style>
-  .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 3%, var(--bg)), var(--bg) 120px); border-bottom: 1px solid var(--border); }
+  .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, transparent), transparent 140px); border-bottom: 1px solid var(--border); }
   .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 820px; margin: 0 auto; }
   .sb-hero.pb { padding-bottom: 26px; }
   .sb-hero-l { display: flex; align-items: center; gap: 14px; min-width: 0; }
