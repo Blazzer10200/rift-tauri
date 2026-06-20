@@ -641,9 +641,7 @@ class AssistantStore {
   // model/effort). `bypassPermissions` until the user picks otherwise so
   // existing behavior is unchanged. Persisted to localStorage.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
-  // `historyOpen` is a one-shot request flag: the `/history` slash command sets
-  // it and ChatTabsBar consumes it to open the history drawer.
-  ui = $state({ tasksUpdatedAt: 0, historyOpen: false, usageOpen: false });
+  ui = $state({ tasksUpdatedAt: 0, usageOpen: false });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first

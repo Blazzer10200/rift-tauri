@@ -2,7 +2,7 @@
   // Shared file-actions popover for any file path in the UI (edit diffs, the
   // Activity "Outputs" list, etc.). Reuses the .rift-menu chrome from app.css;
   // only positioning + the action set live here. Mount it conditionally and
-  // feed it a viewport-anchored {x, y} (mirrors OpenInPaneMenu's contract).
+  // feed it a viewport-anchored {x, y}.
   import { onMount } from "svelte";
   import { Code2, ExternalLink, FolderOpen, Copy, Type } from "lucide-svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";

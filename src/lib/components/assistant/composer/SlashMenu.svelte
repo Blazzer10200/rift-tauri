@@ -5,7 +5,7 @@
   // palette's design language: compact left-anchored panel, boxed icons,
   // grouped rows, bold matched prefix, kbd hints.
   import {
-    Plus, Eraser, History, Cpu, RotateCcw, Copy, StopCircle,
+    Plus, Eraser, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
     Palette, LogIn,
   } from "lucide-svelte";
@@ -28,7 +28,6 @@
   const META: Record<string, { icon: Icon; group: string }> = {
     new:       { icon: Plus,          group: "Conversation" },
     clear:     { icon: Eraser,        group: "Conversation" },
-    history:   { icon: History,       group: "Conversation" },
     model:     { icon: Cpu,           group: "Compose" },
     retry:     { icon: RotateCcw,     group: "Compose" },
     copy:      { icon: Copy,          group: "Compose" },

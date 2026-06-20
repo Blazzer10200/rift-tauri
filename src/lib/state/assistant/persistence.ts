@@ -65,7 +65,6 @@ export type PersistenceHost = {
   lastNotice: string | null;
   messages: ChatMessage[];
   queue: { id: string; text: string }[];
-  ui: { historyOpen: boolean };
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
@@ -241,7 +240,6 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
   if (host.tabs.get(id)) {
     host.currentConvoId = id;
     host.lastNotice = null;
-    host.ui.historyOpen = false;
     return;
   }
   try {
@@ -285,7 +283,6 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     host.convoTitle = convo.title;
     host.queue = [];
     host.lastNotice = null;
-    host.ui.historyOpen = false;
     // ui-audit #5: the saved model scopes to THIS tab only — opening an old
     // chat must not rewrite the global new-chat default (or toast about it).
     tab.modelOverride = asModelSel(convo.model);

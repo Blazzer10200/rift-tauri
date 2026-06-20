@@ -340,9 +340,6 @@ function runSlash(store: AssistantStore, input: string): boolean {
     case "new":
       void store.newTab();
       return true;
-    case "history":
-      store.ui.historyOpen = true;
-      return true;
     case "stop":
       void stop(store);
       return true;
@@ -439,7 +436,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
     }
     case "help":
       store.lastNotice =
-        "Slash commands: /new · /clear · /history · /model · /retry · /copy · /stop · /tools · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
+        "Slash commands: /new · /clear · /model · /retry · /copy · /stop · /tools · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
         "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
         "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
       return true;
