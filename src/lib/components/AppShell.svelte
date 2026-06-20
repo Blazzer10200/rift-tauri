@@ -146,14 +146,8 @@
       }
     }
     const k = e.key.toLowerCase();
-    // View toggles (browser dock, diff drawer) — keyboard mirror of the topbar.
+    // View toggles (browser dock) — keyboard mirror of the topbar.
     if (e.shiftKey && k === "b") { e.preventDefault(); browserDock.toggle(); return; }
-    if (e.shiftKey && k === "d" && workspace.activeId === "chat") {
-      e.preventDefault();
-      if (assistant.ui.diffOpen) { assistant.ui.diffOpen = false; }
-      else { assistant.ui.diffTarget = null; assistant.ui.diffOpen = true; }
-      return;
-    }
     // Ctrl+0 → return to Chat workspace.
     if (!e.shiftKey && e.key === "0") {
       e.preventDefault();

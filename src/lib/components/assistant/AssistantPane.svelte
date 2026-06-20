@@ -8,7 +8,6 @@
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
-  import SessionDiff from "./SessionDiff.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   let {
@@ -541,12 +540,6 @@
         <span class="drop-label">Split → right</span>
       </div>
     {/if}
-  {/if}
-
-  <!-- Session Diff — full-pane review of every edit. Focused pane only so it
-       doesn't render twice in split mode. -->
-  {#if focused && assistant.ui.diffOpen}
-    <SessionDiff {tabId} onClose={() => (assistant.ui.diffOpen = false)} />
   {/if}
 </div>
 </div>

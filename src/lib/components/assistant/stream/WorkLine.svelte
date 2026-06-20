@@ -16,6 +16,7 @@
 
 {#if anyActive && tools.length === 1}
   <div class="wline-active">
+    <span class="wa-dot"></span>
     <span class="wa-text">{VERB_ING[tools[0].kind]}</span>
     <span class="wa-cap"><b>{tools[0].cap}</b></span>
   </div>

@@ -6,7 +6,7 @@
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   import { assistant, type Block, type ChatMessage } from "../../state/assistant.svelte";
-  import { GitCommit, Clock, FileText, RotateCcw } from "lucide-svelte";
+  import { GitCommit, Clock, RotateCcw } from "lucide-svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
@@ -204,16 +204,6 @@
   );
   const bypassApplied = $derived(assistant.permissionMode === "bypassPermissions");
   const showSummary = $derived(!isUser && !streaming && turnStats.files > 0);
-  // Open the Session Diff overlay, deep-linked to this turn's first edited file
-  // (matched by basename). Replaces the old transcript-scroll that pointed at a
-  // removed `actnode-*` anchor and silently no-op'd.
-  function reviewDiff() {
-    if (turnStats.files === 0) return;
-    const fp = turnStats.firstEditFile;
-    assistant.ui.diffTarget = fp ? (fp.replace(/\\/g, "/").split("/").pop() ?? null) : null;
-    assistant.ui.diffOpen = true;
-  }
-
 
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
   // prose become dividers; everything else becomes a node on the chain.
@@ -593,7 +583,6 @@
             {#if costLabel}<span class="ts-item mono">{costLabel}</span>{/if}
           </div>
           <div class="ts-actions">
-            <button type="button" class="ts-btn" onclick={reviewDiff}><FileText size={13} />Review diff</button>
             {#if autoApplied}
               <span class="ts-mode" class:mode-bypass={bypassApplied} use:tooltip={bypassApplied ? "All tools ran without prompting (bypass permissions)" : "Edits were applied without prompting (permission mode)"}><RotateCcw size={12} />{bypassApplied ? "bypass" : "auto"}</span>
             {/if}
@@ -1480,15 +1469,6 @@
   .ts-del { color: var(--danger); }
   .ts-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-faint); }
   .ts-actions { display: flex; align-items: center; gap: 8px; }
-  .ts-btn {
-    display: inline-flex; align-items: center; gap: 6px;
-    height: 28px; padding: 0 11px;
-    background: transparent; border: 1px solid var(--ghost-border); border-radius: 8px;
-    color: var(--fg-2); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
-    transition: background 130ms var(--ease-soft), border-color 130ms var(--ease-soft), color 130ms var(--ease-soft);
-  }
-  .ts-btn:hover { background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 45%, var(--ghost-border)); color: var(--fg); }
-  .ts-btn :global(svg) { color: var(--accent); }
   .ts-mode {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 2px 8px; border-radius: 999px;

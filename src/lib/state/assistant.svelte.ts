@@ -643,7 +643,7 @@ class AssistantStore {
   permissionMode = $state<PermissionMode>(loadPermissionMode());
   // `historyOpen` is a one-shot request flag: the `/history` slash command sets
   // it and ChatTabsBar consumes it to open the history drawer.
-  ui = $state({ tasksUpdatedAt: 0, historyOpen: false, diffOpen: false, diffTarget: null as string | null, usageOpen: false });
+  ui = $state({ tasksUpdatedAt: 0, historyOpen: false, usageOpen: false });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
