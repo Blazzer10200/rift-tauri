@@ -53,8 +53,26 @@
   }
 
   // ── row state ────────────────────────────────────────────────────────
+  // Convos with an in-flight turn — drives the per-row workdots shimmer.
+  const workingIds = $derived(new Set(assistant.liveTabs.map((t) => t.convoId)));
   function isActive(id: string) { return assistant.currentConvoId === id && workspace.activeId === "chat"; }
   function isOpen(id: string) { return assistant.openTabs.includes(id) && !isActive(id); }
+
+  // ── delayed hover preview ──────────────────────────────────────────────
+  let preview = $state<{ c: ConversationMeta; x: number; y: number } | null>(null);
+  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function onRowEnter(e: MouseEvent, c: ConversationMeta) {
+    if (hoverTimer) clearTimeout(hoverTimer);
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    hoverTimer = setTimeout(() => {
+      preview = { c, x: r.right + 8, y: Math.min(r.top, window.innerHeight - 150) };
+    }, 460);
+  }
+  function onRowLeave() {
+    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+    preview = null;
+  }
 
   function open(id: string) {
     if (renaming) return;
@@ -139,8 +157,14 @@
         tabindex="0"
         onclick={() => open(c.id)}
         onkeydown={(e) => { if (e.key === "Enter") open(c.id); }}
+        onmouseenter={(e) => onRowEnter(e, c)}
+        onmouseleave={onRowLeave}
       >
-        {#if shell.isPinned(c.id)}
+        {#if workingIds.has(c.id)}
+          <span class="workdots on" aria-label="Working">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </span>
+        {:else if shell.isPinned(c.id)}
           <span class="crow-pin"><Pin size={11} /></span>
         {:else if isOpen(c.id)}
           <span class="crow-open"><Circle size={7} fill="currentColor" /></span>
@@ -182,6 +206,18 @@
     <button class="pop-item danger" type="button" role="menuitem" onclick={(e) => { e.stopPropagation(); del(id); }}>
       <Trash2 size={13} />Delete
     </button>
+  </div>
+{/if}
+
+{#if preview && !menuId && !renaming}
+  <div class="conv-preview" style="left:{preview.x}px; top:{preview.y}px" aria-hidden="true">
+    <div class="cp-title">{preview.c.title || "Untitled"}</div>
+    {#if preview.c.lastSnippet}
+      <div class="cp-snip">{preview.c.lastSnippet}</div>
+    {/if}
+    <div class="cp-meta">
+      <span class="cp-when">{relTime(preview.c.updatedAt)} ago</span>
+    </div>
   </div>
 {/if}
 
@@ -240,4 +276,27 @@
 
   @keyframes barPop { from { transform: translateY(-50%) scaleY(0.25); } to { transform: translateY(-50%) scaleY(1); } }
   @keyframes popIn { from { opacity: 0; transform: scale(0.97) translateY(-2px); } to { opacity: 1; transform: none; } }
+
+  /* per-chat working indicator — 3×3 dot-grid shimmer (diagonal wave) */
+  .workdots { display: grid; grid-template-columns: repeat(3, 3px); grid-auto-rows: 3px; gap: 2px;
+    width: 13px; height: 13px; place-content: center; flex: none; }
+  .workdots i { width: 3px; height: 3px; border-radius: 1.5px; background: var(--accent);
+    animation: workPulse 1.05s var(--ease-soft, ease) infinite; }
+  .workdots i:nth-child(1) { animation-delay: 0s; }
+  .workdots i:nth-child(2), .workdots i:nth-child(4) { animation-delay: 0.09s; }
+  .workdots i:nth-child(3), .workdots i:nth-child(5), .workdots i:nth-child(7) { animation-delay: 0.18s; }
+  .workdots i:nth-child(6), .workdots i:nth-child(8) { animation-delay: 0.27s; }
+  .workdots i:nth-child(9) { animation-delay: 0.36s; }
+  @keyframes workPulse { 0%, 100% { opacity: 0.16; transform: scale(0.5); } 45% { opacity: 1; transform: scale(1); } }
+  @media (prefers-reduced-motion: reduce) { .workdots i { animation: none; opacity: 0.9; transform: scale(1); } }
+
+  /* delayed hover preview (fixed, anchored beside the row) */
+  .conv-preview { position: fixed; z-index: 50; width: 268px; padding: 12px 13px; border-radius: 13px; pointer-events: none;
+    background: color-mix(in oklab, var(--bg-elev-2) 94%, var(--bg)); border: 1px solid var(--border-strong);
+    box-shadow: 0 28px 64px -30px oklch(0 0 0 / 0.7), var(--shadow-lg); animation: popIn 0.16s var(--ease-page) both; }
+  .cp-title { font-size: 12.5px; font-weight: 650; color: var(--fg); margin-bottom: 6px; line-height: 1.32; text-wrap: pretty; }
+  .cp-snip { font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .cp-meta { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
+    font-size: 10.5px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+  .cp-when { display: inline-flex; align-items: center; gap: 5px; }
 </style>

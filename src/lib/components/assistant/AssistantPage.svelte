@@ -4,11 +4,9 @@
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
   import { activityDock } from "../../state/activityDock.svelte";
-  import { environmentDock } from "../../state/environmentDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
   import SubAgentDock from "./SubAgentDock.svelte";
-  import EnvironmentFloat from "../environment/EnvironmentFloat.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -195,13 +193,6 @@
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
   }
 
-  // ── Environment float auto-show ───────────────────────────────────────────
-  // Surface the floating source-control box once a chat actually starts (the
-  // active tab has messages), unless the user dismissed it. The float itself
-  // self-hides when the workspace isn't a git repo.
-  $effect(() => {
-    if ((assistant.activeTab?.messages.length ?? 0) > 0) environmentDock.autoShow();
-  });
 </script>
 
 <div class="assistant">
@@ -251,8 +242,6 @@
       />
     {/if}
   </div>
-
-  <EnvironmentFloat />
 
   {#if browserDock.open}
     <!-- CR1: the transition animates .dock-wrap's width (no competing inline

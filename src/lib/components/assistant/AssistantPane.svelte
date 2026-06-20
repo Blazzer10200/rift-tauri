@@ -567,6 +567,23 @@
     border: 1px solid transparent;
     transition: border-color 140ms ease-out, background 140ms ease-out;
   }
+  /* Split mode: each pane reads as a rounded card (spec .pane) — inset border,
+     dimmed when not focused, accent ghost-ring on focus. Single pane stays bare. */
+  .pane.split {
+    border: 0;
+    border-radius: 14px;
+    overflow: hidden;
+    margin: 6px 0 6px 6px;
+    background: color-mix(in oklab, var(--bg-inset) 26%, transparent);
+    box-shadow: inset 0 0 0 1px var(--border);
+    transition: box-shadow var(--dur-base) var(--ease-soft), opacity var(--dur-base) var(--ease-soft);
+    animation: paneIn var(--dur-base) var(--ease-page) backwards;
+  }
+  .pane.split:not(.focused) { opacity: 0.84; }
+  .pane.split.focused { box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .pane-shell:last-child .pane.split { margin-right: 6px; }
+  @keyframes paneIn { from { transform: scale(0.985); } to { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .pane.split { animation: none; } }
   /* Pane header — a slim, always-legible strip atop each pane in split mode.
      Replaces the old floating low-opacity chrome: shows the pane index, its
      conversation title (so a split is identifiable at a glance), the ctx chip

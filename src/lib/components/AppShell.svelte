@@ -4,6 +4,7 @@
   import Titlebar from "./shell/Titlebar.svelte";
   import Sidebar from "./shell/Sidebar.svelte";
   import Topbar from "./shell/Topbar.svelte";
+  import StatusBar from "./shell/StatusBar.svelte";
   import ToastHost from "./ToastHost.svelte";
   import UpdatePill from "./UpdatePill.svelte";
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
@@ -13,7 +14,6 @@
   import { workspace, type WorkspaceId } from "../state/workspace.svelte";
   import { browserDock } from "../state/browserDock.svelte";
   import { activityDock } from "../state/activityDock.svelte";
-  import { environmentDock } from "../state/environmentDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { assistant } from "../state/assistant.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
@@ -56,7 +56,6 @@
     shell.init();
     browserDock.init();
     activityDock.init();
-    environmentDock.init();
     void updates.checkOnLaunch();
     // Dev-only: expose the update store so CDP can drive its visual states
     // (toast + dialog) without a live feed. Stripped from prod builds.
@@ -196,6 +195,7 @@
         </main>
       </div>
     </div>
+    <StatusBar />
   {/if}
 
   <UpdateDialog />
