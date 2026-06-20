@@ -14,7 +14,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -278,6 +278,40 @@
                   >
                     <span class="st-swatch-chip">{#if uiPrefs.accentHue === a.hue}<Check size={15} strokeWidth={3} />{/if}</span>
                     <span class="st-swatch-label">{a.label}</span>
+                  </button>
+                {/each}
+              </div>
+              <div class="st-row">
+                <div class="st-row-body">
+                  <div class="st-row-label">Vividness</div>
+                  <div class="st-row-desc">How saturated the accent reads across the app.</div>
+                </div>
+                <div class="st-row-ctl st-range-wrap">
+                  <input
+                    class="st-range" type="range"
+                    min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005"
+                    value={uiPrefs.vividness}
+                    oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))}
+                    aria-label="Accent vividness"
+                  />
+                  <span class="st-range-val">{Math.round((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN) * 100)}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="st-block sb-s7">
+            <div class="st-block-label">Background texture</div>
+            <div class="st-card">
+              <div class="st-dot-grid">
+                {#each DOT_FIELDS as df (df.id)}
+                  <button
+                    class="st-dot" class:on={uiPrefs.dotField === df.id}
+                    type="button" onclick={() => uiPrefs.setDotField(df.id)}
+                    aria-pressed={uiPrefs.dotField === df.id} use:tooltip={df.label}
+                  >
+                    <span class="st-dot-swatch" data-dots={df.id}></span>
+                    <span class="st-dot-label">{df.label}</span>
                   </button>
                 {/each}
               </div>
@@ -1047,6 +1081,35 @@
   .st-swatch.on .st-swatch-chip { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.22), 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--sw) 80%, transparent); }
   .st-swatch-label { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }
   .st-swatch.on .st-swatch-label { color: var(--fg); }
+
+  /* ── Appearance: vividness slider ── */
+  .st-range-wrap { display: flex; align-items: center; gap: 12px; }
+  .st-range { -webkit-appearance: none; appearance: none; width: 150px; height: 4px; border-radius: 999px; background: var(--bg-elev-2); cursor: pointer; }
+  .st-range::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-inset); box-shadow: var(--shadow-sm); cursor: pointer; transition: transform .12s ease; }
+  .st-range::-webkit-slider-thumb:hover { transform: scale(1.14); }
+  .st-range:focus { outline: none; }
+  .st-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--ring); }
+  .st-range-val { font-size: var(--fs-xs); color: var(--fg-muted); font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+
+  /* ── Appearance: background-texture picker (preview tiles paint each
+     texture directly; the live field lives on .app[data-dots]::before) ── */
+  .st-dot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; padding: 16px; }
+  .st-dot { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 8px 4px 6px; background: transparent; border: 0; border-radius: 10px; cursor: pointer; font: inherit; transition: background .13s ease; }
+  .st-dot:hover { background: var(--surface-hover); }
+  .st-dot-swatch { width: 100%; height: 42px; border-radius: var(--radius); background-color: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--border); transition: box-shadow .15s ease, transform .12s ease; }
+  .st-dot:hover .st-dot-swatch { transform: translateY(-1px); }
+  .st-dot.on .st-dot-swatch { box-shadow: inset 0 0 0 1px var(--border), 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+  .st-dot-label { font-size: var(--fs-xs); font-weight: 550; color: var(--fg-subtle); transition: color .13s ease; }
+  .st-dot.on .st-dot-label { color: var(--fg); }
+  .st-dot-swatch[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 24%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; }
+  .st-dot-swatch[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 22%, transparent) 0.9px, transparent 1.4px); background-size: 7px 7px; }
+  .st-dot-swatch[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 28%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; -webkit-mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); }
+  .st-dot-swatch[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 12px 12px; }
+  .st-dot-swatch[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 100% 10px; }
+  .st-dot-swatch[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 18%, transparent) 0 1px, transparent 1px 9px); }
+  .st-dot-swatch[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px); }
+  .st-dot-swatch[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 62%); }
+  .st-dot-swatch[data-dots="off"] { background-image: none; }
 
   /* ── Keyboard shortcut table ── */
   .kbd-grid { display: flex; flex-direction: column; padding: 4px 0; }

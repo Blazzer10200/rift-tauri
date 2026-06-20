@@ -16,6 +16,7 @@
   import { environmentDock } from "../state/environmentDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { assistant } from "../state/assistant.svelte";
+  import { uiPrefs } from "../state/ui-prefs.svelte";
   import { toast, notify } from "../state/toast.svelte";
   import { isFileDrag, attachImageFiles, summarizeAttach } from "./assistant/composer/helpers";
   import { goHome } from "../state/nav";
@@ -179,7 +180,7 @@
   }
 </script>
 
-<div class="app">
+<div class="app" data-dots={uiPrefs.dotField}>
   {#if showOnboarding}
     <Titlebar setupMode={true} />
     <div class="ob-host">
@@ -237,7 +238,50 @@
     -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%);
     mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%);
   }
+  /* Background texture variants (Settings → Appearance). "dots" uses the base
+     .app::before above; the rest override it. All gradient-based, edge-faded. */
   :global(.app[data-dots="off"])::before { display: none; }
+  :global(.app[data-dots="dense"])::before {
+    background: radial-gradient(circle at center, color-mix(in oklab, var(--dots-ink, var(--fg)) 4%, transparent) 0.7px, transparent 1.3px);
+    background-size: calc(18px * var(--dots-scale, 1)) calc(18px * var(--dots-scale, 1));
+  }
+  :global(.app[data-dots="margins"])::before {
+    background: radial-gradient(circle at center, color-mix(in oklab, var(--dots-ink, var(--fg)) 6%, transparent) 0.8px, transparent 1.5px);
+    background-size: calc(30px * var(--dots-scale, 1)) calc(30px * var(--dots-scale, 1));
+    -webkit-mask-image: radial-gradient(130% 122% at 50% 46%, transparent 44%, #000 98%);
+    mask-image: radial-gradient(130% 122% at 50% 46%, transparent 44%, #000 98%);
+  }
+  :global(.app[data-dots="grid"])::before {
+    background-image:
+      linear-gradient(to right, color-mix(in oklab, var(--dots-ink, var(--fg)) 4%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklab, var(--dots-ink, var(--fg)) 4%, transparent) 1px, transparent 1px);
+    background-size: calc(34px * var(--dots-scale, 1)) calc(34px * var(--dots-scale, 1));
+    -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%);
+    mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%);
+  }
+  :global(.app[data-dots="lines"])::before {
+    background-image: linear-gradient(to bottom, color-mix(in oklab, var(--dots-ink, var(--fg)) 4%, transparent) 1px, transparent 1px);
+    background-size: 100% calc(32px * var(--dots-scale, 1));
+  }
+  :global(.app[data-dots="diagonal"])::before {
+    background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--dots-ink, var(--fg)) 3.5%, transparent) 0 1px, transparent 1px calc(13px * var(--dots-scale, 1)));
+    background-size: auto;
+  }
+  :global(.app[data-dots="crosshatch"])::before {
+    background-image:
+      repeating-linear-gradient(45deg, color-mix(in oklab, var(--dots-ink, var(--fg)) 5.5%, transparent) 0 1px, transparent 1px calc(15px * var(--dots-scale, 1))),
+      repeating-linear-gradient(-45deg, color-mix(in oklab, var(--dots-ink, var(--fg)) 5.5%, transparent) 0 1px, transparent 1px calc(15px * var(--dots-scale, 1)));
+    background-size: auto;
+    -webkit-mask-image: radial-gradient(128% 108% at 50% 26%, #000 22%, transparent 86%);
+    mask-image: radial-gradient(128% 108% at 50% 26%, #000 22%, transparent 86%);
+  }
+  :global(.app[data-dots="glow"])::before {
+    background:
+      radial-gradient(900px 520px at 50% -12%, color-mix(in oklab, var(--accent) 7%, transparent), transparent 60%),
+      radial-gradient(720px 480px at 84% 4%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 62%);
+    background-size: auto;
+    -webkit-mask-image: none; mask-image: none;
+  }
 
   .app-body {
     flex: 1;
