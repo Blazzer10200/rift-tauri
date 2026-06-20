@@ -3,14 +3,28 @@
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
+  import { goHome } from "$lib/state/nav";
   import { WORKSPACES } from "../workspaces";
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
-  // Sidebar nav: every workspace except Settings (pinned to the foot). Order
-  // follows the user's persisted workspace order, same as the old titlebar nav.
-  const navItems = $derived(workspace.order.filter((id) => id !== "settings"));
+  // Sidebar nav (redesign §6): Home + Local LLM. Settings is pinned to the
+  // foot; Chat is NOT a nav destination — it's the surface reached via Home
+  // (empty) or by opening a conversation, so it's filtered out here.
+  const navItems = $derived(
+    workspace.order.filter((id) => id !== "settings" && id !== "chat"),
+  );
+
+  // "Home is a verb": the empty Chat surface IS home. A tab with no messages
+  // (or the legacy home workspace) reads as Home-active.
+  const activeTabEmpty = $derived((assistant.activeTab?.messages.length ?? 0) === 0);
+  function isNavActive(id: WorkspaceId): boolean {
+    if (id === "home") {
+      return workspace.activeId === "home" || (workspace.activeId === "chat" && activeTabEmpty);
+    }
+    return workspace.activeId === id;
+  }
 
   // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
   const ICON_KEY: Record<WorkspaceId, string> = {
@@ -21,7 +35,10 @@
     (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "No folder",
   );
 
-  function goto(id: WorkspaceId) { workspace.setActive(id); }
+  function goto(id: WorkspaceId) {
+    if (id === "home") { goHome(); return; }
+    workspace.setActive(id);
+  }
 
   // ── rail resize ──────────────────────────────────────────────────────
   function startResize(e: PointerEvent) {
@@ -48,7 +65,7 @@
   class:resizing={shell.resizing}
   style="width:{shell.collapsed ? 0 : shell.width}px"
 >
-  <aside class="sidebar" class:home={workspace.activeId === "home"}>
+  <aside class="sidebar" class:home={isNavActive("home")}>
     <div class="side-head" data-tauri-drag-region>
       <span class="brand">
         <RiftLogo size={22} class="brand-mk" />
@@ -81,10 +98,10 @@
         {@const def = WORKSPACES[id]}
         <button
           class="snav-item"
-          class:on={workspace.activeId === id}
+          class:on={isNavActive(id)}
           type="button"
           onclick={() => goto(id)}
-          aria-current={workspace.activeId === id ? "page" : undefined}
+          aria-current={isNavActive(id) ? "page" : undefined}
         >
           <def.icon class="snav-ic snav-ic-{ICON_KEY[id]}" size={16} />
           <span class="lbl">{def.title}</span>

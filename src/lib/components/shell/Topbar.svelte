@@ -11,9 +11,12 @@
 
   const win = getCurrentWindow();
 
+  // Empty Chat surface = the "Home" verb (redesign §6); a real conversation
+  // shows its own title.
+  const chatHasConvo = $derived((assistant.activeTab?.messages.length ?? 0) > 0);
   const title = $derived(
     workspace.activeId === "chat"
-      ? assistant.activeTab?.convoTitle || "Chat"
+      ? (chatHasConvo ? assistant.activeTab?.convoTitle || "Chat" : "Home")
       : WORKSPACES[workspace.activeId].title,
   );
 
@@ -44,7 +47,7 @@
       <AppWindow size={15} />
     </button>
 
-    {#if workspace.activeId === "chat"}
+    {#if workspace.activeId === "chat" && chatHasConvo}
       <span class="gauge" class:warm use:tooltip={`Context — ${ctxPct}% of window`}>
         <span class="gauge-bar"><i style="width:{ctxPct}%"></i></span>
         {ctxPct}%

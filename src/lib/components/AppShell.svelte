@@ -18,6 +18,7 @@
   import { assistant } from "../state/assistant.svelte";
   import { toast, notify } from "../state/toast.svelte";
   import { isFileDrag, attachImageFiles, summarizeAttach } from "./assistant/composer/helpers";
+  import { goHome } from "../state/nav";
   import { onboarding } from "../state/onboarding.svelte";
   import { betaNotice } from "../state/betaNotice.svelte";
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
@@ -159,11 +160,13 @@
       workspace.setActive("chat");
       return;
     }
-    // Ctrl+1..9 → workspace switch, mapped by activity-bar order.
+    // Ctrl+1..9 → workspace switch, mapped by activity-bar order. "home" is a
+    // verb (redesign §6) — route it to the empty Chat surface, not the page.
     if (/^[1-9]$/.test(e.key)) {
       e.preventDefault();
       const idx = parseInt(e.key, 10) - 1;
       const id = workspace.order[idx] as WorkspaceId | undefined;
+      if (id === "home") { goHome(); return; }
       if (id && !WORKSPACES[id].disabled) workspace.setActive(id);
       return;
     }

@@ -67,7 +67,9 @@ class WorkspaceState {
     this.migrateLegacy();
 
     const stored = localStorage.getItem(ACTIVE_KEY);
-    if (stored && isWorkspaceId(stored) && !DISABLED.has(stored)) {
+    // "Home is a verb" (redesign §6): the home surface is the empty Chat tab,
+    // so never land on the legacy standalone home workspace — fold it to chat.
+    if (stored && stored !== "home" && isWorkspaceId(stored) && !DISABLED.has(stored)) {
       this.activeId = stored;
     } else {
       this.activeId = "chat";

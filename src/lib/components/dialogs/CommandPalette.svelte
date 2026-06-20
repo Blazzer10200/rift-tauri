@@ -10,6 +10,7 @@
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { goHome } from "../../state/nav";
 
   // lucide-svelte 1.x ships icons as legacy components — `typeof Search`
   // matches what the workspaces registry uses (see workspaces/index.ts).
@@ -50,7 +51,7 @@
         group: "Go to",
         icon: n.icon,
         keywords: `workspace pane ${n.id}`,
-        run: () => workspace.setActive(n.id),
+        run: n.id === "home" ? goHome : () => workspace.setActive(n.id),
       });
     }
 
