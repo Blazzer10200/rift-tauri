@@ -267,6 +267,9 @@
     <div class="pane-head" class:focused>
       <span class="pane-label" use:tooltip={`Pane ${paneIdx + 1} of ${assistant.panes.length}`}>{paneIdx + 1}</span>
       <span class="pane-head-title" use:tooltip={paneTitle}>{paneTitle}</span>
+      {#if streaming}
+        <span class="pane-live" use:tooltip={"This pane is working"}><span class="pane-live-dot"></span>working</span>
+      {/if}
       {#if tabId && tab}
         <span class="pane-ctx-chip" data-tone={paneCtxTone} use:tooltip={paneChipTitle}>
           <span class="pane-ctx-bar"><span class="pane-ctx-fill" style="width: {Math.min(100, paneCtxPct)}%"></span></span>
@@ -534,6 +537,31 @@
   }
   .pane-ctx-pct { color: var(--fg); font-weight: 600; }
   .pane-cost { color: var(--fg-muted); }
+  /* Per-pane working indicator — the concurrent-streaming cue. Pulse via
+     box-shadow (never opacity: a throttled/backgrounded pane could freeze on
+     an opacity:0 frame and read as "dead"). */
+  .pane-live {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 16px; padding: 0 7px 0 6px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+    color: var(--accent);
+    font-size: 10px; font-weight: 600; line-height: 1;
+  }
+  .pane-live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent);
+    animation: pane-live-pulse var(--pulse-live, 1.6s) ease-out infinite;
+  }
+  @keyframes pane-live-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 45%, transparent); }
+    70% { box-shadow: 0 0 0 4px transparent; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pane-live-dot { animation: none; }
+  }
   .pane-ctx-chip[data-tone="yellow"] {
     border-color: color-mix(in oklab, var(--warn) 35%, var(--border));
   }
