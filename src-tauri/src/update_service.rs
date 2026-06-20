@@ -2,9 +2,10 @@
 //! into Rift at app v0.4.47 on 2026-06-04). The vpk CLI version MUST match the
 //! crate version — bump both together (see project CLAUDE.md).
 //!
-//! Wraps `velopack::UpdateManager` over the crate's native `GithubSource`
-//! (v1.x). The old hand-rolled `GithubSource` (~200 lines against the GitHub
-//! REST API) existed only because velopack 0.0.1298 had none — gone now.
+//! Wraps `velopack::UpdateManager` over a Velopack `HttpSource` pointed at the
+//! Cloudflare R2 feed (`UPDATE_FEED_URL`). The old hand-rolled `GithubSource`
+//! (~200 lines against the GitHub REST API) existed only because velopack
+//! 0.0.1298 had none — gone now.
 //!
 //! Flow: `check` → `download` (streams 0..=100 progress) → `apply`. `apply`
 //! uses `wait_exit_then_apply_updates(silent, restart)` and then exits the app
@@ -17,7 +18,7 @@
 //!   1. RIFT_UPDATE_FEED env var → local FileSource (offline dev / testing),
 //!      gated behind `debug_assertions` so a release binary can't be pointed at
 //!      an attacker-controlled local feed.
-//!   2. GithubSource against the public `rift-releases` repo (production).
+//!   2. HttpSource against the Cloudflare R2 feed (`UPDATE_FEED_URL`, production).
 //!
 //! `UpdateService` is a managed Tauri singleton so the pending `UpdateInfo`
 //! survives between the `check`/`download` and `apply` commands.
