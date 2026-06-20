@@ -338,9 +338,12 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
     host.lastNotice = null;
     host.panes = [{ tabId: null }];
     host.focusedPaneIdx = 0;
-    await refreshConversations(host);
   } catch (e) {
     host.lastError = `Failed to delete all conversations: ${String(e)}`;
+  } finally {
+    // Re-sync from backend regardless — a mid-loop failure leaves some convos
+    // deleted server-side, so the in-memory list must reflect what survived.
+    await refreshConversations(host);
   }
 }
 

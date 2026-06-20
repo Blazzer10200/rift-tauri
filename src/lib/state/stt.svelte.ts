@@ -264,12 +264,14 @@ class SttStore {
   }
 
   async setConfig(patch: Partial<SttConfig>) {
+    const prev = this.config;
     const prevEngine = this.config.engine;
     const next: SttConfig = { ...this.config, ...patch };
     this.config = next;
     try {
       await invoke("stt_set_config", { config: next });
     } catch (e) {
+      this.config = prev; // backend rejected — don't leave UI ahead of persisted state
       this.lastError = `Save settings failed: ${e}`;
     }
 
