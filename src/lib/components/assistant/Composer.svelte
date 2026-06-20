@@ -1648,54 +1648,45 @@
 
   /* Send — primary CTA, accent surface w/ glow. Bigger than v2 (32px), more
      pronounced shadow, smoother mode-swap (send → stop → queue). */
+  /* Inline-blend send (spec `.send-inline`): a bare arrow that lives in the
+     well — subtle grey when idle, accent when ready, soft-bg on hover. No
+     filled box / glow. */
   .sendbtn {
     position: relative;
-    width: 32px; height: 32px;
+    width: 34px; height: 34px;
     display: flex; align-items: center; justify-content: center;
-    background: var(--accent);
-    color: var(--accent-fg);
-    border: 0; border-radius: 10px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid transparent; border-radius: 50%;
     cursor: pointer;
     flex-shrink: 0;
     overflow: hidden;
-    transition: background 200ms ease-out, transform 140ms ease-out,
-                box-shadow 220ms ease-out, opacity 140ms ease-out;
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
-      0 0 0 1px color-mix(in oklab, var(--accent) 40%, transparent),
-      0 6px 18px -4px color-mix(in oklab, var(--accent) 60%, transparent);
+    transition: color 140ms ease-out, background 140ms ease-out,
+                transform 140ms ease-out, opacity 140ms ease-out;
+    box-shadow: none;
   }
   .sendbtn:hover:not(:disabled) {
-    background: var(--accent-hover);
-    transform: translateY(-1px);
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-      0 0 0 1px color-mix(in oklab, var(--accent) 55%, transparent),
-      0 10px 28px -4px color-mix(in oklab, var(--accent) 75%, transparent);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
-  .sendbtn:active:not(:disabled) { transform: translateY(0) scale(0.96); }
+  .sendbtn:active:not(:disabled) { transform: scale(0.88); }
   .sendbtn:disabled {
-    opacity: 0.35; cursor: default;
-    box-shadow: inset 0 1px 0 color-mix(in oklch, white 10%, transparent);
+    opacity: 1; cursor: default;
+    color: var(--fg-subtle);
+    box-shadow: none;
   }
   .sendbtn:focus-visible {
     outline: none;
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-      0 0 0 3px var(--ring),
-      0 6px 18px -4px color-mix(in oklab, var(--accent) 60%, transparent);
+    box-shadow: 0 0 0 3px var(--ring);
   }
   .sendbtn.stop {
-    background: var(--danger);
-    color: oklch(0.98 0.01 22);
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-      0 0 0 1px color-mix(in oklab, var(--danger) 50%, transparent),
-      0 6px 18px -4px color-mix(in oklab, var(--danger) 60%, transparent);
+    background: var(--danger-soft);
+    color: var(--danger);
   }
-  .sendbtn.stop:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .sendbtn.stop:hover { background: var(--danger-soft); filter: brightness(1.08); }
   .sendbtn.queue {
-    background: color-mix(in oklab, var(--accent) 70%, var(--surface));
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   /* Launch ripple — two concentric rings expand outward on every fire().
      Mounted by {#key fireKey}; self-removed when the animation ends via
