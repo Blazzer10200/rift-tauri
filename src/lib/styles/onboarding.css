@@ -53,7 +53,10 @@
 }
 
 /* vertical stepper */
-.ob-steps { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.ob-steps { display: flex; flex-direction: column; gap: 2px; flex: none; position: relative; }
+/* continuous spine w/ animated fill (height driven by completed-step count) */
+.ob-spine { position: absolute; left: 20px; top: 20px; bottom: 20px; width: 2px; background: var(--border); border-radius: 2px; overflow: hidden; z-index: 0; }
+.ob-spine i { position: absolute; inset: 0 0 auto 0; height: 0; background: var(--accent); border-radius: 2px; transition: height var(--dur-slow) var(--ease-soft); }
 .ob-step {
   display: grid; grid-template-columns: 26px 1fr; align-items: start; gap: 13px;
   padding: 9px 8px; border: 0; background: none; text-align: left; cursor: default;
@@ -70,24 +73,18 @@
   font-variant-numeric: tabular-nums;
   transition: background 200ms ease, border-color 200ms ease, color 200ms ease, box-shadow 200ms ease;
 }
-.ob-step:not(:last-child) .ob-node::after {
-  content: ""; position: absolute; top: 27px; left: 50%; transform: translateX(-50%);
-  width: 1.5px; height: 30px; background: var(--border);
-  transition: background 200ms ease;
-}
 .ob-step.active .ob-node {
-  background: var(--gi-ghost-bg); border-color: var(--gi-ghost-border); color: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 10%, transparent);
+  background: var(--accent); border-color: transparent; color: var(--accent-fg);
+  box-shadow: 0 0 0 5px var(--gi-ghost-bg);
 }
-.ob-step.done .ob-node { background: var(--accent); border-color: transparent; color: var(--accent-fg); }
-.ob-step.done .ob-node::after { background: color-mix(in oklab, var(--accent) 55%, var(--border)); }
+.ob-step.done .ob-node { background: var(--gi-ghost-bg); border-color: var(--gi-ghost-border); color: var(--accent); }
 .ob-step-body { display: flex; flex-direction: column; gap: 2px; padding-top: 2px; min-width: 0; }
 .ob-step-t { font-size: 13px; font-weight: 500; line-height: 1.25; }
 .ob-step.active .ob-step-t { color: var(--fg); font-weight: 600; }
 .ob-step.done .ob-step-t { color: var(--fg-2); }
 .ob-step-s { font-size: 11px; color: var(--fg-faint); line-height: 1.3; }
 
-.ob-rail-foot { display: flex; flex-direction: column; gap: 9px; margin-top: 18px; }
+.ob-rail-foot { display: flex; flex-direction: column; gap: 9px; margin-top: auto; padding-top: 18px; }
 .ob-skip-link {
   align-self: flex-start; display: inline-flex; align-items: center; gap: 5px;
   padding: 0; border: 0; background: none; cursor: pointer;
@@ -271,6 +268,14 @@
 .ob-hint { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; margin: 0; }
 .ob-hint :global(.lucide) { flex: none; margin-top: 1px; color: var(--fg-subtle); }
 .ob-hint.ok { color: var(--ok); }
+
+/* green "connected" bar w/ pulsing dot — Claude step success state */
+.ob-connbar { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--r-card); font-size: 12px; font-weight: 540; background: var(--ok-soft); color: var(--ok); }
+.ob-connbar .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+@media (prefers-reduced-motion: no-preference) {
+  .ob-connbar .dot { animation: ob-live var(--pulse-live) ease-in-out infinite; }
+}
+@keyframes ob-live { 0% { box-shadow: 0 0 0 0 var(--ok-soft); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
 .ob-error { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--danger); }
 .ob-error :global(.lucide) { flex: none; }

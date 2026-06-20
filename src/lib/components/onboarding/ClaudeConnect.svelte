@@ -177,7 +177,7 @@
       <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. API-key turns run the CLI bare — your personal <code>~/.claude</code> config, MCP servers, and CLAUDE.md won't load.</span></p>
     {/if}
   {:else}
-    <p class="ob-hint ok"><span>Claude is connected and ready — you're set.</span></p>
+    <div class="ob-connbar"><span class="dot"></span> Claude is connected and ready — you're set.</div>
   {/if}
 {/if}
 

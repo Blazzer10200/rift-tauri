@@ -410,9 +410,10 @@
     transition: background 80ms;
   }
   .cp-item[data-active="true"] {
-    background: color-mix(in oklab, var(--accent) 16%, transparent);
+    background: var(--accent-soft);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 26%, transparent);
   }
+  .cp-item[data-active="true"] .cp-item-label { color: var(--accent); }
   .cp-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
   .cp-item-icon {

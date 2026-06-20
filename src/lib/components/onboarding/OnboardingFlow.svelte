@@ -108,6 +108,7 @@
     </div>
 
     <div class="ob-steps">
+      <span class="ob-spine"><i style="height:{((step - 1) / (last - 1)) * 100}%"></i></span>
       {#each steps as s, i (s.t)}
         {@const n = i + 1}
         <button
