@@ -13,14 +13,27 @@
   --gi-ghost-border: color-mix(in oklab, var(--accent) 28%, transparent);
   --gi-ghost-bg-hover: color-mix(in oklab, var(--accent) 16%, transparent);
 
-  height: 100%; width: 100%;
-  display: flex; min-width: 0; min-height: 0;
-  background: var(--bg);
+  height: 100%; width: 100%; min-width: 0; min-height: 0;
+  display: grid; place-items: center; padding: 36px; box-sizing: border-box;
+  background:
+    radial-gradient(820px 480px at 50% -6%, color-mix(in oklab, var(--accent) 11%, transparent), transparent 62%),
+    var(--bg);
 }
+
+/* centered card holding the rail + stage */
+.ob-card {
+  width: 100%; max-width: 880px; height: min(580px, calc(100vh - 72px));
+  display: flex; min-width: 0; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-2xl); box-shadow: var(--shadow-lg);
+  animation: ob-card-in var(--dur-page, 360ms) var(--ease-page) both;
+}
+@keyframes ob-card-in { from { opacity: 0; transform: translateY(10px) scale(0.99); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .ob-card { animation: none; } }
 
 /* ── Left rail — brand + vertical stepper ─────────────────────────────────── */
 .ob-rail {
-  width: 312px; flex: none;
+  width: 250px; flex: none;
   display: flex; flex-direction: column;
   padding: 26px 24px 22px;
   background:
@@ -88,7 +101,7 @@
 .ob-body {
   flex: 1; min-height: 0; overflow-y: auto;
   display: flex; justify-content: center;
-  padding: 0 clamp(28px, 6vw, 76px);
+  padding: 0 clamp(28px, 5%, 44px);
 }
 .ob-step-wrap {
   width: 100%; max-width: 540px;
@@ -139,7 +152,7 @@
 /* footer (pinned) */
 .ob-foot {
   flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 16px clamp(28px, 6vw, 76px); border-top: 1px solid var(--border);
+  padding: 16px clamp(28px, 5%, 44px); border-top: 1px solid var(--border);
   background: color-mix(in oklab, var(--bg) 80%, transparent); backdrop-filter: blur(8px);
 }
 .ob-foot-left { display: flex; align-items: center; gap: 6px; }

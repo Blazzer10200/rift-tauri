@@ -98,6 +98,7 @@
 <svelte:window onkeydown={onEscape} />
 
 <div class="ob-overlay" role="dialog" aria-modal="true" aria-label="Rift first-run setup">
+ <div class="ob-card">
   <!-- ── Left rail: brand + vertical stepper ── -->
   <aside class="ob-rail">
     <div class="ob-brand">
@@ -333,4 +334,5 @@
       </div>
     </footer>
   </main>
+ </div>
 </div>
