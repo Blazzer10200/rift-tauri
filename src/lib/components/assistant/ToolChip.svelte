@@ -63,7 +63,11 @@
   let askMultiSet = $state<Set<number>[]>([]);
   let askOtherText = $state<string[]>([]);
   $effect(() => {
-    // Reset arrays when the question list changes (new ask_user tool call).
+    // Reset arrays only when the question COUNT changes, not on every reactive
+    // re-run. askQuestions is $derived from streaming tool input, so it churns
+    // token-by-token while the tool_use block fills in — resetting on each churn
+    // silently erased a selection the user made before streaming finished.
+    if (askQuestions.length === askSingleIdx.length) return;
     askSingleIdx = askQuestions.map(() => -2);     // -2 = no selection yet
     askMultiSet = askQuestions.map(() => new Set());
     askOtherText = askQuestions.map(() => "");

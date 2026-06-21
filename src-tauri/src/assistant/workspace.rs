@@ -80,6 +80,7 @@ pub fn assistant_set_tab_root(path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn assistant_clear_root() -> Result<WorkspaceState, String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut cfg = load_config();
     cfg.current_root = None;
     save_config(&cfg)?;
@@ -88,6 +89,7 @@ pub fn assistant_clear_root() -> Result<WorkspaceState, String> {
 
 #[tauri::command]
 pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let target = PathBuf::from(&path);
     let mut cfg = load_config();
     cfg.recent_roots.retain(|p| p != &target);

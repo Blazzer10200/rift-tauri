@@ -70,6 +70,12 @@ export type PersistenceHost = {
   dropTab(id: string): void;
 };
 
+// Monotonic load token per host — guards loadConversation against a stale-IPC
+// race: click A then B, A's invoke resolves last → without this it clobbers
+// host state with A while the user last selected B (next send targets A's
+// session). Each call captures the token; only the latest may write host fields.
+const loadGeneration = new WeakMap<PersistenceHost, number>();
+
 export async function refreshConversations(host: PersistenceHost): Promise<void> {
   try {
     host.conversations = await invoke<ConversationMeta[]>("assistant_list_conversations");
@@ -242,8 +248,13 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     host.lastNotice = null;
     return;
   }
+  const gen = (loadGeneration.get(host) ?? 0) + 1;
+  loadGeneration.set(host, gen);
   try {
     const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
+    // A newer loadConversation started while this IPC was in flight — discard
+    // this stale result so the last click wins (Tauri has no invoke-cancel).
+    if (loadGeneration.get(host) !== gen) return;
     // Legacy convos lack cliSessionId — fall back to id so --resume still hits
     // the original JSONL. New convos persist cliSessionId explicitly.
     const cliSid = convo.cliSessionId ?? convo.id;
@@ -271,7 +282,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
       .catch((e) => console.warn("assistant_session_cwd lookup failed:", e));
     tab.promptHistory = (convo.messages ?? [])
       .filter((m) => m.role === "user")
-      .map((m) => m.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim())
+      // blocks is unvalidated passthrough from Rust (serde_json::Value) — a
+      // legacy/corrupt record can omit it; guard so one bad message can't throw.
+      .map((m) => (m.blocks ?? []).map((b) => (b.type === "text" ? b.text : "")).join("").trim())
       .filter((s) => s.length > 0)
       .slice(-50);
     tab.dockAutoOpenedThisConvo = false;
@@ -288,6 +301,10 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     tab.modelOverride = asModelSel(convo.model);
   } catch (e) {
     host.lastError = `Failed to load conversation: ${String(e)}`;
+    // ensureTab already registered a half-built TabState under `id`; evict it so
+    // the fast-path above doesn't surface the broken tab forever (a retry would
+    // otherwise short-circuit before the disk load). Next open re-attempts.
+    host.dropTab(id);
   }
 }
 

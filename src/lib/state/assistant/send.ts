@@ -200,7 +200,10 @@ export async function send(store: AssistantStore, prompt: string) {
  *  so returning to the tab must re-trigger it or the queue strands forever.
  *  Bails unless `tab` is the active tab and idle. */
 export function drainQueue(store: AssistantStore, tab: TabState | null) {
-  if (!tab || tab !== store.activeTab || tab.streaming || tab.queue.length === 0 || tab.lastError) return;
+  // No `tab.lastError` gate: it's cleared by beginTurn (inside send()), which
+  // only drainQueue→send reaches — gating here would deadlock the queue behind
+  // a stale error forever. send() clears lastError before anything visible.
+  if (!tab || tab !== store.activeTab || tab.streaming || tab.queue.length === 0) return;
   // Rail-v2: steer-mode chips don't start turns — they ride the next one
   // (flushSteerChips injects them at its first stream line). Fire the first
   // queue-mode chip; if the rail is ALL steer chips there is no next turn to
@@ -239,6 +242,14 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   tab.deltaCount = 0;
   tab.envelopeTextBuffer = '';
   tab.seenToolUseIds.clear();
+  // Mirror onStreamDone/onStreamError cleanup: stop() is the only terminal
+  // path that runs while the late `done` event is discarded (onStreamDone
+  // early-returns on !streaming), so these would otherwise leak past the turn.
+  // Stale entries cause dead Allow/Deny chips + wrong-request ask_user binding
+  // on the NEXT turn (leftover requestId FIFO-pairs with a fresh toolUseId).
+  if (tab.permissionPrompts.size > 0) tab.permissionPrompts = new Map();
+  tab.unboundAskUserRequestIds = [];
+  tab.unboundAskUserToolUseIds = [];
   tab.activity = { ...tab.activity, currentLabel: null };
   // Telemetry finalize as user-stop before the late done event lands.
   if (tab.currentTurnRecord) {
@@ -252,6 +263,10 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   } catch (e) {
     console.warn("assistant_stop failed", e);
   }
+  // Drain any message queued during the turn — the discarded late `done` event
+  // never fires onTurnComplete, so without this the queue strands until a
+  // tab-switch. Mirrors onStreamError's completion-hook call.
+  tab.onTurnComplete?.(tab);
 }
 
 /** Steer the RUNNING turn: inject `text` into the live CLI stdin so the agent

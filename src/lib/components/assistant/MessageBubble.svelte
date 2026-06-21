@@ -119,13 +119,15 @@
     expandedThinking = next;
   }
 
-  // Collapsed tool-group expand state, keyed by group key.
-  let expandedGroups = $state(new Set<string>());
-  function toggleGroup(key: string) {
-    const next = new Set(expandedGroups);
-    if (next.has(key)) next.delete(key);
-    else next.add(key);
-    expandedGroups = next;
+  // Tool-group expand state, keyed by group key. Stores the EXPLICIT desired
+  // open state (not a deviates-from-default flag) — the old XOR-against-default
+  // inverted a user's choice when `defaultOpen` flipped as streaming ended
+  // (a group collapsed mid-stream popped back open on settle).
+  let groupOpen = $state(new Map<string, boolean>());
+  function toggleGroup(key: string, defaultOpen: boolean) {
+    const next = new Map(groupOpen);
+    next.set(key, !(groupOpen.get(key) ?? defaultOpen));
+    groupOpen = next;
   }
 
   async function copy() {
@@ -491,7 +493,7 @@
           {@const nodeStatus =
             streaming && isLastNode && unit.status === "done" ? "pending" : unit.status}
           {@const defaultOpen = (streaming && isLastNode) || unit.status === "error"}
-          {@const open = expandedGroups.has(unit.key) !== defaultOpen}
+          {@const open = groupOpen.get(unit.key) ?? defaultOpen}
           {@const groupMs = groupDurationMs(unit.blocks)}
           <div
             class="tl-node work"
@@ -501,7 +503,7 @@
             data-open={open ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
-            <button class="work-head" type="button" onclick={() => toggleGroup(unit.key)} aria-expanded={open}>
+            <button class="work-head" type="button" onclick={() => toggleGroup(unit.key, defaultOpen)} aria-expanded={open}>
               <span class="work-chev" class:open><ChevronRight size={12} /></span>
               <span class="work-spark" aria-hidden="true"><Sparkles size={12} /></span>
               <span class="work-sum">

@@ -532,7 +532,14 @@ export async function closeOtherTabs(host: TabsHost, keepId: string) {
 /** Wipe all open tabs and drop into the empty-tabs state. Flushes the
  *  current convo if it has messages so nothing's lost; closes streams. */
 export async function closeAllTabs(host: TabsHost) {
-  if (host.streaming) await host.stop();
+  // Stop EVERY streaming tab, not just the active one (host.streaming reads
+  // activeTab only) — a backgrounded stream would otherwise have its TabState
+  // dropped while its CLI subprocess keeps running + burning tokens, its events
+  // silently discarded. Mirrors closeOtherTabs/closeTabsToRight.
+  for (const id of host.openTabs) {
+    const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
+    if (t?.streaming) await host.stop(id);
+  }
   if (host.messages.length > 0 && host.convoCreatedAt) {
     host.scheduleSave(true);
   }

@@ -233,6 +233,14 @@ async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
         Some(r) => r.inner().clone(),
         None => return err("ask_user: registry not managed (init bug)"),
     };
+
+    // Bail fast if the target window is gone: `emit_to` returns Ok(()) for a
+    // missing/closed label (it just matches zero webviews), so without this
+    // pre-check the event silently drops, nobody resolves the oneshot, and the
+    // task parks for the full 600s timeout — stalling the MCP stdio loop.
+    if app.get_webview_window(window.as_str()).is_none() {
+        return err("ask_user: target window is not available");
+    }
     let rx = registry.register(request_id.clone());
 
     // Emit AFTER registering — guarantees the receiver is in the map before

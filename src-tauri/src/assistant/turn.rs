@@ -379,9 +379,19 @@ async fn handle_permission_request(
     // Guard cancels the registry entry on drop — covers task-abort mid-await
     // (the explicit cancel below never runs when the future is cancelled).
     let (rx, _perm_guard) = registry.register_guarded(request_id.clone());
-    // B4: if the UI is unreachable (window closed mid-turn) the emit fails and
-    // the user never sees the prompt — deny immediately rather than let the
-    // request hang for the full 30-min timeout while the CLI waits on us.
+    // B4: if the UI is unreachable (window closed mid-turn) the user never sees
+    // the prompt — deny immediately rather than hang for the full 30-min timeout
+    // while the CLI waits on us. `emit_to` returns Ok(()) for a missing/closed
+    // label (zero webviews matched), so the error path below can't detect a gone
+    // window — check existence explicitly first.
+    if app.get_webview_window(window_label).is_none() {
+        log::warn!("permission emit skipped for {session_id} — window `{window_label}` gone, denying");
+        registry.cancel(&request_id);
+        write_control_response(stdin, &request_id, serde_json::json!({
+            "behavior": "deny", "message": "permission UI unreachable",
+        })).await?;
+        return Ok(());
+    }
     if let Err(e) = app.emit_to(window_label, PERMISSION_EVENT, serde_json::json!({
         "session_id": session_id,
         "request_id": request_id,

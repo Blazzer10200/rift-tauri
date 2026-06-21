@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill + hardening pass (2 rounds)
+## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill + hardening pass (3 rounds)
 
-> Unshipped batch on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings, forced recompile of all edited .rs).
+> Unshipped batch on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings, isolated-target recompile of all edited .rs — dev app untouched).
 
 **Hardened (deep review — adversarially-verified findings):**
 - **Log sink survives mutex poison** — `diagnostics::file_log_write` now recovers a poisoned `FILE_LOG` lock (`into_inner()`) instead of silently dropping every subsequent write. A panic mid-write previously blacked out the only persistent log sink in a GUI prod build (stderr is `/dev/null`). Also: env_logger (dev stderr) now receives the SCRUBBED message, so home-dir paths no longer leak to the dev terminal.
@@ -22,6 +22,16 @@
 - **`now_ms()` safe-fails to `i64::MAX`** — a broken clock (pre-1970) now treats every OAuth token as expired (clear "expired" message) instead of unexpired (confusing 401). `auth_update.rs` `CLAUDE_EXE` writes recover a poisoned lock (`into_inner()`), matching `cli_install.rs` — a no-op there would spawn the pre-update binary.
 - **`browser://load` scoped to its host window** — `emit_to("main", …)` not a global `emit`, so a second window's address bar/spinner no longer tracks navigations from the dock it doesn't own (multi-window state bleed).
 - **Frontend unmount hygiene** — `Composer` gained an `onDestroy` clearing `steerFlashTimer`/`undoTimer`, releasing a held PTT (mic was left recording on the global stt singleton when a pane closed mid-hold), and cancelling an in-flight `enhancePrompt` (Haiku spawn kept billing after close); `stt.sendRequested` reset wrapped in `untrack()` (removes a spurious effect re-run). `AssistantPane`'s first-send flip timer now self-cancels via the shared `clear` (no stale style write on a detached node).
+
+**Hardened (round 3 — turn-control + persistence + render correctness, adversarially-verified):**
+- **Queued message no longer deadlocks after an error** — `send.ts::drainQueue` dropped the `|| tab.lastError` guard: a turn that ended in error left the queue gated forever (every queued follow-up stuck behind a flag nothing cleared). Queue now drains on the next idle tab regardless of the prior turn's error state.
+- **Stop() no longer strands the queue or stale prompts** — `assistant_stop` now clears `permissionPrompts`/`unboundAskUser*` FIFO state and fires `onTurnComplete` after the stop round-trips, so a user-initiated stop can't leave a half-bound ask_user prompt or a never-completing turn behind.
+- **Close-all stops background streams** — `tabs.ts::closeAllTabs` now `await`s `stop(id)` for every still-streaming tab before dropping them (mirrors `closeOtherTabs`); previously closing the window mid-stream orphaned the non-active tabs' CLI subprocesses.
+- **Stale conversation load can't overwrite a newer one** — `persistence.ts::loadConversation` got a per-host load-generation token: a slow load that resolves after the user has already switched conversations is now discarded instead of clobbering the active tab. Malformed persisted JSON now `dropTab`s the half-built tab (was left as a permanent error stub) and the block-map walk null-guards `m.blocks`.
+- **Tool-group expand/collapse fixed** — `MessageBubble` group-open state was a `Set` XORed against the default-open flag, so toggling a default-open group did nothing visible (and default-closed groups inverted globally). Replaced with an explicit `Map<key,bool>` keyed per group.
+- **Ask-question selection survives streaming** — `ToolChip`'s reset `$effect` now early-returns when the questions/selection arrays are already in sync, so an unrelated re-render mid-stream can't wipe the user's in-progress multi-select answer.
+- **Workspace config writes serialized** — `assistant_clear_root` + `assistant_remove_recent_root` now take `CONFIG_WRITE_LOCK` (matching `set_root`/`set_tab_root`); a clear racing a set could otherwise read-modify-write a torn recent-roots list.
+- **ask_user / permission emit can't hang 10/30 min on a closed window** — `bridge.rs::ask_user_op` and `turn.rs` permission emit now pre-check `get_webview_window(label).is_some()`: Tauri's `emit_to` returns `Ok(())` for a missing label (zero webviews matched), so the prior `is_err()` deny-path never fired — a window closed mid-prompt parked the MCP/CLI on the full timeout. Now they cancel the registry entry and return an immediate "UI unreachable" error.
 
 **Added (self-recovery for end users):**
 - **Install buttons for missing local tools** (Settings → About → Local tools): when `git`/`node`/`cargo`/`code` isn't detected, an Install button runs `winget install --id <pkg> -e` in a visible console (`Git.Git`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, `Microsoft.VisualStudioCode`). Falls back to an actionable error if winget is absent. (`env_checks.rs::install_local_tool`, `environment.svelte.ts::install`).
