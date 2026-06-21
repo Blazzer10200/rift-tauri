@@ -19,13 +19,28 @@
 //! oneshot pattern, distinct type so the two surfaces never alias request ids.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tokio::sync::oneshot;
 
 pub struct PermissionRegistry {
     inner: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+}
+
+/// RAII guard: cancels the registered entry on drop unless `resolve`/`cancel`
+/// already removed it. Closes the leak where `stdout_task` is aborted while
+/// awaiting the user's decision — the future is dropped at the suspension point,
+/// so the explicit `cancel` call never runs, but this guard's `Drop` does.
+pub struct PermissionGuard {
+    registry: Arc<PermissionRegistry>,
+    request_id: String,
+}
+
+impl Drop for PermissionGuard {
+    fn drop(&mut self) {
+        self.registry.cancel(&self.request_id);
+    }
 }
 
 impl PermissionRegistry {
@@ -44,6 +59,18 @@ impl PermissionRegistry {
         };
         g.insert(request_id, tx);
         rx
+    }
+
+    /// Register + return an RAII guard that cancels the entry on drop. Use when
+    /// the await may be cancelled out from under the caller (task abort), so the
+    /// HashMap entry can't leak. Call `PermissionGuard::disarm` is unnecessary —
+    /// `resolve`/`cancel` already remove the entry, making the drop a no-op.
+    pub fn register_guarded(
+        self: &Arc<Self>,
+        request_id: String,
+    ) -> (oneshot::Receiver<Value>, PermissionGuard) {
+        let rx = self.register(request_id.clone());
+        (rx, PermissionGuard { registry: self.clone(), request_id })
     }
 
     /// Resolve a pending ask. Returns true on success; false if the entry was

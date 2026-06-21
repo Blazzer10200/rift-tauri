@@ -104,7 +104,10 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+        // Safe-fail on a broken clock (pre-1970): treat every token as expired
+        // so the user sees the clear "expired" message, not a confusing 401.
+        // `unwrap_or(0)` would do the reverse — mark every token unexpired.
+        .unwrap_or(i64::MAX)
 }
 
 fn read_oauth_token() -> Result<String, String> {

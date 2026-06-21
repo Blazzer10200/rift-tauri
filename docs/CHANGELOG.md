@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill + hardening pass
+## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill + hardening pass (2 rounds)
 
-> Unshipped batch on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings).
+> Unshipped batch on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings, forced recompile of all edited .rs).
 
 **Hardened (deep review — adversarially-verified findings):**
 - **Log sink survives mutex poison** — `diagnostics::file_log_write` now recovers a poisoned `FILE_LOG` lock (`into_inner()`) instead of silently dropping every subsequent write. A panic mid-write previously blacked out the only persistent log sink in a GUI prod build (stderr is `/dev/null`). Also: env_logger (dev stderr) now receives the SCRUBBED message, so home-dir paths no longer leak to the dev terminal.
@@ -13,6 +13,15 @@
 - **Conversation saves serialized** — added `CONVO_WRITE_LOCK` + per-call tmp suffix so two windows saving the same convo id can't race on a shared `.tmp` and silently install stale data (mirrors `CONFIG_WRITE_LOCK`).
 - **Enhance cancel-before-register race closed** — a Discard fired in the spawn→PID-register gap is now honored (pre-registered sentinel pid); previously the cancel was lost and the billed enhance ran to completion.
 - **MCP `read_file` respects SKIP_DIRS on the canonical path** — a workspace-internal symlink into `node_modules`/`.git`/`target` can no longer bypass the exclusion that `grep` already enforces.
+
+**Hardened (round 2 — under-covered surfaces, adversarially-verified):**
+- **CLI can't wedge on a broken stdin** — `turn.rs`: (1) a steer-flush write failure now `break 'outer`s the turn loop instead of escaping only the inner `for` and spinning a dead pipe; (2) `handle_permission_request` now returns `io::Result` and the caller surfaces + exits on a failed `write_control_response` — previously a broken pipe after the user's Allow/Deny left the CLI blocked on a response that never arrived (turn hung, no error, until the 30-min permission timeout).
+- **PermissionRegistry entry can't leak on task abort** — `register_guarded` returns an RAII `PermissionGuard` whose `Drop` cancels the entry, covering the case where `stdout_task` is aborted mid-await (the explicit `cancel` never ran when the future was cancelled).
+- **`icacls` lockdown off the Tokio worker** — `write_mcp_config` now fires the blocking `icacls` DACL-tightening on a detached OS thread instead of blocking an executor thread per turn (sub-100ms normally, but seconds under AV/contention).
+- **Update integrity: `arm_repair` bumps `download_epoch`** — a normal download in flight when Repair is triggered can no longer flip `downloaded=true` against the repair plan (would arm an apply with the wrong package on disk).
+- **`now_ms()` safe-fails to `i64::MAX`** — a broken clock (pre-1970) now treats every OAuth token as expired (clear "expired" message) instead of unexpired (confusing 401). `auth_update.rs` `CLAUDE_EXE` writes recover a poisoned lock (`into_inner()`), matching `cli_install.rs` — a no-op there would spawn the pre-update binary.
+- **`browser://load` scoped to its host window** — `emit_to("main", …)` not a global `emit`, so a second window's address bar/spinner no longer tracks navigations from the dock it doesn't own (multi-window state bleed).
+- **Frontend unmount hygiene** — `Composer` gained an `onDestroy` clearing `steerFlashTimer`/`undoTimer`, releasing a held PTT (mic was left recording on the global stt singleton when a pane closed mid-hold), and cancelling an in-flight `enhancePrompt` (Haiku spawn kept billing after close); `stt.sendRequested` reset wrapped in `untrack()` (removes a spurious effect re-run). `AssistantPane`'s first-send flip timer now self-cancels via the shared `clear` (no stale style write on a detached node).
 
 **Added (self-recovery for end users):**
 - **Install buttons for missing local tools** (Settings → About → Local tools): when `git`/`node`/`cargo`/`code` isn't detected, an Install button runs `winget install --id <pkg> -e` in a visible console (`Git.Git`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, `Microsoft.VisualStudioCode`). Falls back to an actionable error if winget is absent. (`env_checks.rs::install_local_tool`, `environment.svelte.ts::install`).

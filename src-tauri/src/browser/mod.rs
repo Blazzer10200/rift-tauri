@@ -63,7 +63,11 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
                 tauri::webview::PageLoadEvent::Started => "started",
                 tauri::webview::PageLoadEvent::Finished => "finished",
             };
-            let _ = webview.app_handle().emit(
+            // emit_to HOST_WINDOW, not a global emit: the dock only lives on
+            // `main`, so a global broadcast drives a second window's address bar
+            // + spinner off navigations it doesn't own (multi-window state bleed).
+            let _ = webview.app_handle().emit_to(
+                HOST_WINDOW,
                 "browser://load",
                 serde_json::json!({ "phase": phase, "url": payload.url().to_string() }),
             );

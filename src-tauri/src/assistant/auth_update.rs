@@ -67,7 +67,10 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     // sends fail "Claude CLI not found". Writing the authoritative pick here (from
     // the already-offloaded enumeration — no extra spawn, no async-thread block)
     // closes that divergence; the next turn resolves the right binary.
-    if let Ok(mut g) = CLAUDE_EXE.lock() {
+    // Recover a poisoned lock (matches cli_install.rs) — else a panic anywhere
+    // holding CLAUDE_EXE silently no-ops this authoritative cache sync.
+    {
+        let mut g = CLAUDE_EXE.lock().unwrap_or_else(|p| p.into_inner());
         *g = Some(active.map(|i| std::path::PathBuf::from(&installs[i].path)));
     }
     log::info!(
@@ -296,7 +299,10 @@ pub async fn assistant_update_cli() -> Result<CliUpdateResult, String> {
 
     // Drop the cached active exe so the next resolve re-stats the relinked
     // binaries, then re-enumerate to report fresh versions back to the UI.
-    if let Ok(mut g) = CLAUDE_EXE.lock() {
+    // Recover a poisoned lock: a silent no-op here would leave the next turn
+    // spawning the PRE-update binary.
+    {
+        let mut g = CLAUDE_EXE.lock().unwrap_or_else(|p| p.into_inner());
         *g = None;
     }
     let mut after = tokio::task::spawn_blocking(enumerate_claude_installs)

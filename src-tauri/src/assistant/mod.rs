@@ -225,18 +225,27 @@ fn write_mcp_config(
             // /inheritance:r — strip inherited ACEs; /grant:r — replace user grant.
             // Output discarded; failure is non-fatal (file is still delete-on-exit
             // and the embedded token rotates each app launch).
-            let icacls_status = std::process::Command::new("icacls")
-                .arg(&path)
-                // Quote the principal: domain usernames can contain spaces, which
-                // icacls would otherwise parse as separate ACL tokens.
-                .args(["/inheritance:r", "/grant:r", &format!("\"{user}\":(F)")])
-                .creation_flags(CREATE_NO_WINDOW)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            if !matches!(icacls_status, Ok(s) if s.success()) {
-                log::warn!("icacls failed to lock down {} for user {user}", path.display());
-            }
+            // RR2: `icacls` blocks until the subprocess exits (sub-100ms normally,
+            // but seconds under AV/contention). This fn runs on a Tokio worker
+            // (called from async `assistant_send`), so spawn the lockdown on a
+            // detached OS thread to keep the executor unblocked. Best-effort: the
+            // file is delete-on-exit and the token rotates each launch, so a
+            // not-yet-applied DACL during the spawn window is acceptable.
+            let path_for_acl = path.clone();
+            std::thread::spawn(move || {
+                let icacls_status = std::process::Command::new("icacls")
+                    .arg(&path_for_acl)
+                    // Quote the principal: domain usernames can contain spaces, which
+                    // icacls would otherwise parse as separate ACL tokens.
+                    .args(["/inheritance:r", "/grant:r", &format!("\"{user}\":(F)")])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+                if !matches!(icacls_status, Ok(s) if s.success()) {
+                    log::warn!("icacls failed to lock down {} for user {user}", path_for_acl.display());
+                }
+            });
         }
     }
 

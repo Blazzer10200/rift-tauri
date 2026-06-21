@@ -27,12 +27,23 @@
   import { stt } from "../../state/stt.svelte";
   import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
-  import { tick, onMount } from "svelte";
+  import { tick, onMount, onDestroy, untrack } from "svelte";
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
   // mic until they opened Settings → Speech once.
   onMount(() => { void stt.init(); void localLlm.refresh(); });
+
+  // RR2 unmount hygiene — the Composer is destroyed when its tab/split-pane
+  // closes (parent gates rendering on tab presence). Without this, pending
+  // timers fire on torn-down $state, a PTT hold leaves the mic recording on the
+  // global stt singleton, and an in-flight enhance keeps billing a Haiku spawn.
+  onDestroy(() => {
+    if (steerFlashTimer) clearTimeout(steerFlashTimer);
+    if (undoTimer) clearTimeout(undoTimer);
+    pttRelease();
+    if (enhancing && enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
+  });
 
   let {
     onsubmit,
@@ -580,7 +591,9 @@
     // Only the pane the dictation was bound to fires — in split mode every
     // composer mounts this effect, so gate on the STT target tab.
     if (stt.sendRequested && stt.targetTabId === tabId) {
-      stt.sendRequested = false;
+      // untrack the reset — writing a value this effect subscribes to would
+      // schedule a spurious re-run ($state_unsafe_mutation in dev).
+      untrack(() => { stt.sendRequested = false; });
       fire();
     }
   });

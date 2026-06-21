@@ -276,6 +276,10 @@ impl UpdateService {
         let info: UpdateInfo =
             serde_json::from_value(info_json).map_err(|e| format!("repair: build update info: {e}"))?;
         let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        // Bump the epoch so a concurrently in-flight normal download can't later
+        // flip `downloaded=true` against the repair plan we're about to set —
+        // that would arm an apply with the wrong package on disk. (RR2)
+        g.download_epoch = g.download_epoch.wrapping_add(1);
         g.pending = Some(info);
         g.downloaded = false;
         Ok(dto)

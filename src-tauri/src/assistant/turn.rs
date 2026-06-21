@@ -347,7 +347,7 @@ async fn handle_permission_request(
     window_label: &str,
     stdin: &mut tokio::process::ChildStdin,
     msg: &Value,
-) {
+) -> std::io::Result<()> {
     let request_id = msg.get("request_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
     let req = msg.get("request").cloned().unwrap_or(Value::Null);
     let tool_use_id = req.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
@@ -358,25 +358,27 @@ async fn handle_permission_request(
     // and only reaches here because it's off the allowlist. Auto-deny with a
     // steer to mcp__rift__ask_user — never surface the raw Allow/Deny bar.
     if tool_name == "AskUserQuestion" {
-        let _ = write_control_response(stdin, &request_id, serde_json::json!({
+        write_control_response(stdin, &request_id, serde_json::json!({
             "behavior": "deny",
             "message": "AskUserQuestion is unavailable here. Call the mcp__rift__ask_user tool instead — it presents the question(s) in the Rift UI and returns the user's selection.",
-        })).await;
-        return;
+        })).await?;
+        return Ok(());
     }
 
     let registry = match app.try_state::<std::sync::Arc<PermissionRegistry>>() {
         Some(r) => r.inner().clone(),
         None => {
             // Init bug — deny so the CLI doesn't hang forever.
-            let _ = write_control_response(stdin, &request_id, serde_json::json!({
+            write_control_response(stdin, &request_id, serde_json::json!({
                 "behavior": "deny", "message": "permission registry unavailable",
-            })).await;
-            return;
+            })).await?;
+            return Ok(());
         }
     };
 
-    let rx = registry.register(request_id.clone());
+    // Guard cancels the registry entry on drop — covers task-abort mid-await
+    // (the explicit cancel below never runs when the future is cancelled).
+    let (rx, _perm_guard) = registry.register_guarded(request_id.clone());
     // B4: if the UI is unreachable (window closed mid-turn) the emit fails and
     // the user never sees the prompt — deny immediately rather than let the
     // request hang for the full 30-min timeout while the CLI waits on us.
@@ -390,10 +392,10 @@ async fn handle_permission_request(
     })) {
         log::warn!("permission emit failed for {session_id} ({e}) — denying (UI unreachable)");
         registry.cancel(&request_id);
-        let _ = write_control_response(stdin, &request_id, serde_json::json!({
+        write_control_response(stdin, &request_id, serde_json::json!({
             "behavior": "deny", "message": "permission UI unreachable",
-        })).await;
-        return;
+        })).await?;
+        return Ok(());
     }
 
     // Cap the wait so a forgotten prompt can't wedge the turn forever; deny on
@@ -414,7 +416,7 @@ async fn handle_permission_request(
             map.insert("updatedInput".into(), original_input);
         }
     }
-    let _ = write_control_response(stdin, &request_id, decision).await;
+    write_control_response(stdin, &request_id, decision).await
 }
 
 /// Streaming round-trip. Spawns `claude -p` over stdin, forwards stdout NDJSON
@@ -1153,7 +1155,7 @@ pub async fn assistant_send(
         // Steers that arrive before the init handshake completes are buffered,
         // then flushed the instant the user turn is sent (see user_sent branch).
         let mut steer_pending: Vec<SteerMsg> = Vec::new();
-        loop {
+        'outer: loop {
             tokio::select! {
             read = lines.next_line() => {
             match read {
@@ -1188,7 +1190,9 @@ pub async fn assistant_send(
                                                 "session_id": stream_sid,
                                                 "message": format!("write steer: {e}"),
                                             }));
-                                            break;
+                                            // Broken stdin → the loop can't recover; exit
+                                            // the turn instead of spinning with a dead pipe.
+                                            break 'outer;
                                         }
                                     }
                                     Err(e) => {
@@ -1209,7 +1213,15 @@ pub async fn assistant_send(
                                 .and_then(|s| s.as_str())
                                 == Some("can_use_tool");
                         if is_perm {
-                            handle_permission_request(&app_out, &stream_sid, &win_label, &mut stdin, &v).await;
+                            // Broken stdin while writing the decision wedges the CLI
+                            // (it blocks awaiting a control_response that never lands)
+                            // → surface + exit the turn instead of spinning.
+                            if let Err(e) = handle_permission_request(&app_out, &stream_sid, &win_label, &mut stdin, &v).await {
+                                let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
+                                    "session_id": stream_sid, "message": format!("write permission response: {e}"),
+                                }));
+                                break 'outer;
+                            }
                             continue;
                         }
                         // `result` is the last frame — forward it, signal DONE

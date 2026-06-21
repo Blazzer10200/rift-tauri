@@ -209,9 +209,14 @@
       void host.offsetHeight;
       host.style.transition = "transform 380ms cubic-bezier(0.22, 1, 0.36, 1)";
       host.style.transform = "translateY(0)";
-      const clear = () => { host.style.transition = ""; host.style.transform = ""; };
+      let flipTimer: ReturnType<typeof setTimeout> | undefined;
+      const clear = () => {
+        if (flipTimer) clearTimeout(flipTimer);
+        host.removeEventListener("transitionend", clear);
+        host.style.transition = ""; host.style.transform = "";
+      };
       host.addEventListener("transitionend", clear, { once: true });
-      setTimeout(clear, 460);
+      flipTimer = setTimeout(clear, 460);
     });
   }
 
