@@ -216,7 +216,7 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
     let pid = child.id();
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let _ = tx.send(child.wait_with_output());
+        let _ = tx.send(drain_child_capped(child));
     });
     let out = match rx.recv_timeout(std::time::Duration::from_secs(30)) {
         Ok(result) => result.map_err(|e| format!("failed to run git: {e}"))?,
@@ -242,8 +242,40 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
     Ok(GitOut {
         stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
         stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-        code: out.status.code(),
+        code: out.code,
     })
+}
+
+/// RR9: capped child drain. `wait_with_output()` buffers BOTH pipes into `Vec`
+/// with no ceiling — a verbose git hook (linter/CI trigger) emitting 10 MB/s
+/// would accumulate 100s of MB before the 30s kill fires, OOMing the MCP child
+/// (which IS the Tauri binary). Each pipe is drained through `Read::take` so the
+/// in-memory buffer can never exceed `MAX_OUT_BYTES + 1` per stream regardless
+/// of how much git produces; the callers still `truncate_bytes` for display.
+struct CappedOut {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    code: Option<i32>,
+}
+
+fn drain_child_capped(mut child: std::process::Child) -> std::io::Result<CappedOut> {
+    use std::io::Read;
+    let drain = |pipe: Option<Box<dyn Read + Send>>| -> Vec<u8> {
+        let mut buf = Vec::new();
+        if let Some(p) = pipe {
+            let _ = p.take((MAX_OUT_BYTES + 1) as u64).read_to_end(&mut buf);
+        }
+        buf
+    };
+    // Drain stderr on a side thread so a full stdout pipe can't deadlock against
+    // a full stderr pipe (and vice-versa).
+    let stderr_pipe = child.stderr.take();
+    let stderr_handle =
+        std::thread::spawn(move || drain(stderr_pipe.map(|p| Box::new(p) as Box<dyn Read + Send>)));
+    let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let stderr = stderr_handle.join().unwrap_or_default();
+    let status = child.wait()?;
+    Ok(CappedOut { stdout, stderr, code: status.code() })
 }
 
 /// Current branch name, or "HEAD" (detached) — used as the default push target.
@@ -388,6 +420,13 @@ pub fn tool_git_commit(args: &Value, roots: &[PathBuf]) -> Result<String, String
     // Staging: explicit paths win; else `all: true` stages everything; else
     // commit only what's already staged.
     if let Some(paths) = args.get("paths").and_then(|v| v.as_array()) {
+        // RR9: cap entry count before per-path validation (each runs filesystem
+        // I/O) + spawn. An oversized model tool-call could otherwise allocate
+        // ~100 MB of args and blow the OS command-line limit with a cryptic
+        // spawn error. 1000 is well above any real single-commit staging op.
+        if paths.len() > 1000 {
+            return Err("too many paths (max 1000 per commit)".into());
+        }
         let mut add_args: Vec<String> = vec!["add".into(), "--".into()];
         for p in paths {
             let s = p.as_str().ok_or("`paths` entries must be strings")?;
@@ -414,7 +453,9 @@ pub fn tool_git_commit(args: &Value, roots: &[PathBuf]) -> Result<String, String
         }
         return Err(format!("git commit failed: {txt}"));
     }
-    Ok(out.stdout.trim().to_string())
+    // RR9: truncate like log/pull — a verbose post-commit hook can print 100s of
+    // KB that would otherwise be forwarded verbatim as the MCP tool result.
+    Ok(truncate_bytes(out.stdout.trim(), MAX_OUT_BYTES).into_owned())
 }
 
 pub fn tool_git_push(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
@@ -445,7 +486,9 @@ pub fn tool_git_push(args: &Value, roots: &[PathBuf]) -> Result<String, String> 
         s.push_str(out.stderr.trim());
     }
     if s.is_empty() { s = format!("Pushed to {remote}/{branch}."); }
-    Ok(s)
+    // RR9: truncate like log/pull/commit — a verbose post-push hook (CI trigger
+    // printing a build log) can otherwise forward 100s of KB verbatim.
+    Ok(truncate_bytes(&s, MAX_OUT_BYTES).into_owned())
 }
 
 #[cfg(test)]

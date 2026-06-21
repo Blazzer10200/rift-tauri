@@ -463,6 +463,19 @@ pub async fn assistant_send(
     // sidecar filename without check. Blocks leading-dash flag injection
     // into `--session-id`/`--resume` AND path-traversal segments in
     // save_session_cwd's filename derivation.
+    // RR9: cap the renderer-supplied prompt + prior_context_summary before they
+    // flow into build_user_envelope → blocking stdin write_all (mirrors the
+    // attachment 20 MiB cap + steer 1 MiB cap). A renderer bug could otherwise
+    // push tens of MB into a single synchronous pipe write, stalling the worker
+    // + allocating heap proportional to the input. 2 MiB is generous for any
+    // real prompt or compaction summary.
+    const PROMPT_BYTES_CAP: usize = 2 * 1024 * 1024;
+    if prompt.len() > PROMPT_BYTES_CAP {
+        return Err(format!("prompt too large ({} bytes, max {})", prompt.len(), PROMPT_BYTES_CAP));
+    }
+    if prior_context_summary.as_deref().map(str::len).unwrap_or(0) > PROMPT_BYTES_CAP {
+        return Err("prior_context_summary too large (max 2 MiB)".into());
+    }
     if !is_valid_session_id(&session_id) {
         return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
     }
@@ -1120,14 +1133,19 @@ pub async fn assistant_send(
     // handshake is acknowledged. Shares build_user_envelope with steer injection.
     let user_line: Vec<u8> = build_user_envelope(&effective_prompt, &attachments)?;
 
+    // RR9: take the pipes BEFORE registering the steer sender — an `ok_or_else`?
+    // early-return between registration and the turn loop would strand a stale
+    // STEER_TX entry (never matched by clear_steer_tx_if at turn end). Both takes
+    // are effectively infallible (Stdio::piped() is set), but this keeps the
+    // "every registration is matched by a clear" invariant true on every path.
+    let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
+
     // Steer channel: register the sender while this turn streams so
     // `assistant_steer` can inject mid-turn user messages; the reader task owns
     // the receiver. Cleared at the same points as the session PID (turn end).
     let (steer_tx, mut steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
     register_steer_tx(&session_id, steer_tx.clone());
-
-    let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
-    let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
 
     let app_out = app.clone();
     let win_label = window_label.clone();
@@ -1588,7 +1606,13 @@ pub async fn assistant_stop(session_id: String) -> Result<(), String> {
         return Ok(());
     };
     mark_session_stopped(&session_id);
-    clear_session_pid(&session_id);
+    // RR9: compare-and-clear on the PID we observed (mirrors the turn loop at
+    // its two cleanup points). A queued follow-up can call assistant_send →
+    // set_session_pid with a NEW pid between our get_session_pid read and here;
+    // an unconditional clear would wipe the new turn's pid, leaving it
+    // un-stoppable. clear_session_pid_if only removes when the stored pid still
+    // matches ours.
+    clear_session_pid_if(&session_id, pid);
 
     #[cfg(windows)]
     {

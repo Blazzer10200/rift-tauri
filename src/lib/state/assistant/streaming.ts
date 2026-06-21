@@ -115,8 +115,15 @@ function appendCliCompaction(tab: TabState, env: StreamEnvelope) {
 
 function beginThinking(tab: TabState, index: number) {
   if (tab.thinkingByIndex.has(index)) return;
-  tab.activeThinkingIndex = index;
   const startedAt = Date.now();
+  // RR9: keep ALL the per-thinking side effects atomic with the block push.
+  // mutateStreaming early-returns (no-op) when streamingMsgId is null — e.g. a
+  // late content_block_start landing after stop() cleared it. Previously the
+  // map-set lived inside the callback but activeThinkingIndex / "Thinking…" /
+  // thinkingCount ran unconditionally outside it, so on the no-op path the
+  // spinner label stuck on (nothing clears it until the next beginTurn) and
+  // thinkingCount inflated. `applied` tracks whether the push actually ran.
+  let applied = false;
   mutateStreaming(tab, (m) => {
     const blocks = m.blocks.slice();
     tab.thinkingByIndex.set(index, { blockOffset: blocks.length, startedAt });
@@ -128,8 +135,11 @@ function beginThinking(tab: TabState, index: number) {
       durationMs: null,
       status: "active",
     });
+    applied = true;
     return { ...m, blocks };
   });
+  if (!applied) return;
+  tab.activeThinkingIndex = index;
   tab.activity = { ...tab.activity, currentLabel: "Thinking…" };
   if (tab.currentTurnRecord) tab.currentTurnRecord.thinkingCount += 1;
 }
@@ -202,7 +212,14 @@ function ensureThinkingFromEnvelope(tab: TabState, block: { thinking?: string; s
   if (!tab.streamingMsgId) return;
   const msg = tab.messages.find((m) => m.id === tab.streamingMsgId);
   if (!msg) return;
-  const existing = msg.blocks.find((b) => b.type === "thinking") as ThinkingBlock | undefined;
+  // RR9: findLast, not find. In agentic loops endThinking deletes the
+  // thinkingByIndex entry so index 0 is reused each tool round → a message
+  // accumulates one ThinkingBlock per round. The envelope for round N carries
+  // round N's text/signature; find() returns block 0 (round 1, already done) so
+  // in encrypted-thinking mode (no thinking_delta — envelope is the only text
+  // source) every block after the first stayed empty. The most recently pushed
+  // thinking block is always the current round's.
+  const existing = msg.blocks.findLast((b) => b.type === "thinking") as ThinkingBlock | undefined;
   const envText = typeof block.thinking === "string" ? block.thinking : "";
   const envSig = !!block.signature && block.signature.length > 0;
   if (existing) {

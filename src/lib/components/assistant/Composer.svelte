@@ -42,7 +42,16 @@
     if (steerFlashTimer) clearTimeout(steerFlashTimer);
     if (undoTimer) clearTimeout(undoTimer);
     pttRelease();
-    if (enhancing && enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
+    // RR9: bump the seq UNCONDITIONALLY so any pending enhance callback (incl.
+    // one still in the network round-trip before onRequestId populated the id)
+    // is invalidated; cancel the backend subprocess only once we have the id.
+    // The old `enhancing && enhanceRequestId` guard skipped cancellation in the
+    // window between `enhancing = true` and the async onRequestId callback,
+    // leaking a billed Haiku spawn when a split-pane closed mid-init.
+    if (enhancing) {
+      enhanceSeq++;
+      if (enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
+    }
   });
 
   let {
@@ -171,6 +180,15 @@
   }
   let mentionState = $state<MentionState | null>(null);
   let mentionIdx = $state(0);
+  // RR9: this Composer instance persists across tabId changes (AssistantPane
+  // renders it un-keyed), but mentionState holds a character offset into the
+  // PREVIOUS tab's draft. Switching tabs with the @-popover open + then picking
+  // a mention spliced at a stale offset into the new tab's draft, corrupting it.
+  // Clear transient per-draft popover state whenever the active tab changes.
+  $effect(() => {
+    void tabId;
+    mentionState = null;
+  });
   function refreshMention() {
     mentionState = detectMention();
     if (mentionState && assistant.workspaceFiles.length === 0) {
@@ -870,6 +888,16 @@
   // descendants without flicker.
   let dragDepth = $state(0);
   const dragOver = $derived(dragDepth > 0);
+  // RR9: Chromium empties dataTransfer.types on a drag cancelled OUTSIDE the
+  // page (Escape, alt-tab, mouse-up off-window), so isFileDrag() returns false
+  // and onDragLeave's early-return never drains the counter → the "Drop image"
+  // overlay sticks until unmount. A document-level dragend unconditionally
+  // resets it.
+  $effect(() => {
+    const reset = () => { dragDepth = 0; };
+    document.addEventListener("dragend", reset);
+    return () => document.removeEventListener("dragend", reset);
+  });
   function onDragEnter(e: DragEvent) {
     if (!isFileDrag(e)) return;
     e.preventDefault();

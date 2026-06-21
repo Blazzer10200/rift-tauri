@@ -373,6 +373,13 @@ impl UpdateService {
             match std::process::Command::new("taskkill")
                 .args([
                     "/F",
+                    // RR9: /T so the sweep also kills grandchildren (e.g. a git
+                    // subprocess spawned by an orphaned MCP child). Those aren't
+                    // named rift-tauri.exe so the IMAGENAME filter misses them,
+                    // but they can hold inherited handles into current/ and
+                    // silently block the Velopack rename — the same root cause as
+                    // the original child-reap bug. Mirrors kill_all_session_children.
+                    "/T",
                     "/FI",
                     &format!("IMAGENAME eq {image}"),
                     "/FI",
