@@ -16,6 +16,7 @@
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
   import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
+  import { activityDock } from "../../state/activityDock.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -383,6 +384,10 @@
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Stream view</div><div class="ctl-s">Boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div></div>
                 <button class="toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="toggle-knob"></span></button>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Activity dock</div><div class="ctl-s">Slide-in side panel showing live sub-agent activity. Auto-reveals while sub-agents run and tidies away when they finish.</div></div>
+                <button class="toggle" class:on={activityDock.enabled} role="switch" aria-checked={activityDock.enabled} aria-label="Activity dock" type="button" onclick={() => activityDock.setEnabled(!activityDock.enabled)}><span class="toggle-knob"></span></button>
               </div>
           </div>
 

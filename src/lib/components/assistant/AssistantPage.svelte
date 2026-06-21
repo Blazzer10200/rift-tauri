@@ -272,7 +272,7 @@
     </div>
   {/if}
 
-  {#if activityDock.open}
+  {#if activityDock.enabled && activityDock.open}
     <div class="dock-wrap" transition:dockSlide>
       <div class="dock-inner" style="width: {activityDock.width + 3}px">
         <!-- svelte-ignore a11y_no_noninteractive_tabindex -->

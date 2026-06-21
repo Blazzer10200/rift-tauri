@@ -7,6 +7,7 @@
 
 const OPEN_KEY = "rift.assistant.activityDock.open.v1";
 const WIDTH_KEY = "rift.assistant.activityDock.width.v1";
+const ENABLED_KEY = "rift.assistant.activityDock.enabled.v1";
 
 const MIN_W = 320;
 const MAX_W = 900;
@@ -16,6 +17,10 @@ const DEFAULT_W = 440;
 const DISMISS_MS = 6000;
 
 class ActivityDock {
+  // Master switch (Settings → Chat). When off, the dock never auto-reveals and
+  // its toggle/render are suppressed entirely. Default on. Closing the dock is a
+  // per-cycle dismissal (`open`); disabling it is the durable opt-out.
+  enabled = $state(true);
   open = $state(false);
   width = $state(DEFAULT_W);
 
@@ -26,14 +31,30 @@ class ActivityDock {
 
   init() {
     if (typeof window === "undefined") return;
+    // Default on — only an explicit "0" disables (absent key = first run = on).
+    this.enabled = localStorage.getItem(ENABLED_KEY) !== "0";
     this.open = localStorage.getItem(OPEN_KEY) === "1";
     const w = Number(localStorage.getItem(WIDTH_KEY));
     if (Number.isFinite(w) && w >= MIN_W && w <= MAX_W) this.width = w;
   }
 
+  /** Master enable/disable (Settings). Disabling tears the dock down immediately
+   *  and resets the auto-controller so re-enabling starts clean. */
+  setEnabled(on: boolean) {
+    this.enabled = on;
+    try { localStorage.setItem(ENABLED_KEY, on ? "1" : "0"); } catch { /* noop */ }
+    if (!on) {
+      this.open = false;
+      this.autoShown = false;
+      this.userPinned = false;
+      this.clearDismiss();
+    }
+  }
+
   /** User action — pins the dock open/closed for this activity cycle so the auto
    *  controller never fights the user, and persists the preference. */
   toggle() {
+    if (!this.enabled) return;
     this.userPinned = true;
     this.autoShown = false;
     this.clearDismiss();
@@ -54,6 +75,8 @@ class ActivityDock {
    *  auto-reveal / auto-dismiss. Auto open/close is NOT persisted — only an
    *  explicit user toggle changes the remembered preference. */
   syncActivity(running: number, total: number) {
+    // Master switch off → never auto-reveal; the dock stays torn down.
+    if (!this.enabled) return;
     if (total === 0) {
       // Fresh turn with no sub-agents — reset the controller so the next batch
       // can auto-manage again. Leave a user-opened empty dock alone.
