@@ -159,6 +159,10 @@
   const fmtCliVer = (v: string | null | undefined) => v?.replace(/\s*\(claude code\)\s*$/i, "") ?? null;
   const cliInstalled = $derived(fmtCliVer(assistantStore.auth?.cliVersion));
   const cliInstalls = $derived(assistantStore.auth?.installs ?? []);
+  // Active CLI present but its `--version` couldn't be read → backend gates it
+  // as conservative-old (cli_caps). Surface that so a degraded session isn't a
+  // silent mystery. Only when a session actually resolved (auth known).
+  const cliVersionUnknown = $derived(!!assistantStore.auth && !assistantStore.auth.cliVersion && cliInstalls.length <= 1);
   const cliNewer = $derived(cliUpdate.isAnyStale(assistantStore.auth?.installs, cliInstalled));
   const cliSummary = $derived(cliUpdate.summary(assistantStore.auth?.installs));
   const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
@@ -463,6 +467,9 @@
             <div class="sb-status-main">
               <b>{assistantStore.auth ? assistantStore.auth.summary : assistantStore.authChecking ? "Checking session…" : "Session unknown"}</b>
               <div class="sub">Rift runs your local <code>claude</code> install{#if cliInstalled}{' — '}<code>{cliInstalled}</code>{/if}. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
+              {#if cliVersionUnknown}
+                <div class="sub st-cli-warn" use:tooltip={"`claude --version` failed or timed out, so Rift can't tell how new this CLI is. To stay safe it treats it as an old version and turns newer features off. Re-probe after an update, or check the install is healthy."}>⚠ Couldn't read this CLI's version — newer features are off until it's readable.</div>
+              {/if}
             </div>
           </div>
           <div class="sb-status-r">
@@ -490,6 +497,7 @@
                   <code>{fmtCliVer(inst.version) ?? "?"}</code>
                   {#if inst.active}<span class="st-cli-inst-tag">active</span>{/if}
                   {#if stale}<span class="st-cli-inst-tag stale">behind</span>{/if}
+                  {#if !inst.version}<span class="st-cli-inst-tag unknown" use:tooltip={"Rift couldn't read this install's version (`claude --version` failed or timed out). It's treated as an old CLI — newer features are turned off for safety until the version is readable."}>version?</span>{/if}
                   <span class="st-cli-inst-path" use:tooltip={inst.path}>{inst.path}</span>
                   {#if stale}
                     <button class="st-cli-copy sm" class:done={cliUpdate.copiedCmd === cmd} type="button" onclick={() => void cliUpdate.copyValue(cmd)} use:tooltip={"Copy: " + cmd} aria-label="Copy this install's update command">
@@ -1041,6 +1049,8 @@
   .st-cli-inst code { font-family: var(--font-mono); color: var(--fg); }
   .st-cli-inst-tag { font-size: 9px; text-transform: uppercase; letter-spacing: 0.04em; padding: 1px 5px; border-radius: 4px; background: color-mix(in oklab, var(--accent) 22%, transparent); color: var(--accent); }
   .st-cli-inst-tag.stale { background: color-mix(in oklab, var(--warn) 22%, transparent); color: var(--warn); }
+  .st-cli-inst-tag.unknown { background: color-mix(in oklab, var(--fg-muted) 20%, transparent); color: var(--fg-muted); cursor: help; }
+  .st-cli-warn { color: var(--warn); cursor: help; margin-top: 2px; }
   .st-cli-inst-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; opacity: 0.6; font-family: var(--font-mono); font-size: 10px; }
   .st-cli-act { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
   .st-cli-act .st-cli-cmd { margin-top: 0; }
