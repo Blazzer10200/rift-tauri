@@ -82,7 +82,7 @@
       </button>
     </div>
 
-    <button class="ws-switch" type="button" use:tooltip={assistant.activeRoot ?? "Pick a workspace folder"} aria-label="Workspace folder">
+    <button class="ws-switch" type="button" onclick={() => void assistant.pickFolder()} use:tooltip={assistant.activeRoot ?? "Pick a workspace folder"} aria-label="Pick a workspace folder">
       <span class="ws-switch-ic"><Folder size={15} /></span>
       <span class="ws-switch-text">
         <span class="ws-switch-repo">{repoName}</span>

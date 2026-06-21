@@ -69,7 +69,7 @@
     uiPrefs.setDotField(p.dots);
     uiPrefs.setDensity(p.density);
   }
-  const lookSel = (p: Look) => uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots;
+  const lookSel = (p: Look) => uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots && uiPrefs.density === p.density;
 
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
@@ -986,21 +986,6 @@
   .st-note code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
   .st-warn code { background: color-mix(in oklab, var(--warn) 16%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 30%, transparent); padding: 1px 5px; border-radius: 4px; color: var(--warn); font-family: var(--font-mono); }
-
-  /* ── Toggle switch ── */
-  .st-switch { position: relative; width: 40px; height: 23px; border-radius: 999px; border: 0; padding: 0; background: var(--bg-elev-3); cursor: pointer; transition: background 160ms var(--ease-soft); flex: none; }
-  .st-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 999px; background: var(--fg-muted); transition: transform 180ms var(--ease-page), background 160ms; }
-  .st-switch.on { background: var(--accent); }
-  .st-switch.on::after { transform: translateX(17px); background: var(--accent-fg); }
-  .st-switch:disabled { opacity: 0.5; cursor: not-allowed; }
-  .st-switch:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring); }
-
-  /* ── Segmented ── */
-  .st-seg { display: inline-flex; background: var(--track); border: 1px solid var(--border); border-radius: var(--radius); padding: 3px; gap: 2px; }
-  .st-seg-btn { height: 26px; padding: 0 12px; border: 0; border-radius: 6px; background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; white-space: nowrap; transition: color 120ms, background 120ms; }
-  .st-seg-btn:hover:not(:disabled) { color: var(--fg); }
-  .st-seg-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-  .st-seg-btn.on { background: var(--surface-hover); color: var(--fg); box-shadow: var(--shadow-sm); }
 
   /* ── Text input ── */
   .st-input { height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--field); border: 1px solid var(--field-border); color: var(--fg); font: inherit; font-size: var(--fs-sm); }
