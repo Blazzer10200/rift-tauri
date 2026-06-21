@@ -59,9 +59,10 @@ class UiPrefs {
   // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
   // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
   fastMode = $state(false);
-  // Stream mode = the Codex-flavored boxless turn render (Phase 4). Additive +
-  // default-off; the shipping MessageBubble path is untouched when false.
-  streamMode = $state(false);
+  // Stream mode = the redesigned boxless turn render (the spec's default tool
+  // display, redesign-port.md §"Net-new"). Default ON; only an explicit opt-out
+  // ("0") falls back to the legacy MessageBubble path.
+  streamMode = $state(true);
 
   init() {
     if (typeof window === "undefined") return;
@@ -102,7 +103,7 @@ class UiPrefs {
     }
 
     this.fastMode = localStorage.getItem(FAST_MODE_KEY) === "1";
-    this.streamMode = localStorage.getItem(STREAM_MODE_KEY) === "1";
+    this.streamMode = localStorage.getItem(STREAM_MODE_KEY) !== "0";
 
     this.apply();
   }
