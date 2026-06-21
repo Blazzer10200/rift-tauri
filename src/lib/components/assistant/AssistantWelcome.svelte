@@ -513,7 +513,7 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   :global(.folder-row .fr-go) {
-    flex: none; width: 18px; margin-left: -4px; color: var(--accent); opacity: 0; transform: translateX(-4px);
+    flex: none; width: 18px; margin-left: -4px; color: var(--accent); opacity: 0.38; transform: none;
     transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page);
   }
   .folder-row:hover :global(.fr-go) { opacity: 1; transform: none; }

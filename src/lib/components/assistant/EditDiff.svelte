@@ -407,10 +407,10 @@
   }
   .edit-crumb .name { color: var(--fg); font-weight: 600; flex-shrink: 0; }
   .edit-crumb:hover .name { color: var(--accent); }
-  /* Open-file affordance — corner-down-left icon, hidden until hover. */
+  /* Open-file affordance — corner-down-left icon, hinted at rest. */
   :global(.edit-crumb .edit-open) {
     color: var(--fg-faint); flex-shrink: 0;
-    opacity: 0; transition: opacity 140ms ease;
+    opacity: 0.3; transition: opacity 140ms ease;
   }
   .edit-crumb:hover :global(.edit-open) { opacity: 0.75; }
 
