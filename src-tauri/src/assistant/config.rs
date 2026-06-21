@@ -217,6 +217,13 @@ pub(super) fn current_api_key() -> Option<String> {
         .or_else(|| load_config().api_key.filter(|s| !s.is_empty()))
 }
 
+/// Same as `current_api_key` but reuses an already-loaded config — avoids a
+/// second `load_config()` disk read on the per-turn hot path.
+pub(super) fn current_api_key_with(cfg: &AssistantConfig) -> Option<String> {
+    crate::secrets::get(crate::secrets::ASSISTANT_API_KEY)
+        .or_else(|| cfg.api_key.clone().filter(|s| !s.is_empty()))
+}
+
 pub(super) fn save_config(cfg: &AssistantConfig) -> Result<(), String> {
     let p = config_path()?;
     let s = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;

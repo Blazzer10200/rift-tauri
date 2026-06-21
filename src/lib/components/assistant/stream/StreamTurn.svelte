@@ -11,6 +11,7 @@
   import StreamAgent from "./StreamAgent.svelte";
   import { messageToTurn, groupBlocks, fmtDur, VERB_ING, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
+  import { fmtTokens } from "$lib/state/assistant/helpers";
 
   let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
 
@@ -46,11 +47,33 @@
     }
     return null;
   });
+  // The head is the TURN-level status only: "Working…" live, "Worked for Xs"
+  // when done. It must NOT say "Thinking…" — StreamThinking owns that label, and
+  // flipping the head to it too rendered a duplicate "Thinking…" (the turn head
+  // + the thinking block both showing the same string). Thinking is a sub-block,
+  // not the turn status.
   const headLabel = $derived(
-    streaming
-      ? (turn.thinking?.active ? "Thinking…" : "Working…")
-      : `Worked for ${fmtDur(turn.totalSecs)}`
+    streaming ? "Working…" : `Worked for ${fmtDur(turn.totalSecs)}`
   );
+
+  // Live footer meta — spec's `Unfurling… 5s · 312 tokens`. 1s ticker drives
+  // elapsed + tokens; both pull from the assistant store (turnStartedAt +
+  // liveOutputTokens already maintained by streaming.ts, no backend work).
+  let now = $state(0);
+  $effect(() => {
+    if (!streaming) return;
+    now = Date.now();
+    const h = setInterval(() => { now = Date.now(); }, 1000);
+    return () => clearInterval(h);
+  });
+  const liveSecs = $derived.by(() => {
+    const t = assistant.activity.turnStartedAt;
+    return streaming && t != null && now > 0 ? Math.max(0, Math.round((now - t) / 1000)) : null;
+  });
+  const liveTokens = $derived.by(() => {
+    void now;
+    return streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null;
+  });
 </script>
 
 <div class="sturn">
@@ -95,7 +118,17 @@
   {#if streaming && liveTool}
     <div class="sfooter">
       <span class="sf-verb">{VERB_ING[liveTool.kind]}</span>
-      <span class="sf-meta">{liveTool.cap}</span>
+      {#if liveTool.cap}
+        <span class="sf-meta">{liveTool.cap}</span>
+      {/if}
+      {#if liveSecs != null}
+        <span class="sf-pip">·</span>
+        <span class="sf-meta">{liveSecs}s</span>
+      {/if}
+      {#if liveTokens != null}
+        <span class="sf-pip">·</span>
+        <span class="sf-meta">{fmtTokens(liveTokens)} tokens</span>
+      {/if}
     </div>
   {:else if turn.outcome !== "text"}
     <div class="sapplied" data-outcome={turn.outcome}>

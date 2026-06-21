@@ -4,6 +4,7 @@
   import { shell } from "$lib/state/shell.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import type { ConversationMeta } from "$lib/state/assistant/types";
+  import { portal } from "$lib/actions/portal";
 
   // ── grouping ─────────────────────────────────────────────────────────
   type Group = { label: string; items: ConversationMeta[] };
@@ -24,6 +25,14 @@
   const groups = $derived.by<Group[]>(() => {
     const now = Date.now();
     const q = shell.convQuery.trim().toLowerCase();
+    // Actively-streaming convos pin to the top of their bucket — clicking another
+    // chat bumps its updatedAt, which must NOT shove the live turn below it.
+    const working = new Set(assistant.liveTabs.map((t) => t.convoId));
+    const byActivity = (a: ConversationMeta, b: ConversationMeta) => {
+      const aw = working.has(a.id), bw = working.has(b.id);
+      if (aw !== bw) return aw ? -1 : 1;
+      return b.updatedAt - a.updatedAt;
+    };
     const filtered = assistant.conversations.filter((c) =>
       !q || c.title.toLowerCase().includes(q) || (c.lastSnippet ?? "").toLowerCase().includes(q),
     );
@@ -35,10 +44,10 @@
       (buckets.get(b) ?? buckets.set(b, []).get(b)!).push(c);
     }
     const out: Group[] = [];
-    if (pinned.length) out.push({ label: "Pinned", items: pinned.sort((a, b) => b.updatedAt - a.updatedAt) });
+    if (pinned.length) out.push({ label: "Pinned", items: pinned.sort(byActivity) });
     for (const label of BUCKET_ORDER) {
       const items = buckets.get(label);
-      if (items?.length) out.push({ label, items: items.sort((a, b) => b.updatedAt - a.updatedAt) });
+      if (items?.length) out.push({ label, items: items.sort(byActivity) });
     }
     return out;
   });
@@ -62,11 +71,18 @@
   let preview = $state<{ c: ConversationMeta; x: number; y: number } | null>(null);
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const PREVIEW_W = 268; // keep in sync with .conv-preview width
   function onRowEnter(e: MouseEvent, c: ConversationMeta) {
     if (hoverTimer) clearTimeout(hoverTimer);
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     hoverTimer = setTimeout(() => {
-      preview = { c, x: r.right + 8, y: Math.min(r.top, window.innerHeight - 150) };
+      // Flip to the row's left if the right side would run past the viewport,
+      // then hard-clamp into [8, vw-W-8] so it can never render clipped.
+      let x = r.right + 8;
+      if (x + PREVIEW_W + 8 > window.innerWidth) x = r.left - PREVIEW_W - 8;
+      x = Math.max(8, Math.min(x, window.innerWidth - PREVIEW_W - 8));
+      const y = Math.max(8, Math.min(r.top, window.innerHeight - 150));
+      preview = { c, x, y };
     }, 460);
   }
   function onRowLeave() {
@@ -196,7 +212,7 @@
 {#if menuId}
   {@const id = menuId}
   {@const isP = shell.isPinned(id)}
-  <div class="conv-menu" style="left:{menuPos.x}px; top:{menuPos.y}px" role="menu" tabindex="-1">
+  <div class="conv-menu" use:portal style="left:{menuPos.x}px; top:{menuPos.y}px" role="menu" tabindex="-1">
     <button class="pop-item" type="button" role="menuitem" onclick={(e) => { e.stopPropagation(); shell.togglePin(id); closeMenu(); }}>
       {#if isP}<PinOff size={13} />Unpin{:else}<Pin size={13} />Pin{/if}
     </button>
@@ -210,7 +226,7 @@
 {/if}
 
 {#if preview && !menuId && !renaming}
-  <div class="conv-preview" style="left:{preview.x}px; top:{preview.y}px" aria-hidden="true">
+  <div class="conv-preview" use:portal style="left:{preview.x}px; top:{preview.y}px" aria-hidden="true">
     <div class="cp-title">{preview.c.title || "Untitled"}</div>
     {#if preview.c.lastSnippet}
       <div class="cp-snip">{preview.c.lastSnippet}</div>
@@ -262,20 +278,24 @@
   .crow-rename { flex: 1; min-width: 0; height: 25px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-focus);
     background: var(--bg-inset); color: var(--fg); font-size: 12.5px; outline: 0; box-shadow: 0 0 0 3px var(--ring); }
 
-  .conv-menu { position: fixed; z-index: 51; min-width: 150px; padding: 5px; border-radius: 12px;
+  /* conv-menu + conv-preview portal to <body> (escape the sidebar's
+     filter/transform containing block that was clipping the fixed preview),
+     so their rules ride :global. */
+  :global(.conv-menu) { position: fixed; z-index: 51; min-width: 150px; padding: 5px; border-radius: 12px;
     background: color-mix(in oklab, var(--bg-elev-2) 60%, transparent); -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6);
     border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 24px 56px -26px oklch(0 0 0 / 0.7), var(--shadow-lg);
-    animation: popIn 0.16s var(--ease-page) both; transform-origin: top left; }
-  .pop-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px;
+    animation: convPopIn 0.16s var(--ease-page) both; transform-origin: top left; }
+  :global(.conv-menu .pop-item) { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px;
     color: var(--fg-2); font-size: 12.5px; text-align: left; transition: background var(--dur-fast), color var(--dur-fast); }
-  .pop-item:hover { background: var(--surface-hover); color: var(--fg); }
-  .pop-item :global(svg) { color: var(--fg-faint); flex: none; }
-  .pop-item.danger:hover { background: var(--danger-soft, color-mix(in oklab, var(--danger) 18%, transparent)); color: var(--danger); }
-  .pop-item.danger:hover :global(svg) { color: var(--danger); }
+  :global(.conv-menu .pop-item:hover) { background: var(--surface-hover); color: var(--fg); }
+  :global(.conv-menu .pop-item svg) { color: var(--fg-faint); flex: none; }
+  :global(.conv-menu .pop-item.danger:hover) { background: var(--danger-soft, color-mix(in oklab, var(--danger) 18%, transparent)); color: var(--danger); }
+  :global(.conv-menu .pop-item.danger:hover svg) { color: var(--danger); }
 
   @keyframes barPop { from { transform: translateY(-50%) scaleY(0.25); } to { transform: translateY(-50%) scaleY(1); } }
-  @keyframes popIn { from { opacity: 0; transform: scale(0.97) translateY(-2px); } to { opacity: 1; transform: none; } }
+  /* global so the portaled (re-parented) menu/preview can reference it by name */
+  @keyframes -global-convPopIn { from { opacity: 0; transform: scale(0.97) translateY(-2px); } to { opacity: 1; transform: none; } }
 
   /* per-chat working indicator — 3×3 dot-grid shimmer (diagonal wave) */
   .workdots { display: grid; grid-template-columns: repeat(3, 3px); grid-auto-rows: 3px; gap: 2px;
@@ -290,13 +310,13 @@
   @keyframes workPulse { 0%, 100% { opacity: 0.16; transform: scale(0.5); } 45% { opacity: 1; transform: scale(1); } }
   @media (prefers-reduced-motion: reduce) { .workdots i { animation: none; opacity: 0.9; transform: scale(1); } }
 
-  /* delayed hover preview (fixed, anchored beside the row) */
-  .conv-preview { position: fixed; z-index: 50; width: 268px; padding: 12px 13px; border-radius: 13px; pointer-events: none;
+  /* delayed hover preview (fixed, portaled, anchored beside the row) */
+  :global(.conv-preview) { position: fixed; z-index: 50; width: 268px; padding: 12px 13px; border-radius: 13px; pointer-events: none;
     background: color-mix(in oklab, var(--bg-elev-2) 94%, var(--bg)); border: 1px solid var(--border-strong);
-    box-shadow: 0 28px 64px -30px oklch(0 0 0 / 0.7), var(--shadow-lg); animation: popIn 0.16s var(--ease-page) both; }
-  .cp-title { font-size: 12.5px; font-weight: 650; color: var(--fg); margin-bottom: 6px; line-height: 1.32; text-wrap: pretty; }
-  .cp-snip { font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  .cp-meta { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
+    box-shadow: 0 28px 64px -30px oklch(0 0 0 / 0.7), var(--shadow-lg); animation: convPopIn 0.16s var(--ease-page) both; }
+  :global(.conv-preview .cp-title) { font-size: 12.5px; font-weight: 650; color: var(--fg); margin-bottom: 6px; line-height: 1.32; text-wrap: pretty; }
+  :global(.conv-preview .cp-snip) { font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  :global(.conv-preview .cp-meta) { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
     font-size: 10.5px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
-  .cp-when { display: inline-flex; align-items: center; gap: 5px; }
+  :global(.conv-preview .cp-when) { display: inline-flex; align-items: center; gap: 5px; }
 </style>

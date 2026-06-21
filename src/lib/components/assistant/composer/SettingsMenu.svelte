@@ -246,9 +246,11 @@
     from { opacity: 0; transform: translateY(8px) scale(0.96); }
     to { opacity: 1; transform: none; }
   }
-  /* spec section-label spacing on this panel's shared heads/subheads */
+  /* Section head — matched to PermMenu's `.pop-label` (uppercase, 700) so
+     "MODEL" and "PERMISSION MODE" read as siblings when both popovers are open. */
   :global(.settings-menu .rift-menu-head) {
-    font-size: 10px; letter-spacing: 0.09em; color: var(--fg-faint); padding: 7px 9px 5px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
+    color: var(--fg-faint); padding: 7px 9px 5px;
   }
   .pop-label-sub {
     font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
@@ -271,7 +273,8 @@
   }
   .pop-item:hover .pi-ic, .pop-item.active .pi-ic { border-color: var(--border-strong); transform: scale(1.06); }
   .model-dot {
-    width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint);
+    width: 9px; height: 9px; border-radius: 999px; background: var(--fg-faint);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--fg-faint) 14%, transparent);
     transition: background var(--dur-fast), box-shadow var(--dur-fast);
   }
   .pi-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }

@@ -717,7 +717,7 @@
           </button>
         </div>
         {#if askError}
-          <div class="ask-hint" style="color:var(--color-error,#f87171)">{askError}</div>
+          <div class="ask-hint" style="color:var(--danger)">{askError}</div>
         {:else if !askRequestId}
           <div class="ask-hint">Connecting to the chat session…</div>
         {/if}

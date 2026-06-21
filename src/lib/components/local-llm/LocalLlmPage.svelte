@@ -180,10 +180,10 @@
             <div class="mode-desc">When on, every turn spawns the CLI against your local endpoint with <code>--bare</code>. Bypasses cloud auth, effort tiers, and per-conversation model pinning.</div>
           </div>
           <button
-            class="st-switch" class:on={localLlm.enabled}
+            class="rift-toggle" class:on={localLlm.enabled}
             role="switch" aria-checked={localLlm.enabled} aria-label="Toggle local LLM mode"
             disabled={!localLlm.loaded} type="button" onclick={toggleEnabled}
-          ></button>
+          ><span class="rift-toggle-knob"></span></button>
         </div>
       </div>
 
@@ -439,12 +439,12 @@
 
   /* ── Mode master strip ── */
   .mode-bar { transition: border-color 200ms var(--ease-soft), background 200ms var(--ease-soft); }
-  .mode-bar:has(.st-switch.on) { border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
+  .mode-bar:has(.rift-toggle.on) { border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
   .mode-bar .mode-main { display: flex; align-items: center; gap: 16px; padding: 15px 18px; }
   .mode-body { flex: 1 1 auto; min-width: 0; }
-  .mode-title { font-size: var(--fs-md); font-weight: 650; color: var(--fg); }
+  .mode-title { font-size: 14px; font-weight: 650; color: var(--fg); }
   .mode-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; max-width: 72ch; }
-  .mode-desc code { font-family: var(--font-mono); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 6%, transparent); padding: 0 4px; border-radius: 4px; font-size: 0.9em; }
+  .mode-desc code { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
 
   /* ── Cockpit grid ── */
   .cockpit { display: grid; grid-template-columns: minmax(0, 286px) minmax(0, 1fr); gap: 12px; align-items: start; }
@@ -501,7 +501,7 @@
 
   /* ── Config blocks ── */
   .st-block { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent), var(--shadow-sm); }
-  .st-block-label { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); padding: 13px 17px; border-bottom: 1px solid var(--border); }
+  .st-block-label { font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg-faint); padding: 11px 17px; border-bottom: 1px solid var(--border); }
   .config[data-disabled="true"] { opacity: 0.55; }
 
   .st-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 17px; }
@@ -509,7 +509,7 @@
   .st-row-body { flex: 1 1 300px; min-width: 0; }
   .st-row-label { font-size: var(--fs-md); font-weight: 600; color: var(--fg); display: block; }
   .st-row-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; max-width: 60ch; }
-  .st-row-desc code { font-family: var(--font-mono); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 6%, transparent); padding: 0 4px; border-radius: 4px; font-size: 0.9em; }
+  .st-row-desc code { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
   .st-row-ctl { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
   /* presets + detected-model chips share the chip-btn look */
@@ -529,7 +529,7 @@
 
   /* Model card — family / params / quant tags from /api/show */
   .model-card { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .mc-tag { font-size: var(--fs-2xs, 10.5px); font-weight: 600; color: var(--fg-2); background: var(--field); border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; }
+  .mc-tag { font-size: var(--fs-2xs, 10.5px); font-weight: 600; color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 4px; padding: 2px 7px; }
 
   /* Optimize target selector */
   .ctx-targets { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
@@ -542,12 +542,12 @@
 
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
 
-  .st-switch { position: relative; width: 40px; height: 23px; border-radius: 999px; border: 0; padding: 0; background: var(--bg-elev-3); cursor: pointer; transition: background 160ms var(--ease-soft); flex: none; }
-  .st-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 17px; height: 17px; border-radius: 999px; background: var(--fg-muted); transition: transform 180ms var(--ease-page), background 160ms; }
-  .st-switch.on { background: var(--accent); }
-  .st-switch.on::after { transform: translateX(17px); background: var(--accent-fg); }
-  .st-switch:disabled { opacity: 0.5; cursor: not-allowed; }
-  .st-switch:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring); }
+  .rift-toggle { position: relative; width: 40px; height: 23px; border-radius: 999px; border: 1px solid var(--border-strong); padding: 0; background: var(--track, var(--bg-elev-2)); cursor: pointer; transition: background var(--dur-base), border-color var(--dur-base); flex: none; }
+  .rift-toggle.on { background: var(--accent); border-color: transparent; }
+  .rift-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+  .rift-toggle:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring); }
+  .rift-toggle-knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 999px; background: var(--fg-muted); transition: transform var(--dur-base) var(--ease-page), background var(--dur-base); }
+  .rift-toggle.on .rift-toggle-knob { transform: translateX(17px); background: var(--accent-fg); }
 
   .st-input { height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--field); border: 1px solid var(--field-border); color: var(--fg); font: inherit; font-size: var(--fs-sm); }
   .st-input:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }

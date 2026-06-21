@@ -18,7 +18,8 @@ use tokio::sync::mpsc;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    clamp_effort, current_api_key, effective_trust_level, fable_unavailable, is_valid_effort_tier,
+    clamp_effort, current_api_key, current_api_key_with, effective_trust_level, fable_unavailable,
+    is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
     DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
@@ -457,7 +458,7 @@ pub async fn assistant_send(
     // permission) emit_to this label so a second window never sees another's turn.
     let window_label = window.label().to_string();
     let cfg = load_config();
-    let api_key = current_api_key();
+    let api_key = current_api_key_with(&cfg);
     let use_api_key = api_key.is_some();
     let mut model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
     if !is_valid_model_name(&model) {
@@ -817,8 +818,7 @@ pub async fn assistant_send(
         let allowed: String = if prompting_mode {
             // Narrow allowlist: only the safe set auto-approves; the CLI prompts
             // for the rest via the control channel. Applies across config
-            // variants — mutating MCP tools (remote_bash, push/pull, apply,
-            // git write) intentionally prompt here.
+            // variants — mutating MCP tools (git write) intentionally prompt here.
             format!("{SAFE_BUILTINS},{SAFE_MCP},{GIT_READ_MCP}")
         } else if use_full_config {
             // `mcp__*` admits any tool from user MCP servers that the CLI
@@ -1363,7 +1363,7 @@ pub async fn assistant_send(
     const REAP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
     let mut reap_deadline: Option<std::time::Instant> = None;
     let status: Option<std::process::ExitStatus> = loop {
-        match tokio::time::timeout(std::time::Duration::from_millis(150), child.wait()).await {
+        match tokio::time::timeout(std::time::Duration::from_millis(50), child.wait()).await {
             Ok(Ok(s)) => break Some(s),
             Ok(Err(e)) => {
                 // F6: don't leak the two pipe-drain tasks on the wait()-error

@@ -25,7 +25,7 @@ use tokio::sync::broadcast;
 const BUS_CAPACITY: usize = 4096;
 const FRONTEND_RATE_PER_SEC: u32 = 200;
 /// #246: secondary ceiling on critical-bypass events. Pathological loops
-/// (e.g. a RemoteScanResult emitted in a hot retry) could otherwise flood
+/// (e.g. a System/Error event emitted in a hot retry) could otherwise flood
 /// Svelte reactivity without limit. 50/s leaves head-room for normal bursty
 /// activity (drift result + reconnect + bridge ack arriving in the same
 /// second) while bounding pathological cases.
@@ -378,7 +378,7 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
                     let is_critical = matches!(ev.stage, DiagStage::System);
                     if is_critical {
                         // #246: secondary ceiling on the critical bypass —
-                        // pathological loops (e.g. a RemoteScanResult fired
+                        // pathological loops (e.g. a System/Error event fired
                         // in tight retry) could otherwise flood Svelte
                         // reactivity. 50/s is well above any legitimate
                         // burst we've seen in production.

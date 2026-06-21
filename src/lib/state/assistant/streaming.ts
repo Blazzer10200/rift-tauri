@@ -281,11 +281,11 @@ export function drainTick(tab: TabState) {
   const now = performance.now();
   const dt = Math.min(now - tab.lastDrainAt, 100);
   tab.lastDrainAt = now;
-  // Drain the char buffer into the message faster than before (≈0.25s window,
-  // 180 c/s floor, was 0.4s/120) so this char-pacer adds less latency on top of
+  // Drain the char buffer into the message faster than before (≈0.1s window,
+  // 360 c/s floor, was 0.25s/180) so this char-pacer adds less latency on top of
   // Markdown's word-reveal — the two used to compound into a visible lag behind
   // generation. The word-reveal stays the visible cadence authority.
-  const rate = Math.max(180, tab.pendingText.length / 0.25);
+  const rate = Math.max(360, tab.pendingText.length / 0.1);
   const n = Math.min(tab.pendingText.length, Math.max(1, Math.round((rate * dt) / 1000)));
   const chunk = tab.pendingText.slice(0, n);
   tab.pendingText = tab.pendingText.slice(n);

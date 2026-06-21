@@ -174,16 +174,6 @@ pub fn stt_set_config(config: SttConfig) -> Result<(), String> {
     save_config(&config)
 }
 
-#[tauri::command]
-pub fn stt_set_engine(engine: String) -> Result<(), String> {
-    if engine != "web_speech" && engine != "whisper" {
-        return Err(format!("unknown engine: {engine}"));
-    }
-    let mut cfg = load_config();
-    cfg.engine = engine;
-    save_config(&cfg)
-}
-
 // ============================================================================
 // Whisper session orchestration
 // ============================================================================

@@ -1353,12 +1353,15 @@
   /* Input row inside the well: textarea grows, send arrow rides the edge. */
   .cbox-row { display: flex; align-items: center; gap: 4px; }
   .composer-box.multiline .cbox-row { align-items: flex-end; }
-  /* Calm focus ring — a tight 2px tint + a soft, low halo. */
+  /* Calm focus ring — a tight 2px tint that HUGS the well. The old soft halo
+     (0 8px 22px) projected downward onto the flat toolbar below, reading as a
+     stray rounded "overlay" box around the controls. Keep the glow symmetric
+     and contained (0 0 16px, no Y-offset) so it traces the well, not the bar. */
   .composer-box:focus-within {
     border-color: color-mix(in oklch, var(--model-color) 45%, transparent);
     box-shadow:
       0 0 0 2px color-mix(in oklch, var(--model-color) 13%, transparent),
-      0 8px 22px -12px color-mix(in oklch, var(--model-color) 20%, transparent),
+      0 0 16px -6px color-mix(in oklch, var(--model-color) 16%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
   }
 
