@@ -592,7 +592,7 @@
     if (micBusy) return;
     micBusy = true;
     try {
-      void stt.init();
+      await stt.init();
       if (stt.recording) {
         await stt.stop();
         void tick().then(() => { autosize(); ta?.focus(); });

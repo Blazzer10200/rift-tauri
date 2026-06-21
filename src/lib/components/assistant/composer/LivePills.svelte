@@ -149,7 +149,6 @@
     background: transparent;
     border: 0;
     border-radius: 999px;
-    cursor: pointer;
     flex-shrink: 0;
     transition: color 140ms ease-out;
   }
@@ -158,8 +157,6 @@
     box-shadow: inset 1px 0 0 color-mix(in oklch, var(--border) 55%, transparent);
   }
   .live-pill:hover { color: var(--fg); }
-  .live-pill:active { transform: scale(0.97); }
-  .live-pill:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
   .live-pill :global(svg) { color: var(--fg-faint); transition: color 140ms ease-out; }
   .live-pill:hover :global(svg) { color: var(--fg-muted); }
   .live-pill .mono { font-variant-numeric: tabular-nums; color: var(--fg-2); }
