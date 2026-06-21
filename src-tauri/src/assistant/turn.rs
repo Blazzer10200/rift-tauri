@@ -655,6 +655,33 @@ pub async fn assistant_send(
     // allowlist + auto-allow behavior unchanged.
     let prompting_mode = matches!(permission_mode.as_str(), "default" | "acceptEdits" | "plan");
 
+    // Version-gate the spawn flags to the INSTALLED CLI, not the dev's
+    // bleeding-edge one. Cached, 5s-bounded probe; unreadable version ⇒
+    // conservative-old (every optional flag gated off — see cli_caps). Resolved
+    // off the async hot path via spawn_blocking (the probe may shell out).
+    let caps = tokio::task::spawn_blocking(super::cli_caps::CliCaps::active)
+        .await
+        .unwrap_or_else(|_| super::cli_caps::CliCaps::from_version(None));
+    // Hard floor: below it the stream-json control handshake Rift relies on
+    // doesn't exist, so a turn can't run. Surface an actionable update prompt
+    // instead of a silent dead turn. A None version is "unsupported" too, but we
+    // can only PROVE too-old when we actually read a sub-floor version; an
+    // unreadable version still attempts the spawn at reduced features (the CLI
+    // may simply not print --version yet still run).
+    if let Some(v) = caps.version {
+        if !caps.supported {
+            return Err(format!(
+                "This Claude Code CLI (v{}.{}.{}) is too old for Rift, which needs ≥ v{}.{}.{}. \
+                 Update with `npm i -g @anthropic-ai/claude-code@latest` (or `claude update` for a \
+                 native install), then reopen Rift.",
+                v.0, v.1, v.2,
+                super::cli_caps::MIN_SUPPORTED.0,
+                super::cli_caps::MIN_SUPPORTED.1,
+                super::cli_caps::MIN_SUPPORTED.2,
+            ));
+        }
+    }
+
     let mut cmd = claude_command().ok_or_else(|| {
         "Claude CLI not found on this machine. Install Claude Code from https://claude.ai/download \
          (or run `irm https://claude.ai/install.ps1 | iex`), then reopen Rift — or add an Anthropic \
@@ -665,35 +692,44 @@ pub async fn assistant_send(
     cmd.current_dir(std::env::temp_dir());
     cmd.arg("-p")
         .arg("--append-system-prompt").arg(addendum)
-        // Moves the CLI's own per-machine sections (cwd, env info, memory
-        // paths, git status) out of the system prompt and into the first user
-        // message. Keeps the cached system-prompt prefix stable across users
-        // and across our own per-turn workspace-context injection, which now
-        // also rides the user message via <system-reminder>.
-        .arg("--exclude-dynamic-system-prompt-sections")
         .arg("--output-format").arg("stream-json")
         // Always stream-json input: we now always write a `{type:"user"}`
         // envelope (so the control channel and image attachments share one
         // path), and the `initialize` handshake below requires it.
         .arg("--input-format").arg("stream-json")
         .arg("--verbose")
-        .arg("--include-partial-messages")
         .arg("--model").arg(&model)
-        // Piece 2: route per-action permission asks over the stream-json
-        // control channel. `stdio` makes the CLI emit a `can_use_tool`
-        // `control_request` on stdout (instead of headless auto-deny) and
-        // block on a `control_response` we write back to stdin. This is what
-        // the Agent SDK passes when a `canUseTool` callback is set; the flag
-        // is undocumented in `--help` but present in v2.1.152. Harmless for
-        // bypass/auto (they never trigger a permission check). The
-        // `--permission-mode` flag still drives WHICH tools ask: bypass/auto
-        // auto-allow, default asks per tool, acceptEdits auto-allows edits,
-        // plan blocks mutations. The `--allowed-tools` allowlist (below) is a
-        // second always-allow gate, narrowed in prompting modes so the gated
-        // tools actually reach the prompt.
-        .arg("--permission-prompt-tool").arg("stdio")
-        .arg("--permission-mode").arg(&permission_mode)
-        .stdin(Stdio::piped())
+        .arg("--permission-mode").arg(&permission_mode);
+    // Moves the CLI's own per-machine sections (cwd, env info, memory paths,
+    // git status) out of the system prompt and into the first user message.
+    // Keeps the cached system-prompt prefix stable across users and across our
+    // per-turn workspace-context injection (which rides the user message via
+    // <system-reminder>). Gated: an older CLI rejects the unknown flag — without
+    // it the per-machine sections just stay in the system prompt (cache churn,
+    // not a broken turn).
+    if caps.exclude_dynamic_sections {
+        cmd.arg("--exclude-dynamic-system-prompt-sections");
+    }
+    // Partial assistant deltas on the stream. Gated: older CLI rejects it —
+    // without it the UI gets whole-message events instead of token-level
+    // streaming (still a working turn, just chunkier rendering).
+    if caps.include_partial_messages {
+        cmd.arg("--include-partial-messages");
+    }
+    // Piece 2: route per-action permission asks over the stream-json control
+    // channel. `stdio` makes the CLI emit a `can_use_tool` `control_request` on
+    // stdout (instead of headless auto-deny) and block on a `control_response`
+    // we write back to stdin. This is what the Agent SDK passes when a
+    // `canUseTool` callback is set; undocumented in `--help` but present in
+    // v2.1.152. Harmless for bypass/auto (they never trigger a permission
+    // check). `--permission-mode` (set above) still drives WHICH tools ask.
+    // Gated: on a CLI without it, prompting modes can't round-trip a permission
+    // ask — the `--allowed-tools` allowlist below still gates tools, so the turn
+    // runs but per-action prompts silently don't appear (acceptEdits-like).
+    if caps.permission_prompt_tool {
+        cmd.arg("--permission-prompt-tool").arg("stdio");
+    }
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
@@ -706,8 +742,13 @@ pub async fn assistant_send(
         cmd.arg("--resume").arg(&session_id);
     }
 
-    if let Some(budget) = cfg.max_budget_usd.filter(|v| v.is_finite() && *v > 0.0) {
-        cmd.arg("--max-budget-usd").arg(format!("{budget}"));
+    // Gated: older CLI rejects `--max-budget-usd`. Without it the per-turn spend
+    // cap simply isn't enforced CLI-side (the turn runs uncapped) — a degraded
+    // feature, not a broken spawn.
+    if caps.max_budget_usd {
+        if let Some(budget) = cfg.max_budget_usd.filter(|v| v.is_finite() && *v > 0.0) {
+            cmd.arg("--max-budget-usd").arg(format!("{budget}"));
+        }
     }
 
     if !use_full_config {
@@ -895,7 +936,11 @@ pub async fn assistant_send(
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
     // Thinking-off also skips it: the shim disables thinking entirely, so an
     // effort tier would be moot (and the CLI would still emit a thinking block).
-    if !cfg.local_llm_enabled && thinking_on && model != "haiku" {
+    // `--effort` gated: a CLI without it rejects the unknown flag. Omitting it
+    // falls back to the CLI's default thinking behavior (still a working turn,
+    // just not tier-controlled). The ultracode `--settings` key is gated
+    // independently below.
+    if !cfg.local_llm_enabled && thinking_on && model != "haiku" && caps.effort {
         cmd.arg("--effort").arg(effort_level);
         // Ultracode tier: xhigh effort + autonomous dynamic-workflow
         // orchestration. The workflow behavior rides the CLI's `ultracode`
@@ -904,14 +949,15 @@ pub async fn assistant_send(
         // user/project/local settings — when unentitled the CLI ignores it and
         // the session simply runs at xhigh effort. Haiku is excluded (it skips
         // extended thinking + workflow orchestration wholesale).
-        if effort_tier == "ultra" {
+        if effort_tier == "ultra" && caps.settings_flag {
             cmd.arg("--settings").arg(r#"{"ultracode":true}"#);
         }
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={} local_llm={}",
-        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled
+        "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
+        session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled,
+        caps.version, caps.effort, caps.permission_prompt_tool, caps.exclude_dynamic_sections, caps.include_partial_messages, caps.max_budget_usd, caps.settings_flag
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child

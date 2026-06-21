@@ -13,6 +13,7 @@
 pub mod ask_user;
 pub mod auth_update;
 pub mod bridge;
+pub mod cli_caps;
 pub mod cli_install;
 pub mod config;
 pub mod convo_store;

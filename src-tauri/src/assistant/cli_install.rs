@@ -148,7 +148,7 @@ fn probe_version_at(exe: &Path) -> Option<String> {
 
 /// Pull a `major.minor.patch` triple out of a version string, tolerating a
 /// leading `v` and trailing noise like `"2.1.111 (Claude Code)"`.
-fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
+pub(super) fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
     let cleaned: String = v
         .chars()
         .map(|c| if c.is_ascii_digit() || c == '.' { c } else { ' ' })
@@ -410,6 +410,40 @@ pub(crate) fn claude_command() -> Option<Command> {
     // re-adds it explicitly on the configured-key send branch (`assistant_send`).
     cmd.env_remove("ANTHROPIC_API_KEY");
     Some(cmd)
+}
+
+/// Cached `(exe_path, parsed_version)` for the active install. Keyed on the exe
+/// path so a CLI upgrade/move (which `resolve_claude_exe` already re-resolves)
+/// also re-probes the version instead of serving a stale triple. Inner version
+/// is `Option` because `--version` can fail to run (treated as conservative-old
+/// upstream — see `cli_caps`).
+static CLAUDE_VERSION: Mutex<Option<(PathBuf, Option<(u64, u64, u64)>)>> = Mutex::new(None);
+
+/// Parsed `major.minor.patch` of the install Rift currently spawns, or `None`
+/// when no CLI is resolvable OR its `--version` can't be read/parsed. Cached
+/// behind the active-exe path so the (5s-bounded) probe runs at most once per
+/// install, re-running only after an upgrade/move. Callers MUST treat `None` as
+/// "assume old / gate off bleeding-edge flags" (`CliCaps::from_version`).
+pub(super) fn active_cli_version() -> Option<(u64, u64, u64)> {
+    let exe = resolve_claude_exe()?;
+    {
+        let g = match CLAUDE_VERSION.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        if let Some((cached_exe, ver)) = g.as_ref() {
+            if *cached_exe == exe {
+                return *ver;
+            }
+        }
+    }
+    let ver = probe_version_at(&exe).as_deref().and_then(parse_semver);
+    let mut g = match CLAUDE_VERSION.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    *g = Some((exe, ver));
+    ver
 }
 
 #[cfg(test)]
