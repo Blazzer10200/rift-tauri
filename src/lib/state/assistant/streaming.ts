@@ -48,6 +48,11 @@ export function beginTurn(tab: TabState) {
   tab.committedOutputTokens = 0;
   tab.liveOutputChars = 0;
   tab.activity = { currentLabel: null, turnStartedAt: Date.now() };
+  // RR10: re-anchor the task-id counter to the live tasks length each turn.
+  // tasks[] persists across turns (the dock), so leaving the counter alone let
+  // a new turn's TaskCreate mint id "1" — colliding with a prior turn's task —
+  // and a TaskUpdate{taskId:"1"} would then patch the wrong (older) task.
+  tab.taskCreateCount = tab.tasks.length;
   tab.streaming = true;
 }
 
@@ -917,7 +922,29 @@ export function onStreamError(tab: TabState, msg: string) {
     tab.drainHandle = null;
   }
   tab.pendingText = "";
+  // RR10: finalize in-flight blocks BEFORE clearing streamingMsgId (the mutate
+  // helpers no-op once it's null). A mid-reasoning error otherwise leaves a
+  // thinking chip stuck status:"active" and tool chips stuck status:"pending"
+  // forever in the persisted history.
+  for (const index of [...tab.thinkingByIndex.keys()]) {
+    const entry = tab.thinkingByIndex.get(index);
+    const durationMs = entry ? Date.now() - entry.startedAt : 0;
+    mutateThinking(tab, index, (b) =>
+      b.status === "active" ? { ...b, status: "done", durationMs } : b,
+    );
+  }
+  tab.thinkingByIndex.clear();
+  tab.activeThinkingIndex = null;
+  if (tab.activity.currentLabel === "Thinking…") {
+    tab.activity = { ...tab.activity, currentLabel: null };
+  }
   if (tab.streamingMsgId) {
+    mutateStreaming(tab, (m) => ({
+      ...m,
+      blocks: m.blocks.map((b) =>
+        b.type === "tool" && b.status === "pending" ? { ...b, status: "error" } : b,
+      ),
+    }));
     const id = tab.streamingMsgId;
     tab.messages = tab.messages.filter((m) => !(m.id === id && m.blocks.length === 0));
     tab.streamingMsgId = null;

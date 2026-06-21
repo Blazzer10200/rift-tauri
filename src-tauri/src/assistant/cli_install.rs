@@ -419,6 +419,15 @@ pub(crate) fn claude_command() -> Option<Command> {
 /// upstream — see `cli_caps`).
 static CLAUDE_VERSION: Mutex<Option<(PathBuf, Option<(u64, u64, u64)>)>> = Mutex::new(None);
 
+/// RR10: drop the cached version triple. An in-place CLI update leaves the
+/// binary at the SAME path, so the path-keyed cache would return the PRE-update
+/// version (gating new flags off) until restart. Callers clear it alongside
+/// `CLAUDE_EXE` after an update.
+pub(super) fn clear_version_cache() {
+    let mut g = CLAUDE_VERSION.lock().unwrap_or_else(|p| p.into_inner());
+    *g = None;
+}
+
 /// Parsed `major.minor.patch` of the install Rift currently spawns, or `None`
 /// when no CLI is resolvable OR its `--version` can't be read/parsed. Cached
 /// behind the active-exe path so the (5s-bounded) probe runs at most once per

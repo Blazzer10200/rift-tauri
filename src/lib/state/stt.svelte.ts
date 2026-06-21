@@ -179,6 +179,7 @@ class SttStore {
   // unrelated reasons.
   private cancelRequested = false;
   private transcribeTimer: ReturnType<typeof setTimeout> | null = null;
+  private stopInFlight = false;
   private restartToken = 0;
   private unlisten: UnlistenFn[] = [];
 
@@ -186,6 +187,14 @@ class SttStore {
     for (const fn of this.unlisten) fn();
     this.unlisten = [];
     this.initStarted = false;
+    // RR10: clear every armed timer so an HMR module swap doesn't leak a live
+    // interval/timeout firing into stale $state.
+    this.clearSilenceWatch();
+    this.clearTranscribeTimer();
+    if (this.polishUndoTimer) {
+      clearTimeout(this.polishUndoTimer);
+      this.polishUndoTimer = null;
+    }
   }
 
   async init() {
@@ -268,12 +277,19 @@ class SttStore {
     const prevEngine = this.config.engine;
     const next: SttConfig = { ...this.config, ...patch };
     this.config = next;
+    let succeeded = true;
     try {
       await invoke("stt_set_config", { config: next });
     } catch (e) {
+      succeeded = false;
       this.config = prev; // backend rejected — don't leave UI ahead of persisted state
       this.lastError = `Save settings failed: ${e}`;
     }
+
+    // RR10: only act on the engine switch if the backend ACCEPTED it. A rejected
+    // save rolls config back to prev (same engine) — cancelling the live
+    // recording then would destroy the user's dictation for a failed settings save.
+    if (!succeeded) return;
 
     // Engine switch mid-recording — hard-cancel the in-flight session under
     // the OLD engine before letting the new one take over.
@@ -410,6 +426,19 @@ class SttStore {
 
   /** End live recognition. */
   async stop(): Promise<string> {
+    // RR10: a second concurrent stop() would race past the recording-state guard
+    // before the first flips it, double-invoking stt_stop_recording (the second
+    // gets "no stt session active" surfaced as a spurious lastError).
+    if (this.stopInFlight) return this.lastTranscript;
+    this.stopInFlight = true;
+    try {
+      return await this.stopInner();
+    } finally {
+      this.stopInFlight = false;
+    }
+  }
+
+  private async stopInner(): Promise<string> {
     this.clearSilenceWatch();
     if (this.config.engine === "whisper") {
       if (!this.recording && !this.transcribing && !this.whisperStartInvoked) return this.lastTranscript;
@@ -855,3 +884,9 @@ function errorMessage(code: string, msg?: string): string {
 }
 
 export const stt = new SttStore();
+
+// RR10: HMR teardown — clear listeners + timers on module dispose so a dev
+// hot-reload starts clean (mirrors assistant.svelte.ts).
+if (typeof import.meta !== "undefined" && (import.meta as { hot?: { dispose: (cb: () => void) => void } }).hot) {
+  (import.meta as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => stt.destroy());
+}

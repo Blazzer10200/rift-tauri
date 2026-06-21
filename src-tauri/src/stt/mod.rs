@@ -589,21 +589,30 @@ async fn rolling_window_loop(
         let engine_c = engine.clone();
         let prompt_c = initial_prompt.clone();
         let lang_c = language.clone();
-        let raw = match tokio::task::spawn_blocking(move || {
+        let infer = tokio::task::spawn_blocking(move || {
             engine_c.transcribe(&samples, &prompt_c, lang_c.as_deref(), beam_size)
-        })
-        .await
-        {
-            Ok(Ok(t)) => t,
-            Ok(Err(e)) => {
-                emit_error(&app, "transcribe_failed", &e);
-                continue;
-            }
-            Err(e) => {
-                emit_error(&app, "task_join_failed", &e.to_string());
-                continue;
+        });
+        // RR10: race the (multi-second, CPU-bound) inference against cancel. If
+        // stop fires mid-transcribe, return immediately — otherwise the stale
+        // partial lands AFTER stt://final + stt://state:idle, overwriting the
+        // Haiku-cleaned final transcript on the frontend.
+        let raw = tokio::select! {
+            _ = cancel.cancelled() => return,
+            res = infer => match res {
+                Ok(Ok(t)) => t,
+                Ok(Err(e)) => {
+                    emit_error(&app, "transcribe_failed", &e);
+                    continue;
+                }
+                Err(e) => {
+                    emit_error(&app, "task_join_failed", &e.to_string());
+                    continue;
+                }
             }
         };
+        if cancel.is_cancelled() {
+            return;
+        }
         let scrubbed = vad::strip_hallucinations(&raw);
         if scrubbed.is_empty() || scrubbed == last_emitted {
             continue;

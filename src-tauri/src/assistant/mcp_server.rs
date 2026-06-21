@@ -539,6 +539,15 @@ fn tool_ask_user(args: &Value) -> Result<String, String> {
     if questions.is_empty() {
         return Err("`questions` must contain at least one question".into());
     }
+    // RR10: bound the model-supplied payload before it crosses the loopback
+    // bridge (the parent's read path buffers a whole line). The schema says
+    // maxItems:4 but MCP does not enforce JSON Schema, so cap here.
+    if questions.len() > 4 {
+        return Err("too many questions (max 4)".into());
+    }
+    if serde_json::to_string(questions).map(|s| s.len()).unwrap_or(usize::MAX) > 16 * 1024 {
+        return Err("questions payload too large (max 16 KiB)".into());
+    }
 
     // 16 random bytes → 22-char base64url pending-request key. Collision
     // space is the in-flight set, never more than ~1 at a time per session.
@@ -616,9 +625,13 @@ fn tool_notify(args: &Value) -> Result<String, String> {
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .ok_or("missing `title`")?;
+    // RR10: a toast is bounded UI — cap the model-supplied strings (char
+    // boundary safe) before they cross the bridge into the parent heap.
+    let title: String = title.chars().take(200).collect();
     let mut extra = json!({ "title": title });
     if let Some(d) = args.get("detail").and_then(|v| v.as_str()) {
-        extra["detail"] = Value::from(d);
+        let detail: String = d.chars().take(2000).collect();
+        extra["detail"] = Value::from(detail);
     }
     if let Some(s) = args.get("severity").and_then(|v| v.as_str()) {
         extra["severity"] = Value::from(s);

@@ -25,7 +25,13 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+/// RR10: cap a single bridge request line. The MCP child caps its stdin reads
+/// (mcp_server.rs MAX_LINE_BYTES); this closes the symmetric gap on the parent's
+/// read path so a model-directed oversized ask_user/notify payload can't buffer
+/// unbounded into the Tauri process. 256 KiB is generous for any real payload.
+const MAX_BRIDGE_LINE: u64 = 256 * 1024;
 use tokio::net::TcpListener;
 
 #[derive(Debug, Clone)]
@@ -159,7 +165,8 @@ async fn handle_conn(
     stream: tokio::net::TcpStream,
 ) -> Result<(), String> {
     let (read_half, mut write_half) = stream.into_split();
-    let mut lines = BufReader::new(read_half).lines();
+    // Bound the read half so an oversized line can't buffer unbounded (RR10).
+    let mut lines = BufReader::new(read_half.take(MAX_BRIDGE_LINE)).lines();
     while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
         let req: Request = match serde_json::from_str(&line) {
             Ok(r) => r,
@@ -177,6 +184,11 @@ async fn handle_conn(
         }
         let resp = dispatch(&app, req).await;
         write_line(&mut write_half, &resp).await?;
+        // RR10: the protocol is one request per connection (bridge_call opens a
+        // fresh TCP stream per call). Close after the first authed dispatch so an
+        // unauthenticated local process can't hold a Tokio task open by streaming
+        // malformed lines (the parse-error `continue` never reaches the token gate).
+        break;
     }
     Ok(())
 }

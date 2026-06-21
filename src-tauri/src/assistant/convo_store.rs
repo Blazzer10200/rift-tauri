@@ -211,7 +211,15 @@ fn delete_session_model(id: &str) {
 }
 
 #[tauri::command]
-pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
+pub async fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
+    // RR10: the directory scan + per-file JSON parse (potentially hundreds of
+    // convos) is blocking I/O — keep it off the Tokio worker pool.
+    tokio::task::spawn_blocking(list_conversations_sync)
+        .await
+        .map_err(|e| format!("list_conversations join error: {e}"))?
+}
+
+fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
     let dir = conversations_dir()?;
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(&dir) {
@@ -271,7 +279,18 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
                         return None;
                     }
                     let t = b.get("text")?.as_str()?;
-                    let flat = t.split_whitespace().collect::<Vec<_>>().join(" ");
+                    // RR10: only the first ~120 chars are kept — bound the input
+                    // before the whitespace-collapse allocates (a multi-MB text
+                    // block would otherwise be flattened in full just to slice 120).
+                    let head = if t.len() > 2048 {
+                        match t.char_indices().nth(512) {
+                            Some((byte_idx, _)) => &t[..byte_idx],
+                            None => t,
+                        }
+                    } else {
+                        t
+                    };
+                    let flat = head.split_whitespace().collect::<Vec<_>>().join(" ");
                     if flat.is_empty() {
                         return None;
                     }
@@ -438,9 +457,18 @@ pub fn assistant_export_save(dest: String, contents: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn assistant_save_conversation(convo: Conversation) -> Result<(), String> {
+pub async fn assistant_save_conversation(convo: Conversation) -> Result<(), String> {
+    // RR10: serialize + tmp-write + rename is blocking I/O — off the Tokio worker.
+    // The std CONVO_WRITE_LOCK is acquired+released entirely inside the closure,
+    // never held across an await.
+    tokio::task::spawn_blocking(move || save_conversation_sync(&convo))
+        .await
+        .map_err(|e| format!("save_conversation join error: {e}"))?
+}
+
+fn save_conversation_sync(convo: &Conversation) -> Result<(), String> {
     let p = convo_path(&convo.id)?;
-    let s = serde_json::to_string(&convo).map_err(|e| e.to_string())?;
+    let s = serde_json::to_string(convo).map_err(|e| e.to_string())?;
     // Serialize saves (multi-window can race the same id) + per-call tmp suffix
     // so concurrent writers never clobber a shared .tmp. Atomic-ish: write tmp
     // then rename so a crash mid-write leaves no half-truncated transcript.

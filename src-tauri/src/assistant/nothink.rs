@@ -126,6 +126,11 @@ async fn read_request(stream: &mut TcpStream) -> Result<ParsedReq, String> {
             let value = value.trim().to_string();
             if name.eq_ignore_ascii_case("content-length") {
                 content_length = value.parse().unwrap_or(0);
+                // RR10: bound the body alloc — a misbehaving/garbled CLI sending a
+                // huge Content-Length would otherwise pre-grow `body` unbounded.
+                if content_length > 64 * 1024 * 1024 {
+                    return Err(format!("Content-Length {content_length} exceeds 64 MiB cap"));
+                }
             }
             headers.push((name, value));
         }

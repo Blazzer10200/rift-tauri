@@ -45,7 +45,7 @@ export type TabsHost = {
   // ── methods that stay on store / live in other modules ──
   loadConversation(id: string): Promise<void>;
   persistTabs(): void;
-  scheduleSave(flush?: boolean): void;
+  scheduleSave(flush?: boolean, forConvoId?: string): void;
   stop(tabId?: string | null): Promise<void>;
   ensureTab(convoId: string, cliSessionId: string): unknown;
   dropTab(convoId: string): void;
@@ -540,8 +540,12 @@ export async function closeAllTabs(host: TabsHost) {
     const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
     if (t?.streaming) await host.stop(id);
   }
-  if (host.messages.length > 0 && host.convoCreatedAt) {
-    host.scheduleSave(true);
+  // RR10: flush EVERY tab with unsaved messages, not just the active one — a
+  // background tab whose turn just completed has a pending 700ms debounce that
+  // would fire against an already-dropped TabState (silent data loss).
+  for (const [convoId, t] of host.tabs) {
+    const tab = t as { messages?: unknown[] };
+    if ((tab.messages?.length ?? 0) > 0) host.scheduleSave(true, convoId);
   }
   // Drop every TabState; the convos persisted to disk above.
   for (const id of host.openTabs) {

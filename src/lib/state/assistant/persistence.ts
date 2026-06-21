@@ -228,15 +228,24 @@ export async function renameConversation(
 ): Promise<void> {
   const trimmed = title.trim();
   if (!trimmed) return;
+  const newTitle = trimmed.slice(0, 120);
   try {
+    // RR10: a live tab is authoritative over its disk snapshot — load-then-save
+    // off disk would drop messages a concurrent turn-save wrote between awaits.
+    const liveTab = host.tabs.get(id);
+    if (liveTab) {
+      liveTab.convoTitle = newTitle;
+      liveTab.titleGenerated = true;
+      if (host.currentConvoId === id) host.convoTitle = newTitle;
+      scheduleSave(host, true, id);
+      await refreshConversations(host);
+      return;
+    }
     const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-    convo.title = trimmed.slice(0, 120);
+    convo.title = newTitle;
     convo.updatedAt = Date.now();
     await invoke("assistant_save_conversation", { convo });
     if (host.currentConvoId === id) host.convoTitle = convo.title;
-    // Manual title wins — block any pending auto-gen from clobbering it.
-    const renamedTab = host.tabs.get(id);
-    if (renamedTab) renamedTab.titleGenerated = true;
     await refreshConversations(host);
   } catch (e) {
     host.lastError = `Failed to rename conversation: ${String(e)}`;
@@ -348,6 +357,14 @@ export async function deleteConversation(host: PersistenceHost, id: string): Pro
 export async function deleteAllConversations(host: PersistenceHost): Promise<void> {
   const ids = host.conversations.map((c) => c.id);
   if (ids.length === 0) return;
+  // RR10: cancel every armed save debounce first — an orphaned timer firing
+  // after the delete loop would resurrect a just-deleted convo file.
+  for (const [, tab] of host.tabs) {
+    if (tab.saveTimer) {
+      clearTimeout(tab.saveTimer);
+      tab.saveTimer = null;
+    }
+  }
   try {
     for (const id of ids) {
       await invoke("assistant_delete_conversation", { id });

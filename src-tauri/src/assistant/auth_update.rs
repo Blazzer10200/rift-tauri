@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use super::cli_install::{
-    claude_command, enumerate_claude_installs, resolve_claude_exe, select_active_index,
-    ClaudeInstall, CLAUDE_EXE,
+    claude_command, clear_version_cache, enumerate_claude_installs, resolve_claude_exe,
+    select_active_index, ClaudeInstall, CLAUDE_EXE,
 };
 use super::{current_api_key, load_config, AuthStatus};
 
@@ -48,7 +48,13 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     let installs_fut = tokio::task::spawn_blocking(enumerate_claude_installs);
     let auth_fut = async {
         match claude_command() {
-            Some(mut c) => c.args(["auth", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).output().await.ok(),
+            // RR10: bound the probe — kill_on_drop only fires on drop, not while
+            // output().await blocks on a hung/corrupted CLI. A 10s cap degrades to
+            // the existing None path instead of freezing the auth pill forever.
+            Some(mut c) => {
+                let fut = c.args(["auth", "status"]).stdout(Stdio::piped()).stderr(Stdio::null()).output();
+                tokio::time::timeout(std::time::Duration::from_secs(10), fut).await.ok().and_then(|r| r.ok())
+            }
             None => None,
         }
     };
@@ -305,6 +311,10 @@ pub async fn assistant_update_cli() -> Result<CliUpdateResult, String> {
         let mut g = CLAUDE_EXE.lock().unwrap_or_else(|p| p.into_inner());
         *g = None;
     }
+    // RR10: also drop the version cache — the binary stays at the same path after
+    // an in-place update, so the path-keyed version triple would stay stale (new
+    // CLI flags gated off) until restart despite the exe cache being cleared.
+    clear_version_cache();
     let mut after = tokio::task::spawn_blocking(enumerate_claude_installs)
         .await
         .unwrap_or_default();
@@ -348,11 +358,12 @@ async fn run_npm_update() -> Result<String, String> {
         cmd = Command::new("npm");
         cmd.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
     }
-    let output = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+    // RR10: bound the npm spawn — a stalled registry/download would otherwise
+    // hang the invoke forever (frontend `updating` spinner never clears).
+    let fut = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output();
+    let output = tokio::time::timeout(std::time::Duration::from_secs(180), fut)
         .await
+        .map_err(|_| "npm update timed out (180s) — registry may be unreachable".to_string())?
         .map_err(|e| format!("Couldn't launch npm — is Node.js/npm installed and on PATH? ({e})"))?;
     finish_update(output)
 }
@@ -368,12 +379,11 @@ async fn run_exe_update(exe: &str) -> Result<String, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd.env_remove("ANTHROPIC_API_KEY");
-    let output = cmd
-        .arg("update")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
+    // RR10: bound the native updater spawn (see run_npm_update).
+    let fut = cmd.arg("update").stdout(Stdio::piped()).stderr(Stdio::piped()).output();
+    let output = tokio::time::timeout(std::time::Duration::from_secs(120), fut)
         .await
+        .map_err(|_| "`claude update` timed out (120s)".to_string())?
         .map_err(|e| format!("Couldn't run `claude update`: {e}"))?;
     finish_update(output)
 }

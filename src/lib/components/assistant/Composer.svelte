@@ -42,6 +42,11 @@
     if (steerFlashTimer) clearTimeout(steerFlashTimer);
     if (undoTimer) clearTimeout(undoTimer);
     pttRelease();
+    // RR10: pttRelease only stops a held PTT; in tap-to-toggle mode pttActive is
+    // false while recording, so closing this tab would orphan the live mic
+    // (recording=true, events firing into a destroyed tab). Stop any recording
+    // this tab owns.
+    if (stt.recording && stt.targetTabId === tabId) void stt.cancel();
     // RR9: bump the seq UNCONDITIONALLY so any pending enhance callback (incl.
     // one still in the network round-trip before onRequestId populated the id)
     // is invalidated; cancel the backend subprocess only once we have the id.
