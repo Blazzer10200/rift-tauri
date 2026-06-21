@@ -37,10 +37,19 @@ export type StreamBlock =
   | { type: "tool"; tool: StreamTool }
   | { type: "steer"; text: string };
 
+// What the turn actually did, so the footer can be honest:
+//  - "applied": at least one edit/create tool succeeded → green "Applied"
+//  - "ran":     ran tools but changed no files (read/grep/shell/web/…) → muted "Done"
+//  - "failed":  edits/creates were attempted but every one errored → "Changes failed"
+//  - "text":    no tools at all (a plain answer) → no status badge
+export type TurnOutcome = "applied" | "ran" | "failed" | "text";
+
 export type TurnModel = {
   blocks: StreamBlock[];
   thinking: { active: boolean; durSecs: number; text: string } | null;
-  applied: { add: number | null; del: number | null; time: string; cost: string } | null;
+  outcome: TurnOutcome;
+  files: number; // distinct files edited/created (only meaningful for "applied")
+  meta: { time: string; cost: string | null } | null; // footer time·cost line
   totalSecs: number;
 };
 
@@ -181,11 +190,23 @@ export function messageToTurn(m: ChatMessage): TurnModel {
     ? { active: thinkActive, durSecs: thinkSecs, text: thinkText.join("\n\n") }
     : null;
 
-  const applied = typeof m.costUsd === "number" && m.costUsd > 0
-    ? { add: null, del: null, time: fmtDur(totalSecs), cost: `$${m.costUsd.toFixed(2)}` }
-    : null;
+  // Classify what the turn did from its tools (not from cost — every turn costs).
+  const tools = blocks.filter((b): b is { type: "tool"; tool: StreamTool } => b.type === "tool").map((b) => b.tool);
+  const mutators = tools.filter((t) => t.kind === "edit" || t.kind === "create");
+  const okMutators = mutators.filter((t) => t.status !== "error");
+  const changedFiles = new Set(okMutators.map((t) => t.cap)); // cap = filename for edit/create
 
-  return { blocks, thinking, applied, totalSecs };
+  let outcome: TurnOutcome;
+  if (okMutators.length > 0) outcome = "applied";
+  else if (mutators.length > 0) outcome = "failed"; // attempted edits, all errored
+  else if (tools.length > 0) outcome = "ran"; // tools, but nothing mutating
+  else outcome = "text"; // a plain answer
+
+  // Footer time·cost line — shown for any turn that did work (not pure text).
+  const cost = typeof m.costUsd === "number" && m.costUsd > 0 ? `$${m.costUsd.toFixed(2)}` : null;
+  const meta = outcome === "text" ? null : { time: fmtDur(totalSecs), cost };
+
+  return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs };
 }
 
 // Group consecutive tool blocks into work runs (say/steer pass through).

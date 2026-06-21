@@ -111,12 +111,15 @@
   .splan-ring { animation: none; }
 }
 
-/* applied — inline, boxless */
+/* turn footer — inline, boxless; label varies by what the turn actually did */
 .sapplied { display: inline-flex; align-items: center; gap: 10px; margin: 16px 0 2px; font-size: 12px; color: var(--fg-subtle); }
 .sapplied .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-weight: 600; }
-.sapplied .add, .sapplied .del { font-family: var(--font-mono); font-size: 11.5px; }
-.sapplied .add { color: var(--ok); }
-.sapplied .del { color: var(--fg-faint); }
+/* "Done" (ran tools, no file changes) — quieter than Applied, no accent claim */
+.sapplied .ran { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-muted); font-weight: 600; }
+/* "Changes failed" — edits attempted but all errored */
+.sapplied .bad { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); font-weight: 600; }
+/* distinct-file count next to "Applied" */
+.sapplied .files { font-family: var(--font-mono); font-size: 11.5px; color: var(--ok); }
 .sapplied .sapplied-meta { color: var(--fg-faint); font-family: var(--font-mono); font-size: 11px; }
 
 /* per-turn hover actions (copy / retry) */

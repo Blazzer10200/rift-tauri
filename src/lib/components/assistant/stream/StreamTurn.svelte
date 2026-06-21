@@ -1,6 +1,6 @@
 <script lang="ts">
   import "$lib/styles/stream.css";
-  import { Check, Send, Copy, RotateCcw } from "lucide-svelte";
+  import { Check, Send, Copy, RotateCcw, AlertTriangle } from "lucide-svelte";
   import Markdown from "../Markdown.svelte";
   import StreamThinking from "./StreamThinking.svelte";
   import WorkLine from "./WorkLine.svelte";
@@ -95,12 +95,19 @@
       <span class="sf-verb">{VERB_ING[liveTool.kind]}</span>
       <span class="sf-meta">{liveTool.cap}</span>
     </div>
-  {:else if turn.applied}
-    <div class="sapplied">
-      <span class="ok"><Check size={13} strokeWidth={2.5} /> Applied</span>
-      {#if turn.applied.add != null}<span class="add">+{turn.applied.add}</span>{/if}
-      {#if turn.applied.del != null}<span class="del">−{turn.applied.del}</span>{/if}
-      <span class="sapplied-meta">{turn.applied.time} · {turn.applied.cost}</span>
+  {:else if turn.outcome !== "text"}
+    <div class="sapplied" data-outcome={turn.outcome}>
+      {#if turn.outcome === "applied"}
+        <span class="ok"><Check size={13} strokeWidth={2.5} /> Applied</span>
+        <span class="files">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
+      {:else if turn.outcome === "failed"}
+        <span class="bad"><AlertTriangle size={13} strokeWidth={2.5} /> Changes failed</span>
+      {:else}
+        <span class="ran"><Check size={13} strokeWidth={2.5} /> Done</span>
+      {/if}
+      {#if turn.meta}
+        <span class="sapplied-meta">{turn.meta.time}{#if turn.meta.cost} · {turn.meta.cost}{/if}</span>
+      {/if}
     </div>
   {/if}
 
