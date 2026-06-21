@@ -296,8 +296,8 @@
 
           {#if apprSec === "theme"}
           <div class="card">
-            <div class="card-tt">Looks</div>
-            <div class="card-sub">One tap sets accent, texture, and density together.</div>
+            <div class="card-tt">Looks &amp; accent</div>
+            <div class="card-sub">One tap sets accent, texture, and density together — or fine-tune the accent colour below.</div>
             <div class="looks">
               {#each LOOKS as p (p.id)}
                 <button class="look" class:sel={lookSel(p)} type="button" onclick={() => applyLook(p)} style="--lk: oklch(0.72 0.16 {p.h}); --lkh: {p.h};" use:tooltip={p.name}>
@@ -310,24 +310,28 @@
                 </button>
               {/each}
             </div>
-          </div>
 
-          <div class="card">
-            <div class="card-tt">Accent</div>
-            <div class="card-sub">The signature colour across buttons, links, and focus rings.</div>
-            <div class="swatches">
-              {#each ACCENTS as a (a.id)}
-                <button class="sw" class:sel={uiPrefs.accentHue === a.hue} type="button" style="background: oklch(0.72 0.16 {a.hue});" onclick={() => uiPrefs.setAccentHue(a.hue)} aria-pressed={uiPrefs.accentHue === a.hue} use:tooltip={a.label}>
-                  {#if uiPrefs.accentHue === a.hue}<Check size={15} strokeWidth={3} color="rgba(0,0,0,0.82)" />{/if}
-                </button>
-              {/each}
-            </div>
-            <input class="hue-range" type="range" min="0" max="360" step="1" value={uiPrefs.accentHue} oninput={(e) => uiPrefs.setAccentHue(Number(e.currentTarget.value))} aria-label="Custom accent hue" />
-            <div class="ctl-row tight" style="margin-top:14px;">
-              <div><div class="ctl-t">Vividness</div><div class="ctl-s">How saturated the accent reads across the app.</div></div>
-              <div class="range-wrap">
-                <input class="set-range" type="range" min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005" value={uiPrefs.vividness} oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))} aria-label="Accent vividness" />
-                <span class="range-val">{Math.round((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN) * 100)}%</span>
+            <div class="card-divider"></div>
+            <div class="accent-panel">
+              <div class="ap-head">
+                <span class="sub-label">Accent colour</span>
+                <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
+              </div>
+              <div class="swatches">
+                {#each ACCENTS as a (a.id)}
+                  <button class="sw" class:sel={uiPrefs.accentHue === a.hue} type="button" style="background: oklch(0.72 0.16 {a.hue});" onclick={() => uiPrefs.setAccentHue(a.hue)} aria-pressed={uiPrefs.accentHue === a.hue} use:tooltip={a.label}>
+                    {#if uiPrefs.accentHue === a.hue}<Check size={15} strokeWidth={3} color="rgba(0,0,0,0.82)" />{/if}
+                  </button>
+                {/each}
+              </div>
+              <input class="hue-range" type="range" min="0" max="360" step="1" value={uiPrefs.accentHue} oninput={(e) => uiPrefs.setAccentHue(Number(e.currentTarget.value))} aria-label="Custom accent hue" />
+              <div class="ap-divider"></div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Vividness</div><div class="ctl-s">How saturated the accent reads across the app.</div></div>
+                <div class="range-wrap">
+                  <input class="set-range" type="range" min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005" value={uiPrefs.vividness} oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))} aria-label="Accent vividness" />
+                  <span class="range-val">{Math.round((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN) * 100)}%</span>
+                </div>
               </div>
             </div>
           </div>
@@ -842,6 +846,13 @@
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
   .card-tt { font-size: 14px; font-weight: 650; margin-bottom: 3px; }
   .card-sub { font-size: 11.5px; color: var(--fg-subtle); margin-bottom: 14px; }
+  .card-divider { height: 1px; background: var(--border); margin: 20px 0; }
+  .sub-label { font-size: 12px; font-weight: 600; color: var(--fg-2); letter-spacing: 0.01em; }
+  /* accent sub-panel — groups swatches + hue + vividness as one deliberate unit */
+  .accent-panel { background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
+  .ap-head { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; }
+  .ap-dot { width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 0 1px var(--border-strong), 0 0 10px -1px oklch(0.72 var(--accent-c) var(--accent-h) / 0.6); flex: none; }
+  .ap-divider { height: 1px; background: var(--border); margin: 16px 0 14px; }
   .card-sub code, .ctl-s code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
 
   /* control rows */
