@@ -15,7 +15,7 @@ Rift is a Tauri 2 desktop app that wraps the **Claude CLI** as a per-turn subpro
 | Assistant engine | Claude CLI subprocess + stdio MCP server | `src-tauri/src/assistant/` |
 | Distribution | NSIS first-install → Velopack self-update | `update_service.rs` · `scripts/release.ps1` |
 
-The frontend is a single-window SPA (no SSR at runtime — SvelteKit is the build tool). Three core workspaces — **Home · Chat · Settings** — plus an experimental **Local LLM** page (keyboard 4, gated).
+The frontend is a single-window SPA (no SSR at runtime — SvelteKit is the build tool). Core workspaces — **Chat · Settings** — plus an experimental **Local LLM** page (keyboard 4, gated). Since the redesign ("Home is a verb"), the home surface IS the empty Chat tab; the standalone `"home"` workspace is folded to `chat` on load (`workspace.svelte.ts`), though `HomePage.svelte` still backs the warm/cold welcome content.
 
 ## 3. Request lifecycle — a turn, end to end
 
