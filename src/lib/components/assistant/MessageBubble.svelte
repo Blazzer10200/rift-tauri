@@ -386,6 +386,7 @@
                 type="button"
                 onclick={() => assistant.retryLast()}
                 use:tooltip={"Retry this turn — re-runs your last prompt"}
+                aria-label="Retry this turn"
               >
                 <RotateCcw size={11} />
               </button>

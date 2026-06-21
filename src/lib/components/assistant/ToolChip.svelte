@@ -618,7 +618,7 @@
           <div class="ask-question">
             {#if q.header}<span class="ask-q-header">{q.header}</span>{/if}
             <div class="ask-q-text">{q.question}</div>
-            <div class="ask-options" role={q.multiSelect ? "group" : "radiogroup"}>
+            <div class="ask-options" role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question}>
               {#each q.options as opt, oi (oi)}
                 {@const selected =
                   q.multiSelect
@@ -893,14 +893,6 @@
     flex-shrink: 0;
     opacity: 0.85;
   }
-  /* Category coloring — distinguishes read-only/mutation/side-effect/agentic
-   * at a glance. Tones picked from the existing palette + slight hue shifts
-   * so the chips read as a family rather than 5 unrelated colors. */
-  .chip[data-category="read"]  .chip-icon { color: var(--accent); }
-  .chip[data-category="write"] .chip-icon { color: var(--accent); }
-  .chip[data-category="shell"] .chip-icon { color: var(--accent); }
-  .chip[data-category="agent"] .chip-icon { color: var(--accent); }
-  .chip[data-category="meta"]  .chip-icon { color: var(--accent); }
   /* Subtle left-edge accent so a wall of chips has visual scannability. */
   .chip { border-left-width: 2px; }
   .chip[data-category="read"]  { border-left-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }

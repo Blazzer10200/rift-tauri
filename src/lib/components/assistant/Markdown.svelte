@@ -752,7 +752,6 @@
   .md :global(th) {
     background: var(--bg-elev-2);
     font-weight: 600;
-    color: var(--fg);
     font-size: 11.5px;
     text-transform: uppercase;
     letter-spacing: 0.04em;

@@ -30,7 +30,9 @@
       copied = true;
       if (copyTimer) clearTimeout(copyTimer);
       copyTimer = setTimeout(() => { copied = false; copyTimer = null; }, 1200);
-    } catch { /* clipboard denied — ignore */ }
+    } catch (e) {
+      console.warn("copy failed", e);
+    }
   }
 
   // live status: the last pending tool drives the footer verb
