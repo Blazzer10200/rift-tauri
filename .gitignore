@@ -23,6 +23,9 @@ src-tauri/src/state/rift-edits/
 scripts/cdp/.tmp/
 /.tmp/
 
+# Transient commit-message scratch (git can't read MSYS /tmp paths).
+.cmsg.tmp
+
 # Local timestamped backups dir created by tooling.
 backups/
 
