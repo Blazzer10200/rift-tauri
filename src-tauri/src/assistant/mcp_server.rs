@@ -146,12 +146,11 @@ mod dunce {
 
 // ─── tool implementations ──────────────────────────────────────────────────
 
-fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
-    let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
-    let resolved = resolve_under_roots(path, roots)?;
-    // Enforce SKIP_DIRS on the CANONICAL path too: a workspace-internal symlink
-    // (e.g. src/x.js → node_modules/pkg/secret.js) resolves under-root and would
-    // otherwise bypass the exclusion that grep applies via its walkdir filter.
+/// Reject a canonical path that lands inside any SKIP_DIRS segment. Enforced on
+/// the post-canonicalize path so a workspace-internal symlink (or passing a
+/// skipped dir directly as the arg, e.g. `.git`) can't bypass the exclusion.
+/// Shared by read_file / list_dir / grep so all three agree on the boundary.
+fn reject_skipped(resolved: &std::path::Path) -> Result<(), String> {
     if resolved
         .components()
         .any(|c| SKIP_DIRS.contains(&c.as_os_str().to_string_lossy().as_ref()))
@@ -161,6 +160,13 @@ fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             resolved.display()
         ));
     }
+    Ok(())
+}
+
+fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
+    let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
+    let resolved = resolve_under_roots(path, roots)?;
+    reject_skipped(&resolved)?;
     let meta = std::fs::metadata(&resolved).map_err(|e| format!("stat: {e}"))?;
     if !meta.is_file() {
         return Err(format!("{} is not a regular file", resolved.display()));
@@ -196,6 +202,7 @@ fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
 fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
     let resolved = resolve_under_roots(path, roots)?;
+    reject_skipped(&resolved)?;
     let meta = std::fs::metadata(&resolved).map_err(|e| format!("stat: {e}"))?;
     if !meta.is_dir() {
         return Err(format!("{} is not a directory", resolved.display()));
@@ -285,6 +292,9 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             .cloned()
             .ok_or("no workspace root configured")?,
     };
+    // The walkdir filter below only prunes SKIP_DIRS at depth>0; guard the root
+    // itself so grep(path:".git") can't read .git/config etc. at walk-depth 1.
+    reject_skipped(&search_root)?;
 
     let mut files_scanned = 0usize;
     let mut matches: Vec<String> = Vec::new();
@@ -494,7 +504,10 @@ fn bridge_call(op: &str, extra: Value, read_timeout: Duration) -> Result<Value, 
         .map_err(|e| format!("bridge write: {e}"))?;
     stream.flush().map_err(|e| format!("bridge flush: {e}"))?;
 
-    let mut reader = io::BufReader::new(&stream);
+    // Cap the response read — a bridge response (ask_user answer, ack) is small;
+    // a Take guard bounds the allocation if bridge.rs ever emits a huge line.
+    use std::io::Read as _;
+    let mut reader = io::BufReader::new((&stream).take(64 * 1024));
     let mut line = String::new();
     reader
         .read_line(&mut line)
@@ -859,19 +872,34 @@ pub fn run_stdio() {
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut reader = stdin.lock();
-    let mut buf = String::new();
+    let mut buf = Vec::new();
     loop {
         buf.clear();
-        match reader.read_line(&mut buf) {
+        // Bound the read at the source: read_line would allocate an arbitrarily
+        // large line into memory BEFORE any length check. Cap the reader to
+        // MAX_LINE_BYTES+1 per line so a runaway/hostile producer can't OOM the
+        // child; an over-cap line is detected + skipped without buffering it
+        // whole. (RR3)
+        let read = io::Read::take(&mut reader, MAX_LINE_BYTES as u64 + 1)
+            .read_until(b'\n', &mut buf);
+        match read {
             Ok(0) => return,
             Ok(_) => {}
             Err(_) => return,
         }
         if buf.len() > MAX_LINE_BYTES {
-            buf.clear();
+            // Drain the rest of the over-cap line so the next iteration starts
+            // at a real line boundary, not mid-record.
+            let mut sink = Vec::new();
+            if reader.read_until(b'\n', &mut sink).is_err() {
+                return;
+            }
             continue;
         }
-        let line = buf.trim();
+        let line = match std::str::from_utf8(&buf) {
+            Ok(s) => s.trim(),
+            Err(_) => continue,
+        };
         if line.is_empty() {
             continue;
         }

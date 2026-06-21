@@ -77,6 +77,40 @@ pub(super) fn config_path() -> Result<PathBuf, String> {
     Ok(dir.join("config.json"))
 }
 
+/// Best-effort DACL lockdown for a file that may hold a plaintext secret
+/// (config.json when keychain migration fails). Mirrors the mcp-config icacls
+/// pattern: strip inherited ACEs, grant the current user Full Control only.
+/// No-op on non-Windows / empty username. Detached thread — icacls can block
+/// for seconds under AV, and callers run on the load path.
+fn harden_config_acl(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let user = std::env::var("USERNAME").unwrap_or_default();
+        if user.is_empty() {
+            return;
+        }
+        let path_for_acl = path.to_path_buf();
+        std::thread::spawn(move || {
+            let status = std::process::Command::new("icacls")
+                .arg(&path_for_acl)
+                .args(["/inheritance:r", "/grant:r", &format!("\"{user}\":(F)")])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+            if !matches!(status, Ok(s) if s.success()) {
+                log::warn!("icacls failed to lock down {} for user {user}", path_for_acl.display());
+            }
+        });
+    }
+}
 
 /// #221: reject any model value that would be parsed as a flag by the CLI.
 /// Allowlist `[A-Za-z0-9._-]+` w/ NO leading dash. Covers short aliases
@@ -217,7 +251,16 @@ pub(super) fn load_config() -> AssistantConfig {
                     }
                 }
             }
-            Err(e) => log::warn!("assistant: keychain migration for api_key failed: {e}"),
+            Err(e) => {
+                log::warn!("assistant: keychain migration for api_key failed: {e}");
+                // The plaintext api_key now stays in config.json indefinitely.
+                // Harden the file's DACL so a domain-joined/shared profile's
+                // inherited SYSTEM/Administrators read ACEs can't expose it —
+                // mirrors the mcp-config lockdown. Best-effort. (RR9)
+                if let Ok(p) = config_path() {
+                    harden_config_acl(&p);
+                }
+            }
         }
     }
     cfg

@@ -28,10 +28,26 @@ use serde_json::Value;
 
 /// Max bytes of a diff we hand back to the model before truncating.
 const MAX_DIFF_BYTES: usize = 64 * 1024;
+/// Max bytes of log/status/pull output we hand back (a monorepo or verbose
+/// hook stderr can otherwise buffer 100s of MB into the MCP child).
+const MAX_OUT_BYTES: usize = 256 * 1024;
 /// Hard ceiling on `git log -n`.
 const MAX_LOG_COUNT: u64 = 100;
 /// Commit-message cap.
 const MAX_MSG_BYTES: usize = 4 * 1024;
+
+/// Truncate `s` to at most `limit` bytes on a UTF-8 char boundary, appending a
+/// note when it had to cut. Shared by every tool that returns raw git output.
+fn truncate_bytes(s: &str, limit: usize) -> std::borrow::Cow<'_, str> {
+    if s.len() <= limit {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut end = limit;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    std::borrow::Cow::Owned(format!("{}\n… (output truncated at {} KB)", &s[..end], limit / 1024))
+}
 
 // ─── validation ─────────────────────────────────────────────────────────────
 
@@ -338,7 +354,7 @@ pub fn tool_git_log(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     if out.stdout.trim().is_empty() {
         return Ok("No commits.".into());
     }
-    Ok(out.stdout)
+    Ok(truncate_bytes(&out.stdout, MAX_OUT_BYTES).into_owned())
 }
 
 pub fn tool_git_pull(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
@@ -358,7 +374,7 @@ pub fn tool_git_pull(args: &Value, roots: &[PathBuf]) -> Result<String, String> 
         s.push_str(out.stderr.trim());
     }
     if s.is_empty() { s = "Already up to date.".into(); }
-    Ok(s)
+    Ok(truncate_bytes(&s, MAX_OUT_BYTES).into_owned())
 }
 
 pub fn tool_git_commit(args: &Value, roots: &[PathBuf]) -> Result<String, String> {

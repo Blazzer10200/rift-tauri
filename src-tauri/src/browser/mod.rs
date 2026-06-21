@@ -72,13 +72,27 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
                 serde_json::json!({ "phase": phase, "url": payload.url().to_string() }),
             );
         });
-    let wv = window
-        .add_child(
-            builder,
-            LogicalPosition::new(x, y),
-            LogicalSize::new(w, h),
-        )
-        .map_err(|e| format!("create embedded webview: {e}"))?;
+    let wv = match window.add_child(
+        builder,
+        LogicalPosition::new(x, y),
+        LogicalSize::new(w, h),
+    ) {
+        Ok(wv) => wv,
+        // TOCTOU: a concurrent open() may have created the webview between our
+        // get_webview check above and this add_child. Duplicate-label is then
+        // not a failure — adopt the existing webview and reposition, matching
+        // the early-return idempotent path. (RR10)
+        Err(e) => match app.get_webview(LABEL) {
+            Some(wv) => {
+                wv.navigate(u).map_err(|e| format!("navigate: {e}"))?;
+                let _ = wv.set_position(LogicalPosition::new(x, y));
+                let _ = wv.set_size(LogicalSize::new(w, h));
+                let _ = wv.show();
+                return Ok(());
+            }
+            None => return Err(format!("create embedded webview: {e}")),
+        },
+    };
     // The builder's initial External URL doesn't reliably load on the child
     // webview (WebView2 starts it at about:blank); navigate explicitly.
     wv.navigate(u).map_err(|e| format!("navigate: {e}"))?;
@@ -232,8 +246,14 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
     // Use the webview-reported URL (trusted navigation state), NOT the page's
     // own `location.href` — a hostile page can spoof the latter to a
     // `javascript:`/`data:` string that downstream consumers might treat as a
-    // real navigable URL.
-    let url = wv.url().map(|u| u.to_string()).unwrap_or_default();
+    // real navigable URL. Re-fetch the webview by label rather than reusing the
+    // handle captured before the up-to-5s await: it may have been closed +
+    // recreated during the eval, making the old handle's url() stale. (RR11)
+    let url = app
+        .get_webview(LABEL)
+        .and_then(|w| w.url().ok())
+        .map(|u| u.to_string())
+        .unwrap_or_default();
     Ok(PageContent {
         title: raw.title,
         url,

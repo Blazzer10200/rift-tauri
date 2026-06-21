@@ -2,9 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.9 — Round 5 hardening (config migration race)
+## Unreleased — on top of v0.20.9 — Rounds 5–6 hardening (config race + IPC/update/browser surfaces)
 
 > Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target).
+
+**Hardened (round 6 — MCP / git / update / browser surfaces, adversarially-verified, 11 confirmed):**
+- **MCP tools respect SKIP_DIRS uniformly** — extracted a shared `reject_skipped` guard; `read_file` (already covered), `list_dir`, and `grep` now all reject any path that *resolves* into `node_modules/.git/target/…`. A workspace-internal symlink could previously let `list_dir`/`grep` enumerate excluded trees that `read_file` already blocked.
+- **MCP stdin read is bounded at the source** — `run_stdio` replaced `read_line` (which allocates an arbitrarily large line *before* the length check) with a `Read::take(MAX_LINE_BYTES+1)` + `read_until`; an over-cap line is detected and drained to the next boundary without ever buffering it whole. Removes a theoretical OOM from a runaway producer.
+- **Bridge socket read capped** — the loopback UI bridge (`bridge_call`) wraps its stream in a 64 KB `Take` so a malformed/hostile local client can't stream an unbounded request body into the MCP child.
+- **git log / status / pull output byte-capped** — added shared `truncate_bytes`; `git_log` and `git_pull` now cap returned output at 256 KB (matching `git_diff`'s existing cap), so a monorepo log or verbose hook stderr can't buffer 100s of MB into the MCP child. `git_status` already line-capped at 200.
+- **Update plan races closed** — `check()` now bumps `download_epoch` when it sets a new `pending` (mirrors `arm_repair`), so an in-flight download against a prior plan can't flip `downloaded=true` against the new one. `ver_key` gained a stable-vs-pre-release tiebreak (`1.2.0` outranks `1.2.0-beta` at the same X.Y.Z) so `arm_repair` can't pick a pre-release asset over the stable of the same core. `download()`'s self-heal re-check now returns a distinct "installed version is current" error on `Ok(None)` instead of dead-ending on the generic "no pending update" guard.
+- **config.json plaintext fallback hardened** — when keychain migration of `api_key` *fails* (headless/locked Credential Manager), the field stays in `config.json` as plaintext; that file now gets the same `icacls` per-user DACL lockdown (strip inheritance, user-only Full Control) as the mcp-config, so domain-joined inherited SYSTEM/Administrators read ACEs can't expose it.
+- **Browser dock TOCTOU + stale-handle fixes** — `open()` now treats a duplicate-label `add_child` error (concurrent open between the get_webview check and add_child) as idempotent: adopt the existing webview and reposition. `read_page()` re-fetches the webview by label after its up-to-5s eval await before reading `wv.url()`, so a webview closed+recreated mid-read can't return a stale URL.
 
 **Hardened (round 5 — config write-path race, adversarially-verified):**
 - **api_key keychain-migration save is now lock-guarded** — `config.rs::load_config` runs the one-shot plaintext→keychain migration both unlocked (getters) and locked (setters). Its `save_config` previously ran without `CONFIG_WRITE_LOCK`, so a getter racing an active setter could land its tmp-rename second and silently clobber the setter's change. Now wrapped in `CONFIG_WRITE_LOCK.try_lock()`: the migration persists only when the lock is free (non-reentrant std Mutex → `WouldBlock` skips the save when a setter on the same thread already holds it; the field stays in JSON and re-migrates on the next uncontended cold load). No deadlock, no lost setting. (Last open finding from the round-3 review — `draggingTabId` dead-feature wiring stays catalogued in ISSUES #46/#36, out of scope for the harden loop.)

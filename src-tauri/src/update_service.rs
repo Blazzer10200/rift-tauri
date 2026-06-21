@@ -144,6 +144,12 @@ impl UpdateService {
                     notes_markdown: asset.NotesMarkdown.clone(),
                 };
                 let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+                // Bump the epoch so any download still in flight against a prior
+                // plan can't later flip `downloaded=true` against THIS pending —
+                // same race arm_repair guards (RR2). Replacing `pending` while an
+                // older transfer is mid-flight would otherwise arm apply() with a
+                // package that doesn't match the new plan.
+                g.download_epoch = g.download_epoch.wrapping_add(1);
                 g.pending = Some(*info);
                 g.downloaded = false;
                 Ok(Some(dto))
@@ -177,7 +183,16 @@ impl UpdateService {
         };
         if needs_recheck {
             log::info!("update download: no pending plan — re-checking first");
-            self.check()?;
+            // If the re-check resolves to "up to date" (Ok(None)) the plan stays
+            // empty; surface a distinct message rather than dead-ending on the
+            // generic "no pending update" guard below, which is indistinguishable
+            // from the uninitialized-manager case. (RR6)
+            if self.check()?.is_none() {
+                return Err(
+                    "no update available — the feed shows the installed version is current"
+                        .to_string(),
+                );
+            }
         }
         // Clone out under lock so the mutex isn't held across blocking I/O.
         // Capture the epoch now; if it's been bumped by the time we finish,
@@ -242,10 +257,13 @@ impl UpdateService {
         // Newest "Full" asset by version (matches check_for_updates' own
         // selection). Lightweight numeric compare on the dotted X.Y.Z core —
         // avoids pulling in a semver dep just to rank the feed.
-        fn ver_key(v: &str) -> (u64, u64, u64) {
+        fn ver_key(v: &str) -> (u64, u64, u64, u8) {
             let core = v.split(['-', '+']).next().unwrap_or(v);
             let mut it = core.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
-            (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
+            // 4th element: stable (no pre-release tag) outranks a pre-release of
+            // the same X.Y.Z, so 1.2.0 wins over 1.2.0-beta on a tie.
+            let is_stable = u8::from(!v.contains('-'));
+            (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0), is_stable)
         }
         let latest = feed
             .Assets
