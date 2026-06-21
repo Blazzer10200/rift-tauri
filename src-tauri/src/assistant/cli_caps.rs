@@ -69,6 +69,15 @@ mod mins {
     /// `--effort`). The ultracode key itself is plan-gated server-side and
     /// harmlessly ignored when unknown, so this gates only the FLAG's existence.
     pub const SETTINGS_FLAG: Version = (2, 1, 142); // confirmed @ 2.1.142
+
+    /// `--strict-mcp-config` (ignore user `~/.claude.json` MCP servers; use only
+    /// `--mcp-config`). No direct introduction entry; confirmed present ≤2.1.152.
+    /// Fired only in api-key / local-llm modes (the non-piggyback path).
+    pub const STRICT_MCP_CONFIG: Version = (2, 1, 152); // confirmed present @ 2.1.152
+
+    /// `--disable-slash-commands`. Confirmed added at v2.1.170 (zebbern CHANGELOG:
+    /// "Update to version 2.1.170 for access"). Also api-key / local-llm only.
+    pub const DISABLE_SLASH_COMMANDS: Version = (2, 1, 170); // confirmed @ 2.1.170
 }
 
 /// The hard minimum CLI version Rift can drive at all. Below this, no turn can
@@ -90,6 +99,8 @@ pub struct CliCaps {
     pub max_budget_usd: bool,
     pub effort: bool,
     pub settings_flag: bool,
+    pub strict_mcp_config: bool,
+    pub disable_slash_commands: bool,
 }
 
 /// `a >= b` on version triples.
@@ -111,6 +122,8 @@ impl CliCaps {
                 max_budget_usd: false,
                 effort: false,
                 settings_flag: false,
+                strict_mcp_config: false,
+                disable_slash_commands: false,
             },
             Some(ver) => Self {
                 version: Some(ver),
@@ -121,6 +134,8 @@ impl CliCaps {
                 max_budget_usd: at_least(ver, mins::MAX_BUDGET_USD),
                 effort: at_least(ver, mins::EFFORT),
                 settings_flag: at_least(ver, mins::SETTINGS_FLAG),
+                strict_mcp_config: at_least(ver, mins::STRICT_MCP_CONFIG),
+                disable_slash_commands: at_least(ver, mins::DISABLE_SLASH_COMMANDS),
             },
         }
     }
@@ -199,5 +214,15 @@ mod tests {
         let at = CliCaps::from_version(Some((2, 1, 142)));
         assert!(at.effort);
         assert!(at.settings_flag);
+    }
+
+    #[test]
+    fn disable_slash_commands_gate_boundary() {
+        // 2.1.170 floor (confirmed). 2.1.169 (e.g. the --bare era) is just below.
+        assert!(!CliCaps::from_version(Some((2, 1, 169))).disable_slash_commands);
+        assert!(CliCaps::from_version(Some((2, 1, 170))).disable_slash_commands);
+        // strict-mcp-config sits at the 2.1.152 confirmed-present bound.
+        assert!(!CliCaps::from_version(Some((2, 1, 151))).strict_mcp_config);
+        assert!(CliCaps::from_version(Some((2, 1, 152))).strict_mcp_config);
     }
 }

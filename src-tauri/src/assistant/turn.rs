@@ -752,8 +752,17 @@ pub async fn assistant_send(
     }
 
     if !use_full_config {
-        cmd.arg("--strict-mcp-config")
-            .arg("--disable-slash-commands");
+        // Both gated independently (different floors). Absent `--strict-mcp-config`
+        // → the CLI may merge the user's `~/.claude.json` MCP servers (slightly
+        // wider than the intended strict sandbox, not a broken turn). Absent
+        // `--disable-slash-commands` (lands 2.1.170) → user slash commands stay
+        // enabled. Both degrade gracefully on an older CLI rather than crashing.
+        if caps.strict_mcp_config {
+            cmd.arg("--strict-mcp-config");
+        }
+        if caps.disable_slash_commands {
+            cmd.arg("--disable-slash-commands");
+        }
     }
 
     if let Some(ref p) = mcp_config_path {
@@ -958,6 +967,10 @@ pub async fn assistant_send(
         "assistant_send: spawn session_id={} first_turn={} model={} effort={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
         session_id, is_first_turn, model, effort_level, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled,
         caps.version, caps.effort, caps.permission_prompt_tool, caps.exclude_dynamic_sections, caps.include_partial_messages, caps.max_budget_usd, caps.settings_flag
+    );
+    log::debug!(
+        "assistant_send: caps(cont) strict_mcp={} disable_slash={}",
+        caps.strict_mcp_config, caps.disable_slash_commands
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
