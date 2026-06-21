@@ -609,7 +609,7 @@
     transition:fade={{ duration: reducedMotion ? 0 : 140 }}
     onclick={() => (lightboxSrc = null)}
   >
-    <img class="lightbox-img" src={lightboxSrc} alt="" />
+    <img class="lightbox-img" src={lightboxSrc} alt="Attachment at full size" />
     <button class="lightbox-close" type="button" aria-label="Close" onclick={() => (lightboxSrc = null)}>
       <X size={18} />
     </button>

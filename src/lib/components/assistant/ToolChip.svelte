@@ -331,7 +331,7 @@
       return rows;
     }
     if (n === "Read" || n === "read_file") {
-      const fp = s("file_path") ?? s("path"); if (fp) rows.push({ label: "file", value: fp, mono: true });
+      const fp = s("file_path") ?? s("path") ?? s("notebook_path"); if (fp) rows.push({ label: "file", value: fp, mono: true });
       const off = num("offset"); if (off != null) rows.push({ label: "offset", value: String(off), mono: true });
       const lim = num("limit"); if (lim != null) rows.push({ label: "limit", value: String(lim), mono: true });
       return rows;
