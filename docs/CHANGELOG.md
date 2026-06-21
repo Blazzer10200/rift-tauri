@@ -11,16 +11,18 @@
 - **Home** (warm + cold), **Settings** (bento → single-column RailShell, all 5 tabs), **Onboarding** (centered card + rail spine, 1180px), **command palette**.
 - **Composer** → flat-bar (`.composer-box`/`.composer-bar`/`.cbtn`/`.send-inline`) + perm/model popovers → spec `.pop` rich-item.
 - **Shell** → global status bar; floating **Environment** pill replaces the old dock; **SessionDiff** dropped.
-- New green-R glass logo app-wide; screen-tint comfort filter removed (separate a11y `warmTint` untouched).
+- **Official Rift logo** app-wide — neon-R squircle with transparent corners (all 10 assets cornerA=0); screen-tint comfort filter removed (separate a11y `warmTint` untouched).
 
 **Added:**
 - **Activity dock toggle** (Settings → Chat) — the live sub-agent dock now has a user-facing enable/disable (default on). Off suppresses auto-reveal + render entirely; persisted per-device.
+- **CLI backwards-compat hardening** — Rift now version-gates every bleeding-edge spawn flag to the *installed* `claude` (was assuming the dev's). `assistant/cli_caps.rs` capability table + `cli_install::active_cli_version()` (5s cache); `assistant_send` gates 8 flags with degraded-but-working fallbacks; below the 2.1.161 floor → an actionable update prompt; unreadable version → conservative-old + a Settings `⚠` banner so degradation isn't silent.
 
 **Fixed:**
+- **Stream render defaulted to the legacy view** — `streamMode` defaulted OFF, so a fresh install fell back to the old `MessageBubble` card path instead of the spec's boxless `StreamTurn` (tool runs / edit batches / footers). Now defaults ON (only an explicit opt-out falls back). The render tree was already spec-faithful — only the flag was wrong.
 - `stt.svelte.ts::setConfig` rolls back in-memory config on backend reject (UI no longer ahead of persisted state).
 - `persistence.ts::deleteAllConversations` re-syncs in a `finally` (mid-loop delete failure no longer desyncs the list).
 
-**Internal:** backend dead-code sweep — removed `rift_dir()` / `atomic_write_json()` (orphaned by the remote-half strip) + two never-read `AudioCapture` fields; tightened over-broad `pub`. 0 warnings · `cargo test` 57/57 · check 0/0 · vitest 201/201.
+**Internal:** backend dead-code sweep — removed `rift_dir()` / `atomic_write_json()` (orphaned by the remote-half strip) + two never-read `AudioCapture` fields; tightened over-broad `pub`. 0 warnings · `cargo test` 64/64 · check 0/0 · vitest 210/210.
 
 **Verify.** version lockstep ×3 + `Cargo.lock` · svelte-check 0/0 · `cargo check` clean.
 
