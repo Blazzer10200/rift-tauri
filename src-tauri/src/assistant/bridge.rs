@@ -241,7 +241,10 @@ async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
     if app.get_webview_window(window.as_str()).is_none() {
         return err("ask_user: target window is not available");
     }
-    let rx = registry.register(request_id.clone());
+    // RR7: guarded registration — if this bridge task is aborted mid-await
+    // (runtime shutdown / explicit abort), the guard's Drop cancels the entry
+    // so it can't leak in the registry HashMap until app restart.
+    let (rx, _guard) = registry.register_guarded(request_id.clone());
 
     // Emit AFTER registering — guarantees the receiver is in the map before
     // the frontend can possibly fire an answer back.

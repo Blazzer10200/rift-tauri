@@ -15,13 +15,29 @@
 //! The registry is `tauri::State`-managed — single instance for the app.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 use tokio::sync::oneshot;
 
 pub struct AskUserRegistry {
     inner: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+}
+
+/// RAII guard mirroring `PermissionGuard`: cancels the registry entry on drop.
+/// Covers the case where the hosting bridge task is aborted mid-await (runtime
+/// shutdown / explicit abort) — the await point is cancelled, so neither the
+/// timeout nor error arm runs `cancel`, and the HashMap entry would otherwise
+/// leak until app restart (RR7).
+pub struct AskUserGuard {
+    registry: Arc<AskUserRegistry>,
+    request_id: String,
+}
+
+impl Drop for AskUserGuard {
+    fn drop(&mut self) {
+        self.registry.cancel(&self.request_id);
+    }
 }
 
 impl AskUserRegistry {
@@ -39,6 +55,16 @@ impl AskUserRegistry {
         };
         g.insert(request_id, tx);
         rx
+    }
+
+    /// `register` + an RAII `AskUserGuard` that cancels the entry on drop.
+    /// Use this from any path that can be cancelled at an await point.
+    pub fn register_guarded(
+        self: &Arc<Self>,
+        request_id: String,
+    ) -> (oneshot::Receiver<Value>, AskUserGuard) {
+        let rx = self.register(request_id.clone());
+        (rx, AskUserGuard { registry: self.clone(), request_id })
     }
 
     /// Resolve a pending request. Returns true on success; false if the entry

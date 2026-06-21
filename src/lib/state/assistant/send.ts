@@ -208,19 +208,23 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
   // (flushSteerChips injects them at its first stream line). Fire the first
   // queue-mode chip; if the rail is ALL steer chips there is no next turn to
   // ride, so degrade the head to a normal send — the queue can never strand.
+  // RR7: PEEK the head, don't pop yet. Popping here (before the microtask) left
+  // a window where closeTab could read tab.queue.length for its "N discarded"
+  // toast AFTER the item was already removed but BEFORE the microtask could
+  // re-queue it — undercounting by one and silently dropping the in-flight item
+  // when dropTab removed the tab first. The item now stays in the queue until
+  // the microtask actually sends it, so closeTab's count is always accurate.
   const next = tab.queue.find((q) => q.mode !== "steer") ?? tab.queue[0];
-  tab.queue = tab.queue.filter((q) => q.id !== next.id);
-  // #148: capture the active convo at pop time; if the user switches tabs OR
-  // a new turn starts before the microtask fires, re-queue the head and bail.
-  // The next completion or tab activation re-drains — never a silent strand.
+  // #148: capture the active convo at peek time; if the user switches tabs OR
+  // a new turn starts before the microtask fires, leave the head queued and
+  // bail. The next completion or tab activation re-drains — never a silent strand.
   const capturedConvoId = store.currentConvoId;
   queueMicrotask(() => {
-    if (store.currentConvoId !== capturedConvoId || tab.streaming) {
-      if ([...store.tabs.values()].includes(tab)) {
-        tab.queue = [next, ...tab.queue];
-      }
-      return;
-    }
+    if (store.currentConvoId !== capturedConvoId || tab.streaming) return;
+    // Item is still in the queue (we peeked); remove it now that we're committed
+    // to sending. If it's already gone (raced drain), bail.
+    if (!tab.queue.some((q) => q.id === next.id)) return;
+    tab.queue = tab.queue.filter((q) => q.id !== next.id);
     send(store, next.text).catch(e => tab.onError(String(e)));
   });
 }
@@ -250,6 +254,9 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   if (tab.permissionPrompts.size > 0) tab.permissionPrompts = new Map();
   tab.unboundAskUserRequestIds = [];
   tab.unboundAskUserToolUseIds = [];
+  // RR7: clear ask_user bindings here too (third terminal path) — same dead-chip
+  // reasoning as onStreamDone/onStreamError.
+  if (tab.askUserBindings.size > 0) tab.askUserBindings = new Map();
   tab.activity = { ...tab.activity, currentLabel: null };
   // Telemetry finalize as user-stop before the late done event lands.
   if (tab.currentTurnRecord) {
@@ -477,6 +484,11 @@ export async function retryLast(store: AssistantStore) {
     if (tab.streaming) {
       await stop(store);
     }
+    // RR7: stop() awaits an IPC round-trip; the user may have switched tabs
+    // during it. send() below routes through store.currentConvoId (the LIVE
+    // active tab), so retrying now would fire into the wrong tab. Abort if the
+    // captured tab is no longer active — the prompt stays in promptHistory.
+    if (store.activeTab !== tab) return;
     // Strip the trailing assistant turn (if any) and the matching user turn
     // so the replayed history doesn't double-include the prompt.
     const msgs = tab.messages.slice();

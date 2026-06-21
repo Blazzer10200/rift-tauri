@@ -1640,6 +1640,13 @@ pub async fn assistant_steer(session_id: String, text: String) -> Result<String,
     if trimmed.is_empty() {
         return Err("empty steer text".into());
     }
+    // RR7: cap a renderer-supplied steer message before it enters the unbounded
+    // mpsc channel and gets serialized + written to the CLI child's stdin. A
+    // multi-megabyte payload would otherwise allocate unbounded heap and force a
+    // huge synchronous write on the stdin task. 1 MiB is far above any real steer.
+    if trimmed.len() > 1_048_576 {
+        return Err("steer text too large (max 1 MiB)".into());
+    }
     let Some(tx) = get_steer_tx(&session_id) else {
         return Ok("no_active_turn".into());
     };

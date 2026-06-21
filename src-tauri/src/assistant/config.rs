@@ -210,19 +210,25 @@ pub(super) fn fable_unavailable() -> bool {
     FABLE_DISABLED || fable_sunset_passed()
 }
 
-pub(super) fn load_config() -> AssistantConfig {
-    // Missing file = normal first run (silent default); a file that exists
-    // but fails to parse means settings are being dropped — warn so it's
-    // traceable instead of "my settings vanished".
-    let mut cfg: AssistantConfig = match config_path()
-        .and_then(|p| std::fs::read_to_string(&p).map_err(|e| e.to_string()))
-    {
+/// Read config.json with NO side effects — does not run the keychain
+/// migration. Used by setters that need to inspect/clear the legacy plaintext
+/// field before performing their own keychain op, where letting `load_config`'s
+/// migration fire would re-write a stale value over the caller's change (RR7).
+fn load_config_raw() -> AssistantConfig {
+    match config_path().and_then(|p| std::fs::read_to_string(&p).map_err(|e| e.to_string())) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
             log::warn!("assistant config unreadable — falling back to defaults: {e}");
             AssistantConfig::default()
         }),
         Err(_) => AssistantConfig::default(),
-    };
+    }
+}
+
+pub(super) fn load_config() -> AssistantConfig {
+    // Missing file = normal first run (silent default); a file that exists
+    // but fails to parse means settings are being dropped — warn so it's
+    // traceable instead of "my settings vanished".
+    let mut cfg = load_config_raw();
     // Phase 6 (#37): one-shot migration of any plaintext api_key into the
     // OS keychain. Failure is non-fatal — the field stays in JSON for a
     // future attempt, and runtime reads still see it via legacy fallback in
@@ -457,17 +463,24 @@ pub fn assistant_set_local_llm_key(key: Option<String>) -> Result<(), String> {
 pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
     let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     // Phase 6 (#37): write the API key to the OS keychain, not config.json.
-    // Empty/None → delete the keychain entry. Also clears any lingering
-    // legacy plaintext field (load_config's migration handles the read side,
-    // but a fresh set after a failed migration leaves the legacy slot stale).
-    match api_key.as_deref().filter(|s| !s.is_empty()) {
-        Some(k) => crate::secrets::set(crate::secrets::ASSISTANT_API_KEY, k)?,
-        None => crate::secrets::delete(crate::secrets::ASSISTANT_API_KEY)?,
-    }
-    let mut cfg = load_config();
+    // Empty/None → delete the keychain entry.
+    //
+    // CRITICAL ordering (RR7): clear the legacy plaintext field FIRST via a raw
+    // (migration-free) load+save, THEN do the keychain op. If we did the keychain
+    // op first and then called `load_config()`, its migration would fire against
+    // the stale plaintext value and `secrets::set(old_key)` would overwrite the
+    // key we just set (or re-create the entry we just deleted). The migration's
+    // own save is gated on `try_lock` which we already hold here, so it would
+    // also leave the plaintext in config.json — perpetuating the corruption on
+    // every call. Using the raw loader avoids triggering migration at all.
+    let mut cfg = load_config_raw();
     if cfg.api_key.is_some() {
         cfg.api_key = None;
         save_config(&cfg)?;
+    }
+    match api_key.as_deref().filter(|s| !s.is_empty()) {
+        Some(k) => crate::secrets::set(crate::secrets::ASSISTANT_API_KEY, k)?,
+        None => crate::secrets::delete(crate::secrets::ASSISTANT_API_KEY)?,
     }
     Ok(())
 }

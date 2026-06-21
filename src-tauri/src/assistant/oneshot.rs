@@ -14,8 +14,8 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use super::cli_install::claude_command;
 use super::config::{
-    effective_trust_level, is_valid_local_model_name, load_config, save_config, DEFAULT_MODEL,
-    CONFIG_WRITE_LOCK,
+    effective_trust_level, is_valid_local_model_name, is_valid_model_name, load_config,
+    save_config, DEFAULT_MODEL, CONFIG_WRITE_LOCK,
 };
 use super::turn::ENHANCE_STREAM_EVENT;
 use super::{write_mcp_config, McpConfigGuard};
@@ -147,6 +147,12 @@ pub async fn assistant_enhance_prompt(
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| DEFAULT_MODEL.to_string());
+    // RR7: reject a renderer-supplied value that would be parsed as a CLI flag
+    // (e.g. `--dangerously-skip-permissions`) before it reaches `--model`.
+    // assistant_send guards this in turn.rs; the enhance path had no equivalent.
+    if !is_valid_model_name(&model) {
+        return Err(format!("invalid model: {model}"));
+    }
     // Optional steering for the refine loop (Concise / Detailed / freeform).
     let directive_line = match directive.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
         Some(d) => format!(" Adjustment for this rewrite: {d}."),
@@ -293,7 +299,7 @@ names), then output the rewritten prompt. Keep lookups minimal."
 
     // Drain stderr concurrently so a chatty CLI can't deadlock on a full pipe
     // while we read stdout. Bounded — the enhancer's stderr is tiny.
-    let stderr_task = tokio::spawn(async move {
+    let mut stderr_task = tokio::spawn(async move {
         let mut buf = String::new();
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
@@ -405,11 +411,21 @@ names), then output the rewritten prompt. Keep lookups minimal."
         child_pid.is_some() && with_enhance_pids(|m| m.remove(&request_id)).is_none();
     // RR-7: surface a panicked stderr-drain task instead of unwrap_or_default()
     // collapsing it to an empty body (which then reads as a reasonless failure).
-    let stderr_buf = match stderr_task.await {
-        Ok(buf) => buf,
-        Err(e) => {
+    // RR7 (round 7): bound the drain — on the grounded enhance path the CLI can
+    // spawn subprocesses that inherit the stderr pipe write-end; on Windows those
+    // handles keep the pipe open past the parent's exit, so an unbounded await
+    // would wedge this command forever (mirrors turn.rs's DRAIN_TIMEOUT).
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
+        Ok(Ok(buf)) => buf,
+        Ok(Err(e)) => {
             log::error!("enhance stderr drain task panicked: {e}");
             format!("(stderr drain task panicked: {e})")
+        }
+        Err(_) => {
+            log::warn!("enhance stderr drain timed out (inherited pipe held by a background process?)");
+            stderr_task.abort();
+            String::new()
         }
     };
     if cancelled {
@@ -502,7 +518,7 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
     let stdout = child.stdout.take().ok_or("title stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("title stderr unavailable")?;
 
-    let stderr_task = tokio::spawn(async move {
+    let mut stderr_task = tokio::spawn(async move {
         let mut buf = String::new();
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
@@ -562,15 +578,26 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
             Ok(r) => r?,
             Err(_) => {
                 let _ = child.start_kill();
+                // RR7: abort the orphaned stderr drain so it doesn't keep
+                // reading the killed child's pipe in the background.
+                stderr_task.abort();
                 return Err("title generation timed out".to_string());
             }
         };
     // RR-7: surface a panicked stderr-drain task (see enhance path above).
-    let stderr_buf = match stderr_task.await {
-        Ok(buf) => buf,
-        Err(e) => {
+    // RR7 (round 7): bound the drain — a grandchild that inherited the stderr
+    // pipe could otherwise keep it open and wedge this await forever on Windows.
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
+        Ok(Ok(buf)) => buf,
+        Ok(Err(e)) => {
             log::error!("title stderr drain task panicked: {e}");
             format!("(stderr drain task panicked: {e})")
+        }
+        Err(_) => {
+            log::warn!("title stderr drain timed out (inherited pipe held by a background process?)");
+            stderr_task.abort();
+            String::new()
         }
     };
     if !status.success() {

@@ -872,6 +872,11 @@ export function onStreamDone(tab: TabState) {
   if (tab.permissionPrompts.size > 0) tab.permissionPrompts = new Map();
   tab.unboundAskUserRequestIds = [];
   tab.unboundAskUserToolUseIds = [];
+  // RR7: clear ask_user toolUseId→requestId bindings too. A turn that ends
+  // before the user answers an ask_user chip would otherwise leave the binding
+  // live, keeping the dead chip's Allow/Deny interactive (a click then hits a
+  // resolved/auto-denied oneshot) — mirrors the permissionPrompts clear above.
+  if (tab.askUserBindings.size > 0) tab.askUserBindings = new Map();
   tab.activity = { ...tab.activity, currentLabel: null };
   // Finalize telemetry for this turn.
   if (tab.currentTurnRecord) {
@@ -905,6 +910,9 @@ export function onStreamError(tab: TabState, msg: string) {
   if (tab.permissionPrompts.size > 0) tab.permissionPrompts = new Map();
   tab.unboundAskUserRequestIds = [];
   tab.unboundAskUserToolUseIds = [];
+  // RR7: see onStreamDone — clear ask_user bindings on the error terminal path
+  // too, so a dead chip can't stay interactive after the turn errors.
+  if (tab.askUserBindings.size > 0) tab.askUserBindings = new Map();
   // Finalize telemetry.
   if (tab.currentTurnRecord) {
     tab.currentTurnRecord.doneAt = Date.now();

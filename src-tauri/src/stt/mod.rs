@@ -302,7 +302,7 @@ fn workspace_context() -> String {
     if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
         let _ = write!(ctx, "Project: {name}.");
     }
-    if let Some(branch) = crate::assistant::assistant_workspace_branch(None) {
+    if let Some(branch) = crate::assistant::workspace::workspace_branch_sync(&root) {
         let _ = write!(ctx, " Branch: {branch}.");
     }
     {
@@ -444,6 +444,15 @@ pub async fn stt_start_recording(
     // Store session BEFORE spawning — any racing stop call can now cancel.
     {
         let mut slot = session.0.lock().await;
+        // RR7: the is_some() guard above dropped the lock before the multi-second
+        // model load + capture init, so two concurrent stt_start_recording calls
+        // can both pass it and reach here. Re-check under THIS lock: if a racing
+        // call already stored a session, bail rather than silently overwrite it
+        // (which would orphan the first session's capture thread + engine).
+        // Dropping cap_stop_tx here signals our just-started capture thread to exit.
+        if slot.is_some() {
+            return Err("stt session already active (raced concurrent start)".into());
+        }
         *slot = Some(ActiveSession {
             ring: ring.clone(),
             initial_prompt: initial_prompt.clone(),

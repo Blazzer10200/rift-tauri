@@ -990,6 +990,11 @@ class AssistantStore {
     tab.streamingMsgId = null;
     tab.streamingMsgIdx = null;
     tab.lastError = null;
+    // RR7: cancel the rAF text-drain pacer + zero pendingText. Without this, any
+    // text buffered when the session was lost keeps the drainTick loop re-arming
+    // each frame (appendText early-returns on null streamingMsgId), burning
+    // frames until it self-drains — matches the onStreamError terminal path.
+    tab.flushPendingText();
     notify.warn("Session was lost — retrying as a fresh start");
     // Auto-retry only when the lost tab is active. Bg-tab retry would require
     // routing send() to a specific tab; for now the user re-clicks send.

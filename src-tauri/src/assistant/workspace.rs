@@ -168,11 +168,13 @@ pub async fn assistant_list_workspace_files(root: Option<String>) -> Result<Vec<
 /// Current git branch of the active workspace root, or `None` when the folder
 /// isn't a git repo, is in detached-HEAD, or git isn't available. Surfaced in
 /// the assistant Welcome's context strip; never fabricated.
-#[tauri::command]
-pub fn assistant_workspace_branch(root: Option<String>) -> Option<String> {
-    let root = resolve_root(root)?;
+/// Blocking `git rev-parse --abbrev-ref HEAD`. Synchronous helper shared by the
+/// async command and the sync `stt::workspace_context` caller (mirrors
+/// list_workspace_files_sync). Callers on a Tokio thread MUST wrap in
+/// spawn_blocking — this does real subprocess I/O.
+pub fn workspace_branch_sync(root: &std::path::Path) -> Option<String> {
     let mut cmd = std::process::Command::new("git");
-    cmd.current_dir(&root)
+    cmd.current_dir(root)
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
@@ -193,4 +195,16 @@ pub fn assistant_workspace_branch(root: Option<String>) -> Option<String> {
     } else {
         Some(branch)
     }
+}
+
+#[tauri::command]
+pub async fn assistant_workspace_branch(root: Option<String>) -> Option<String> {
+    let root = resolve_root(root)?;
+    // RR7: `git rev-parse` is a blocking OS subprocess; on a network-mounted
+    // workspace it can stall for seconds. Run it on the blocking pool so it
+    // can't starve a Tokio worker (mirrors assistant_list_workspace_files).
+    tokio::task::spawn_blocking(move || workspace_branch_sync(&root))
+        .await
+        .ok()
+        .flatten()
 }

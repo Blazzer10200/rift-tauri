@@ -2,9 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.9 — Rounds 5–6 hardening (config race + IPC/update/browser surfaces)
+## Unreleased — on top of v0.20.9 — Rounds 5–7 hardening (config race + IPC/update/browser + secrets/commands/state/frontend)
 
-> Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target).
+> Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target) · svelte-check 0/0 · playback regression net green.
+
+**Hardened (round 7 — secrets / commands / state / frontend-send, adversarially-verified, 12 confirmed):**
+- **CRITICAL: `assistant_set_api_key` no longer self-clobbers via migration** — when config.json still held a legacy plaintext `api_key`, setting/deleting the key did the keychain op first, then `load_config()` fired the plaintext→keychain migration *after*, overwriting the just-set key (or re-creating the just-deleted entry) with the stale value — and the migration's `try_lock` (we already held it) left the plaintext in config.json, perpetuating it every call. Fixed by reordering: a new migration-free `load_config_raw()` clears the plaintext field + saves FIRST, then the keychain op runs. R5 only guarded the migration's *save*; this guards the *trigger*.
+- **Enhance path validates the model arg** — `assistant_enhance_prompt` now runs `is_valid_model_name()` (mirrors `assistant_send`) before passing the renderer-supplied value to `--model`, rejecting flag-injection like `--dangerously-skip-permissions`.
+- **`assistant_workspace_branch` off the Tokio worker** — converted to `async` + `spawn_blocking` (the blocking `git rev-parse` could stall a worker for seconds on a network FS); extracted shared sync helper `workspace_branch_sync` (R4 only converted the *file-walk* command, not this one).
+- **Steer text capped at 1 MiB** — `assistant_steer` bounds the renderer-supplied payload before it enters the unbounded mpsc channel + child stdin write (was: unbounded heap alloc + giant synchronous stdin write).
+- **STT double-recording TOCTOU closed** — `stt_start_recording`'s `is_some()` guard dropped the session lock before a multi-second model load; two concurrent calls could both pass and the second silently overwrote the first `ActiveSession` (orphaning its capture thread + engine). Now re-checks under the lock before storing and errors on collision.
+- **oneshot stderr-drain leaks bounded** — `assistant_generate_title` aborts its orphaned stderr task on the 30s timeout and bounds the success-path `stderr_task.await` with a 500ms `DRAIN_TIMEOUT`; `assistant_enhance_prompt`'s stderr drain got the same timeout. A grandchild inheriting the stderr pipe (Windows) could otherwise wedge the command forever (mirrors `turn.rs`'s existing fix).
+- **ask_user registry leak closed** — added an RAII `AskUserGuard` (mirrors `PermissionGuard`); `bridge::ask_user_op` uses `register_guarded` so a bridge task aborted mid-await can't leak a dead HashMap entry until app restart.
+- **Frontend turn-terminal hygiene** — `onSessionLost` now calls `flushPendingText()` (was: rAF text-drain pacer kept re-arming each frame after the session was lost). `askUserBindings` is cleared on all three turn-terminal paths (`onStreamDone`/`onStreamError`/`stop()`), so a turn ending before the user answers an ask_user chip can't leave the dead chip interactive (a click would hit a resolved oneshot). `retryLast` re-checks the active tab after `await stop()` so a mid-stop tab switch can't fire the retry into the wrong tab. `drainQueue` peeks-then-pops (pop moved inside the committed microtask) so `closeTab`'s "N discarded" toast can't undercount + silently drop the in-flight item.
 
 **Hardened (round 6 — MCP / git / update / browser surfaces, adversarially-verified, 11 confirmed):**
 - **MCP tools respect SKIP_DIRS uniformly** — extracted a shared `reject_skipped` guard; `read_file` (already covered), `list_dir`, and `grep` now all reject any path that *resolves* into `node_modules/.git/target/…`. A workspace-internal symlink could previously let `list_dir`/`grep` enumerate excluded trees that `read_file` already blocked.
