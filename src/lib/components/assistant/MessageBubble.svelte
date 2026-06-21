@@ -1260,7 +1260,7 @@
     margin-left: 2px;
   }
   .copybtn {
-    opacity: 0;
+    opacity: 0.42;
     background: transparent;
     border: 0;
     color: var(--fg-faint);
