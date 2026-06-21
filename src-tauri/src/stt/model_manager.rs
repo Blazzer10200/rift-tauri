@@ -197,6 +197,22 @@ pub async fn download(
     // 416 = Range Not Satisfiable: .partial already covers the full file.
     if status.as_u16() == 416 {
         let on_disk = partial_path.metadata().map(|m| m.len()).unwrap_or(0);
+        // Verify the full .partial before promoting — a truncated/corrupt resume
+        // must not be silently accepted (mirrors the post-rename verify below).
+        if let Some(expected) = entry.sha256 {
+            let got = file_sha256(&partial_path)
+                .map_err(|e| format!("416 verify: {e}"))?;
+            if got != expected {
+                let _ = std::fs::rename(
+                    &partial_path,
+                    dir.join(format!("{}.badhash", entry.filename)),
+                );
+                return Err(format!(
+                    "sha256 mismatch (416 resume) for {}: got {got}, expected {expected}",
+                    entry.filename
+                ));
+            }
+        }
         std::fs::rename(&partial_path, &final_path)
             .map_err(|e| format!("promote partial -> final (416 path): {e}"))?;
         emit_progress(&app, entry.id, on_disk, on_disk, "done", None);

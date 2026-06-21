@@ -1565,8 +1565,10 @@ fn auth_rejection_message() -> String {
         "Your configured API key was rejected (401). Clear it in Settings → CLI session to fall back to your `claude login`, or paste a valid key.".to_string()
     } else {
         format!(
-            "Authentication failed (401). Rift is using the Claude CLI at {} — sign in by running `claude login` in a terminal, or switch installs in Settings → CLI session, then retry.",
-            resolve_claude_exe().map(|p| p.display().to_string()).unwrap_or_else(|| "your active install".into())
+            "Authentication failed (401). Rift is using the Claude CLI ({}) — sign in by running `claude login` in a terminal, or switch installs in Settings → CLI session, then retry.",
+            resolve_claude_exe()
+                .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| "your active install".into())
         )
     }
 }

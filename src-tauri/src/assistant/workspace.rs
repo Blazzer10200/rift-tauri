@@ -119,16 +119,13 @@ fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
 /// Enumerate file paths under the active workspace root, relative to the root,
 /// forward-slash normalized. Drives the composer's `@`-file mention picker.
 /// Capped at `MENTION_LIMIT` files.
-#[tauri::command]
-pub fn assistant_list_workspace_files(root: Option<String>) -> Result<Vec<String>, String> {
+/// Synchronous walk shared by the async command and `stt::workspace_context`.
+/// Returns root-relative, forward-slash paths, capped at 4000 entries.
+pub fn list_workspace_files_sync(root: &std::path::Path) -> Vec<String> {
     const MENTION_LIMIT: usize = 4000;
     use super::mcp_server::SKIP_DIRS;
-    let root = match resolve_root(root) {
-        Some(p) => p,
-        None => return Ok(Vec::new()),
-    };
     let mut out = Vec::with_capacity(512);
-    for entry in walkdir::WalkDir::new(&root)
+    for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
@@ -146,13 +143,26 @@ pub fn assistant_list_workspace_files(root: Option<String>) -> Result<Vec<String
         if !entry.file_type().is_file() {
             continue;
         }
-        let rel = entry.path().strip_prefix(&root).unwrap_or(entry.path());
+        let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
         out.push(rel.to_string_lossy().replace('\\', "/"));
         if out.len() >= MENTION_LIMIT {
             break;
         }
     }
-    Ok(out)
+    out
+}
+
+#[tauri::command]
+pub async fn assistant_list_workspace_files(root: Option<String>) -> Result<Vec<String>, String> {
+    let root = match resolve_root(root) {
+        Some(p) => p,
+        None => return Ok(Vec::new()),
+    };
+    // Offload the synchronous walk to a blocking thread — a large monorepo or
+    // network FS can take seconds and would otherwise stall a Tokio worker.
+    tokio::task::spawn_blocking(move || list_workspace_files_sync(&root))
+        .await
+        .map_err(|e| format!("walk: {e}"))
 }
 
 /// Current git branch of the active workspace root, or `None` when the folder

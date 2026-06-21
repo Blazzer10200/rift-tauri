@@ -422,7 +422,14 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
                     let _ = app.emit("diag://event", &ev);
                 }
                 Err(RecvError::Lagged(n)) => {
-                    log::warn!("diag bus lagged: {n} events dropped");
+                    // Direct file write, NOT log::warn! — the latter re-enters
+                    // LogForwarder (file mutex + flush) on this tokio task and
+                    // re-publishes onto the very bus that just lagged.
+                    file_log_write(
+                        log::Level::Warn,
+                        "rift_tauri_lib::diagnostics",
+                        &format!("diag bus lagged: {n} events dropped"),
+                    );
                 }
                 Err(RecvError::Closed) => break,
             }

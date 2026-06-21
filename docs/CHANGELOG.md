@@ -2,9 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill + hardening pass (3 rounds)
+## v0.20.9 — 2026-06-21 — Recovery tools + per-project chat scoping + 4-round hardening pass
 
-> Unshipped batch on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings, isolated-target recompile of all edited .rs — dev app untouched).
+> Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings, isolated-target recompile of all edited .rs — dev app untouched).
+
+**Hardened (round 4 — under-swept surfaces: stt / diagnostics / oneshot / workspace, adversarially-verified):**
+- **STT model integrity on 416-resume** — `model_manager.rs`: when HuggingFace returns HTTP 416 (the `.partial` already covers the full file), the resume path now runs a full-file SHA256 verify before promoting `.partial → final`, mirroring the normal resume path. A truncated/corrupt partial is renamed `.badhash` and errored instead of silently installed as the live model.
+- **STT title generation can't wedge the app** — `oneshot.rs::assistant_generate_title` now bounds the CLI stdout-read + `child.wait()` in a 30s `tokio::time::timeout` and `start_kill()`s the child on expiry. Unlike the enhance path it had no cancel registry, so a hung `claude` (OAuth re-prompt / network stall / broken pipe) previously left the command future permanently unresolved (only an app restart recovered it).
+- **STT config writes serialized** — `stt/mod.rs`: `load_config`/`save_config` now take a process-wide `STT_WRITE_LOCK` (mirrors `assistant::config::CONFIG_WRITE_LOCK`); rapid Settings toggles via the sync `stt_set_config` command could otherwise interleave truncate+write and silently drop a save.
+- **Workspace file-walk off the Tokio worker** — `assistant_list_workspace_files` is now `async` + `spawn_blocking`; the up-to-4000-entry `walkdir` traversal no longer runs inline on an executor thread (a large monorepo / network FS could stall it for seconds). Shared sync helper `list_workspace_files_sync` backs both the command and `stt::workspace_context`.
+- **401 error no longer leaks the home-dir path** — `turn.rs::auth_rejection_message` now surfaces only the CLI *filename* (`claude.cmd`), not the absolute install path (`C:\Users\<name>\AppData\…`), which was rendered verbatim in the chat error bubble and any diagnostics export. Full path still lives where it belongs: Settings → CLI session.
+- **Diag-bus Lagged warn off the async task** — `diagnostics/mod.rs`: the `RecvError::Lagged` handler now writes directly to the file sink instead of `log::warn!`, which re-entered `LogForwarder` (file mutex-lock + flush) on the Tokio task and re-published onto the very bus that just lagged.
 
 **Hardened (deep review — adversarially-verified findings):**
 - **Log sink survives mutex poison** — `diagnostics::file_log_write` now recovers a poisoned `FILE_LOG` lock (`into_inner()`) instead of silently dropping every subsequent write. A panic mid-write previously blacked out the only persistent log sink in a GUI prod build (stderr is `/dev/null`). Also: env_logger (dev stderr) now receives the SCRUBBED message, so home-dir paths no longer leak to the dev terminal.

@@ -516,41 +516,55 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
         buf
     });
 
-    let mut acc = String::new();
-    let mut lines = BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+    // Bound the whole read+wait against a wedged CLI (network stall, OAuth
+    // re-prompt, broken pipe). Unlike the enhance path, title generation has no
+    // cancel registry, so a hang here is unrecoverable without an app restart.
+    let read_wait = async {
+        let mut acc = String::new();
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+                continue;
+            };
+            let ty = v.get("type").and_then(|t| t.as_str());
+            if ty == Some("result") {
+                break;
+            }
+            if ty != Some("stream_event") {
+                continue;
+            }
+            let Some(ev) = v.get("event") else { continue };
+            if ev.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
+                continue;
+            }
+            let delta = ev.get("delta");
+            let is_text = delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
+            if !is_text {
+                continue;
+            }
+            if let Some(txt) = delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
+                acc.push_str(txt);
+            }
         }
-        let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
-            continue;
-        };
-        let ty = v.get("type").and_then(|t| t.as_str());
-        if ty == Some("result") {
-            break;
-        }
-        if ty != Some("stream_event") {
-            continue;
-        }
-        let Some(ev) = v.get("event") else { continue };
-        if ev.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
-            continue;
-        }
-        let delta = ev.get("delta");
-        let is_text = delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
-        if !is_text {
-            continue;
-        }
-        if let Some(txt) = delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
-            acc.push_str(txt);
-        }
-    }
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("await claude (title): {e}"))?;
+        Ok::<_, String>((acc, status))
+    };
 
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| format!("await claude (title): {e}"))?;
+    let (acc, status) =
+        match tokio::time::timeout(std::time::Duration::from_secs(30), read_wait).await {
+            Ok(r) => r?,
+            Err(_) => {
+                let _ = child.start_kill();
+                return Err("title generation timed out".to_string());
+            }
+        };
     // RR-7: surface a panicked stderr-drain task (see enhance path above).
     let stderr_buf = match stderr_task.await {
         Ok(buf) => buf,

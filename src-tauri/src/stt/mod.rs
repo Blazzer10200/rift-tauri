@@ -140,7 +140,13 @@ fn config_path() -> PathBuf {
     dirs_home().join(".rift").join("stt-config.json")
 }
 
+/// Serializes config disk access — `stt_set_config` is a sync command on the
+/// thread pool, so concurrent saves could otherwise tear the file (truncate
+/// races overwrite). Mirrors `assistant::config::CONFIG_WRITE_LOCK`.
+static STT_WRITE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn load_config() -> SttConfig {
+    let _g = STT_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = config_path();
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
@@ -156,6 +162,7 @@ fn load_config() -> SttConfig {
 }
 
 fn save_config(cfg: &SttConfig) -> Result<(), String> {
+    let _g = STT_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let path = config_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir ~/.rift: {e}"))?;
@@ -298,7 +305,8 @@ fn workspace_context() -> String {
     if let Some(branch) = crate::assistant::assistant_workspace_branch(None) {
         let _ = write!(ctx, " Branch: {branch}.");
     }
-    if let Ok(files) = crate::assistant::assistant_list_workspace_files(None) {
+    {
+        let files = crate::assistant::workspace::list_workspace_files_sync(&root);
         // Distinct basenames, first ~30. compose_prompt's 800-char cap is the
         // final backstop; this keeps the file list from dominating it.
         let mut names: Vec<&str> = Vec::new();
