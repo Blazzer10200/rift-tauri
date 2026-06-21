@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.9 — Rounds 5–9 hardening (config race + IPC/update/browser + secrets/commands/state/frontend + diagnostics/update/UI-resilience + turn-lifecycle/git-dos/streaming/composer)
+## v0.21.0 — Rounds 5–9 hardening (1 critical + 42 fixes: config race + IPC/update/browser + secrets/commands/state/frontend + diagnostics/update/UI-resilience + turn-lifecycle/git-dos/streaming/composer)
 
-> Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target) · svelte-check 0/0 (4105) · playback regression net green (33/33).
+> Multi-agent adversarial review arc (review-dimension → per-finding skeptic verify). Verified: cargo check clean (0 errors/warnings, isolated target) · svelte-check 0/0 (4105) · playback regression net green (33/33).
 
 **Hardened (round 9 — turn-lifecycle / git-tool DoS / streaming-reducer / composer-lifecycle, adversarially-verified, 12 confirmed / 3 rejected):**
 - **Multi-round thinking blocks render their text** — `ensureThinkingFromEnvelope` used `find()` (first thinking block) to patch the incoming envelope; in agentic loops the message accumulates one thinking block per tool round, so in encrypted-thinking mode (the envelope is the only text source) every round after the first showed an empty thinking chip. Now `findLast()` targets the current round's block.
