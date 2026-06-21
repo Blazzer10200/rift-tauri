@@ -81,6 +81,7 @@
   // Tracks whether the input has grown past one line — flips the well to
   // bottom-align so the inline send arrow rides the textarea's last line.
   let multiline = $state(false);
+  let atMaxHeight = $state(false);
 
   type SlashCmd = { name: string; desc: string };
   // Grouped: conversation lifecycle → model + composition → flow control → info.
@@ -120,6 +121,9 @@
     const h = Math.min(ta.scrollHeight, 340);
     ta.style.height = h + "px";
     multiline = h > 40;
+    // Only allow the inner scrollbar once content actually hits the cap —
+    // otherwise `overflow:auto` paints a phantom gutter in the idle composer.
+    atMaxHeight = ta.scrollHeight > 340;
   }
 
   $effect(() => {
@@ -622,6 +626,9 @@
   // Permission-mode menu portals to <body> — positioning + outside-mousedown
   // close live in composer/PermMenu.svelte (C7); permWrap anchors it.
   let permWrap = $state<HTMLButtonElement | null>(null);
+  // Model/effort menu portals to <body> too — same anchor pattern; modelWrap
+  // is the trigger pill it positions against.
+  let modelWrap = $state<HTMLButtonElement | null>(null);
 
   let attachError = $state<string | null>(null);
   async function onPaste(e: ClipboardEvent) {
@@ -978,14 +985,6 @@
       />
     {/if}
 
-    {#if settingsOpen && !localLlm.enabled}
-      <SettingsMenu
-        {settingsIdx}
-        activeKind={settingsRows[settingsIdx]?.kind ?? null}
-        onPickModel={pickModel}
-      />
-    {/if}
-
     {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
       <div class="quick-chips">
         {#each quickStarts as s (s.title)}
@@ -1029,6 +1028,7 @@
           onkeydown={onKey}
           onpaste={onPaste}
           placeholder=""
+          class:scrollable={atMaxHeight}
           rows="1"
         ></textarea>
         {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
@@ -1103,7 +1103,7 @@
             use:tooltip={{ text: `Permission mode — ${currentMode.label}`, kbd: "⇧Tab" }}
           >
             <PermIcon size={13} />
-            <span class="perm-label">{currentMode.label}</span>
+            <span class="perm-label">{currentMode.short}</span>
             <ChevronUp size={12} class="cbtn-chev" />
           </button>
 
@@ -1238,6 +1238,7 @@
             class:open={settingsOpen}
             class:ultra={effortApplies && assistant.thinkingEffort === "ultra"}
             data-model={currentModel ? modelFamily(currentModel.id) : ""}
+            bind:this={modelWrap}
             onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
@@ -1256,6 +1257,16 @@
             {/if}
             <ChevronUp size={13} class="pill-chev" />
           </button>
+
+          {#if settingsOpen && !localLlm.enabled}
+            <SettingsMenu
+              {settingsIdx}
+              activeKind={settingsRows[settingsIdx]?.kind ?? null}
+              anchor={modelWrap}
+              onPickModel={pickModel}
+              onRequestClose={() => (settingsOpen = false)}
+            />
+          {/if}
           {/if}
         </div>
       </div>
@@ -1444,8 +1455,9 @@
     font: inherit;
     font-size: var(--fs-md);
     line-height: 1.5;
-    overflow-y: auto;
+    overflow-y: hidden;
   }
+  textarea.scrollable { overflow-y: auto; }
   textarea::placeholder {
     color: transparent;
   }

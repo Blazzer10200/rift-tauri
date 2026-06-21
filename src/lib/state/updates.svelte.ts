@@ -284,6 +284,37 @@ class UpdateStore {
   /** Back-compat alias — any "Install" caller routes through the same flow. */
   async applyNow() { await this.download(); }
 
+  /** Repair installation — force a fresh full re-download + re-apply of the
+   *  LATEST release (even when already on it), overwriting corrupted/half-written
+   *  binaries. Arms the pending plan to the latest full release on the backend,
+   *  then reuses the normal download → apply chain (app exits + relaunches).
+   *  Drives the same dialog progress UI as a normal update. */
+  async repair() {
+    if (this.state === "downloading" || this.state === "installing") return;
+    this.downloadError = "";
+    this.error = "";
+    try {
+      const res = await invoke<UpdateInfoDto>("repair_install");
+      // arm_repair set the pending plan; mirror an "available" state so the
+      // shared download() guard + dialog progress render correctly.
+      this.info = { ...res, releaseUrl: `${RELEASES_REPO_URL}/releases/tag/v${res.version}` };
+      this.state = "available";
+      this.dialogOpen = true;
+      await this.download();
+    } catch (e) {
+      this.state = "error";
+      this.downloadError = String(e);
+      this.dialogOpen = true;
+      toast.push({
+        severity: "danger",
+        title: "Repair couldn't start",
+        detail: String(e),
+        sticky: true,
+        action: { label: "Get it on GitHub", onClick: () => void this.openLatestRelease() },
+      });
+    }
+  }
+
   /** Open the GitHub release page in the OS browser — the always-available
    *  manual fallback when the in-app Velopack path fails on a given machine.
    *  Only ever hands a real https URL to the opener (F47). */

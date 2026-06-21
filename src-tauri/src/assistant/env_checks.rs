@@ -53,3 +53,61 @@ pub async fn environment_check() -> EnvironmentInfo {
     .await
     .unwrap_or(EnvironmentInfo { git: false, node: false, npm: false, cargo: false, code: false })
 }
+
+/// winget package id for an optional host tool. `npm` ships with Node, so it maps
+/// to the Node package; `cargo` comes from rustup. Returns `None` for unknown keys.
+#[cfg(windows)]
+fn winget_id(key: &str) -> Option<&'static str> {
+    Some(match key {
+        "git" => "Git.Git",
+        "node" | "npm" => "OpenJS.NodeJS.LTS",
+        "cargo" => "Rustlang.Rustup",
+        "code" => "Microsoft.VisualStudioCode",
+        _ => return None,
+    })
+}
+
+/// Install a missing optional host tool via winget, in a VISIBLE console so the
+/// user sees the UAC prompt + download progress and can react if winget asks for
+/// agreements. We deliberately do NOT install silently/in-process: silent winget
+/// can stall on a hidden prompt, and a fresh install needs a new shell to pick up
+/// PATH changes anyway. After this returns the frontend re-probes `environment_check`
+/// (the user reopens Settings / clicks re-probe once the console finishes).
+///
+/// winget is built into Windows 11; if it's absent we surface an actionable error.
+#[tauri::command]
+pub async fn install_local_tool(key: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let id = winget_id(&key).ok_or_else(|| format!("unknown tool '{key}'"))?;
+        if !which_on_path("winget") {
+            return Err(
+                "Windows Package Manager (winget) isn't available. Update \"App Installer\" \
+                 from the Microsoft Store, then try again — or install the tool manually."
+                    .to_string(),
+            );
+        }
+        // Launch winget in its own console window via PowerShell Start-Process so
+        // the user sees progress/UAC. `-e` exact-id match; accept source+package
+        // agreements so it doesn't block on the first-run EULA prompt.
+        let inner = format!(
+            "winget install --id {id} -e --accept-source-agreements --accept-package-agreements"
+        );
+        let arg = format!(
+            "Start-Process -FilePath 'powershell' -ArgumentList @('-NoLogo','-NoProfile','-Command',\"{inner}; Write-Host ''; Write-Host 'Done — you can close this window.' -ForegroundColor Green; Read-Host 'Press Enter to close'\")"
+        );
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", &arg])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Couldn't launch installer: {e}"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = key;
+        Err("Automatic install is only supported on Windows.".to_string())
+    }
+}

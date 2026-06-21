@@ -213,6 +213,74 @@ impl UpdateService {
         Ok(())
     }
 
+    /// Force the pending plan to the LATEST full release in the feed, regardless
+    /// of whether it's newer than the installed version. This is the "Repair
+    /// installation" path — it re-fetches and re-applies the current release to
+    /// overwrite corrupted/half-written binaries. Velopack's normal `check`
+    /// returns `NoUpdateAvailable` when remote == installed, so we bypass it:
+    /// pull the release feed, pick the newest `Full` asset, and build an
+    /// `UpdateInfo` for it via serde (the public ctor is crate-private). After
+    /// this, the regular `download()` → `apply()` chain reinstalls it.
+    pub fn arm_repair(&self) -> Result<UpdateInfoDto, String> {
+        let mgr = {
+            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            match g.mgr.as_ref() {
+                Some(m) => m.clone(),
+                None => {
+                    return Err(g
+                        .init_error
+                        .clone()
+                        .map(|e| format!(
+                            "Rift isn't properly installed for auto-update ({e}). \
+                             Reinstall from the latest Setup.exe to repair."
+                        ))
+                        .unwrap_or_else(|| "update source unavailable".to_string()))
+                }
+            }
+        };
+        let feed = mgr.get_release_feed().map_err(|e| format!("repair: release feed: {e}"))?;
+        // Newest "Full" asset by version (matches check_for_updates' own
+        // selection). Lightweight numeric compare on the dotted X.Y.Z core —
+        // avoids pulling in a semver dep just to rank the feed.
+        fn ver_key(v: &str) -> (u64, u64, u64) {
+            let core = v.split(['-', '+']).next().unwrap_or(v);
+            let mut it = core.split('.').map(|p| p.parse::<u64>().unwrap_or(0));
+            (it.next().unwrap_or(0), it.next().unwrap_or(0), it.next().unwrap_or(0))
+        }
+        let latest = feed
+            .Assets
+            .iter()
+            .filter(|a| a.Type.eq_ignore_ascii_case("Full"))
+            .max_by_key(|a| ver_key(&a.Version))
+            .ok_or_else(|| "repair: no full release found in feed".to_string())?
+            .clone();
+        log::info!("repair: arming reinstall of full release v{}", latest.Version);
+        let dto = UpdateInfoDto {
+            version: latest.Version.clone(),
+            release_name: latest.FileName.clone(),
+            size_bytes: latest.Size,
+            notes_markdown: latest.NotesMarkdown.clone(),
+        };
+        // The crate-private `UpdateInfo::new_full` ctor is unreachable, but
+        // `UpdateInfo` is serde-(de)serializable — round-trip a JSON object with
+        // the chosen full release as the target (no base/deltas → forces a full
+        // download). `IsDowngrade: true` lets Velopack overwrite a same/lower
+        // local version, which is exactly the repair case.
+        let target = serde_json::to_value(&latest).map_err(|e| format!("repair: serialize asset: {e}"))?;
+        let info_json = serde_json::json!({
+            "TargetFullRelease": target,
+            "BaseRelease": null,
+            "DeltasToTarget": [],
+            "IsDowngrade": true,
+        });
+        let info: UpdateInfo =
+            serde_json::from_value(info_json).map_err(|e| format!("repair: build update info: {e}"))?;
+        let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        g.pending = Some(info);
+        g.downloaded = false;
+        Ok(dto)
+    }
+
     /// Abandon any in-flight download: bump the epoch so a still-running
     /// `download()` task can't later flip `downloaded`, and clear the flag now.
     /// Called by the command layer when its stall watchdog gives up on a wedged

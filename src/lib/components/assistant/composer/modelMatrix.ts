@@ -81,13 +81,16 @@ export function clampEffortIdx(stops: EffortOpt[], i: number): number {
 
 // Permission-mode picker options — order matches the VS Code Claude Code menu:
 // ask → auto-edit → plan → auto → bypass. Icons echo that menu.
-export type ModeOpt = { id: PermissionMode; label: string; icon: typeof Hand; hint: string };
+// `label` = full descriptive label (menu rows). `short` = the compact bar-pill
+// label (design-system `PERM_SHORT`) so the composer bar stays terse — e.g.
+// "Bypass" not "Bypass permissions". Keep both in sync per mode.
+export type ModeOpt = { id: PermissionMode; label: string; short: string; icon: typeof Hand; hint: string };
 export const MODE_OPTIONS: ModeOpt[] = [
-  { id: "default",           label: "Ask before edits", icon: Hand,          hint: "Ask before edits — approve each change before it's made" },
-  { id: "acceptEdits",       label: "Edit automatically", icon: Code2,       hint: "Edit automatically — apply file edits without asking" },
-  { id: "plan",              label: "Plan mode",        icon: ClipboardList, hint: "Plan mode — explore and present a plan before editing" },
-  { id: "auto",              label: "Auto mode",        icon: Zap,           hint: "Auto mode — pick the best permission mode per task" },
-  { id: "bypassPermissions", label: "Bypass permissions", icon: InfinityIcon, hint: "Bypass permissions — never ask before running anything" },
+  { id: "default",           label: "Ask before edits",   short: "Ask first", icon: Hand,          hint: "Ask before edits — approve each change before it's made" },
+  { id: "acceptEdits",       label: "Edit automatically", short: "Auto-edit", icon: Code2,         hint: "Edit automatically — apply file edits without asking" },
+  { id: "plan",              label: "Plan mode",          short: "Plan",      icon: ClipboardList, hint: "Plan mode — explore and present a plan before editing" },
+  { id: "auto",              label: "Auto mode",          short: "Auto",      icon: Zap,           hint: "Auto mode — pick the best permission mode per task" },
+  { id: "bypassPermissions", label: "Bypass permissions", short: "Bypass",    icon: InfinityIcon,  hint: "Bypass permissions — never ask before running anything" },
 ];
 
 // Per-mode semantic tone for the spec `.pop-item.tone-*` tinting + the composer

@@ -49,6 +49,25 @@ class Environment {
       this.#inflight = null;
     }
   }
+
+  /** Tool keys currently mid-install (winget console open). Drives the button's
+   *  "Installing…" state until the user re-probes. */
+  installing = $state<Record<string, boolean>>({});
+  installError = $state<string | null>(null);
+
+  /** Launch a winget install for `key` in a visible console (backend handles the
+   *  package mapping + UAC). Marks the tool "installing" optimistically; the user
+   *  finishes in the console, then re-probe (refresh) flips it to Installed. */
+  async install(key: "git" | "node" | "npm" | "cargo" | "code"): Promise<void> {
+    this.installError = null;
+    this.installing = { ...this.installing, [key]: true };
+    try {
+      await invoke("install_local_tool", { key });
+    } catch (e) {
+      this.installError = typeof e === "string" ? e : String(e);
+      this.installing = { ...this.installing, [key]: false };
+    }
+  }
 }
 
 export const environment = new Environment();

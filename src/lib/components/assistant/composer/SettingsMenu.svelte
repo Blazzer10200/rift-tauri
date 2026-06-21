@@ -6,9 +6,11 @@
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
   import { Check, HelpCircle } from "lucide-svelte";
+  import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { uiPrefs } from "../../../state/ui-prefs.svelte";
   import { effortToFlag } from "../../../state/assistant/helpers";
+  import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { effortIdxFromX } from "./helpers";
   import {
@@ -19,12 +21,53 @@
   let {
     settingsIdx,
     activeKind,
+    anchor,
     onPickModel,
+    onRequestClose,
   }: {
     settingsIdx: number;
     activeKind: "model" | "fast" | "effort" | null;
+    anchor: HTMLElement | null;
     onPickModel: (m: ModelOpt) => void;
+    onRequestClose: () => void;
   } = $props();
+
+  // Portal to <body> + position against the trigger pill (same pattern as
+  // PermMenu) — escapes the composer's overflow/backdrop-filter containing
+  // block that was leaving this panel floating mid-app.
+  let menuEl = $state<HTMLDivElement | null>(null);
+  let pos = $state<{ top: number; left: number }>({ top: 0, left: 0 });
+  function position() {
+    if (!anchor || !menuEl) return;
+    const a = anchor.getBoundingClientRect();
+    const ph = menuEl.offsetHeight || 420;
+    const pw = menuEl.offsetWidth || 320;
+    let top = a.top - ph - 9;
+    if (top < 8) top = a.bottom + 9;
+    // right-align the panel to the pill's right edge
+    let left = a.right - pw;
+    const maxLeft = window.innerWidth - pw - 8;
+    if (left > maxLeft) left = maxLeft;
+    if (left < 8) left = 8;
+    pos = { top, left };
+  }
+  function onDocMousedown(ev: MouseEvent) {
+    if (anchor && ev.target instanceof Node && anchor.contains(ev.target)) return;
+    if (menuEl && ev.target instanceof Node && menuEl.contains(ev.target)) return;
+    onRequestClose();
+  }
+  $effect(() => {
+    window.addEventListener("mousedown", onDocMousedown);
+    return () => window.removeEventListener("mousedown", onDocMousedown);
+  });
+  $effect(() => {
+    // re-position when the panel's height changes (effort slider show/hide, etc.)
+    const _h = assistant.thinkingEnabled; const _m = assistant.effectiveModel; void _h; void _m;
+    void tick().then(position);
+    const onResize = () => position();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  });
 
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
@@ -76,7 +119,13 @@
   function endEffortDrag() { draggingEffort = false; }
 </script>
 
-<div class="rift-menu settings-menu" role="menu">
+<div
+  class="rift-menu settings-menu"
+  role="menu"
+  bind:this={menuEl}
+  use:portal
+  style="top: {pos.top}px; left: {pos.left}px;"
+>
   <div class="rift-menu-head">Model</div>
   {#each MODEL_OPTIONS as m, i (m.id)}
     {#if m.legacy && (i === 0 || !MODEL_OPTIONS[i - 1].legacy)}
@@ -222,14 +271,12 @@
      and a Faster↔Smarter effort slider. Right-anchored, content-width. */
   /* Panel — spec `.pop` glass popover (docs/design/rift-redesign.html). The
      compound selector overrides the shared .rift-menu base chrome. */
-  .rift-menu.settings-menu {
-    position: absolute;
-    bottom: calc(100% + 9px);
-    left: auto; right: 0;
+  :global(.rift-menu.settings-menu) {
+    position: fixed;
     width: 320px; min-width: 264px;
     max-height: min(82vh, 600px);
     overflow-y: auto;
-    z-index: 10;
+    z-index: 9998;
     padding: 7px; border-radius: 16px;
     transform-origin: bottom right;
     background: color-mix(in oklab, var(--bg-elev-2) 56%, transparent);
@@ -252,105 +299,109 @@
     font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
     color: var(--fg-faint); padding: 7px 9px 5px;
   }
-  .pop-label-sub {
+  :global(.settings-menu .pop-label-sub) {
     font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
     color: var(--fg-faint); padding: 9px 9px 4px;
   }
 
   /* Rich two-line items — spec `.pop-item.rich` (model rows). */
-  .pop-item {
+  :global(.settings-menu .pop-item) {
     display: flex; align-items: center; gap: 11px; width: 100%;
     padding: 9px 10px; border-radius: 11px; border: 0; background: transparent;
     color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
     transition: background var(--dur-fast);
   }
-  .pop-item:hover, .pop-item.active { background: var(--surface-hover); color: var(--fg); }
-  .pi-ic {
+  :global(.settings-menu .pop-item:hover),
+  :global(.settings-menu .pop-item.active) { background: var(--surface-hover); color: var(--fg); }
+  :global(.settings-menu .pi-ic) {
     flex: none; width: 30px; height: 30px; display: grid; place-items: center;
     border-radius: 9px; background: var(--surface); color: var(--fg-muted);
     border: 1px solid var(--border);
     transition: transform 0.34s var(--ease-page), background var(--dur-fast), border-color var(--dur-fast);
   }
-  .pop-item:hover .pi-ic, .pop-item.active .pi-ic { border-color: var(--border-strong); transform: scale(1.06); }
-  .model-dot {
+  :global(.settings-menu .pop-item:hover .pi-ic),
+  :global(.settings-menu .pop-item.active .pi-ic) { border-color: var(--border-strong); transform: scale(1.06); }
+  :global(.settings-menu .model-dot) {
     width: 9px; height: 9px; border-radius: 999px; background: var(--fg-faint);
     box-shadow: 0 0 0 3px color-mix(in oklab, var(--fg-faint) 14%, transparent);
     transition: background var(--dur-fast), box-shadow var(--dur-fast);
   }
-  .pi-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .pi-name { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; color: var(--fg-2); line-height: 1.2; }
-  .pi-name .model-name { flex: 0 0 auto; }
-  .pi-tag {
+  :global(.settings-menu .pi-text) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  :global(.settings-menu .pi-name) { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 600; color: var(--fg-2); line-height: 1.2; }
+  :global(.settings-menu .pi-name .model-name) { flex: 0 0 auto; }
+  :global(.settings-menu .pi-tag) {
     margin-left: auto; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     color: var(--fg-faint); font-variant-numeric: tabular-nums; white-space: nowrap;
   }
-  .pi-tag.accent {
+  :global(.settings-menu .pi-tag.accent) {
     color: var(--accent); padding: 2px 6px; border-radius: 999px; text-transform: none; letter-spacing: 0.02em;
     background: color-mix(in oklab, var(--accent) 14%, transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
   }
-  .pi-sub {
+  :global(.settings-menu .pi-sub) {
     font-size: 11.5px; color: var(--fg-faint); line-height: 1.3;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .pop-item:hover .pi-name, .pop-item.active .pi-name { color: var(--fg); }
+  :global(.settings-menu .pop-item:hover .pi-name),
+  :global(.settings-menu .pop-item.active .pi-name) { color: var(--fg); }
   /* selected model — accent-soft slab + lit dot + tinted tile + checkmark */
-  .model-row.sel { background: var(--accent-soft); }
-  .model-row.sel .pi-name { color: var(--fg); }
-  .model-row.sel .pi-ic { background: color-mix(in oklab, var(--accent) 14%, transparent); border-color: transparent; }
-  .model-row.sel .model-dot,
-  .model-row.limited .model-dot {
+  :global(.settings-menu .model-row.sel) { background: var(--accent-soft); }
+  :global(.settings-menu .model-row.sel .pi-name) { color: var(--fg); }
+  :global(.settings-menu .model-row.sel .pi-ic) { background: color-mix(in oklab, var(--accent) 14%, transparent); border-color: transparent; }
+  :global(.settings-menu .model-row.sel .model-dot),
+  :global(.settings-menu .model-row.limited .model-dot) {
     background: var(--accent);
     box-shadow: 0 0 7px color-mix(in oklab, var(--accent) 70%, transparent);
   }
-  .model-row.limited .model-name { color: var(--accent); }
+  :global(.settings-menu .model-row.limited .model-name) { color: var(--accent); }
   :global(.settings-menu .pop-ck) { flex: none; color: var(--accent); }
 
   /* Fixed-width trailing slot so the ✓ (selected) and the number badge
      (unselected) occupy identical space — selecting a row never reflows it. */
-  .model-trail {
+  :global(.settings-menu .model-trail) {
     flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px;
   }
-  .model-num {
+  :global(.settings-menu .model-num) {
     flex: none;
     font-family: var(--font-mono); font-size: 10px; font-weight: 600; line-height: 1;
     color: var(--fg-faint); background: var(--bg-inset);
     border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px;
   }
-  .model-row:hover .model-num, .model-row.active .model-num { color: var(--fg-muted); }
+  :global(.settings-menu .model-row:hover .model-num),
+  :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
 
   /* Fast-mode toggle row. */
-  .toggle-row { align-items: center; }
-  .rift-toggle {
+  :global(.settings-menu .toggle-row) { align-items: center; }
+  :global(.settings-menu .rift-toggle) {
     position: relative; flex-shrink: 0; align-self: center;
     width: 30px; height: 17px; border-radius: 999px;
     background: color-mix(in oklch, var(--fg-faint) 38%, transparent);
     border: 1px solid var(--border);
     transition: background 160ms ease, border-color 160ms ease;
   }
-  .rift-toggle.on { background: var(--accent); border-color: transparent; }
-  .rift-toggle-knob {
+  :global(.settings-menu .rift-toggle.on) { background: var(--accent); border-color: transparent; }
+  :global(.settings-menu .rift-toggle-knob) {
     position: absolute; top: 1px; left: 1px;
     width: 13px; height: 13px; border-radius: 999px;
     background: oklch(0.97 0 0);
     box-shadow: 0 1px 2px oklch(0 0 0 / 0.4);
     transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .rift-toggle.on .rift-toggle-knob { transform: translateX(13px); }
+  :global(.settings-menu .rift-toggle.on .rift-toggle-knob) { transform: translateX(13px); }
 
   /* Effort slider — Faster↔Smarter, stops = EFFORT_OPTIONS levels. */
-  .effort-head {
+  :global(.settings-menu .effort-head) {
     display: flex; align-items: center;
     padding: 6px 8px 3px;
     font-size: 11px; color: var(--fg-muted);
   }
-  .effort-head .effort-head-l { letter-spacing: 0.01em; }
-  .effort-head .effort-head-l b {
+  :global(.settings-menu .effort-head .effort-head-l) { letter-spacing: 0.01em; }
+  :global(.settings-menu .effort-head .effort-head-l b) {
     color: var(--fg); font-weight: 650; margin-left: 2px;
     transition: color 180ms ease;
   }
-  .effort-head.ultra .effort-head-l b { color: var(--accent); }
-  .effort-head .effort-head-flag {
+  :global(.settings-menu .effort-head.ultra .effort-head-l b) { color: var(--accent); }
+  :global(.settings-menu .effort-head .effort-head-flag) {
     margin-left: 8px;
     font-family: var(--font-mono);
     font-size: 9px;
@@ -363,34 +414,34 @@
     border-radius: 4px;
     line-height: 1.4;
   }
-  .effort-head.ultra .effort-head-flag {
+  :global(.settings-menu .effort-head.ultra .effort-head-flag) {
     color: color-mix(in oklab, var(--accent) 70%, var(--fg-faint));
     border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
   }
-  .effort-head .effort-help {
+  :global(.settings-menu .effort-head .effort-help) {
     margin-left: auto; display: inline-flex; padding: 2px; border: 0;
     background: transparent; color: var(--fg-faint); cursor: help;
     transition: color 140ms ease;
   }
-  .effort-head .effort-help:hover { color: var(--fg-muted); }
-  .effort-slider {
+  :global(.settings-menu .effort-head .effort-help:hover) { color: var(--fg-muted); }
+  :global(.settings-menu .effort-slider) {
     padding: 13px 16px 8px; margin: 0 2px; border-radius: var(--radius-xl);
     transition: background 160ms ease, box-shadow 160ms ease;
   }
-  .effort-slider.active {
+  :global(.settings-menu .effort-slider.active) {
     background: var(--surface-hover);
     box-shadow: inset 0 0 0 1px var(--border);
   }
-  .effort-track {
+  :global(.settings-menu .effort-track) {
     position: relative; height: 5px; border-radius: 999px;
     background: color-mix(in oklch, var(--fg-faint) 24%, transparent);
     box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.28);
     cursor: grab; touch-action: none;
   }
   /* Invisible vertical hit-area so the 5px track is easy to grab. */
-  .effort-track::before { content: ""; position: absolute; inset: -11px 0; }
-  .effort-slider.dragging .effort-track { cursor: grabbing; }
-  .effort-fill {
+  :global(.settings-menu .effort-track::before) { content: ""; position: absolute; inset: -11px 0; }
+  :global(.settings-menu .effort-slider.dragging .effort-track) { cursor: grabbing; }
+  :global(.settings-menu .effort-fill) {
     position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
     background: linear-gradient(
       90deg,
@@ -401,11 +452,11 @@
     transition: width 260ms cubic-bezier(0.22, 1, 0.36, 1),
                 background 220ms ease, box-shadow 220ms ease;
   }
-  .effort-slider.ultra .effort-fill {
+  :global(.settings-menu .effort-slider.ultra .effort-fill) {
     background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 68%, var(--fg-faint)), var(--accent));
     box-shadow: 0 0 11px color-mix(in oklab, var(--accent) 55%, transparent);
   }
-  .effort-notch {
+  :global(.settings-menu .effort-notch) {
     position: absolute; top: 50%; width: 9px; height: 9px; padding: 0;
     transform: translate(-50%, -50%);
     border-radius: 999px; border: 1.5px solid var(--border-strong);
@@ -413,14 +464,14 @@
     transition: border-color 160ms ease, background 160ms ease,
                 transform 220ms cubic-bezier(0.34, 1.4, 0.5, 1);
   }
-  .effort-notch:hover { transform: translate(-50%, -50%) scale(1.3); }
-  .effort-notch.on {
+  :global(.settings-menu .effort-notch:hover) { transform: translate(-50%, -50%) scale(1.3); }
+  :global(.settings-menu .effort-notch.on) {
     border-color: var(--accent);
     background: color-mix(in oklab, var(--accent) 24%, var(--surface));
   }
-  .effort-notch.cur { transform: translate(-50%, -50%) scale(0); }
-  .effort-slider.ultra .effort-notch.on { border-color: var(--accent); }
-  .effort-knob {
+  :global(.settings-menu .effort-notch.cur) { transform: translate(-50%, -50%) scale(0); }
+  :global(.settings-menu .effort-slider.ultra .effort-notch.on) { border-color: var(--accent); }
+  :global(.settings-menu .effort-knob) {
     position: absolute; top: 50%; width: 15px; height: 15px; z-index: 2;
     transform: translate(-50%, -50%);
     border-radius: 999px;
@@ -432,32 +483,34 @@
                 border-color 220ms ease, box-shadow 220ms ease;
     pointer-events: none;
   }
-  .effort-slider.dragging .effort-fill { transition: background 220ms ease, box-shadow 220ms ease; }
-  .effort-slider.dragging .effort-knob { transition: border-color 220ms ease, box-shadow 220ms ease; }
-  .effort-slider.active .effort-knob {
+  :global(.settings-menu .effort-slider.dragging .effort-fill) { transition: background 220ms ease, box-shadow 220ms ease; }
+  :global(.settings-menu .effort-slider.dragging .effort-knob) { transition: border-color 220ms ease, box-shadow 220ms ease; }
+  :global(.settings-menu .effort-slider.active .effort-knob) {
     box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 22%, transparent),
                 0 2px 6px oklch(0 0 0 / 0.45);
   }
-  .effort-slider.ultra .effort-knob {
+  :global(.settings-menu .effort-slider.ultra .effort-knob) {
     border-color: var(--accent);
     box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 22%, transparent),
                 0 0 11px color-mix(in oklab, var(--accent) 55%, transparent),
                 0 2px 5px oklch(0 0 0 / 0.45);
   }
-  .effort-ends {
+  :global(.settings-menu .effort-ends) {
     display: flex; justify-content: space-between;
     margin-top: 9px; font-size: 9px; font-weight: 600;
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-faint);
   }
   /* Plain-language "what you're getting" line under the effort slider. Amber on
      the Ultracode tier to flag its higher cost / autonomous behavior. */
-  .model-caption {
+  :global(.settings-menu .model-caption) {
     margin: 8px 10px 2px; padding: 0;
     font-size: 10.5px; line-height: 1.4; color: var(--fg-muted);
     transition: color 180ms ease;
   }
-  .model-caption.warn { color: var(--warn); }
+  :global(.settings-menu .model-caption.warn) { color: var(--warn); }
   @media (prefers-reduced-motion: reduce) {
-    .effort-fill, .effort-knob, .effort-notch { transition: none; }
+    :global(.settings-menu .effort-fill),
+    :global(.settings-menu .effort-knob),
+    :global(.settings-menu .effort-notch) { transition: none; }
   }
 </style>

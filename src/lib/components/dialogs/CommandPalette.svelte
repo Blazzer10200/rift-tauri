@@ -4,7 +4,7 @@
   import { quintOut } from "svelte/easing";
   import {
     Search, Home, MessageSquare,
-    Settings as SettingsIcon, Plus, Palette, Accessibility as A11yIcon,
+    Settings as SettingsIcon, Plus, Palette,
     Sparkles, Mic, Info, History,
   } from "lucide-svelte";
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
@@ -56,12 +56,11 @@
     }
 
     // Settings sections (deep-link)
-    const sects: { id: SettingsSection; label: string; icon: Icon }[] = [
-      { id: "appearance",    label: "Appearance",    icon: Palette },
-      { id: "accessibility", label: "Accessibility", icon: A11yIcon },
-      { id: "assistant",     label: "Assistant",     icon: Sparkles },
-      { id: "speech",        label: "Speech",        icon: Mic },
-      { id: "about",         label: "About",         icon: Info },
+    const sects: { id: SettingsSection; label: string; icon: Icon; kw?: string }[] = [
+      { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "chat",       label: "Chat",       icon: Sparkles, kw: "assistant accessibility reading comfort session keys cost" },
+      { id: "speech",     label: "Speech",     icon: Mic },
+      { id: "about",      label: "About",      icon: Info, kw: "shortcuts keyboard tools help diagnostics" },
     ];
     for (const s of sects) {
       out.push({
@@ -70,7 +69,7 @@
         sub: `Jump to ${s.label.toLowerCase()} settings`,
         group: "Go to",
         icon: s.icon,
-        keywords: `preferences ${s.id} options`,
+        keywords: `preferences ${s.id} options ${s.kw ?? ""}`,
         run: () => {
           commandPalette.requestSettingsSection(s.id);
           workspace.setActive("settings");

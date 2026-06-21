@@ -39,6 +39,25 @@ pub async fn check_for_updates(
     }
 }
 
+/// Arm a "Repair installation" — force the pending plan to the latest full
+/// release so the next `download_update` + `apply_pending_update` reinstalls it,
+/// overwriting any corrupted binaries (even when already on the latest version).
+/// Returns the release that will be reinstalled. Frontend then drives the SAME
+/// download → apply chain as a normal update.
+#[tauri::command]
+pub async fn repair_install(
+    svc: tauri::State<'_, Arc<UpdateService>>,
+) -> Result<UpdateInfoDto, String> {
+    use std::time::Duration;
+    log::info!("repair_install: command invoked (frontend → backend OK)");
+    let svc = svc.inner().clone();
+    let task = tokio::task::spawn_blocking(move || svc.arm_repair());
+    match tokio::time::timeout(Duration::from_secs(30), task).await {
+        Ok(joined) => joined.map_err(|e| format!("repair task: {e}"))?,
+        Err(_) => Err("repair timed out after 30s — the update feed may be unreachable".to_string()),
+    }
+}
+
 /// Download the pending update package. Emits `update-progress` (i16 0..=100)
 /// as bytes arrive, then `update-downloaded` on success.
 #[tauri::command]

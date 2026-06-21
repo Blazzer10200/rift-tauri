@@ -5,9 +5,10 @@
     Cog, Info, RefreshCw, Sparkles, Palette,
     FolderOpen, Copy, Check, Eye, EyeOff, Mic, Accessibility as A11yIcon,
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
-    SlidersHorizontal, Bot, KeyRound, Wrench, Keyboard,
+    SlidersHorizontal, Bot, KeyRound, Wrench, Keyboard, Download, ShieldCheck,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
+  import { confirm } from "@tauri-apps/plugin-dialog";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
   import { cliUpdate } from "../../state/cliUpdate.svelte";
@@ -27,13 +28,12 @@
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
 
-  type Section = "appearance" | "accessibility" | "assistant" | "speech" | "about";
+  type Section = "appearance" | "chat" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
-    { id: "appearance",    label: "Appearance",    icon: Palette,  sub: "Theme color, density, code preview, and keyboard shortcuts — applied instantly across Rift." },
-    { id: "accessibility", label: "Accessibility", icon: A11yIcon, sub: "Reading-comfort options for the Assistant chat." },
-    { id: "assistant",     label: "Assistant",     icon: Sparkles, sub: "Your Claude session and per-turn cost guard." },
-    { id: "speech",        label: "Speech",        icon: Mic,      sub: "Voice-to-text input. Web Speech (online) or Whisper (local, accent-tuned)." },
-    { id: "about",         label: "About",         icon: Info,     sub: "Build info, file paths, first-run, and support diagnostics." },
+    { id: "appearance", label: "Appearance", icon: Palette,  sub: "Theme, density, and chat rendering — applied instantly across Rift." },
+    { id: "chat",       label: "Chat",       icon: Sparkles, sub: "Your Claude session, reading comfort, and per-turn cost guard." },
+    { id: "speech",     label: "Speech",     icon: Mic,      sub: "Voice-to-text input — Web Speech (online) or Whisper (on-device, accent-tuned)." },
+    { id: "about",      label: "About",      icon: Info,     sub: "Build info, file paths, keyboard shortcuts, and support diagnostics." },
   ];
 
   let activeSec = $state<Section>("appearance");
@@ -49,7 +49,7 @@
 
   // Per-tab rail sub-section (RailShell left nav).
   let apprSec = $state<"theme" | "layout">("theme");
-  let asstSec = $state<"session" | "keys">("session");
+  let chatSec = $state<"session" | "reading" | "keys">("session");
   let spchSec = $state<"engine" | "composer">("engine");
   let abtSec = $state<"about" | "help">("about");
 
@@ -75,7 +75,7 @@
   $effect(() => {
     const req = commandPalette.targetSettingsSection;
     if (req) {
-      activeSec = req as Section;
+      activeSec = req;
       requestAnimationFrame(() => scrollEl?.scrollTo({ top: 0 }));
       untrack(() => commandPalette.clearSettingsSection());
     }
@@ -109,6 +109,15 @@
       if (diagCopiedTimer) clearTimeout(diagCopiedTimer);
       diagCopiedTimer = setTimeout(() => { diagCopied = false; diagCopiedTimer = null; }, 1400);
     } catch (e) { console.error("clipboard failed", e); }
+  }
+
+  async function repairInstall() {
+    const ok = await confirm(
+      "Repair will re-download and reinstall the current version, then restart Rift. Continue?",
+      { title: "Repair installation", kind: "warning", okLabel: "Repair", cancelLabel: "Cancel" },
+    );
+    if (!ok) return;
+    await updates.repair();
   }
 
   const STT_LANGS: { id: string; label: string }[] = [
@@ -277,7 +286,7 @@
       <div class="tabnav" role="tablist">
         {#each ST_SECTIONS as s (s.id)}
           {@const Icon = s.icon}
-          {@const dot = s.id === "assistant" ? assistantDot : s.dot}
+          {@const dot = s.id === "chat" ? assistantDot : s.dot}
           <button class="snav" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
             <Icon size={15} strokeWidth={1.75} />
             <span>{s.label}</span>
@@ -301,7 +310,7 @@
           {#if apprSec === "theme"}
           <div class="card">
             <div class="card-tt">Looks &amp; accent</div>
-            <div class="card-sub">One tap sets accent, texture, and density together — or fine-tune the accent colour below.</div>
+            <div class="card-sub">One tap sets accent, texture, and density together — or fine-tune the accent color below.</div>
             <div class="looks">
               {#each LOOKS as p (p.id)}
                 <button class="look" class:sel={lookSel(p)} type="button" onclick={() => applyLook(p)} style="--lk: oklch(0.72 0.16 {p.h}); --lkh: {p.h};" use:tooltip={p.name}>
@@ -318,7 +327,7 @@
             <div class="card-divider"></div>
             <div class="accent-panel">
               <div class="ap-head">
-                <span class="sub-label">Accent colour</span>
+                <span class="sub-label">Accent color</span>
                 <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
               </div>
               <div class="swatches">
@@ -374,7 +383,7 @@
             <div class="card-tt">Code blocks</div>
             <div class="card-sub">How code renders in Claude's replies.</div>
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Font size</div><div class="ctl-s">Size of code blocks in Claude's chat replies.</div></div>
+                <div><div class="ctl-t">Font size</div><div class="ctl-s">Size of code in Claude's replies.</div></div>
                 <div style="min-width:130px;">
                   <Select value={String(uiPrefs.code.fontSize)} options={[11,12,13,14].map((n) => ({ value: String(n), label: `${n}px` }))} onChange={(v) => uiPrefs.setCode({ fontSize: Number(v) })} ariaLabel="Code font size" />
                 </div>
@@ -389,75 +398,21 @@
                 <div><div class="ctl-t">Font ligatures</div><div class="ctl-s">Render <code>→ ≠ &gt;=</code> as joined glyphs in JetBrains Mono.</div></div>
                 <button class="toggle" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}><span class="toggle-knob"></span></button>
               </div>
-              <div class="ctl-row tight">
-                <div><div class="ctl-t">Stream view</div><div class="ctl-s">Boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div></div>
-                <button class="toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="toggle-knob"></span></button>
-              </div>
-              <div class="ctl-row tight">
-                <div><div class="ctl-t">Activity dock</div><div class="ctl-s">Slide-in side panel showing live sub-agent activity. Auto-reveals while sub-agents run and tidies away when they finish.</div></div>
-                <button class="toggle" class:on={activityDock.enabled} role="switch" aria-checked={activityDock.enabled} aria-label="Activity dock" type="button" onclick={() => activityDock.setEnabled(!activityDock.enabled)}><span class="toggle-knob"></span></button>
-              </div>
-          </div>
-
-          <div class="card">
-            <div class="card-tt">Keyboard shortcuts</div>
-            <div class="card-sub">Move around Rift without the mouse.</div>
-            {#each SHORTCUTS as sc (sc.label)}
-              <div class="kbd-row">
-                <span>{sc.label}</span>
-                <span class="keys">
-                  {#each sc.combo as k}<b>{k}</b>{/each}
-                  {#if sc.alt}<span class="kbd-or">or</span>{#each sc.alt as k}<b>{k}</b>{/each}{/if}
-                </span>
-              </div>
-            {/each}
           </div>
           {/if}
         </div>
       </div></div>
     {/if}
 
-    {#if activeSec === "accessibility"}
+    {#if activeSec === "chat"}
       <div class="set-surface"><div class="set-rail">
         <nav class="set-railnav">
-          <button class="on" type="button"><A11yIcon size={16} strokeWidth={1.75} /> Reading comfort</button>
+          <button class:on={chatSec === "session"} type="button" onclick={() => (chatSec = "session")}><Bot size={16} strokeWidth={1.75} /> Session</button>
+          <button class:on={chatSec === "reading"} type="button" onclick={() => (chatSec = "reading")}><A11yIcon size={16} strokeWidth={1.75} /> Reading</button>
+          <button class:on={chatSec === "keys"} type="button" onclick={() => (chatSec = "keys")}><KeyRound size={16} strokeWidth={1.75} /> Cost &amp; keys</button>
         </nav>
         <div class="set-railbody">
-          <div class="card">
-            <div class="card-tt">Reading comfort</div>
-            <div class="card-sub">Reading-comfort options for the Assistant chat.</div>
-            <div class="ctl-row tight">
-              <div><div class="ctl-t">Dyslexia-friendly mode</div><div class="ctl-s">Lexend font + wider line spacing, and tells Claude to interpret phonetic typos / voice-to-text artifacts charitably.</div></div>
-              <button class="toggle" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}><span class="toggle-knob"></span></button>
-            </div>
-            <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
-              <div><div class="ctl-t">UI font</div><div class="ctl-s">Lexend has the strongest research backing for reading-rate improvement on dyslexic readers.</div></div>
-              <div class="seg" role="radiogroup" aria-label="UI font">
-                <button class:on={accessibility.font === "system"} role="radio" aria-checked={accessibility.font === "system"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("system")}>Inter</button>
-                <button class:on={accessibility.font === "lexend"} role="radio" aria-checked={accessibility.font === "lexend"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("lexend")}>Lexend</button>
-              </div>
-            </div>
-            <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
-              <div><div class="ctl-t">Wider line + letter spacing</div><div class="ctl-s">Bumps line-height to 1.85 inside Assistant bubbles and the composer.</div></div>
-              <button class="toggle" class:on={accessibility.lineHeightBoost} role="switch" aria-checked={accessibility.lineHeightBoost} aria-label="Increased line and letter spacing" disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}><span class="toggle-knob"></span></button>
-            </div>
-            <div class="ctl-row tight">
-              <div><div class="ctl-t">Warm reading tint</div><div class="ctl-s">Sepia overlay on Assistant message bubbles — softens bright-white-on-dark glare. UI chrome keeps the dark theme.</div></div>
-              <button class="toggle" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}><span class="toggle-knob"></span></button>
-            </div>
-          </div>
-        </div>
-      </div></div>
-    {/if}
-
-    {#if activeSec === "assistant"}
-      <div class="set-surface"><div class="set-rail">
-        <nav class="set-railnav">
-          <button class:on={asstSec === "session"} type="button" onclick={() => (asstSec = "session")}><Bot size={16} strokeWidth={1.75} /> Session</button>
-          <button class:on={asstSec === "keys"} type="button" onclick={() => (asstSec = "keys")}><KeyRound size={16} strokeWidth={1.75} /> Cost &amp; keys</button>
-        </nav>
-        <div class="set-railbody">
-        {#if asstSec === "session"}
+        {#if chatSec === "session"}
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
         <div class="sb-status {assistantDot ?? 'ok'}">
           <div class="sb-status-l">
@@ -545,6 +500,43 @@
             </div>
           </div>
         </div>
+        {:else if chatSec === "reading"}
+          <div class="card">
+            <div class="card-tt">Reading comfort</div>
+            <div class="card-sub">Make Claude's replies easier to read. These affect the chat only — the rest of Rift keeps the dark theme.</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Dyslexia-friendly mode</div><div class="ctl-s">Switches to the Lexend font with wider spacing, and asks Claude to read phonetic typos and voice-to-text slips charitably.</div></div>
+              <button class="toggle" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
+              <div><div class="ctl-t">UI font</div><div class="ctl-s">Lexend has the strongest research backing for improving reading rate in dyslexic readers.</div></div>
+              <div class="seg" role="radiogroup" aria-label="UI font">
+                <button class:on={accessibility.font === "system"} role="radio" aria-checked={accessibility.font === "system"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("system")}>Inter</button>
+                <button class:on={accessibility.font === "lexend"} role="radio" aria-checked={accessibility.font === "lexend"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("lexend")}>Lexend</button>
+              </div>
+            </div>
+            <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
+              <div><div class="ctl-t">Wider line and letter spacing</div><div class="ctl-s">Raises line height to 1.85 inside chat bubbles and the composer.</div></div>
+              <button class="toggle" class:on={accessibility.lineHeightBoost} role="switch" aria-checked={accessibility.lineHeightBoost} aria-label="Wider line and letter spacing" disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Warm reading tint</div><div class="ctl-s">A soft sepia overlay on chat bubbles to ease bright-white-on-dark glare.</div></div>
+              <button class="toggle" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}><span class="toggle-knob"></span></button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-tt">Chat rendering</div>
+            <div class="card-sub">How Claude's activity and replies are laid out.</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Stream view</div><div class="ctl-s">A boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div></div>
+              <button class="toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="toggle-knob"></span></button>
+            </div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">Activity dock</div><div class="ctl-s">A slide-in side panel showing live sub-agent activity. Reveals itself while sub-agents run and tidies away when they finish.</div></div>
+              <button class="toggle" class:on={activityDock.enabled} role="switch" aria-checked={activityDock.enabled} aria-label="Activity dock" type="button" onclick={() => activityDock.setEnabled(!activityDock.enabled)}><span class="toggle-knob"></span></button>
+            </div>
+          </div>
         {:else}
           <div class="card">
             <div class="card-tt">Cost guard</div>
@@ -623,7 +615,7 @@
             <div class="card">
               <div class="card-tt">Web Speech</div>
               <div class="ctl-row stack">
-                <div><div class="ctl-t">Language</div><div class="ctl-s">BCP-47 tag passed to the recogniser. Pick another language if you speak something other than English.</div></div>
+                <div><div class="ctl-t">Language</div><div class="ctl-s">BCP-47 tag passed to the recognizer. Pick another language if you speak something other than English.</div></div>
                 <div class="set-pick-grid" role="radiogroup" aria-label="Speech recognition language">
                   {#each STT_LANGS as l (l.id)}
                     <button type="button" role="radio" aria-checked={stt.config.language === l.id} class="set-pick" data-active={stt.config.language === l.id} onclick={() => void stt.setConfig({ language: l.id })}>
@@ -678,7 +670,7 @@
                       </div>
                     </div>
                   {/each}
-                  {#if stt.models.length === 0}<div class="st-note">Loading model catalogue…</div>{/if}
+                  {#if stt.models.length === 0}<div class="st-note">Loading model catalog…</div>{/if}
               </div>
             </div>
 
@@ -700,7 +692,7 @@
                 </div>
               </div>
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Clean with Claude Haiku</div><div class="ctl-s">Polishes the final transcript via Haiku — fixes punctuation, capitalises proper nouns. ~200-400ms tail, ~$0.0001/utterance.</div></div>
+                <div><div class="ctl-t">Clean with Claude Haiku</div><div class="ctl-s">Polishes the final transcript via Haiku — fixes punctuation, capitalizes proper nouns. ~200-400ms tail, ~$0.0001/utterance.</div></div>
                 <button class="toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean transcripts with Claude Haiku" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="toggle-knob"></span></button>
               </div>
               <div class="ctl-row tight">
@@ -781,18 +773,44 @@
               <button class="st-btn" type="button" disabled={!logDir} onclick={() => openDir(logDir)}><FolderOpen size={14} /> Open</button>
             </div>
           </div>
+
+          <div class="card">
+            <div class="card-tt">Keyboard shortcuts</div>
+            <div class="card-sub">Move around Rift without the mouse.</div>
+            {#each SHORTCUTS as sc (sc.label)}
+              <div class="kbd-row">
+                <span>{sc.label}</span>
+                <span class="keys">
+                  {#each sc.combo as k}<b>{k}</b>{/each}
+                  {#if sc.alt}<span class="kbd-or">or</span>{#each sc.alt as k}<b>{k}</b>{/each}{/if}
+                </span>
+              </div>
+            {/each}
+          </div>
         {:else}
           <div class="card">
             <div class="card-tt">Local tools</div>
             {#each LOCAL_TOOLS as t (t.key)}
               {@const present = environment[t.key]}
+              {@const installing = environment.installing[t.key]}
               <div class="ctl-row tight">
                 <div><div class="ctl-t">{t.label}</div><div class="ctl-s">{t.use}{present ? "" : ` · ${t.hint}`}</div></div>
-                <span class="env-stat" class:ok={present} class:warn={!present}>
-                  <span class="env-dot"></span>{present ? "Installed" : "Not found"}
-                </span>
+                {#if present}
+                  <span class="env-stat ok"><span class="env-dot"></span>Installed</span>
+                {:else if installing}
+                  <span class="env-stat warn"><Loader2 size={12} class="mic-spin" /> Installing…</span>
+                {:else}
+                  <button class="st-btn accent" type="button" onclick={() => void environment.install(t.key)} use:tooltip={`Install ${t.label} via winget`}>
+                    <Download size={13} /> Install
+                  </button>
+                {/if}
               </div>
             {/each}
+            {#if environment.installError}
+              <div class="st-note">⚠ {environment.installError}</div>
+            {:else if Object.values(environment.installing).some(Boolean)}
+              <div class="st-note">An install console opened — finish there, then <button class="link-btn" type="button" onclick={() => void environment.refresh()}>re-probe</button> to refresh status.</div>
+            {/if}
           </div>
 
           <div class="card">
@@ -808,6 +826,10 @@
             <button class="st-about-row" type="button" onclick={() => { onboarding.reset(); betaNotice.reset(); }}>
               <span class="st-about-ic"><RotateCcw size={15} /></span>
               <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Shows the welcome walkthrough — including the beta &amp; AI-disclaimer notice — again on next launch</span></span>
+            </button>
+            <button class="st-about-row" type="button" onclick={repairInstall}>
+              <span class="st-about-ic"><ShieldCheck size={15} /></span>
+              <span class="st-about-body"><span class="st-about-t">Repair installation</span><span class="st-about-s">Re-download and reinstall the current version — fixes corrupted or missing program files. Rift will restart.</span></span>
             </button>
           </div>
         {/if}

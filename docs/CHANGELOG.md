@@ -2,6 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill
+
+> Uncommitted batch staged on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors).
+
+**Added (self-recovery for end users):**
+- **Install buttons for missing local tools** (Settings → About → Local tools): when `git`/`node`/`cargo`/`code` isn't detected, an Install button runs `winget install --id <pkg> -e` in a visible console (`Git.Git`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, `Microsoft.VisualStudioCode`). Falls back to an actionable error if winget is absent. (`env_checks.rs::install_local_tool`, `environment.svelte.ts::install`).
+- **Repair installation button** (Settings → About → Help & diagnostics): force-re-downloads and reinstalls the current version over corrupted/missing program files via Velopack, then restarts. Arms the latest Full release as the pending plan (`update_service.rs::arm_repair`, `commands/update.rs::repair_install`) and reuses the normal download→apply chain (`updates.svelte.ts::repair`). Guarded by a confirm dialog.
+
+**Fixed (design-system fidelity):**
+- Composer permission pill now shows the DS short form ("Ask first" / "Auto-edit" / "Plan" / "Auto" / "Bypass") instead of the verbose label ("Bypass permissions") — matches `app/composer.jsx` `PERM_SHORT`. (`modelMatrix.ts` adds `short`; `Composer.svelte` renders `currentMode.short`).
+- SettingsMenu model popover fully converted to the portal/`position:fixed` pattern (all child CSS namespaced under `:global(.settings-menu …)`) so it anchors to its trigger instead of floating mid-screen.
+- Command palette Settings deep-links collapsed to the real 4-section IA (`appearance · chat · speech · about`).
+
 ## v0.20.8 — 2026-06-21 — Overnight efficiency + cleanup polish
 
 > Stress-test + cleanup pass on top of v0.20.7. Verified: svelte-check 0/0 · vitest 210/210 · dev cargo rebuild clean · 0 prod npm vulns.
