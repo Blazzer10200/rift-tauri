@@ -1046,16 +1046,14 @@ class AssistantStore {
     if (!tab) return;
     const requestId = tab.askUserBindings.get(toolUseId);
     if (!requestId) return;
-    try {
-      await invoke("assistant_answer_ask_user", { requestId, answer });
-    } finally {
-      // Pop the binding regardless — re-submission on the same toolUseId
-      // would be a UI bug, and the tool_result envelope is the authoritative
-      // "done" signal.
-      const next = new Map(tab.askUserBindings);
-      next.delete(toolUseId);
-      tab.askUserBindings = next;
-    }
+    // RR8: pop the binding ONLY on success. The old `finally` deleted it even
+    // when invoke threw, which drove the chip's askRequestId to null and
+    // permanently disabled BOTH Submit and Dismiss — an unrecoverable lockup.
+    // Preserving the binding on error lets the user retry from the chip.
+    await invoke("assistant_answer_ask_user", { requestId, answer });
+    const next = new Map(tab.askUserBindings);
+    next.delete(toolUseId);
+    tab.askUserBindings = next;
   }
 
   /** `assistant://permission-request` arrived — the CLI wants to run a gated

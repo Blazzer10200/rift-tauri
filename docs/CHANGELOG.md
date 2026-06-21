@@ -2,9 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.9 — Rounds 5–7 hardening (config race + IPC/update/browser + secrets/commands/state/frontend)
+## Unreleased — on top of v0.20.9 — Rounds 5–8 hardening (config race + IPC/update/browser + secrets/commands/state/frontend + diagnostics/update/UI-resilience)
 
-> Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target) · svelte-check 0/0 · playback regression net green.
+> Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target) · svelte-check 0/0 (4105) · playback regression net green (33/33).
+
+**Hardened (round 8 — diagnostics / update epoch / UI resilience, adversarially-verified, 8 confirmed):**
+- **ask_user chip no longer locks up on submit failure** — `submitAskUserAnswer` deleted the `askUserBindings` entry in a `finally`, so an IPC error drove the chip's `askRequestId` to null and permanently disabled *both* Submit and Dismiss (unrecoverable). The binding is now popped only on success; an error preserves it so the user can retry.
+- **Page-context "Add to chat" can't be prompt-injected** — `WebBrowserPage.addToChat` now neutralizes a literal `[End page context]` inside the page body (zero-width-space break) before wrapping it in the delimited block, so a hostile page can't escape the sentinel and inject instructions into the composer draft. URL also length-capped (2048) frontend-side.
+- **Third update-epoch arm closed** — `check()`'s "up to date" `Ok(_)` branch now bumps `download_epoch` too (mirrors the `UpdateAvailable` + `arm_repair` arms). A download in flight when the feed flips to "current" (yanked release) could otherwise set `downloaded=true` against `pending=None` — a zombie state that makes `apply()` fail with a confusing "no pending update".
+- **Structured-field log scrubbing fixed** — `DiagBus` scrubbed `event.fields` by serializing to a string first, which JSON-escapes `\` → `\\`, so single-backslash `USERPROFILE` prefixes (`C:\Users\foo`) never matched and Windows paths leaked through structured fields. Now a recursive `scrub_value` walks the JSON tree and scrubs each String leaf at its real, unescaped value.
+- **Diagnostics lag-handler off the async worker** — the `RecvError::Lagged` arm called `file_log_write` (blocking mutex + sync I/O) directly on the Tokio worker, stalling the emit loop under disk contention. Now wrapped in `spawn_blocking`.
+- **read_page URL byte-capped** — `browser::read_page` caps the webview-reported URL at 2048 bytes (char-boundary safe), matching the existing 200-char title cap; a hostile page driving navigation to a multi-megabyte `data:`/`blob:` URL can no longer bloat every snapshot consumer.
+- **MessageBubble timeline keys are stable** — tool/thinking blocks were keyed by list position (`b_${i}`), which goes stale when `mergeSplitProse`/`reconcileSplitHeaders` reorder blocks mid-stream → ToolChip remounted (expanded state reset) and thinking rows collapsed. Now keyed by block identity (`tool_${id}` / `th_${startedAt}`).
+- **`repair()` guards a concurrent check** — the update repair early-return now also covers the `checking` state, so a check in flight + repair can't race two arm operations on the backend pending plan (latent today; all callers gate via the dialog).
 
 **Hardened (round 7 — secrets / commands / state / frontend-send, adversarially-verified, 12 confirmed):**
 - **CRITICAL: `assistant_set_api_key` no longer self-clobbers via migration** — when config.json still held a legacy plaintext `api_key`, setting/deleting the key did the keychain op first, then `load_config()` fired the plaintext→keychain migration *after*, overwriting the just-set key (or re-creating the just-deleted entry) with the stale value — and the migration's `try_lock` (we already held it) left the plaintext in config.json, perpetuating it every call. Fixed by reordering: a new migration-free `load_config_raw()` clears the plaintext field + saves FIRST, then the keychain op runs. R5 only guarded the migration's *save*; this guards the *trigger*.

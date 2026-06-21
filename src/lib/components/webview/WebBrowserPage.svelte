@@ -156,11 +156,15 @@
     adding = true;
     try {
       const p = await invoke<PageSnapshot>("browser_read_page");
-      const body = (p.text || "").trim();
+      // Neutralize the closing sentinel inside the page body so a hostile page
+      // can't emit a literal "[End page context]" to escape the delimited block
+      // and inject instructions into the prompt (zero-width space breaks the
+      // exact match while staying invisible).
+      const body = (p.text || "").trim().replace(/\[End page context\]/g, "[End page context​]");
       if (!body) { flash("fail"); return; }
       // Sanitize title/url to prevent ] or newlines from breaking the delimiter.
       const safeTitle = (p.title || "untitled").replace(/[\]\r\n]/g, " ").slice(0, 200);
-      const safeUrl = (p.url || "").replace(/[\]\r\n]/g, " ");
+      const safeUrl = (p.url || "").replace(/[\]\r\n]/g, " ").slice(0, 2048);
       const head = `[Page context: ${safeTitle} — ${safeUrl}]`;
       const tail = p.truncated ? `\n[…truncated — full page is ${p.full_len.toLocaleString()} chars]` : "";
       const block = `${head}\n${body}${tail}\n[End page context]`;

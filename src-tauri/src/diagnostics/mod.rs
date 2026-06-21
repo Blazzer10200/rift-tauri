@@ -113,10 +113,12 @@ impl DiagBus {
         // redaction is a no-op on `[REDACTED ...]`.
         event.message = scrub_log_message(&event.message);
         if !event.fields.is_null() {
-            let raw = event.fields.to_string();
-            let scrubbed = scrub_log_message(&raw);
-            event.fields = serde_json::from_str(&scrubbed)
-                .unwrap_or(serde_json::Value::String(scrubbed));
+            // RR8: scrub the string LEAVES, not the serialized blob. `to_string()`
+            // JSON-escapes `\` → `\\`, so a single-backslash USERPROFILE prefix
+            // (`C:\Users\foo`) never matched in structured fields — Windows paths
+            // leaked through. Walking the tree scrubs each String at its real,
+            // unescaped value.
+            scrub_value(&mut event.fields);
         }
         event.seq = self.seq.fetch_add(1, Ordering::Relaxed);
         // send() returns Err only when there are zero subscribers — that's
@@ -280,6 +282,24 @@ impl LogForwarder {
 ///   2. Lines containing OpenSSH/RSA `BEGIN ... PRIVATE KEY` markers →
 ///      full-message redaction (safer than per-line — a single leaked body
 ///      line is enough to compromise the key, so drop the whole message).
+/// RR8: recursively scrub every String leaf of a JSON value in place. Used on
+/// structured `event.fields` so home-dir prefixes / key bodies are redacted at
+/// their real (unescaped) values — serializing first would `\`-escape Windows
+/// paths and defeat the literal match in `scrub_log_message`.
+pub fn scrub_value(v: &mut serde_json::Value) {
+    match v {
+        serde_json::Value::String(s) => {
+            let scrubbed = scrub_log_message(s);
+            if scrubbed != *s {
+                *s = scrubbed;
+            }
+        }
+        serde_json::Value::Array(arr) => arr.iter_mut().for_each(scrub_value),
+        serde_json::Value::Object(map) => map.values_mut().for_each(scrub_value),
+        _ => {}
+    }
+}
+
 pub fn scrub_log_message(msg: &str) -> String {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     let enabled = *ENABLED
@@ -425,11 +445,17 @@ pub fn spawn_frontend_pump(app: tauri::AppHandle) {
                     // Direct file write, NOT log::warn! — the latter re-enters
                     // LogForwarder (file mutex + flush) on this tokio task and
                     // re-publishes onto the very bus that just lagged.
-                    file_log_write(
-                        log::Level::Warn,
-                        "rift_tauri_lib::diagnostics",
-                        &format!("diag bus lagged: {n} events dropped"),
-                    );
+                    // RR8: off the async worker — file_log_write grabs a blocking
+                    // mutex + does sync I/O, which would stall the emit loop (and
+                    // every other task on this worker) under disk contention.
+                    let msg = format!("diag bus lagged: {n} events dropped");
+                    tokio::task::spawn_blocking(move || {
+                        file_log_write(
+                            log::Level::Warn,
+                            "rift_tauri_lib::diagnostics",
+                            &msg,
+                        );
+                    });
                 }
                 Err(RecvError::Closed) => break,
             }

@@ -290,7 +290,10 @@ class UpdateStore {
    *  then reuses the normal download → apply chain (app exits + relaunches).
    *  Drives the same dialog progress UI as a normal update. */
   async repair() {
-    if (this.state === "downloading" || this.state === "installing") return;
+    // RR8: include 'checking' — a concurrent check in flight + repair would
+    // race two arm operations on the backend pending plan. Latent today (all
+    // callers gate via the dialog) but cheap to make correct.
+    if (this.state === "downloading" || this.state === "installing" || this.state === "checking") return;
     this.downloadError = "";
     this.error = "";
     try {

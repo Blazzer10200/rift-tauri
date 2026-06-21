@@ -240,7 +240,17 @@
         }
         continue;
       }
-      units.push({ kind: "block", block: b, status: statusOf(b), key: `b_${i}` });
+      // RR8: stable identity keys for tool/thinking blocks. Position keys
+      // (`b_${i}`) go stale when mergeSplitProse/reconcileSplitHeaders reorder
+      // blocks mid-stream → ToolChip remounts (expanded state resets) and
+      // thinking rows collapse. Anchor to the block's own id / start time.
+      const key =
+        b.type === "tool"
+          ? `tool_${b.id}`
+          : b.type === "thinking"
+            ? `th_${b.startedAt ?? i}`
+            : `b_${i}`;
+      units.push({ kind: "block", block: b, status: statusOf(b), key });
     }
     // Fold runs of back-to-back completed thinking units into one row —
     // summed duration, prose joined. Kills the "Thought for 1s / Thought for

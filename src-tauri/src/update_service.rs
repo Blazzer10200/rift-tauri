@@ -157,6 +157,12 @@ impl UpdateService {
             Ok(_) => {
                 log::info!("update check: up to date");
                 let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+                // RR8: bump the epoch here too (third arm — mirrors UpdateAvailable
+                // + arm_repair). If a download is in flight when the feed flips to
+                // "up to date" (yanked version), an un-bumped epoch lets the zombie
+                // download later set downloaded=true against pending=None — a state
+                // that makes apply() fail with a confusing "no pending update".
+                g.download_epoch = g.download_epoch.wrapping_add(1);
                 g.pending = None;
                 g.downloaded = false;
                 Ok(None)

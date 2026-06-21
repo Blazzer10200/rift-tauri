@@ -253,6 +253,21 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
         .get_webview(LABEL)
         .and_then(|w| w.url().ok())
         .map(|u| u.to_string())
+        // RR8: cap like the title — a hostile page can drive navigation to a
+        // multi-megabyte data:/blob: URL; an uncapped string bloats every
+        // snapshot consumer (frontend, prompt context). 2048 is generous for
+        // any real URL.
+        .map(|s| {
+            if s.len() > 2048 {
+                let mut end = 2048;
+                while !s.is_char_boundary(end) {
+                    end -= 1;
+                }
+                format!("{}…", &s[..end])
+            } else {
+                s
+            }
+        })
         .unwrap_or_default();
     Ok(PageContent {
         title: raw.title,
