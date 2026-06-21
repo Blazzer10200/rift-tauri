@@ -45,11 +45,16 @@ function parseSemver(v: string): [number, number, number] | null {
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
-/** >0 if a is newer than b, <0 if older, 0 if equal/unparseable. */
+/** >0 if a is newer than b, <0 if older, 0 if equal/unparseable. An
+ *  unparseable operand fails closed (returns 0 → treated up-to-date), so warn
+ *  once — else a CLI whose version string we can't read silently never badges. */
 function cmpSemver(a: string, b: string): number {
   const pa = parseSemver(a);
   const pb = parseSemver(b);
-  if (!pa || !pb) return 0;
+  if (!pa || !pb) {
+    console.warn(`cliUpdate: unparseable version, skipping comparison (a=${JSON.stringify(a)} b=${JSON.stringify(b)})`);
+    return 0;
+  }
   for (let i = 0; i < 3; i++) {
     if (pa[i] !== pb[i]) return pa[i] - pb[i];
   }
