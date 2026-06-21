@@ -13,6 +13,9 @@
 - **Shell** → global status bar; floating **Environment** pill replaces the old dock; **SessionDiff** dropped.
 - New green-R glass logo app-wide; screen-tint comfort filter removed (separate a11y `warmTint` untouched).
 
+**Added:**
+- **Activity dock toggle** (Settings → Chat) — the live sub-agent dock now has a user-facing enable/disable (default on). Off suppresses auto-reveal + render entirely; persisted per-device.
+
 **Fixed:**
 - `stt.svelte.ts::setConfig` rolls back in-memory config on backend reject (UI no longer ahead of persisted state).
 - `persistence.ts::deleteAllConversations` re-syncs in a `finally` (mid-loop delete failure no longer desyncs the list).
