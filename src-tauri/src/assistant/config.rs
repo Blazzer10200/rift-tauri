@@ -197,10 +197,24 @@ pub(super) fn load_config() -> AssistantConfig {
         match crate::secrets::set(crate::secrets::ASSISTANT_API_KEY, k) {
             Ok(()) => {
                 cfg.api_key = None;
-                if let Err(e) = save_config(&cfg) {
-                    log::warn!("assistant: post-migration save_config failed: {e}");
-                } else {
-                    log::info!("assistant: migrated api_key to keychain");
+                // Only persist the migration when the config lock is free.
+                // load_config runs both unlocked (getters) and locked (setters,
+                // same thread). A bare save here could land its tmp-rename after
+                // a concurrent setter's, clobbering the setting. try_lock skips
+                // the save when a setter already holds the lock (non-reentrant
+                // std Mutex → WouldBlock on the same thread); the field stays in
+                // JSON and re-migrates on the next cold, uncontended load.
+                match CONFIG_WRITE_LOCK.try_lock() {
+                    Ok(_guard) => {
+                        if let Err(e) = save_config(&cfg) {
+                            log::warn!("assistant: post-migration save_config failed: {e}");
+                        } else {
+                            log::info!("assistant: migrated api_key to keychain");
+                        }
+                    }
+                    Err(_) => {
+                        log::debug!("assistant: api_key migration save deferred — config lock busy");
+                    }
                 }
             }
             Err(e) => log::warn!("assistant: keychain migration for api_key failed: {e}"),

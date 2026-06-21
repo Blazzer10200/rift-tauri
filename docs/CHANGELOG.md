@@ -2,6 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — on top of v0.20.9 — Round 5 hardening (config migration race)
+
+> Unshipped on `main`, pending the next bump. Verified: cargo check clean (0 errors/warnings, isolated target).
+
+**Hardened (round 5 — config write-path race, adversarially-verified):**
+- **api_key keychain-migration save is now lock-guarded** — `config.rs::load_config` runs the one-shot plaintext→keychain migration both unlocked (getters) and locked (setters). Its `save_config` previously ran without `CONFIG_WRITE_LOCK`, so a getter racing an active setter could land its tmp-rename second and silently clobber the setter's change. Now wrapped in `CONFIG_WRITE_LOCK.try_lock()`: the migration persists only when the lock is free (non-reentrant std Mutex → `WouldBlock` skips the save when a setter on the same thread already holds it; the field stays in JSON and re-migrates on the next uncontended cold load). No deadlock, no lost setting. (Last open finding from the round-3 review — `draggingTabId` dead-feature wiring stays catalogued in ISSUES #46/#36, out of scope for the harden loop.)
+
 ## v0.20.9 — 2026-06-21 — Recovery tools + per-project chat scoping + 4-round hardening pass
 
 > Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings, isolated-target recompile of all edited .rs — dev app untouched).
