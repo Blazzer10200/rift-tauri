@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — polish batch (staged on `main`, not yet versioned)
+## v0.20.8 — 2026-06-21 — Overnight efficiency + cleanup polish
 
-> Overnight stress-test + cleanup pass on top of shipped v0.20.7. Commit-only — not published. Verified: svelte-check 0/0 · vitest 210/210 · dev cargo rebuild clean · 0 prod npm vulns.
+> Stress-test + cleanup pass on top of v0.20.7. Verified: svelte-check 0/0 · vitest 210/210 · dev cargo rebuild clean · 0 prod npm vulns.
 
 **Backend (turn hot-path efficiency):**
 - Eliminated a redundant second `load_config()` disk read every turn (`config.rs::current_api_key_with` reuses the already-loaded config; `turn.rs:460`).
