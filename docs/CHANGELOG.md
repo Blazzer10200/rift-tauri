@@ -2,9 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill
+## Unreleased — on top of v0.20.8 — Recovery tools + composer DS pill + hardening pass
 
-> Uncommitted batch staged on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors).
+> Unshipped batch on `main`, pending the next bump. Verified: svelte-check 0/0 (4105) · cargo check clean (0 errors/warnings).
+
+**Hardened (deep review — adversarially-verified findings):**
+- **Log sink survives mutex poison** — `diagnostics::file_log_write` now recovers a poisoned `FILE_LOG` lock (`into_inner()`) instead of silently dropping every subsequent write. A panic mid-write previously blacked out the only persistent log sink in a GUI prod build (stderr is `/dev/null`). Also: env_logger (dev stderr) now receives the SCRUBBED message, so home-dir paths no longer leak to the dev terminal.
+- **STT no longer hangs on a stalled audio device** — capture-init `recv()` got a 10s `recv_timeout`; a Bluetooth/WASAPI device-enum hang on Windows can't wedge `stt_start_recording` forever and burn a Tokio blocking-pool slot. Haiku-cleanup failure now emits `stt://error` (`cleanup_failed`) instead of silently returning the raw transcript.
+- **Background streaming tab no longer leaks its subprocess** — `closeTab` stops the CLOSING tab's CLI subprocess directly (probing its own `streaming`), not just the active tab's. Closing a background tab mid-stream previously orphaned the `claude` process (burning tokens, events silently dropped).
+- **Conversation saves serialized** — added `CONVO_WRITE_LOCK` + per-call tmp suffix so two windows saving the same convo id can't race on a shared `.tmp` and silently install stale data (mirrors `CONFIG_WRITE_LOCK`).
+- **Enhance cancel-before-register race closed** — a Discard fired in the spawn→PID-register gap is now honored (pre-registered sentinel pid); previously the cancel was lost and the billed enhance ran to completion.
+- **MCP `read_file` respects SKIP_DIRS on the canonical path** — a workspace-internal symlink into `node_modules`/`.git`/`target` can no longer bypass the exclusion that `grep` already enforces.
 
 **Added (self-recovery for end users):**
 - **Install buttons for missing local tools** (Settings → About → Local tools): when `git`/`node`/`cargo`/`code` isn't detected, an Install button runs `winget install --id <pkg> -e` in a visible console (`Git.Git`, `OpenJS.NodeJS.LTS`, `Rustlang.Rustup`, `Microsoft.VisualStudioCode`). Falls back to an actionable error if winget is absent. (`env_checks.rs::install_local_tool`, `environment.svelte.ts::install`).

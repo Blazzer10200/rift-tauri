@@ -259,14 +259,34 @@ names), then output the rewritten prompt. Keep lookups minimal."
         None
     };
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("spawn `claude` (enhance): {e}"))?;
+    // Pre-register a sentinel (pid 0) BEFORE spawn so a Discard that races the
+    // spawn→insert window has an entry to remove — closing the lost-cancel gap.
+    with_enhance_pids(|m| { m.insert(request_id.clone(), 0); });
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            with_enhance_pids(|m| { m.remove(&request_id); });
+            return Err(format!("spawn `claude` (enhance): {e}"));
+        }
+    };
     // Register for cancel (Discard) + the update-apply sweep. Entry removal by
     // `assistant_enhance_cancel` doubles as the cancelled-flag after wait().
+    // Cancel-before-register race: a Discard fired in the spawn→insert gap finds
+    // no entry and no-ops, then this insert resurrects it — the user's cancel is
+    // lost and the (billed) enhance runs to completion. Guard: a sentinel is
+    // pre-inserted before spawn; if it's gone here, a cancel already landed.
     let child_pid = child.id();
     if let Some(pid) = child_pid {
-        with_enhance_pids(|m| { m.insert(request_id.clone(), pid); });
+        let cancelled_early = with_enhance_pids(|m| match m.get(&request_id) {
+            // sentinel still present → no cancel raced; promote to the real pid.
+            Some(_) => { m.insert(request_id.clone(), pid); false }
+            // sentinel gone → cancel landed in the gap; honor it.
+            None => true,
+        });
+        if cancelled_early {
+            tree_kill(pid);
+            return Err("enhance cancelled".into());
+        }
     }
     let stdout = child.stdout.take().ok_or("enhancer stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("enhancer stderr unavailable")?;

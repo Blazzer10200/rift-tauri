@@ -355,18 +355,24 @@ export async function closeTab(host: TabsHost, id: string) {
   host.openTabs = next;
   // Drop the closing tab's UI scratch + TabState. The convo itself stays
   // on disk via scheduleSave below; only in-memory streaming state is retired.
-  const closingTab = host.tabs.get(id) as { queue?: { id: string; text: string }[] } | undefined;
+  const closingTab = host.tabs.get(id) as
+    | { queue?: { id: string; text: string }[]; streaming?: boolean }
+    | undefined;
   if (closingTab?.queue?.length) {
     notify.warn(`${closingTab.queue.length} queued message(s) discarded`, { detail: "The tab was closed mid-queue." });
   }
   host.pruneTabUi(id);
   scrubTabFromPanes(host, id);
+  // Stop the CLI subprocess for the CLOSING tab — `host.streaming` reads the
+  // ACTIVE tab, so a streaming background tab would leak its subprocess (burning
+  // tokens, events silently dropped once its TabState is gone). Mirror the
+  // tab-targeted stop in closeOtherTabs/closeTabsToRight.
+  if (closingTab?.streaming) await host.stop(id);
   if (wasActive) {
     // Save unsaved tail of the closing tab before switching/clearing.
     if (host.messages.length > 0 && host.convoCreatedAt) {
       host.scheduleSave(true);
     }
-    if (host.streaming) await host.stop();
   }
   host.dropTab(id);
   if (wasActive) {

@@ -149,6 +149,18 @@ mod dunce {
 fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
     let resolved = resolve_under_roots(path, roots)?;
+    // Enforce SKIP_DIRS on the CANONICAL path too: a workspace-internal symlink
+    // (e.g. src/x.js → node_modules/pkg/secret.js) resolves under-root and would
+    // otherwise bypass the exclusion that grep applies via its walkdir filter.
+    if resolved
+        .components()
+        .any(|c| SKIP_DIRS.contains(&c.as_os_str().to_string_lossy().as_ref()))
+    {
+        return Err(format!(
+            "{} resolves into an excluded directory (node_modules/.git/target/…)",
+            resolved.display()
+        ));
+    }
     let meta = std::fs::metadata(&resolved).map_err(|e| format!("stat: {e}"))?;
     if !meta.is_file() {
         return Err(format!("{} is not a regular file", resolved.display()));

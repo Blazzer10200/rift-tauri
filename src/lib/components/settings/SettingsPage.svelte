@@ -1000,7 +1000,6 @@
   .env-stat.ok { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); }
   .env-stat.ok .env-dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
   .env-stat.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 28%, transparent); }
-  .env-stat.warn .env-dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
   /* Status rows: label + status-cluster on the top line, description full-width below. */
   /* CLI install list + update CTA live inside the hero banner — span its full width. */
   .sb-status > .st-cli-installs, .sb-status > .st-cli-act, .sb-status > .st-cli-err, .sb-status > .st-cli-ok, .sb-status > .st-cli-warn { flex: 1 1 100%; margin-top: 0; }

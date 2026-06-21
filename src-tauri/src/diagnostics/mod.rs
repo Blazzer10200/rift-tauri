@@ -200,17 +200,22 @@ fn init_file_log() -> Option<Mutex<std::fs::File>> {
 
 fn file_log_write(level: log::Level, target: &str, msg: &str) {
     if let Some(m) = FILE_LOG.get_or_init(init_file_log) {
-        if let Ok(mut f) = m.lock() {
-            let _ = writeln!(
-                f,
-                "{} [{:<5}] {} — {}",
-                Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ"),
-                level,
-                target,
-                msg
-            );
-            let _ = f.flush();
-        }
+        // Recover from poison: a panic mid-write must not blackout all future
+        // logging (this is the only persistent sink in a GUI prod build — stderr
+        // is /dev/null). Matches CONFIG_WRITE_LOCK / turn.rs into_inner() pattern.
+        let mut f = match m.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        let _ = writeln!(
+            f,
+            "{} [{:<5}] {} — {}",
+            Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ"),
+            level,
+            target,
+            msg
+        );
+        let _ = f.flush();
     }
 }
 
@@ -322,9 +327,21 @@ impl log::Log for LogForwarder {
         if !self.inner.enabled(record.metadata()) {
             return;
         }
-        self.inner.log(record);
         let target = record.target();
         let message = scrub_log_message(&format!("{}", record.args()));
+        // Forward to env_logger (dev stderr) with the SCRUBBED message, not the
+        // raw record — else home-dir paths leak to the dev terminal before scrub.
+        self.inner.log(
+            &log::Record::builder()
+                .args(format_args!("{message}"))
+                .metadata(record.metadata().clone())
+                .level(record.level())
+                .target(target)
+                .module_path(record.module_path())
+                .file(record.file())
+                .line(record.line())
+                .build(),
+        );
         // Persist to the rotating file sink (captures Velopack's in-process
         // check/download/apply logs that stderr discards in GUI prod). Done for
         // every record, including our own forwarder target — no loop risk here.

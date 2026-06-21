@@ -6,10 +6,16 @@
 //! Disk format is the contract — don't reshape any serialized field.
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
 use super::{dirs_home, is_valid_model_name};
+
+/// Serializes conversation saves so two windows saving the same convo id can't
+/// race on a shared `.tmp` and silently install stale data. Mirrors
+/// `config.rs::CONFIG_WRITE_LOCK`. Poison-recovered at the call site.
+static CONVO_WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 /// Directory holding one `<uuid>.json` per saved conversation.
 fn conversations_dir() -> Result<PathBuf, String> {
@@ -416,11 +422,16 @@ pub fn assistant_export_save(dest: String, contents: String) -> Result<(), Strin
 pub fn assistant_save_conversation(convo: Conversation) -> Result<(), String> {
     let p = convo_path(&convo.id)?;
     let s = serde_json::to_string(&convo).map_err(|e| e.to_string())?;
-    // Atomic-ish write: write to .tmp then rename so a crash mid-write
-    // doesn't leave a half-truncated transcript on disk.
-    let tmp = p.with_extension("json.tmp");
+    // Serialize saves (multi-window can race the same id) + per-call tmp suffix
+    // so concurrent writers never clobber a shared .tmp. Atomic-ish: write tmp
+    // then rename so a crash mid-write leaves no half-truncated transcript.
+    let _guard = CONVO_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = p.with_extension(format!("json.tmp.{}", std::process::id()));
     std::fs::write(&tmp, s).map_err(|e| format!("write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, &p).map_err(|e| format!("rename {}: {e}", p.display()))?;
+    std::fs::rename(&tmp, &p).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("rename {}: {e}", p.display())
+    })?;
     Ok(())
 }
 

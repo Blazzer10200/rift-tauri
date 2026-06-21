@@ -401,9 +401,13 @@ pub async fn stt_start_recording(
     });
 
     // recv() would block the Tokio worker — offload to a blocking thread.
+    // Bounded wait: a stalled audio subsystem (Bluetooth/WASAPI device-enum hang
+    // on Windows) must not wedge stt_start_recording forever and burn a blocking
+    // thread-pool slot. On timeout we surface an error instead of hanging; the
+    // capture thread is reaped when stop_recording drops the session's stop tx.
     let ring = tokio::task::spawn_blocking(move || {
         cap_ready_rx
-            .recv()
+            .recv_timeout(std::time::Duration::from_secs(10))
             .map_err(|e| format!("capture init channel: {e}"))
             .and_then(|r| r)
     })
@@ -512,6 +516,9 @@ pub async fn stt_stop_recording(
             Ok(t) => t,
             Err(e) => {
                 log::warn!("[stt] cleanup hop failed, returning raw: {e}");
+                // Surface the failure so the user knows the transcript is the
+                // unpolished raw text (token expiry / network), not silent.
+                emit_error(&app, "cleanup_failed", &e);
                 scrubbed.clone()
             }
         }
