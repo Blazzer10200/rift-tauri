@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 /// Whisper's native sample rate.
-pub const TARGET_HZ: u32 = 16_000;
+const TARGET_HZ: u32 = 16_000;
 /// Cap the ring buffer at 30s of 16 kHz mono = 480k samples (~1.9 MB). More
 /// than enough for the 3s rolling window + finalise-on-stop.
 const MAX_BUFFER_SECS: usize = 30;
@@ -23,8 +23,6 @@ pub type AudioRing = Arc<Mutex<VecDeque<f32>>>;
 pub struct AudioCapture {
     _stream: Stream,
     pub ring: AudioRing,
-    pub source_hz: u32,
-    pub source_channels: u16,
 }
 
 pub fn list_input_devices() -> Result<Vec<String>, String> {
@@ -167,8 +165,6 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
     Ok(AudioCapture {
         _stream: stream,
         ring,
-        source_hz,
-        source_channels,
     })
 }
 

@@ -108,11 +108,16 @@ optionally install the NVIDIA CUDA Toolkit, then rebuild Rift with \
 `cargo build --release --features whisper-rs` (or `whisper-rs,whisper-cuda` \
 for GPU). The Web Speech engine remains available in Settings → Speech.";
 
+    // The stub engine is never constructed (`load` always errs), so neither
+    // field is ever assigned — `#[allow(dead_code)]` keeps the feature-off
+    // build warning-clean. `model_id` still type-checks against the read in
+    // `mod.rs`; `_marker` gives the same Send+Clone semantics as the real
+    // branch.
     #[derive(Clone)]
     pub struct WhisperEngine {
+        #[allow(dead_code)]
         pub model_id: String,
-        // Silence unused-field-on-feature-off lint by holding an Arc — also
-        // gives WhisperEngine the same Send+Clone semantics across branches.
+        #[allow(dead_code)]
         _marker: Arc<()>,
     }
 
@@ -129,18 +134,6 @@ for GPU). The Web Speech engine remains available in Settings → Speech.";
             _beam_size: Option<u8>,
         ) -> Result<String, String> {
             Err(NOT_BUILT_MSG.into())
-        }
-    }
-
-    // Keep the unused-field warning quiet at construction-time too — there is
-    // no construction site (load always errs), but rustc still type-checks.
-    impl WhisperEngine {
-        #[allow(dead_code)]
-        fn _new_unused() -> Self {
-            Self {
-                model_id: String::new(),
-                _marker: Arc::new(()),
-            }
         }
     }
 }

@@ -76,7 +76,7 @@ struct ModelEntry {
     sha256: Option<&'static str>,
 }
 
-pub fn models_dir() -> PathBuf {
+fn models_dir() -> PathBuf {
     // Resolve via the canonical USERPROFILE→HOME helper. Last-resort fallback is
     // the OS temp dir (an absolute, writable path) rather than "." — a CWD-
     // relative ".rift/models" would land next to the exe under
