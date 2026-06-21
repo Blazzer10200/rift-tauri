@@ -22,6 +22,22 @@
 
   const BUCKET_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
 
+  // ── per-project scope ────────────────────────────────────────────────
+  // Canonical roots from the backend are already normalized; lower-case for a
+  // case-insensitive match (Windows paths) so a convo's stamped root lines up
+  // with the open folder regardless of drive-letter casing.
+  function rootKey(r: string | null | undefined): string {
+    return (r ?? "").replace(/[\\/]+$/, "").toLowerCase();
+  }
+  /** Short project label (folder basename) for All-projects mode rows. */
+  function projLabel(r: string | null | undefined): string {
+    const k = (r ?? "").replace(/[\\/]+$/, "");
+    if (!k) return "Unfiled";
+    const seg = k.split(/[\\/]/).pop();
+    return seg || k;
+  }
+  const activeKey = $derived(rootKey(assistant.activeRoot));
+
   const groups = $derived.by<Group[]>(() => {
     const now = Date.now();
     const q = shell.convQuery.trim().toLowerCase();
@@ -33,9 +49,13 @@
       if (aw !== bw) return aw ? -1 : 1;
       return b.updatedAt - a.updatedAt;
     };
-    const filtered = assistant.conversations.filter((c) =>
-      !q || c.title.toLowerCase().includes(q) || (c.lastSnippet ?? "").toLowerCase().includes(q),
-    );
+    const filtered = assistant.conversations.filter((c) => {
+      // Scope to the open project unless the user flipped to All-projects, or
+      // there's no open folder (activeKey === "" → show everything so chats are
+      // never stranded). A convo whose root matches the open folder is in-scope.
+      if (!shell.allProjects && activeKey && rootKey(c.workspaceRoot) !== activeKey) return false;
+      return !q || c.title.toLowerCase().includes(q) || (c.lastSnippet ?? "").toLowerCase().includes(q);
+    });
     const pinned: ConversationMeta[] = [];
     const buckets = new Map<string, ConversationMeta[]>();
     for (const c of filtered) {
@@ -157,6 +177,24 @@
   {/if}
 </div>
 
+{#if assistant.activeRoot}
+  <div class="conv-scope" role="group" aria-label="Conversation scope">
+    <button
+      class="cscope-btn"
+      class:on={!shell.allProjects}
+      type="button"
+      onclick={() => { if (shell.allProjects) shell.toggleAllProjects(); }}
+      title={projLabel(assistant.activeRoot)}
+    >This project</button>
+    <button
+      class="cscope-btn"
+      class:on={shell.allProjects}
+      type="button"
+      onclick={() => { if (!shell.allProjects) shell.toggleAllProjects(); }}
+    >All projects</button>
+  </div>
+{/if}
+
 <div class="conv-list">
   {#if groups.length === 0}
     <div class="conv-empty">{shell.convQuery ? "No conversations match." : "No conversations yet.\nStart one from Home or Chat."}</div>
@@ -199,6 +237,9 @@
           />
         {:else}
           <span class="crow-title">{c.title || "Untitled"}</span>
+          {#if shell.allProjects}
+            <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
+          {/if}
           <span class="crow-time">{relTime(c.updatedAt)}</span>
           <button class="crow-menu-btn" type="button" onclick={(e) => openMenu(e, c.id)} aria-label="Conversation actions">
             <MoreHorizontal size={14} />
@@ -247,6 +288,21 @@
   .conv-search input::placeholder { color: var(--fg-subtle); }
   .cs-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--fg-faint); flex: none; }
   .cs-clear:hover { background: var(--surface-active); color: var(--fg-2); }
+
+  /* per-project scope toggle — segmented control under the search box */
+  .conv-scope { display: flex; gap: 2px; margin: 0 2px 6px; padding: 2px; flex: none;
+    border-radius: 8px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .cscope-btn { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    transition: background var(--dur-fast), color var(--dur-fast); }
+  .cscope-btn:hover { color: var(--fg-2); }
+  .cscope-btn.on { background: var(--surface-active); color: var(--fg); }
+
+  /* per-row project label (All-projects mode only) */
+  .crow-proj { flex: none; max-width: 84px; padding: 1px 6px; border-radius: 5px;
+    font-size: 10px; font-weight: 600; color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 7%, transparent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow:hover .crow-proj, .crow.menu-open .crow-proj { display: none; }
 
   .conv-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 8px;
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }

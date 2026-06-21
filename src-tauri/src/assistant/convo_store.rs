@@ -48,6 +48,12 @@ pub struct ConversationMeta {
     /// Home "Jump back in" rows. None when no text block exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_snippet: Option<String>,
+    /// Per-project scoping: the workspace folder this conversation belongs to,
+    /// so the sidebar can show only the open project's chats. Sourced from the
+    /// convo's own `workspace_root` (new convos), else backfilled from the
+    /// session-cwd sidecar (legacy convos predating the field). None = unfiled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
 }
 
 /// Full conversation record persisted to disk. `messages` is the frontend's
@@ -69,6 +75,11 @@ pub struct Conversation {
     /// (Option default = None); frontend falls back to `id` on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_session_id: Option<String>,
+    /// Per-project scoping: the workspace folder active when this conversation's
+    /// turns run. Stamped by the frontend on save (`tab.workspaceRoot ?? activeRoot`).
+    /// Legacy convos lack it (None) — the list backfills from the cwd sidecar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_root: Option<String>,
     /// Catch-all for conversation-level fields the frontend owns but Rust does
     /// not model — `forceNextFirstTurn` (F51) and `compactionHistory` (the
     /// latent round-trip bug). Without flatten, `from_value` → `to_string` on
@@ -272,6 +283,13 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
                 })
             })
         });
+        // Per-project scope: prefer the convo's own root; else backfill from the
+        // session-cwd sidecar (keyed by the cli session id, falling back to the
+        // convo id) so chats predating the field still land in their folder.
+        let workspace_root = convo.workspace_root.clone().or_else(|| {
+            let sid = convo.cli_session_id.as_deref().unwrap_or(&convo.id);
+            load_session_cwd(sid).map(|p| p.to_string_lossy().into_owned())
+        });
         out.push(ConversationMeta {
             id: convo.id,
             title: convo.title,
@@ -282,6 +300,7 @@ pub fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, String> {
             cost_usd,
             compaction_summaries,
             last_snippet,
+            workspace_root,
         });
     }
     out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));

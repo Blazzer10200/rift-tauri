@@ -150,6 +150,10 @@ export type ConversationMeta = {
   costUsd: number;
   /** One-line preview of the newest text message (ui-audit #6). */
   lastSnippet?: string;
+  /** Per-project scope: the workspace folder this convo belongs to, so the
+   *  sidebar can show only the open project's chats. Backfilled from the
+   *  session-cwd sidecar for legacy convos; null/absent = unfiled. */
+  workspaceRoot?: string | null;
 };
 
 export type ConversationRecord = {
@@ -163,6 +167,9 @@ export type ConversationRecord = {
   cliSessionId?: string;
   /** Final turn's ctx usage — hydrates the ctx meter on restore (ISSUES #32). */
   lastTurnUsage?: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  /** Per-project scope: workspace folder active when this convo's turns run.
+   *  Stamped on save so the sidebar can filter to the open project. */
+  workspaceRoot?: string | null;
 };
 
 // Minimal stream-json envelope shape we care about.

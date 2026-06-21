@@ -5,6 +5,7 @@
 const COLLAPSE_KEY = "rift.ui.sidebar-collapsed.v1";
 const WIDTH_KEY = "rift.ui.sidebar-width.v1";
 const PINNED_KEY = "rift.ui.pinned-convos.v1";
+const ALL_PROJECTS_KEY = "rift.ui.conv-all-projects.v1";
 const MIN_W = 208;
 const MAX_W = 380;
 const DEFAULT_W = 248;
@@ -22,6 +23,9 @@ class ShellState {
   convQuery = $state("");
   /** Pinned conversation ids — frontend-only (the backend meta has no pin). */
   pinned = $state<Set<string>>(new Set<string>());
+  /** Sidebar scope: false (default) = show only the open project's chats;
+   *  true = show every project's chats (with a per-row project label). */
+  allProjects = $state(false);
 
   readonly minWidth = MIN_W;
   readonly maxWidth = MAX_W;
@@ -36,9 +40,17 @@ class ShellState {
       const ids = JSON.parse(localStorage.getItem(PINNED_KEY) ?? "[]") as unknown;
       if (Array.isArray(ids)) this.pinned = new Set(ids.filter((s): s is string => typeof s === "string"));
     } catch (e) { console.warn("[shell] pinned-convos parse failed:", e); }
+    this.allProjects = localStorage.getItem(ALL_PROJECTS_KEY) === "1";
   }
 
   isPinned(id: string): boolean { return this.pinned.has(id); }
+
+  toggleAllProjects() {
+    this.allProjects = !this.allProjects;
+    if (typeof window !== "undefined") {
+      localStorage.setItem(ALL_PROJECTS_KEY, this.allProjects ? "1" : "0");
+    }
+  }
 
   togglePin(id: string) {
     const next = new Set(this.pinned);

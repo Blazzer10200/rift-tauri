@@ -33,6 +33,9 @@ export type SaveableTab = {
   titleGenerated: boolean;
   modelOverride: ModelSel | null;
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  // Per-project scope: the folder this tab's turns run in. Stamped onto the
+  // saved record so the sidebar can filter chats to the open project.
+  workspaceRoot: string | null;
 };
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
@@ -65,6 +68,9 @@ export type PersistenceHost = {
   lastNotice: string | null;
   messages: ChatMessage[];
   queue: { id: string; text: string }[];
+  // Effective folder of the focused tab — fallback scope for a save whose tab
+  // has no explicit per-pane root (matches AssistantStore.activeRoot).
+  activeRoot: string | null;
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
@@ -117,6 +123,9 @@ export function buildSaveRecord(
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
     lastTurnUsage: tab.lastTurnUsage ?? undefined,
+    // Scope the convo to the tab's folder (or the focused root as fallback) so
+    // the sidebar shows it only under its project. null = unfiled.
+    workspaceRoot: tab.workspaceRoot ?? host.activeRoot ?? null,
   };
 }
 
