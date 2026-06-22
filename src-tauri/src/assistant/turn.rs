@@ -349,6 +349,16 @@ async fn handle_permission_request(
     msg: &Value,
 ) -> std::io::Result<()> {
     let request_id = msg.get("request_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    // RR11: reject a missing/empty request_id (mirrors ask_user_op) — an empty key
+    // collides in the PermissionRegistry, so two malformed messages would corrupt
+    // both pending grants. Deny immediately rather than register the "" slot.
+    if request_id.is_empty() {
+        write_control_response(stdin, "", serde_json::json!({
+            "behavior": "deny",
+            "message": "permission request missing request_id"
+        })).await?;
+        return Ok(());
+    }
     let req = msg.get("request").cloned().unwrap_or(Value::Null);
     let tool_use_id = req.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
     let original_input = req.get("input").cloned().unwrap_or(Value::Null);
@@ -1614,16 +1624,23 @@ pub async fn assistant_stop(session_id: String) -> Result<(), String> {
     // matches ours.
     clear_session_pid_if(&session_id, pid);
 
+    // RR11: taskkill/kill .status() blocks until the child exits; under AV/process
+    // contention this can stall a Tokio worker for seconds (and several concurrent
+    // Stops could starve the pool). Run the blocking wait off-worker.
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let out = std::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        let out = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        })
+        .await
+        .map_err(|e| format!("taskkill join: {e}"))?;
         match out {
             Ok(s) if s.success() => Ok(()),
             Ok(s) => Err(format!("taskkill exited {}", s.code().unwrap_or(-1))),
@@ -1633,11 +1650,15 @@ pub async fn assistant_stop(session_id: String) -> Result<(), String> {
     #[cfg(unix)]
     {
         // Avoid a libc dependency just for SIGTERM; shell out to `kill`.
-        let out = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        let out = tokio::task::spawn_blocking(move || {
+            std::process::Command::new("kill")
+                .args(["-TERM", &pid.to_string()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+        })
+        .await
+        .map_err(|e| format!("kill join: {e}"))?;
         match out {
             Ok(s) if s.success() => Ok(()),
             Ok(s) => Err(format!("kill exited {}", s.code().unwrap_or(-1))),

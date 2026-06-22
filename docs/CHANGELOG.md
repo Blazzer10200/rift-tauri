@@ -2,9 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.21.0 — Round 10 hardening (under-swept surfaces: bridge/persistence/cli-probe/stt/streaming)
+## Unreleased — on top of v0.21.0 — Rounds 10–11 hardening (under-swept surfaces)
 
-> Unshipped on `main`, pending the next bump. Multi-agent adversarial review (6 dimensions → per-finding skeptic verify, 31 raised → 27 confirmed / 4 rejected; 22 fixed this batch, 5 deferred as flag-not-fix/enhancement). Verified: cargo check clean (0/0, isolated target) · svelte-check 0/0 (4105) · playback 33/33.
+> Unshipped on `main`, pending the next bump. Two more multi-agent adversarial rounds (review-dimension → per-finding skeptic verify, default isReal=false). R10: 31 raised → 27 confirmed / 4 rejected, 22 fixed. R11: 11 raised → 5 confirmed / 6 rejected, 5 fixed. Verified each round: cargo check clean (isolated target) · svelte-check 0/0 (4105) · playback 33/33.
+
+**Hardened (round 11 — secrets/crypto · stt-audio-backend · velopack-apply · big-frontend-render · commands-registry, adversarially-verified, 5 confirmed / 6 rejected):**
+- **Start-recording no longer stalls the UI (HIGH)** — `stt_start_recording` called `workspace_context()` (which spawns `git rev-parse` + walks up to 4000 files synchronously) directly on a Tokio worker, blocking all other IPC for the duration — `workspace.rs` explicitly mandates `spawn_blocking` for Tokio callers and the sister commands already comply. Now wrapped in `spawn_blocking`.
+- **Stop is non-blocking under contention (MED→low)** — `assistant_stop` ran `taskkill`/`kill` `.status()` (blocks until the child exits) on a Tokio worker; under AV/process-table contention several concurrent Stops could starve the pool. Now off-worker via `spawn_blocking`.
+- **Workspace-switch animation settles correctly (MED)** — `WorkspaceShell`'s `.rising` $effect both read and wrote `risingIds`, so the tracked self-write re-invalidated the effect, ran its cleanup (`clearTimeout`) and early-exited without re-arming → the 810ms settle timer never fired and `.rising` stuck on the page forever (any later child re-mount replayed the entrance animation). Read is now `untrack()`'d and the timer is a plain var.
+- **Permission requests reject an empty id (MED→low)** — `handle_permission_request` took `request_id` via `.unwrap_or_default()`, registering an empty `""` key in the registry on a malformed `can_use_tool`; two such messages would collide and corrupt both pending grants. Now denies immediately on an empty id (mirrors `ask_user_op`).
+- **Dictation-cleanup subprocess is byte-capped (LOW)** — `cleanup.rs` read the `claude -p` stdout/stderr via uncapped `read_to_end`; now `take(256 KiB)` each (the project-wide subprocess-read cap), so an injected/runaway response can't balloon RAM inside the 15s window.
+
+**Hardened (round 10 — bridge/persistence/cli-probe/stt/streaming, adversarially-verified, 22 confirmed):**
 
 **Hardened (round 10 — adversarially-verified):**
 - **Rename no longer drops concurrent messages (HIGH)** — `renameConversation` did load-from-disk → mutate title → save-back; a turn-save landing between the two awaits was overwritten with the stale snapshot (silent message loss). Now mutates the live in-memory tab + `scheduleSave`, falling back to disk only when the convo isn't open.

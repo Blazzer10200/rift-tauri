@@ -1,7 +1,7 @@
 <script lang="ts">
   import { WORKSPACES } from "../workspaces";
   import { workspace, WORKSPACE_IDS, type WorkspaceId } from "$lib/state/workspace.svelte";
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -16,7 +16,12 @@
   const SETTLE_MS = 810;
 
   let prevActiveId: string | null = null;
+  let riseHandle: ReturnType<typeof setTimeout> | null = null;
 
+  // RR11: untrack the risingIds read — the effect both reads and writes it, so a
+  // tracked read self-invalidates the effect, runs its cleanup (clearTimeout), and
+  // the re-run early-exits without re-arming → the settle timer never fired and
+  // .rising stuck forever. Manage the timer as a plain var instead of via cleanup.
   $effect(() => {
     const id = workspace.activeId;
     // Skip first run to avoid spurious .rising on init/HMR.
@@ -26,14 +31,16 @@
     if (!id) return;
 
     // Add transient class — CSS picks it up immediately on next paint.
-    risingIds = new Set([...risingIds, id]);
+    if (riseHandle) clearTimeout(riseHandle);
+    risingIds = new Set([...untrack(() => risingIds), id]);
 
-    const handle = setTimeout(() => {
-      risingIds = new Set([...risingIds].filter((x) => x !== id));
+    riseHandle = setTimeout(() => {
+      riseHandle = null;
+      risingIds = new Set([...untrack(() => risingIds)].filter((x) => x !== id));
     }, SETTLE_MS);
-
-    return () => clearTimeout(handle);
   });
+
+  onMount(() => () => { if (riseHandle) clearTimeout(riseHandle); });
 </script>
 
 <div class="ws-shell">

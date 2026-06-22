@@ -102,17 +102,19 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let drain = async {
+        // RR11: cap both pipes (256 KiB, the project-wide subprocess-read cap) so
+        // a runaway/injected response can't balloon RAM inside the timeout window.
         let read_out = async {
             let mut b = Vec::new();
             if let Some(s) = &mut stdout {
-                let _ = s.read_to_end(&mut b).await;
+                let _ = s.take(256 * 1024).read_to_end(&mut b).await;
             }
             b
         };
         let read_err = async {
             let mut b = Vec::new();
             if let Some(s) = &mut stderr {
-                let _ = s.read_to_end(&mut b).await;
+                let _ = s.take(256 * 1024).read_to_end(&mut b).await;
             }
             b
         };

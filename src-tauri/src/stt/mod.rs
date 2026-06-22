@@ -425,7 +425,12 @@ pub async fn stt_start_recording(
     // Fold the workspace context into the vocab slot so it biases the decoder
     // toward project filenames/symbols; user vocab follows (trimmed first if
     // the 800-char prompt budget is exceeded).
-    let workspace_ctx = workspace_context();
+    // RR11: workspace_context() spawns `git rev-parse` + walks up to 4000 files
+    // synchronously (workspace.rs mandates spawn_blocking for Tokio callers);
+    // running it inline here stalled a worker for seconds on record-start.
+    let workspace_ctx = tokio::task::spawn_blocking(workspace_context)
+        .await
+        .unwrap_or_default();
     let vocab = if workspace_ctx.is_empty() {
         cfg.vocab_text.clone()
     } else if cfg.vocab_text.trim().is_empty() {
