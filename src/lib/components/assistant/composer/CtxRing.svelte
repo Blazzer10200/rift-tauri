@@ -6,7 +6,19 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { fmtTokens } from "$lib/state/assistant/helpers";
 
-  let { pct, tokens, window: win }: { pct: number; tokens: number; window: number } = $props();
+  let {
+    pct,
+    tokens,
+    window: win,
+    onClick,
+    open = false,
+  }: {
+    pct: number;
+    tokens: number;
+    window: number;
+    onClick?: () => void;
+    open?: boolean;
+  } = $props();
 
   const R = 6;
   const C = 2 * Math.PI * R;
@@ -14,11 +26,20 @@
   const offset = $derived(C * (1 - clamped / 100));
   const tone = $derived(clamped >= 90 ? "danger" : clamped >= 75 ? "warn" : "ok");
   const tip = $derived(
-    `Context — ${fmtTokens(tokens)} / ${fmtTokens(win)} (${Math.round(clamped)}%)`,
+    `Context — ${fmtTokens(tokens)} / ${fmtTokens(win)} (${Math.round(clamped)}%)\nClick for plan limits`,
   );
 </script>
 
-<span class="ctxring" data-tone={tone} use:tooltip={tip} aria-label={tip}>
+<button
+  type="button"
+  class="ctxring"
+  data-tone={tone}
+  class:open
+  use:tooltip={tip}
+  aria-label={tip}
+  aria-expanded={open}
+  onclick={onClick}
+>
   <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
     <circle class="track" cx="8" cy="8" r={R} fill="none" stroke-width="2" />
     <circle
@@ -34,18 +55,26 @@
       transform="rotate(-90 8 8)"
     />
   </svg>
-</span>
+</button>
 
 <style>
   .ctxring {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    cursor: default;
+    padding: 2px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    transition: background var(--dur-base);
   }
+  .ctxring:hover { background: var(--bg-elev-3); }
+  .ctxring.open { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+  .ctxring:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .ctxring .track { stroke: color-mix(in oklab, var(--fg) 12%, transparent); }
   .ctxring .fill {
-    stroke: var(--fg-faint);
+    stroke: var(--accent);
     transition: stroke-dashoffset var(--dur-slow) var(--ease-soft), stroke var(--dur-base);
   }
   .ctxring[data-tone="warn"] .fill { stroke: var(--warn); }

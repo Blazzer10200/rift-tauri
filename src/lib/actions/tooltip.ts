@@ -5,9 +5,7 @@
 // `aria-label` so screen readers still announce it. Kept as a one-line shim so
 // the ~26 `use:tooltip={...}` call sites don't each need unwinding, and so
 // re-introducing a tooltip later is a single-file change.
-//
-// NOTE: the old `.tip` glass styles (app.css) are now dead — left in place,
-// flagged here, not swept.
+// (The old `.tip` glass styles were swept from app.css 2026-06-15.)
 
 export type TooltipOpts =
   | string

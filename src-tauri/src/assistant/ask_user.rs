@@ -20,8 +20,15 @@ use std::sync::{Arc, Mutex};
 use serde_json::Value;
 use tokio::sync::oneshot;
 
+/// A parked ask_user request: the resolver channel + the session that raised it
+/// (so a Stop on that session can cancel it even when the PID-kill path misses).
+struct Pending {
+    tx: oneshot::Sender<Value>,
+    session_id: String,
+}
+
 pub struct AskUserRegistry {
-    inner: Mutex<HashMap<String, oneshot::Sender<Value>>>,
+    inner: Mutex<HashMap<String, Pending>>,
 }
 
 /// RAII guard mirroring `PermissionGuard`: cancels the registry entry on drop.
@@ -47,13 +54,13 @@ impl AskUserRegistry {
 
     /// Register a pending request. The bridge dispatch task awaits the
     /// returned Receiver; `resolve` fires it from the Tauri command thread.
-    pub fn register(&self, request_id: String) -> oneshot::Receiver<Value> {
+    pub fn register(&self, request_id: String, session_id: String) -> oneshot::Receiver<Value> {
         let (tx, rx) = oneshot::channel();
         let mut g = match self.inner.lock() {
             Ok(g) => g,
             Err(p) => { log::error!("AskUserRegistry mutex poisoned — recovering"); p.into_inner() }
         };
-        g.insert(request_id, tx);
+        g.insert(request_id, Pending { tx, session_id });
         rx
     }
 
@@ -62,22 +69,46 @@ impl AskUserRegistry {
     pub fn register_guarded(
         self: &Arc<Self>,
         request_id: String,
+        session_id: String,
     ) -> (oneshot::Receiver<Value>, AskUserGuard) {
-        let rx = self.register(request_id.clone());
+        let rx = self.register(request_id.clone(), session_id);
         (rx, AskUserGuard { registry: self.clone(), request_id })
     }
 
     /// Resolve a pending request. Returns true on success; false if the entry
     /// was already cancelled / never registered (stale UI re-submit, etc.).
     pub fn resolve(&self, request_id: &str, value: Value) -> bool {
-        let tx = match self.inner.lock() {
+        let pending = match self.inner.lock() {
             Ok(mut g) => g.remove(request_id),
             Err(_) => return false,
         };
-        match tx {
-            Some(tx) => tx.send(value).is_ok(),
+        match pending {
+            Some(p) => p.tx.send(value).is_ok(),
             None => false,
         }
+    }
+
+    /// Cancel every pending ask_user raised by `session_id`. The dropped
+    /// `oneshot::Sender` makes each parked bridge waiter's `rx` resolve `Err`
+    /// immediately, so the MCP child unblocks and the UI spinner clears. This is
+    /// the Stop-path safety net: `assistant_stop` kills the warm child by PID,
+    /// but if that PID was already cleared (eviction / prior-turn cleanup) the
+    /// kill is a no-op and the bridge oneshot would otherwise park for the full
+    /// 600s timeout. Returns how many entries were cancelled.
+    pub fn cancel_all_for_session(&self, session_id: &str) -> usize {
+        let mut g = match self.inner.lock() {
+            Ok(g) => g,
+            Err(p) => { log::error!("AskUserRegistry mutex poisoned — recovering"); p.into_inner() }
+        };
+        let ids: Vec<String> = g
+            .iter()
+            .filter(|(_, p)| p.session_id == session_id)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for id in &ids {
+            g.remove(id);
+        }
+        ids.len()
     }
 
     /// Drop a pending request without resolving — used after a timeout so the

@@ -69,18 +69,25 @@
 
   // Count the tool steps in a transcript for the collapsed-section summary.
   const toolCount = (blocks: { type: string }[]) => blocks.filter((b) => b.type === "tool").length;
+  // Of those steps, how many have settled (done/error) — drives the progress bar.
+  const doneToolCount = (blocks: { type: string; status?: string }[]) =>
+    blocks.filter((b) => b.type === "tool" && b.status !== "pending").length;
 </script>
 
 <div class="subagent-dock" role="complementary" aria-label="Sub-agent activity" onpointerenter={() => activityDock.notePointerEnter()}>
   <header class="head">
-    <span class="head-icon" class:live={runningCount > 0}><Bot size={14} /></span>
-    <span class="title">Sub-agents</span>
+    <span class="head-badge" class:live={runningCount > 0}><Bot size={15} /></span>
+    <span class="head-text">
+      <span class="title">Sub-agents</span>
+      {#if runningCount > 0}
+        <span class="head-live" use:tooltip={`${runningCount} running`}><span class="live-dot"></span>{runningCount} live</span>
+      {:else if spawns.length > 0}
+        <span class="head-rest">{spawns.length} done</span>
+      {/if}
+    </span>
     {#if spawns.length > 0}<span class="count">{spawns.length}</span>{/if}
-    {#if runningCount > 0}
-      <span class="head-live" use:tooltip={`${runningCount} running`}><span class="live-dot"></span>{runningCount} live</span>
-    {/if}
     <button class="close" onclick={() => activityDock.toggle()} use:tooltip={"Close panel"} aria-label="Close sub-agent panel">
-      <X size={14} />
+      <X size={15} />
     </button>
   </header>
 
@@ -151,8 +158,17 @@
               {/if}
             </div>
           {:else}
+            {@const total = toolCount(a.blocks)}
+            {@const settled = doneToolCount(a.blocks)}
             <div class="agent-summary">
-              {#if toolCount(a.blocks) > 0}{toolCount(a.blocks)} step{toolCount(a.blocks) === 1 ? "" : "s"}{:else}no steps{/if}
+              {#if total > 0}
+                <span class="prog-track" aria-hidden="true">
+                  <span class="prog-fill" data-status={st} style="width:{Math.round((settled / total) * 100)}%"></span>
+                </span>
+                <span class="prog-label">{settled}/{total} step{total === 1 ? "" : "s"}</span>
+              {:else}
+                <span class="prog-label muted">no steps yet</span>
+              {/if}
             </div>
           {/if}
         </section>
@@ -171,26 +187,39 @@
     overflow: hidden;
   }
 
-  /* ── Header ── */
+  /* ── Header ── lighter than a bordered toolbar: a soft gradient wash + an
+     accent-badged title, no hard bottom rule (a faint shadow separates it). */
   .head {
     flex: 0 0 auto;
-    display: flex; align-items: center; gap: 7px;
-    padding: 0 8px 0 11px;
+    display: flex; align-items: center; gap: 9px;
+    padding: 0 8px 0 12px;
     height: var(--titlebar-h);
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    background: linear-gradient(180deg, color-mix(in oklch, var(--bg-elev-1) 60%, var(--bg)), var(--bg));
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 60%, transparent);
     color: var(--fg);
   }
-  .head-icon { display: grid; place-items: center; color: var(--fg-muted); transition: color var(--dur-base) var(--ease-soft); }
-  .head-icon.live { color: var(--accent); }
-  .head .title { font-size: var(--fs-sm); font-weight: 600; letter-spacing: -0.01em; }
+  .head-badge {
+    flex: 0 0 auto; display: grid; place-items: center;
+    width: 26px; height: 26px; border-radius: var(--radius-sm);
+    background: var(--bg-elev-2); color: var(--fg-muted);
+    transition: color var(--dur-base) var(--ease-soft), background var(--dur-base) var(--ease-soft);
+  }
+  .head-badge.live {
+    color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent);
+  }
+  .head-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.1; min-width: 0; }
+  .head .title { font-size: var(--fs-sm); font-weight: 650; letter-spacing: -0.01em; }
+  .head-rest { font-size: 10px; color: var(--fg-subtle); }
   .head .count {
-    font-size: var(--fs-xs); font-weight: 600; line-height: 1;
-    padding: 2px 6px; border-radius: 999px;
-    background: var(--accent-soft); color: var(--accent);
+    margin-left: auto;
+    font-size: var(--fs-xs); font-weight: 650; line-height: 1;
+    padding: 3px 7px; border-radius: 999px;
+    background: var(--field); color: var(--fg-muted);
   }
   .head-live {
-    display: inline-flex; align-items: center; gap: 5px; margin-left: 2px;
+    display: inline-flex; align-items: center; gap: 5px;
     font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
     color: var(--accent);
   }
@@ -199,8 +228,8 @@
     box-shadow: 0 0 0 0 var(--accent-soft); animation: live-pulse 1.8s var(--ease-soft) infinite;
   }
   .close {
-    margin-left: auto; display: grid; place-items: center;
-    width: 24px; height: 24px; border-radius: var(--radius-sm);
+    flex: 0 0 auto; display: grid; place-items: center;
+    width: 26px; height: 26px; border-radius: var(--radius-sm);
     color: var(--fg-subtle); background: transparent; border: 0; cursor: pointer;
     transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
@@ -220,19 +249,31 @@
   .empty p { margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--fg-2); }
   .empty-sub { font-size: var(--fs-xs); line-height: 1.55; max-width: 230px; color: var(--fg-subtle); }
 
-  /* ── Agent accordion ── */
+  /* ── Agent cards ── each spawn is a distinct raised surface w/ breathing room,
+     not a hard-bordered list row. Running cards get an accent ring + soft glow. */
   .agents {
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
-    display: flex; flex-direction: column;
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 9px;
   }
   .agent {
-    border-bottom: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--bg-elev-1);
+    overflow: hidden;
+    transition: border-color var(--dur-base) var(--ease-soft), box-shadow var(--dur-base) var(--ease-soft);
     animation: enter var(--dur-base) var(--ease-page);
   }
+  .agent[data-status="running"] {
+    border-color: color-mix(in oklch, var(--accent) 38%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 14%, transparent),
+                0 4px 18px -10px color-mix(in oklch, var(--accent) 50%, transparent);
+  }
+  .agent[data-status="error"] { border-color: color-mix(in oklch, var(--danger) 40%, transparent); }
   .agent-head {
     width: 100%; position: relative;
     display: flex; align-items: flex-start; gap: 8px;
-    padding: 9px 10px 9px 11px; text-align: left;
+    padding: 10px 11px 10px 12px; text-align: left;
     background: transparent; border: 0; cursor: pointer; color: var(--fg);
     transition: background var(--dur-fast) ease-out;
   }
@@ -241,8 +282,10 @@
     background: transparent; transition: background var(--dur-fast) ease-out;
   }
   .agent-head:hover { background: var(--surface-hover); }
-  .agent[data-status="running"] .agent-head::before { background: var(--accent); }
-  .agent[data-status="running"].open > .agent-head { background: var(--accent-soft); }
+  .agent[data-status="running"] > .agent-head::before { background: var(--accent); }
+  .agent[data-status="running"].open > .agent-head {
+    background: color-mix(in oklch, var(--accent-soft) 50%, transparent);
+  }
   .chev { flex: 0 0 auto; margin-top: 1px; display: grid; place-items: center; color: var(--fg-subtle); }
   .stat { flex: 0 0 auto; margin-top: 1px; display: grid; place-items: center; }
   .stat[data-status="running"] { color: var(--accent); }
@@ -268,9 +311,22 @@
   }
 
   .agent-summary {
-    padding: 0 11px 9px 33px;
-    font-size: 10px; color: var(--fg-subtle);
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 12px 10px 33px;
   }
+  .prog-track {
+    flex: 1 1 auto; height: 4px; border-radius: 999px; overflow: hidden;
+    background: var(--bg-inset);
+  }
+  .prog-fill {
+    display: block; height: 100%; border-radius: 999px;
+    background: var(--ok);
+    transition: width var(--dur-slow) var(--ease-page), background var(--dur-base);
+  }
+  .prog-fill[data-status="running"] { background: var(--accent); }
+  .prog-fill[data-status="error"] { background: var(--danger); }
+  .prog-label { flex: 0 0 auto; font-size: 10px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+  .prog-label.muted { color: var(--fg-faint); }
 
   /* ── Transcript body ── */
   .agent-body {

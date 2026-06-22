@@ -1326,7 +1326,13 @@
           {/if}
 
           {#if !localLlm.enabled && assistant.ctxTokens > 0}
-            <CtxRing pct={assistant.ctxPct} tokens={assistant.ctxTokens} window={assistant.ctxWindow} />
+            <CtxRing
+              pct={assistant.ctxPct}
+              tokens={assistant.ctxTokens}
+              window={assistant.ctxWindow}
+              open={assistant.ui.usageOpen}
+              onClick={() => (assistant.ui.usageOpen = !assistant.ui.usageOpen)}
+            />
           {/if}
         </div>
       </div>

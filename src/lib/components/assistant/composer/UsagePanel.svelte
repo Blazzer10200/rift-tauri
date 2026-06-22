@@ -7,9 +7,19 @@
   import { X, Gauge } from "lucide-svelte";
   import { usage, type LimitWindow } from "../../../state/usage.svelte";
   import { assistant } from "../../../state/assistant.svelte";
+  import { fmtTokens } from "../../../state/assistant/helpers";
 
   let { onClose }: { onClose: () => void } = $props();
   let el = $state<HTMLDivElement | undefined>();
+
+  // Live conversation context (the same value the composer ring fills toward).
+  const ctxPct = $derived(Math.max(0, Math.min(100, assistant.ctxPct)));
+  const ctxTokens = $derived(assistant.ctxTokens);
+  const ctxWindow = $derived(assistant.ctxWindow);
+  const showCtx = $derived(ctxTokens > 0 && ctxWindow > 0);
+  function ctxZone(u: number): string {
+    return u < 75 ? "ok" : u < 90 ? "warn" : "hot";
+  }
 
   const rows = $derived.by(() => {
     const rl = usage.rateLimits;
@@ -42,7 +52,12 @@
 
 <svelte:window
   onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } }}
-  onmousedown={(e) => { if (el && !el.contains(e.target as Node)) onClose(); }}
+  onmousedown={(e) => {
+    const t = e.target as Node;
+    // Ignore mousedown on the composer ctx ring — it owns the toggle; closing
+    // here would race its onclick and double-toggle the panel back open.
+    if (el && !el.contains(t) && !(t as Element)?.closest?.(".ctxring")) onClose();
+  }}
 />
 
 <div class="rift-menu usage-pop" role="dialog" aria-label="Plan limits" bind:this={el}>
@@ -51,6 +66,19 @@
     <span class="up-meta">{usage.rateLimits ? "live · claude.ai" : "claude.ai"}</span>
     <button class="up-x" type="button" onclick={onClose} aria-label="Close"><X size={13} /></button>
   </header>
+  {#if showCtx}
+    <div class="up-row up-ctx">
+      <div class="up-top">
+        <span class="up-k">This conversation · context</span>
+        <span class="up-pct mono" data-zone={ctxZone(ctxPct)}>{ctxPct.toFixed(0)}<span class="up-pct-u">%</span></span>
+      </div>
+      <div class="up-track">
+        <span class="up-fill up-fill-ctx" data-zone={ctxZone(ctxPct)} style="width:{Math.min(100, Math.max(2, ctxPct))}%"></span>
+      </div>
+      <div class="up-reset">{fmtTokens(ctxTokens)} / {fmtTokens(ctxWindow)} tokens</div>
+    </div>
+    <div class="up-sep" aria-hidden="true"></div>
+  {/if}
   {#if rows.length > 0}
     <div class="up-rows">
       {#each rows as r (r.k)}
@@ -93,6 +121,8 @@
   .up-meta { flex: 1; font-size: 10px; color: var(--fg-subtle); font-family: var(--font-mono); text-align: right; }
   .up-x { display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: 6px; background: transparent; color: var(--fg-muted); cursor: pointer; flex: none; }
   .up-x:hover { background: var(--bg-elev-3); color: var(--fg); }
+  .up-ctx { margin-bottom: 10px; }
+  .up-sep { height: 1px; background: var(--border); margin: 0 0 10px; }
   .up-rows { display: flex; flex-direction: column; gap: 10px; }
   .up-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .up-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }

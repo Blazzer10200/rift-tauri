@@ -1923,14 +1923,27 @@ fn auth_rejection_message() -> String {
 /// Per-session (vs the prior single-slot global) so a tab pressing Stop kills
 /// only its own stream — never another tab's.
 #[tauri::command]
-pub async fn assistant_stop(session_id: String) -> Result<(), String> {
+pub async fn assistant_stop(
+    session_id: String,
+    ask_user: tauri::State<'_, std::sync::Arc<crate::assistant::AskUserRegistry>>,
+) -> Result<(), String> {
     if !is_valid_session_id(&session_id) {
         return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+    }
+    mark_session_stopped(&session_id);
+    // Unblock any parked ask_user for this session FIRST — independent of the
+    // PID kill. A warm child blocked in the bridge on an ask_user oneshot can't
+    // be reached by `taskkill` if its PID was already cleared (eviction /
+    // prior-turn cleanup), so the kill alone would leave the bridge parked for
+    // the full 600s timeout and the UI spinner stuck. Cancelling here drops the
+    // sender → the bridge waiter resolves Err immediately → MCP child unblocks.
+    let cancelled = ask_user.cancel_all_for_session(&session_id);
+    if cancelled > 0 {
+        log::info!("assistant_stop: cancelled {cancelled} pending ask_user for {session_id}");
     }
     let Some(pid) = get_session_pid(&session_id) else {
         return Ok(());
     };
-    mark_session_stopped(&session_id);
     // RR9: compare-and-clear on the PID we observed (mirrors the turn loop at
     // its two cleanup points). A queued follow-up can call assistant_send →
     // set_session_pid with a NEW pid between our get_session_pid read and here;
