@@ -56,6 +56,19 @@
   color: var(--fg-faint); max-width: 52ch;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 
+/* Awaiting human input — the turn is parked on YOU (a pending ask_user), not
+   the model. Kill the shimmer + the racing clock illusion: a calm accent verb
+   ("Waiting for your answer") + a quiet hint. This is the fix for the "why is
+   it so slow after a multiple-choice?" complaint — it was never slow, it was
+   waiting on a click and the chrome lied about it. Specificity (0,2,1) beats
+   the base shimmer rule (0,1,1) so animation:none wins. */
+.sfooter.awaiting .sf-verb {
+  animation: none; -webkit-text-fill-color: currentColor;
+  background: none; color: var(--accent); font-weight: 600; }
+.sfooter.awaiting .sf-await-hint { color: var(--fg-faint); }
+/* head dot: solid accent, no pulse — calm "parked" not "live grinding" */
+.sturn-head.live.awaiting-head .sh-dot { animation: none; background: var(--accent); }
+
 /* tool run — one quiet line */
 .wline { margin: 12px 0; }
 .wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-subtle);

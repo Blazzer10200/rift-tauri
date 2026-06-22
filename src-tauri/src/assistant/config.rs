@@ -39,8 +39,8 @@ pub(super) struct AssistantConfig {
     pub(super) max_budget_usd: Option<f64>,
     /// Effort tier for extended thinking on non-Haiku models, mapped to the
     /// CLI's `--effort` flag in turn.rs: `"none"`→low · `"quick"`→medium ·
-    /// `"smart"`→high (API default) · `"deep"`→xhigh · `"ultra"`→xhigh +
-    /// ultracode workflows. Haiku rejects effort server-side and is skipped.
+    /// `"smart"`→medium (responsive interactive default) · `"deep"`→high ·
+    /// `"ultra"`→xhigh + ultracode. Haiku rejects effort server-side and is skipped.
     /// Per-turn override rides the `assistant_send` arg; this is the default.
     #[serde(default)]
     pub(super) thinking_effort: Option<String>,
@@ -145,7 +145,7 @@ pub(super) fn is_valid_effort_tier(s: &str) -> bool {
 pub(super) fn model_max_effort(model: &str) -> &'static str {
     match model {
         "haiku" => "none",
-        "sonnet" => "smart",
+        "sonnet" => "deep", // accepts low/medium/high but NOT xhigh — tops out at deep(high)
         _ => "ultra", // opus / claude-opus-4-7 / claude-fable-5 / unknown
     }
 }
@@ -517,16 +517,17 @@ mod tests {
         assert_eq!(model_max_effort("opus"), "ultra");
         assert_eq!(model_max_effort("claude-opus-4-7"), "ultra");
         assert_eq!(model_max_effort("claude-fable-5"), "ultra");
-        assert_eq!(model_max_effort("sonnet"), "smart");
+        assert_eq!(model_max_effort("sonnet"), "deep"); // accepts high, not xhigh
         assert_eq!(model_max_effort("haiku"), "none");
         assert_eq!(model_max_effort("some-future-model"), "ultra"); // unknown → top
     }
 
     #[test]
     fn clamp_caps_sonnet_and_leaves_opus_untouched() {
-        // Sonnet tops out at smart: a stale deep/ultra pref must come down.
-        assert_eq!(clamp_effort("ultra", "sonnet"), "smart");
-        assert_eq!(clamp_effort("deep", "sonnet"), "smart");
+        // Sonnet tops out at deep(high): a stale ultra(xhigh) pref must come down,
+        // but deep(high) is now in range (Sonnet accepts high, just not xhigh).
+        assert_eq!(clamp_effort("ultra", "sonnet"), "deep");
+        assert_eq!(clamp_effort("deep", "sonnet"), "deep"); // in range now
         assert_eq!(clamp_effort("quick", "sonnet"), "quick"); // already in range
         assert_eq!(clamp_effort("ultra", "opus"), "ultra");
         assert_eq!(clamp_effort("ultra", "claude-fable-5"), "ultra");

@@ -270,13 +270,30 @@ async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
         }),
     );
 
-    match tokio::time::timeout(Duration::from_secs(600), rx).await {
-        Ok(Ok(answer)) => ok_with(answer),
+    // Instrument the human-wait. A parked ask_user is the #1 source of "why is
+    // it slow?" confusion — the turn looks frozen for as long as the user takes
+    // to click. Logging the parked→answered span makes that visible in the prod
+    // log so a long ask_user is never mistaken for a backend stall again. This
+    // is wall-clock the model never spent computing.
+    let parked = std::time::Instant::now();
+    log::info!("ask_user: parked, awaiting user answer (request_id={request_id})");
+    let outcome = tokio::time::timeout(Duration::from_secs(600), rx).await;
+    let waited = parked.elapsed();
+    match outcome {
+        Ok(Ok(answer)) => {
+            log::info!(
+                "ask_user: answered after {:.1}s (human wait, not compute)",
+                waited.as_secs_f64()
+            );
+            ok_with(answer)
+        }
         Ok(Err(_)) => {
+            log::warn!("ask_user: pending dropped after {:.1}s", waited.as_secs_f64());
             registry.cancel(&request_id);
             err("ask_user: pending entry dropped before an answer arrived")
         }
         Err(_) => {
+            log::warn!("ask_user: timed out after {:.1}s with no answer", waited.as_secs_f64());
             registry.cancel(&request_id);
             err("ask_user: user did not answer within 10 minutes")
         }

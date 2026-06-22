@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
-  import { PanelLeftOpen, Search, AppWindow, X } from "lucide-svelte";
+  import { PanelLeftOpen, Search, AppWindow, X, SplitSquareHorizontal } from "lucide-svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
@@ -37,6 +37,21 @@
   <span class="topbar-title" data-tauri-drag-region>{title}</span>
 
   <div class="topbar-r">
+    {#if workspace.activeId === "chat"}
+      <!-- Split-pane entry point — was keyboard-only (Ctrl+\), so undiscoverable.
+           Add a pane when there's room; once split, this disables (Ctrl+Shift+\
+           still closes the focused pane). -->
+      <button
+        class="topbar-ic"
+        type="button"
+        onclick={() => assistant.addPane()}
+        disabled={!assistant.canAddPane}
+        use:tooltip={assistant.canAddPane ? "Split editor — Ctrl+\\" : "Maximum panes open"}
+        aria-label="Split editor"
+      >
+        <SplitSquareHorizontal size={15} />
+      </button>
+    {/if}
     <button class="topbar-ic" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search — Ctrl+K"} aria-label="Search commands & chats">
       <Search size={15} />
     </button>
@@ -59,6 +74,7 @@
   .topbar-ic { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-subtle);
     transition: background var(--dur-fast), color var(--dur-fast); }
   .topbar-ic:hover { background: var(--surface-hover); color: var(--fg-2); }
+  .topbar-ic:disabled { opacity: 0.35; pointer-events: none; }
   .topbar-ic.show-side { margin-left: -8px; margin-right: 2px; }
 
   .winctl { display: flex; gap: 2px; }

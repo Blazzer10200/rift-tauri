@@ -7,17 +7,20 @@ import type { ModelSel, PermissionMode, ThinkingEffort } from "../../../state/as
 import { fableAvailable, MODEL_MAX_EFFORT } from "../../../state/assistant/helpers";
 
 export type EffortOpt = { id: ThinkingEffort; label: string; hint: string; level: 1 | 2 | 3 | 4 | 5 };
-// Effort ladder — 1:1 with the CLI's `--effort` ladder (low/medium/high/xhigh)
-// so the slider never lies about what gets sent. "smart" (high) is the API
-// default and Rift's default; "deep" (xhigh) is Claude Code's own default for
-// agentic coding; "ultra" rides xhigh + the ultracode workflow key. Haiku
-// rejects effort server-side, so the slider hides entirely there.
+// Effort ladder mapped to the CLI's `--effort` flag (low/medium/high/xhigh) by
+// effortToFlag (helpers.ts): none→low · quick→medium · smart→medium · deep→high
+// · ultra→xhigh. "smart" is Rift's default and maps to `medium` — Anthropic's
+// recommended responsive default for interactive use (the CLI default is `high`,
+// but their guidance is to override it: high makes the model think for a long
+// time before any visible text, which reads as a frozen UI). "deep" (high) is
+// explicit heavy reasoning; "ultra" rides xhigh + the ultracode workflow key.
+// Haiku rejects effort server-side, so the slider hides entirely there.
 export const EFFORT_OPTIONS: EffortOpt[] = [
   { id: "none",  label: "Instant", level: 1, hint: "Instant — minimal reasoning. Fastest answers for quick lookups and small edits." },
   { id: "quick", label: "Quick",   level: 2, hint: "Quick — light reasoning with leaner tool use. Good for routine, well-defined tasks." },
-  { id: "smart", label: "Smart",   level: 3, hint: "Smart — standard reasoning depth, the recommended default for everyday work." },
-  { id: "deep",  label: "Deep",    level: 4, hint: "Deep — extra reasoning depth and more thorough tool use. Claude Code's tier for hard agentic coding." },
-  { id: "ultra", label: "Ultracode", level: 5, hint: "Ultracode — deep reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
+  { id: "smart", label: "Smart",   level: 3, hint: "Smart — balanced reasoning + fast responses. The recommended default for everyday work." },
+  { id: "deep",  label: "Deep",    level: 4, hint: "Deep — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
+  { id: "ultra", label: "Ultracode", level: 5, hint: "Ultracode — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
 ];
 
 export type ModelOpt = {
@@ -36,8 +39,9 @@ export type ModelOpt = {
   //   • effort     — accepts the CLI `--effort` flag at all. The API rejects
   //                  effort on Haiku 4.5 wholesale, so this is false for Haiku.
   //   • maxEffort  — highest effort tier the model honors. Opus + Fable reach
-  //                  "ultra" (xhigh + ultracode); Sonnet 4.6 tops out at
-  //                  "smart" (high) — xhigh/ultracode are Opus-tier only.
+  //                  "ultra" (xhigh + ultracode); Sonnet 4.6 reaches "deep"
+  //                  (high) — it accepts high but not xhigh, so ultracode is
+  //                  Opus-tier only.
   //   • fastMode   — Opus-only faster-output mode (CC's `/fast`).
   effort: boolean;
   maxEffort: ThinkingEffort;

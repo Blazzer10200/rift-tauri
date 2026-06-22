@@ -83,7 +83,12 @@
   const gridTemplate = $derived.by(() => {
     const parts: string[] = [];
     for (let i = 0; i < fracs.length; i++) {
-      parts.push(`${fracs[i]}fr`);
+      // minmax(0, …fr), NOT a bare …fr: an fr track's implicit min is `auto`,
+      // so at 3–4 panes the composer/message min-content widths refuse to
+      // shrink and the tracks overflow → panes visually collide. minmax(0,…)
+      // lets a track shrink below its content (the inner scroll/ellipsis then
+      // handles the squeeze) so N panes always tile cleanly.
+      parts.push(`minmax(0, ${fracs[i]}fr)`);
       if (i < fracs.length - 1) parts.push("6px");
     }
     return parts.join(" ");

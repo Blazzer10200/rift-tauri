@@ -176,6 +176,11 @@ export class TabState {
    *  so a 700ms scheduleSave debounce can't dispatch against whichever tab
    *  is active when the timer fires. */
   convoCreatedAt = $state<number | null>(null);
+  /** Last *real* turn timestamp — bumped on send() and on a result landing,
+   *  NOT on open/switch/auto-save. The sidebar sorts + buckets by this so a
+   *  chat doesn't jump to the top merely because it was opened (its tab-switch
+   *  auto-save still advances updatedAt). Falls back to convoCreatedAt. */
+  lastActivityAt = $state<number | null>(null);
   convoTitle = $state<string | null>(null);
   /** Guards the one-shot smart-title generation (assistant_generate_title).
    *  False on a fresh tab → generated once after the first assistant turn;

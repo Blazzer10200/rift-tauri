@@ -10,7 +10,7 @@
   import StreamResult from "./StreamResult.svelte";
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
-  import { messageToTurn, groupBlocks, fmtDur, VERB_ING, type StreamTool } from "./streamModel";
+  import { messageToTurn, groupBlocks, fmtDur, isFillerSay, VERB_ING, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
   import AnimatedCount from "./AnimatedCount.svelte";
@@ -49,6 +49,13 @@
     }
     return null;
   });
+  // Awaiting human input: a pending ask_user (or permission) tool parks the
+  // turn on YOU, not the model. The elapsed timer + shimmer would otherwise
+  // read as "the bot is grinding" when it's actually idle waiting for a click —
+  // the #1 "why is this so slow" illusion (a 124s ask_user looks like a 124s
+  // stall). Freeze the clock, calm the chrome, and say so plainly.
+  const awaitingInput = $derived(liveTool?.kind === "ask");
+
   // The head is the TURN-level status only: "Working…" live, "Worked for Xs"
   // when done. It must NOT say "Thinking…" — and the StreamThinking block only
   // renders once thinking is DONE (the collapsible "Thought for Xs"). While
@@ -56,7 +63,11 @@
   // rotating verb (which includes "Thinking…"); rendering the active block too
   // duplicated that label. Thinking-in-progress is the footer's job, not a block.
   const headLabel = $derived(
-    streaming ? "Working…" : `Worked for ${fmtDur(turn.totalSecs)}`
+    !streaming
+      ? `Worked for ${fmtDur(turn.totalSecs)}`
+      : awaitingInput
+        ? "Waiting for you"
+        : "Working…"
   );
 
   // Live footer meta — spec's `Unfurling… 5s · 312 tokens`. 1s ticker drives
@@ -118,7 +129,7 @@
 </script>
 
 <div class="sturn">
-  <div class="sturn-head {streaming ? 'live' : ''}">
+  <div class="sturn-head {streaming ? 'live' : ''}" class:awaiting-head={awaitingInput}>
     <span class="sh-dot"></span>
     <span class="sh-label">{headLabel}</span>
   </div>
@@ -129,7 +140,11 @@
 
   {#each groups as g, gi (gi)}
     {#if g.type === "say"}
-      <div class="snarr"><Markdown text={g.text} {streaming} /></div>
+      {#if !(streaming && gi === groups.length - 1) && isFillerSay(g.text)}
+        <!-- trivial transitional narration; the work rows below name the target -->
+      {:else}
+        <div class="snarr"><Markdown text={g.text} {streaming} /></div>
+      {/if}
     {:else if g.type === "steer"}
       <div class="ssteer">
         <span class="ssteer-ic"><Send size={12} strokeWidth={2} /></span>
@@ -159,18 +174,24 @@
   {/each}
 
   {#if streaming}
-    <div class="sfooter" class:stalled={stallLevel > 0}>
+    <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
       {#key footerVerb}<span class="sf-verb">{footerVerb}</span>{/key}
-      {#if liveTool?.cap}
-        <span class="sf-meta">{liveTool.cap}</span>
-      {/if}
-      {#if liveSecs != null}
-        <span class="sf-pip">·</span>
-        <span class="sf-meta"><AnimatedCount value={liveSecs} durationMs={300} />s</span>
-      {/if}
-      {#if liveTokens != null}
-        <span class="sf-pip">·</span>
-        <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
+      {#if awaitingInput}
+        <!-- Parked on the user: no climbing clock (it's human time, not the
+             model's), no token meter. Just the calm verb + a nudge. -->
+        <span class="sf-meta sf-await-hint">— choose an option above to continue</span>
+      {:else}
+        {#if liveTool?.cap}
+          <span class="sf-meta">{liveTool.cap}</span>
+        {/if}
+        {#if liveSecs != null}
+          <span class="sf-pip">·</span>
+          <span class="sf-meta"><AnimatedCount value={liveSecs} durationMs={300} />s</span>
+        {/if}
+        {#if liveTokens != null}
+          <span class="sf-pip">·</span>
+          <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
+        {/if}
       {/if}
     </div>
     {#if stallLevel > 0}

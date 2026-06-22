@@ -147,6 +147,11 @@ export type ConversationMeta = {
   messageCount: number;
   createdAt: number;
   updatedAt: number;
+  /** Timestamp of the last real user/assistant turn. Only advances when a
+   *  message is sent or an assistant result lands — NOT on open/switch/auto-save.
+   *  Used by the sidebar to sort and bucket conversations. Falls back to
+   *  updatedAt on legacy records that predate this field. */
+  lastActivityAt?: number;
   /** Σ of per-turn costs across the transcript. 0 for convos predating cost capture. */
   costUsd: number;
   /** One-line preview of the newest text message (ui-audit #6). */
@@ -166,6 +171,9 @@ export type ConversationRecord = {
   messages: ChatMessage[];
   // CLI session UUID (--session-id / --resume target).
   cliSessionId?: string;
+  /** Last real turn timestamp — drives stable sidebar order (see ConversationMeta).
+   *  Optional: legacy records predating it fall back to updatedAt on load. */
+  lastActivityAt?: number;
   /** Final turn's ctx usage — hydrates the ctx meter on restore (ISSUES #32). */
   lastTurnUsage?: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
   /** Per-project scope: workspace folder active when this convo's turns run.

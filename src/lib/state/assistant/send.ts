@@ -18,7 +18,7 @@ import { accessibility } from "../accessibility.svelte";
 import { toast, notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, TurnRecord } from "./types";
-import { effortToFlag, autoScaleEffort, FABLE_SUNSET_MS } from "./helpers";
+import { effortToFlag, FABLE_SUNSET_MS } from "./helpers";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
@@ -66,6 +66,9 @@ export async function send(store: AssistantStore, prompt: string) {
     tab.convoCreatedAt = Date.now();
     tab.convoTitle = null;
   }
+  // A real turn — advance the sidebar's activity clock. Tab-switch auto-saves
+  // deliberately don't touch this, so opening a chat no longer reshuffles.
+  tab.lastActivityAt = Date.now();
   // v0.4: catches the raw newConversation→send path (slash /new) so tabs
   // never drift out of sync with the streaming convo.
   if (!store.openTabs.includes(store.currentConvoId)) {
@@ -97,15 +100,13 @@ export async function send(store: AssistantStore, prompt: string) {
   // Telemetry: build the turn record + attach to tab. TabState fills it as
   // envelopes arrive; finalized in onDone/onError.
   const attachBytes = store.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
-  // #244: per-turn effort auto-scale. A trivial greeting on the default "smart"
-  // tier downshifts to "quick" so it doesn't burn ~10s (Sonnet) / ~130s (Opus)
-  // of hidden pre-text reasoning. The store's persisted tier is untouched — this
-  // is the effective per-send value only.
-  const sendEffort = autoScaleEffort(
-    store.thinkingEffort,
-    trimmed,
-    store.composerAttachments.length > 0,
-  );
+  // The send tier IS the user's persisted tier — no per-turn auto-scaling.
+  // (#244's autoScaleEffort is retired: the default tier now maps to `medium`,
+  // so a trivial greeting is already light, AND any per-turn effort change forces
+  // a warm-pool cold respawn — `effort_level` is baked into the SpawnKey
+  // (warm_pool.rs), so the "optimization" silently triggered the ~1.7s slow path
+  // it was meant to avoid. Stable effort across turns = the warm child is reused.)
+  const sendEffort = store.thinkingEffort;
   const turnRecord: TurnRecord = {
     ts: Date.now(),
     convoId: store.currentConvoId,

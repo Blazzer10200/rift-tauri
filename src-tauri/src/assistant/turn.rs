@@ -955,8 +955,11 @@ pub async fn assistant_send(
     // `effortToFlag` in src/lib/state/assistant/helpers.ts):
     //   none  → --effort low     (minimal reasoning, fastest TTFT)
     //   quick → --effort medium  (light reasoning, leaner tool use)
-    //   smart → --effort high    (the API default — Rift's default tier)
-    //   deep  → --effort xhigh   (Claude Code's own default for agentic coding)
+    //   smart → --effort medium  (the responsive interactive default — Anthropic's
+    //            recommended `medium`; the CLI default is `high` but their API
+    //            guidance says to override it for interactive use to avoid the
+    //            "UI appears frozen" long hidden pre-pass)
+    //   deep  → --effort high    (the old API default — explicit heavy reasoning)
     //   ultra → --effort xhigh + the ultracode workflow settings key
     // `max` is deliberately not exposed — per Anthropic's guidance it shows
     // diminishing returns and is prone to overthinking vs xhigh.
@@ -987,9 +990,9 @@ pub async fn assistant_send(
     let effort_tier = clamp_effort(&effort, &model);
     let effort_level = match effort_tier {
         "none" => "low",
-        "quick" => "medium",
-        "deep" | "ultra" => "xhigh",
-        _ /* "smart" or unknown */ => "high",
+        "quick" | "smart" => "medium", // "smart" = the responsive interactive default (Anthropic's recommended medium); see effortToFlag in helpers.ts
+        "ultra" => "xhigh",
+        _ /* "deep" or unknown */ => "high",
     };
     log::info!("assistant_send: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't

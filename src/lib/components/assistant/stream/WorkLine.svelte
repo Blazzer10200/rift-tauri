@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ChevronDown, FileText, Search, Terminal, Wrench } from "lucide-svelte";
-  import { groupSummary, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
+  import { groupNames, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
 
   let { tools }: { tools: StreamTool[] } = $props();
   let open = $state(false);
@@ -11,7 +11,7 @@
   const lead = $derived(tools[0]?.kind ?? "mcp");
   const Icon = $derived(ICONS[lead] ?? Wrench);
   const anyActive = $derived(tools.some((t) => t.status === "pending"));
-  const summary = $derived(groupSummary(tools));
+  const summary = $derived(groupNames(tools));
 </script>
 
 {#if anyActive && tools.length === 1}

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, isFillerSay } from "./streamModel";
+import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
 // Minimal ChatMessage builder — only the fields messageToTurn reads.
@@ -144,5 +145,130 @@ describe("streamModel — edit diff counts + input passthrough", () => {
     expect(t.add).toBeNull();
     expect(t.del).toBeNull();
     expect(t.input ?? null).toBeNull();
+  });
+});
+
+// The answered-state parser mirrors the EXACT backend format
+// (mcp_server.rs::format_ask_user_result): "Q: <q>\nA: <label>", blocks joined
+// by "\n", multi-select labels joined by ", ". If the backend format changes,
+// these break — that's the point (the parser is brittle by necessity).
+describe("parseAskUserResult — answered ask_user → chips", () => {
+  it("single question, single answer", () => {
+    expect(parseAskUserResult("Q: Pick a color\nA: Blue")).toEqual([
+      { question: "Pick a color", answers: ["Blue"] },
+    ]);
+  });
+
+  it("multi-select answer splits on comma-space", () => {
+    expect(parseAskUserResult("Q: Pick features\nA: Auth, Billing, Search")).toEqual([
+      { question: "Pick features", answers: ["Auth", "Billing", "Search"] },
+    ]);
+  });
+
+  it("multiple questions each parse to their own pair", () => {
+    const raw = "Q: First?\nA: Yes\nQ: Second?\nA: No";
+    expect(parseAskUserResult(raw)).toEqual([
+      { question: "First?", answers: ["Yes"] },
+      { question: "Second?", answers: ["No"] },
+    ]);
+  });
+
+  it("dismissal sentence → empty (caller shows neutral state)", () => {
+    expect(parseAskUserResult("User dismissed the question without answering. Fall back…")).toEqual([]);
+  });
+
+  it("null/empty result → empty", () => {
+    expect(parseAskUserResult(null)).toEqual([]);
+    expect(parseAskUserResult("")).toEqual([]);
+    expect(parseAskUserResult(undefined)).toEqual([]);
+  });
+
+  it("custom 'Other' free-text answer survives verbatim", () => {
+    expect(parseAskUserResult("Q: How?\nA: Some bespoke approach I typed")).toEqual([
+      { question: "How?", answers: ["Some bespoke approach I typed"] },
+    ]);
+  });
+
+  it("unparseable text (no A: line) → empty, never throws", () => {
+    expect(parseAskUserResult("just some random text")).toEqual([]);
+  });
+});
+
+describe("groupNames — names on the collapsed work row", () => {
+  it("single-kind reads → 'Read a.ts, b.ts'", () => {
+    const ts = toolsOf([
+      tool("Read", "done", { file_path: "/a/a.ts" }),
+      tool("Read", "done", { file_path: "/a/b.ts" }),
+    ]);
+    expect(groupNames(ts)).toBe("Read a.ts, b.ts");
+  });
+
+  it("caps at 3 names with a '+N more' tail", () => {
+    const ts = toolsOf([
+      tool("Read", "done", { file_path: "/a/a.ts" }),
+      tool("Read", "done", { file_path: "/a/b.ts" }),
+      tool("Read", "done", { file_path: "/a/c.ts" }),
+      tool("Read", "done", { file_path: "/a/d.ts" }),
+      tool("Read", "done", { file_path: "/a/e.ts" }),
+    ]);
+    expect(groupNames(ts)).toBe("Read a.ts, b.ts, c.ts +2 more");
+  });
+
+  it("de-dupes repeated names", () => {
+    const ts = toolsOf([
+      tool("Read", "done", { file_path: "/a/a.ts" }),
+      tool("Read", "done", { file_path: "/a/a.ts" }),
+    ]);
+    expect(groupNames(ts)).toBe("Read a.ts");
+  });
+
+  it("shell falls back to the count summary (command text isn't a target name)", () => {
+    const ts = toolsOf([tool("Bash", "done", { command: "npm run check" })]);
+    expect(groupNames(ts)).toBe("Ran 1 command");
+  });
+
+  it("mixed kinds fall back to the count summary", () => {
+    const ts = toolsOf([
+      tool("Read", "done", { file_path: "/a/a.ts" }),
+      tool("Bash", "done", { command: "ls" }),
+    ]);
+    expect(groupNames(ts)).toBe("Ran 2 steps");
+  });
+
+  it("grep names its pattern target", () => {
+    const ts = toolsOf([tool("Grep", "done", { pattern: "foo" })]);
+    expect(groupNames(ts)).toBe('Searched "foo"');
+  });
+});
+
+describe("isFillerSay — trim throwaway transitional prose", () => {
+  it("drops a single 'Let me…' sentence", () => {
+    expect(isFillerSay("Let me look at the layout file.")).toBe(true);
+  });
+
+  it("drops 'Now I'll…' / 'First,…' lead-ins", () => {
+    expect(isFillerSay("Now I'll check the routes.")).toBe(true);
+    expect(isFillerSay("First, I need to read the config.")).toBe(true);
+  });
+
+  it("keeps real multi-sentence prose", () => {
+    expect(isFillerSay("Let me explain. The bug is in the parser, here's why it matters.")).toBe(false);
+  });
+
+  it("keeps long single sentences (real content, even if it starts with a lead-in)", () => {
+    const long = "Let me walk through exactly what the warm pool does on each turn, because the eviction timing is the whole reason this felt slow before.";
+    expect(isFillerSay(long)).toBe(false);
+  });
+
+  it("keeps prose that doesn't open with a filler lead-in", () => {
+    expect(isFillerSay("The answer is 42.")).toBe(false);
+  });
+
+  it("keeps anything containing a code fence", () => {
+    expect(isFillerSay("Let me run ```npm test```")).toBe(false);
+  });
+
+  it("empty / whitespace → not filler (nothing to drop)", () => {
+    expect(isFillerSay("   ")).toBe(false);
   });
 });

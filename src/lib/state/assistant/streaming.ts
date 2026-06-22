@@ -531,6 +531,9 @@ export function recordTurnUsage(tab: TabState, u: Record<string, unknown>, accum
   } else {
     // assistant envelope = point-in-time window occupancy → drives the pill.
     tab.lastTurnUsage = turn;
+    // A turn just completed — advance the sidebar's activity clock so the row
+    // sorts to "now" on real work (not on mere open/switch).
+    tab.lastActivityAt = Date.now();
     // This message just completed — bank its exact output and clear the
     // in-flight char estimate, snapping the live count to the real total.
     tab.committedOutputTokens += turn.output;

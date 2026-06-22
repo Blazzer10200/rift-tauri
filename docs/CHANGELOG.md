@@ -2,15 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.26.3 — Warm process stays warm through your think-time (the real "feels slow sometimes" fix)
+## v0.27.0 — Faster replies, a sidebar that stays put, and real split-pane multitasking
 
-> The warm CLI process from v0.25.0 makes replies near-instant *within* a session — but it was quietly giving up after 5 minutes of quiet and re-paying the ~1.7s cold start on your next message. Mining the prod log made it obvious: the warm pool is reused in 3–18ms, but ~60% of turns were paying a cold respawn, and every one of them followed an idle-eviction. Your real pause-between-messages runs to ~7.5 minutes at the 90th percentile (median ~90s), so a 5-minute timer was aging the process out right in the middle of normal reading-and-thinking. This raises the idle window so the process survives the way it does in VSCode. `cargo check` 0/0.
+> A batch aimed squarely at the day-to-day annoyances: Sonnet feeling sluggish, the chat list reshuffling under your cursor, and split-view being half-finished. Each chat pane is now its own world — you can run two (or four) projects side by side at once.
 
-- **The warm process now idles for 30 minutes, not 5.** You can read a reply, think, go make coffee, and come back to an instant next reply instead of a one-and-a-half-second cold start. Tuned against real session data — 30 minutes clears the 90th-percentile think-time with room to spare, so an active session effectively never evicts mid-flow.
-- **Memory stays bounded.** If several sessions pile up warm, the oldest idle ones are still reclaimed quickly (each warm process is ~450MB), so the long window never leaks. The common one-or-two-session case keeps the full 30 minutes.
-- **Not new in v0.26.x — it was there since the warm pool shipped.** The display side was checked too and left alone: token streaming is already smooth (paced on the frontend), and the occasional slow *first* token is the model thinking, not Rift.
+- **Replies start fast on every model, especially Sonnet.** "Smart" (the default) used to make the model think hard before showing a single word, which on Sonnet looked like a frozen window for 10–20s. It now uses a balanced reasoning level that streams almost immediately — Anthropic's own recommended setting for interactive use. "Deep" still does the heavy thinking when you ask for it. Also removed an auto-downshift that was secretly forcing a ~1.7s cold restart on simple turns.
+- **Your chat list stops jumping around.** Opening or clicking between conversations no longer reshuffles the sidebar — each chat holds a fixed position based on real activity, not on the bookkeeping save that fired every time you switched tabs. Spam-click through your chats all you want; the order stays put.
+- **Split view, finished.** There's now a "Split editor" button in the top bar (it was keyboard-only before, `Ctrl+\`), panes no longer overlap or collide when you open three or four, and **each pane can run in a different project folder at the same time** — click the folder chip in a pane's header to point it anywhere. Two projects, side by side, each with its own conversation, context meter, and cost.
+- **Cleaner work rows + calmer waiting.** Collapsed tool rows name the files (e.g. "Read a.ts, b.ts") and skip filler narration; when a turn is parked on *your* answer (a multiple-choice prompt) the footer says so calmly instead of running a fake "working…" clock.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.26.3** — Warm CLI process now idles for 30 minutes instead of 5, so it survives normal read-and-think pauses (prod log showed ~60% of turns were re-paying a ~1.7s cold start after the 5-minute eviction; real think-time runs to ~7.5 min at p90). Memory stays bounded — surplus idle processes are still reclaimed quickly.
 
 - **v0.26.2** — Honest feedback when the API stalls (it's not Rift): a "Rift got slow" report was a single 138s Anthropic API stall on one request, not a Rift regression (Rift overhead ~1s median, ~5ms warm; one turn of 38 hit 138s with zero Rift activity in the gap). Live stall watchdog (>20s/>60s with no token + no tool → footer says the API is slow, not Rift, wait or Stop) + de-latched egregious-stall alert so it re-fires.
 

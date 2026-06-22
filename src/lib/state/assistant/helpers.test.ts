@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
-  FABLE_DISABLED, FABLE_SUNSET_MS, autoScaleEffort, clampEffort, effortToFlag, fableAvailable,
+  FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
   firstLine, flattenToolResult, shellLabel, liveActivity, messagesHaveContextSignals, modelFamily,
   previewToolInput,
 } from "./helpers";
@@ -47,24 +47,25 @@ describe("effortToFlag (must mirror src-tauri assistant turn.rs mapping)", () =>
   it("suppresses effort entirely on haiku", () => {
     expect(effortToFlag("deep", "haiku")).toBeNull();
   });
-  it("maps none/quick/smart/deep/ultra to low/medium/high/xhigh/xhigh", () => {
-    expect(effortToFlag("none", "sonnet")).toBe("low");
-    expect(effortToFlag("quick", "sonnet")).toBe("medium");
-    expect(effortToFlag("smart", "sonnet")).toBe("high");
-    expect(effortToFlag("deep", "opus")).toBe("xhigh");
+  it("maps none/quick/smart/deep/ultra to low/medium/medium/high/xhigh", () => {
+    expect(effortToFlag("none", "opus")).toBe("low");
+    expect(effortToFlag("quick", "opus")).toBe("medium");
+    expect(effortToFlag("smart", "opus")).toBe("medium"); // responsive default
+    expect(effortToFlag("deep", "opus")).toBe("high");
     expect(effortToFlag("ultra", "claude-fable-5")).toBe("xhigh");
   });
   it("clamps an out-of-range tier to the model ceiling before mapping", () => {
-    // Sonnet tops out at smart(high): a stale deep/ultra pref must NOT send xhigh.
-    expect(effortToFlag("deep", "sonnet")).toBe("high");
+    // Sonnet tops out at deep(high): a stale ultra(xhigh) pref must NOT send xhigh.
     expect(effortToFlag("ultra", "sonnet")).toBe("high");
+    // smart on Sonnet is the responsive default → medium (not the old high).
+    expect(effortToFlag("smart", "sonnet")).toBe("medium");
   });
 });
 
 describe("clampEffort (model effort ceiling)", () => {
-  it("caps Sonnet at smart and leaves Opus/Fable untouched", () => {
-    expect(clampEffort("ultra", "sonnet")).toBe("smart");
-    expect(clampEffort("deep", "sonnet")).toBe("smart");
+  it("caps Sonnet at deep(high) and leaves Opus/Fable untouched", () => {
+    expect(clampEffort("ultra", "sonnet")).toBe("deep"); // xhigh not accepted on Sonnet → down to high
+    expect(clampEffort("deep", "sonnet")).toBe("deep");  // in range now (Sonnet accepts high)
     expect(clampEffort("quick", "sonnet")).toBe("quick"); // already in range
     expect(clampEffort("ultra", "opus")).toBe("ultra");
     expect(clampEffort("ultra", "claude-fable-5")).toBe("ultra");
@@ -74,26 +75,23 @@ describe("clampEffort (model effort ceiling)", () => {
   });
 });
 
-describe("autoScaleEffort (#244 — only relaxes the default tier on trivial turns)", () => {
-  it("downshifts smart→quick for bare greetings / acks", () => {
-    for (const g of ["hi", "Hello", "hey", "thanks", "ok", "yep", "good morning", "lol"])
-      expect(autoScaleEffort("smart", g, false)).toBe("quick");
+describe("effortToFlag — default tier maps to medium (responsive interactive default)", () => {
+  it("smart and quick both → medium; none → low", () => {
+    expect(effortToFlag("smart", "opus")).toBe("medium");
+    expect(effortToFlag("quick", "opus")).toBe("medium");
+    expect(effortToFlag("none", "opus")).toBe("low");
   });
-  it("leaves smart untouched on questions, imperatives, or code-ish prompts", () => {
-    expect(autoScaleEffort("smart", "hi?", false)).toBe("smart");          // a question
-    expect(autoScaleEffort("smart", "fix the bug", false)).toBe("smart");  // imperative verb
-    expect(autoScaleEffort("smart", "run `ls`", false)).toBe("smart");     // code-ish
-    expect(autoScaleEffort("smart", "what time is it", false)).toBe("smart"); // 'what'
+  it("deep → high, ultra → xhigh on a model that reaches them", () => {
+    expect(effortToFlag("deep", "opus")).toBe("high");
+    expect(effortToFlag("ultra", "opus")).toBe("xhigh");
   });
-  it("leaves smart untouched when the prompt is long or has attachments", () => {
-    expect(autoScaleEffort("smart", "x".repeat(41), false)).toBe("smart");
-    expect(autoScaleEffort("smart", "hi", true)).toBe("smart"); // image is real work
+  it("Sonnet reaches deep(high) but xhigh clamps to high (no xhigh on Sonnet)", () => {
+    expect(effortToFlag("deep", "sonnet")).toBe("high");
+    expect(effortToFlag("ultra", "sonnet")).toBe("high"); // ultra clamps to sonnet's deep ceiling → high
   });
-  it("never raises, and honors explicit non-default tiers verbatim", () => {
-    expect(autoScaleEffort("none", "hi", false)).toBe("none");
-    expect(autoScaleEffort("quick", "hi", false)).toBe("quick");
-    expect(autoScaleEffort("deep", "hi", false)).toBe("deep");   // explicit intent on 'hi'
-    expect(autoScaleEffort("ultra", "hi", false)).toBe("ultra");
+  it("haiku rejects effort wholesale → null", () => {
+    expect(effortToFlag("smart", "haiku")).toBeNull();
+    expect(effortToFlag("deep", "haiku")).toBeNull();
   });
 });
 

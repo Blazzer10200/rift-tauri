@@ -185,6 +185,33 @@ const IDLE_EVICT_PRESSURE: Duration = Duration::from_secs(120);
 /// How often the background sweeper checks for idle children.
 const EVICT_TICK: Duration = Duration::from_secs(60);
 
+/// Pure eviction decision (extracted so the v0.26.3 pressure-valve logic is
+/// unit-testable without the global registry + real clocks). Given each child's
+/// idle age sorted OLDEST-FIRST and its in-progress flag, decide eviction:
+///   * the first `total - max_warm` (the surplus, oldest) use `pressure`,
+///   * the rest use the generous `idle` window,
+///   * a mid-turn child is never evicted regardless of age.
+/// Returns a bool per input index (same order as the sorted input).
+fn evict_decision(
+    sorted_idle: &[Duration],
+    in_progress: &[bool],
+    max_warm: usize,
+    idle: Duration,
+    pressure: Duration,
+) -> Vec<bool> {
+    let total = sorted_idle.len();
+    let over_cap = total.saturating_sub(max_warm);
+    (0..total)
+        .map(|rank| {
+            if in_progress.get(rank).copied().unwrap_or(false) {
+                return false;
+            }
+            let window = if rank < over_cap { pressure } else { idle };
+            sorted_idle[rank] >= window
+        })
+        .collect()
+}
+
 /// Snapshot the registry, find children idle past `IDLE_EVICT`, and drop their
 /// turn_tx (→ reader loop exits → stdin drops → child EOFs → watchdog reaps).
 /// Skips any child mid-turn. Returns the count evicted. M5/M7: clone Arcs out
@@ -222,19 +249,22 @@ fn evict_idle_once() -> usize {
     ranked.sort_by(|a, b| b.idle_for.cmp(&a.idle_for));
     let over_cap = total.saturating_sub(MAX_WARM);
 
+    // Decide via the pure kernel (unit-tested) so this hot path and the test
+    // can't diverge. Build the parallel age/in-progress slices in ranked order.
+    let ages: Vec<Duration> = ranked.iter().map(|c| c.idle_for).collect();
+    let in_prog: Vec<bool> = ranked.iter().map(|c| c.in_progress).collect();
+    let decisions = evict_decision(&ages, &in_prog, MAX_WARM, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+
     let mut evicted = 0;
     for (rank, c) in ranked.into_iter().enumerate() {
-        // The first `over_cap` (oldest) children are surplus → shorter window.
-        let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
-        let idle = c.idle_for >= window;
-        let in_progress = c.in_progress;
         let sid = c.sid;
         let arc = c.arc;
-        if idle && !in_progress {
+        if decisions[rank] {
             // remove_if takes the registry lock alone (child lock released).
             if remove_if(&sid, &arc) {
                 evicted += 1;
                 let reason = if rank < over_cap { "pressure" } else { "idle" };
+                let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
                 log::info!(
                     "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm)",
                     window.as_secs()
@@ -285,4 +315,73 @@ pub(crate) fn drain_all_for_shutdown() {
     // yields None → loop exits → stdin drops. Best-effort; the actual PID kill
     // is the IMAGENAME/tree sweep in update_service + kill_all_session_children.
     drop(drained);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIN: Duration = Duration::from_secs(60);
+
+    // Helper: durations in minutes, descending (oldest-first as evict_idle_once
+    // pre-sorts). Real consts: IDLE_EVICT=1800s (30m), PRESSURE=120s (2m).
+    fn mins(v: &[u64]) -> Vec<Duration> {
+        v.iter().map(|m| MIN * (*m as u32)).collect()
+    }
+
+    #[test]
+    fn under_cap_uses_generous_window_only() {
+        // 3 children (== MAX_WARM=3), none over 30m → nobody evicted even though
+        // two are well past the 2m pressure window. The pressure valve must NOT
+        // fire below the cap (the v0.26.3 fix: don't age out an active session).
+        let ages = mins(&[20, 10, 5]); // 20m, 10m, 5m idle
+        let d = evict_decision(&ages, &[false; 3], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        assert_eq!(d, vec![false, false, false]);
+    }
+
+    #[test]
+    fn under_cap_evicts_only_past_generous_window() {
+        // A genuinely abandoned session (>30m) ages out even under the cap.
+        let ages = mins(&[40, 10, 5]);
+        let d = evict_decision(&ages, &[false; 3], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        assert_eq!(d, vec![true, false, false]);
+    }
+
+    #[test]
+    fn over_cap_trims_surplus_oldest_on_short_window() {
+        // 5 children, cap 3 → over_cap=2: the two OLDEST get the 2m pressure
+        // window, the remaining three keep the 30m window. Ages 10m/8m are past
+        // 2m but under 30m → the two surplus evict, the rest stay.
+        let ages = mins(&[10, 8, 6, 4, 1]);
+        let d = evict_decision(&ages, &[false; 5], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        // ranks 0,1 (10m,8m) surplus & >2m → evict; ranks 2,3,4 keep 30m → stay.
+        assert_eq!(d, vec![true, true, false, false, false]);
+    }
+
+    #[test]
+    fn over_cap_surplus_still_needs_to_exceed_pressure_window() {
+        // Surplus rank but idle only 1m (< 2m pressure) → NOT evicted. The valve
+        // trims the *oldest idle*, not freshly-used children that happen to rank.
+        let ages = mins(&[1, 1, 1, 1, 1]);
+        let d = evict_decision(&ages, &[false; 5], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        assert_eq!(d, vec![false; 5]);
+    }
+
+    #[test]
+    fn mid_turn_child_never_evicted_even_if_oldest() {
+        // The oldest child is mid-turn → must be spared regardless of age, or we'd
+        // kill the CLI under an in-flight request. (rank 0, 40m idle, in_progress)
+        let ages = mins(&[40, 35, 5, 5, 5]);
+        let mut prog = [false; 5];
+        prog[0] = true;
+        let d = evict_decision(&ages, &prog, 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        // rank 0 spared (in-progress); rank 1 (35m surplus, >2m) evicts.
+        assert_eq!(d, vec![false, true, false, false, false]);
+    }
+
+    #[test]
+    fn empty_pool_is_noop() {
+        let d = evict_decision(&[], &[], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        assert!(d.is_empty());
+    }
 }

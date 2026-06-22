@@ -1097,6 +1097,59 @@ mod tests {
         assert!(tool_grep(&json!({ "pattern": long }), &roots).unwrap_err().contains("too long"));
     }
 
+    #[test]
+    fn grep_rejects_oversize_glob() {
+        // The glob length cap (512) is a memory guard on the glob→regex compile.
+        let (_td, root) = workspace();
+        let big_glob = format!("{}/*.rs", "a".repeat(520));
+        let err = tool_grep(&json!({ "pattern": "x", "glob": big_glob }), &[root]).unwrap_err();
+        assert!(err.contains("glob too long"), "got: {err}");
+    }
+
+    #[test]
+    fn grep_rejects_skip_dir_passed_directly_as_path() {
+        // The walkdir filter only prunes SKIP_DIRS at depth>0; reject_skipped on
+        // the search_root itself stops grep(path:"node_modules") from reading an
+        // excluded tree wholesale. Without it, .git/config etc. would be greppable.
+        let (_td, root) = workspace();
+        let err = tool_grep(&json!({ "pattern": "hello", "path": "node_modules" }), &[root]).unwrap_err();
+        assert!(err.contains("excluded directory"), "got: {err}");
+    }
+
+    // ─── reject_skipped — the excluded-tree boundary (read/list, not just grep) ──
+
+    #[test]
+    fn read_and_list_reject_files_inside_skip_dirs() {
+        // A direct read/list INTO an excluded dir must be refused even though the
+        // path is technically under the workspace root — node_modules/.git/target
+        // are never legitimate read targets and can hide secrets/large blobs.
+        let (_td, root) = workspace();
+        let roots = vec![root];
+        let read_err = tool_read_file(&json!({ "path": "node_modules/skip.txt" }), &roots).unwrap_err();
+        assert!(read_err.contains("excluded directory"), "read got: {read_err}");
+        let list_err = tool_list_dir(&json!({ "path": "node_modules" }), &roots).unwrap_err();
+        assert!(list_err.contains("excluded directory"), "list got: {list_err}");
+    }
+
+    // ─── symlink escape — canonicalize must follow the link OUT of root ─────────
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_rejects_symlink_escaping_root() {
+        // A symlink living inside the workspace but pointing at a sibling outside
+        // it: canonicalize resolves to the real (outside) target, so the
+        // starts_with(root) check rejects it. This is THE classic sandbox escape.
+        let (_td, root) = workspace();
+        let (_outside_td, outside) = workspace(); // a separate temp tree
+        let secret = outside.join("a.txt");
+        let link = root.join("escape");
+        std::os::unix::fs::symlink(&secret, &link).unwrap();
+        let roots = vec![root];
+        // Resolving the symlink path must land outside → rejected.
+        assert!(resolve_under_roots("escape", &roots).is_err());
+        assert!(tool_read_file(&json!({ "path": "escape" }), &roots).is_err());
+    }
+
     // ─── glob_to_regex (pure) ─────────────────────────────────────────────────
 
     #[test]

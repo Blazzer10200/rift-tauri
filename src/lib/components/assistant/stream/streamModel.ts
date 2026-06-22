@@ -327,6 +327,47 @@ export function groupSummary(tools: StreamTool[]): string {
   return `Ran ${n} steps`;
 }
 
+// Names-on-rows summary: instead of "Read 2 files", show "Read layout.ts,
+// rest.ts" so the collapsed work line names its targets. Verb comes from the
+// lead tool's kind; targets are each tool's basename caption, de-duped, capped
+// at 3 with a "+N more" tail. Falls back to groupSummary when the group is
+// mixed-kind or its targets aren't file-ish names (shell commands, mcp calls).
+export function groupNames(tools: StreamTool[]): string {
+  const kinds = new Set(tools.map((t) => t.kind));
+  // Only name-list the kinds whose caption IS a target name (file/dir/pattern).
+  const namable = (k: TKind) => k === "read" || k === "grep" || k === "edit" || k === "create";
+  if (kinds.size !== 1 || !namable([...kinds][0] as TKind)) return groupSummary(tools);
+  const k = [...kinds][0] as TKind;
+  const verb = VERB_PAST[k];
+  const names: string[] = [];
+  for (const t of tools) {
+    const nm = (t.cap ?? "").trim();
+    if (nm && !names.includes(nm)) names.push(nm);
+  }
+  if (names.length === 0) return groupSummary(tools);
+  const shown = names.slice(0, 3).join(", ");
+  const more = names.length > 3 ? ` +${names.length - 3} more` : "";
+  return `${verb} ${shown}${more}`;
+}
+
+// Trivial transitional narration ("Let me look at the layout file.", "Now I'll
+// check the routes.") reads as filler once the work rows name their targets.
+// Drop a `say` block when it's a single short sentence opening with a known
+// throwaway lead-in AND it sits adjacent to a work group (the work shows what
+// the sentence was about to announce). Real prose — answers, multi-sentence
+// explanation, anything long — is never touched.
+const FILLER_LEAD = /^(?:let me|let's|now (?:i'?ll|let)|i'?ll|i'?m going to|first,?\s|next,?\s|then,?\s|okay,?\s|alright,?\s|sure,?\s)/i;
+export function isFillerSay(text: string): boolean {
+  const t = text.trim();
+  if (t.length === 0 || t.length > 120) return false; // long → real content
+  if (/\n/.test(t)) return false;                     // multi-line → real content
+  if (/```/.test(t)) return false;                    // has code → keep
+  // One sentence only (allow a trailing period/colon).
+  const sentences = t.split(/[.!?]+\s/).filter(Boolean);
+  if (sentences.length > 1) return false;
+  return FILLER_LEAD.test(t);
+}
+
 export const VERB_PAST: Record<TKind, string> = {
   read: "Read", grep: "Searched", edit: "Edited", create: "Created", shell: "Ran",
   agent: "Delegated", web: "Searched the web", fetch: "Fetched", test: "Tested",
@@ -337,3 +378,28 @@ export const VERB_ING: Record<TKind, string> = {
   agent: "Delegating", web: "Searching the web", fetch: "Fetching", test: "Running tests",
   lint: "Type-checking", mcp: "Calling", plan: "Planning", ask: "Waiting for your answer",
 };
+
+export type AnsweredPair = { question: string; answers: string[] };
+
+// The backend (mcp_server.rs::format_ask_user_result) hands back the answered
+// ask_user tool_result as plain text Claude reads — blocks of "Q: <question>\n
+// A: <label>[, <label>…]" joined by newlines, OR a dismissal sentence. The card
+// rendered that raw in a <pre> (the "looks like shit" complaint). Parse it back
+// into structured pairs so the answered state can render clean chips. Multi-
+// select answers are comma-joined by the backend, so split A: on ", ".
+// Returns [] for the dismissal sentence or any unparseable text (caller falls
+// back to a neutral state). Kept pure + exported for unit tests.
+export function parseAskUserResult(result: string | null | undefined): AnsweredPair[] {
+  if (!result || /^User dismissed the question/i.test(result)) return [];
+  const out: AnsweredPair[] = [];
+  // Each block starts with "Q: "; subsequent blocks are delimited by "\nQ: ".
+  const blocks = result.split(/\nQ: /).map((b, i) => (i === 0 ? b.replace(/^Q: /, "") : b));
+  for (const block of blocks) {
+    const m = block.match(/^([\s\S]*?)\nA: ([\s\S]*)$/);
+    if (!m) continue;
+    const question = m[1].trim();
+    const answers = m[2].split(", ").map((s) => s.trim()).filter(Boolean);
+    if (question) out.push({ question, answers });
+  }
+  return out;
+}

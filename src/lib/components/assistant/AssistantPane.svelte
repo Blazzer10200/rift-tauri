@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
@@ -60,6 +60,15 @@
   );
   const paneModel = $derived(tab?.lastModelId ?? null);
   const paneCost = $derived(tab?.totalCostUsd ?? null);
+  // This pane's project folder (its own per-tab root, else the global default) —
+  // each pane can run in a DIFFERENT folder, so the head surfaces the basename +
+  // a click-to-change picker. "—" when nothing is set (pure conversational).
+  const paneRoot = $derived(tab ? assistant.effectiveRoot(tab) : null);
+  const paneFolder = $derived.by(() => {
+    const r = (paneRoot ?? "").replace(/[\\/]+$/, "");
+    if (!r) return null;
+    return r.split(/[\\/]/).pop() || r;
+  });
   const paneChipTitle = $derived.by(() => {
     if (!tab) return "";
     const w = assistant.ctxWindowFor(tab);
@@ -260,6 +269,15 @@
     assistant.closePane(paneIdx);
   }
 
+  // Per-pane folder picker — sets THIS pane's tab root only (pickTabFolder never
+  // touches the global default), so two panes can run in different projects at
+  // once. Focus first so the @-mention/branch caches refresh against this pane.
+  function onPickPaneFolder(e: MouseEvent) {
+    e.stopPropagation();
+    if (!focused) assistant.setFocusedPane(paneIdx);
+    void assistant.pickTabFolder(tabId);
+  }
+
   // Empty-pane actions — surface New chat / Close pane / Recent picks so
   // an unassigned slot is actionable instead of just saying "No tab in this
   // pane". Each handler focuses this pane first so newTab / openTab assigns
@@ -349,6 +367,18 @@
     <div class="pane-head" class:focused>
       <span class="pane-label" use:tooltip={`Pane ${paneIdx + 1} of ${assistant.panes.length}`}>{paneIdx + 1}</span>
       <span class="pane-head-title" use:tooltip={paneTitle}>{paneTitle}</span>
+      {#if tabId && tab}
+        <button
+          class="pane-folder"
+          type="button"
+          use:tooltip={paneRoot ? `Project: ${paneRoot}\nClick to change this pane's folder` : "Set this pane's project folder"}
+          aria-label="Change pane folder"
+          onclick={onPickPaneFolder}
+        >
+          <FolderOpen size={11}/>
+          <span class="pane-folder-name">{paneFolder ?? "No folder"}</span>
+        </button>
+      {/if}
       {#if streaming}
         <span class="pane-live" use:tooltip={"This pane is working"}><span class="pane-live-dot"></span>working</span>
       {/if}
@@ -636,6 +666,29 @@
     font-variant-numeric: tabular-nums;
     color: var(--fg-muted);
     line-height: 1;
+  }
+  /* Per-pane folder chip — matches the ctx-chip language but is interactive
+     (each pane can run in its own project). Truncates the basename so a deep
+     path can't blow out the head. */
+  .pane-folder {
+    flex-shrink: 1; min-width: 0;
+    max-width: 130px;
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 16px; padding: 0 7px 0 6px;
+    border-radius: 999px;
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    font-size: 10px; font-weight: 500; line-height: 1;
+    cursor: pointer;
+    transition: background 120ms, color 120ms, border-color 120ms;
+  }
+  .pane-folder :global(svg) { flex-shrink: 0; opacity: 0.8; }
+  .pane-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pane-folder:hover {
+    color: var(--fg);
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
+    background: color-mix(in oklab, var(--accent) 8%, var(--bg-elev-2));
   }
   .pane-ctx-bar {
     width: 28px; height: 3px;

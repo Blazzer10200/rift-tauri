@@ -288,13 +288,15 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
  *  truth for the capability ceiling. `MODEL_OPTIONS.maxEffort` (the picker's
  *  slider) and `clampEffort` (the value actually sent) both derive from this so
  *  they can't disagree. Opus/Fable reach `ultra` (xhigh + ultracode); Sonnet 4.6
- *  tops out at `smart` (high); Haiku rejects effort wholesale (`none`). Mirror
- *  the Sonnet ceiling in src-tauri/src/assistant/turn.rs. */
+ *  reaches `deep` (high) — it accepts low/medium/high but NOT xhigh (the API
+ *  rejects xhigh on Sonnet, falling back to high), so the slider must stop at
+ *  Deep; Haiku rejects effort wholesale (`none`). Mirror the Sonnet ceiling in
+ *  src-tauri/src/assistant/turn.rs (model_max_effort). */
 export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
   opus: "ultra",
   "claude-opus-4-7": "ultra",
   "claude-fable-5": "ultra",
-  sonnet: "smart",
+  sonnet: "deep",
   haiku: "none",
 };
 
@@ -306,47 +308,20 @@ export function clampEffort(effort: ThinkingEffort, model: ModelSel): ThinkingEf
   return EFFORT_ORDER.indexOf(effort) > EFFORT_ORDER.indexOf(cap) ? cap : effort;
 }
 
-/** Per-turn effort auto-scale (#244). The default tier "smart" maps to
- *  `--effort high`, which makes the model do heavy hidden reasoning BEFORE any
- *  visible text — ~10s to first token on Sonnet for "Hello", ~130s on Opus (whose
- *  thinking streams invisibly). A bare greeting shouldn't pay that. This trims the
- *  effort for *clearly trivial* turns only, returning the per-send tier (the
- *  user's stored choice is never mutated — picker + persistence are untouched).
- *
- *  Rules (deliberately conservative — bias to NOT downshifting):
- *   - Only ever DOWNSHIFTS, never raises. A pinned low/quick stays as-is.
- *   - Only fires on `smart` (the default). `deep`/`ultra` are explicit user
- *     intent to think hard — respected verbatim, even on "hi".
- *   - Only for short, attachment-free prompts that match a triviality shape
- *     (greeting / ack / one-liner with no question, code, or imperative verb).
- *   - smart → quick (medium), not all the way to none, so a misjudged "trivial"
- *     prompt still gets light reasoning rather than zero. */
-export function autoScaleEffort(
-  effort: ThinkingEffort,
-  prompt: string,
-  hasAttachments: boolean,
-): ThinkingEffort {
-  if (effort !== "smart") return effort; // only relax the default; honor explicit tiers
-  if (hasAttachments) return effort;      // an image is real work — never trivial
-  const p = prompt.trim();
-  if (p.length === 0 || p.length > 40) return effort; // long enough to be real
-  const lower = p.toLowerCase();
-  // Signals that the turn is NOT trivial despite being short.
-  if (/[?]/.test(p)) return effort;                       // a question
-  if (/[`/<>{}=]|\b(fix|add|run|build|write|make|change|edit|create|debug|explain|why|how|what|show|list|check|test|refactor|implement|update|remove|delete)\b/i.test(lower))
-    return effort;                                        // imperative / code-ish
-  // Triviality shapes: greetings, acks, thanks, short filler.
-  const TRIVIAL = /^(hi|hey|hello|yo|sup|hiya|howdy|greetings|gm|good (morning|evening|afternoon)|thanks|thank you|ty|thx|ok|okay|k|cool|nice|great|got it|sounds good|yes|no|yep|nope|sure|lol|haha)[\s!.,…]*$/i;
-  if (TRIVIAL.test(lower)) return "quick";
-  return effort; // short but unrecognized → leave at the user's tier
-}
-
 /** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/turn.rs.
- *  Ladder: none→low · quick→medium · smart→high (API default) · deep→xhigh
- *  (Claude Code's own agentic default) · ultra→xhigh; ultra's autonomous-workflow
- *  behavior rides the separate `ultracode` settings key, set in turn.rs. The
- *  effort is clamped to the model's ceiling first, so an out-of-range tier can
- *  never emit a flag the model rejects. */
+ *  Ladder: none→low · quick→medium · smart→medium · deep→high · ultra→xhigh;
+ *  ultra's autonomous-workflow behavior rides the separate `ultracode` settings
+ *  key, set in turn.rs. The effort is clamped to the model's ceiling first, so an
+ *  out-of-range tier can never emit a flag the model rejects.
+ *
+ *  Why "smart" → medium (not high): the CLI default is `high`, but Anthropic's
+ *  own API guidance says to OVERRIDE that for interactive use — Sonnet 4.6 at
+ *  `high` "almost always thinks" and the postmortem names the exact symptom we
+ *  hit (the UI appears frozen while it does a long hidden pre-pass before the
+ *  first token; their words). `medium` is the documented "best balance of speed,
+ *  cost, and performance for most applications." Heavy reasoning stays one click
+ *  away as the explicit "Deep" (high) / "Ultracode" (xhigh) tiers. Model-
+ *  agnostic — every present + future model gets a responsive default tier. */
 export function effortToFlag(
   effort: ThinkingEffort,
   model: ModelSel,
@@ -354,7 +329,7 @@ export function effortToFlag(
   if (model === "haiku") return null;
   const e = clampEffort(effort, model);
   if (e === "none") return "low";
-  if (e === "quick") return "medium";
-  if (e === "deep" || e === "ultra") return "xhigh";
-  return "high"; // "smart" — the default tier
+  if (e === "quick" || e === "smart") return "medium";
+  if (e === "ultra") return "xhigh";
+  return "high"; // "deep"
 }

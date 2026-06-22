@@ -29,6 +29,7 @@ export type SaveableTab = {
   saveTimer: ReturnType<typeof setTimeout> | null;
   convoTitle: string | null;
   convoCreatedAt: number | null;
+  lastActivityAt: number | null;
   cliSessionId: string;
   titleGenerated: boolean;
   modelOverride: ModelSel | null;
@@ -120,6 +121,10 @@ export function buildSaveRecord(
     model: tab.modelOverride ?? host.model,
     createdAt: tab.convoCreatedAt ?? Date.now(),
     updatedAt: Date.now(),
+    // Only real turns advance this (send / result), so a tab-switch auto-save
+    // bumps updatedAt but leaves the sidebar order untouched. Falls back to
+    // creation time so a never-sent draft still sorts sanely.
+    lastActivityAt: tab.lastActivityAt ?? tab.convoCreatedAt ?? Date.now(),
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
     lastTurnUsage: tab.lastTurnUsage ?? undefined,
@@ -279,6 +284,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     const tab = host.ensureTab(convo.id, cliSid);
     tab.messages = convo.messages ?? [];
     tab.cliSessionId = cliSid;
+    // Hydrate last-activity from disk so reopening doesn't reset the order;
+    // legacy records lacking it fall back to their createdAt.
+    tab.lastActivityAt = convo.lastActivityAt ?? convo.createdAt;
     tab.tasks = [];
     tab.lastError = null;
     tab.totalCostUsd = null;

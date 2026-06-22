@@ -3,9 +3,9 @@
   // card; StreamTurn never did, so mcp__rift__ask_user silently fell through to a
   // dead WorkLine in stream mode — the question never rendered. This restores the
   // full interactive surface, reusing the same store binding/submit API.
-  import { CheckCircle2, Circle, Square, Loader2 } from "lucide-svelte";
+  import { CheckCircle2, Circle, Square, Loader2, MessageCircleQuestion, Check } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
-  import type { StreamTool } from "./streamModel";
+  import { parseAskUserResult, type StreamTool } from "./streamModel";
 
   let { tool }: { tool: StreamTool } = $props();
 
@@ -46,6 +46,24 @@
   let askError = $state<string | null>(null);
   const askRequestId = $derived(assistant.askUserRequestIdFor(tool.id));
   const askAnswered = $derived(tool.status === "done");
+
+  // The backend tool_result is plain text Claude reads ("Q: …\nA: …" pairs, or
+  // a dismissal sentence). Rendering it raw in a <pre> was the "looks like shit"
+  // complaint. Parse it back into structured {header, question, answer[]} so the
+  // answered state can render as clean chips that mirror the question chrome —
+  // headers pulled from tool.input (the result text only has the question body).
+  const askDismissed = $derived(
+    askAnswered && /^User dismissed the question/i.test(tool.result ?? ""),
+  );
+  const answeredPairs = $derived.by(() => {
+    if (!askAnswered || askDismissed) return [];
+    // Header only exists in tool.input (the result text has just the body) —
+    // re-attach it by matching the parsed question against the original.
+    return parseAskUserResult(tool.result).map((p) => ({
+      ...p,
+      header: askQuestions.find((q) => q.question === p.question)?.header ?? "",
+    }));
+  });
 
   function toggleAskMulti(qi: number, oi: number) {
     const cur = askMultiSet[qi] ?? new Set<number>();
@@ -122,10 +140,29 @@
   });
 </script>
 
-<div class="sask">
+<div class="sask" class:answered={askAnswered}>
+  <div class="sask-head">
+    <span class="sask-head-ic" aria-hidden="true">
+      {#if askAnswered}<Check size={13} strokeWidth={2.5} />{:else}<MessageCircleQuestion size={13} />{/if}
+    </span>
+    <span class="sask-head-label">{askAnswered ? "Your answer" : "Rift needs your input"}</span>
+  </div>
+
   {#if askAnswered}
-    {#if tool.result}
-      <pre class="sask-result">{tool.result}</pre>
+    {#if askDismissed}
+      <div class="sask-empty">Dismissed — no answer given.</div>
+    {:else if answeredPairs.length > 0}
+      {#each answeredPairs as p (p.question)}
+        <div class="sask-answered">
+          {#if p.header}<span class="sask-q-header">{p.header}</span>{/if}
+          <div class="sask-q-text">{p.question}</div>
+          <div class="sask-chips">
+            {#each p.answers as a (a)}
+              <span class="sask-chip"><Check size={11} strokeWidth={2.5} />{a}</span>
+            {/each}
+          </div>
+        </div>
+      {/each}
     {:else}
       <div class="sask-empty">(no answer recorded)</div>
     {/if}
@@ -243,13 +280,57 @@
   .sask {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    margin: 6px 0;
-    padding: 12px 14px;
-    border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
-    border-radius: 10px;
-    background: color-mix(in oklab, var(--accent) 6%, var(--bg-1, transparent));
+    gap: 11px;
+    margin: 10px 0;
+    padding: 13px 15px 14px;
+    border: 1px solid color-mix(in oklab, var(--accent) 38%, transparent);
+    border-radius: 12px;
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklab, var(--accent) 7%, transparent),
+        color-mix(in oklab, var(--accent) 3%, transparent));
+    box-shadow: 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent) inset;
   }
+  /* Answered: drop the call-to-action accent, settle into a quiet "done" card. */
+  .sask.answered {
+    border-color: var(--border, color-mix(in oklab, var(--fg) 12%, transparent));
+    background: color-mix(in oklab, var(--fg) 3%, transparent);
+    box-shadow: none;
+  }
+
+  /* card header — a small labelled rail so the card reads as a deliberate
+     surface, not a floating button group */
+  .sask-head {
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--accent);
+  }
+  .sask.answered .sask-head { color: var(--fg-2, color-mix(in oklab, var(--fg) 62%, transparent)); }
+  .sask-head-ic {
+    display: grid; place-items: center; width: 19px; height: 19px;
+    border-radius: 6px; flex: none;
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 13%, transparent);
+  }
+  .sask.answered .sask-head-ic {
+    color: var(--ok, #4ade80);
+    background: color-mix(in oklab, var(--ok, #4ade80) 14%, transparent);
+  }
+
+  /* answered summary — chips, not a monospace dump */
+  .sask-answered { display: flex; flex-direction: column; gap: 6px; }
+  .sask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
+  .sask-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 9px 3px 7px;
+    font-size: 12px; line-height: 1.3;
+    border-radius: 999px;
+    color: var(--fg, inherit);
+    border: 1px solid color-mix(in oklab, var(--ok, #4ade80) 40%, transparent);
+    background: color-mix(in oklab, var(--ok, #4ade80) 11%, transparent);
+  }
+  .sask-chip :global(svg) { color: var(--ok, #4ade80); flex: none; }
+
   .sask-question { display: flex; flex-direction: column; gap: 6px; }
   .sask-q-header {
     align-self: flex-start;
@@ -319,14 +400,5 @@
   .sask-btn.submit { background: var(--accent); color: var(--accent-fg, #fff); }
   .sask-btn:disabled { opacity: 0.5; cursor: default; }
   .sask-hint { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 55%, transparent)); }
-  .sask-result {
-    margin: 0;
-    padding: 8px 10px;
-    font-size: 12px;
-    white-space: pre-wrap;
-    border-radius: 8px;
-    background: color-mix(in oklab, var(--fg) 5%, transparent);
-    color: var(--fg-2, inherit);
-  }
   .sask-empty { font-size: 12px; color: var(--fg-2, inherit); font-style: italic; }
 </style>

@@ -42,12 +42,26 @@
     const now = Date.now();
     const q = shell.convQuery.trim().toLowerCase();
     // Actively-streaming convos pin to the top of their bucket — clicking another
-    // chat bumps its updatedAt, which must NOT shove the live turn below it.
+    // chat must NOT shove the live turn below it.
     const working = new Set(assistant.liveTabs.map((t) => t.convoId));
+    // STABLE ORDER — the whole point of this comparator. The list must not
+    // reshuffle just because you clicked between chats. Two rules make that hold:
+    //  1. Rank by `lastActivityAt`, which advances ONLY on a real turn (send /
+    //     result) — NEVER on open/switch/auto-save. We deliberately do NOT fall
+    //     back to `updatedAt`: every open re-saves the tab and bumps updatedAt
+    //     (often several tabs to the same millisecond), which is exactly what
+    //     was causing the spam-click reshuffle. Legacy records with no
+    //     lastActivityAt fall back to `createdAt` — fixed at creation, so their
+    //     position is permanent.
+    //  2. `createdAt` is the tiebreaker, so equal ranks have a deterministic,
+    //     render-stable order (a plain `b-a` of equal values is unstable and
+    //     visibly jitters on re-render).
+    const act = (c: ConversationMeta) => c.lastActivityAt ?? c.createdAt;
     const byActivity = (a: ConversationMeta, b: ConversationMeta) => {
       const aw = working.has(a.id), bw = working.has(b.id);
       if (aw !== bw) return aw ? -1 : 1;
-      return b.updatedAt - a.updatedAt;
+      const d = act(b) - act(a);
+      return d !== 0 ? d : b.createdAt - a.createdAt;
     };
     const filtered = assistant.conversations.filter((c) => {
       // Scope to the open project unless the user flipped to All-projects, or
@@ -60,7 +74,7 @@
     const buckets = new Map<string, ConversationMeta[]>();
     for (const c of filtered) {
       if (shell.isPinned(c.id)) { pinned.push(c); continue; }
-      const b = timeBucket(c.updatedAt, now);
+      const b = timeBucket(act(c), now);
       (buckets.get(b) ?? buckets.set(b, []).get(b)!).push(c);
     }
     const out: Group[] = [];
@@ -240,7 +254,7 @@
           {#if shell.allProjects}
             <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
           {/if}
-          <span class="crow-time">{relTime(c.updatedAt)}</span>
+          <span class="crow-time">{relTime(c.lastActivityAt ?? c.createdAt)}</span>
           <button class="crow-menu-btn" type="button" onclick={(e) => openMenu(e, c.id)} aria-label="Conversation actions">
             <MoreHorizontal size={14} />
           </button>

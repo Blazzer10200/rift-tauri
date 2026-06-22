@@ -128,3 +128,77 @@ impl Default for AskUserRegistry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn register_then_resolve_delivers_value() {
+        let reg = AskUserRegistry::new();
+        let mut rx = reg.register("r1".into(), "s1".into());
+        assert!(reg.resolve("r1", json!({"answers": [{"question": "Q", "answer": "A"}]})));
+        // The value arrived on the oneshot.
+        let got = rx.try_recv().expect("value should be delivered");
+        assert_eq!(got["answers"][0]["answer"], "A");
+    }
+
+    #[test]
+    fn resolve_unknown_id_is_false_not_panic() {
+        let reg = AskUserRegistry::new();
+        // Stale UI re-submit / never-registered id → false, no panic.
+        assert!(!reg.resolve("ghost", json!({})));
+    }
+
+    #[test]
+    fn double_resolve_second_is_false() {
+        let reg = AskUserRegistry::new();
+        let _rx = reg.register("r1".into(), "s1".into());
+        assert!(reg.resolve("r1", json!({"x": 1})));
+        // Entry was removed on first resolve — second is a no-op false.
+        assert!(!reg.resolve("r1", json!({"x": 2})));
+    }
+
+    #[test]
+    fn cancel_unblocks_waiter_and_blocks_later_resolve() {
+        let reg = AskUserRegistry::new();
+        let mut rx = reg.register("r1".into(), "s1".into());
+        reg.cancel("r1");
+        // The Sender dropped → rx resolves Err (the bridge waiter unblocks).
+        assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+        // A late answer for a cancelled id is a no-op, never a panic.
+        assert!(!reg.resolve("r1", json!({})));
+    }
+
+    #[test]
+    fn guard_drop_cancels_entry_rr7() {
+        // RR7: an aborted bridge task drops the guard without hitting the
+        // timeout/error arm; the Drop must still purge the registry entry.
+        let reg = Arc::new(AskUserRegistry::new());
+        let mut rx = {
+            let (rx, _guard) = reg.register_guarded("r1".into(), "s1".into());
+            rx
+            // _guard dropped here at scope end → cancel("r1")
+        };
+        assert!(matches!(rx.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+        assert!(!reg.resolve("r1", json!({})), "entry must be gone after guard drop");
+    }
+
+    #[test]
+    fn cancel_all_for_session_scopes_to_one_session() {
+        let reg = AskUserRegistry::new();
+        let mut a = reg.register("a".into(), "sess-A".into());
+        let mut b = reg.register("b".into(), "sess-A".into());
+        let mut c = reg.register("c".into(), "sess-B".into());
+        // Cancel only session A's two entries.
+        assert_eq!(reg.cancel_all_for_session("sess-A"), 2);
+        assert!(matches!(a.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+        assert!(matches!(b.try_recv(), Err(oneshot::error::TryRecvError::Closed)));
+        // Session B is untouched — still resolvable.
+        assert!(reg.resolve("c", json!({"ok": true})));
+        assert_eq!(c.try_recv().unwrap()["ok"], true);
+        // Cancelling a session with no entries returns 0.
+        assert_eq!(reg.cancel_all_for_session("sess-A"), 0);
+    }
+}
