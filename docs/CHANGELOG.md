@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — on top of v0.21.0 — Rounds 10–11 hardening (under-swept surfaces)
+## v0.22.0 — Rounds 10–11 hardening (27 fixes across under-swept surfaces)
 
-> Unshipped on `main`, pending the next bump. Two more multi-agent adversarial rounds (review-dimension → per-finding skeptic verify, default isReal=false). R10: 31 raised → 27 confirmed / 4 rejected, 22 fixed. R11: 11 raised → 5 confirmed / 6 rejected, 5 fixed. Verified each round: cargo check clean (isolated target) · svelte-check 0/0 (4105) · playback 33/33.
+> Two more multi-agent adversarial rounds on top of v0.21.0 (review-dimension → per-finding skeptic verify, default isReal=false). R10: 31 raised → 27 confirmed / 4 rejected, 22 fixed. R11: 11 raised → 5 confirmed / 6 rejected, 5 fixed. Verified each round: cargo check clean (isolated target) · svelte-check 0/0 (4105) · playback 33/33.
 
 **Hardened (round 11 — secrets/crypto · stt-audio-backend · velopack-apply · big-frontend-render · commands-registry, adversarially-verified, 5 confirmed / 6 rejected):**
 - **Start-recording no longer stalls the UI (HIGH)** — `stt_start_recording` called `workspace_context()` (which spawns `git rev-parse` + walks up to 4000 files synchronously) directly on a Tokio worker, blocking all other IPC for the duration — `workspace.rs` explicitly mandates `spawn_blocking` for Tokio callers and the sister commands already comply. Now wrapped in `spawn_blocking`.

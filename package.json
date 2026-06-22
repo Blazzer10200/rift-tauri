@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "A local-workspace coding assistant for Windows — wraps the Claude CLI in a native Tauri shell.",
   "type": "module",
   "scripts": {
