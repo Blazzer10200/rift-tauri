@@ -290,26 +290,36 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
  *  the queue, this does NOT wait for the turn to finish. Falls back to the
  *  queue if the turn already ended (or the tab isn't streaming). Defaults to
  *  the focused-pane tab when `tabId` is omitted. */
-export async function steer(store: AssistantStore, text: string, tabId?: string | null) {
+export async function steer(
+  store: AssistantStore,
+  text: string,
+  tabId?: string | null,
+  attachments?: { mime: string; dataBase64: string }[],
+): Promise<"steered" | "no_active_turn" | "queued"> {
   const trimmed = text.trim();
-  if (!trimmed) return;
+  if (!trimmed) return "queued";
   const tab = tabId ? store.tabFor(tabId) : store.activeTab;
-  if (!tab) return;
+  if (!tab) return "queued";
   const enqueue = () => {
     tab.queue = [...tab.queue, { id: crypto.randomUUID(), text: trimmed }];
   };
   // No active turn locally → nothing to steer; queue as a normal follow-up.
   if (!tab.streaming) {
     enqueue();
-    return;
+    return "queued";
   }
   const sid = tab.cliSessionId;
   try {
-    const res = await invoke<string>("assistant_steer", { sessionId: sid, text: trimmed });
+    const turnAttachments = attachments && attachments.length > 0 ? attachments : null;
+    const res = await invoke<string>("assistant_steer", {
+      sessionId: sid,
+      text: trimmed,
+      attachments: turnAttachments,
+    });
     if (res === "no_active_turn") {
       // Turn ended between keypress and IPC — don't lose the message.
       enqueue();
-      return;
+      return "no_active_turn";
     }
     store.telemetry.event("turn.steer", { convoId: sid });
     // Make the steer VISIBLE: drop an inline marker into the streaming
@@ -317,7 +327,18 @@ export async function steer(store: AssistantStore, text: string, tabId?: string 
     // interjection in the transcript instead of it vanishing into stdin.
     tab.messages = tab.messages.map((m) =>
       m.id === tab.streamingMsgId
-        ? { ...m, blocks: [...m.blocks, { type: "steer", text: trimmed, at: Date.now() }] }
+        ? {
+            ...m,
+            blocks: [
+              ...m.blocks,
+              {
+                type: "steer" as const,
+                text: trimmed,
+                at: Date.now(),
+                ...(turnAttachments ? { attachments: turnAttachments } : {}),
+              },
+            ],
+          }
         : m,
     );
     toast.push({
@@ -326,9 +347,11 @@ export async function steer(store: AssistantStore, text: string, tabId?: string 
       detail: trimmed.length > 60 ? trimmed.slice(0, 60) + "…" : trimmed,
       timeoutMs: 2500,
     });
+    return "steered";
   } catch (e) {
     console.warn("assistant_steer failed", e);
     enqueue();
+    return "queued";
   }
 }
 

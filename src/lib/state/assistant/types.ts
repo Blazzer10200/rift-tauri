@@ -123,6 +123,7 @@ export type SteerBlock = {
   type: "steer";
   text: string;
   at: number;
+  attachments?: { mime: string; dataBase64: string }[];
 };
 
 export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | SteerBlock;

@@ -205,8 +205,8 @@
   // offset); del lines carry no number. Blank-context runs (`gap`) still count
   // toward the line tally so subsequent numbers stay consistent.
   type UnifiedLine =
-    | { kind: "ctx" | "add"; num: number; text: string }
-    | { kind: "del"; num: null; text: string }
+    | { kind: "ctx" | "add"; num: number; text: string; html: string | null }
+    | { kind: "del"; num: null; text: string; html: string | null }
     | { kind: "meta"; text: string }
     | { kind: "gap"; lines: number };
   const unifiedLines = $derived.by<UnifiedLine[]>(() => {
@@ -215,12 +215,12 @@
     for (const p of compactPairs) {
       if (p.kind === "meta") { out.push({ kind: "meta", text: p.text }); continue; }
       if (p.kind === "gap") { out.push({ kind: "gap", lines: p.lines }); ln += p.lines; continue; }
-      if (p.kind === "ctx") { ln++; out.push({ kind: "ctx", num: ln, text: p.left }); continue; }
-      if (p.kind === "del") { out.push({ kind: "del", num: null, text: p.left }); continue; }
-      if (p.kind === "add") { ln++; out.push({ kind: "add", num: ln, text: p.right }); continue; }
+      if (p.kind === "ctx") { ln++; out.push({ kind: "ctx", num: ln, text: p.left, html: hl(p.left) }); continue; }
+      if (p.kind === "del") { out.push({ kind: "del", num: null, text: p.left, html: hl(p.left) }); continue; }
+      if (p.kind === "add") { ln++; out.push({ kind: "add", num: ln, text: p.right, html: hl(p.right) }); continue; }
       // mod — del then add.
-      out.push({ kind: "del", num: null, text: p.left });
-      ln++; out.push({ kind: "add", num: ln, text: p.right });
+      out.push({ kind: "del", num: null, text: p.left, html: hl(p.left) });
+      ln++; out.push({ kind: "add", num: ln, text: p.right, html: hl(p.right) });
     }
     return out;
   });
@@ -310,11 +310,10 @@
               {#if l.lines > 1}<span class="gap-dots">···</span><span class="gap-count">{l.lines} blank lines</span>{/if}
             </div>
           {:else}
-            {@const ch = hl(l.text)}
             <div class="diff-line" data-kind={l.kind} style="--ri: {Math.min(li, 14)}">
               <span class="diff-num mono">{l.num ?? ""}</span>
               <span class="diff-gutter mono">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}</span>
-              {#if ch !== null}<span class="diff-code mono">{@html ch}</span>{:else}<span class="diff-code mono">{l.text}</span>{/if}
+              {#if l.html !== null}<span class="diff-code mono">{@html l.html}</span>{:else}<span class="diff-code mono">{l.text}</span>{/if}
             </div>
           {/if}
         {/each}
@@ -468,15 +467,20 @@
     grid-template-columns: 34px 14px 1fr;
     align-items: baseline;
   }
-  /* Staggered reveal — each row fades + slides in keyed off its --ri index
-     (capped at 14 so big diffs settle fast). */
+  /* Staggered reveal — each row slides in keyed off its --ri index (capped at
+     14 so big diffs settle fast). NB: the row only translates; it never drops
+     to opacity:0. A re-derive (e.g. shiki finishing warm-up flips `shikiReady`
+     and re-runs the inline hl()) replays this animation, and an opacity:0 frame
+     would make the green change-bar visibly flash out — the "dividing green
+     sometimes shows, sometimes doesn't" glitch. Translate-only keeps the bar
+     solid through any replay. */
   .diff-line, .diff-meta, .diff-gap {
-    animation: diff-row-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: diff-row-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--ri, 0) * 16ms);
   }
   @keyframes diff-row-in {
-    from { opacity: 0; transform: translateX(-4px); }
-    to   { opacity: 1; transform: translateX(0); }
+    from { transform: translateX(-4px); }
+    to   { transform: translateX(0); }
   }
   @media (prefers-reduced-motion: reduce) {
     .diff-line, .diff-meta, .diff-gap { animation: none; }

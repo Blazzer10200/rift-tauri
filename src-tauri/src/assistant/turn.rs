@@ -7,13 +7,15 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::io::BufReader;
+use tokio::sync::{mpsc, oneshot};
+
+use super::warm_pool;
 
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
@@ -196,6 +198,50 @@ fn clear_steer_tx_if(session_id: &str, tx: &mpsc::UnboundedSender<SteerMsg>) {
 
 fn get_steer_tx(session_id: &str) -> Option<mpsc::UnboundedSender<SteerMsg>> {
     with_steer_tx(|m| m.get(session_id).cloned()).flatten()
+}
+
+/// 20 MiB total cap across all attachments — protects the CLI's JSON parser
+/// from a runaway paste. Per-image cap equals the cumulative since one big
+/// image is the realistic worst case.
+const ATTACHMENT_BYTES_CAP: usize = 20 * 1024 * 1024;
+/// Strict allowlist (not an `image/` prefix) — blocks e.g. image/svg+xml,
+/// which can carry script, and any malformed `image/…\r\n…` smuggle.
+const ALLOWED_IMAGE_MIMES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/// Validate inline image attachments: cumulative decoded size ≤ cap, mime in
+/// the strict allowlist. Shared by the send path and `assistant_steer` so a
+/// steered image gets the same gate as a first-turn one (#49).
+fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), String> {
+    if attachments.is_empty() {
+        return Ok(());
+    }
+    // #116: `len * 3 / 4` is approximate — pasted base64 can contain
+    // whitespace/CRLF that inflates the encoded length but doesn't add to
+    // decoded bytes. Strip whitespace before the divide so the cap reflects
+    // real decoded size.
+    let total: usize = attachments
+        .iter()
+        .map(|a| {
+            let trimmed_len = a
+                .data_base64
+                .bytes()
+                .filter(|b| !b.is_ascii_whitespace())
+                .count();
+            trimmed_len.saturating_mul(3) / 4
+        })
+        .sum();
+    if total > ATTACHMENT_BYTES_CAP {
+        return Err(format!(
+            "Attachment(s) too large: {} bytes > cap {}",
+            total, ATTACHMENT_BYTES_CAP
+        ));
+    }
+    for a in attachments {
+        if !ALLOWED_IMAGE_MIMES.contains(&a.mime.as_str()) {
+            return Err(format!("Unsupported attachment mime: {}", a.mime));
+        }
+    }
+    Ok(())
 }
 
 /// Build a stream-json `user` message NDJSON line (trailing `\n`). Shared by
@@ -648,43 +694,8 @@ pub async fn assistant_send(
     let use_full_config =
         cfg.use_full_config.unwrap_or(true) && !use_api_key && !cfg.local_llm_enabled;
 
-    // 20 MiB total cap across all attachments — protects the CLI's JSON
-    // parser from a runaway paste. Per-image cap is the same as the cumulative
-    // since one big image is the realistic worst case.
-    const ATTACHMENT_BYTES_CAP: usize = 20 * 1024 * 1024;
     let attachments = attachments.unwrap_or_default();
-    if !attachments.is_empty() {
-        // #116: `len * 3 / 4` is approximate — pasted base64 can contain
-        // whitespace/CRLF that inflates the encoded length but doesn't add
-        // to decoded bytes. Strip whitespace before the divide so the cap
-        // reflects real decoded size; otherwise users see "too large"
-        // errors on attachments that decode to ≤ cap.
-        let total: usize = attachments
-            .iter()
-            .map(|a| {
-                let trimmed_len = a
-                    .data_base64
-                    .bytes()
-                    .filter(|b| !b.is_ascii_whitespace())
-                    .count();
-                trimmed_len.saturating_mul(3) / 4
-            })
-            .sum();
-        if total > ATTACHMENT_BYTES_CAP {
-            return Err(format!(
-                "Attachment(s) too large: {} bytes > cap {}",
-                total, ATTACHMENT_BYTES_CAP
-            ));
-        }
-        // Strict allowlist (not a `image/` prefix) — blocks e.g. image/svg+xml,
-        // which can carry script, and any malformed `image/…\r\n…` smuggle.
-        const ALLOWED_IMAGE_MIMES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
-        for a in &attachments {
-            if !ALLOWED_IMAGE_MIMES.contains(&a.mime.as_str()) {
-                return Err(format!("Unsupported attachment mime: {}", a.mime));
-            }
-        }
-    }
+    validate_attachments(&attachments)?;
     // Prompting modes route per-action permission asks through the stream-json
     // control channel (`--permission-prompt-tool stdio` + the `can_use_tool`
     // round-trip below). bypass/auto never prompt, so they keep the wide
@@ -1087,535 +1098,797 @@ pub async fn assistant_send(
     // Clear any stale stop marker for this session (e.g. retry after a
     // previous stop) before we spawn.
     take_session_stopped(&session_id);
-    // #241: coarse turn-latency profile. spawn → first-stream-line (TTFT proxy:
-    // process spawn + handshake + SessionStart hooks + model prefill) and
-    // spawn → result are the two numbers that reveal whether per-turn cost is
-    // harness overhead vs model time. Logged at INFO so a dev session surfaces
-    // the breakdown without a debugger. `Instant` is Copy → safe to read in the
-    // stdout task and again after child.wait().
+    // The per-turn user message — always a stream-json `user` envelope (text +
+    // optional image blocks). Sent by the reader loop once the `initialize`
+    // handshake is acknowledged. Shares build_user_envelope with steer injection.
+    let user_line: Vec<u8> = build_user_envelope(&effective_prompt, &attachments)?;
+
+    // #48 warm pool: the spawn "signature". Every field below is baked into the
+    // child's argv/env at spawn and CANNOT change in-flight — so a turn whose
+    // key differs from the warm child's must drain + cold-respawn (with
+    // `--resume`). `addendum` is a `&'static str` (one of three constants), so
+    // its pointer is a stable, cheap fingerprint of the system-prompt variant.
+    let key = warm_pool::SpawnKey {
+        model: model.clone(),
+        root: roots.first().map(|p| p.to_string_lossy().into_owned()),
+        permission_mode: permission_mode.clone(),
+        prompting_mode,
+        use_full_config,
+        use_api_key,
+        local_llm_enabled: cfg.local_llm_enabled,
+        thinking_on,
+        effort_level: effort_level.to_string(),
+        addendum_ptr: addendum.as_ptr() as usize,
+    };
+
+    // Dispatch through the warm pool: reuse a live child whose key matches, else
+    // cold-spawn one and keep it warm. `_mcp_guard` outlives the process via the
+    // WarmChild so the per-turn config file survives every reused turn. The
+    // whole spawn + reader loop + reaping moved into `dispatch_turn`.
+    dispatch_turn(
+        app,
+        window_label,
+        session_id,
+        key,
+        cmd,
+        user_line,
+        _mcp_guard,
+        is_first_turn,
+        model,
+    )
+    .await
+}
+
+/// Reuse-or-cold-spawn a warm `claude` child for this turn, run the turn, and
+/// return once its `result` frame lands (DONE already emitted by the reader
+/// loop). The highest-risk function in the file — see warm_pool.rs + the design
+/// doc. Keeps the existing per-turn streaming/permission/steer plumbing intact;
+/// the only structural change vs the old inline path is that the reader loop is
+/// LONG-LIVED (one per warm child) and parks on `result` instead of EOF-ing.
+#[allow(clippy::too_many_arguments)]
+async fn dispatch_turn(
+    app: AppHandle,
+    window_label: String,
+    session_id: String,
+    key: warm_pool::SpawnKey,
+    cmd: tokio::process::Command,
+    user_line: Vec<u8>,
+    mcp_guard: Option<McpConfigGuard>,
+    is_first_turn: bool,
+    model: String,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    // Clear any stale stop marker for this session (e.g. retry after a previous
+    // stop) before we touch the warm child.
+    take_session_stopped(&session_id);
+
+    // 1) Try the warm path: a live child whose signature matches.
+    if let Some(arc) = warm_pool::get(&session_id) {
+        // M5/M7: lock the child only to read tx + key + in-progress, then RELEASE
+        // before any await. Never hold the WarmChild mutex across the turn.
+        let reuse: Option<(mpsc::UnboundedSender<warm_pool::TurnCmd>, Arc<std::sync::atomic::AtomicBool>)> = {
+            let mut g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            if g.key != key {
+                // Signature changed (model/effort/perm/root/mode) → can't reuse.
+                // Drain the old child + fall through to cold respawn (--resume).
+                log::info!("warm_pool: signature changed for {session_id} — draining + cold respawn");
+                None
+            } else if g.turn_in_progress.load(Ordering::Acquire) {
+                // Concurrent turn on one session (failure mode #1). The frontend
+                // serializes turns per tab via the queue, so this is a bug/race;
+                // reject rather than interleave two turns on one stdin.
+                return Err("a turn is already in progress for this session".into());
+            } else {
+                // Mark in-progress BEFORE releasing the lock so a racing second
+                // send sees it. The reader loop clears it on `result` (M6).
+                g.turn_in_progress.store(true, Ordering::Release);
+                g.last_used = std::time::Instant::now();
+                Some((g.turn_tx.clone(), g.turn_in_progress.clone()))
+            }
+        };
+        // `user_line` is moved into the TurnCmd only on the reuse path; on every
+        // fall-through (mismatch / dead-on-send) it's recovered so the cold path
+        // below still has it. `user_line` stays a binding the cold call consumes.
+        let user_line = match reuse {
+            Some((turn_tx, in_progress)) => {
+                let (done_tx, done_rx) = oneshot::channel();
+                let bg_evict = Arc::new(std::sync::atomic::AtomicBool::new(false));
+                // Keep a copy: if the reused child turns out to be dead (killed
+                // while parked), the loop reports DeadOnReuse and we retry cold —
+                // which needs user_line again (the original was moved into the cmd).
+                let retry_line = user_line.clone();
+                let cmd_msg = warm_pool::TurnCmd {
+                    user_line,
+                    app: app.clone(),
+                    window_label: window_label.clone(),
+                    done: done_tx,
+                    bg_evict,
+                };
+                match turn_tx.send(cmd_msg) {
+                    Ok(()) => {
+                        // Await the turn's completion signal from the reader loop.
+                        match done_rx.await {
+                            // Dead-on-reuse sentinel: the parked child was dead.
+                            // The loop already dropped it; fall through to cold
+                            // respawn with the preserved user_line — no UI error.
+                            Ok(Err(ref s)) if s == RETRY_COLD_SENTINEL => {
+                                in_progress.store(false, Ordering::Release);
+                                retry_line
+                            }
+                            Ok(r) => return r,
+                            // Reader dropped done_tx without sending (loop exited /
+                            // panicked mid-turn). Surface so the UI unwedges.
+                            Err(_) => {
+                                in_progress.store(false, Ordering::Release);
+                                let _ = app.emit_to(&window_label, ERROR_EVENT, serde_json::json!({
+                                    "session_id": session_id,
+                                    "message": "the warm CLI process ended unexpectedly — retry the turn",
+                                }));
+                                return Err("warm child reader ended before result".into());
+                            }
+                        }
+                    }
+                    Err(send_err) => {
+                        // Reader loop gone (child died between our get + send).
+                        // Clear in-progress, drop the dead child, recover user_line
+                        // from the rejected message, fall through to cold respawn.
+                        in_progress.store(false, Ordering::Release);
+                        warm_pool::remove_if(&session_id, &arc);
+                        log::info!("warm_pool: warm child for {session_id} dead on send — cold respawn");
+                        send_err.0.user_line
+                    }
+                }
+            }
+            None => {
+                // Signature mismatch → drop the old child so the cold spawn below
+                // replaces it cleanly (its reader loop exits when turn_tx drops).
+                warm_pool::remove_if(&session_id, &arc);
+                user_line
+            }
+        };
+
+        // 2) Cold path (warm child existed but couldn't be reused).
+        return cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model).await;
+    }
+
+    // 2) Cold path: no warm child at all — spawn one, register it, run turn 1.
+    cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model).await
+}
+
+/// Cold-spawn a fresh `claude` child, register it in the warm pool, start its
+/// long-lived reader loop, hand it the first turn, and await that turn's
+/// result. The reader loop OWNS stdin/stdout/stderr for the child's whole life
+/// and parks between turns — so this fn returns when the FIRST turn's `result`
+/// lands, but the process stays alive for subsequent reused turns.
+#[allow(clippy::too_many_arguments)]
+async fn cold_spawn_and_run(
+    app: AppHandle,
+    window_label: String,
+    session_id: String,
+    key: warm_pool::SpawnKey,
+    mut cmd: tokio::process::Command,
+    user_line: Vec<u8>,
+    mcp_guard: Option<McpConfigGuard>,
+    is_first_turn: bool,
+    model: String,
+) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    // Make sure the idle-evict sweeper is running (idempotent; first cold spawn
+    // starts it, so a process that never opens a chat pays nothing).
+    warm_pool::ensure_evictor();
+
     let turn_start = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     let turn_pid = child.id();
     if let Some(pid) = turn_pid {
         set_session_pid(&session_id, pid);
     } else {
-        // #67: `child.id()` returns None when the process already exited by
-        // the time we ask (immediate-exit on bad args is the usual cause).
-        // Without surfacing this, `assistant_stop` later returns Ok with no
-        // PID found and looks like a successful stop while the child kept
-        // running. Logging makes the orphan-or-instant-exit case diagnosable.
-        log::warn!("assistant_send: child PID unavailable for session {session_id} (process already exited?)");
+        // #67: `child.id()` returns None when the process already exited by the
+        // time we ask (immediate-exit on bad args). Surface it so a later
+        // assistant_stop's "no PID, return Ok" isn't mistaken for a real stop.
+        log::warn!("cold_spawn: child PID unavailable for session {session_id} (process already exited?)");
     }
 
-    // #39: race window between the pre-spawn clear and set_session_pid means a
-    // concurrent `assistant_stop` arriving in that window would find no PID,
-    // return Ok, and silently drop the stop intent. Re-check the stopped flag
-    // now that the PID is registered — if a stop landed during spawn, honor
-    // it by killing the child immediately so the wait loop sees the exit and
-    // emits the normal stop-path done event.
+    // #39: a concurrent stop arriving in the spawn window would find no PID and
+    // silently drop. Re-check now that the PID is registered.
     if take_session_stopped(&session_id) {
-        log::info!("assistant_send: stop arrived during spawn for {session_id} — killing child");
-        // B3: surface a failed kill. This arm intentionally keeps the pid
-        // registered (so a retry can stop the child), so a silent start_kill
-        // failure is exactly the case where a later stale-pid kill could hit a
-        // recycled pid — log it so it's diagnosable.
+        log::info!("cold_spawn: stop arrived during spawn for {session_id} — killing child");
         if let Err(e) = child.start_kill() {
-            log::warn!("assistant_send: start_kill failed for {session_id} during stop-on-spawn: {e}");
+            log::warn!("cold_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}");
         }
-        // Re-set the marker so the post-wait take_ at the failure branch
-        // recognizes this as a user-initiated stop, not a crash.
-        mark_session_stopped(&session_id);
+        if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
+        let _ = app.emit_to(&window_label, DONE_EVENT, serde_json::json!({
+            "session_id": session_id, "exit_code": -1,
+        }));
+        return Ok(());
     }
 
-    // stdin stays OPEN for the whole turn: the control channel writes a
-    // `control_response` back mid-stream after each `can_use_tool` ask, so we
-    // can't EOF up front like the old text-input path did. The reader task
-    // below owns stdin and drops it (EOF) once the turn's `result` lands.
-    // #117: a None stdin would otherwise leave the child waiting forever —
-    // fail loudly + kill so the wait loop unblocks.
-    // A1: take() + guard in one — no `.expect()` panic path. None means the
-    // child died between spawn and now; kill + clear the registered pid so a
-    // later assistant_stop can't taskkill a since-recycled pid (#39), then fail
-    // loudly so the wait loop unblocks (#117).
+    // A1: take() + guard — None means the child died between spawn and now.
     let Some(stdin) = child.stdin.take() else {
         let _ = child.start_kill();
         clear_session_pid(&session_id);
         return Err("claude stdin unavailable — process killed".into());
     };
-
-    // The per-turn user message — always a stream-json `user` envelope (text +
-    // optional image blocks). Sent by the reader task once the `initialize`
-    // handshake is acknowledged. Shares build_user_envelope with steer injection.
-    let user_line: Vec<u8> = build_user_envelope(&effective_prompt, &attachments)?;
-
-    // RR9: take the pipes BEFORE registering the steer sender — an `ok_or_else`?
-    // early-return between registration and the turn loop would strand a stale
-    // STEER_TX entry (never matched by clear_steer_tx_if at turn end). Both takes
-    // are effectively infallible (Stdio::piped() is set), but this keeps the
-    // "every registration is matched by a clear" invariant true on every path.
     let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
 
-    // Steer channel: register the sender while this turn streams so
-    // `assistant_steer` can inject mid-turn user messages; the reader task owns
-    // the receiver. Cleared at the same points as the session PID (turn end).
-    let (steer_tx, mut steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
+    // Steer channel — registered for the WARM CHILD's whole life (not per-turn).
+    // `assistant_steer` looks it up; the reader loop owns the receiver and gates
+    // on `turn_in_progress` so an idle-between-turns steer answers no_active_turn.
+    let (steer_tx, steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
     register_steer_tx(&session_id, steer_tx.clone());
 
-    let app_out = app.clone();
-    let win_label = window_label.clone();
-    let stream_sid = session_id.clone();
-    // #242: turn-completion is signaled by the `result` frame, NOT process exit.
-    // A `run_in_background` child (e.g. a dev server / localhost) keeps `claude`
-    // alive for as long as it runs, so `child.wait()` below would block for
-    // minutes and the UI's DONE_EVENT (which drains the queue) would never fire.
-    // The reader sets this the instant `result` lands and emits DONE itself; the
-    // main task then reaps a lingering claude instead of waiting it out.
-    let result_seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let result_seen_task = result_seen.clone();
-    let done_sid = session_id.clone();
-    let done_app = app.clone();
-    let mut stdout_task = tokio::spawn(async move {
-        use tokio::io::AsyncWriteExt;
-        use std::sync::atomic::Ordering;
-        let mut stdin = stdin; // owned by the task; dropped → EOF on turn end
-        let mut lines = BufReader::new(stdout).lines();
+    // Per-child turn channel: dispatch_turn sends a TurnCmd; the loop runs it.
+    let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
+    let turn_in_progress = Arc::new(std::sync::atomic::AtomicBool::new(true)); // first turn starts in-progress
 
-        // 1) initialize handshake — required so the CLI routes permission asks
-        //    over the control channel as `can_use_tool` instead of the headless
-        //    auto-deny short-circuit. Mirrors what the Agent SDK sends.
-        const INIT: &[u8] = b"{\"type\":\"control_request\",\"request_id\":\"rift-init\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}\n";
-        if let Err(e) = stdin.write_all(INIT).await {
-            let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                "session_id": stream_sid, "message": format!("write initialize: {e}"),
+    // Register the warm child BEFORE spawning the loop so a racing second send
+    // (or the evictor) sees a coherent entry.
+    let warm = Arc::new(std::sync::Mutex::new(warm_pool::WarmChild {
+        turn_tx: turn_tx.clone(),
+        key,
+        turn_in_progress: turn_in_progress.clone(),
+        last_used: std::time::Instant::now(),
+    }));
+    warm_pool::insert(&session_id, warm.clone());
+
+    // The first turn's completion signal.
+    let (done_tx, done_rx) = oneshot::channel();
+    let first_bg_evict = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let first_turn = warm_pool::TurnCmd {
+        user_line,
+        app: app.clone(),
+        window_label: window_label.clone(),
+        done: done_tx,
+        bg_evict: first_bg_evict,
+    };
+
+    // Spawn the long-lived reader loop. It owns child/stdin/stdout/stderr, the
+    // steer receiver, the turn receiver, the mcp guard, and the warm-pool Arc —
+    // all dropped together when the loop exits (death / evict / signature drain).
+    tokio::spawn(run_turn_loop(RunCtx {
+        child,
+        stdin,
+        stdout,
+        stderr,
+        steer_rx,
+        turn_rx,
+        first_turn,
+        session_id: session_id.clone(),
+        turn_pid,
+        turn_in_progress: turn_in_progress.clone(),
+        warm: warm.clone(),
+        steer_tx,
+        mcp_guard,
+        is_first_turn,
+        model,
+        turn_start,
+    }));
+
+    // Await the FIRST turn's result. Subsequent turns ride the warm child.
+    match done_rx.await {
+        Ok(r) => r,
+        Err(_) => {
+            turn_in_progress.store(false, Ordering::Release);
+            let _ = app.emit_to(&window_label, ERROR_EVENT, serde_json::json!({
+                "session_id": session_id,
+                "message": "the CLI process ended before producing a result — retry the turn",
             }));
-            return;
+            Err("warm child reader ended before first result".into())
         }
-        let _ = stdin.flush().await;
+    }
+}
 
-        let mut user_sent = false;
-        let mut first_line_logged = false;
-        // #244 phase probe: prove where a slow turn's wall-clock goes. We already
-        // log TTFT (spawn→first-line). These add the two boundaries that separate
-        // "thinking-bound" from "generation-bound": first thinking delta and first
-        // visible text delta. Large (first-text − first-thinking) = invisible Opus
-        // reasoning burn; small = the model answered fast and the cost is elsewhere.
-        let mut first_think_logged = false;
-        let mut first_text_logged = false;
-        // Steers that arrive before the init handshake completes are buffered,
-        // then flushed the instant the user turn is sent (see user_sent branch).
-        let mut steer_pending: Vec<SteerMsg> = Vec::new();
-        'outer: loop {
-            tokio::select! {
-            read = lines.next_line() => {
-            match read {
-                Ok(Some(line)) => {
-                    let trimmed = line.trim();
-                    if trimmed.is_empty() {
-                        continue;
-                    }
-                    // Intercept control-channel frames before forwarding.
-                    if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-                        let ty = v.get("type").and_then(|x| x.as_str());
-                        // The first `control_response` is the init ack → fire
-                        // the user turn once. Don't forward it to the UI.
-                        if !user_sent && ty == Some("control_response") {
-                            user_sent = true;
-                            if let Err(e) = stdin.write_all(&user_line).await {
-                                let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                                    "session_id": stream_sid, "message": format!("write user turn: {e}"),
-                                }));
-                                break;
-                            }
-                            let _ = stdin.flush().await;
-                            // Flush steers that landed during the handshake.
-                            // RR-6: surface write/build failures instead of
-                            // dropping them silently — mirrors the live steer
-                            // path below so a lost steer always signals.
-                            for m in steer_pending.drain(..) {
-                                match build_user_envelope(&m.text, &m.attachments) {
-                                    Ok(env) => {
-                                        if let Err(e) = stdin.write_all(&env).await {
-                                            let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                                                "session_id": stream_sid,
-                                                "message": format!("write steer: {e}"),
-                                            }));
-                                            // Broken stdin → the loop can't recover; exit
-                                            // the turn instead of spinning with a dead pipe.
-                                            break 'outer;
-                                        }
-                                    }
-                                    Err(e) => {
-                                        let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                                            "session_id": stream_sid, "message": e,
-                                        }));
-                                    }
-                                }
-                            }
-                            let _ = stdin.flush().await;
-                            continue;
-                        }
-                        // Permission ask → resolve via the registry + UI, write
-                        // the decision back as a `control_response`.
-                        let is_perm = ty == Some("control_request")
-                            && v.get("request")
-                                .and_then(|r| r.get("subtype"))
-                                .and_then(|s| s.as_str())
-                                == Some("can_use_tool");
-                        if is_perm {
-                            // Broken stdin while writing the decision wedges the CLI
-                            // (it blocks awaiting a control_response that never lands)
-                            // → surface + exit the turn instead of spinning.
-                            if let Err(e) = handle_permission_request(&app_out, &stream_sid, &win_label, &mut stdin, &v).await {
-                                let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
-                                    "session_id": stream_sid, "message": format!("write permission response: {e}"),
-                                }));
-                                break 'outer;
-                            }
-                            continue;
-                        }
-                        // `result` is the last frame — forward it, signal DONE
-                        // immediately (the turn is semantically over; don't wait
-                        // for process exit, which a background child can defer for
-                        // minutes), then break so stdin drops (EOF).
-                        if ty == Some("result") {
-                            // An auth rejection (401) surfaces as an error result
-                            // frame carrying the raw "API Error: 401 Invalid
-                            // authentication credentials" — forwarded verbatim it's
-                            // a dead-end. Detect it and emit an actionable error too,
-                            // mirroring the stderr-exit remap below, so a genuine
-                            // auth failure always tells the user what to do.
-                            let res_is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
-                                || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);
-                            let res_text = v.get("result").and_then(|s| s.as_str()).unwrap_or("");
-                            if res_is_err && is_auth_rejection(res_text) {
-                                let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                                    "session_id": stream_sid, "message": auth_rejection_message(),
-                                }));
-                            }
-                            let _ = app_out.emit_to(&win_label,STREAM_EVENT, serde_json::json!({
-                                "session_id": stream_sid, "line": trimmed,
-                            }));
-                            result_seen_task.store(true, Ordering::SeqCst);
-                            let _ = done_app.emit_to(&win_label,DONE_EVENT, serde_json::json!({
-                                "session_id": done_sid, "exit_code": 0,
-                            }));
-                            break;
-                        }
-                        // #244 phase probe: classify the first thinking vs text
-                        // delta on the partial-message stream. Shapes (Anthropic
-                        // SSE wrapped by the CLI as `stream_event`):
-                        //   content_block_start { content_block.type: "thinking" }
-                        //   content_block_delta { delta.type: "thinking_delta" | "signature_delta" }
-                        //   content_block_delta { delta.type: "text_delta" }
-                        if ty == Some("stream_event") {
-                            if let Some(ev) = v.get("event") {
-                                let ev_ty = ev.get("type").and_then(|x| x.as_str());
-                                let blk_ty = ev.get("content_block").and_then(|b| b.get("type")).and_then(|x| x.as_str());
-                                let delta_ty = ev.get("delta").and_then(|d| d.get("type")).and_then(|x| x.as_str());
-                                let is_think = blk_ty == Some("thinking")
-                                    || matches!(delta_ty, Some("thinking_delta") | Some("signature_delta"));
-                                let is_text = blk_ty == Some("text") || delta_ty == Some("text_delta");
-                                if is_think && !first_think_logged {
-                                    first_think_logged = true;
-                                    log::info!(
-                                        "assistant_send: first-thinking {} ms (spawn→first-thinking-delta) session={}",
-                                        turn_start.elapsed().as_millis(), stream_sid
-                                    );
-                                }
-                                if is_text && !first_text_logged {
-                                    first_text_logged = true;
-                                    log::info!(
-                                        "assistant_send: first-text {} ms (spawn→first-visible-text), ev={:?} session={}",
-                                        turn_start.elapsed().as_millis(), ev_ty, stream_sid
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    // #241: first forwarded content line ≈ TTFT. Everything
-                    // before it (spawn, init handshake, SessionStart hooks,
-                    // model prefill) is fixed per-turn overhead.
-                    if !first_line_logged {
-                        first_line_logged = true;
-                        log::info!(
-                            "assistant_send: TTFT {} ms (spawn→first-stream-line) session={}",
-                            turn_start.elapsed().as_millis(), stream_sid
-                        );
-                    }
-                    // Forward raw NDJSON line, tagged with the CLI session_id
-                    // so multi-tab UIs route the event to the right bubble.
-                    let _ = app_out.emit_to(&win_label,
-                        STREAM_EVENT,
-                        serde_json::json!({ "session_id": stream_sid, "line": trimmed }),
-                    );
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    let _ = app_out.emit_to(&win_label,
-                        ERROR_EVENT,
-                        serde_json::json!({
-                            "session_id": stream_sid,
-                            "message": format!("stdout read error: {e}"),
-                        }),
-                    );
-                    break;
-                }
-            }
-            }
-            // Mid-turn steer: write the injected user message to the live stdin.
-            // The CLI folds it into the running turn at the next agent-loop step.
-            // The STEER_TX registry holds a sender for the whole turn, so recv()
-            // never yields None mid-turn (no busy-loop); the branch just parks.
-            Some(msg) = steer_rx.recv() => {
-                if !user_sent {
-                    // Init handshake not yet acked — buffer until the turn is sent.
-                    // Cap the buffer: the window is ~100ms, so a flood here can only
-                    // be a frontend bug; drop extras rather than grow unbounded.
-                    const STEER_PENDING_CAP: usize = 8;
-                    if steer_pending.len() < STEER_PENDING_CAP {
-                        steer_pending.push(msg);
-                    } else {
-                        log::warn!("steer_pending cap reached — dropping steer during init handshake");
-                    }
-                } else {
-                    match build_user_envelope(&msg.text, &msg.attachments) {
-                        Ok(env) => {
-                            if let Err(e) = stdin.write_all(&env).await {
-                                let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                                    "session_id": stream_sid,
-                                    "message": format!("write steer: {e}"),
-                                }));
-                                break;
-                            }
-                            let _ = stdin.flush().await;
-                        }
-                        Err(e) => {
-                            let _ = app_out.emit_to(&win_label,ERROR_EVENT, serde_json::json!({
-                                "session_id": stream_sid, "message": e,
-                            }));
-                        }
-                    }
-                }
-            }
-            }
-        }
-        // stdin dropped here → EOF.
-    });
+/// Everything the long-lived reader loop owns for one warm child. Bundled into
+/// a struct so `run_turn_loop` takes a single arg (clippy + readability).
+struct RunCtx {
+    child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+    steer_rx: mpsc::UnboundedReceiver<SteerMsg>,
+    turn_rx: mpsc::UnboundedReceiver<warm_pool::TurnCmd>,
+    first_turn: warm_pool::TurnCmd,
+    session_id: String,
+    turn_pid: Option<u32>,
+    turn_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    warm: Arc<std::sync::Mutex<warm_pool::WarmChild>>,
+    steer_tx: mpsc::UnboundedSender<SteerMsg>,
+    mcp_guard: Option<McpConfigGuard>,
+    is_first_turn: bool,
+    model: String,
+    turn_start: std::time::Instant,
+}
 
-    // Drain stderr to a buffer for error-event surfacing on non-zero exit.
-    // #66: cap at 64 KiB so a wedged CLI streaming error spew doesn't grow
-    // the heap unboundedly. When the buffer crosses the cap, drop the first
-    // 32 KiB and keep the tail — error context lives at the END of a stderr
-    // stream (the panic / fatal-error line), not at the start.
-    const STDERR_CAP: usize = 64 * 1024;
-    const STDERR_TRIM: usize = 32 * 1024;
-    let mut stderr_task = tokio::spawn(async move {
-        let mut buf = String::new();
-        let mut truncated = false;
+/// The long-lived per-warm-child reader loop. Owns stdin/stdout for the child's
+/// whole life. Runs the `initialize` handshake ONCE, then for each turn: writes
+/// the user envelope, streams NDJSON (forwarding + control-channel handling +
+/// steer injection) exactly as the old inline path did, and on `result` emits
+/// DONE, signals the turn's `done` channel, clears `turn_in_progress`, and
+/// PARKS on the turn channel for the next envelope — instead of EOF-ing.
+///
+/// The loop exits (→ stdin drops → child EOFs → reaped) when: the child dies,
+/// the turn channel closes (evict / signature drain — all senders dropped), a
+/// turn requested bg-evict (M3), or a fatal stdin write error.
+async fn run_turn_loop(mut ctx: RunCtx) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use std::sync::atomic::Ordering;
+
+    let mut stdin = ctx.stdin;
+    let mut lines = BufReader::new(ctx.stdout).lines();
+    let mut steer_rx = ctx.steer_rx;
+    let mut turn_rx = ctx.turn_rx;
+
+    // Persistent stderr reader (M2): on the warm path `child.wait()` never
+    // returns non-zero mid-life, so stderr can't be drained at exit. Keep a
+    // rolling tail in a shared buffer that the EOF handler reads for auth/resume
+    // failure remapping. Capped (64 KiB, keep the tail — fatal lines live at end).
+    let stderr_tail: Arc<std::sync::Mutex<String>> = Arc::new(std::sync::Mutex::new(String::new()));
+    let stderr_tail_task = stderr_tail.clone();
+    let stderr = ctx.stderr;
+    let stderr_handle = tokio::spawn(async move {
+        const STDERR_CAP: usize = 64 * 1024;
+        const STDERR_TRIM: usize = 32 * 1024;
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
+            let mut buf = match stderr_tail_task.lock() { Ok(g) => g, Err(p) => p.into_inner() };
             buf.push_str(&l);
             buf.push('\n');
             if buf.len() > STDERR_CAP {
-                truncated = true;
-                // Find the first newline >= STDERR_TRIM bytes in so we drop on
-                // a line boundary, not mid-line. Safe `String::drain` requires
-                // a char boundary; newline is always one.
-                // F70: index the BYTES, not the str — `buf[STDERR_TRIM..]` on a
-                // String panics when STDERR_TRIM lands inside a multi-byte
-                // codepoint. A byte slice is always valid; the cut (just past a
-                // `\n`, or the next char boundary) stays drain-safe.
                 let cut = buf.as_bytes()[STDERR_TRIM..]
                     .iter()
                     .position(|&b| b == b'\n')
                     .map(|n| STDERR_TRIM + n + 1)
                     .unwrap_or_else(|| {
                         let mut c = STDERR_TRIM;
-                        while c < buf.len() && !buf.is_char_boundary(c) {
-                            c += 1;
-                        }
+                        while c < buf.len() && !buf.is_char_boundary(c) { c += 1; }
                         c
                     });
                 buf.drain(..cut);
             }
         }
-        if truncated {
-            buf.insert_str(0, "[... earlier stderr dropped (>64 KiB) ...]\n");
-        }
-        buf
     });
 
-    // #242: wait for claude to exit — but the `result` frame already ended the
-    // turn for the UI (the reader emitted DONE). If claude lingers past a short
-    // grace AFTER result (a run_in_background child is pinning it alive), kill
-    // its PID — NOT the tree, so the detached background process survives — and
-    // stop waiting. Without `result` we keep waiting: claude may legitimately be
-    // mid-turn on a long task and must not be killed out from under itself.
-    const REAP_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
-    let mut reap_deadline: Option<std::time::Instant> = None;
-    let status: Option<std::process::ExitStatus> = loop {
-        match tokio::time::timeout(std::time::Duration::from_millis(50), child.wait()).await {
-            Ok(Ok(s)) => break Some(s),
-            Ok(Err(e)) => {
-                // F6: don't leak the two pipe-drain tasks on the wait()-error
-                // path — abort them before bailing.
-                stdout_task.abort();
-                stderr_task.abort();
-                if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
-                clear_steer_tx_if(&session_id, &steer_tx);
-                return Err(format!("await claude: {e}"));
+    // 1) initialize handshake — ONCE per process. Required so the CLI routes
+    //    permission asks over the control channel as `can_use_tool`. A write
+    //    failure here means the child is already dead.
+    const INIT: &[u8] = b"{\"type\":\"control_request\",\"request_id\":\"rift-init\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}\n";
+    if let Err(e) = stdin.write_all(INIT).await {
+        let _ = ctx.first_turn.app.emit_to(&ctx.first_turn.window_label, ERROR_EVENT, serde_json::json!({
+            "session_id": ctx.session_id, "message": format!("write initialize: {e}"),
+        }));
+        let _ = ctx.first_turn.done.send(Err(format!("write initialize: {e}")));
+        loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
+        stderr_handle.abort();
+        drop(ctx.mcp_guard);
+        return;
+    }
+    let _ = stdin.flush().await;
+
+    // The first turn is in hand; subsequent ones arrive on turn_rx.
+    let mut current: Option<warm_pool::TurnCmd> = Some(ctx.first_turn);
+    let mut handshake_done = false;
+    let cold_first = ctx.is_first_turn;
+    let mut first_turn_flag = ctx.is_first_turn;
+
+    'turns: loop {
+        // Park for a turn if we don't have one in hand.
+        let turn = match current.take() {
+            Some(t) => t,
+            None => {
+                ctx.turn_in_progress.store(false, Ordering::Release);
+                match turn_rx.recv().await {
+                    Some(t) => {
+                        // dispatch_turn already set turn_in_progress = true before
+                        // sending; re-assert for safety on the loop side.
+                        ctx.turn_in_progress.store(true, Ordering::Release);
+                        t
+                    }
+                    None => break 'turns, // all senders dropped → evict/drain → exit
+                }
             }
-            Err(_) => {
-                if result_seen.load(std::sync::atomic::Ordering::SeqCst) {
-                    let dl = *reap_deadline
-                        .get_or_insert_with(|| std::time::Instant::now() + REAP_GRACE);
-                    if std::time::Instant::now() >= dl {
-                        log::info!(
-                            "assistant_send: claude lingering {} ms past result (background child pinning it) — killing PID, session={}",
-                            turn_start.elapsed().as_millis(), session_id
-                        );
-                        let _ = child.start_kill();
-                        let _ = child.wait().await;
-                        break None;
+        };
+        let app_out = turn.app.clone();
+        let win_label = turn.window_label.clone();
+        let stream_sid = ctx.session_id.clone();
+        let bg_evict = turn.bg_evict.clone();
+        let done = turn.done;
+        let user_line = turn.user_line;
+
+        let turn_start = if first_turn_flag { ctx.turn_start } else { std::time::Instant::now() };
+
+        // Per-turn run: stream NDJSON until result/eof/fatal.
+        let outcome = stream_one_turn(StreamCtx {
+            stdin: &mut stdin,
+            lines: &mut lines,
+            steer_rx: &mut steer_rx,
+            app_out: &app_out,
+            win_label: &win_label,
+            stream_sid: &stream_sid,
+            user_line: &user_line,
+            handshake_done: &mut handshake_done,
+            bg_evict: &bg_evict,
+            turn_start,
+        }).await;
+
+        // Clear in-progress the instant the turn ends (M6: reader-side).
+        ctx.turn_in_progress.store(false, Ordering::Release);
+        first_turn_flag = false;
+
+        match outcome {
+            TurnOutcome::Result => {
+                log::info!("warm_pool: turn result {} ms session={}", turn_start.elapsed().as_millis(), stream_sid);
+                let _ = done.send(Ok(()));
+                // M3: a turn that spawned a background child taints the inherited
+                // stdout pipe — don't keep it warm. Exit the loop (→ stdin drops).
+                if bg_evict.load(Ordering::Acquire) {
+                    log::info!("warm_pool: bg-spawn turn — evicting warm child {stream_sid}");
+                    break 'turns;
+                }
+                continue 'turns; // reuse: park for the next turn
+            }
+            TurnOutcome::Fatal(msg) => {
+                let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
+                    "session_id": stream_sid, "message": msg.clone(),
+                }));
+                let _ = done.send(Err(msg));
+                break 'turns;
+            }
+            TurnOutcome::DeadOnReuse => {
+                // Warm child died while parked; this reused turn produced no
+                // output. Drop the dead child + registry entry and tell the
+                // dispatcher to retry cold (fresh spawn + --resume). NO UI error.
+                log::info!("warm_pool: reused turn found dead child {stream_sid} — signalling cold retry");
+                warm_pool::remove_if(&ctx.session_id, &ctx.warm);
+                let _ = done.send(Err(RETRY_COLD_SENTINEL.into()));
+                break 'turns;
+            }
+            TurnOutcome::Eof => {
+                // stdout closed without a result — the child exited (crash, bad
+                // args, user stop, lost --resume). Disambiguate via exit status +
+                // the stderr tail, exactly like the old post-wait path.
+                warm_pool::remove_if(&ctx.session_id, &ctx.warm);
+                let status = ctx.child.wait().await.ok();
+                let stderr_buf = {
+                    let g = match stderr_tail.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+                    g.clone()
+                };
+                emit_turn_end_error(
+                    &app_out, &win_label, &stream_sid, cold_first, status, &stderr_buf, done,
+                ).await;
+                break 'turns;
+            }
+        }
+    }
+
+    // Loop exited — tear down. Clear registry entry (if still ours), PID, steer.
+    loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
+    stderr_handle.abort();
+    drop(ctx.mcp_guard); // delete the per-session MCP config file now (not per-turn)
+    log::debug!("warm_pool: reader loop exited for {} (model={})", ctx.session_id, ctx.model);
+}
+
+/// Common loop-exit teardown: drop the warm registry entry if it's still ours,
+/// clear the PID + steer-tx, and best-effort reap the child.
+async fn loop_cleanup(
+    session_id: &str,
+    turn_pid: Option<u32>,
+    steer_tx: &mpsc::UnboundedSender<SteerMsg>,
+    warm: &Arc<std::sync::Mutex<warm_pool::WarmChild>>,
+    child: &mut tokio::process::Child,
+) {
+    warm_pool::remove_if(session_id, warm);
+    if let Some(p) = turn_pid { clear_session_pid_if(session_id, p); }
+    clear_steer_tx_if(session_id, steer_tx);
+    let _ = child.start_kill();
+    let _ = child.wait().await;
+}
+
+/// How a single turn ended, as seen by the reader loop.
+/// Internal sentinel passed through the turn's `done` channel when a reused turn
+/// found a dead warm child. `dispatch_turn` recognises it and retries the turn
+/// cold instead of surfacing it to the UI. Never user-visible.
+const RETRY_COLD_SENTINEL: &str = "__rift_retry_cold__";
+
+enum TurnOutcome {
+    /// A `result` frame landed — DONE was emitted; the warm child can be reused.
+    Result,
+    /// stdout closed (None) before any `result` — the child exited. The caller
+    /// reaps it + remaps the exit/stderr into an actionable error/session-lost.
+    Eof,
+    /// A fatal mid-turn condition (broken stdin while writing a control response
+    /// or steer, or a stdout read error) — the child is unusable. The caller
+    /// surfaces `msg` + drops the child.
+    Fatal(String),
+    /// A REUSED turn's first envelope write failed before any output — the warm
+    /// child died while parked (process killed/crashed between turns). Not a
+    /// turn failure: the loop drops the dead child and the dispatcher retries the
+    /// turn cold (fresh spawn + `--resume`) so the user never sees an error.
+    DeadOnReuse,
+}
+
+/// Borrowed per-turn context for `stream_one_turn` — keeps the long-lived
+/// owned state (`stdin`, `lines`, `steer_rx`) borrowed mutably while the
+/// per-turn values are passed by ref. One arg-bundle struct so the fn stays
+/// under clippy's arg limit.
+struct StreamCtx<'a> {
+    stdin: &'a mut tokio::process::ChildStdin,
+    lines: &'a mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    steer_rx: &'a mut mpsc::UnboundedReceiver<SteerMsg>,
+    app_out: &'a AppHandle,
+    win_label: &'a str,
+    stream_sid: &'a str,
+    user_line: &'a [u8],
+    /// True once the per-process `initialize` handshake has been acked. The
+    /// FIRST turn waits for the first `control_response` (the init ack) before
+    /// sending its user envelope; every reused turn writes the envelope up front
+    /// (the handshake already happened at process start).
+    handshake_done: &'a mut bool,
+    /// M3: set true if this turn launched a `run_in_background` Bash — the
+    /// detached grandchild inherits the warm stdout write-end and never EOFs, so
+    /// the warm child is tainted and must be evicted after `result` (the next
+    /// turn would otherwise read interleaved junk from the bg process).
+    bg_evict: &'a std::sync::atomic::AtomicBool,
+    turn_start: std::time::Instant,
+}
+
+/// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
+/// channel (init ack, `can_use_tool` permission asks) + mid-turn steers, and
+/// return when `result` lands / stdout EOFs / a fatal write fails. Ported
+/// verbatim from the old inline reader task — the only structural change is that
+/// it runs per-turn against borrowed long-lived stdin/stdout instead of owning
+/// them, and on `result` it RETURNS (the loop parks) instead of dropping stdin.
+async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
+    use tokio::io::AsyncWriteExt;
+
+    let StreamCtx {
+        stdin, lines, steer_rx, app_out, win_label, stream_sid, user_line,
+        handshake_done, bg_evict, turn_start,
+    } = ctx;
+
+    // A reused turn entered with the handshake already done. If such a turn sees
+    // stdout EOF before any `result`, the warm child died while parked (a write
+    // to a dead pipe doesn't fail synchronously on Windows — the death only
+    // surfaces as a read EOF). That's silently retryable: drop the dead child +
+    // respawn cold. A FIRST turn EOF is a real spawn failure → surface it.
+    let was_reused = *handshake_done;
+    // Reused turns: the handshake already happened at process start, so write
+    // the user envelope immediately. First turn: wait for the init ack below.
+    let mut user_sent = if *handshake_done {
+        // Reused turn: a write failure here means the warm child died while
+        // parked. No output has been produced, so this is silently retryable —
+        // signal the loop to drop the child and let the dispatcher respawn cold.
+        if stdin.write_all(user_line).await.is_err() {
+            return TurnOutcome::DeadOnReuse;
+        }
+        let _ = stdin.flush().await;
+        true
+    } else {
+        false
+    };
+
+    let mut first_line_logged = false;
+    let mut first_think_logged = false;
+    let mut first_text_logged = false;
+    // Steers that arrive before the (first-turn) handshake completes are
+    // buffered, then flushed the instant the user turn is sent.
+    let mut steer_pending: Vec<SteerMsg> = Vec::new();
+
+    loop {
+        tokio::select! {
+        read = lines.next_line() => {
+        match read {
+            Ok(Some(line)) => {
+                let trimmed = line.trim();
+                if trimmed.is_empty() { continue; }
+                if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
+                    let ty = v.get("type").and_then(|x| x.as_str());
+                    // First `control_response` on a first turn = the init ack →
+                    // fire the user turn once. Don't forward it to the UI.
+                    if !user_sent && ty == Some("control_response") {
+                        user_sent = true;
+                        *handshake_done = true;
+                        if let Err(e) = stdin.write_all(user_line).await {
+                            return TurnOutcome::Fatal(format!("write user turn: {e}"));
+                        }
+                        let _ = stdin.flush().await;
+                        for m in steer_pending.drain(..) {
+                            match build_user_envelope(&m.text, &m.attachments) {
+                                Ok(env) => {
+                                    if let Err(e) = stdin.write_all(&env).await {
+                                        return TurnOutcome::Fatal(format!("write steer: {e}"));
+                                    }
+                                }
+                                Err(e) => {
+                                    let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
+                                        "session_id": stream_sid, "message": e,
+                                    }));
+                                }
+                            }
+                        }
+                        let _ = stdin.flush().await;
+                        continue;
+                    }
+                    // A `control_response` on a REUSED turn (handshake already
+                    // done) is the CLI re-acking — ignore, don't forward.
+                    if *handshake_done && !user_sent && ty == Some("control_response") {
+                        continue;
+                    }
+                    // Permission ask → resolve via the registry + UI, write the
+                    // decision back as a `control_response`.
+                    let is_perm = ty == Some("control_request")
+                        && v.get("request").and_then(|r| r.get("subtype")).and_then(|s| s.as_str())
+                            == Some("can_use_tool");
+                    if is_perm {
+                        if let Err(e) = handle_permission_request(app_out, stream_sid, win_label, stdin, &v).await {
+                            return TurnOutcome::Fatal(format!("write permission response: {e}"));
+                        }
+                        continue;
+                    }
+                    // `result` is the last frame — forward it, emit DONE, and
+                    // RETURN (the loop parks for the next turn; stdin stays open).
+                    if ty == Some("result") {
+                        let res_is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
+                            || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);
+                        let res_text = v.get("result").and_then(|s| s.as_str()).unwrap_or("");
+                        if res_is_err && is_auth_rejection(res_text) {
+                            let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
+                                "session_id": stream_sid, "message": auth_rejection_message(),
+                            }));
+                        }
+                        let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
+                            "session_id": stream_sid, "line": trimmed,
+                        }));
+                        let _ = app_out.emit_to(win_label, DONE_EVENT, serde_json::json!({
+                            "session_id": stream_sid, "exit_code": 0,
+                        }));
+                        return TurnOutcome::Result;
+                    }
+                    // M3: detect a `run_in_background` Bash tool_use so we evict
+                    // this warm child after the turn (its detached grandchild
+                    // inherits the stdout pipe → would taint the next turn).
+                    if ty == Some("assistant") {
+                        if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
+                            for block in content {
+                                if block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+                                    && block.get("name").and_then(|n| n.as_str()) == Some("Bash")
+                                    && block.get("input").and_then(|i| i.get("run_in_background")).and_then(|b| b.as_bool()) == Some(true)
+                                {
+                                    bg_evict.store(true, std::sync::atomic::Ordering::Release);
+                                    log::info!("warm_pool: run_in_background Bash detected — will evict warm child after turn, session={stream_sid}");
+                                }
+                            }
+                        }
+                    }
+                    // #244 phase probe: first thinking vs text delta.
+                    if ty == Some("stream_event") {
+                        if let Some(ev) = v.get("event") {
+                            let ev_ty = ev.get("type").and_then(|x| x.as_str());
+                            let blk_ty = ev.get("content_block").and_then(|b| b.get("type")).and_then(|x| x.as_str());
+                            let delta_ty = ev.get("delta").and_then(|d| d.get("type")).and_then(|x| x.as_str());
+                            let is_think = blk_ty == Some("thinking")
+                                || matches!(delta_ty, Some("thinking_delta") | Some("signature_delta"));
+                            let is_text = blk_ty == Some("text") || delta_ty == Some("text_delta");
+                            if is_think && !first_think_logged {
+                                first_think_logged = true;
+                                log::info!("warm_pool: first-thinking {} ms session={}", turn_start.elapsed().as_millis(), stream_sid);
+                            }
+                            if is_text && !first_text_logged {
+                                first_text_logged = true;
+                                log::info!("warm_pool: first-text {} ms ev={:?} session={}", turn_start.elapsed().as_millis(), ev_ty, stream_sid);
+                            }
+                        }
+                    }
+                }
+                if !first_line_logged {
+                    first_line_logged = true;
+                    log::info!("warm_pool: TTFT {} ms (turn-start→first-line) session={}", turn_start.elapsed().as_millis(), stream_sid);
+                }
+                let _ = app_out.emit_to(win_label, STREAM_EVENT,
+                    serde_json::json!({ "session_id": stream_sid, "line": trimmed }));
+            }
+            Ok(None) => {
+                // Reused turn, stdout closed with no result → child died while
+                // parked. Retry cold instead of erroring the user's turn.
+                return if was_reused { TurnOutcome::DeadOnReuse } else { TurnOutcome::Eof };
+            }
+            Err(e) => {
+                let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
+                    "session_id": stream_sid, "message": format!("stdout read error: {e}"),
+                }));
+                return TurnOutcome::Fatal(format!("stdout read error: {e}"));
+            }
+        }
+        }
+        // Mid-turn steer: write the injected user message to the live stdin.
+        Some(msg) = steer_rx.recv() => {
+            if !user_sent {
+                const STEER_PENDING_CAP: usize = 8;
+                if steer_pending.len() < STEER_PENDING_CAP {
+                    steer_pending.push(msg);
+                } else {
+                    log::warn!("steer_pending cap reached — dropping steer during init handshake");
+                }
+            } else {
+                match build_user_envelope(&msg.text, &msg.attachments) {
+                    Ok(env) => {
+                        if let Err(e) = stdin.write_all(&env).await {
+                            let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
+                                "session_id": stream_sid, "message": format!("write steer: {e}"),
+                            }));
+                            return TurnOutcome::Fatal(format!("write steer: {e}"));
+                        }
+                        let _ = stdin.flush().await;
+                    }
+                    Err(e) => {
+                        let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
+                            "session_id": stream_sid, "message": e,
+                        }));
                     }
                 }
             }
         }
-    };
-    if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
-    clear_steer_tx_if(&session_id, &steer_tx);
-    // #241: total turn wall-clock (spawn → claude exit). Compare against the
-    // TTFT line above: large TTFT w/ small (total−TTFT) = harness/prefill bound;
-    // small TTFT w/ large remainder = model generation bound.
-    log::info!(
-        "assistant_send: turn total {} ms (spawn→exit) first_turn={} model={} session={}",
-        turn_start.elapsed().as_millis(), is_first_turn, model, session_id
-    );
-
-    // #240: both drain tasks read the child's piped stdout/stderr. A background
-    // process the turn spawned (e.g. a dev server / localhost) inherits those
-    // pipe write-ends on Windows, so the reader never sees EOF and a bare
-    // `.await` here blocks FOREVER — stranding the DONE_EVENT below and hanging
-    // the frontend queue in "Queued". claude itself has already exited (wait()
-    // returned above), so anything still pending is a leaked fd with nothing
-    // left to deliver: bound each await and abort the task on elapse. stdout has
-    // the `result`-frame break so it usually finishes instantly; stderr drains
-    // to EOF with no escape hatch, so it's the one that actually wedges.
-    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-    if tokio::time::timeout(DRAIN_TIMEOUT, &mut stdout_task).await.is_err() {
-        log::warn!("assistant_send: stdout drain timed out (inherited pipe held by a background process?) for {session_id}");
-        stdout_task.abort();
+        }
     }
-    // #222: surface stderr-drain JoinError so a panicked drain task doesn't
-    // turn into a blank stderr at the call site (which then shows up as
-    // "claude exited with 1 — " with no diagnosis).
-    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
-        Ok(Ok(buf)) => buf,
-        Ok(Err(e)) => {
-            log::error!("stderr drain task panicked: {e}");
-            format!("(stderr drain task panicked: {e})")
-        }
-        Err(_) => {
-            log::warn!("assistant_send: stderr drain timed out (inherited pipe held by a background process?) for {session_id}");
-            stderr_task.abort();
-            String::new()
-        }
-    };
+}
 
-    // #242: a `result` frame means the turn succeeded and the reader already
-    // emitted DONE — whether claude then exited cleanly or we killed a pinned
-    // process, there is nothing more to signal.
-    if result_seen.load(std::sync::atomic::Ordering::SeqCst) {
-        return Ok(());
+/// Remap a turn that ended WITHOUT a `result` (EOF) into the right frontend
+/// event: session-lost (resume miss → auto-recover), stop-done (user stopped),
+/// or an actionable error. Mirrors the old post-wait failure branch. `done`
+/// signals `cold_spawn_and_run`'s awaiter; we send `Ok(())` for the recoverable
+/// session-lost/stop cases (the UI already got its event) and `Err` otherwise.
+async fn emit_turn_end_error(
+    app: &AppHandle,
+    window_label: &str,
+    session_id: &str,
+    is_first_turn: bool,
+    status: Option<std::process::ExitStatus>,
+    stderr_buf: &str,
+    done: oneshot::Sender<Result<(), String>>,
+) {
+    // User clicked Stop → emit done (not error) so the UI clears + pops queue.
+    if take_session_stopped(session_id) {
+        let _ = app.emit_to(window_label, DONE_EVENT, serde_json::json!({
+            "session_id": session_id,
+            "exit_code": status.and_then(|s| s.code()).unwrap_or(-1),
+        }));
+        let _ = done.send(Ok(()));
+        return;
     }
-    // No `result` → claude ended without finishing the turn (crash, bad args,
-    // user Stop, or a lost --resume). `status` is always Some on this path: we
-    // only break the wait loop with None after observing result_seen above.
-    let status = match status {
-        Some(s) => s,
-        None => {
-            let _ = app.emit_to(&window_label,ERROR_EVENT, serde_json::json!({
-                "session_id": session_id,
-                "message": "claude was killed before producing a result",
-            }));
-            return Err("claude killed before result".into());
+    // --resume index miss → session-lost so the frontend re-sends as first turn.
+    if !is_first_turn && stderr_buf.contains("No conversation found with session ID:") {
+        log::warn!("warm_pool: --resume {session_id} failed (no conversation) — emitting session-lost");
+        let _ = app.emit_to(window_label, SESSION_LOST_EVENT, serde_json::json!({
+            "session_id": session_id,
+        }));
+        let _ = done.send(Ok(()));
+        return;
+    }
+    let raw = stderr_buf.trim();
+    let msg = if raw.is_empty() {
+        match assistant_auth_probe().await {
+            Ok(s) if !s.cli_present => "Claude Code CLI not found on this machine — install it from claude.com/code (or add an API key in Settings), then try again.".to_string(),
+            Ok(s) if !s.logged_in && !s.api_key_configured => "Claude CLI is installed but not logged in on this machine — open a terminal, run `claude`, and sign in (or add an API key in Settings), then try again.".to_string(),
+            _ => format!(
+                "claude exited with {} (no error output) — run `claude` in a terminal to confirm it works, then retry.",
+                status.and_then(|s| s.code()).map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
+            ),
         }
-    };
-
-    if status.success() {
-        let _ = app.emit_to(&window_label,
-            DONE_EVENT,
-            serde_json::json!({ "session_id": session_id, "exit_code": 0 }),
-        );
-        Ok(())
-    } else if take_session_stopped(&session_id) {
-        // User clicked Stop → assistant_stop killed the child. Emit done
-        // (not error) so the UI clears the streaming flag and pops the
-        // next queued message cleanly.
-        let _ = app.emit_to(&window_label,
-            DONE_EVENT,
-            serde_json::json!({
-                "session_id": session_id,
-                "exit_code": status.code().unwrap_or(-1),
-            }),
-        );
-        Ok(())
+    } else if is_auth_rejection(raw) {
+        auth_rejection_message()
     } else {
-        // Auto-recovery: claude's resume index sometimes loses track of valid
-        // session JSONLs (transient — observed after long-idle tabs / app
-        // rebuilds even when the JSONL is on disk). Emit a session-lost
-        // event so the frontend can null convoCreatedAt + re-send the same
-        // prompt as a fresh first-turn. Only fires on --resume failures
-        // (first-turn failures still go through the normal error path).
-        if !is_first_turn
-            && stderr_buf.contains("No conversation found with session ID:")
-        {
-            log::warn!(
-                "assistant_send: --resume {} failed (no conversation found) — emitting session-lost for frontend auto-recovery",
-                session_id
-            );
-            // #115: emit only the recovery signal. The full prompt is buffered
-            // in the frontend's last-message slot; re-broadcasting it over the
-            // Tauri bus risks leaking via diag listeners and inflates the
-            // event payload for no benefit.
-            let _ = app.emit_to(&window_label,
-                SESSION_LOST_EVENT,
-                serde_json::json!({ "session_id": session_id }),
-            );
-            return Ok(());
-        }
-        // A non-zero exit with EMPTY stderr is almost always a startup failure —
-        // a missing CLI or an unauthenticated session — both of which claude
-        // reports on stdout/JSON, leaving the bare "claude exited with 1 — " with
-        // no diagnosis (the exact dead-end a fresh collaborator hits). Reuse the
-        // auth probe (already distinguishes not-installed vs not-logged-in) to
-        // turn it into something the user can act on.
-        let raw = stderr_buf.trim();
-        let msg = if raw.is_empty() {
-            match assistant_auth_probe().await {
-                Ok(s) if !s.cli_present => "Claude Code CLI not found on this machine — install it from claude.com/code (or add an API key in Settings), then try again.".to_string(),
-                Ok(s) if !s.logged_in && !s.api_key_configured => "Claude CLI is installed but not logged in on this machine — open a terminal, run `claude`, and sign in (or add an API key in Settings), then try again.".to_string(),
-                _ => format!(
-                    "claude exited with {} (no error output) — run `claude` in a terminal to confirm it works, then retry.",
-                    status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
-                ),
-            }
-        } else if is_auth_rejection(raw) {
-            auth_rejection_message()
-        } else {
-            format!(
-                "claude exited with {} — {}",
-                status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
-                raw
-            )
-        };
-        let _ = app.emit_to(&window_label,
-            ERROR_EVENT,
-            serde_json::json!({ "session_id": session_id, "message": msg.clone() }),
-        );
-        Err(msg)
-    }
+        format!(
+            "claude exited with {} — {}",
+            status.and_then(|s| s.code()).map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
+            raw
+        )
+    };
+    let _ = app.emit_to(window_label, ERROR_EVENT, serde_json::json!({
+        "session_id": session_id, "message": msg.clone(),
+    }));
+    let _ = done.send(Err(msg));
 }
 
 /// A rejected credential (401) arrives either as a stdout error-result frame
@@ -1716,7 +1989,11 @@ pub async fn assistant_stop(session_id: String) -> Result<(), String> {
 /// accepted it, or `"no_active_turn"` when the turn already ended (the caller
 /// should fall back to queueing a fresh turn).
 #[tauri::command]
-pub async fn assistant_steer(session_id: String, text: String) -> Result<String, String> {
+pub async fn assistant_steer(
+    session_id: String,
+    text: String,
+    attachments: Option<Vec<AssistantAttachment>>,
+) -> Result<String, String> {
     if !is_valid_session_id(&session_id) {
         return Err(format!(
             "invalid session_id: must be a UUID (got {} chars)",
@@ -1724,9 +2001,12 @@ pub async fn assistant_steer(session_id: String, text: String) -> Result<String,
         ));
     }
     let trimmed = text.trim();
-    if trimmed.is_empty() {
+    let attachments = attachments.unwrap_or_default();
+    // A steer with no text but with images is valid (#49: an image-only steer).
+    if trimmed.is_empty() && attachments.is_empty() {
         return Err("empty steer text".into());
     }
+    validate_attachments(&attachments)?;
     // RR7: cap a renderer-supplied steer message before it enters the unbounded
     // mpsc channel and gets serialized + written to the CLI child's stdin. A
     // multi-megabyte payload would otherwise allocate unbounded heap and force a
@@ -1737,7 +2017,7 @@ pub async fn assistant_steer(session_id: String, text: String) -> Result<String,
     let Some(tx) = get_steer_tx(&session_id) else {
         return Ok("no_active_turn".into());
     };
-    match tx.send(SteerMsg { text: trimmed.to_string(), attachments: Vec::new() }) {
+    match tx.send(SteerMsg { text: trimmed.to_string(), attachments }) {
         Ok(()) => Ok("steered".into()),
         // Receiver dropped between lookup and send → turn just ended.
         Err(_) => Ok("no_active_turn".into()),

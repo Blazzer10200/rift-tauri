@@ -24,6 +24,7 @@ pub mod nothink;
 pub mod oneshot;
 pub mod permission;
 pub mod turn;
+pub mod warm_pool;
 pub mod workspace;
 
 pub use ask_user::AskUserRegistry;

@@ -11,7 +11,7 @@
     FileText, FolderTree, Search, FilePen, FilePlus, Terminal, Globe,
     Wrench, Loader2, CheckCircle2, AlertCircle, ChevronRight, ListChecks,
     Bot, HelpCircle, FlagOff, BookOpen, Sparkles, Slash, Square, SkipForward,
-    Circle,
+    Circle, GitBranch, GitCommitHorizontal, ExternalLink, Bell,
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
@@ -248,7 +248,13 @@
     if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
     if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
     if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand") return "agent";
-    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ExitPlanMode") return "meta";
+    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode") return "meta";
+    // Local git: mutating ops read as consequential (write tint); read-only
+    // status/diff/log stay cheap (read).
+    if (n === "git_commit" || n === "git_push" || n === "git_pull") return "write";
+    if (n === "git_status" || n === "git_diff" || n === "git_log") return "read";
+    // Bridge side-effects — opening the dock / firing a toast.
+    if (n === "open_browser" || n === "notify") return "shell";
     if (n === "DesignSync") {
       const m = typeof tool.input?.method === "string" ? tool.input.method as string : "";
       // Cloud-publishing methods read as consequential (write tint); reads stay cheap.
@@ -306,8 +312,13 @@
     if (sn === "Grep" || sn === "grep") return Search;
     // Web.
     if (sn === "WebFetch" || sn === "WebSearch") return Globe;
+    if (sn === "open_browser") return ExternalLink;
+    if (sn === "notify") return Bell;
+    // Local git (mcp__rift__git_*).
+    if (sn === "git_commit") return GitCommitHorizontal;
+    if (sn.startsWith("git_")) return GitBranch;
     // Agentic / planning / meta.
-    if (sn === "Agent") return Bot;
+    if (sn === "Agent" || sn === "Task") return Bot;
     if (sn === "AskUserQuestion") return HelpCircle;
     if (sn === "ExitPlanMode") return FlagOff;
     if (sn === "SlashCommand") return Slash;

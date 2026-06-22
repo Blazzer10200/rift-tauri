@@ -411,12 +411,21 @@
   function steer() {
     const text = draft.trim();
     if (!text || !streaming) return;
-    setDraft("");
+    // Snapshot attachments before clearing (pass with the steer).
+    const steerAttachments = attachments.map((a) => ({ mime: a.mime, dataBase64: a.dataBase64 }));
     stt.consume();
-    void assistant.steer(text, tabId);
-    steerFlash = true;
-    if (steerFlashTimer) clearTimeout(steerFlashTimer);
-    steerFlashTimer = setTimeout(() => { steerFlash = false; }, 1400);
+    // Clear draft + attachments only after the IPC resolves (defect 2 + 3).
+    void assistant.steer(text, tabId, steerAttachments.length > 0 ? steerAttachments : undefined).then((result) => {
+      if (result === "steered") {
+        setDraft("");
+        setAttachments([]);
+        steerFlash = true;
+        if (steerFlashTimer) clearTimeout(steerFlashTimer);
+        steerFlashTimer = setTimeout(() => { steerFlash = false; }, 1400);
+      }
+      // On "queued"/"no_active_turn" the text/attachments stay so the user
+      // can see what was queued / retry.
+    });
     void tick().then(autosize);
   }
 

@@ -1024,12 +1024,25 @@ class AssistantStore {
     tab.tryBindAskUser();
   }
 
-  /** Look up the bridge request_id for an ask_user tool block in the active
-   *  tab. Returns null until the binding lands (one of two arrival orders).
-   *  Called from ToolChip.svelte via a `$derived` so the chip activates
-   *  the moment its requestId is known. */
+  /** Find the tab whose `askUserBindings` holds this tool_use id. tool_use ids
+   *  are globally unique, so a scan across all tabs is unambiguous. Necessary
+   *  because the binding is stored on the tab that OWNS the CLI session (via
+   *  `tabByCliSession` in onAskUser), which may not be the foreground
+   *  `activeTab` — the user can switch tabs while a turn awaits an answer. */
+  private tabHoldingAskBinding(toolUseId: string): TabState | null {
+    for (const t of this.tabs.values()) {
+      if (t.askUserBindings.has(toolUseId)) return t;
+    }
+    return null;
+  }
+
+  /** Look up the bridge request_id for an ask_user tool block. Returns null
+   *  until the binding lands (one of two arrival orders). Called from
+   *  ToolChip.svelte via a `$derived` so the chip activates the moment its
+   *  requestId is known. Resolves through the OWNING tab, not `activeTab`,
+   *  so the question is interactive even from a background/other-pane tab. */
   askUserRequestIdFor(toolUseId: string): string | null {
-    return this.activeTab?.askUserBindings.get(toolUseId) ?? null;
+    return this.tabHoldingAskBinding(toolUseId)?.askUserBindings.get(toolUseId) ?? null;
   }
 
   /** Submit the user's choice for an `mcp__rift__ask_user` tool call.
@@ -1042,7 +1055,7 @@ class AssistantStore {
    *  `answer` shape: `{ answers: [{question, answer}, ...] }` for normal
    *  submissions, or `{ cancelled: true }` if the user dismissed. */
   async submitAskUserAnswer(toolUseId: string, answer: Record<string, unknown>): Promise<void> {
-    const tab = this.activeTab;
+    const tab = this.tabHoldingAskBinding(toolUseId);
     if (!tab) return;
     const requestId = tab.askUserBindings.get(toolUseId);
     if (!requestId) return;
@@ -1084,11 +1097,23 @@ class AssistantStore {
     tab.permissionPrompts = next;
   }
 
-  /** Look up a pending permission ask for a tool block in the active tab.
-   *  Called from ToolChip.svelte via a `$derived` so the chip's Allow/Deny
-   *  buttons appear the moment the ask lands. */
+  /** Find the tab whose `permissionPrompts` holds this tool_use id (globally
+   *  unique). Same owning-tab-vs-activeTab concern as ask_user — the prompt is
+   *  registered on the tab that owns the CLI session, not necessarily the
+   *  foreground tab. */
+  private tabHoldingPermission(toolUseId: string): TabState | null {
+    for (const t of this.tabs.values()) {
+      if (t.permissionPrompts.has(toolUseId)) return t;
+    }
+    return null;
+  }
+
+  /** Look up a pending permission ask for a tool block. Called from
+   *  ToolChip.svelte via a `$derived` so the chip's Allow/Deny buttons appear
+   *  the moment the ask lands. Resolves through the OWNING tab, not
+   *  `activeTab`, so Allow/Deny work from a background/other-pane tab. */
   permissionPromptFor(toolUseId: string): PermissionPromptInfo | null {
-    return this.activeTab?.permissionPrompts.get(toolUseId) ?? null;
+    return this.tabHoldingPermission(toolUseId)?.permissionPrompts.get(toolUseId) ?? null;
   }
 
   /** Answer a `can_use_tool` ask. `allow` writes `{behavior:"allow"}` (the CLI
@@ -1097,7 +1122,7 @@ class AssistantStore {
    *  CLI's stdin and unblocks tool execution. The chip flips to its normal
    *  running/done state via the existing stream pipeline. */
   async submitPermissionDecision(toolUseId: string, allow: boolean): Promise<void> {
-    const tab = this.activeTab;
+    const tab = this.tabHoldingPermission(toolUseId);
     if (!tab) return;
     const info = tab.permissionPrompts.get(toolUseId);
     if (!info) return;
@@ -1464,8 +1489,8 @@ class AssistantStore {
   }
 
   /** Steer the RUNNING turn via live CLI stdin — see ./assistant/send. */
-  async steer(text: string, tabId?: string | null) {
-    return sendSteer(this, text, tabId);
+  async steer(text: string, tabId?: string | null, attachments?: { mime: string; dataBase64: string }[]) {
+    return sendSteer(this, text, tabId, attachments);
   }
 
   removeQueued(id: string, tabId?: string) {

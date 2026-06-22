@@ -355,9 +355,17 @@ impl UpdateService {
         // `app.exit(0)` below is `std::process::exit` — it skips `Drop`, so
         // `kill_on_drop` never reaps those children. Left alive they block the
         // swap and the update silently no-ops (the "can't update from the app"
-        // bug). Reap them before exiting: tracked claude trees first (so none can
-        // respawn an MCP child in the exit window), then any stray
-        // `rift-tauri.exe` MCP child orphaned from an earlier turn.
+        // bug). Reap them before exiting: warm CLI children first, then tracked
+        // claude trees (so none can respawn an MCP child in the exit window),
+        // then any stray `rift-tauri.exe` MCP child orphaned from an earlier turn.
+        //
+        // #48 warm pool: each warm child is a parked `claude` process owned by a
+        // long-lived reader loop that holds its `tokio::process::Child`. Signal
+        // every loop to start_kill + drop its child so the claude tree (and its
+        // MCP `rift-tauri.exe` grandchild holding `current/`) goes down before
+        // the swap. This is synchronous best-effort; the taskkill sweep below is
+        // the backstop for anything that outlives the drain.
+        crate::assistant::warm_pool::drain_all_for_shutdown();
         crate::assistant::kill_all_session_children();
         #[cfg(windows)]
         {

@@ -77,19 +77,25 @@
   });
 </script>
 
-<span class="acount" class:live={live && !reduced} data-dir={dir}>
-  {#key rollKey}<span class="acount-v">{text}</span>{/key}
-</span>
+<span class="acount" class:live={live && !reduced} data-dir={dir}
+  >{#key rollKey}<span class="acount-v">{text}</span>{/key}</span>
 
 <style>
+  /* The number must sit on the SAME text baseline as the adjacent unit ("2s",
+     "312 tokens"). The glyph wrapper MUST stay `display:inline` — ANY
+     inline-block (even without overflow) aligns ~2.4px off the text baseline,
+     which is what made the digit ride higher than the "s"/"tokens" run
+     (CDP-measured: inline-block → +2.4px, inline → 0.0px). A plain inline
+     element still paints `transform` for the roll, and `clip-path` (which does
+     NOT change box type or baseline) clips the roll overflow — so we keep the
+     animation without `inline-block` or `overflow`. */
   .acount {
-    display: inline-block;
-    overflow: hidden;
-    vertical-align: baseline;
-    line-height: inherit;
     font-variant-numeric: tabular-nums;
   }
-  .acount-v { display: inline-block; }
+  .acount-v {
+    display: inline;
+    clip-path: inset(0 -0.15em);
+  }
   .acount.live .acount-v { animation: acRoll 0.17s cubic-bezier(0.22, 1, 0.36, 1); }
   .acount.live[data-dir="down"] .acount-v { animation: acRollDown 0.17s cubic-bezier(0.22, 1, 0.36, 1); }
   @keyframes acRoll {

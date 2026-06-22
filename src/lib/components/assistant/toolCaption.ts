@@ -67,12 +67,27 @@ export function captionForTool(name: string, input: Input = {}): string {
     const q = s("query");
     return q ? `Searching the web for ${clip(q, 40)}` : "Searching the web";
   }
-  if (n === "Agent") {
+  if (n === "Agent" || n === "Task") {
     const sa = s("subagent_type") ?? "general";
     const d = s("description");
     return d ? `Delegating: ${clip(d, 44)}` : `Delegating to ${sa}`;
   }
-  if (n === "AskUserQuestion") return "Asking you a question";
+  if (n === "AskUserQuestion" || n === "ask_user") return "Asking you a question";
+  if (n === "open_browser") {
+    const u = s("url");
+    return u ? `Opening ${hostOf(u)}` : "Opening the browser";
+  }
+  if (n === "notify") return "Sending a notification";
+  // Local git (mcp__rift__git_*).
+  if (n === "git_status") return "Checking git status";
+  if (n === "git_diff") return "Viewing the git diff";
+  if (n === "git_log") return "Reading the git log";
+  if (n === "git_pull") return "Pulling from the remote";
+  if (n === "git_commit") {
+    const m = s("message");
+    return m ? `Committing: ${clip(m, 40)}` : "Committing changes";
+  }
+  if (n === "git_push") return "Pushing to the remote";
   if (n === "ExitPlanMode") return "Presenting a plan";
   if (n === "SlashCommand") {
     const c = s("command");
