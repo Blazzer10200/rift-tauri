@@ -2,14 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.26.2 — Honest feedback when the API stalls (it's not Rift)
+## v0.26.3 — Warm process stays warm through your think-time (the real "feels slow sometimes" fix)
 
-> A "Rift got slow" report turned out to be a single 138-second Anthropic API stall on one request — not a Rift regression. Proven from the prod log: Rift's own per-turn overhead is ~1s median (and ~5ms on a warm-pool reuse), the model's first token is ~4s median, and exactly one turn out of 38 hit 138s with zero Rift activity during the gap. The plumbing is fast; the API occasionally isn't. This release makes that legible instead of looking like a freeze. `npm run check` 0/0 (4108).
+> The warm CLI process from v0.25.0 makes replies near-instant *within* a session — but it was quietly giving up after 5 minutes of quiet and re-paying the ~1.7s cold start on your next message. Mining the prod log made it obvious: the warm pool is reused in 3–18ms, but ~60% of turns were paying a cold respawn, and every one of them followed an idle-eviction. Your real pause-between-messages runs to ~7.5 minutes at the 90th percentile (median ~90s), so a 5-minute timer was aging the process out right in the middle of normal reading-and-thinking. This raises the idle window so the process survives the way it does in VSCode. `cargo check` 0/0.
 
-- **Live stall watchdog on a turn.** When a turn is running but nothing has come back yet — no tool in flight, no tokens — and it crosses ~20s (then ~60s), the footer stops the whimsical "Unfurling…" shimmer (which implies local progress) and tells you the truth: the model is slow to respond right now, this is the Anthropic API and not Rift, and you can keep waiting or press Stop. Normal turns (first token ~4s) never see it.
-- **The "slow turn start" alert no longer self-silences on a bad one.** A genuinely egregious stall (>30s before any output) now re-surfaces every time it happens and names the API as the cause, instead of being muted after the first mild occurrence in a session.
+- **The warm process now idles for 30 minutes, not 5.** You can read a reply, think, go make coffee, and come back to an instant next reply instead of a one-and-a-half-second cold start. Tuned against real session data — 30 minutes clears the 90th-percentile think-time with room to spare, so an active session effectively never evicts mid-flow.
+- **Memory stays bounded.** If several sessions pile up warm, the oldest idle ones are still reclaimed quickly (each warm process is ~450MB), so the long window never leaks. The common one-or-two-session case keeps the full 30 minutes.
+- **Not new in v0.26.x — it was there since the warm pool shipped.** The display side was checked too and left alone: token streaming is already smooth (paced on the frontend), and the occasional slow *first* token is the model thinking, not Rift.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.26.2** — Honest feedback when the API stalls (it's not Rift): a "Rift got slow" report was a single 138s Anthropic API stall on one request, not a Rift regression (Rift overhead ~1s median, ~5ms warm; one turn of 38 hit 138s with zero Rift activity in the gap). Live stall watchdog (>20s/>60s with no token + no tool → footer says the API is slow, not Rift, wait or Stop) + de-latched egregious-stall alert so it re-fires.
 
 - **v0.26.1** — `ask_user` questions render as a real interactive card in stream mode (options/multi-select/freeform/Submit — the chip used to appear and park forever with no buttons; the v0.24 stream mode never had an `ask_user` case) + no more "Empty pane" homepage flash on launch (single-pane null-tab goes straight to the home hero). Both CDP-verified end-to-end.
 

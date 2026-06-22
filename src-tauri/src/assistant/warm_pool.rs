@@ -159,9 +159,29 @@ pub(super) fn remove_if(session_id: &str, this: &Arc<Mutex<WarmChild>>) -> bool 
 }
 
 /// Idle eviction window. A warm child unused for this long is killed +
-/// deregistered by the background sweeper — frees the Velopack `current/` lock
-/// (the MCP child it parents holds it) and reclaims memory.
-const IDLE_EVICT: Duration = Duration::from_secs(300);
+/// deregistered by the background sweeper, reclaiming its ~450MB resident set.
+///
+/// **Tuned against real prod data (2026-06-22, 49 inter-turn gaps over the
+/// day's sessions):** p50 gap 90s, p75 256s, **p90 445s**. The old 300s window
+/// sat in the fat part of that distribution → ~24% of turns exceeded it and
+/// re-paid a full cold respawn (~1750ms) on the user's next message — the
+/// "feels slow sometimes" report. 30 min clears the p90 with margin, so an
+/// interactive user (read response → think → reply) effectively never gets
+/// evicted mid-session; only a genuinely-abandoned session ages out.
+/// The Velopack `current/` lock concern that originally motivated eviction is
+/// already covered by `drain_all_for_shutdown` on the update-apply path, so
+/// this timer is now purely a memory backstop — hence the generous window plus
+/// the `MAX_WARM` pressure valve below.
+const IDLE_EVICT: Duration = Duration::from_secs(1800);
+/// Memory pressure valve. While at most this many warm children are registered,
+/// the generous `IDLE_EVICT` window applies. Above it, the OLDEST idle children
+/// are evicted on a much shorter `IDLE_EVICT_PRESSURE` window until the count is
+/// back at the cap — bounds the worst case (many abandoned sessions × ~450MB)
+/// without taxing the common 1–2 active-session case.
+const MAX_WARM: usize = 3;
+/// Shortened idle window applied to surplus children once `MAX_WARM` is
+/// exceeded (oldest-first).
+const IDLE_EVICT_PRESSURE: Duration = Duration::from_secs(120);
 /// How often the background sweeper checks for idle children.
 const EVICT_TICK: Duration = Duration::from_secs(60);
 
@@ -174,24 +194,51 @@ fn evict_idle_once() -> usize {
     // Collect (session_id, Arc) snapshot under the registry lock, release it.
     let candidates: Vec<(String, Arc<Mutex<WarmChild>>)> =
         with_warm(|m| m.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
-    let mut evicted = 0;
-    for (sid, arc) in candidates {
-        // Lock the child (registry NOT held here) to read its state.
-        let (idle, in_progress) = {
-            let g = match arc.lock() {
-                Ok(g) => g,
-                Err(p) => p.into_inner(),
+    let total = candidates.len();
+    // Under MAX_WARM, every child gets the full IDLE_EVICT window. Above it, the
+    // surplus oldest-idle children get the shortened IDLE_EVICT_PRESSURE window
+    // (memory valve). Compute each child's idle age once (locking the child, not
+    // the registry — M5/M7), then rank by age so "oldest" is well-defined.
+    struct Cand {
+        sid: String,
+        arc: Arc<Mutex<WarmChild>>,
+        idle_for: Duration,
+        in_progress: bool,
+    }
+    let mut ranked: Vec<Cand> = candidates
+        .into_iter()
+        .map(|(sid, arc)| {
+            let (idle_for, in_progress) = {
+                let g = match arc.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
+                (now.duration_since(g.last_used), g.turn_in_progress.load(Ordering::Acquire))
             };
-            (
-                now.duration_since(g.last_used) >= IDLE_EVICT,
-                g.turn_in_progress.load(Ordering::Acquire),
-            )
-        };
+            Cand { sid, arc, idle_for, in_progress }
+        })
+        .collect();
+    // Oldest (most idle) first — the surplus we trim under pressure.
+    ranked.sort_by(|a, b| b.idle_for.cmp(&a.idle_for));
+    let over_cap = total.saturating_sub(MAX_WARM);
+
+    let mut evicted = 0;
+    for (rank, c) in ranked.into_iter().enumerate() {
+        // The first `over_cap` (oldest) children are surplus → shorter window.
+        let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
+        let idle = c.idle_for >= window;
+        let in_progress = c.in_progress;
+        let sid = c.sid;
+        let arc = c.arc;
         if idle && !in_progress {
             // remove_if takes the registry lock alone (child lock released).
             if remove_if(&sid, &arc) {
                 evicted += 1;
-                log::info!("warm_pool: idle-evicted session {sid} (>{}s)", IDLE_EVICT.as_secs());
+                let reason = if rank < over_cap { "pressure" } else { "idle" };
+                log::info!(
+                    "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm)",
+                    window.as_secs()
+                );
                 // Dropping the registry's Arc + the caller's local `arc` is what
                 // eventually frees the last turn_tx clone. The reader loop holds
                 // a clone too via the WarmChild it owns? No — the loop owns the
