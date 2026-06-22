@@ -736,6 +736,10 @@ pub async fn assistant_send(
         .arg("--verbose")
         .arg("--model").arg(&model)
         .arg("--permission-mode").arg(&permission_mode);
+    // Latency: drop the `user` setting source so the dev's personal ~/.claude
+    // SessionStart hooks/auto-memory don't re-run on every fresh per-turn spawn.
+    // Keeps OAuth auth (separate source) + project/local settings.
+    cmd.arg("--setting-sources").arg("project,local");
     // Moves the CLI's own per-machine sections (cwd, env info, memory paths,
     // git status) out of the system prompt and into the first user message.
     // Keeps the cached system-prompt prefix stable across users and across our
