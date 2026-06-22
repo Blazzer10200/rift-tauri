@@ -14,7 +14,7 @@ import { diffArrays } from "diff";
 
 export type TKind =
   | "read" | "grep" | "edit" | "create" | "shell"
-  | "agent" | "web" | "fetch" | "test" | "lint" | "mcp" | "plan";
+  | "agent" | "web" | "fetch" | "test" | "lint" | "mcp" | "plan" | "ask";
 
 export type PlanItem = { text: string; status: "done" | "active" | "todo" };
 
@@ -91,6 +91,7 @@ function nameToKind(name: string): TKind {
   if (n === "WebSearch") return "web";
   if (n === "WebFetch") return "fetch";
   if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate") return "plan";
+  if (n === "ask_user") return "ask";
   return "mcp";
 }
 
@@ -223,6 +224,12 @@ function adaptTool(tb: ToolBlock): StreamTool {
     t.task = t.cap; t.steps = [];
     t.result = tb.result && !tb.isError ? trim(tb.result.trim().split("\n")[0] ?? "", 90) : null;
   }
+  if (kind === "ask") {
+    // Carry the raw questions input + full tool_result through so the
+    // interactive ask card can render options + the answered transcript.
+    t.input = inp;
+    t.result = tb.result ?? null;
+  }
   return t;
 }
 
@@ -291,7 +298,7 @@ export function groupBlocks(blocks: StreamBlock[]): Group[] {
   return out;
 }
 
-const isRich = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent";
+const isRich = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask";
 
 // Split a work run: rich tools each get their own block; edits batch; the rest
 // collapse to one quiet WorkLine. Order preserved.
@@ -323,10 +330,10 @@ export function groupSummary(tools: StreamTool[]): string {
 export const VERB_PAST: Record<TKind, string> = {
   read: "Read", grep: "Searched", edit: "Edited", create: "Created", shell: "Ran",
   agent: "Delegated", web: "Searched the web", fetch: "Fetched", test: "Tested",
-  lint: "Checked", mcp: "Called", plan: "Planned",
+  lint: "Checked", mcp: "Called", plan: "Planned", ask: "Asked",
 };
 export const VERB_ING: Record<TKind, string> = {
   read: "Reading", grep: "Searching", edit: "Editing", create: "Creating", shell: "Running",
   agent: "Delegating", web: "Searching the web", fetch: "Fetching", test: "Running tests",
-  lint: "Type-checking", mcp: "Calling", plan: "Planning",
+  lint: "Type-checking", mcp: "Calling", plan: "Planning", ask: "Waiting for your answer",
 };

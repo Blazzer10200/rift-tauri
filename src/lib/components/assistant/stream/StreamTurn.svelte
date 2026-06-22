@@ -9,6 +9,7 @@
   import StreamWeb from "./StreamWeb.svelte";
   import StreamResult from "./StreamResult.svelte";
   import StreamAgent from "./StreamAgent.svelte";
+  import StreamAskUser from "./StreamAskUser.svelte";
   import { messageToTurn, groupBlocks, fmtDur, VERB_ING, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
@@ -124,6 +125,8 @@
             <StreamResult tool={seg.tool} />
           {:else if seg.tool.kind === "agent"}
             <StreamAgent tool={seg.tool} />
+          {:else if seg.tool.kind === "ask"}
+            <StreamAskUser tool={seg.tool} />
           {/if}
         {:else if seg.seg === "edit"}
           <WriteBatch tools={seg.tools} />

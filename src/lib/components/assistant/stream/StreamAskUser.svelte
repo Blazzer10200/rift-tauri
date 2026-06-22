@@ -1,0 +1,332 @@
+<script lang="ts">
+  // Interactive ask_user card for STREAM mode. The legacy ToolChip path had this
+  // card; StreamTurn never did, so mcp__rift__ask_user silently fell through to a
+  // dead WorkLine in stream mode — the question never rendered. This restores the
+  // full interactive surface, reusing the same store binding/submit API.
+  import { CheckCircle2, Circle, Square, Loader2 } from "lucide-svelte";
+  import { assistant } from "$lib/state/assistant.svelte";
+  import type { StreamTool } from "./streamModel";
+
+  let { tool }: { tool: StreamTool } = $props();
+
+  type AskQuestion = {
+    question: string;
+    header: string;
+    multiSelect?: boolean;
+    options: Array<{ label: string; description?: string }>;
+  };
+  const askQuestions = $derived.by<AskQuestion[]>(() => {
+    const raw = tool.input?.questions;
+    if (!Array.isArray(raw)) return [];
+    return (raw as Array<Record<string, unknown>>).map((q) => ({
+      question: typeof q.question === "string" ? q.question : "",
+      header: typeof q.header === "string" ? q.header : "",
+      multiSelect: q.multiSelect === true,
+      options: Array.isArray(q.options)
+        ? (q.options as Array<Record<string, unknown>>).map((o) => ({
+            label: typeof o.label === "string" ? o.label : "",
+            description: typeof o.description === "string" ? o.description : undefined,
+          })).filter((o) => o.label.length > 0)
+        : [],
+    }));
+  });
+
+  const OTHER_IDX = -1;
+  let askSingleIdx = $state<number[]>([]);
+  let askMultiSet = $state<Set<number>[]>([]);
+  let askOtherText = $state<string[]>([]);
+  $effect(() => {
+    if (askQuestions.length === askSingleIdx.length) return;
+    askSingleIdx = askQuestions.map(() => -2);
+    askMultiSet = askQuestions.map(() => new Set());
+    askOtherText = askQuestions.map(() => "");
+  });
+
+  let askSubmitting = $state(false);
+  let askError = $state<string | null>(null);
+  const askRequestId = $derived(assistant.askUserRequestIdFor(tool.id));
+  const askAnswered = $derived(tool.status === "done");
+
+  function toggleAskMulti(qi: number, oi: number) {
+    const cur = askMultiSet[qi] ?? new Set<number>();
+    const next = new Set(cur);
+    if (next.has(oi)) next.delete(oi); else next.add(oi);
+    askMultiSet = askMultiSet.map((s, i) => (i === qi ? next : s));
+  }
+
+  async function submitAskUser() {
+    if (askSubmitting || !askRequestId) return;
+    const answers = askQuestions.map((q, qi) => {
+      if (q.multiSelect) {
+        const set = askMultiSet[qi] ?? new Set<number>();
+        const otherText = askOtherText[qi]?.trim();
+        const labels: string[] = [];
+        for (const oi of set) {
+          if (oi === OTHER_IDX) {
+            if (otherText) labels.push(otherText);
+          } else {
+            const label = q.options[oi]?.label;
+            if (label) labels.push(label);
+          }
+        }
+        return { question: q.question, answer: labels };
+      }
+      const idx = askSingleIdx[qi];
+      if (idx === OTHER_IDX) {
+        return { question: q.question, answer: askOtherText[qi]?.trim() || "(no answer)" };
+      }
+      const label = q.options[idx]?.label ?? "(no answer)";
+      return { question: q.question, answer: label };
+    });
+    askSubmitting = true;
+    askError = null;
+    try {
+      await assistant.submitAskUserAnswer(tool.id, { answers });
+      askSubmitting = false;
+    } catch (e) {
+      console.warn("submitAskUserAnswer failed", e);
+      askError = e instanceof Error ? e.message : "Submit failed — please retry.";
+      askSubmitting = false;
+    }
+  }
+
+  async function cancelAskUser() {
+    if (askSubmitting || !askRequestId) return;
+    askSubmitting = true;
+    askError = null;
+    try {
+      await assistant.submitAskUserAnswer(tool.id, { cancelled: true });
+      askSubmitting = false;
+    } catch (e) {
+      console.warn("cancelAskUser failed", e);
+      askError = e instanceof Error ? e.message : "Dismiss failed — please retry.";
+      askSubmitting = false;
+    }
+  }
+
+  const askCanSubmit = $derived.by<boolean>(() => {
+    if (askQuestions.length === 0) return false;
+    for (let qi = 0; qi < askQuestions.length; qi++) {
+      const q = askQuestions[qi];
+      if (q.multiSelect) {
+        const set = askMultiSet[qi] ?? new Set<number>();
+        if (set.size === 0) return false;
+        if (set.has(OTHER_IDX) && !askOtherText[qi]?.trim()) return false;
+      } else {
+        const idx = askSingleIdx[qi];
+        if (idx === undefined || idx === -2) return false;
+        if (idx === OTHER_IDX && !askOtherText[qi]?.trim()) return false;
+      }
+    }
+    return true;
+  });
+</script>
+
+<div class="sask">
+  {#if askAnswered}
+    {#if tool.result}
+      <pre class="sask-result">{tool.result}</pre>
+    {:else}
+      <div class="sask-empty">(no answer recorded)</div>
+    {/if}
+  {:else}
+    {#each askQuestions as q, qi (qi)}
+      <div class="sask-question">
+        {#if q.header}<span class="sask-q-header">{q.header}</span>{/if}
+        <div class="sask-q-text">{q.question}</div>
+        <div class="sask-options" role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question}>
+          {#each q.options as opt, oi (oi)}
+            {@const selected =
+              q.multiSelect
+                ? (askMultiSet[qi] ?? new Set()).has(oi)
+                : askSingleIdx[qi] === oi}
+            <button
+              type="button"
+              class="sask-option"
+              class:selected
+              disabled={askSubmitting || askAnswered}
+              role={q.multiSelect ? "checkbox" : "radio"}
+              aria-checked={selected}
+              onclick={() => {
+                if (q.multiSelect) {
+                  toggleAskMulti(qi, oi);
+                } else {
+                  askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? oi : v));
+                }
+              }}
+            >
+              <span class="sask-marker" aria-hidden="true">
+                {#if q.multiSelect}
+                  {#if selected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+                {:else}
+                  {#if selected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+                {/if}
+              </span>
+              <span class="sask-opt-text">
+                <span class="sask-opt-label">{opt.label}</span>
+                {#if opt.description}
+                  <span class="sask-opt-desc">{opt.description}</span>
+                {/if}
+              </span>
+            </button>
+          {/each}
+          {#if true}
+          {@const otherSelected =
+            q.multiSelect
+              ? (askMultiSet[qi] ?? new Set()).has(OTHER_IDX)
+              : askSingleIdx[qi] === OTHER_IDX}
+          <button
+            type="button"
+            class="sask-option sask-option-other"
+            class:selected={otherSelected}
+            disabled={askSubmitting || askAnswered}
+            role={q.multiSelect ? "checkbox" : "radio"}
+            aria-checked={otherSelected}
+            onclick={() => {
+              if (q.multiSelect) {
+                toggleAskMulti(qi, OTHER_IDX);
+              } else {
+                askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? OTHER_IDX : v));
+              }
+            }}
+          >
+            <span class="sask-marker" aria-hidden="true">
+              {#if q.multiSelect}
+                {#if otherSelected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+              {:else}
+                {#if otherSelected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+              {/if}
+            </span>
+            <span class="sask-opt-text">
+              <span class="sask-opt-label">Other (custom)</span>
+            </span>
+          </button>
+          {#if otherSelected}
+            <input
+              type="text"
+              class="sask-other-input"
+              placeholder="Type your answer…"
+              disabled={askSubmitting || askAnswered}
+              bind:value={askOtherText[qi]}
+            />
+          {/if}
+          {/if}
+        </div>
+      </div>
+    {/each}
+    <div class="sask-actions">
+      <button
+        type="button"
+        class="sask-btn cancel"
+        disabled={askSubmitting || !askRequestId}
+        onclick={cancelAskUser}
+      >Dismiss</button>
+      <button
+        type="button"
+        class="sask-btn submit"
+        disabled={!askCanSubmit || askSubmitting || !askRequestId}
+        onclick={submitAskUser}
+      >
+        {#if askSubmitting}<Loader2 size={11} class="chip-spin" /> Sending…
+        {:else}Submit{/if}
+      </button>
+    </div>
+    {#if askError}
+      <div class="sask-hint" style="color:var(--danger)">{askError}</div>
+    {:else if !askRequestId}
+      <div class="sask-hint">Connecting to the chat session…</div>
+    {/if}
+  {/if}
+</div>
+
+<style>
+  .sask {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin: 6px 0;
+    padding: 12px 14px;
+    border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--accent) 6%, var(--bg-1, transparent));
+  }
+  .sask-question { display: flex; flex-direction: column; gap: 6px; }
+  .sask-q-header {
+    align-self: flex-start;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 2px 7px;
+    border-radius: 5px;
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+  }
+  .sask-q-text { font-size: 13px; font-weight: 500; color: var(--fg, inherit); }
+  .sask-options { display: flex; flex-direction: column; gap: 5px; }
+  .sask-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    width: 100%;
+    text-align: left;
+    padding: 8px 10px;
+    border: 1px solid var(--border, color-mix(in oklab, var(--fg) 12%, transparent));
+    border-radius: 8px;
+    background: transparent;
+    cursor: pointer;
+    transition: border-color 120ms, background 120ms;
+  }
+  .sask-option:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    background: color-mix(in oklab, var(--accent) 5%, transparent);
+  }
+  .sask-option.selected {
+    border-color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+  }
+  .sask-option:disabled { opacity: 0.55; cursor: default; }
+  .sask-marker { display: inline-flex; margin-top: 1px; color: var(--accent); }
+  .sask-opt-text { display: flex; flex-direction: column; gap: 2px; }
+  .sask-opt-label { font-size: 12.5px; color: var(--fg, inherit); }
+  .sask-opt-desc { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 60%, transparent)); }
+  .sask-other-input {
+    width: 100%;
+    padding: 7px 10px;
+    font-size: 12.5px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--bg-0, transparent);
+    color: var(--fg, inherit);
+  }
+  .sask-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .sask-btn {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .sask-btn.cancel {
+    border-color: var(--border, color-mix(in oklab, var(--fg) 14%, transparent));
+    background: transparent;
+    color: var(--fg-2, inherit);
+  }
+  .sask-btn.submit { background: var(--accent); color: var(--accent-fg, #fff); }
+  .sask-btn:disabled { opacity: 0.5; cursor: default; }
+  .sask-hint { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 55%, transparent)); }
+  .sask-result {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--fg) 5%, transparent);
+    color: var(--fg-2, inherit);
+  }
+  .sask-empty { font-size: 12px; color: var(--fg-2, inherit); font-style: italic; }
+</style>

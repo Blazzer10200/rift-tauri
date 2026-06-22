@@ -373,7 +373,7 @@
     </div>
   {/if}
 
-  {#if !tabId}
+  {#if !tabId && assistant.splitActive}
     <div class="scroll">
       <div class="pane-empty">
         <div class="pane-empty-card">
