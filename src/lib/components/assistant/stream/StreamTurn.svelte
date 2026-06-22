@@ -74,6 +74,23 @@
     void now;
     return streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null;
   });
+
+  // Live footer verb: a pending tool drives the real action word ("Reading X");
+  // with no tool in flight (e.g. the model is thinking before any tool call) we
+  // cycle a whimsical present-participle every ~2.4s so the turn reads as alive
+  // instead of frozen. Mirrors app/stream.jsx StreamFooter (the DS reference).
+  const WHIM_WORDS = [
+    "Thinking", "Sussing", "Spelunking", "Pondering", "Brewing",
+    "Reckoning", "Mulling", "Cogitating", "Hatching", "Conjuring",
+    "Noodling", "Untangling",
+  ];
+  let whimTick = $state(0);
+  $effect(() => {
+    if (!streaming || liveTool) return;
+    const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
+    return () => clearInterval(id);
+  });
+  const footerVerb = $derived(liveTool ? VERB_ING[liveTool.kind] : `${WHIM_WORDS[whimTick]}…`);
 </script>
 
 <div class="sturn">
@@ -115,10 +132,10 @@
     {/if}
   {/each}
 
-  {#if streaming && liveTool}
+  {#if streaming}
     <div class="sfooter">
-      <span class="sf-verb">{VERB_ING[liveTool.kind]}</span>
-      {#if liveTool.cap}
+      {#key footerVerb}<span class="sf-verb">{footerVerb}</span>{/key}
+      {#if liveTool?.cap}
         <span class="sf-meta">{liveTool.cap}</span>
       {/if}
       {#if liveSecs != null}

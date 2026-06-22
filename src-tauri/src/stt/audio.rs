@@ -122,8 +122,12 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
                 .build_input_stream(
                     &config,
                     move |data: &[i16], _| {
+                        // /32768 (not i16::MAX=32767): the i16 range is asymmetric
+                        // (-32768..=32767), so dividing by 32767 pushes the minimum
+                        // sample to -1.00003 — past the ±1.0 rail. 32768 keeps every
+                        // sample in range (max maps to +0.99997, which is correct).
                         let f: Vec<f32> =
-                            data.iter().map(|s| *s as f32 / i16::MAX as f32).collect();
+                            data.iter().map(|s| *s as f32 / 32768.0).collect();
                         push_samples(&ring_cb, &f, source_channels, rs.as_ref(), lo.as_ref());
                     },
                     err_cb,
@@ -139,9 +143,12 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
                 .build_input_stream(
                     &config,
                     move |data: &[u16], _| {
+                        // u16 (0..=65535) centers at 32768; subtract it to center,
+                        // divide by 32768 so the rails land in ±1.0. The old divisor
+                        // i16::MAX (32767) pushed s=0 to -1.00003 — past the rail.
                         let f: Vec<f32> = data
                             .iter()
-                            .map(|s| (*s as f32 - i16::MAX as f32 - 1.0) / i16::MAX as f32)
+                            .map(|s| (*s as f32 - 32768.0) / 32768.0)
                             .collect();
                         push_samples(&ring_cb, &f, source_channels, rs.as_ref(), lo.as_ref());
                     },

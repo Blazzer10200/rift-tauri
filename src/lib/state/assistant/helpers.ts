@@ -306,6 +306,41 @@ export function clampEffort(effort: ThinkingEffort, model: ModelSel): ThinkingEf
   return EFFORT_ORDER.indexOf(effort) > EFFORT_ORDER.indexOf(cap) ? cap : effort;
 }
 
+/** Per-turn effort auto-scale (#244). The default tier "smart" maps to
+ *  `--effort high`, which makes the model do heavy hidden reasoning BEFORE any
+ *  visible text — ~10s to first token on Sonnet for "Hello", ~130s on Opus (whose
+ *  thinking streams invisibly). A bare greeting shouldn't pay that. This trims the
+ *  effort for *clearly trivial* turns only, returning the per-send tier (the
+ *  user's stored choice is never mutated — picker + persistence are untouched).
+ *
+ *  Rules (deliberately conservative — bias to NOT downshifting):
+ *   - Only ever DOWNSHIFTS, never raises. A pinned low/quick stays as-is.
+ *   - Only fires on `smart` (the default). `deep`/`ultra` are explicit user
+ *     intent to think hard — respected verbatim, even on "hi".
+ *   - Only for short, attachment-free prompts that match a triviality shape
+ *     (greeting / ack / one-liner with no question, code, or imperative verb).
+ *   - smart → quick (medium), not all the way to none, so a misjudged "trivial"
+ *     prompt still gets light reasoning rather than zero. */
+export function autoScaleEffort(
+  effort: ThinkingEffort,
+  prompt: string,
+  hasAttachments: boolean,
+): ThinkingEffort {
+  if (effort !== "smart") return effort; // only relax the default; honor explicit tiers
+  if (hasAttachments) return effort;      // an image is real work — never trivial
+  const p = prompt.trim();
+  if (p.length === 0 || p.length > 40) return effort; // long enough to be real
+  const lower = p.toLowerCase();
+  // Signals that the turn is NOT trivial despite being short.
+  if (/[?]/.test(p)) return effort;                       // a question
+  if (/[`/<>{}=]|\b(fix|add|run|build|write|make|change|edit|create|debug|explain|why|how|what|show|list|check|test|refactor|implement|update|remove|delete)\b/i.test(lower))
+    return effort;                                        // imperative / code-ish
+  // Triviality shapes: greetings, acks, thanks, short filler.
+  const TRIVIAL = /^(hi|hey|hello|yo|sup|hiya|howdy|greetings|gm|good (morning|evening|afternoon)|thanks|thank you|ty|thx|ok|okay|k|cool|nice|great|got it|sounds good|yes|no|yep|nope|sure|lol|haha)[\s!.,…]*$/i;
+  if (TRIVIAL.test(lower)) return "quick";
+  return effort; // short but unrecognized → leave at the user's tier
+}
+
 /** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/turn.rs.
  *  Ladder: none→low · quick→medium · smart→high (API default) · deep→xhigh
  *  (Claude Code's own agentic default) · ultra→xhigh; ultra's autonomous-workflow

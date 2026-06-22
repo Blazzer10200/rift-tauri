@@ -521,6 +521,7 @@ export async function closeOtherTabs(host: TabsHost, keepId: string) {
     if (t?.streaming) await host.stop(id);
     host.dropTab(id);
     host.pruneTabUi(id);
+    scrubTabFromPanes(host, id);
   }
   host.openTabs = [keepId];
   if (host.currentConvoId !== keepId) {
@@ -576,6 +577,7 @@ export async function closeTabsToRight(host: TabsHost, anchorId: string) {
     if (t?.streaming) await host.stop(id);
     host.dropTab(id);
     host.pruneTabUi(id);
+    scrubTabFromPanes(host, id);
   }
   host.openTabs = kept;
   if (removedActive) {

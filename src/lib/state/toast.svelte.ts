@@ -102,6 +102,7 @@ class ToastStore {
 
   clear(): void {
     for (const id of [...this.timers.keys()]) this.clearTimer(id);
+    this.remaining.clear();
     this.items = [];
   }
 

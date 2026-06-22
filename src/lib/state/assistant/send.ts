@@ -18,7 +18,7 @@ import { accessibility } from "../accessibility.svelte";
 import { toast, notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, TurnRecord } from "./types";
-import { effortToFlag, FABLE_SUNSET_MS } from "./helpers";
+import { effortToFlag, autoScaleEffort, FABLE_SUNSET_MS } from "./helpers";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
@@ -97,14 +97,23 @@ export async function send(store: AssistantStore, prompt: string) {
   // Telemetry: build the turn record + attach to tab. TabState fills it as
   // envelopes arrive; finalized in onDone/onError.
   const attachBytes = store.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
+  // #244: per-turn effort auto-scale. A trivial greeting on the default "smart"
+  // tier downshifts to "quick" so it doesn't burn ~10s (Sonnet) / ~130s (Opus)
+  // of hidden pre-text reasoning. The store's persisted tier is untouched — this
+  // is the effective per-send value only.
+  const sendEffort = autoScaleEffort(
+    store.thinkingEffort,
+    trimmed,
+    store.composerAttachments.length > 0,
+  );
   const turnRecord: TurnRecord = {
     ts: Date.now(),
     convoId: store.currentConvoId,
     cliSessionId: tab.cliSessionId,
     isFirstTurn,
     model: store.effectiveModel,
-    effort: store.thinkingEffort,
-    effortFlag: effortToFlag(store.thinkingEffort, store.effectiveModel),
+    effort: sendEffort,
+    effortFlag: effortToFlag(sendEffort, store.effectiveModel),
     promptLen: trimmed.length,
     promptPreview: trimmed.length > 120 ? trimmed.slice(0, 120) + "…" : trimmed,
     attachmentsCount: store.composerAttachments.length,
@@ -180,7 +189,7 @@ export async function send(store: AssistantStore, prompt: string) {
       model: store.effectiveModel,
       attachments: turnAttachments.length > 0 ? turnAttachments : null,
       dyslexiaMode: accessibility.dyslexiaMode,
-      thinkingEffort: store.thinkingEffort,
+      thinkingEffort: sendEffort,
       thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
       priorContextSummary: null,

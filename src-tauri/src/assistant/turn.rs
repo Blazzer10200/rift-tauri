@@ -976,6 +976,7 @@ pub async fn assistant_send(
         "deep" | "ultra" => "xhigh",
         _ /* "smart" or unknown */ => "high",
     };
+    log::info!("assistant_send: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
     // Thinking-off also skips it: the shim disables thinking entirely, so an
@@ -1190,6 +1191,13 @@ pub async fn assistant_send(
 
         let mut user_sent = false;
         let mut first_line_logged = false;
+        // #244 phase probe: prove where a slow turn's wall-clock goes. We already
+        // log TTFT (spawn→first-line). These add the two boundaries that separate
+        // "thinking-bound" from "generation-bound": first thinking delta and first
+        // visible text delta. Large (first-text − first-thinking) = invisible Opus
+        // reasoning burn; small = the model answered fast and the cost is elsewhere.
+        let mut first_think_logged = false;
+        let mut first_text_logged = false;
         // Steers that arrive before the init handshake completes are buffered,
         // then flushed the instant the user turn is sent (see user_sent branch).
         let mut steer_pending: Vec<SteerMsg> = Vec::new();
@@ -1289,6 +1297,36 @@ pub async fn assistant_send(
                                 "session_id": done_sid, "exit_code": 0,
                             }));
                             break;
+                        }
+                        // #244 phase probe: classify the first thinking vs text
+                        // delta on the partial-message stream. Shapes (Anthropic
+                        // SSE wrapped by the CLI as `stream_event`):
+                        //   content_block_start { content_block.type: "thinking" }
+                        //   content_block_delta { delta.type: "thinking_delta" | "signature_delta" }
+                        //   content_block_delta { delta.type: "text_delta" }
+                        if ty == Some("stream_event") {
+                            if let Some(ev) = v.get("event") {
+                                let ev_ty = ev.get("type").and_then(|x| x.as_str());
+                                let blk_ty = ev.get("content_block").and_then(|b| b.get("type")).and_then(|x| x.as_str());
+                                let delta_ty = ev.get("delta").and_then(|d| d.get("type")).and_then(|x| x.as_str());
+                                let is_think = blk_ty == Some("thinking")
+                                    || matches!(delta_ty, Some("thinking_delta") | Some("signature_delta"));
+                                let is_text = blk_ty == Some("text") || delta_ty == Some("text_delta");
+                                if is_think && !first_think_logged {
+                                    first_think_logged = true;
+                                    log::info!(
+                                        "assistant_send: first-thinking {} ms (spawn→first-thinking-delta) session={}",
+                                        turn_start.elapsed().as_millis(), stream_sid
+                                    );
+                                }
+                                if is_text && !first_text_logged {
+                                    first_text_logged = true;
+                                    log::info!(
+                                        "assistant_send: first-text {} ms (spawn→first-visible-text), ev={:?} session={}",
+                                        turn_start.elapsed().as_millis(), ev_ty, stream_sid
+                                    );
+                                }
+                            }
                         }
                     }
                     // #241: first forwarded content line ≈ TTFT. Everything

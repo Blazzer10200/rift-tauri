@@ -301,17 +301,19 @@ pub async fn download(
         }
     }
 
-    std::fs::rename(&partial_path, &final_path)
-        .map_err(|e| format!("promote partial → final: {e}"))?;
-
-    // Post-rename full-file verify for resumed downloads (hasher was None).
+    // Verify resumed downloads (hasher was None — we didn't stream-hash the
+    // pre-existing bytes) on the .partial BEFORE the rename. Verifying after the
+    // rename leaves a corrupt file sitting at final_path as a valid completion
+    // marker — known_models() trusts presence+size with no hash check, so a
+    // crash/concurrent call in that window would serve a bad GGML. Mirror the
+    // fresh-download path: verify, then promote.
     if !was_hashed {
         if let Some(expected) = entry.sha256 {
-            let got = file_sha256(&final_path)
-                .map_err(|e| format!("post-rename verify: {e}"))?;
+            let got = file_sha256(&partial_path)
+                .map_err(|e| format!("pre-rename verify: {e}"))?;
             if got != expected {
                 let _ = std::fs::rename(
-                    &final_path,
+                    &partial_path,
                     dir.join(format!("{}.badhash", entry.filename)),
                 );
                 return Err(format!(
@@ -321,6 +323,9 @@ pub async fn download(
             }
         }
     }
+
+    std::fs::rename(&partial_path, &final_path)
+        .map_err(|e| format!("promote partial → final: {e}"))?;
 
     emit_progress(&app, entry.id, on_disk, on_disk, "done", None);
     Ok(())

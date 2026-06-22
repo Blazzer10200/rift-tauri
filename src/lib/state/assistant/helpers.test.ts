@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
-  FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable, firstLine,
-  flattenToolResult, shellLabel, liveActivity, messagesHaveContextSignals, modelFamily,
+  FABLE_DISABLED, FABLE_SUNSET_MS, autoScaleEffort, clampEffort, effortToFlag, fableAvailable,
+  firstLine, flattenToolResult, shellLabel, liveActivity, messagesHaveContextSignals, modelFamily,
   previewToolInput,
 } from "./helpers";
 
@@ -71,6 +71,29 @@ describe("clampEffort (model effort ceiling)", () => {
   });
   it("floors Haiku to none (rejects effort wholesale)", () => {
     expect(clampEffort("ultra", "haiku")).toBe("none");
+  });
+});
+
+describe("autoScaleEffort (#244 — only relaxes the default tier on trivial turns)", () => {
+  it("downshifts smart→quick for bare greetings / acks", () => {
+    for (const g of ["hi", "Hello", "hey", "thanks", "ok", "yep", "good morning", "lol"])
+      expect(autoScaleEffort("smart", g, false)).toBe("quick");
+  });
+  it("leaves smart untouched on questions, imperatives, or code-ish prompts", () => {
+    expect(autoScaleEffort("smart", "hi?", false)).toBe("smart");          // a question
+    expect(autoScaleEffort("smart", "fix the bug", false)).toBe("smart");  // imperative verb
+    expect(autoScaleEffort("smart", "run `ls`", false)).toBe("smart");     // code-ish
+    expect(autoScaleEffort("smart", "what time is it", false)).toBe("smart"); // 'what'
+  });
+  it("leaves smart untouched when the prompt is long or has attachments", () => {
+    expect(autoScaleEffort("smart", "x".repeat(41), false)).toBe("smart");
+    expect(autoScaleEffort("smart", "hi", true)).toBe("smart"); // image is real work
+  });
+  it("never raises, and honors explicit non-default tiers verbatim", () => {
+    expect(autoScaleEffort("none", "hi", false)).toBe("none");
+    expect(autoScaleEffort("quick", "hi", false)).toBe("quick");
+    expect(autoScaleEffort("deep", "hi", false)).toBe("deep");   // explicit intent on 'hi'
+    expect(autoScaleEffort("ultra", "hi", false)).toBe("ultra");
   });
 });
 
