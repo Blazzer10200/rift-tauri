@@ -15,7 +15,7 @@
     {#if sources.length}
       <div class="sweb-src">
         {#each sources.slice(0, 5) as s (s)}
-          <span class="sweb-chip"><span class="sweb-fav" style="background:var(--accent)"></span>{s}</span>
+          <span class="sweb-chip"><span class="sweb-fav"></span>{s}</span>
         {/each}
         {#if sources.length > 5}<span class="sweb-more">+{sources.length - 5} more</span>{/if}
       </div>

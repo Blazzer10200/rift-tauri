@@ -97,7 +97,7 @@
 .wb-add { color: var(--ok); }
 .wb-del { color: var(--fg-faint); }
 .wb-del.real { color: var(--danger); }
-.acount { display: inline-block; overflow: hidden; vertical-align: bottom; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.acount { display: inline-block; overflow: hidden; vertical-align: baseline; line-height: inherit; font-variant-numeric: tabular-nums; }
 .acount-v { display: inline-block; }
 .acount.live .acount-v { animation: acRoll 0.17s var(--ease-page); }
 .acount.live[data-dir="down"] .acount-v { animation: acRollDown 0.17s var(--ease-page); }
@@ -138,20 +138,22 @@
 /* steer note */
 .ssteer { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.ssteer-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
-.ssteer-tag { color: var(--accent); font-weight: 600; }
+.ssteer-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; }
+.ssteer-tag { color: var(--fg); font-weight: 600; }
 
-/* ── plan / todo checklist ── */
-.splan { margin: 14px 0; border: 1px solid var(--border); border-radius: 11px; background: color-mix(in oklab, var(--bg-inset) 45%, transparent); overflow: hidden;
+/* ── plan / todo checklist ── boxless, transparent (matches the inline diff):
+   no card fill, a thin left rule instead of a full border so the page texture
+   reads through it. ── */
+.splan { margin: 14px 0 14px 2px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.splan-head { display: flex; align-items: center; gap: 9px; padding: 9px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--fg-2); }
+.splan-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 8px; font-size: 12px; color: var(--fg-2); }
 .splan-head > svg { color: var(--accent); flex: none; }
 .splan-title { font-weight: 650; letter-spacing: -0.006em; }
 .splan-track { flex: 1; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); overflow: hidden; }
 .splan-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width var(--dur-base) var(--ease-page); }
 .splan-count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; flex: none; }
-.splan-list { display: flex; flex-direction: column; padding: 4px 0; margin: 0; list-style: none; }
-.splan-item { display: flex; align-items: center; gap: 10px; padding: 5px 12px; font-size: 12.5px; color: var(--fg-muted); }
+.splan-list { display: flex; flex-direction: column; padding: 2px 0; margin: 0; list-style: none; }
+.splan-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; color: var(--fg-muted); }
 .splan-mark { width: 16px; height: 16px; display: grid; place-items: center; flex: none; }
 .splan-item.is-done .splan-mark { color: var(--ok); }
 .splan-item.is-done .splan-text { color: var(--fg-subtle); }
@@ -162,13 +164,13 @@
 
 /* ── web search / fetch ── */
 .sweb { display: flex; gap: 9px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sweb-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
+.sweb-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; }
 .sweb-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-top: 1px; }
 .sweb-q b { color: var(--fg); font-weight: 600; }
 .sweb-q.sweb-pending { color: var(--fg-faint); font-style: italic; }
 .sweb-src { display: flex; flex-wrap: wrap; gap: 6px; }
-.sweb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); padding: 2px 8px 2px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); }
-.sweb-fav { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+.sweb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); padding: 2px 8px 2px 6px; border-radius: 6px; background: color-mix(in oklch, var(--fg) 6%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
+.sweb-fav { width: 7px; height: 7px; border-radius: 2px; flex: none; background: color-mix(in oklab, var(--fg) 30%, transparent); }
 .sweb-more { font-size: 10.5px; color: var(--fg-faint); align-self: center; }
 
 /* ── test / type-check result ── */
@@ -181,22 +183,21 @@
 .sr-pill.running { background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-subtle); font-style: italic; }
 .sr-dur { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-faint); flex: none; }
 
-/* ── delegated subagent ── */
-.sagent { margin: 12px 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: color-mix(in oklab, var(--bg-inset) 40%, transparent);
+/* ── delegated subagent ── boxless, transparent (matches the inline diff). ── */
+.sagent { margin: 12px 0 12px 2px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sagent-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 11px; cursor: pointer; background: none; border: 0; transition: background var(--dur-fast); }
-.sagent-head:hover { background: var(--surface-hover); }
-.sagent.open .sagent-head:hover { background: transparent; }
-.sagent-ic { width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); flex: none; }
+.sagent-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 4px 0; cursor: pointer; background: none; border: 0; color: var(--fg-faint); transition: color var(--dur-fast); }
+.sagent-head:hover { color: var(--fg-2); }
+.sagent-ic { width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; }
 .sagent-title { flex: 1; min-width: 0; font-size: 12.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 .sagent-title b { color: var(--fg); font-weight: 600; }
 .sagent-meta { flex: none; font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 .sagent-meta.sagent-run { color: var(--accent); font-style: italic; }
 .sagent-chev { color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
 .sagent-chev.open { transform: rotate(180deg); }
-.sagent-body { border-top: 1px solid var(--border); padding: 8px 12px 9px; display: flex; flex-direction: column; gap: 5px;
+.sagent-body { padding: 2px 0 6px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
 .sagent-step { display: flex; align-items: center; gap: 9px; font-size: 11.5px; color: var(--fg-muted); }
 .sagent-bullet { width: 4px; height: 4px; border-radius: 50%; background: var(--fg-faint); flex: none; margin-left: 7px; }
-.sagent-result { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding-top: 7px; border-top: 1px dashed var(--border); font-size: 12px; color: var(--fg-2); }
-.sagent-result > svg { color: var(--accent); flex: none; }
+.sagent-result { display: flex; align-items: center; gap: 6px; margin-top: 4px; padding-top: 7px; border-top: 1px dashed color-mix(in oklch, var(--border) 70%, transparent); font-size: 12px; color: var(--fg-2); }
+.sagent-result > svg { color: var(--ok); flex: none; }

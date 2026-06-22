@@ -531,17 +531,24 @@
 
   .md :global(code) {
     font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 0.9em;
-    /* Mockup `.kbd`: subtle inline code — emerald color only, no pill (declutter). */
-    color: var(--accent);
+    font-size: 0.86em;
+    /* Calm code token — a faint surface chip + near-prose ink rather than a
+       loud accent tint, so a paragraph dense with `identifiers` reads as
+       organized prose instead of a wall of colored monospace. */
+    color: var(--fg-2);
+    background: color-mix(in oklch, var(--fg) 6%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    border-radius: 5px;
+    padding: 0.06em 0.34em;
     line-height: inherit;
+    white-space: nowrap;
   }
   .md :global(pre) {
     margin: 8px 0;
     padding: 10px 14px;
     background: var(--bg-elev-1);
     border: 1px solid var(--border);
-    border-left: 3px solid color-mix(in oklab, var(--accent) 50%, var(--border));
+    border-left: 3px solid color-mix(in oklab, var(--accent) 22%, var(--border));
     border-radius: 8px;
     overflow-x: auto;
     font-size: var(--fs-sm);
@@ -550,9 +557,11 @@
   .md :global(pre code) {
     background: transparent;
     border: 0;
+    border-radius: 0;
     padding: 0;
     font-size: inherit;
     color: var(--fg);
+    white-space: pre;
   }
 
   /* Code-block copy affordance. <span class="code-copy"> injected by
@@ -727,8 +736,15 @@
   .md :global(pre) + :global(p),
   .md :global(p) + :global(pre) { margin-top: 4px; }
 
-  .md :global(a) { color: var(--accent); text-decoration: none; }
-  .md :global(a:hover) { text-decoration: underline; }
+  .md :global(a) {
+    color: color-mix(in oklch, var(--accent) 82%, var(--fg));
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
+    text-underline-offset: 2px;
+    text-decoration-thickness: 1px;
+    transition: text-decoration-color 140ms ease-out, color 140ms ease-out;
+  }
+  .md :global(a:hover) { color: var(--accent); text-decoration-color: var(--accent); }
 
   .md :global(table) {
     border-collapse: separate;

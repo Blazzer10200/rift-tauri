@@ -1446,8 +1446,11 @@
   .quick-chip:active { transform: translateY(0) scale(0.97); }
   @media (prefers-reduced-motion: reduce) { .quick-chip { transition: none; } }
 
-  .composer.hero .composer-box { border-radius: 18px; padding: 4px; }
-  .composer.hero textarea { font-size: 16px; padding: 13px 10px 13px 14px; min-height: 34px; }
+  .composer.hero .composer-box { border-radius: 16px; padding: 3px; }
+  .composer.hero textarea { font-size: 14.5px; line-height: 1.55; padding: 11px 12px 11px 14px; min-height: 30px; letter-spacing: -0.003em; }
+  /* Keep the hero placeholder in lockstep with the hero textarea so the ghost
+     prompt and the text you type read at the same size. */
+  .composer.hero .placeholder-ghost { font-size: 14.5px; line-height: 1.55; top: 11px; left: 14px; right: 12px; }
 
   /* Streaming = ONE coherent signal: a thin model-tinted border + the
      animated top-edge bar below (synced 2.6s with the model-pill breathe).
@@ -1944,9 +1947,9 @@
   .model-pill {
     align-self: center;
     display: inline-flex; align-items: center; gap: 7px;
-    height: 30px; padding: 0 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    height: 30px; padding: 0 8px;
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: 9px;
     color: var(--fg-2);
     cursor: pointer;
@@ -1959,6 +1962,7 @@
     color: var(--fg);
   }
   .model-pill.open {
+    background: var(--surface-hover);
     border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
     color: var(--fg);
   }

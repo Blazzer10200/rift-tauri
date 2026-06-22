@@ -830,7 +830,7 @@
   }
   .chip[data-variant="timeline"]:not(.as-card) .chip-head:hover {
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--border) 90%, transparent);
     transform: translateX(1px);
   }
   /* Rail-bullet already shows status — kill the redundant right-edge pill
@@ -893,17 +893,19 @@
   .chip-head:hover .chip-chev:not(.open) { transform: translateX(2px); }
   .chip-icon {
     display: inline-flex;
-    color: var(--accent);
+    color: var(--fg-2);
     flex-shrink: 0;
     opacity: 0.85;
   }
-  /* Subtle left-edge accent so a wall of chips has visual scannability. */
+  /* Neutral left rule — calm/boxless, matching the stream blocks. Accent is
+     reserved for the live (pending) and error states below, which are real
+     signals; idle categories don't claim the model hue. */
   .chip { border-left-width: 2px; }
-  .chip[data-category="read"]  { border-left-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
-  .chip[data-category="write"] { border-left-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
-  .chip[data-category="shell"] { border-left-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
-  .chip[data-category="agent"] { border-left-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
-  .chip[data-category="meta"]  { border-left-color: color-mix(in oklab, var(--accent) 45%, var(--border)); }
+  .chip[data-category="read"],
+  .chip[data-category="write"],
+  .chip[data-category="shell"],
+  .chip[data-category="agent"],
+  .chip[data-category="meta"]  { border-left-color: color-mix(in oklch, var(--border) 80%, transparent); }
   .chip[data-status="error"] .chip-icon { color: var(--danger); opacity: 1; }
   .chip[data-status="error"] { border-left-color: var(--danger) !important; }
   .chip[data-status="pending"] {

@@ -5,9 +5,8 @@
   // keyboard hint while idle-focused. Talks to the assistant store directly
   // (telemetry snapshot + Activity dock toggle — the cluster already reads it
   // pervasively, per the brief's QueueRail precedent).
-  import { Bot, Terminal, Wrench, ListPlus } from "lucide-svelte";
+  import { ListPlus } from "lucide-svelte";
   import type { ChatMessage } from "../../../state/assistant/types";
-  import { liveActivity } from "../../../state/assistant/helpers";
   import { tooltip } from "$lib/actions/tooltip";
 
   type AgentSpawnLike = { id: string; subagentType: string; description: string; startedAt: number; completedAt: number | null };
@@ -24,49 +23,17 @@
     composerFocused: boolean;
   } = $props();
 
-  // ── Live activity pills ───────────────────────────────────────────────
-  // Compact, additive readout of in-flight work — reuses the Activity panel's
-  // `liveActivity` derivation (single source of truth) plus the telemetry
-  // tok/s, so a busy turn surfaces ◍ agents · ▸ shells · elapsed + tok/s ·
-  // queued without opening the panel. The idle bar renders none of this. The
-  // 1s ticker only runs while streaming (drives elapsed + tok/s refresh).
-  let now = $state(Date.now());
-  $effect(() => {
-    if (!streaming) return;
-    const h = setInterval(() => { now = Date.now(); }, 1000);
-    return () => clearInterval(h);
-  });
-  const liveItems = $derived(liveActivity(tab?.messages ?? [], tab?.agentSpawns ?? [], now));
-  const agentCount = $derived(liveItems.filter((i) => i.kind === "agent").length);
-  const shellCount = $derived(liveItems.filter((i) => i.kind === "shell").length);
-  const toolCount = $derived(liveItems.filter((i) => i.kind === "tool").length);
-  // The in-flight live-status label (whimsical word · elapsed · tokens) now lives
-  // in StreamTurn's inline footer, under the turn's "Working…" head — matching the
-  // DS reference (app/stream.jsx StreamFooter). This toolbar slot keeps only the
-  // compact count pills (agents · shells · tools · queued).
-  const showLivePills = $derived(agentCount > 0 || shellCount > 0 || toolCount > 0 || queue.length > 0);
+  // The in-flight live-status (agents · shells · tools · elapsed · tokens) now
+  // lives in StreamTurn's inline footer, under the turn's "Working…" head —
+  // matching the DS reference (app/stream.jsx StreamFooter). The old toolbar
+  // count pills duplicated that and popped opaque badges near the composer on
+  // every bash/PowerShell run, so they were dropped (2026-06-21). This slot now
+  // keeps only the genuinely-distinct "N queued" signal + the idle keyboard hint.
+  const showLivePills = $derived(queue.length > 0);
 </script>
 
 {#if showLivePills}
   <div class="live-pills" role="group" aria-label="Live turn activity">
-    {#if agentCount > 0}
-      <span class="live-pill" use:tooltip={`${agentCount} sub-agent${agentCount === 1 ? "" : "s"} running.`}>
-        <Bot size={12} />
-        <span class="mono">{agentCount}</span>
-      </span>
-    {/if}
-    {#if shellCount > 0}
-      <span class="live-pill" use:tooltip={`${shellCount} shell${shellCount === 1 ? "" : "s"} running.`}>
-        <Terminal size={12} />
-        <span class="mono">{shellCount}</span>
-      </span>
-    {/if}
-    {#if toolCount > 0}
-      <span class="live-pill" use:tooltip={`${toolCount} tool${toolCount === 1 ? "" : "s"} running.`}>
-        <Wrench size={12} />
-        <span class="mono">{toolCount}</span>
-      </span>
-    {/if}
     {#if queue.length > 0}
       <span class="live-pill queued" use:tooltip={`${queue.length} message${queue.length === 1 ? "" : "s"} queued to send after this turn.`}>
         <ListPlus size={12} />
@@ -83,11 +50,9 @@
 {/if}
 
 <style>
-  /* One neutral capsule (same surface as the settings pill) holding quiet
-     ghost stats split by hairline dividers — reads as a single intentional
-     "live" readout rather than three loud floating badges. Color is held back
-     to --fg-muted; the model hue is reserved for the one pulsing live dot so
-     the cluster blends into the toolbar instead of competing with it. */
+  /* One neutral capsule (same surface as the settings pill) for the lone
+     "N queued" readout — the agents/shells/tools counts moved to StreamTurn's
+     inline footer, so this slot stays quiet and blends into the toolbar. */
   .live-pills {
     display: inline-flex; align-items: center;
     height: 26px;
@@ -108,10 +73,6 @@
     border-radius: 999px;
     flex-shrink: 0;
     transition: color 140ms ease-out;
-  }
-  /* Hairline divider before every pill after the first. */
-  .live-pill + .live-pill {
-    box-shadow: inset 1px 0 0 color-mix(in oklch, var(--border) 55%, transparent);
   }
   .live-pill:hover { color: var(--fg); }
   .live-pill :global(svg) { color: var(--fg-faint); transition: color 140ms ease-out; }
