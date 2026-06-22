@@ -2,14 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.26.1 — Interactive questions actually render + no homepage flash on launch
+## v0.26.2 — Honest feedback when the API stalls (it's not Rift)
 
-> Two long-standing annoyances, fixed at the root and verified live over CDP (the full ask → select → submit → answer cycle, and a 30-sample boot capture with zero flash). `npm run check` 0/0 (4108).
+> A "Rift got slow" report turned out to be a single 138-second Anthropic API stall on one request — not a Rift regression. Proven from the prod log: Rift's own per-turn overhead is ~1s median (and ~5ms on a warm-pool reuse), the model's first token is ~4s median, and exactly one turn out of 38 hit 138s with zero Rift activity during the gap. The plumbing is fast; the API occasionally isn't. This release makes that legible instead of looking like a freeze. `npm run check` 0/0 (4108).
 
-- **`ask_user` questions now render as a real interactive card (the big one).** When the agent asked you a multiple-choice question, the chip would appear and just *sit there* — no options, no buttons, nothing to click, the turn parked forever. Root cause: the v0.24 STREAM rendering mode (now the default) never had an `ask_user` case, so the question silently fell through to a dead one-line status row. The data pipeline was healthy the whole time — the card simply was never drawn in stream mode. There's now a dedicated interactive question card in stream mode (options, multi-select, "Other" freeform, Submit/Dismiss) that binds to the live request and returns your answer to the agent. End-to-end confirmed: select → Submit → the agent receives `A: <your choice>` and continues.
-- **No more homepage layout flash on launch/refresh.** After the intro screen, a stray "Empty pane" card used to flash for a beat before the real home appeared. In single-pane mode (the default) a not-yet-loaded conversation now goes straight to the home hero — the "Empty pane" drag-a-tab card only shows in split view where it actually means something. The home surface paints correctly from the first frame.
+- **Live stall watchdog on a turn.** When a turn is running but nothing has come back yet — no tool in flight, no tokens — and it crosses ~20s (then ~60s), the footer stops the whimsical "Unfurling…" shimmer (which implies local progress) and tells you the truth: the model is slow to respond right now, this is the Anthropic API and not Rift, and you can keep waiting or press Stop. Normal turns (first token ~4s) never see it.
+- **The "slow turn start" alert no longer self-silences on a bad one.** A genuinely egregious stall (>30s before any output) now re-surfaces every time it happens and names the API as the cause, instead of being muted after the first mild occurrence in a session.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.26.1** — `ask_user` questions render as a real interactive card in stream mode (options/multi-select/freeform/Submit — the chip used to appear and park forever with no buttons; the v0.24 stream mode never had an `ask_user` case) + no more "Empty pane" homepage flash on launch (single-pane null-tab goes straight to the home hero). Both CDP-verified end-to-end.
 
 - **v0.26.0** — Stop now always clears a hung "Calling ask_user…" prompt (the warm-pool deadlock: the session PID could be cleared before Stop, so the parked question never released — Stop now cancels any pending `ask_user` for the session first); interactive + colored context ring with a "this conversation · context" row in the usage panel; sub-agent activity dock visual overhaul; accent reset to emerald.
 - **v0.25.0** — Warm CLI process: persistent child per session reused across turns (first reply ~1400ms → every reply after ~5ms), transparent respawn on death/idle/setting-change; steering image attachments forwarded end-to-end; interactive prompts resolve from any tab; EditDiff green-bar flicker fixed; per-tool icons/captions/tints; ctx gauge → composer ring; duplicate-"Thinking…" + footer baseline fixes. #48 + #49 closed.

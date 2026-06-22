@@ -46,6 +46,16 @@
 .sfooter .sf-meta { color: var(--fg-subtle); }
 .sfooter .sf-pip { opacity: 0.5; }
 
+/* Stall watchdog — a live turn with no token back past the threshold. The wait
+   is API-side (prefill/queue), so kill the shimmer (it implies local progress)
+   and read calm-amber. Honest sub-note explains it's not Rift + offers Stop. */
+.sfooter.stalled .sf-verb {
+  animation: none; -webkit-text-fill-color: currentColor;
+  background: none; color: var(--warn, #d9a441); }
+.sstall-note { margin: 4px 0 2px; font-size: 12px; line-height: 1.45;
+  color: var(--fg-faint); max-width: 52ch;
+  animation: blockIn var(--dur-base) var(--ease-page) both; }
+
 /* tool run — one quiet line */
 .wline { margin: 12px 0; }
 .wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-subtle);

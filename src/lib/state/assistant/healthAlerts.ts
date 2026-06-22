@@ -89,14 +89,22 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
   if (!rec) return;
 
   // Silent pre-paint stall not attributable to thinking (spawn/prefill/queue).
-  if (!warned.has("deadWait") && rec.firstPaintAt != null) {
+  // The soft 8s notice is one-shot-per-session (a hint, not a nag); but an
+  // egregious stall (>30s before first output) re-fires every time — a single
+  // 138s API hang shouldn't be silenced just because a milder one warned earlier
+  // in the session. Verified 2026-06-22: Rift's own TTFT is ~1s median, model
+  // first-token ~4s median; a >30s deadWait is an API-side stall, worth saying.
+  if (rec.firstPaintAt != null) {
     const deadWait = rec.firstPaintAt - rec.ts - rec.thinkingTotalMs;
-    if (deadWait > 8000) {
+    const egregious = deadWait > 30000;
+    if (deadWait > 8000 && (egregious || !warned.has("deadWait"))) {
       warned.add("deadWait");
       toast.push({
         severity: "warn",
         title: "Slow turn start",
-        detail: `${Math.round(deadWait / 1000)}s passed before first output (spawn/prefill/queue stall).`,
+        detail: egregious
+          ? `${Math.round(deadWait / 1000)}s before first output — the Anthropic API was slow, not Rift.`
+          : `${Math.round(deadWait / 1000)}s passed before first output (spawn/prefill/queue stall).`,
       });
     }
   }

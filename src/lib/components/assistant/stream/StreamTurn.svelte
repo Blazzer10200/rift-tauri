@@ -93,7 +93,28 @@
     const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
     return () => clearInterval(id);
   });
-  const footerVerb = $derived(liveTool ? VERB_ING[liveTool.kind] : `${WHIM_WORDS[whimTick]}…`);
+  // Stall watchdog: when the turn is live but NOTHING has come back yet — no
+  // tool in flight, no output tokens — and elapsed crosses a threshold, the
+  // wait is on the Anthropic API (prefill/queue), not Rift (TTFT is ~1s; the
+  // model's first token is normally ~4s). A rare API stall would otherwise read
+  // as a frozen app behind the whimsical cycler, so swap in an honest notice.
+  // Tiers: 0 normal · 1 soft (≥20s) · 2 strong (≥60s). Normal turns never trip
+  // it (median first-token ~4s).
+  const stallLevel = $derived.by(() => {
+    if (!streaming || liveTool || liveTokens != null || liveSecs == null) return 0;
+    if (liveSecs >= 60) return 2;
+    if (liveSecs >= 20) return 1;
+    return 0;
+  });
+  const footerVerb = $derived(
+    liveTool
+      ? VERB_ING[liveTool.kind]
+      : stallLevel === 2
+        ? "Still waiting on the API"
+        : stallLevel === 1
+          ? "Waiting on the model"
+          : `${WHIM_WORDS[whimTick]}…`,
+  );
 </script>
 
 <div class="sturn">
@@ -138,7 +159,7 @@
   {/each}
 
   {#if streaming}
-    <div class="sfooter">
+    <div class="sfooter" class:stalled={stallLevel > 0}>
       {#key footerVerb}<span class="sf-verb">{footerVerb}</span>{/key}
       {#if liveTool?.cap}
         <span class="sf-meta">{liveTool.cap}</span>
@@ -152,6 +173,12 @@
         <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
       {/if}
     </div>
+    {#if stallLevel > 0}
+      <div class="sstall-note">
+        The model is slow to respond right now — this is the Anthropic API, not Rift.
+        It'll stream as soon as the first token arrives; you can keep waiting or press Stop.
+      </div>
+    {/if}
   {:else if turn.outcome !== "text"}
     <div class="sapplied" data-outcome={turn.outcome}>
       {#if turn.outcome === "applied"}
