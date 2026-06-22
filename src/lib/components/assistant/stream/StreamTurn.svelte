@@ -12,6 +12,7 @@
   import { messageToTurn, groupBlocks, fmtDur, VERB_ING, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
+  import AnimatedCount from "./AnimatedCount.svelte";
 
   let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
 
@@ -140,11 +141,11 @@
       {/if}
       {#if liveSecs != null}
         <span class="sf-pip">·</span>
-        <span class="sf-meta">{liveSecs}s</span>
+        <span class="sf-meta"><AnimatedCount value={liveSecs} durationMs={300} />s</span>
       {/if}
       {#if liveTokens != null}
         <span class="sf-pip">·</span>
-        <span class="sf-meta">{fmtTokens(liveTokens)} tokens</span>
+        <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
       {/if}
     </div>
   {:else if turn.outcome !== "text"}

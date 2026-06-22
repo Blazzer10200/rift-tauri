@@ -62,12 +62,14 @@
 .wline-row { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--fg-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wline-row .wr-verb { color: var(--fg-subtle); }
+.wline-row .wr-dir { color: var(--fg-faint); opacity: 0.7; }
 .wline-row b { color: var(--fg-2); font-weight: 600; }
 /* in-flight tool — single active line, no box */
 .wline-active { display: inline-flex; align-items: center; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wline-active .wa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }
 .wline-active .wa-cap { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-faint); }
+.wline-active .wa-cap .wa-dir { color: var(--fg-faint); opacity: 0.65; }
 .wline-active .wa-cap b { color: var(--fg-2); font-weight: 600; }
 
 /* shimmer wave on whatever line is currently live */

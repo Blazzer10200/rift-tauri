@@ -10,6 +10,7 @@
 // backend doesn't emit the extra metadata (sources, diff counts, pass/fail).
 
 import type { Block, ChatMessage, ToolBlock } from "$lib/state/assistant.svelte";
+import { diffArrays } from "diff";
 
 export type TKind =
   | "read" | "grep" | "edit" | "create" | "shell"
@@ -26,6 +27,9 @@ export type StreamTool = {
   durSecs: number;
   add: number | null;
   del: number | null;
+  path?: string | null; // full file_path (read/edit/create) — for path surfacing
+  dir?: string | null;  // workspace-relative dir prefix of `path`
+  input?: Record<string, unknown> | null; // raw tool input — feeds inline EditDiff
   items?: PlanItem[]; // plan
   query?: string; sources?: string[]; count?: number | null; // web/fetch
   fail?: number | null; pass?: number | null; // test/lint
@@ -130,6 +134,59 @@ function caption(tb: ToolBlock): string {
   return n;
 }
 
+// Full file path off a tool's input (read/edit/create/notebook), normalized to
+// forward slashes. Drives the path-surfacing crumb + the EditDiff header.
+function pathOf(inp: Record<string, unknown>): string | null {
+  const p =
+    typeof inp.file_path === "string" ? inp.file_path
+    : typeof inp.path === "string" ? inp.path
+    : typeof inp.notebook_path === "string" ? inp.notebook_path
+    : null;
+  return p ? p.replace(/\\/g, "/").replace(/\/$/, "") : null;
+}
+
+// Dir prefix of a full path, collapsed to its last two segments so the filename
+// stays readable (full path lives in the row's title/tooltip).
+function dirOf(path: string | null): string | null {
+  if (!path) return null;
+  const idx = path.lastIndexOf("/");
+  if (idx < 0) return null;
+  const segs = path.slice(0, idx).split("/").filter(Boolean);
+  if (segs.length === 0) return null;
+  return (segs.length <= 2 ? segs.join("/") : "…/" + segs.slice(-2).join("/")) + "/";
+}
+
+// Cheap +adds / −dels from an Edit/Write/MultiEdit input, so the stream batch
+// can show real line deltas (and roll them on the odometer) without rendering
+// the whole diff. MultiEdit sums each sub-edit.
+function diffCounts(inp: Record<string, unknown>): { add: number; del: number } | null {
+  const pairs: Array<{ o: string; n: string }> = [];
+  if (typeof inp.content === "string" && typeof inp.new_string !== "string") {
+    pairs.push({ o: "", n: inp.content }); // Write (new file) → all adds
+  } else if (typeof inp.old_string === "string" && typeof inp.new_string === "string") {
+    pairs.push({ o: inp.old_string, n: inp.new_string });
+  } else if (Array.isArray(inp.edits)) {
+    for (const e of inp.edits as Array<Record<string, unknown>>) {
+      if (typeof e?.old_string === "string" && typeof e?.new_string === "string") {
+        pairs.push({ o: e.old_string, n: e.new_string });
+      }
+    }
+  }
+  if (pairs.length === 0) return null;
+  let add = 0, del = 0;
+  for (const { o, n } of pairs) {
+    if (o.length + n.length > 200_000) continue; // skip huge blobs
+    // Empty old → new-file/all-additions: split("") yields [""] which diff would
+    // report as a phantom 1-line deletion. Count it as pure adds.
+    if (o === "") { add += n === "" ? 0 : n.split("\n").length; continue; }
+    for (const c of diffArrays(o.split("\n"), n.split("\n"))) {
+      if (c.added) add += c.value.length;
+      else if (c.removed) del += c.value.length;
+    }
+  }
+  return { add, del };
+}
+
 function planItems(tb: ToolBlock): PlanItem[] {
   const raw = tb.input?.todos;
   if (!Array.isArray(raw)) return [];
@@ -146,10 +203,18 @@ function planItems(tb: ToolBlock): PlanItem[] {
 function adaptTool(tb: ToolBlock): StreamTool {
   const kind = nameToKind(tb.name);
   const durSecs = typeof tb.durationMs === "number" ? tb.durationMs / 1000 : 0;
+  const inp = tb.input ?? {};
+  const path = pathOf(inp);
   const t: StreamTool = {
     id: tb.id, kind, name: shortName(tb.name), cap: caption(tb),
     status: tb.status, durSecs, add: null, del: null,
+    path, dir: dirOf(path),
   };
+  if (kind === "edit" || kind === "create") {
+    t.input = inp;
+    const dc = diffCounts(inp);
+    if (dc) { t.add = dc.add; t.del = dc.del; }
+  }
   if (kind === "plan") t.items = planItems(tb);
   if (kind === "web" || kind === "fetch") {
     t.query = t.cap; t.sources = []; t.count = null;
@@ -194,7 +259,7 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   const tools = blocks.filter((b): b is { type: "tool"; tool: StreamTool } => b.type === "tool").map((b) => b.tool);
   const mutators = tools.filter((t) => t.kind === "edit" || t.kind === "create");
   const okMutators = mutators.filter((t) => t.status !== "error");
-  const changedFiles = new Set(okMutators.map((t) => t.cap)); // cap = filename for edit/create
+  const changedFiles = new Set(okMutators.map((t) => t.path ?? t.cap)); // distinct by full path
 
   let outcome: TurnOutcome;
   if (okMutators.length > 0) outcome = "applied";

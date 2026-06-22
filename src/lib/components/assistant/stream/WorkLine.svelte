@@ -15,10 +15,10 @@
 </script>
 
 {#if anyActive && tools.length === 1}
-  <div class="wline-active">
+  <div class="wline-active" title={tools[0].path ?? tools[0].cap}>
     <span class="wa-dot"></span>
     <span class="wa-text">{VERB_ING[tools[0].kind]}</span>
-    <span class="wa-cap"><b>{tools[0].cap}</b></span>
+    <span class="wa-cap">{#if tools[0].dir}<span class="wa-dir">{tools[0].dir}</span>{/if}<b>{tools[0].cap}</b></span>
   </div>
 {:else}
   <div class="wline">
@@ -30,9 +30,9 @@
     {#if open}
       <div class="wline-list">
         {#each tools as t (t.id)}
-          <div class="wline-row" title={t.cap}>
+          <div class="wline-row" title={t.path ?? t.cap}>
             <span class="wr-verb">{t.status === "pending" ? VERB_ING[t.kind] : VERB_PAST[t.kind]}</span>
-            <b>{t.cap}</b>
+            {#if t.dir}<span class="wr-dir">{t.dir}</span>{/if}<b>{t.cap}</b>
           </div>
         {/each}
       </div>
