@@ -18,6 +18,7 @@
   import UsagePanel from "./composer/UsagePanel.svelte";
   import MentionPopover from "./composer/MentionPopover.svelte";
   import SettingsMenu from "./composer/SettingsMenu.svelte";
+  import CtxRing from "./composer/CtxRing.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
   import {
     EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, FAST_MODE_WIRED,
@@ -1313,6 +1314,10 @@
               onRequestClose={() => (settingsOpen = false)}
             />
           {/if}
+          {/if}
+
+          {#if !localLlm.enabled && assistant.ctxTokens > 0}
+            <CtxRing pct={assistant.ctxPct} tokens={assistant.ctxTokens} window={assistant.ctxWindow} />
           {/if}
         </div>
       </div>

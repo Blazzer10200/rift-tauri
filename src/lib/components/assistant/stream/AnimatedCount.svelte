@@ -85,8 +85,8 @@
   .acount {
     display: inline-block;
     overflow: hidden;
-    vertical-align: bottom;
-    line-height: 1.25;
+    vertical-align: baseline;
+    line-height: inherit;
     font-variant-numeric: tabular-nums;
   }
   .acount-v { display: inline-block; }

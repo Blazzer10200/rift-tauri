@@ -49,10 +49,11 @@
     return null;
   });
   // The head is the TURN-level status only: "Working…" live, "Worked for Xs"
-  // when done. It must NOT say "Thinking…" — StreamThinking owns that label, and
-  // flipping the head to it too rendered a duplicate "Thinking…" (the turn head
-  // + the thinking block both showing the same string). Thinking is a sub-block,
-  // not the turn status.
+  // when done. It must NOT say "Thinking…" — and the StreamThinking block only
+  // renders once thinking is DONE (the collapsible "Thought for Xs"). While
+  // active, the live thinking state is already shown by the head + the footer's
+  // rotating verb (which includes "Thinking…"); rendering the active block too
+  // duplicated that label. Thinking-in-progress is the footer's job, not a block.
   const headLabel = $derived(
     streaming ? "Working…" : `Worked for ${fmtDur(turn.totalSecs)}`
   );
@@ -100,7 +101,7 @@
     <span class="sh-label">{headLabel}</span>
   </div>
 
-  {#if turn.thinking}
+  {#if turn.thinking && !turn.thinking.active}
     <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
   {/if}
 

@@ -2,6 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — composer ctx ring + live-turn fixes
+
+> Follow-up polish on v0.24.0 (committed, not yet shipped). Pure frontend. `npm run check` 0/0 (4107) · vitest 222/222.
+
+- **Context gauge is now a ring in the composer** — moved from the header bar to a small filling circle (Claude-Desktop style) bottom-right of the composer, by the model pill. Fills as the session uses up the model's context window; calm by default, warms past 75%, danger past 90%. Hover for `tokens / window (%)`. Accuracy unchanged (real CLI usage envelope).
+- **No more duplicate "Thinking…"** — the thinking block only appears once reasoning is *done* (as the collapsible "Thought for Xs"); while the model is actively thinking, that state shows once via the live header + footer, not twice.
+- **Footer numbers + units align** — the animated counters ("12s", "186 tokens") now sit on the same baseline as their unit letters (a stale component-scoped style was overriding the fix).
+
 ## v0.24.0 — Stream design-language pass (calm/boxless tools + live-turn polish)
 
 > A full sweep of every streamed display to one calm, professional design language: accent colour is now reserved for *meaningful* signals (progress, live spinners, pass/fail) and everything idle reads as neutral/boxless so the page texture shows through. Plus the live-turn upgrades from `b4fd4e5` (animated token odometer, file-path surfacing, inline edit diffs). Verified: `npm run check` 0 errors / 0 warnings (4106 files) · vitest 222/222 · CDP screenshot review of every stream block. No backend change.

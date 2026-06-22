@@ -19,9 +19,6 @@
       ? (chatHasConvo ? assistant.activeTab?.convoTitle || "Chat" : "Home")
       : WORKSPACES[workspace.activeId].title,
   );
-
-  const ctxPct = $derived(Math.round(assistant.ctxPct));
-  const warm = $derived(ctxPct >= 75);
 </script>
 
 <div class="topbar" data-tauri-drag-region>
@@ -47,13 +44,6 @@
       <AppWindow size={15} />
     </button>
 
-    {#if workspace.activeId === "chat" && chatHasConvo}
-      <span class="gauge" class:warm use:tooltip={`Context — ${ctxPct}% of window`}>
-        <span class="gauge-bar"><i style="width:{ctxPct}%"></i></span>
-        {ctxPct}%
-      </span>
-    {/if}
-
     <div class="winctl">
       <button class="wc" type="button" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} aria-label="Minimize"><span class="wc-min"></span></button>
       <button class="wc" type="button" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={"Maximize"} aria-label="Maximize"><span class="wc-max"></span></button>
@@ -70,13 +60,6 @@
     transition: background var(--dur-fast), color var(--dur-fast); }
   .topbar-ic:hover { background: var(--surface-hover); color: var(--fg-2); }
   .topbar-ic.show-side { margin-left: -8px; margin-right: 2px; }
-
-  .gauge { display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 11px; border-radius: 999px;
-    border: 1px solid var(--border); font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
-  .gauge.warm { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 30%, var(--border)); }
-  .gauge-bar { width: 44px; height: 5px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
-  .gauge-bar i { display: block; height: 100%; background: var(--accent); transition: width var(--dur-slow) var(--ease-soft); }
-  .gauge.warm .gauge-bar i { background: linear-gradient(90deg, var(--warn), oklch(0.78 0.16 45)); }
 
   .winctl { display: flex; gap: 2px; }
   .wc { width: 36px; height: 30px; display: grid; place-items: center; color: var(--fg-muted); border-radius: 7px; transition: background var(--dur-fast); }
