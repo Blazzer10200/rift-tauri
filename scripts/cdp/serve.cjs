@@ -387,9 +387,16 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, v
         params.clip = { x: clip.x, y: clip.y, width: clip.width, height: clip.height, scale: clip.scale || 1 };
         params.captureBeyondViewport = true;
     }
-    const resp = await cdp('Page.captureScreenshot', params, 15000, target);
-    if (overrideViewport || autoScaled) {
-        await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+    // try/finally: if capture throws (or times out), the metrics override MUST
+    // still be cleared — otherwise an interrupted shot wedges the layout viewport
+    // at the emulated size and every later read/shot is wrong until a reset.
+    let resp;
+    try {
+        resp = await cdp('Page.captureScreenshot', params, 15000, target);
+    } finally {
+        if (overrideViewport || autoScaled) {
+            await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+        }
     }
     if (!resp.result?.data) throw new Error('CDP returned no data');
     // ms precision + monotonic counter — parallel /batch screenshots must not collide.
@@ -603,11 +610,22 @@ const routes = {
     'POST /reload': async (body, target) => {
         // Hard reload: bust WebView2's HTTP cache then reload ignoring cache, so
         // Vite re-serves importers fresh (304-cached importers otherwise keep
-        // stale child ?t= URLs that pin a broken HMR transform).
+        // stale child ?t= URLs that pin a broken HMR transform). Also clear any
+        // leftover device-metrics override — an interrupted screenshot can wedge
+        // the layout viewport at a tiny size that survives ws reconnect.
+        try { await cdp('Emulation.clearDeviceMetricsOverride', {}, 5000, target); } catch {}
         try { await cdp('Network.clearBrowserCache', {}, 5000, target); } catch {}
         await cdp('Page.enable', {}, 5000, target).catch(() => {});
         await cdp('Page.reload', { ignoreCache: true }, 10000, target);
         return { ok: true, reloaded: target };
+    },
+    'POST /reset-viewport': async (body, target) => {
+        // Recovery: drop a wedged Emulation device-metrics override so the real
+        // WebView2 window size is restored (no reload). Use when innerWidth/Height
+        // read tiny after an interrupted shot.
+        await cdp('Emulation.clearDeviceMetricsOverride', {}, 5000, target);
+        const vp = await evalJs('({w:innerWidth,h:innerHeight})', 5000, target);
+        return { ok: true, viewport: vp.value };
     },
     'POST /shutdown': async () => { setTimeout(() => process.exit(0), 100); return { ok: true }; },
 };

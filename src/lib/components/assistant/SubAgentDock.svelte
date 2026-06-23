@@ -212,7 +212,10 @@
      it floats above the chat instead of reserving a side column. */
   .subagent-dock {
     width: 360px; max-width: calc(100vw - 32px);
-    max-height: min(62vh, 560px);
+    /* Capped so the card clears the composer at the bottom of the pane even on
+       shorter windows (it starts ~38px down + leaves room for the composer);
+       overflow scrolls internally past this. */
+    max-height: min(56vh, 480px);
     display: flex; flex-direction: column;
     background: var(--bg-elev-1);
     border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
@@ -480,5 +483,6 @@
   @media (prefers-reduced-motion: reduce) {
     .empty, .block, .agent { animation: none; }
     .live-dot, .tool[data-status="pending"] { animation: none; }
+    .subagent-pill:hover { transform: none; }
   }
 </style>

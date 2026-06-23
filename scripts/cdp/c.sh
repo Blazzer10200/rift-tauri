@@ -164,11 +164,16 @@ case "$cmd" in
     # Hard cache-busting reload — use when HMR wedges on a stale transform.
     post reload "{}"
     ;;
+  reset-viewport)
+    # Recovery — drop a wedged device-metrics override (innerWidth/Height read
+    # tiny after an interrupted shot) without a reload.
+    post reset-viewport "{}"
+    ;;
   shutdown)
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|reset-viewport|shutdown} ..." >&2
     exit 2
     ;;
 esac
