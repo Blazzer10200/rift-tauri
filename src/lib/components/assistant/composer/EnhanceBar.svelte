@@ -139,7 +139,7 @@
         ></textarea>
       {:else}
         <div class="enhance-text">
-          {#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}
+          {#key enhancedPreview}{#each enhancedWords as w, i (i)}<span class="ew" class:live={enhancing} style="--i:{i}">{w}</span>{/each}{/key}
         </div>
       {/if}
       <div class="enhance-actions">
