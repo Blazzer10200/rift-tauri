@@ -157,6 +157,20 @@ function dirOf(path: string | null): string | null {
   return (segs.length <= 2 ? segs.join("/") : "…/" + segs.slice(-2).join("/")) + "/";
 }
 
+// Memo keyed by tool id: an Edit/Write input is fixed at tool_use_start, but
+// messageToTurn re-runs on every stream frame, so without this the O(n·m) line
+// diff below recomputes for every settled edit on every token. Bounded so a long
+// session can't grow it unboundedly.
+const diffCountCache = new Map<string, { add: number; del: number } | null>();
+function diffCountsCached(id: string, inp: Record<string, unknown>) {
+  const hit = diffCountCache.get(id);
+  if (hit !== undefined) return hit;
+  const dc = diffCounts(inp);
+  if (diffCountCache.size > 500) diffCountCache.clear();
+  diffCountCache.set(id, dc);
+  return dc;
+}
+
 // Cheap +adds / −dels from an Edit/Write/MultiEdit input, so the stream batch
 // can show real line deltas (and roll them on the odometer) without rendering
 // the whole diff. MultiEdit sums each sub-edit.
@@ -213,7 +227,7 @@ function adaptTool(tb: ToolBlock): StreamTool {
   };
   if (kind === "edit" || kind === "create") {
     t.input = inp;
-    const dc = diffCounts(inp);
+    const dc = diffCountsCached(tb.id, inp);
     if (dc) { t.add = dc.add; t.del = dc.del; }
   }
   if (kind === "plan") t.items = planItems(tb);

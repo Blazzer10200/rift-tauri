@@ -26,6 +26,9 @@
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  // Clear a pending copy-reset timer on unmount so it can't fire into a
+  // destroyed component.
+  $effect(() => () => { if (copyTimer) clearTimeout(copyTimer); });
   async function copy() {
     if (!plainText) return;
     try {
