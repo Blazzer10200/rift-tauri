@@ -2,15 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.27.1 — Activity stats, drag-a-chat-into-a-pane, and a dead-code cleanup
+## v0.28.0 — Top-to-bottom hardening pass (quieter, safer, leak-free)
 
-> A small follow-up to v0.27.0. Two features that were built but never wired up are now live, plus an unreachable old home screen got removed.
+> No new features — this is a full front-to-back audit and fix release. A multi-wave, multi-agent review swept the whole app (145 confirmed findings across two waves) and every fix landed here: tighter security, fewer ways to leak memory over a long session, and a pile of subtle correctness bugs squashed. Nothing you do changes; it just holds up better the longer you run it.
 
-- **See your activity at a glance.** A new **Activity** button on the home welcome opens a stats panel — total messages, sessions, tool calls, and spend, a current/best streak, your peak hour, a 12-week activity heatmap, and a per-model breakdown. Toggle between all-time, last 30 days, and last 7 days.
-- **Drag a conversation straight into a split pane.** Grab any chat in the sidebar and drop it onto the editor to open it in a split — drop on the left or right half to choose the side. The drop target already existed; now there's something to drag into it.
-- **Removed a leftover home screen** that was no longer reachable (the "Home is a verb" redesign routes Home to a fresh empty chat). No visible change — the Home button works exactly as before.
+- **Safer with untrusted content.** Page text pulled into a turn is now sanitized against prompt-injection (control-char/sentinel stripping), oversized pasted drafts are capped before they can bloat a request, and the browser/opener surface rejects a dozen more executable file types. Backend git and CLI plumbing strips verbose-trace env vars and runs with system git-config disabled, so nothing leaks through a subprocess.
+- **Leak-free over long sessions.** Telemetry, transcript, and model-list buffers are now ring-capped instead of growing forever; stray timers and event listeners are torn down on unmount; and several reactive effects that could quietly re-run themselves were fixed. The longer Rift stays open, the more these matter.
+- **Subtle correctness fixes.** A rare init race on rapid conversation switches, a queued-steer message that could reorder itself, a slash-menu Enter that double-fired, the stats panel's clock not advancing, voice-input restart edge cases, and more — all squashed. Update/repair toasts now say what actually happened, and stray terminal color codes no longer show up in error text.
+- **Memory and speed on the hot path.** The streaming diff view recomputes only what changed when syntax highlighting warms up (instead of re-walking the whole diff), oversized tool and sub-agent results are truncated before rendering, and a per-frame diff recount is memoized.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.27.1** — Activity stats panel (messages/sessions/tools/spend, streaks, peak hour, 12-week heatmap, per-model breakdown, All/30d/7d toggle), drag a sidebar chat straight into a split pane, and removal of an unreachable old home screen.
 
 - **v0.27.0** — Faster replies on every model (Smart → balanced reasoning that streams immediately, especially on Sonnet; retired the auto-downshift cold-restart), a sidebar that stops reshuffling on open/click, finished split-view (top-bar "Split editor" button, no overlap at 3–4 panes, per-pane project folders), cleaner collapsed tool rows + a calm "waiting for you" footer on ask_user.
 
@@ -24,8 +27,4 @@
 - **v0.25.0** — Warm CLI process: persistent child per session reused across turns (first reply ~1400ms → every reply after ~5ms), transparent respawn on death/idle/setting-change; steering image attachments forwarded end-to-end; interactive prompts resolve from any tab; EditDiff green-bar flicker fixed; per-tool icons/captions/tints; ctx gauge → composer ring; duplicate-"Thinking…" + footer baseline fixes. #48 + #49 closed.
 - **v0.24.0** — Stream design-language pass (accent = meaningful-signal-only; idle blocks neutral/boxless with left-rule; calm icon badges + markdown code-chips) + live-turn polish (animated token odometer, file-path crumbs, inline EditDiff).
 - **v0.23.0** — Latency auto-scale (trivial turns downshift `smart→quick`) + turn-phase probe + live-status pill fix + round-12 `src/lib/state/` sweep (6 fixes: STT corrupt-resume guard, mic over-rail, split-pane scrub, toast timer leak).
-- **v0.22.0** — Rounds 10–11 hardening (27 fixes across under-swept surfaces; skeptic-verify multi-agent rounds).
-- **v0.21.0** — Rounds 5–9 hardening (1 critical + 42 fixes): config race · IPC/update/browser · secrets/commands/state/frontend · diagnostics/UI-resilience · turn-lifecycle/git-DoS/streaming/composer.
-- **v0.20.9** — Recovery tools + per-project chat scoping + 4-round hardening pass.
-- **v0.20.8** — Overnight efficiency + cleanup polish (stress-test pass on v0.20.7).
-- **v0.20.7** — Full redesign port (all 7 surfaces rebuilt to spec, CDP-verified) + backend dead-code sweep.
+- **v0.20.7–v0.22.0** — Earlier hardening arc (rounds 5–11, ~70 fixes total) + the full redesign port (all 7 surfaces rebuilt to spec) + per-project chat scoping + recovery tools. Detail via `git log`.
