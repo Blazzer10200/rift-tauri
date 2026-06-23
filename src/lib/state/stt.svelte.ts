@@ -195,6 +195,11 @@ class SttStore {
       clearTimeout(this.polishUndoTimer);
       this.polishUndoTimer = null;
     }
+    // Invalidate any in-flight Haiku polish so its result/shimmer can't land in
+    // the post-HMR store (capTimer is a local timeout; the guard bump stops the
+    // awaited swap).
+    this.polishGuard++;
+    this.polishing = false;
   }
 
   async init() {
@@ -302,6 +307,9 @@ class SttStore {
     // changes take effect mid-session. Whisper picks up config on next start().
     if (next.engine === "web_speech" && this.recording && this.recognition) {
       const token = ++this.restartToken;
+      // abort() fires onEnd → a polish for the old segment; cancel it so the
+      // new session doesn't inherit polishing=true and block all future polish.
+      this.cancelPolish();
       this.recognition.abort();
       this.recording = false;
       setTimeout(() => {
@@ -326,6 +334,7 @@ class SttStore {
   /** Composer-side hook: the current draft was just sent / cleared. */
   consume() {
     this.cancelRequested = true;
+    this.cancelPolish(); // stop any shimmer + invalidate an in-flight polish
     if (this.config.engine === "whisper") {
       // Fire-and-forget — the backend's drop-on-stop preserves any in-flight
       // partials but stops emitting new ones.
@@ -581,7 +590,9 @@ class SttStore {
       t = applyInlineCommands(t).trim();
       if (SEND_CMD_RE.test(t)) {
         t = t.replace(SEND_CMD_RE, "").trim();
-        send = t.length > 0;
+        // Send even when the utterance was ONLY the command — the intent is to
+        // ship whatever is already in the draft (baseDraft / prior segments).
+        send = true;
       }
     }
     this.finalText = t;
@@ -703,10 +714,12 @@ class SttStore {
     if (this.config.voice_commands) {
       seg = applyInlineCommands(seg);
       if (SCRATCH_CMD_RE.test(seg)) {
-        // "scratch that" deletes the last thing said — text in the same
-        // utterance if any, otherwise the previous committed segment.
+        // "scratch that" deletes the last thing said. Pop the previous committed
+        // segment, then push back any words spoken AFTER the command in the same
+        // utterance ("scratch that, actually …") so they aren't lost.
         const rest = seg.replace(SCRATCH_CMD_RE, "").trim();
-        if (!rest) this.segments.pop();
+        this.segments.pop();
+        if (rest) this.segments.push(rest);
         this.refreshFinal();
         return;
       }
@@ -719,6 +732,13 @@ class SttStore {
       }
     }
     this.segments.push(seg);
+    // Continuous-mode safety: collapse the backlog into a single string so an
+    // hours-long session doesn't grow segments[] (and its per-commit join)
+    // without bound. "scratch that" then only pops the most-recent utterance,
+    // which is the practical case.
+    if (this.segments.length > 500) {
+      this.segments = [this.segments.join(" ")];
+    }
     this.refreshFinal();
   }
 
