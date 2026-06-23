@@ -436,7 +436,9 @@ pub fn tool_git_commit(args: &Value, roots: &[PathBuf]) -> Result<String, String
     let message = validate_message(message)?;
 
     // Staging: explicit paths win; else `all: true` stages everything; else
-    // commit only what's already staged.
+    // commit only what's already staged. Track the paths WE stage so a later
+    // commit failure doesn't leave a silent partial mutation in the index.
+    let mut staged_paths: Vec<String> = Vec::new();
     if let Some(paths) = args.get("paths").and_then(|v| v.as_array()) {
         // RR9: cap entry count before per-path validation (each runs filesystem
         // I/O) + spawn. An oversized model tool-call could otherwise allocate
@@ -448,7 +450,9 @@ pub fn tool_git_commit(args: &Value, roots: &[PathBuf]) -> Result<String, String
         let mut add_args: Vec<String> = vec!["add".into(), "--".into()];
         for p in paths {
             let s = p.as_str().ok_or("`paths` entries must be strings")?;
-            add_args.push(validate_path(root, s)?);
+            let validated = validate_path(root, s)?;
+            staged_paths.push(validated.clone());
+            add_args.push(validated);
         }
         let refs: Vec<&str> = add_args.iter().map(|s| s.as_str()).collect();
         let add = run_git(root, &refs)?;
@@ -468,6 +472,21 @@ pub fn tool_git_commit(args: &Value, roots: &[PathBuf]) -> Result<String, String
         // "nothing to commit" is git's normal message on an empty index.
         if txt.contains("nothing to commit") || out.stdout.contains("nothing to commit") {
             return Err("nothing to commit — stage changes first (pass `paths` or `all: true`).".into());
+        }
+        // Roll back the index entries WE staged so a failed `paths` commit
+        // doesn't silently leave them staged (`git reset -- <paths>` restores
+        // each entry to HEAD's tree, i.e. unstaged). Best-effort: a reset
+        // failure is reported alongside, never masking the real commit error.
+        if !staged_paths.is_empty() {
+            let mut reset_args: Vec<&str> = vec!["reset", "--quiet", "--"];
+            reset_args.extend(staged_paths.iter().map(|s| s.as_str()));
+            if let Ok(reset) = run_git(root, &reset_args) {
+                if !reset.ok() {
+                    return Err(format!(
+                        "git commit failed: {txt}\n(note: could not unstage the paths this call staged — `git status` to inspect)"
+                    ));
+                }
+            }
         }
         return Err(format!("git commit failed: {txt}"));
     }

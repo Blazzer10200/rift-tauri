@@ -242,7 +242,18 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        let convo: Conversation = match serde_json::from_value(raw.clone()) {
+        // Extract the Value-only field BEFORE the typed parse consumes `raw`,
+        // so we deserialize once without cloning the whole Value per convo.
+        let compaction_summaries = raw
+            .get("compactionHistory")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| e.get("summary").and_then(|s| s.as_str()).map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let convo: Conversation = match serde_json::from_value(raw) {
             Ok(c) => c,
             Err(_) => continue,
         };
@@ -260,15 +271,6 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
                     .sum::<f64>()
             })
             .unwrap_or(0.0);
-        let compaction_summaries = raw
-            .get("compactionHistory")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.get("summary").and_then(|s| s.as_str()).map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
         let last_snippet = convo.messages.as_array().and_then(|arr| {
             arr.iter().rev().find_map(|m| {
                 if m.get("role").and_then(|r| r.as_str()) == Some("system") {
@@ -353,7 +355,15 @@ pub struct ConvoStat {
 /// totals, per-model breakdowns, and the activity heatmap without re-reading
 /// disk. Unparseable files are skipped, mirroring `assistant_list_conversations`.
 #[tauri::command]
-pub fn assistant_stats() -> Result<Vec<ConvoStat>, String> {
+pub async fn assistant_stats() -> Result<Vec<ConvoStat>, String> {
+    // Same blocking dir-scan + per-file parse as list_conversations (potentially
+    // hundreds of convos) — keep it off the Tokio worker pool.
+    tokio::task::spawn_blocking(assistant_stats_sync)
+        .await
+        .map_err(|e| format!("assistant_stats join error: {e}"))?
+}
+
+fn assistant_stats_sync() -> Result<Vec<ConvoStat>, String> {
     let dir = conversations_dir()?;
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(&dir) {
