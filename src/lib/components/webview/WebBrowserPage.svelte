@@ -7,7 +7,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { openUrl } from "@tauri-apps/plugin-opener";
-  import { onDestroy, onMount } from "svelte";
+  import { onDestroy, onMount, untrack } from "svelte";
   import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal } from "lucide-svelte";
   import { portal } from "$lib/actions/portal";
   import { workspace } from "../../state/workspace.svelte";
@@ -160,16 +160,20 @@
       // can't emit a literal "[End page context]" to escape the delimited block
       // and inject instructions into the prompt (zero-width space breaks the
       // exact match while staying invisible).
-      const body = (p.text || "").trim().replace(/\[End page context\]/g, "[End page context​]");
+      const body = (p.text || "").trim()
+        .replace(/\[End page context\]/gi, "[End page context​]")
+        .replace(/\[Page context:/gi, "[Page context​:");
       if (!body) { flash("fail"); return; }
       // Sanitize title/url to prevent ] or newlines from breaking the delimiter.
-      const safeTitle = (p.title || "untitled").replace(/[\]\r\n]/g, " ").slice(0, 200);
-      const safeUrl = (p.url || "").replace(/[\]\r\n]/g, " ").slice(0, 2048);
+      const safeTitle = (p.title || "untitled").replace(/[[\]\r\n]/g, " ").slice(0, 200);
+      const safeUrl = (p.url || "").replace(/[[\]\r\n]/g, " ").slice(0, 2048);
       const head = `[Page context: ${safeTitle} — ${safeUrl}]`;
       const tail = p.truncated ? `\n[…truncated — full page is ${p.full_len.toLocaleString()} chars]` : "";
       const block = `${head}\n${body}${tail}\n[End page context]`;
       const cur = assistant.composerDraft;
-      assistant.composerDraft = cur ? `${cur}\n\n${block}` : block;
+      const next = cur ? `${cur}\n\n${block}` : block;
+      if (next.length > 200_000) { flash("fail"); return; }
+      assistant.composerDraft = next;
       flash("ok");
     } catch (e) {
       console.warn("browser_read_page:", e);
@@ -210,9 +214,11 @@
   $effect(() => {
     const url = browserDock.pendingUrl;
     if (!url || !stageEl) return;
-    browserDock.pendingUrl = null;
-    address = url;
-    void go();
+    untrack(() => {
+      browserDock.pendingUrl = null;
+      address = url;
+      void go();
+    });
   });
 
   // Ctrl+L (via browserDock.focusAddress) bumps focusToken — focus + select-all
