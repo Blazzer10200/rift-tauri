@@ -656,6 +656,232 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
     Ok(title)
 }
 
+/// Meta-prompt for the AI Health advisor. The model is a usage coach for a
+/// newcomer — its whole job is to turn a usage snapshot into a few concrete,
+/// plain-English changes that stretch the user's plan further. Two hard rules
+/// keep it trustworthy: (1) ground every claim in the numbers it was given —
+/// never invent usage it can't see; (2) emit ONLY the JSON contract so the
+/// frontend can render cards without parsing prose.
+const ANALYZE_META_PROMPT: &str = "You are Rift's usage advisor — a friendly coach helping someone get more out of \
+their Claude plan. You are given a JSON snapshot of the user's setup and recent usage. Your job: surface a FEW \
+concrete, high-impact changes they could make, explained in plain language a non-expert understands.\n\
+\n\
+Hard rules:\n\
+- Ground EVERY recommendation in the numbers in the snapshot. Quote the actual figure that motivates it. Never \
+invent or assume usage you were not given. If the data is too thin to advise, say so honestly with fewer cards.\n\
+- Speak to a newcomer. No jargon without a one-line plain explanation. Frame advice as benefit (\"you'll get more \
+replies before hitting your limit\"), not mechanism.\n\
+- Be specific and actionable. \"Switch chat-only turns to Quick effort\" beats \"optimize your settings\".\n\
+- Do NOT recommend changes the snapshot shows are already in place. Do NOT pad — 2 strong cards beat 5 weak ones.\n\
+\n\
+Output ONLY a JSON object, no markdown fence, no preamble, matching exactly:\n\
+{\"summary\": \"one warm sentence on how their usage looks overall\", \"cards\": [{\"title\": \"short imperative \
+headline\", \"detail\": \"2-3 sentences: what to change, the number that motivates it, the benefit\", \"impact\": \
+\"high\"|\"medium\"|\"low\", \"apply\": null OR {\"kind\": \"effort\"|\"model\"|\"budget\", \"value\": <see below>, \
+\"label\": \"human phrase like 'Set default effort to Quick'\"}}]}\n\
+\n\
+The \"apply\" field is the heart of this feature — when the advice maps to a Rift setting the user can change in ONE \
+tap, fill it in with a CONCRETE machine value so Rift can apply it directly. Use null only for pure behavior tips \
+(e.g. \"batch your tool calls\") that no single setting captures.\n\
+- kind \"effort\": value is one of \"none\"|\"quick\"|\"smart\"|\"deep\"|\"ultra\" — the default reasoning tier. Lower \
+= cheaper/faster. Recommend lowering it only if the usage suggests over-spend on simple turns.\n\
+- kind \"model\": value is one of \"opus\"|\"sonnet\"|\"haiku\" — the default model. Recommend a cheaper default \
+(sonnet/haiku) when an expensive model dominates spend on routine work.\n\
+- kind \"budget\": value is a positive NUMBER of US dollars — a per-turn spend ceiling. Recommend when there's no cap \
+and spend is high.\n\
+The \"currentSetup\" object in the <usage> block shows the user's CURRENT effortDefault, model, and maxBudgetUsd \
+(maxBudgetUsd null = no cap set) — NEVER emit an apply whose value equals what's already set, and never suggest a \
+change already in place. Return 0-4 cards.";
+
+/// Analyze a user's usage snapshot and return plain-English optimization advice.
+/// The AI Health tab assembles `snapshot_json` (limits + session/all-time
+/// telemetry + setup) on the frontend; this command spawns the user's OWN Claude
+/// (headless `-p`, off the warm pool, like title/enhance) to reason over it and
+/// returns the raw JSON contract for the frontend to render as cards.
+///
+/// Off-the-warm-pool by construction: fresh `-p` spawn, null stdin, no
+/// `--resume`, no session persistence — never touches `warm_pool`. The frontend
+/// owns the snapshot shape so adding cross-session history later is additive
+/// (more data in the same string) with no backend change.
+#[tauri::command]
+pub async fn assistant_analyze_usage(snapshot_json: String) -> Result<String, String> {
+    let trimmed = snapshot_json.trim();
+    if trimmed.is_empty() {
+        return Err("no usage snapshot to analyze".into());
+    }
+    // Cap the payload — a well-formed snapshot is a few KB; this bounds cost +
+    // arg length against a misbehaving caller before it fires a model call.
+    if trimmed.chars().count() > 24_000 {
+        return Err("usage snapshot too large to analyze".into());
+    }
+    // Enrich with server-only setup facts the frontend can't see (trust level,
+    // local-LLM mode, OS). The tunable knobs — effort/model/budget — come from
+    // the frontend's `currentSetup` block instead: post-F48 effort + model live
+    // in localStorage, not config.json, so the frontend value is authoritative
+    // and config.json's may be stale.
+    let cfg = load_config();
+    let os = std::env::consts::OS;
+    let setup = serde_json::json!({
+        "permissionMode": cfg.permission_mode.as_deref().unwrap_or("bypassPermissions"),
+        "trustLevel": cfg.trust_level.as_deref().unwrap_or("readonly"),
+        "localLlmMode": cfg.local_llm_enabled,
+        "os": os,
+    });
+
+    let mut cmd = claude_command()
+        .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
+    let user_msg = format!(
+        "Analyze this user's Rift usage and produce optimization advice per your instructions. \
+         The <setup> block is their live harness config; the <usage> block is their plan limits + usage telemetry.\n\n\
+         <setup>\n{setup}\n</setup>\n\n<usage>\n{trimmed}\n</usage>"
+    );
+    cmd.arg("-p").arg(&user_msg)
+        .arg("--append-system-prompt").arg(ANALYZE_META_PROMPT)
+        .arg("--exclude-dynamic-system-prompt-sections")
+        // Sonnet — the reasoning quality lever for nuanced, grounded advice
+        // (title gen uses Haiku; this is a harder judgment task).
+        // stream-json WITHOUT partials: we only harvest the terminal `result`
+        // frame, never deltas. Partial messages flood stdout with hundreds of
+        // frames and were implicated in an intermittent ~60s in-app stall (the
+        // identical CLI args return in <8s) — dropping them keeps the pipe quiet
+        // until the one frame we want. `--verbose` is required for stream-json.
+        .arg("--output-format").arg("stream-json")
+        .arg("--verbose")
+        .arg("--model").arg(DEFAULT_MODEL)
+        // Budget must cover the one-time system-prompt cache-creation tax, not
+        // just the few-hundred-token JSON reply: a fresh Sonnet spawn bills
+        // ~16K cache-creation tokens up front (~$0.10) before any output. A
+        // $0.15 cap tripped `error_max_budget_usd` on the first call; $0.50
+        // clears the tax with headroom while still bounding a runaway.
+        .arg("--max-budget-usd").arg("0.50")
+        .arg("--strict-mcp-config")
+        .arg("--disable-slash-commands")
+        .arg("--tools").arg("")
+        .arg("--permission-mode").arg("bypassPermissions")
+        .arg("--no-session-persistence")
+        .current_dir(std::env::temp_dir())
+        .env("CLAUDE_DISABLE_HOOKS", "1")
+        .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+        .env("DISABLE_AUTOUPDATER", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn `claude` (analyze): {e}"))?;
+    let stdout = child.stdout.take().ok_or("analyze stdout unavailable")?;
+    let stderr = child.stderr.take().ok_or("analyze stderr unavailable")?;
+
+    let mut stderr_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(l)) = lines.next_line().await {
+            // Keep draining to EOF past the cap so the child's stderr pipe can't
+            // fill and deadlock it on wait() (same F4 invariant as title/enhance).
+            if buf.len() <= 8192 {
+                buf.push_str(&l);
+                buf.push('\n');
+            }
+        }
+        buf
+    });
+
+    // Bound the whole read+wait — like title gen, this path has no cancel
+    // registry, so a wedged CLI (network stall, OAuth re-prompt) would hang
+    // forever. 90s: the FIRST analyze after launch races the warm pool's own
+    // auth warmup and can take ~50-60s (a settled call returns in <10s); 60s sat
+    // right on that edge and tripped a false timeout on cold start.
+    let read_wait = async {
+        let mut acc = String::new();
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+                continue;
+            };
+            // The terminal `result` frame carries the authoritative final text —
+            // harvest it and stop (deltas can include partial JSON).
+            if v.get("type").and_then(|t| t.as_str()) == Some("result") {
+                if let Some(t) = v.get("result").and_then(|r| r.as_str()) {
+                    if !t.trim().is_empty() {
+                        acc = t.to_string();
+                    }
+                }
+                break;
+            }
+        }
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| format!("await claude (analyze): {e}"))?;
+        Ok::<_, String>((acc, status))
+    };
+
+    let (acc, status) =
+        match tokio::time::timeout(std::time::Duration::from_secs(90), read_wait).await {
+            Ok(r) => r?,
+            Err(_) => {
+                let _ = child.start_kill();
+                // Salvage whatever the CLI wrote to stderr before the cap so a
+                // timeout reports *why* (OAuth re-prompt, network stall) instead
+                // of a bare "timed out". 500ms is plenty — the pipe's already
+                // buffered; we just need to read what's there.
+                let tail = tokio::time::timeout(
+                    std::time::Duration::from_millis(500),
+                    &mut stderr_task,
+                )
+                .await
+                .ok()
+                .and_then(|r| r.ok())
+                .unwrap_or_default();
+                stderr_task.abort();
+                let tail = tail.trim();
+                log::warn!("assistant_analyze_usage timed out (90s); stderr tail: {tail}");
+                return Err(if tail.is_empty() {
+                    "usage analysis timed out".to_string()
+                } else {
+                    format!("usage analysis timed out: {tail}")
+                });
+            }
+        };
+
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
+        Ok(Ok(buf)) => buf,
+        Ok(Err(e)) => format!("(stderr drain task panicked: {e})"),
+        Err(_) => {
+            stderr_task.abort();
+            String::new()
+        }
+    };
+    if !status.success() {
+        let msg = stderr_buf.trim();
+        return Err(if msg.is_empty() {
+            "usage analysis failed".to_string()
+        } else {
+            format!("analysis failed: {msg}")
+        });
+    }
+    // Return the raw model text. The model is instructed to emit pure JSON, but a
+    // stray fence can slip through — strip a leading/trailing ```json fence so the
+    // frontend's JSON.parse doesn't choke. Frontend still guards parse failures.
+    let cleaned = acc
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
+        .to_string();
+    if cleaned.is_empty() {
+        return Err("usage analysis returned empty output".into());
+    }
+    Ok(cleaned)
+}
+
 /// Experimental: round-trip a one-line prompt through the configured local-LLM
 /// endpoint so the Local LLM page can show a green/red "Test connection".
 /// POSTs directly to `{base_url}/v1/messages` (the Anthropic API the CLI

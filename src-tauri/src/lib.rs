@@ -203,6 +203,7 @@ pub fn run() {
             commands::assistant_enhance_prompt,
             commands::assistant_enhance_cancel,
             commands::assistant_generate_title,
+            commands::assistant_analyze_usage,
             commands::assistant_stop,
             commands::assistant_steer,
             commands::assistant_answer_ask_user,

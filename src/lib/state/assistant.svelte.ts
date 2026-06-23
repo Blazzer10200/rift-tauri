@@ -26,6 +26,7 @@ export type {
   ChatMessage,
   ConversationMeta,
   ThinkingEffort,
+  ModelSel,
   PaneState,
 } from "./assistant/types";
 export { MAX_PANES } from "./assistant/types";

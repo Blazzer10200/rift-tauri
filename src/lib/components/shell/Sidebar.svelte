@@ -28,7 +28,7 @@
 
   // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
   const ICON_KEY: Record<WorkspaceId, string> = {
-    home: "home", chat: "chat", "local-llm": "local", settings: "settings",
+    home: "home", chat: "chat", "local-llm": "local", settings: "settings", "ai-health": "health",
   };
 
   const repoName = $derived(

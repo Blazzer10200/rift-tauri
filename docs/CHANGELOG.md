@@ -2,6 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.29.0 — AI Health: a coach for your Claude plan
+
+> New workspace tab (sidebar, shortcut **5**). Most apps show you a usage bar; AI Health *coaches* you. It reads how you actually use Claude through Rift, then asks **your own Claude** — your subscription, your private data — for a few plain-English ways to get more out of your plan. Built for newcomers: no jargon, no dashboards to decode, just "here's what to change and why."
+
+- **See where it all goes.** Your plan limits (5-hour + weekly windows with reset times), all-time usage (conversations, messages, tool calls, est. spend, day streak, per-model split), and a live this-session readout — all on one screen, no scrolling.
+- **"Analyze my usage" — advice from your own Claude, not a canned script.** One tap spawns a private, off-the-record reasoning pass over your setup + usage. It comes back with a few ranked suggestions (high/medium/low impact), each grounded in *your* actual numbers — not generic tips. Because it's your subscription doing the thinking, the advice adapts to your plan tier, your models, and how you work.
+- **One-tap apply, fully undoable.** When a suggestion maps to a Rift setting (default effort, default model, per-turn spend cap), the card shows the exact before→after ("No cap → $2.00/turn") and an Apply button. Tap it and Rift tunes itself; an Undo sits right there if you change your mind. Behavior tips that don't map to a single switch just explain themselves. **Nothing changes until you choose** — and it only ever touches Rift's own settings, never your global Claude config.
+- **Your current setup, at a glance.** A small panel shows the live knobs AI Health can tune, so the advice always has something concrete to point at.
+- **A friendly wait.** The first analysis can take up to a minute (it warms up your Claude); an animated card walks you through what it's doing instead of leaving you staring at a spinner.
+
 ## v0.28.0 — Top-to-bottom hardening pass (quieter, safer, leak-free)
 
 > No new features — this is a full front-to-back audit and fix release. A multi-wave, multi-agent review swept the whole app (145 confirmed findings across two waves) and every fix landed here: tighter security, fewer ways to leak memory over a long session, and a pile of subtle correctness bugs squashed. Nothing you do changes; it just holds up better the longer you run it.
