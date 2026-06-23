@@ -137,7 +137,7 @@ export async function send(store: AssistantStore, prompt: string) {
     doneAt: null,
     endKind: null,
   };
-  store.telemetry.turns.push(turnRecord);
+  store.telemetry.pushTurn(turnRecord);
   tab.currentTurnRecord = turnRecord;
   // Track for /retry and Up-arrow recall. De-dupe consecutive identicals.
   if (tab.promptHistory[tab.promptHistory.length - 1] !== trimmed) {

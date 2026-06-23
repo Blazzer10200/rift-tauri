@@ -135,7 +135,9 @@ class LocalLlmStore {
     this.detecting = true;
     try {
       await this.saveBaseUrl();
-      this.models = await invoke<string[]>("assistant_list_local_models");
+      // Cap the list — a hostile/misconfigured endpoint could return thousands
+      // of names and balloon the picker DOM.
+      this.models = (await invoke<string[]>("assistant_list_local_models")).slice(0, 100);
       if (!this.model.trim() && this.models.length === 1) {
         this.model = this.models[0];
         await this.saveModel().catch(() => {});

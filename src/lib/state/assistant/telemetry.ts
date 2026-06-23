@@ -19,8 +19,23 @@ export class SessionTelemetry {
    *  workspace changes, session-lost recoveries, etc. Cheap to capture. */
   events: { ts: number; kind: string; detail?: unknown }[] = [];
 
+  /** Ring caps — a long-lived session (days open) would otherwise grow
+   *  turns[]/events[] unbounded until /diag-clear. Drop oldest on overflow. */
+  private static readonly MAX_TURNS = 500;
+  private static readonly MAX_EVENTS = 2000;
+
+  pushTurn(t: TurnRecord) {
+    this.turns.push(t);
+    if (this.turns.length > SessionTelemetry.MAX_TURNS) {
+      this.turns.splice(0, this.turns.length - SessionTelemetry.MAX_TURNS);
+    }
+  }
+
   event(kind: string, detail?: unknown) {
     this.events.push({ ts: Date.now(), kind, detail });
+    if (this.events.length > SessionTelemetry.MAX_EVENTS) {
+      this.events.splice(0, this.events.length - SessionTelemetry.MAX_EVENTS);
+    }
   }
 
   /** JSON snapshot for /diag clipboard export. */
