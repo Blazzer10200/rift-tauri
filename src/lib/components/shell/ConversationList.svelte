@@ -184,6 +184,8 @@
     void assistant.deleteConversation(id).catch(console.error);
   }
 
+  $effect(() => () => { if (hoverTimer) clearTimeout(hoverTimer); });
+
   $effect(() => {
     if (menuId === null) return;
     const onDoc = () => closeMenu();

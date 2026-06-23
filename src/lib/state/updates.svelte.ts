@@ -99,6 +99,9 @@ class UpdateStore {
   /** Download progress 0..100, streamed from Velopack via `update-progress`. */
   progress = $state(0);
   dialogOpen = $state(false);
+  /** True while a repair() drives the shared download() chain — lets the
+   *  failure toast distinguish "Repair failed" from a normal update failure. */
+  private repairing = false;
   snoozed = $state<Snooze | null>(loadSnooze());
   /** Wakes the pill when an active snooze expires mid-session. */
   private snoozeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -271,7 +274,7 @@ class UpdateStore {
       this.dialogOpen = true;
       toast.push({
         severity: "danger",
-        title: "Update couldn't install",
+        title: this.repairing ? "Repair couldn't finish" : "Update couldn't install",
         detail: String(e),
         sticky: true,
         action: { label: "Get it on GitHub", onClick: () => void this.openReleasePage() },
@@ -303,7 +306,12 @@ class UpdateStore {
       this.info = { ...res, releaseUrl: `${RELEASES_REPO_URL}/releases/tag/v${res.version}` };
       this.state = "available";
       this.dialogOpen = true;
-      await this.download();
+      this.repairing = true;
+      try {
+        await this.download();
+      } finally {
+        this.repairing = false;
+      }
     } catch (e) {
       this.state = "error";
       this.downloadError = String(e);

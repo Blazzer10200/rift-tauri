@@ -3,6 +3,7 @@
   // card; StreamTurn never did, so mcp__rift__ask_user silently fell through to a
   // dead WorkLine in stream mode — the question never rendered. This restores the
   // full interactive surface, reusing the same store binding/submit API.
+  import { untrack } from "svelte";
   import { CheckCircle2, Circle, Square, Loader2, MessageCircleQuestion, Check } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { parseAskUserResult, type StreamTool } from "./streamModel";
@@ -36,10 +37,13 @@
   let askMultiSet = $state<Set<number>[]>([]);
   let askOtherText = $state<string[]>([]);
   $effect(() => {
-    if (askQuestions.length === askSingleIdx.length) return;
-    askSingleIdx = askQuestions.map(() => -2);
-    askMultiSet = askQuestions.map(() => new Set());
-    askOtherText = askQuestions.map(() => "");
+    const n = askQuestions.length;
+    untrack(() => {
+      if (n === askSingleIdx.length) return;
+      askSingleIdx = askQuestions.map(() => -2);
+      askMultiSet = askQuestions.map(() => new Set());
+      askOtherText = askQuestions.map(() => "");
+    });
   });
 
   let askSubmitting = $state(false);

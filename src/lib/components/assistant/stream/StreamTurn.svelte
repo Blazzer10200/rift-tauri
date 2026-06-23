@@ -87,10 +87,9 @@
     const t = assistant.activity.turnStartedAt;
     return streaming && t != null && now > 0 ? Math.max(0, Math.round((now - t) / 1000)) : null;
   });
-  const liveTokens = $derived.by(() => {
-    void now;
-    return streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null;
-  });
+  const liveTokens = $derived.by(() =>
+    streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null,
+  );
 
   // Live footer verb: a pending tool drives the real action word ("Reading X");
   // with no tool in flight (e.g. the model is thinking before any tool call) we
