@@ -208,6 +208,7 @@ pub fn run() {
             commands::assistant_answer_ask_user,
             commands::assistant_answer_permission,
             commands::assistant_list_conversations,
+            commands::assistant_stats,
             commands::assistant_load_conversation,
             commands::assistant_session_cwd,
             commands::assistant_export_save,

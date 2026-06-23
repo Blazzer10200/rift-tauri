@@ -2,10 +2,11 @@
   import {
     Sparkles, FolderOpen,
     ExternalLink, X, Folder, FolderGit2, GitBranch, ChevronRight, ChevronDown,
-    Compass, MessageSquare, Shield, Zap,
+    Compass, MessageSquare, Shield, Zap, BarChart3,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
+  import StatsPanel from "$lib/components/home/StatsPanel.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -82,6 +83,9 @@
 
   // Warm-home "New to Rift?" collapsible orientation footer (spec NewToRift).
   let newToRiftOpen = $state(false);
+
+  // Activity stats overlay — opens the (previously-orphaned) usage dashboard.
+  let statsOpen = $state(false);
 
   // Resume-tiles — top recent conversations excluding the current empty tab.
   // Curate, don't dump: a 1-turn convo (≤2 messages) is almost always a
@@ -160,6 +164,9 @@
           </span>
           <button class="greet-switch" type="button" onclick={() => void assistant.pickTabFolder(tabId)}>
             <Folder size={13} /> Switch folder
+          </button>
+          <button class="greet-switch" type="button" onclick={() => (statsOpen = true)} use:tooltip={"Your activity — usage stats"}>
+            <BarChart3 size={13} /> Activity
           </button>
         </div>
       </div>
@@ -295,6 +302,10 @@
         Scoped to the folder you open — review every change before it's committed
       </div>
     </div>
+  {/if}
+
+  {#if statsOpen}
+    <StatsPanel onclose={() => (statsOpen = false)} />
   {/if}
 </div>
 
