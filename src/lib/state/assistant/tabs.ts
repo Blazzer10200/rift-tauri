@@ -154,8 +154,15 @@ function assignFocusedPane(host: TabsHost, tabId: string | null) {
  *  - paneIdx === panes.length is a sentinel meaning "drop in a new pane at
  *    the end" — auto-adds (cap-aware) and assigns. */
 export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) {
-  if (!host.openTabs.includes(tabId)) return;
   if (paneIdx < 0) return;
+  // Drag-source can be the conversation list, where the convo may not be open
+  // yet — admit it by pushing into openTabs first (mirrors openTab's insert), so
+  // the load-on-drop path below hydrates it. A tab neither open nor on disk is
+  // rejected.
+  if (!host.openTabs.includes(tabId)) {
+    if (!host.conversations.some((c) => c.id === tabId)) return;
+    host.openTabs = [...host.openTabs, tabId];
+  }
 
   if (host.panes.length === 1) {
     // Single-pane → drop on a half = enter split. The half-detect passes

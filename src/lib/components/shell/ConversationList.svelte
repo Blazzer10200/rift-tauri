@@ -130,6 +130,23 @@
     void assistant.openTab(id).catch(console.error);
   }
 
+  // ── drag a conversation into a pane ──────────────────────────────────
+  // Sets assistant.draggingTabId so AssistantPane's drop targets light up;
+  // dropTabIntoPane opens the convo if it isn't already a tab. Switch to the
+  // chat view on drop-start so the panes are actually visible to drop onto.
+  function onRowDragStart(e: DragEvent, id: string) {
+    if (renaming) { e.preventDefault(); return; }
+    assistant.draggingTabId = id;
+    workspace.setActive("chat");
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", id); // some engines need a payload to start a drag
+    }
+  }
+  function onRowDragEnd() {
+    assistant.draggingTabId = null;
+  }
+
   // ── row menu ─────────────────────────────────────────────────────────
   let menuId = $state<string | null>(null);
   let menuPos = $state({ x: 0, y: 0 });
@@ -223,6 +240,9 @@
         class:menu-open={menuId === c.id}
         role="button"
         tabindex="0"
+        draggable={renaming === c.id ? "false" : "true"}
+        ondragstart={(e) => onRowDragStart(e, c.id)}
+        ondragend={onRowDragEnd}
         onclick={() => open(c.id)}
         onkeydown={(e) => { if (e.key === "Enter") open(c.id); }}
         onmouseenter={(e) => onRowEnter(e, c)}
