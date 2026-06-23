@@ -627,7 +627,11 @@ const server = http.createServer(async (req, res) => {
         const target = urlObj.searchParams.get('target') || body.target || 'main';
         const query = Object.fromEntries(urlObj.searchParams);
         const result = await handler(body, target, query);
-        res.statusCode = result?.error ? 500 : 200;
+        // Structured `{error}` from a handler is an EXPECTED outcome the client is
+        // meant to read (e.g. "selector not found") — return it as 200 so clients
+        // using `curl -f` still receive the body. Genuine crashes go through the
+        // catch below as 500.
+        res.statusCode = 200;
         res.end(JSON.stringify(result));
     } catch (e) {
         res.statusCode = 500;

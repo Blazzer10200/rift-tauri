@@ -20,6 +20,7 @@
 #   bash scripts/cdp/c.sh shot-sel ".tabs-rail"          # clip to a selector
 #   bash scripts/cdp/c.sh shot-sel ".chat" jpeg 65
 #   bash scripts/cdp/c.sh batch '<json>'                 # raw batch body
+#   bash scripts/cdp/c.sh reload                          # hard cache-busting reload (stuck HMR)
 #   bash scripts/cdp/c.sh shutdown
 #
 # FAST PATH — to verify a UI change in 2 turns instead of 5:
@@ -46,12 +47,26 @@ qs=""; [ -n "$TARGET" ] && qs="?target=$TARGET"
 # jq --arg/--argjson handle arbitrary quotes/newlines in JS expressions safely.
 command -v jq >/dev/null 2>&1 || { echo "c.sh requires jq (winget install jqlang.jq)" >&2; exit 3; }
 
-# POST a JSON body to $API/$path$qs and stream the response.
-post() { curl -fsS -X POST "$API/$1$qs" -H 'Content-Type: application/json' --data "$2"; }
+# GET/POST helpers. We deliberately DON'T use `curl -f`: on an HTTP error `-f`
+# discards the response body and prints only "curl: (22) ... 500", swallowing the
+# server's structured `{error}` message (the #1 "tool silently failed" cause). The
+# server now returns expected errors as 200; for a genuine 500 we still want the
+# JSON body, so we capture it and let the caller's jq surface `.error`. A real
+# transport failure (server down) yields empty output + a clear stderr note.
+http_get() {
+  local out; out="$(curl -sS "$1" 2>/dev/null)" || true
+  if [ -z "$out" ]; then echo "c.sh: no response from $API (is 'npm run cdp:serve' running?)" >&2; return 7; fi
+  printf '%s' "$out"
+}
+post() {
+  local out; out="$(curl -sS -X POST "$API/$1$qs" -H 'Content-Type: application/json' --data "$2" 2>/dev/null)" || true
+  if [ -z "$out" ]; then echo "c.sh: no response from $API/$1 (is 'npm run cdp:serve' running?)" >&2; return 7; fi
+  printf '%s' "$out"
+}
 
 case "$cmd" in
   health|state|page|targets)
-    curl -fsS "$API/$cmd$qs"
+    http_get "$API/$cmd$qs"
     ;;
   console)
     # console [level] [limit] [clear]  — drains nothing unless clear=1 given.
@@ -63,7 +78,7 @@ case "$cmd" in
     [ -n "$lvl" ] && { cq="$cq${sep}level=$lvl"; sep="&"; }
     [ -n "$lim" ] && { cq="$cq${sep}limit=$lim"; sep="&"; }
     [ -n "$clr" ] && { cq="$cq${sep}clear=$clr"; sep="&"; }
-    curl -fsS "$API/console$cq"
+    http_get "$API/console$cq"
     ;;
   look)
     # The verify primitive: page/assistant state + console errors + a screenshot,
@@ -145,11 +160,15 @@ case "$cmd" in
     k="$1"; mods="${2:-0}"
     post key "$(jq -nc --arg k "$k" --argjson m "${mods:-0}" '{key:$k,modifiers:$m}')"
     ;;
+  reload)
+    # Hard cache-busting reload — use when HMR wedges on a stale transform.
+    post reload "{}"
+    ;;
   shutdown)
-    curl -fsS -X POST "$API/shutdown"
+    curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|shutdown} ..." >&2
     exit 2
     ;;
 esac

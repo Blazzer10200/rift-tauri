@@ -179,29 +179,13 @@
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
   }
 
-  // ── Activity (sub-agent) dock resize ──────────────────────────────────────
-  // Mirrors the browser-dock drag, measured from the same workbench right edge.
-  let activityDragging = $state(false);
-  function onActivityPointerDown(e: PointerEvent) {
-    e.preventDefault();
-    activityDragging = true;
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  }
-  function onActivityPointerMove(e: PointerEvent) {
-    if (!activityDragging || !workbenchEl) return;
-    const rect = workbenchEl.getBoundingClientRect();
-    activityDock.setWidth(rect.right - e.clientX);
-  }
-  function onActivityPointerUp(e: PointerEvent) {
-    if (!activityDragging) return;
-    activityDragging = false;
-    try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
-  }
+  // The sub-agent activity float is a top-right overlay (no column, no resize) —
+  // see the .subagent-float block below + SubAgentDock's card/pill render.
 
 </script>
 
 <div class="assistant">
-  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging || activityDragging}>
+  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging}>
   <div class="layout">
     {#if assistant.splitActive}
       <div
@@ -277,25 +261,13 @@
     </div>
   {/if}
 
-  {#if activityDock.enabled && activityDock.open}
-    <div class="dock-wrap" transition:dockSlide>
-      <div class="dock-inner" style="width: {activityDock.width + 3}px">
-        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-        <div
-          class="dock-divider"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize sub-agent panel"
-          tabindex="0"
-          use:tooltip={"Drag to resize the sub-agent panel"}
-          onpointerdown={onActivityPointerDown}
-          onpointermove={onActivityPointerMove}
-          onpointerup={onActivityPointerUp}
-          onpointercancel={onActivityPointerUp}
-        ><span class="divider-grip" aria-hidden="true"></span></div>
-        <SubAgentDock />
-      </div>
+  <!-- Sub-agent activity: a floating top-right overlay (card ↔ idle pill), NOT a
+       reserved column. Anchored to .workbench (position:relative); SubAgentDock
+       renders the card when expanded, the pill when collapsed, nothing when idle
+       + empty. -->
+  {#if activityDock.enabled}
+    <div class="subagent-float" style="right: {(browserDock.open ? browserDock.width + 6 : 0) + 12}px">
+      <SubAgentDock />
     </div>
   {/if}
 
@@ -352,6 +324,21 @@
     overflow: hidden;
     border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
   }
+
+  /* Sub-agent float — anchored to the workbench's top-right, above the chat. It
+     overlays (doesn't reserve a column), so the conversation keeps full width.
+     pointer-events:none on the wrapper lets clicks pass through the empty gutter;
+     the card/pill themselves re-enable it. Sits left of the browser dock when
+     that's open via a CSS var the dock sets, falling back to a small inset. */
+  /* top clears the split-pane header row (≈34px tall from the workbench top) so
+     the card/pill never covers a pane's title; in single-pane mode there's no
+     header, so this just reads as comfortable top inset. */
+  .subagent-float {
+    position: absolute; top: 38px; z-index: 20;
+    display: flex; justify-content: flex-end;
+    pointer-events: none;
+  }
+  .subagent-float > :global(*) { pointer-events: auto; }
   .dock-divider {
     position: relative;
     flex: 0 0 3px;

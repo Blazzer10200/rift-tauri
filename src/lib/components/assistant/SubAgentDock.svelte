@@ -9,7 +9,8 @@
   import { captionForTool } from "./toolCaption";
   import { tooltip } from "$lib/actions/tooltip";
   import Markdown from "./Markdown.svelte";
-  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, X } from "lucide-svelte";
+  import { scale } from "svelte/transition";
+  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, Minus } from "lucide-svelte";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -74,7 +75,34 @@
     blocks.filter((b) => b.type === "tool" && b.status !== "pending").length;
 </script>
 
-<div class="subagent-dock" role="complementary" aria-label="Sub-agent activity" onpointerenter={() => activityDock.notePointerEnter()}>
+{#if !activityDock.open}
+  <!-- Collapsed: a compact live pill anchored top-right. Click to expand the
+       card. Hidden entirely when there's nothing to show (idle + no spawns) so
+       a fresh chat stays clean. -->
+  {#if spawns.length > 0}
+    <button
+      class="subagent-pill"
+      class:live={runningCount > 0}
+      transition:scale={{ duration: reducedMotion ? 0 : 160, start: 0.85 }}
+      onclick={() => activityDock.toggle()}
+      onpointerenter={() => activityDock.notePointerEnter()}
+      use:tooltip={runningCount > 0 ? `${runningCount} sub-agent${runningCount === 1 ? "" : "s"} running — click to expand` : "Sub-agent activity — click to expand"}
+      aria-label="Expand sub-agent activity"
+    >
+      <span class="pill-badge">
+        {#if runningCount > 0}<Loader2 size={13} class="spin" />{:else}<Bot size={13} />{/if}
+      </span>
+      {#if runningCount > 0}
+        <span class="pill-live"><span class="live-dot"></span>{runningCount}</span>
+      {:else}
+        <span class="pill-count">{spawns.length}</span>
+      {/if}
+    </button>
+  {/if}
+{:else}
+<div class="subagent-dock" role="complementary" aria-label="Sub-agent activity"
+     transition:scale={{ duration: reducedMotion ? 0 : 180, start: 0.96 }}
+     onpointerenter={() => activityDock.notePointerEnter()}>
   <header class="head">
     <span class="head-badge" class:live={runningCount > 0}><Bot size={15} /></span>
     <span class="head-text">
@@ -86,8 +114,8 @@
       {/if}
     </span>
     {#if spawns.length > 0}<span class="count">{spawns.length}</span>{/if}
-    <button class="close" onclick={() => activityDock.toggle()} use:tooltip={"Close panel"} aria-label="Close sub-agent panel">
-      <X size={15} />
+    <button class="close" onclick={() => activityDock.toggle()} use:tooltip={"Minimize to pill"} aria-label="Minimize sub-agent panel">
+      <Minus size={15} />
     </button>
   </header>
 
@@ -176,15 +204,55 @@
     </div>
   {/if}
 </div>
+{/if}
 
 <style>
+  /* ── Floating card ── a fixed-width top-right overlay (anchored by .subagent-float
+     in AssistantPage), not a full-height column. Rounded, raised, self-scrolling;
+     it floats above the chat instead of reserving a side column. */
   .subagent-dock {
-    flex: 1 1 auto;
-    min-width: 0; min-height: 0;
+    width: 360px; max-width: calc(100vw - 32px);
+    max-height: min(62vh, 560px);
     display: flex; flex-direction: column;
-    background: var(--bg);
-    border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    background: var(--bg-elev-1);
+    border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 12px 40px -12px color-mix(in oklch, var(--shadow, #000) 55%, transparent),
+                0 2px 8px -4px color-mix(in oklch, var(--shadow, #000) 40%, transparent);
     overflow: hidden;
+    backdrop-filter: blur(2px);
+  }
+
+  /* ── Collapsed pill ── the idle/minimized affordance. A small capsule with the
+     bot/spinner badge + live or done count; clicking expands the card. */
+  .subagent-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 11px 0 9px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+    background: color-mix(in oklch, var(--bg-elev-1) 92%, transparent);
+    color: var(--fg-2); cursor: pointer;
+    box-shadow: 0 6px 20px -8px color-mix(in oklch, var(--shadow, #000) 50%, transparent);
+    backdrop-filter: blur(4px);
+    transition: border-color var(--dur-base) var(--ease-soft), box-shadow var(--dur-base) var(--ease-soft),
+                background var(--dur-fast) ease-out, transform var(--dur-fast) var(--ease-soft);
+  }
+  .subagent-pill:hover { background: var(--bg-elev-1); transform: translateY(-1px); }
+  .subagent-pill.live {
+    border-color: color-mix(in oklch, var(--accent) 42%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 16%, transparent),
+                0 6px 22px -8px color-mix(in oklch, var(--accent) 45%, transparent);
+  }
+  .pill-badge { display: grid; place-items: center; color: var(--fg-muted); }
+  .subagent-pill.live .pill-badge { color: var(--accent); }
+  .pill-live {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--fs-xs); font-weight: 650; color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .pill-count {
+    font-size: var(--fs-xs); font-weight: 650; color: var(--fg-muted);
+    font-variant-numeric: tabular-nums;
   }
 
   /* ── Header ── lighter than a bordered toolbar: a soft gradient wash + an
@@ -235,11 +303,11 @@
   }
   .close:hover { background: var(--surface-hover); color: var(--fg); }
 
-  /* ── Empty state ── */
+  /* ── Empty state ── card shrink-wraps content, so give it a stable height
+     rather than flex-filling a (now absent) full-height column. */
   .empty {
-    flex: 1; min-height: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 7px; padding: 28px 24px; text-align: center;
+    gap: 7px; padding: 30px 24px; text-align: center;
     animation: enter var(--dur-base) var(--ease-page);
   }
   .empty-icon {

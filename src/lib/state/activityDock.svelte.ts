@@ -1,28 +1,27 @@
-// Sub-agent live-activity dock. A thin UI-state singleton (kept out of the large
-// AssistantStore) shared by SubAgentDock (the toggle) and AssistantPage (the dock
-// layout + activity sync). It tracks whether the dock is shown and how wide it
-// is; the data lives on the active tab's `agentSpawns`. The dock is SMART: it
-// auto-reveals while sub-agents run and auto-dismisses a few seconds after they
-// all finish — unless the user has manually toggled or moused into it this cycle.
+// Sub-agent live-activity float. A thin UI-state singleton (kept out of the large
+// AssistantStore) shared by SubAgentDock (the float body) and AssistantPage (the
+// activity sync). The float is a top-right overlay card that collapses to a small
+// live pill; `open` now means card-expanded (true) vs. pill-collapsed (false) —
+// NOT mounted vs. unmounted. The data lives on the active tab's `agentSpawns`. The
+// float is SMART: it auto-expands while sub-agents run and auto-collapses to the
+// pill a few seconds after they all finish — unless the user toggled/hovered this
+// cycle.
 
 const OPEN_KEY = "rift.assistant.activityDock.open.v1";
-const WIDTH_KEY = "rift.assistant.activityDock.width.v1";
 const ENABLED_KEY = "rift.assistant.activityDock.enabled.v1";
 
-const MIN_W = 320;
-const MAX_W = 900;
-const DEFAULT_W = 440;
-// Grace window after the last sub-agent finishes before an auto-revealed dock
-// slides away — long enough to glance at the result, short enough to feel tidy.
+// Grace window after the last sub-agent finishes before an auto-expanded card
+// collapses back to the pill — long enough to glance at the result, short enough
+// to feel tidy.
 const DISMISS_MS = 6000;
 
 class ActivityDock {
-  // Master switch (Settings → Chat). When off, the dock never auto-reveals and
-  // its toggle/render are suppressed entirely. Default on. Closing the dock is a
+  // Master switch (Settings → Chat). When off, the float never auto-reveals and
+  // its render is suppressed entirely. Default on. Collapsing to the pill is a
   // per-cycle dismissal (`open`); disabling it is the durable opt-out.
   enabled = $state(true);
+  // true = card expanded · false = collapsed to the idle pill.
   open = $state(false);
-  width = $state(DEFAULT_W);
 
   // Auto-visibility bookkeeping (plain fields — they gate behavior, not render).
   private autoShown = false;   // dock is currently shown BY activity, not the user
@@ -34,8 +33,6 @@ class ActivityDock {
     // Default on — only an explicit "0" disables (absent key = first run = on).
     this.enabled = localStorage.getItem(ENABLED_KEY) !== "0";
     this.open = localStorage.getItem(OPEN_KEY) === "1";
-    const w = Number(localStorage.getItem(WIDTH_KEY));
-    if (Number.isFinite(w) && w >= MIN_W && w <= MAX_W) this.width = w;
   }
 
   /** Master enable/disable (Settings). Disabling tears the dock down immediately
@@ -93,7 +90,7 @@ class ActivityDock {
       }
       return;
     }
-    // All sub-agents finished — schedule the slide-away if WE revealed it.
+    // All sub-agents finished — schedule the collapse-to-pill if WE expanded it.
     if (this.autoShown && !this.userPinned && this.dismissTimer === null) {
       this.dismissTimer = setTimeout(() => {
         this.dismissTimer = null;
@@ -110,11 +107,6 @@ class ActivityDock {
       clearTimeout(this.dismissTimer);
       this.dismissTimer = null;
     }
-  }
-
-  setWidth(w: number) {
-    this.width = Math.max(MIN_W, Math.min(MAX_W, Math.round(w)));
-    try { localStorage.setItem(WIDTH_KEY, String(this.width)); } catch { /* noop */ }
   }
 }
 
