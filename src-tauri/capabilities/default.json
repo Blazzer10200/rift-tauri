@@ -37,7 +37,19 @@
         { "path": "**/*.wsh" },
         { "path": "**/*.msc" },
         { "path": "**/*.cpl" },
-        { "path": "**/*.jar" }
+        { "path": "**/*.jar" },
+        { "path": "**/*.js" },
+        { "path": "**/*.jse" },
+        { "path": "**/*.ws" },
+        { "path": "**/*.hta" },
+        { "path": "**/*.reg" },
+        { "path": "**/*.msp" },
+        { "path": "**/*.lnk" },
+        { "path": "**/*.ps1" },
+        { "path": "**/*.ps1xml" },
+        { "path": "**/*.gadget" },
+        { "path": "**/*.application" },
+        { "path": "**/*.appref-ms" }
       ]
     },
     {
