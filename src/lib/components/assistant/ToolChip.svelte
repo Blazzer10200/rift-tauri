@@ -474,6 +474,18 @@
     typeof tool.input?.prompt === "string" ? (tool.input.prompt as string) : null,
   );
 
+  // tool.result for an Agent block is model-controlled subagent output with no
+  // size bound — a runaway/hostile agent returning megabytes would freeze the UI
+  // on the synchronous marked.parse + DOMPurify pass. Cap before render.
+  const AGENT_RESULT_CAP = 20000;
+  const agentResult = $derived.by(() => {
+    const r = tool.result;
+    if (!r) return null;
+    return r.length > AGENT_RESULT_CAP
+      ? { text: r.slice(0, AGENT_RESULT_CAP), truncated: r.length - AGENT_RESULT_CAP }
+      : { text: r, truncated: 0 };
+  });
+
   // ── TodoWrite checklist data ─────────────────────────────────────────
   type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" };
   const todoItems = $derived.by<TodoItem[]>(() => {
@@ -599,8 +611,11 @@
         </div>
       {:else if tool.isError}
         <pre class="result error">{tool.result ?? ""}</pre>
-      {:else if tool.result}
-        <div class="agent-result"><Markdown text={tool.result} /></div>
+      {:else if agentResult}
+        <div class="agent-result"><Markdown text={agentResult.text} /></div>
+        {#if agentResult.truncated > 0}
+          <div class="agent-field-label">+{agentResult.truncated.toLocaleString()} more chars truncated</div>
+        {/if}
       {/if}
     </div>
   {:else if isTodoWrite && expanded}

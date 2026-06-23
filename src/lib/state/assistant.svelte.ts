@@ -1134,13 +1134,14 @@ class AssistantStore {
     const decision = allow
       ? { behavior: "allow" }
       : { behavior: "deny", message: "User declined this action." };
-    try {
-      await invoke("assistant_answer_permission", { requestId: info.requestId, decision });
-    } finally {
-      const next = new Map(tab.permissionPrompts);
-      next.delete(toolUseId);
-      tab.permissionPrompts = next;
-    }
+    // RR8 (same as submitAskUserAnswer): pop the binding ONLY on success. A
+    // `finally` would delete it even when invoke threw, flipping the chip to
+    // "answered" while the backend oneshot stays unresolved — leaving the CLI
+    // gate hung with no retry path. Preserve it on error so Allow/Deny stays live.
+    await invoke("assistant_answer_permission", { requestId: info.requestId, decision });
+    const next = new Map(tab.permissionPrompts);
+    next.delete(toolUseId);
+    tab.permissionPrompts = next;
   }
 
 
