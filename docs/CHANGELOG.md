@@ -2,16 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.27.0 — Faster replies, a sidebar that stays put, and real split-pane multitasking
+## v0.27.1 — Activity stats, drag-a-chat-into-a-pane, and a dead-code cleanup
 
-> A batch aimed squarely at the day-to-day annoyances: Sonnet feeling sluggish, the chat list reshuffling under your cursor, and split-view being half-finished. Each chat pane is now its own world — you can run two (or four) projects side by side at once.
+> A small follow-up to v0.27.0. Two features that were built but never wired up are now live, plus an unreachable old home screen got removed.
 
-- **Replies start fast on every model, especially Sonnet.** "Smart" (the default) used to make the model think hard before showing a single word, which on Sonnet looked like a frozen window for 10–20s. It now uses a balanced reasoning level that streams almost immediately — Anthropic's own recommended setting for interactive use. "Deep" still does the heavy thinking when you ask for it. Also removed an auto-downshift that was secretly forcing a ~1.7s cold restart on simple turns.
-- **Your chat list stops jumping around.** Opening or clicking between conversations no longer reshuffles the sidebar — each chat holds a fixed position based on real activity, not on the bookkeeping save that fired every time you switched tabs. Spam-click through your chats all you want; the order stays put.
-- **Split view, finished.** There's now a "Split editor" button in the top bar (it was keyboard-only before, `Ctrl+\`), panes no longer overlap or collide when you open three or four, and **each pane can run in a different project folder at the same time** — click the folder chip in a pane's header to point it anywhere. Two projects, side by side, each with its own conversation, context meter, and cost.
-- **Cleaner work rows + calmer waiting.** Collapsed tool rows name the files (e.g. "Read a.ts, b.ts") and skip filler narration; when a turn is parked on *your* answer (a multiple-choice prompt) the footer says so calmly instead of running a fake "working…" clock.
+- **See your activity at a glance.** A new **Activity** button on the home welcome opens a stats panel — total messages, sessions, tool calls, and spend, a current/best streak, your peak hour, a 12-week activity heatmap, and a per-model breakdown. Toggle between all-time, last 30 days, and last 7 days.
+- **Drag a conversation straight into a split pane.** Grab any chat in the sidebar and drop it onto the editor to open it in a split — drop on the left or right half to choose the side. The drop target already existed; now there's something to drag into it.
+- **Removed a leftover home screen** that was no longer reachable (the "Home is a verb" redesign routes Home to a fresh empty chat). No visible change — the Home button works exactly as before.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.27.0** — Faster replies on every model (Smart → balanced reasoning that streams immediately, especially on Sonnet; retired the auto-downshift cold-restart), a sidebar that stops reshuffling on open/click, finished split-view (top-bar "Split editor" button, no overlap at 3–4 panes, per-pane project folders), cleaner collapsed tool rows + a calm "waiting for you" footer on ask_user.
 
 - **v0.26.3** — Warm CLI process now idles for 30 minutes instead of 5, so it survives normal read-and-think pauses (prod log showed ~60% of turns were re-paying a ~1.7s cold start after the 5-minute eviction; real think-time runs to ~7.5 min at p90). Memory stays bounded — surplus idle processes are still reclaimed quickly.
 

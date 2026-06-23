@@ -4,7 +4,6 @@ import {
   Home as HomeIcon, MessageSquare,
   Activity, Settings as SettingsIcon, Cpu,
 } from "lucide-svelte";
-import HomePage from "../home/HomePage.svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
 import LocalLlmPage from "../local-llm/LocalLlmPage.svelte";
@@ -31,7 +30,11 @@ export type WorkspaceDef = {
 };
 
 export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
-  home:        { component: HomePage,          title: "Home",        icon: HomeIcon,      kbd: "1" },
+  // "Home is a verb" (redesign §6): the Home nav button routes via goHome() to
+  // the empty Chat surface — this entry is never mounted (home never enters
+  // everOpened), so it points at AssistantPage purely to keep WORKSPACES total
+  // over WorkspaceId and stay crash-safe if any future path mounts it.
+  home:        { component: AssistantPage,     title: "Home",        icon: HomeIcon,      kbd: "1" },
   chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "2" },
   settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "3" },
   "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "4" },
