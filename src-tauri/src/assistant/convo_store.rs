@@ -609,3 +609,65 @@ pub fn cleanup_retired_jsonls() -> usize {
     }
     deleted
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convo_path_rejects_traversal_and_separators() {
+        // The charset/length guard must fire before any path join, so these
+        // never reach disk. Path-traversal + separator + null-ish inputs all
+        // rejected; only the hex/uuid-dash shape is accepted.
+        for bad in [
+            "",
+            "..",
+            "../etc/passwd",
+            "a/b",
+            "a\\b",
+            "id.json",       // dot not allowed
+            "id with space",
+            "héllo",          // non-ascii
+            &"a".repeat(65),  // over the 64-char cap
+        ] {
+            assert!(convo_path(bad).is_err(), "should reject {bad:?}");
+        }
+    }
+
+    #[test]
+    fn convo_path_accepts_uuid_shape_and_lands_in_dir() {
+        let id = "550e8400-e29b-41d4-a716-446655440000";
+        let p = convo_path(id).expect("valid uuid id accepted");
+        // Confinement: the resolved file is exactly <id>.json inside the
+        // conversations dir — no traversal out of it.
+        assert_eq!(
+            p.file_name().and_then(|s| s.to_str()),
+            Some("550e8400-e29b-41d4-a716-446655440000.json")
+        );
+        assert_eq!(p.parent(), Some(conversations_dir().unwrap().as_path()));
+    }
+
+    #[test]
+    fn session_cwd_path_applies_same_guard() {
+        assert!(session_cwd_path("../escape").is_err());
+        assert!(session_cwd_path("a/b").is_err());
+        assert!(session_cwd_path(&"x".repeat(65)).is_err());
+        // A clean uuid passes the guard.
+        assert!(session_cwd_path("550e8400-e29b-41d4-a716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn is_valid_session_id_enforces_uuid_shape() {
+        // Canonical 8-4-4-4-12 hex, both cases.
+        assert!(is_valid_session_id("550e8400-e29b-41d4-a716-446655440000"));
+        assert!(is_valid_session_id("550E8400-E29B-41D4-A716-446655440000"));
+        // Wrong length, missing/displaced hyphens, non-hex, traversal bytes.
+        assert!(!is_valid_session_id(""));
+        assert!(!is_valid_session_id("550e8400e29b41d4a716446655440000")); // no hyphens
+        assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-44665544000")); // 35 chars
+        assert!(!is_valid_session_id("550e8400-e29b-41d4-a716-4466554400000")); // 37 chars
+        assert!(!is_valid_session_id("550e8400xe29bx41d4xa716x446655440000")); // hyphens→x
+        assert!(!is_valid_session_id("g50e8400-e29b-41d4-a716-446655440000")); // non-hex
+        assert!(!is_valid_session_id("../0e8400-e29b-41d4-a716-446655440000")); // traversal
+    }
+}

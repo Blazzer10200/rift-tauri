@@ -146,6 +146,22 @@ describe("streamModel — edit diff counts + input passthrough", () => {
     expect(t.del).toBeNull();
     expect(t.input ?? null).toBeNull();
   });
+
+  it("diff counts are stable across re-renders of the same tool id (memo)", () => {
+    // messageToTurn re-runs on every stream frame; the per-id memo must return
+    // identical counts each time (correctness preserved, not just cached).
+    const edit = {
+      type: "tool", id: "fixed-edit-id", name: "Edit",
+      input: { file_path: "/a/foo.ts", old_string: "a\nb\nc", new_string: "a\nX\nc\nd" },
+      result: null, isError: false, status: "done",
+    };
+    const first = messageToTurn(msg([edit])).blocks.find((b) => b.type === "tool")!.tool;
+    const second = messageToTurn(msg([edit])).blocks.find((b) => b.type === "tool")!.tool;
+    expect(first.add).toBe(second.add);
+    expect(first.del).toBe(second.del);
+    expect(first.add).toBe(2); // X + d
+    expect(first.del).toBe(1); // b
+  });
 });
 
 // The answered-state parser mirrors the EXACT backend format
