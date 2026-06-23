@@ -409,7 +409,10 @@ export function parseAskUserResult(result: string | null | undefined): AnsweredP
   // Each block starts with "Q: "; subsequent blocks are delimited by "\nQ: ".
   const blocks = result.split(/\nQ: /).map((b, i) => (i === 0 ? b.replace(/^Q: /, "") : b));
   for (const block of blocks) {
-    const m = block.match(/^([\s\S]*?)\nA: ([\s\S]*)$/);
+    // Greedy question group so a model-supplied "\nA: " inside the question
+    // body can't truncate it + forge the answer — the real answer is the LAST
+    // "\nA: " segment (backend appends it last).
+    const m = block.match(/^([\s\S]*)\nA: ([\s\S]*)$/);
     if (!m) continue;
     const question = m[1].trim();
     const answers = m[2].split(", ").map((s) => s.trim()).filter(Boolean);

@@ -706,6 +706,10 @@ class AssistantStore {
   // push happens until after the first await), double-registering every
   // listener → every stream line applied twice.
   private initPromise: Promise<void> | null = null;
+  // B1: destroy() bumps this so an initInner() still awaiting its listen() calls
+  // can detect it was torn down mid-flight and bail before re-pushing a second
+  // set of listeners (the unlistens-length guard alone races across destroy()).
+  private initGen = 0;
   // #177: keep the beforeunload listener reachable for removal in destroy().
   // Anonymous closures used to leak across HMR cycles.
   private beforeUnloadHandler: (() => void) | null = null;
@@ -830,6 +834,7 @@ class AssistantStore {
 
   private async initInner() {
     if (this.unlistens.length > 0) return;
+    const gen = this.initGen;
     // Backend tags every stream/done/error event w/ the originating CLI
     // session_id (S104). We route by session_id to the right TabState so
     // background tabs can keep painting concurrently with the foreground.
@@ -930,6 +935,14 @@ class AssistantStore {
         (e) => this.onPermissionRequest(e.payload),
       ),
     );
+    // B1: a destroy() that landed while the listen() calls above were awaiting
+    // already emptied unlistens[] — our just-registered handlers are now
+    // orphaned (a re-init would stack a second set). Tear them down and bail.
+    if (gen !== this.initGen) {
+      for (const u of this.unlistens) { try { u(); } catch { /* already gone */ } }
+      this.unlistens = [];
+      return;
+    }
 
     await this.refreshConversations();
     await this.refreshWorkspace();
@@ -960,6 +973,7 @@ class AssistantStore {
     }
     this.unlistens = [];
     this.initPromise = null;
+    this.initGen++;
     if (this.beforeUnloadHandler && typeof window !== "undefined") {
       window.removeEventListener("beforeunload", this.beforeUnloadHandler);
       this.beforeUnloadHandler = null;

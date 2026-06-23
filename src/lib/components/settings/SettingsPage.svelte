@@ -202,19 +202,28 @@
       asstApiKeyDraft = "";
       asstApiKeyVisible = false;
     } catch (e) {
-      asstApiKeyMsg = `Failed: ${e}`;
+      console.error("setApiKey failed", e);
+      asstApiKeyMsg = "Couldn't save the API key. See logs for details.";
     } finally {
       asstApiKeySaving = false;
     }
   }
   async function saveAsstMaxBudget() {
+    // B11: a typed 0/negative is invalid input, not a clear — the Clear button
+    // is the explicit no-cap path (sets draft to null). Reject it loudly
+    // instead of silently coercing to null + a misleading "Cleared" success.
+    if (asstMaxBudgetDraft !== null && !(asstMaxBudgetDraft > 0)) {
+      asstMaxBudgetMsg = "Enter an amount above 0, or use Clear to remove the cap.";
+      return;
+    }
     asstMaxBudgetSaving = true;
     asstMaxBudgetMsg = null;
     try {
       await assistantStore.setMaxBudgetUsd(asstMaxBudgetDraft);
       asstMaxBudgetMsg = assistantStore.maxBudgetUsd != null ? `Saved: ${assistantStore.maxBudgetUsd.toFixed(2)} cap.` : "Cleared (no cap).";
     } catch (e) {
-      asstMaxBudgetMsg = `Failed: ${e}`;
+      console.error("setMaxBudgetUsd failed", e);
+      asstMaxBudgetMsg = "Couldn't save the budget cap. See logs for details.";
     } finally {
       asstMaxBudgetSaving = false;
     }

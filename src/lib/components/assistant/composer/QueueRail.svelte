@@ -84,8 +84,12 @@
   // turn (detected as a steer-count drop while streaming).
   let pulseKey = $state(0);
   let prevSteerCount = 0;
+  let prevTabId: string | null = null;
   $effect(() => {
     const n = queue.filter((q) => q.mode === "steer").length;
+    // Reset the baseline on tab switch so the prior tab's steer count can't
+    // read as a "drop" and fire a spurious pulse on the newly-shown tab.
+    if (tabId !== prevTabId) { prevTabId = tabId; prevSteerCount = n; return; }
     if (n < prevSteerCount && streaming) pulseKey++;
     prevSteerCount = n;
   });

@@ -196,6 +196,7 @@
   // position once the layout settles (mirrors the comp `chat.jsx` FLIP).
   let flipFirst: DOMRect | null = null;
   let prevEmpty: boolean | null = null;
+  let flipPrevTabId: string | null = null;
 
   function handleSend(text: string) {
     if (showEmpty && composerSlotEl) flipFirst = composerSlotEl.getBoundingClientRect();
@@ -231,6 +232,14 @@
 
   $effect(() => {
     const empty = showEmpty;
+    // Re-baseline on tab switch so the previous tab's empty-state can't read as
+    // a home→convo transition and fire a spurious FLIP on the newly-shown tab.
+    if (tabId !== flipPrevTabId) {
+      flipPrevTabId = tabId;
+      prevEmpty = empty;
+      flipFirst = null;
+      return;
+    }
     const was = prevEmpty;
     prevEmpty = empty;
     if (was === null || was === empty) return;

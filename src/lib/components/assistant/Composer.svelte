@@ -867,6 +867,9 @@
         pickSlash(slashFiltered[slashIdx]);
         return;
       }
+      // Slash menu open with no match (e.g. "/zzz") — swallow Enter instead of
+      // firing it as a real chat turn.
+      if (slashOpen) return;
       fire();
     }
   }
@@ -1073,7 +1076,7 @@
             stt.cancelPolish();
             resetRecall(); autosize(); refreshMention();
           }}
-          onkeyup={() => refreshMention()}
+          onkeyup={(e) => { if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") refreshMention(); }}
           onclick={refreshMention}
           onfocus={() => { composerFocused = true; }}
           onblur={() => {

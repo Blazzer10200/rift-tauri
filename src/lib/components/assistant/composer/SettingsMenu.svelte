@@ -64,6 +64,10 @@
     // re-position when the panel's height changes (effort slider show/hide, etc.)
     const _h = assistant.thinkingEnabled; const _m = assistant.effectiveModel; void _h; void _m;
     void tick().then(position);
+  });
+  // Mount-once resize listener — kept separate so a reposition-dep change above
+  // doesn't tear down and re-register it every toggle.
+  $effect(() => {
     const onResize = () => position();
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);

@@ -26,7 +26,15 @@
       .finally(() => { loading = false; });
   });
 
-  const now = Date.now();
+  // Reactive so the day-boundary stays correct if the panel is left open past
+  // midnight or the range changes (was a const frozen at mount → stale "today").
+  let now = $state(Date.now());
+  $effect(() => {
+    void range;
+    now = Date.now();
+    const h = setInterval(() => { now = Date.now(); }, 60_000);
+    return () => clearInterval(h);
+  });
   const stats = $derived(filterRange(raw, range, now));
   const totals = $derived(summarize(stats));
   const strk = $derived(streaks(stats, now));

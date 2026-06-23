@@ -188,7 +188,7 @@ export function handleGlobalContextMenu(e: MouseEvent) {
 
   const pre = target?.closest?.("pre");
   if (pre) {
-    const code = (pre.querySelector("code")?.innerText ?? pre.innerText).trimEnd();
+    const code = (pre.querySelector("code")?.textContent ?? pre.textContent ?? "").trimEnd();
     if (code) items.push({ label: "Copy code", icon: SquareCode, action: () => copyText(code) });
   }
 

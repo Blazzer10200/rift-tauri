@@ -83,8 +83,11 @@
       if (!isFileDrag(e)) return;
       e.preventDefault();
       const files = e.dataTransfer?.files;
-      if (workspace.activeId !== "chat" || !assistant.currentConvoId || !files?.length) return;
-      const res = await attachImageFiles(files, (a) => assistant.addAttachment(a));
+      const targetConvoId = assistant.currentConvoId;
+      if (workspace.activeId !== "chat" || !targetConvoId || !files?.length) return;
+      // Capture the drop-time convo so a tab switch mid-await routes the
+      // attachment to the tab the user actually dropped onto.
+      const res = await attachImageFiles(files, (a) => assistant.addAttachment(a, targetConvoId));
       if (res.attached > 0) {
         notify.ok(`${res.attached} image${res.attached === 1 ? "" : "s"} attached`, { detail: "Send to include them in your next message." });
       }
