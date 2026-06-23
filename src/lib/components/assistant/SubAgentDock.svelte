@@ -178,7 +178,7 @@
                         {#if b.result}<span class="tool-chev">{#if openTools.has(b.id)}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}</span>{/if}
                       </button>
                       {#if b.result && openTools.has(b.id)}
-                        <pre class="tool-result mono" transition:slide={{ duration: reducedMotion ? 0 : 160 }}>{b.result}</pre>
+                        <pre class="tool-result mono" transition:slide={{ duration: reducedMotion ? 0 : 160 }}>{b.result.length > 4096 ? b.result.slice(0, 4096) + "\n… (truncated)" : b.result}</pre>
                       {/if}
                     </div>
                   {/if}

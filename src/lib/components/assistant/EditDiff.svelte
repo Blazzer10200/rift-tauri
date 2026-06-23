@@ -209,21 +209,31 @@
     | { kind: "del"; num: null; text: string; html: string | null }
     | { kind: "meta"; text: string }
     | { kind: "gap"; lines: number };
-  const unifiedLines = $derived.by<UnifiedLine[]>(() => {
+  // D3: build the line STRUCTURE without highlighting (depends only on
+  // compactPairs), then layer html in a separate derived. A shikiReady flip
+  // then re-runs only the cheap html map, not this O(N) structural walk.
+  const unifiedStruct = $derived.by<UnifiedLine[]>(() => {
     const out: UnifiedLine[] = [];
     let ln = 0;
     for (const p of compactPairs) {
       if (p.kind === "meta") { out.push({ kind: "meta", text: p.text }); continue; }
       if (p.kind === "gap") { out.push({ kind: "gap", lines: p.lines }); ln += p.lines; continue; }
-      if (p.kind === "ctx") { ln++; out.push({ kind: "ctx", num: ln, text: p.left, html: hl(p.left) }); continue; }
-      if (p.kind === "del") { out.push({ kind: "del", num: null, text: p.left, html: hl(p.left) }); continue; }
-      if (p.kind === "add") { ln++; out.push({ kind: "add", num: ln, text: p.right, html: hl(p.right) }); continue; }
+      if (p.kind === "ctx") { ln++; out.push({ kind: "ctx", num: ln, text: p.left, html: null }); continue; }
+      if (p.kind === "del") { out.push({ kind: "del", num: null, text: p.left, html: null }); continue; }
+      if (p.kind === "add") { ln++; out.push({ kind: "add", num: ln, text: p.right, html: null }); continue; }
       // mod — del then add.
-      out.push({ kind: "del", num: null, text: p.left, html: hl(p.left) });
-      ln++; out.push({ kind: "add", num: ln, text: p.right, html: hl(p.right) });
+      out.push({ kind: "del", num: null, text: p.left, html: null });
+      ln++; out.push({ kind: "add", num: ln, text: p.right, html: null });
     }
     return out;
   });
+  const unifiedLines = $derived.by<UnifiedLine[]>(() =>
+    unifiedStruct.map((l) =>
+      l.kind === "ctx" || l.kind === "add" || l.kind === "del"
+        ? { ...l, html: hl(l.text) }
+        : l,
+    ),
+  );
 
   // #34: line cap — render only the first `maxLines` rows until the user asks
   // for the rest. +24 hysteresis so a diff barely over the cap isn't truncated

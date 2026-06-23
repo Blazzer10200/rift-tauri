@@ -64,11 +64,14 @@
   // Promote a parked chip into the live turn: steer it now + drop it from the
   // queue. Only meaningful while streaming (assistant.steer re-queues on miss,
   // so no message is lost if the turn ends mid-click).
-  function sendQueuedNow(q: { id: string; text: string }) {
+  async function sendQueuedNow(q: { id: string; text: string }) {
     if (!tab || !streaming) return;
-    removeQueued(q.id);
     pulseKey++;
-    void assistant.steer(q.text, tabId);
+    // Await the steer before dropping the chip: on a no_active_turn miss the
+    // store re-enqueues a NEW chip at the queue tail, so removing first would
+    // reorder this item to the bottom. Only drop the original when it landed.
+    const res = await assistant.steer(q.text, tabId);
+    if (res !== "no_active_turn") removeQueued(q.id);
   }
   // Rail-v2: per-chip fire mode. Steer chips don't start their own turn —
   // they inject into the NEXT turn at its first step (flushSteerChips in the

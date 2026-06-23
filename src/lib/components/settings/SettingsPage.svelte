@@ -229,6 +229,16 @@
     }
   }
 
+  // D9: CLI stdout/stderr can carry ANSI color codes + run long — strip the
+  // escapes and cap before rendering in the pre-wrap blocks below.
+  function cleanCliText(s: string | null | undefined): string {
+    if (!s) return "";
+    const stripped = s.replace(/\x1b\[[0-9;]*m/g, "");
+    return stripped.length > 500 ? stripped.slice(0, 500) + "…" : stripped;
+  }
+  const cliUpdateErrorClean = $derived(cleanCliText(cliUpdate.updateError));
+  const cliUpdateOutputClean = $derived(cleanCliText(cliUpdate.updateOutput));
+
   const assistantDot = $derived<"ok" | "warn" | undefined>(
     assistantStore.auth?.pill === "green" ? "ok"
       : assistantStore.auth?.pill === "yellow" || assistantStore.auth?.pill === "red" ? "warn" : undefined
@@ -485,9 +495,9 @@
               </div>
             </div>
             {#if cliUpdate.updateError}
-              <div class="st-cli-err">{cliUpdate.updateError}</div>
+              <div class="st-cli-err">{cliUpdateErrorClean}</div>
             {:else if cliUpdate.updateOutput}
-              <div class="st-cli-ok">{cliUpdate.updateOutput}</div>
+              <div class="st-cli-ok">{cliUpdateOutputClean}</div>
             {/if}
             {#if cliUpdate.updateStuck}
               <div class="st-cli-warn">{cliSummary.detail}</div>

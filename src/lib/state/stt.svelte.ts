@@ -313,7 +313,9 @@ class SttStore {
       this.recognition.abort();
       this.recording = false;
       setTimeout(() => {
-        if (token === this.restartToken) void this.start();
+        // Re-check recording at fire-time: if something restarted the mic in
+        // the 120ms gap, start() again would double-start the recogniser.
+        if (token === this.restartToken && !this.recording) void this.start();
       }, 120);
     }
   }
