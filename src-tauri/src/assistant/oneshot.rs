@@ -57,6 +57,31 @@ Output ONLY the rewritten prompt — no preamble, no explanation, no markdown co
 /// to completion) and lets the update-apply sweep reap enhance children too.
 static ENHANCE_PIDS: Mutex<Option<HashMap<String, u32>>> = Mutex::new(None);
 
+/// Read an HTTP response body with a hard byte cap. The local-LLM/proxy probes
+/// talk to a user-configured Base URL, so a misbehaving or hostile endpoint
+/// could stream an unbounded body into `.text()` and OOM us. Every probe's real
+/// body is tiny (a short reply, a model list, an error), so 256KB is generous;
+/// surplus bytes are dropped at the boundary. Decode lossily — these are JSON or
+/// plain-text diagnostics, not exact binary.
+async fn read_body_capped(resp: reqwest::Response) -> String {
+    const BODY_CAP: usize = 256 * 1024;
+    let mut resp = resp;
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < BODY_CAP {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let take = (BODY_CAP - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn with_enhance_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
     let mut g = match ENHANCE_PIDS.lock() {
         Ok(g) => g,
@@ -155,7 +180,10 @@ pub async fn assistant_enhance_prompt(
     }
     // Optional steering for the refine loop (Concise / Detailed / freeform).
     let directive_line = match directive.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
-        Some(d) => format!(" Adjustment for this rewrite: {d}."),
+        Some(d) => {
+            let capped: String = d.chars().take(2000).collect();
+            format!(" Adjustment for this rewrite: {capped}.")
+        }
         None => String::new(),
     };
     // Conversation tail — lets a mid-thread draft ("fix that same thing") resolve
@@ -708,7 +736,7 @@ pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
         })?;
 
     let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
+    let text = read_body_capped(resp).await;
     if !status.is_success() {
         // Surface the upstream body (truncated) so the UI shows the real cause —
         // e.g. `OllamaException - "qwen3-coder:30b" does not support thinking`.
@@ -781,7 +809,7 @@ pub async fn assistant_list_local_models() -> Result<Vec<String>, String> {
         return Err(format!("{url} returned HTTP {}", resp.status().as_u16()));
     }
 
-    let text = resp.text().await.unwrap_or_default();
+    let text = read_body_capped(resp).await;
     // OpenAI list shape: { "data": [ { "id": "ollama/qwen3-coder:30b" }, ... ] }.
     // Keep only ids that pass the same name guard the model field enforces.
     let models = serde_json::from_str::<Value>(&text)
@@ -888,7 +916,7 @@ pub async fn assistant_local_model_context() -> Result<LocalCtxInfo, String> {
         return Err(format!("/api/show returned HTTP {}", resp.status().as_u16()));
     }
 
-    let text = resp.text().await.unwrap_or_default();
+    let text = read_body_capped(resp).await;
     let v: Value = serde_json::from_str(&text).map_err(|e| format!("bad /api/show JSON: {e}"))?;
 
     let num_ctx = v
@@ -988,7 +1016,7 @@ pub async fn assistant_optimize_local_model(target_ctx: Option<u64>) -> Result<S
         })?;
 
     let status = resp.status();
-    let text = resp.text().await.unwrap_or_default();
+    let text = read_body_capped(resp).await;
     if !status.is_success() {
         let snippet: String = text.trim().chars().take(400).collect();
         return Err(if snippet.is_empty() {

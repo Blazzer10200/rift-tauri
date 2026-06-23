@@ -100,9 +100,12 @@ fn resolve_under_roots(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String>
     } else {
         roots[0].join(&raw)
     };
-    // Canonicalize so `..` segments are resolved before the root check.
+    // Canonicalize so `..` segments are resolved before the root check. Don't
+    // echo the raw OS error (it discloses internal filesystem layout / existence
+    // of sibling paths); a path that won't canonicalize is reported as not-found
+    // relative to the workspace, which is all the caller needs.
     let canon = std::fs::canonicalize(&candidate)
-        .map_err(|e| format!("canonicalize {}: {e}", candidate.display()))?;
+        .map_err(|_| format!("path not found or unreadable: {}", path))?;
     // Windows-friendly canonical (strip UNC prefix).
     let canon = strip_unc(&canon);
     for root in roots {
@@ -901,11 +904,31 @@ pub fn run_stdio() {
             Err(_) => return,
         }
         if buf.len() > MAX_LINE_BYTES {
-            // Drain the rest of the over-cap line so the next iteration starts
-            // at a real line boundary, not mid-record.
-            let mut sink = Vec::new();
-            if reader.read_until(b'\n', &mut sink).is_err() {
-                return;
+            // Drain the rest of the over-cap line so the next iteration starts at
+            // a real line boundary, not mid-record. The naive
+            // `reader.read_until('\n', &mut sink)` would buffer the ENTIRE
+            // remainder of a multi-GB no-newline line into `sink`, defeating the
+            // MAX_LINE_BYTES cap above and OOMing the child. Drain in bounded
+            // chunks and discard instead — constant memory regardless of line size.
+            let mut skip = [0u8; 8192];
+            loop {
+                match io::Read::read(&mut reader, &mut skip) {
+                    Ok(0) => return, // EOF before newline → stream closed
+                    Ok(n) => {
+                        if let Some(nl) = skip[..n].iter().position(|&b| b == b'\n') {
+                            // Found the line boundary. Anything after it in this
+                            // chunk belongs to the next record — but BufRead has
+                            // no unread, and a producer interleaving a giant line
+                            // with a valid record on the same chunk is not a real
+                            // case (one JSON-RPC request per line). Resume at next
+                            // read; the rare lost-tail is acceptable for a line we
+                            // already rejected as oversized.
+                            let _ = nl;
+                            break;
+                        }
+                    }
+                    Err(_) => return,
+                }
             }
             continue;
         }

@@ -90,9 +90,15 @@ pub fn assistant_clear_root() -> Result<WorkspaceState, String> {
 #[tauri::command]
 pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, String> {
     let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let target = PathBuf::from(&path);
+    let raw = PathBuf::from(&path);
+    // Stored roots are canonicalized on insert (assistant_set_root). Canonicalize
+    // the target the same way so removal matches regardless of case/trailing-slash/
+    // `..` drift; keep the raw form too so a now-deleted dir (canonicalize fails)
+    // is still removable.
+    let canonical = std::fs::canonicalize(&raw).ok();
     let mut cfg = load_config();
-    cfg.recent_roots.retain(|p| p != &target);
+    cfg.recent_roots
+        .retain(|p| p != &raw && Some(p) != canonical.as_ref());
     save_config(&cfg)?;
     Ok(workspace_state_from(&cfg))
 }

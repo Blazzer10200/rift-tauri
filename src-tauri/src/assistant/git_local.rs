@@ -159,7 +159,10 @@ impl GitOut {
         if s.is_empty() {
             format!("git exited with code {}", self.code.map(|c| c.to_string()).unwrap_or_else(|| "?".into()))
         } else {
-            s.to_string()
+            // Cap the surfaced error — stderr is drained up to MAX_OUT_BYTES, so an
+            // un-truncated err_text could push 256 KB into a model-facing error
+            // string. 8 KB is plenty for any real git error.
+            truncate_bytes(s, 8 * 1024).into_owned()
         }
     }
 }
@@ -198,6 +201,21 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
         .env_remove("GIT_CONFIG_GLOBAL")
         .env_remove("GIT_CONFIG_SYSTEM")
         .env_remove("GIT_EXEC_PATH")
+        // Strip inherited trace/debug toggles — if the user's shell has any of
+        // these set, git dumps verbose internals (incl. HTTP headers w/ auth on
+        // CURL_VERBOSE) to stderr, which flows into err_text() → the model + log
+        // files. Block the whole family.
+        .env_remove("GIT_TRACE")
+        .env_remove("GIT_TRACE_PACKET")
+        .env_remove("GIT_TRACE_PACK_ACCESS")
+        .env_remove("GIT_TRACE_PERFORMANCE")
+        .env_remove("GIT_TRACE_SETUP")
+        .env_remove("GIT_TRACE_CURL")
+        .env_remove("GIT_TRACE_CURL_NO_DATA")
+        .env_remove("GIT_CURL_VERBOSE")
+        // Pin system gitconfig out of the picture so a machine-level
+        // core.hooksPath can't redirect hook execution.
+        .env("GIT_CONFIG_NOSYSTEM", "1")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     #[cfg(windows)]

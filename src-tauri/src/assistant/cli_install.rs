@@ -358,11 +358,16 @@ pub(super) fn resolve_claude_exe() -> Option<PathBuf> {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
-        if let Some(cached) = g.as_ref() {
-            match cached {
-                Some(p) if p.is_file() => return Some(p.clone()),
-                None => return None, // cached "no CLI on PATH"
-                _ => {} // cached path is stale → re-resolve below
+        if let Some(Some(p)) = g.as_ref() {
+            // Only a still-present cached path is authoritative. A cached
+            // `Some(None)` ("no CLI on PATH") is NOT sticky — re-resolving each
+            // spawn lets a CLI installed AFTER the first failed resolve become
+            // visible without a restart (the `#64` re-stat only revives a path
+            // that vanished, never an empty cache → green pill but "not found"
+            // sends). Cost is one cheap re-enumeration per spawn while no CLI
+            // exists; it self-heals the moment one appears.
+            if p.is_file() {
+                return Some(p.clone());
             }
         }
     }
@@ -374,11 +379,9 @@ pub(super) fn resolve_claude_exe() -> Option<PathBuf> {
         Ok(g) => g,
         Err(p) => p.into_inner(),
     };
-    if let Some(existing) = g.as_ref() {
-        match existing {
-            Some(p) if p.is_file() => return Some(p.clone()),
-            None => return None,
-            _ => {} // stale → overwrite with our fresh resolve
+    if let Some(Some(p)) = g.as_ref() {
+        if p.is_file() {
+            return Some(p.clone());
         }
     }
     *g = Some(resolved.clone());
