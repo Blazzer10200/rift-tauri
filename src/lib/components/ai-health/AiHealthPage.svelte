@@ -20,12 +20,41 @@
   let stats = $state<ConvoStat[] | null>(null);
   let statsError = $state<string | null>(null);
 
+  // B2 — cross-session turn-perf aggregate from the persisted turns.ndjson:
+  // p50/p90 latency, cache-hit rate, cost-by-day. Absent until the first turn
+  // is recorded; a parse failure just leaves the panel hidden.
+  type TurnPerfStats = {
+    p50_ttft_text_ms: number | null;
+    p90_ttft_text_ms: number | null;
+    p50_duration_ms: number | null;
+    p90_duration_ms: number | null;
+    cache_hit_rate: number | null;
+    total_output_tokens: number;
+    cost_by_day: [string, number][];
+    total_turns: number;
+  };
+  let perfStats = $state<TurnPerfStats | null>(null);
+
   onMount(() => {
     void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
     void invoke<ConvoStat[]>("assistant_stats")
       .then((s) => { stats = s; })
       .catch((e) => { statsError = String(e); });
+    void invoke<TurnPerfStats>("query_turn_perf")
+      .then((p) => { perfStats = p; })
+      .catch(() => {});
   });
+
+  const fmtMs = (ms: number | null) => (ms == null ? "—" : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`);
+  // Has enough recorded turns to be worth showing (avoids a one-sample panel).
+  const hasPerf = $derived(!!perfStats && perfStats.total_turns >= 3);
+  // Cost-trend bars normalise to the costliest day in the shown window.
+  const costPeak = $derived.by(() => {
+    let max = 0;
+    for (const [, c] of perfStats?.cost_by_day.slice(0, 7) ?? []) max = Math.max(max, c);
+    return max;
+  });
+  const costBarPct = (cost: number) => (costPeak > 0 ? Math.max(4, Math.round((cost / costPeak) * 100)) : 0);
 
   // ── Plan-limit rail ──
   const limitRows = $derived.by(() => {
@@ -375,6 +404,37 @@
         {/if}
       </section>
 
+      <!-- ── Performance (B2: persisted turn telemetry) ── -->
+      {#if hasPerf && perfStats}
+        <section class="ah-card">
+          <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Performance</div>
+          <div class="ah-tiles">
+            <div class="ah-tile"><div class="ah-tile-v">{fmtMs(perfStats.p50_ttft_text_ms)}</div><div class="ah-tile-k">p50 first reply</div></div>
+            {#if perfStats.p90_ttft_text_ms != null}
+              <div class="ah-tile"><div class="ah-tile-v">{fmtMs(perfStats.p90_ttft_text_ms)}</div><div class="ah-tile-k">p90 first reply</div></div>
+            {/if}
+            <div class="ah-tile"><div class="ah-tile-v">{fmtMs(perfStats.p50_duration_ms)}</div><div class="ah-tile-k">p50 turn time</div></div>
+            {#if perfStats.cache_hit_rate != null}
+              <div class="ah-tile"><div class="ah-tile-v">{Math.round(perfStats.cache_hit_rate * 100)}%</div><div class="ah-tile-k">cache hit rate</div></div>
+            {/if}
+            <div class="ah-tile"><div class="ah-tile-v">{fmtNum(perfStats.total_output_tokens)}</div><div class="ah-tile-k">tokens out</div></div>
+            <div class="ah-tile"><div class="ah-tile-v">{fmtNum(perfStats.total_turns)}</div><div class="ah-tile-k">turns measured</div></div>
+          </div>
+
+          {#if perfStats.cost_by_day.length > 0}
+            <div class="ah-trend">
+              {#each perfStats.cost_by_day.slice(0, 7) as [day, cost] (day)}
+                <div class="ah-trend-row">
+                  <span class="ah-trend-k">{day}</span>
+                  <div class="ah-track sm"><div class="ah-fill ok" style:width="{costBarPct(cost)}%"></div></div>
+                  <span class="ah-trend-v">{fmtUsd(cost)}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </section>
+      {/if}
+
       <!-- ── This session ── -->
       <section class="ah-card">
         <div class="ah-card-h"><HeartPulse size={15} strokeWidth={1.9} />This session</div>
@@ -514,4 +574,8 @@
   .ah-model-row { display: flex; align-items: center; gap: 12px; }
   .ah-model-k { font-size: var(--fs-sm); color: var(--fg-muted); width: 130px; flex: none; }
   .ah-model-v { font-size: var(--fs-sm); font-weight: 640; font-variant-numeric: tabular-nums; width: 38px; text-align: right; flex: none; }
+  .ah-trend { display: flex; flex-direction: column; gap: 9px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .ah-trend-row { display: flex; align-items: center; gap: 12px; }
+  .ah-trend-k { font-size: var(--fs-sm); color: var(--fg-muted); width: 92px; flex: none; font-variant-numeric: tabular-nums; }
+  .ah-trend-v { font-size: var(--fs-sm); font-weight: 640; font-variant-numeric: tabular-nums; width: 56px; text-align: right; flex: none; }
 </style>

@@ -42,6 +42,17 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
         .map_err(|e| format!("Couldn't launch VS Code (is `code` on PATH?): {e}"))
 }
 
+/// B2 — AI Health turn-performance aggregate. Reads the persisted `turns.ndjson`
+/// (p50/p90 latency, cache-hit rate, cost-by-day) off the async executor so the
+/// file parse never stalls a Tauri worker. Returns a zero-filled aggregate when
+/// no turns have been recorded yet (first launch) rather than erroring.
+#[tauri::command]
+pub async fn query_turn_perf() -> Result<crate::diagnostics::perf::TurnPerfStats, String> {
+    tokio::task::spawn_blocking(crate::diagnostics::perf::query_turn_perf_sync)
+        .await
+        .map_err(|e| format!("query_turn_perf: {e}"))
+}
+
 /// #37 Route A — spawn a second native window so a session can live on a
 /// separate monitor. Same app URL, unique `window-<n>` label (matched by the
 /// `secondary-window` capability glob). Each window boots its own store and

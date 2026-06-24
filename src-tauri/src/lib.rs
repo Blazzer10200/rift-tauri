@@ -173,6 +173,7 @@ pub fn run() {
             commands::app_version,
             commands::open_in_vscode,
             commands::open_new_window,
+            commands::query_turn_perf,
             commands::check_for_updates,
             commands::download_update,
             commands::apply_pending_update,

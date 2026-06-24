@@ -22,6 +22,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
+pub mod perf;
+
 const BUS_CAPACITY: usize = 4096;
 const FRONTEND_RATE_PER_SEC: u32 = 200;
 /// #246: secondary ceiling on critical-bypass events. Pathological loops
@@ -169,7 +171,7 @@ static FILE_LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
 /// Mirror Tauri's `appLogDir()` for identifier `com.blazzer.rift`. Computed
 /// from env (no AppHandle needed — `LogForwarder::install()` runs before the
 /// Tauri app is built).
-fn app_log_path() -> Option<std::path::PathBuf> {
+pub(crate) fn app_log_path() -> Option<std::path::PathBuf> {
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA").map(std::path::PathBuf::from);
     #[cfg(not(windows))]

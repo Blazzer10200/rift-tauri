@@ -1679,6 +1679,17 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // buffered, then flushed the instant the user turn is sent.
     let mut steer_pending: Vec<SteerMsg> = Vec::new();
 
+    // B2: per-turn perf accumulators — filled at the existing TTFT log sites +
+    // the result frame, finalised into a TurnPerf record before the result
+    // return. Wall-clock start (for cost-by-day bucketing); elapsed milestones
+    // use the existing `turn_start` Instant.
+    let ts_start_ms: u64 = {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    };
+    let mut perf_ttft_thinking_ms: Option<u64> = None;
+    let mut perf_ttft_text_ms: Option<u64> = None;
+
     loop {
         tokio::select! {
         read = lines.next_line() => {
@@ -1741,6 +1752,13 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                 "session_id": stream_sid, "message": auth_rejection_message(),
                             }));
                         }
+                        // B2: harvest the result frame's token / cache / cost data
+                        // (the only frame that carries them) and persist a typed
+                        // perf record. Fire-and-forget — never gates the DONE emit.
+                        record_turn_perf(
+                            &v, ts_start_ms, turn_start, perf_ttft_thinking_ms,
+                            perf_ttft_text_ms, stream_sid,
+                        );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
                             "session_id": stream_sid, "line": trimmed,
                         }));
@@ -1776,10 +1794,12 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             let is_text = blk_ty == Some("text") || delta_ty == Some("text_delta");
                             if is_think && !first_think_logged {
                                 first_think_logged = true;
+                                perf_ttft_thinking_ms = Some(turn_start.elapsed().as_millis() as u64);
                                 log::info!("warm_pool: first-thinking {} ms session={}", turn_start.elapsed().as_millis(), stream_sid);
                             }
                             if is_text && !first_text_logged {
                                 first_text_logged = true;
+                                perf_ttft_text_ms = Some(turn_start.elapsed().as_millis() as u64);
                                 log::info!("warm_pool: first-text {} ms ev={:?} session={}", turn_start.elapsed().as_millis(), ev_ty, stream_sid);
                             }
                         }
@@ -1892,6 +1912,65 @@ async fn emit_turn_end_error(
         "session_id": session_id, "message": msg.clone(),
     }));
     let _ = done.send(Err(msg));
+}
+
+/// B2: build a `TurnPerf` from the result frame + accumulated TTFT milestones,
+/// persist it to `turns.ndjson` (fire-and-forget), and mirror it onto the diag
+/// bus as a structured event. The CLI carries token/cache/cost data ONLY on the
+/// `result` frame — `v` here is that parsed frame. Best-effort: a malformed or
+/// usage-less frame just yields `None` fields, never an error.
+fn record_turn_perf(
+    v: &Value,
+    ts_start_ms: u64,
+    turn_start: std::time::Instant,
+    ttft_thinking_ms: Option<u64>,
+    ttft_text_ms: Option<u64>,
+    stream_sid: &str,
+) {
+    use crate::diagnostics::{self, perf::TurnPerf, DiagLevel, DiagStage};
+
+    let usage = v.get("usage");
+    let input_tokens = usage.and_then(|u| u.get("input_tokens")).and_then(|x| x.as_u64());
+    let output_tokens = usage.and_then(|u| u.get("output_tokens")).and_then(|x| x.as_u64());
+    let cache_read_tokens =
+        usage.and_then(|u| u.get("cache_read_input_tokens")).and_then(|x| x.as_u64());
+    let cache_create_tokens =
+        usage.and_then(|u| u.get("cache_creation_input_tokens")).and_then(|x| x.as_u64());
+    let cost_usd = v.get("total_cost_usd").and_then(|x| x.as_f64());
+    let result_subtype = v.get("subtype").and_then(|s| s.as_str()).map(|s| s.to_owned());
+
+    let cache_hit_rate = match (cache_read_tokens, input_tokens) {
+        (Some(r), Some(i)) if r + i > 0 => Some(r as f64 / (r + i) as f64),
+        _ => None,
+    };
+
+    let rec = TurnPerf {
+        ts_start_ms,
+        ttft_thinking_ms,
+        ttft_text_ms,
+        duration_ms: Some(turn_start.elapsed().as_millis() as u64),
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_create_tokens,
+        cost_usd,
+        cache_hit_rate,
+        session_id: stream_sid.to_owned(),
+        result_subtype,
+    };
+
+    // Structured bus event — DiagStage::Log so it rides the normal 200/s cap,
+    // not the System critical-bypass. Useful for the live diagnostics pane.
+    let fields = serde_json::to_value(&rec).unwrap_or(Value::Null);
+    diagnostics::emit_with_fields(
+        DiagStage::Log,
+        DiagLevel::Info,
+        Some("assistant"),
+        Some("turn.rs"),
+        "turn-perf",
+        fields,
+    );
+    diagnostics::perf::append_turn_perf(rec);
 }
 
 /// A rejected credential (401) arrives either as a stdout error-result frame
