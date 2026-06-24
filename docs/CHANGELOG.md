@@ -2,15 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.31.1 — Project globs that actually match
+## v0.31.2 — Project editor that tells you what's wrong
 
-> A fix on top of yesterday's Projects release. The include/exclude patterns you set on a project now match folders the way every glob is supposed to — so the scoping you configure is the scoping you get.
+> Polish on the Projects feature: the editor now catches bad glob patterns as you type, surfaces save/load problems clearly instead of swallowing or double-printing them, and a load failure no longer masquerades as "no projects yet."
 
-- **`**` now spans whole folders, including none.** A pattern like `src/**/*.ts` matched files one level deep but quietly skipped `src/main.ts` at the top; an exclude like `vendor/**` hid files inside `vendor` but left the folder itself listed. Both are fixed: `**` now correctly means "any depth, including zero," and a trailing `dir/**` covers the folder and everything in it. If you set up a project in v0.31.0 and the file scoping looked off, this is why — it's right now.
-- **Bad patterns are caught when you save, not silently ignored later.** A glob that can't compile is rejected with a clear message at save time instead of no-op'ing invisibly during file reads.
-- **A wedged turn can't outlast its own safety net.** The stall watchdog no longer re-arms forever while a tool is "in flight" — if a tool starts but never reports back and the process goes silent, the turn now ends honestly instead of hanging.
+- **Live glob validation.** The include/exclude boxes now flag an invalid pattern inline — a red outline and a count ("1 invalid · too long") right under the field — and disable Save until it's fixed, so you never round-trip to the backend just to find out a pattern was malformed. The check mirrors the real matcher dialect exactly.
+- **Clearer error messages.** Save and delete failures used to show a doubled, jargon-y string ("Save failed: Save project failed: …"); now you get the plain reason ("not a directory: …", "project limit reached"). A successful delete no longer mistakenly reports a stale earlier error.
+- **A failed project load looks like a failure, not an empty list.** If the project store can't be read, the Workspace page now shows "Couldn't load projects" with the reason and a Retry button — instead of silently showing "No projects yet" as if you'd never made any.
+- **Under the hood:** the project registry, the Workspace migration, and the new glob validator went from zero tests to a full suite (100+ cases), so these paths are now regression-guarded.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.31.1** — Project globs that actually match: `**` now spans zero-or-more folders (so `src/**/*.ts` catches top-level files and `vendor/**` hides the folder itself), invalid patterns are rejected at save time, and the stall watchdog can no longer re-arm forever while a tool hangs.
 
 - **v0.31.0** — Projects, and a single Workspace home: named folder aliases with their own include/exclude file scoping, switchable in a click; Home and Projects merged into one **Workspace** page (greeting, current-folder context, resume-a-chat cards, full project manager); and honest stalled-turn handling that names the real cause instead of blaming the API.
 

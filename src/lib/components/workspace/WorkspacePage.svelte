@@ -13,6 +13,7 @@
   import { goHome } from "../../state/nav";
   import { prettyPath, leafName } from "../shell/tabsbar/helpers";
   import { notify } from "../../state/toast.svelte";
+  import { globSummary } from "./globPreview";
   import type { Project } from "../../state/assistant/types";
 
   // ── Zone 1: Context strip state ─────────────────────────────────────────────
@@ -71,7 +72,11 @@
   let dInclude = $state("");
   let dExclude = $state("");
 
-  const canSave = $derived(dName.trim().length > 0 && dRoot.trim().length > 0);
+  const incGlobs = $derived(globSummary(dInclude));
+  const excGlobs = $derived(globSummary(dExclude));
+  const canSave = $derived(
+    dName.trim().length > 0 && dRoot.trim().length > 0 && incGlobs.invalid === 0 && excGlobs.invalid === 0,
+  );
 
   const linesToList = (s: string) =>
     s.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -147,7 +152,10 @@
   }
 
   // ── Zone 3: Project list ────────────────────────────────────────────────────
-  onMount(() => void projects.refresh());
+  onMount(async () => {
+    await projects.refresh();
+    if (projects.lastError) notify.warn("Couldn't load projects", { detail: projects.lastError });
+  });
 
   const activeKey = $derived(projectRootKey(assistant.activeRoot));
   function isActive(p: Project): boolean {
@@ -271,19 +279,27 @@
               <span class="fld-lbl">Include <span class="fld-hint">one glob per line · empty = everything</span></span>
               <textarea
                 class="rift-input mono pat"
+                class:bad={incGlobs.invalid > 0}
                 placeholder={"src/**\n*.ts\ndocs/**"}
                 bind:value={dInclude}
                 spellcheck="false"
               ></textarea>
+              {#if incGlobs.invalid > 0}
+                <span class="glob-err">{incGlobs.invalid} invalid · {incGlobs.firstError}</span>
+              {/if}
             </label>
             <label class="fld">
               <span class="fld-lbl">Exclude <span class="fld-hint">wins over include</span></span>
               <textarea
                 class="rift-input mono pat"
+                class:bad={excGlobs.invalid > 0}
                 placeholder={"**/node_modules/**\n*.lock\ndist/**"}
                 bind:value={dExclude}
                 spellcheck="false"
               ></textarea>
+              {#if excGlobs.invalid > 0}
+                <span class="glob-err">{excGlobs.invalid} invalid · {excGlobs.firstError}</span>
+              {/if}
             </label>
           </div>
 
@@ -304,7 +320,16 @@
       {/if}
 
       <!-- Zone 3: Projects spine -->
-      {#if projects.items.length === 0 && !editing}
+      {#if !projects.loaded && projects.lastError && !editing}
+        <div class="empty">
+          <div class="empty-ic"><FolderTree size={30} strokeWidth={1.5} /></div>
+          <div class="empty-tt">Couldn't load projects</div>
+          <div class="empty-sub">{projects.lastError}</div>
+          <button class="save-btn" type="button" onclick={() => projects.refresh()}>
+            Retry
+          </button>
+        </div>
+      {:else if projects.items.length === 0 && !editing}
         <div class="empty">
           <div class="empty-ic"><FolderTree size={30} strokeWidth={1.5} /></div>
           <div class="empty-tt">No projects yet</div>
@@ -431,6 +456,9 @@
   .rift-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
   .rift-input.mono { font-family: var(--font-mono); font-size: 12px; }
   textarea.pat { height: auto; min-height: 96px; padding: 9px 12px; line-height: 1.6; resize: vertical; }
+  textarea.pat.bad { border-color: color-mix(in oklab, var(--danger) 50%, var(--border)); }
+  textarea.pat.bad:focus { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+  .glob-err { font-size: 11px; color: var(--danger); font-family: var(--font-mono); }
 
   .folder-row { display: flex; gap: 8px; }
   .folder-row .rift-input { flex: 1; min-width: 0; }

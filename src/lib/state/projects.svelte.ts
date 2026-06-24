@@ -56,8 +56,9 @@ class ProjectRegistry {
     try {
       this.items = await invoke<Project[]>("assistant_list_projects");
       this.loaded = true;
+      this.lastError = null;
     } catch (e) {
-      this.lastError = `Load projects failed: ${String(e)}`;
+      this.lastError = String(e);
       console.warn("assistant_list_projects failed", e);
     }
   }
@@ -86,7 +87,7 @@ class ProjectRegistry {
       this.lastError = null;
       return id;
     } catch (e) {
-      this.lastError = `Save project failed: ${String(e)}`;
+      this.lastError = String(e);
       return null;
     }
   }
@@ -95,8 +96,9 @@ class ProjectRegistry {
     try {
       this.items = await invoke<Project[]>("assistant_delete_project", { id });
       if (this.activeId === id) this.setActiveId(null);
+      this.lastError = null;
     } catch (e) {
-      this.lastError = `Delete project failed: ${String(e)}`;
+      this.lastError = String(e);
     }
   }
 
