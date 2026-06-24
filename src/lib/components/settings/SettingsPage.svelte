@@ -632,7 +632,20 @@
               </div>
             </div>
             {#if !stt.backendAvailable}
-              <div class="st-warn">Whisper backend not built into this Rift release. To enable: install LLVM (<code>winget install LLVM.LLVM</code>, admin required), optionally the NVIDIA CUDA Toolkit for GPU, then rebuild with <code>cargo build --release --features whisper-rs</code>.</div>
+              <div class="st-info">
+                <div class="st-info-t">On-device Whisper isn't included in this build.</div>
+                <div class="st-info-s">Web Speech is selected for you and works right now — no setup, no download. It transcribes through your browser engine while you're online.</div>
+                <details class="st-dev">
+                  <summary>Build Whisper into Rift yourself</summary>
+                  <div class="st-dev-body">For offline, accent-tuned transcription you can compile Rift from source with Whisper enabled:
+                    <ol>
+                      <li>Install LLVM — <code>winget install LLVM.LLVM</code> (run as administrator)</li>
+                      <li>Optional, for GPU acceleration — install the NVIDIA CUDA Toolkit</li>
+                      <li>Rebuild — <code>cargo build --release --features whisper-rs</code></li>
+                    </ol>
+                  </div>
+                </details>
+              </div>
             {/if}
           </div>
 
@@ -740,7 +753,7 @@
           {/if}
 
           {#if stt.config.engine === "web_speech" && !stt.supported}
-            <div class="st-warn">Your WebView does not expose <code>SpeechRecognition</code>; Web Speech is unavailable — switch to Whisper or install LLVM and rebuild.</div>
+            <div class="st-warn">Your WebView doesn't expose <code>SpeechRecognition</code>, so Web Speech can't run here.{#if stt.backendAvailable} Switch to the Whisper engine above — it runs on-device and needs no browser support.{:else} On-device Whisper isn't built into this release either; see the note under <strong>Engine</strong> for how to enable it.{/if}</div>
           {/if}
           {#if stt.lastError}<div class="st-warn">{stt.lastError}</div>{/if}
         {:else}
@@ -1032,6 +1045,20 @@
   .st-note code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
   .st-warn code { background: color-mix(in oklab, var(--warn) 16%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 30%, transparent); padding: 1px 5px; border-radius: 4px; color: var(--warn); font-family: var(--font-mono); }
+  .st-warn strong { font-weight: 600; color: var(--fg); }
+
+  /* Neutral, friendly note for expected states (not an error) — used when a build feature simply isn't present. */
+  .st-info { display: block; font-size: var(--fs-xs); line-height: 1.5; padding: 11px 13px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); }
+  .st-info-t { font-weight: 600; color: var(--fg); }
+  .st-info-s { color: var(--fg-muted); margin-top: 3px; }
+  .st-dev { margin-top: 9px; }
+  .st-dev > summary { cursor: pointer; color: var(--fg-muted); font-size: var(--fs-xs); list-style: none; user-select: none; display: inline-flex; align-items: center; gap: 5px; }
+  .st-dev > summary::before { content: "›"; display: inline-block; transition: transform 140ms ease-out; }
+  .st-dev[open] > summary::before { transform: rotate(90deg); }
+  .st-dev > summary:hover { color: var(--fg); }
+  .st-dev-body { margin-top: 7px; color: var(--fg-muted); }
+  .st-dev-body ol { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+  .st-dev-body code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
 
   /* ── Text input ── */
   .st-input { height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--field); border: 1px solid var(--field-border); color: var(--fg); font: inherit; font-size: var(--fs-sm); }
