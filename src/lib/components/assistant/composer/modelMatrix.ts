@@ -42,10 +42,8 @@ export type ModelOpt = {
   //                  "ultra" (xhigh + ultracode); Sonnet 4.6 reaches "deep"
   //                  (high) — it accepts high but not xhigh, so ultracode is
   //                  Opus-tier only.
-  //   • fastMode   — Opus-only faster-output mode (CC's `/fast`).
   effort: boolean;
   maxEffort: ThinkingEffort;
-  fastMode: boolean;
 };
 // Flat single-column list (Claude-Code-Desktop layout): current models first,
 // legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
@@ -54,20 +52,14 @@ export type ModelOpt = {
 // Fable 5 is a limited run — row exists only while fableAvailable() (through
 // Jun 22 2026); after sunset the list collapses back to the standard four.
 export const MODEL_OPTIONS: ModelOpt[] = [
-  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], fastMode: false }] : []),
-  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, fastMode: true  },
-  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, fastMode: false },
-  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku,  fastMode: false },
-  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], fastMode: true  },
+  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"] }] : []),
+  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus },
+  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet },
+  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku },
+  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"] },
 ];
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
-
-// Fast mode is Opus-only (CC's `/fast`). It is also not yet plumbed to the CLI
-// spawn (ui-prefs TODO), so the row stays hidden behind FAST_MODE_WIRED until
-// the backend honors it — showing a dead toggle would be the exact false
-// signal we're removing. Flip to true once wired; it then appears Opus-only.
-export const FAST_MODE_WIRED = false;
 
 /** The slider's allowed tiers — EFFORT_OPTIONS truncated at the model's
  *  ceiling. A prefix slice, so an index into it equals the absolute tier index. */

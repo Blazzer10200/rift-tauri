@@ -15,7 +15,7 @@
   import { effortIdxFromX } from "./helpers";
   import {
     EFFORT_OPTIONS, MODEL_OPTIONS, modelShortcut, effortStopsFor, clampEffortIdx,
-    FAST_MODE_WIRED, type ModelOpt,
+    type ModelOpt,
   } from "./modelMatrix";
 
   let {
@@ -26,7 +26,7 @@
     onRequestClose,
   }: {
     settingsIdx: number;
-    activeKind: "model" | "fast" | "effort" | null;
+    activeKind: "model" | "effort" | null;
     anchor: HTMLElement | null;
     onPickModel: (m: ModelOpt) => void;
     onRequestClose: () => void;
@@ -80,7 +80,6 @@
   const effortFlagLabel = $derived(effortToFlag(assistant.thinkingEffort, assistant.effectiveModel));
   const effortApplies = $derived(currentModel?.effort ?? true);
   const effortStops = $derived(effortStopsFor(currentModel));
-  const fastModeApplies = $derived((currentModel?.fastMode ?? false) && FAST_MODE_WIRED);
   const effortIdx = $derived(
     Math.min(
       Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)),
@@ -165,27 +164,6 @@
       </span>
     </button>
   {/each}
-
-  {#if fastModeApplies}
-    <div class="rift-menu-divider"></div>
-    <div class="rift-menu-sub">Fast mode</div>
-    <button
-      type="button"
-      class="rift-menu-row toggle-row"
-      class:active={activeKind === "fast"}
-      onmousedown={(e) => { e.preventDefault(); uiPrefs.toggleFastMode(); }}
-      role="menuitemcheckbox"
-      aria-checked={uiPrefs.fastMode}
-    >
-      <span class="rift-menu-row-body">
-        <span class="rift-menu-row-t">Enable fast mode</span>
-        <span class="rift-menu-row-d">Opus with faster output</span>
-      </span>
-      <span class="rift-toggle" class:on={uiPrefs.fastMode} aria-hidden="true">
-        <span class="rift-toggle-knob"></span>
-      </span>
-    </button>
-  {/if}
 
   {#if effortApplies}
     <div class="rift-menu-divider"></div>

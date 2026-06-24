@@ -6,7 +6,6 @@ const STORAGE_KEY = "rift.ui.density.v1";
 const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
 const CODE_KEY = "rift.ui.code.v1";
-const FAST_MODE_KEY = "rift.ui.fast-mode.v1";
 const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
 const DOTFIELD_KEY = "rift.ui.dotfield.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
@@ -56,9 +55,6 @@ class UiPrefs {
   vividness = $state(DEFAULT_VIVIDNESS);
   dotField = $state<DotField>("dots");
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
-  // Fast mode = Opus with faster output (CC's `/fast`). TODO: not yet plumbed
-  // to the CLI spawn in assistant.svelte.ts — this only persists the intent.
-  fastMode = $state(false);
   // Stream mode = the redesigned boxless turn render (the spec's default tool
   // display, redesign-port.md §"Net-new"). Default ON; only an explicit opt-out
   // ("0") falls back to the legacy MessageBubble path.
@@ -102,7 +98,6 @@ class UiPrefs {
       /* malformed code prefs — fall back to defaults */
     }
 
-    this.fastMode = localStorage.getItem(FAST_MODE_KEY) === "1";
     this.streamMode = localStorage.getItem(STREAM_MODE_KEY) !== "0";
 
     this.apply();
@@ -143,11 +138,6 @@ class UiPrefs {
     this.code = { ...this.code, ...patch };
     localStorage.setItem(CODE_KEY, JSON.stringify(this.code));
     this.applyCode();
-  }
-
-  toggleFastMode() {
-    this.fastMode = !this.fastMode;
-    localStorage.setItem(FAST_MODE_KEY, this.fastMode ? "1" : "0");
   }
 
   toggleStreamMode() {

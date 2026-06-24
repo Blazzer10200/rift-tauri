@@ -21,7 +21,7 @@
   import CtxRing from "./composer/CtxRing.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
   import {
-    EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS, FAST_MODE_WIRED,
+    EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS,
     effortStopsFor, clampEffortIdx, permToneFor,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
@@ -269,7 +269,6 @@
   const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
   const effortApplies = $derived(currentModel?.effort ?? true);
   const effortStops = $derived(effortStopsFor(currentModel));
-  const fastModeApplies = $derived((currentModel?.fastMode ?? false) && FAST_MODE_WIRED);
   const effortIdx = $derived(
     Math.min(
       Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)),
@@ -314,11 +313,9 @@
   // + the active highlight; mouse clicks call the per-kind pick fns directly.
   type SettingsRow =
     | { kind: "model"; model: ModelOpt }
-    | { kind: "fast" }
     | { kind: "effort" };
   const settingsRows = $derived.by<SettingsRow[]>(() => {
     const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
-    if (fastModeApplies) rows.push({ kind: "fast" });
     if (effortApplies && effortStops.length > 0) rows.push({ kind: "effort" });
     return rows;
   });
@@ -338,7 +335,6 @@
   });
   function pickRow(row: SettingsRow) {
     if (row.kind === "model") pickModel(row.model);
-    else if (row.kind === "fast") uiPrefs.toggleFastMode();
     else { settingsOpen = false; void tick().then(() => ta?.focus()); }
   }
 
