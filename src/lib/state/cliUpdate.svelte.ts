@@ -45,10 +45,17 @@ function parseSemver(v: string): [number, number, number] | null {
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
+/** The CLI version at which every Rift-gated spawn flag is available. Mirrors
+ *  the HIGHEST gate in `cli_caps::mins` (`DISABLE_SLASH_COMMANDS` = 2.1.170);
+ *  all other gates sit below the hard floor (`MIN_SUPPORTED` = 2.1.161), so an
+ *  above-floor install is missing at most this one. Keep in lockstep if a new
+ *  higher gate is added Rust-side. */
+export const CLI_RECOMMENDED_VERSION = "2.1.170";
+
 /** >0 if a is newer than b, <0 if older, 0 if equal/unparseable. An
  *  unparseable operand fails closed (returns 0 → treated up-to-date), so warn
  *  once — else a CLI whose version string we can't read silently never badges. */
-function cmpSemver(a: string, b: string): number {
+export function cmpSemver(a: string, b: string): number {
   const pa = parseSemver(a);
   const pb = parseSemver(b);
   if (!pa || !pb) {

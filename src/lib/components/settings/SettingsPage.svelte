@@ -11,7 +11,7 @@
   import { confirm } from "@tauri-apps/plugin-dialog";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { updates } from "../../state/updates.svelte";
-  import { cliUpdate } from "../../state/cliUpdate.svelte";
+  import { cliUpdate, cmpSemver, CLI_RECOMMENDED_VERSION } from "../../state/cliUpdate.svelte";
   import { assistant as assistantStore } from "../../state/assistant.svelte";
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
@@ -172,6 +172,13 @@
   // as conservative-old (cli_caps). Surface that so a degraded session isn't a
   // silent mystery. Only when a session actually resolved (auth known).
   const cliVersionUnknown = $derived(!!assistantStore.auth && !assistantStore.auth.cliVersion && cliInstalls.length <= 1);
+  // P2 (#45): readable version, at/above the hard floor (a turn can run) but
+  // below the version where every spawn flag is available — one calm line, not
+  // a warning (the gap is at most one internal flag; nothing is broken).
+  const cliBelowFeatureFloor = $derived(
+    !!assistantStore.auth?.cliVersion &&
+      cmpSemver(assistantStore.auth.cliVersion, CLI_RECOMMENDED_VERSION) < 0,
+  );
   const cliNewer = $derived(cliUpdate.isAnyStale(assistantStore.auth?.installs, cliInstalled));
   const cliSummary = $derived(cliUpdate.summary(assistantStore.auth?.installs));
   const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
@@ -443,6 +450,8 @@
               <div class="sub">Rift runs your local <code>claude</code> install{#if cliInstalled}{' — '}<code>{cliInstalled}</code>{/if}. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
               {#if cliVersionUnknown}
                 <div class="sub st-cli-warn" use:tooltip={"`claude --version` failed or timed out, so Rift can't tell how new this CLI is. To stay safe it treats it as an old version and turns newer features off. Re-probe after an update, or check the install is healthy."}>⚠ Couldn't read this CLI's version — newer features are off until it's readable.</div>
+              {:else if cliBelowFeatureFloor && !cliNewer}
+                <div class="sub st-cli-note" use:tooltip={`Your CLI can run every Rift turn, but a couple of spawn-time options only exist on Claude Code ≥ ${CLI_RECOMMENDED_VERSION}. Updating turns them on automatically — nothing's broken in the meantime.`}>Some features need Claude Code ≥ <code>{CLI_RECOMMENDED_VERSION}</code> — update to enable them all.</div>
               {/if}
             </div>
           </div>
@@ -1118,6 +1127,7 @@
   .st-cli-err { margin-top: 7px; font-size: var(--fs-xs); color: var(--danger); white-space: pre-wrap; }
   .st-cli-ok { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); white-space: pre-wrap; }
   .st-cli-warn { margin-top: 7px; font-size: var(--fs-xs); color: var(--warn); line-height: 1.4; }
+  .st-cli-note { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.4; cursor: help; }
 
   /* ── About: kv + resource rows ── */
   .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 17px; }
