@@ -295,6 +295,16 @@
       fireCodeCopy(copyBtn);
       return;
     }
+    // Expand a clamped tall code block — flip the host's data-expanded so the
+    // CSS drops the max-height and the fade/button hide. One-way (no re-collapse
+    // — re-clamping a long block the user just opened is annoying).
+    const moreBtn = target?.closest(".code-more") as HTMLElement | null;
+    if (moreBtn) {
+      e.preventDefault();
+      const host = moreBtn.closest("[data-collapsible]") as HTMLElement | null;
+      host?.setAttribute("data-expanded", "true");
+      return;
+    }
     const a = target?.closest("a") as HTMLAnchorElement | null;
     if (!a) return;
     const href = a.getAttribute("href");
@@ -351,15 +361,41 @@
     return { html: tpl.innerHTML, items };
   }
 
-  // Inject a tiny copy affordance into every fenced code block. The button
-  // lives inside the <pre> so we can position it absolutely top-right.
-  // Diff blocks AND shiki-rendered blocks are skipped — diffs would yield
-  // mangled output, and shiki blocks already have a header w/ Copy.
+  // Tall code blocks collapse behind a blurred fade with a "Show N more lines"
+  // reveal — keeps a long paste from eating the whole turn. Applies to both
+  // legacy <pre> and shiki blocks. ~18 visible lines is the clamp; a +6
+  // hysteresis means a block barely over the line isn't collapsed for a couple
+  // of rows. The button + fade are injected DOM; the toggle is handled in
+  // onClick (delegated, like .code-copy).
+  const CODE_CLAMP_LINES = 18;
+  const CODE_CLAMP_HYST = 6;
+  function markCollapsible(host: HTMLElement, code: Element) {
+    const lineCount = (code.textContent ?? "").replace(/\n$/, "").split("\n").length;
+    if (lineCount <= CODE_CLAMP_LINES + CODE_CLAMP_HYST) return;
+    const hidden = lineCount - CODE_CLAMP_LINES;
+    host.setAttribute("data-collapsible", "true");
+    const more = document.createElement("button");
+    more.className = "code-more";
+    more.setAttribute("type", "button");
+    more.setAttribute("aria-label", `Show ${hidden} more lines`);
+    more.innerHTML = `<span class="cm-fade" aria-hidden="true"></span><span class="cm-pill">Show ${hidden} more line${hidden === 1 ? "" : "s"}</span>`;
+    host.appendChild(more);
+  }
+
+  // Inject a tiny copy affordance into every fenced code block + mark tall
+  // blocks collapsible. The copy button lives inside the <pre> (positioned
+  // top-right). Diff blocks are skipped for copy (mangled output); shiki blocks
+  // already carry a header w/ Copy, but BOTH get the collapse treatment.
   function annotateCodeBlocks(html: string): string {
     if (typeof document === "undefined") return html;
     if (!html.includes("<pre")) return html;
     const tpl = document.createElement("template");
     tpl.innerHTML = html;
+    // Collapse: shiki blocks clamp at the wrapper so the head bar stays visible.
+    tpl.content.querySelectorAll(".shiki-block").forEach((block) => {
+      const code = block.querySelector("code");
+      if (code) markCollapsible(block as HTMLElement, code);
+    });
     tpl.content.querySelectorAll("pre").forEach((pre) => {
       if (pre.classList.contains("diff-block")) return;
       // Skip shiki blocks — they're wrapped in .shiki-block w/ own header.
@@ -374,6 +410,7 @@
       btn.setAttribute("aria-label", "Copy code");
       btn.textContent = "Copy";
       pre.insertBefore(btn, pre.firstChild);
+      markCollapsible(pre, code);
     });
     return tpl.innerHTML;
   }
@@ -850,12 +887,13 @@
      + Copy. Overrides the default .md pre styling so shiki's own bg + colors
      take over from the elev-1/accent-border treatment. */
   .md :global(.shiki-block) {
-    margin: 8px 0;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    margin: 10px 0;
+    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
+    border-radius: 11px;
     overflow: hidden;
     background: #22272e; /* github-dark-dimmed bg, matches Shiki output */
     position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.22), inset 0 1px 0 color-mix(in oklab, #fff 4%, transparent);
   }
   .md :global(.shiki-head) {
     display: flex;
@@ -935,6 +973,86 @@
     color: inherit;
     font-variant-ligatures: inherit;
     font-family: var(--font-mono, ui-monospace, monospace);
+  }
+
+  /* ── Tall-block collapse: blurred fade + "Show N more lines" reveal ──────
+     A long code block (>~18 lines) clamps its scroll area and overlays a
+     bottom gradient that dissolves into a centered pill. Click → data-expanded
+     drops the clamp. Works for both shiki wrappers and legacy <pre>. ~18 lines
+     × 1.72 line-height × ~12px ≈ the clamp height below. */
+  .md :global([data-collapsible="true"]) { position: relative; }
+  /* shiki: clamp the inner <pre> (keep the head bar visible); legacy: clamp the
+     <pre> itself. The fade/pill button is the LAST child of the collapsible. */
+  .md :global(.shiki-block[data-collapsible="true"] pre.shiki) {
+    max-height: 23rem;
+    overflow: hidden;
+  }
+  .md :global(pre.has-copy[data-collapsible="true"]) {
+    max-height: 23rem;
+    overflow: hidden;
+  }
+  .md :global([data-collapsible="true"][data-expanded="true"] pre.shiki),
+  .md :global(pre.has-copy[data-collapsible="true"][data-expanded="true"]) {
+    max-height: none;
+    overflow-x: auto;
+  }
+  .md :global(.code-more) {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    display: flex; align-items: flex-end; justify-content: center;
+    padding: 0 0 11px;
+    height: 88px;
+    border: 0; background: transparent;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .md :global([data-collapsible="true"][data-expanded="true"] .code-more) { display: none; }
+  /* The dissolve — a gradient from transparent → the block's own bg, plus a
+     light backdrop-blur so the clipped code reads as "more below" not "cut". */
+  .md :global(.code-more .cm-fade) {
+    position: absolute; inset: 0;
+    background: linear-gradient(to bottom,
+      transparent 0,
+      color-mix(in oklab, #22272e 55%, transparent) 45%,
+      #22272e 100%);
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 60%);
+    mask-image: linear-gradient(to bottom, transparent 0, #000 60%);
+    backdrop-filter: blur(1.5px);
+    -webkit-backdrop-filter: blur(1.5px);
+    pointer-events: none;
+  }
+  /* legacy <pre> sits on --bg-elev-2-ish; fade to a neutral dark instead. */
+  .md :global(pre.has-copy .cm-fade) {
+    background: linear-gradient(to bottom,
+      transparent 0,
+      color-mix(in oklab, var(--bg-inset) 55%, transparent) 45%,
+      var(--bg-inset) 100%);
+  }
+  .md :global(.code-more .cm-pill) {
+    position: relative; z-index: 1;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 999px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.03em;
+    color: var(--fg-2);
+    background: color-mix(in oklab, var(--bg-elev-2) 88%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    transition: color 120ms ease, border-color 120ms ease, transform 120ms ease;
+  }
+  .md :global(.code-more:hover .cm-pill) {
+    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+    transform: translateY(-1px);
+  }
+  /* down-chevron hint after the label */
+  .md :global(.code-more .cm-pill::after) {
+    content: "⌄";
+    font-size: 13px; line-height: 1; margin-top: -3px;
+    opacity: 0.8;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .md :global(.code-more .cm-pill) { transition: none; }
   }
 
   /* ── Diff code blocks (```diff fenced) ─────────────────────────────── */

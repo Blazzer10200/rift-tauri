@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "$lib/styles/settings-controls.css";
   import { untrack, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import {
@@ -1069,36 +1070,8 @@
   .st-dev-body ol { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
   .st-dev-body code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
 
-  /* ── Text input ── */
-  .st-input { height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--field); border: 1px solid var(--field-border); color: var(--fg); font: inherit; font-size: var(--fs-sm); }
-  .st-input:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
-  .st-input.mono { font-family: var(--font-mono); }
-  .st-secret { position: relative; display: inline-flex; align-items: center; }
-  .st-secret .st-input { padding-right: 34px; }
-  .st-eye { position: absolute; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; color: var(--fg-subtle); cursor: pointer; border-radius: 6px; }
-  .st-eye:hover { color: var(--fg); background: var(--surface-hover); }
-
-  /* ── Buttons ── */
-  .st-btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; border-radius: var(--radius); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg-2); transition: background 120ms, border-color 120ms, color 120ms; white-space: nowrap; }
-  .st-btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
-  .st-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  .st-btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-fg); box-shadow: 0 4px 14px -5px color-mix(in srgb, var(--accent) 60%, transparent); }
-  .st-btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
-  .st-btn.icon { padding: 0; width: 32px; justify-content: center; }
-  .st-btn.danger-btn { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); }
-  .st-btn.danger-btn:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 12%, var(--surface)); border-color: var(--danger); color: var(--danger); }
-  .st-btn :global(svg) { color: currentColor; }
+  /* Input · button · status-pill kit → $lib/styles/settings-controls.css */
   .st-stamp { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-faint); white-space: nowrap; }
-
-  /* ── Status pills ── */
-  .st-pill { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 650; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); }
-  .st-pill .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
-  .st-pill.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
-  .st-pill.ok .dot { background: var(--ok); }
-  .st-pill.warn { background: var(--warn-soft); border-color: color-mix(in oklab, var(--warn) 28%, transparent); color: var(--warn); }
-  .st-pill.warn .dot { background: var(--warn); }
-  .st-pill.accent { background: color-mix(in oklab, var(--accent) 12%, transparent); border-color: color-mix(in oklab, var(--accent) 38%, var(--border)); color: var(--accent); font-variant-numeric: tabular-nums; }
-  .st-pill.accent .dot { background: var(--accent); }
 
   /* ── Custom-provider list (2a) ── */
 
@@ -1121,9 +1094,6 @@
   .st-cli-inst-path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; opacity: 0.6; font-family: var(--font-mono); font-size: 10px; }
   .st-cli-act { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
   .st-cli-act .st-cli-cmd { margin-top: 0; }
-  .st-btn :global(.st-spin) { animation: st-spin 0.8s linear infinite; }
-  @keyframes st-spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .st-btn :global(.st-spin) { animation: none; } }
   .st-cli-err { margin-top: 7px; font-size: var(--fs-xs); color: var(--danger); white-space: pre-wrap; }
   .st-cli-ok { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); white-space: pre-wrap; }
   .st-cli-warn { margin-top: 7px; font-size: var(--fs-xs); color: var(--warn); line-height: 1.4; }

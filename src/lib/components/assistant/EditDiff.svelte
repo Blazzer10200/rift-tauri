@@ -519,15 +519,15 @@
   /* Mockup `.ct-diff-line`: softer fill + a left change-bar so add/del read at a
      glance without the heavier full-row tint. */
   .diff-line[data-kind="add"] {
-    background: color-mix(in oklch, var(--ok) 9%, transparent);
-    box-shadow: inset 2px 0 0 var(--ok);
+    background: color-mix(in oklch, var(--ok) 6%, transparent);
+    box-shadow: inset 2.5px 0 0 color-mix(in oklch, var(--ok) 85%, transparent);
   }
-  .diff-line[data-kind="add"] .diff-num { color: var(--ok); opacity: 0.75; }
+  .diff-line[data-kind="add"] .diff-num { color: var(--ok); opacity: 0.7; }
   .diff-line[data-kind="add"] .diff-gutter { color: var(--ok); }
   .diff-line[data-kind="add"] .diff-code { color: var(--fg); }
   .diff-line[data-kind="del"] {
-    background: color-mix(in oklab, var(--danger) 9%, transparent);
-    box-shadow: inset 2px 0 0 var(--danger);
+    background: color-mix(in oklab, var(--danger) 6%, transparent);
+    box-shadow: inset 2.5px 0 0 color-mix(in oklab, var(--danger) 85%, transparent);
   }
   .diff-line[data-kind="del"] .diff-gutter,
   .diff-line[data-kind="del"] .diff-code { color: oklch(0.86 0.06 22); }

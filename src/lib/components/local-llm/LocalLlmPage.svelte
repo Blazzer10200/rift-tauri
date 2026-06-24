@@ -1,4 +1,5 @@
 <script lang="ts">
+  import "$lib/styles/settings-controls.css";
   import { onMount } from "svelte";
   import { Cpu, FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, ArrowRight, Gauge, Sparkles, AlertTriangle } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
@@ -549,28 +550,5 @@
   .rift-toggle-knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 999px; background: var(--fg-muted); transition: transform var(--dur-base) var(--ease-page), background var(--dur-base); }
   .rift-toggle.on .rift-toggle-knob { transform: translateX(17px); background: var(--accent-fg); }
 
-  .st-input { height: 32px; padding: 0 12px; border-radius: var(--radius); background: var(--field); border: 1px solid var(--field-border); color: var(--fg); font: inherit; font-size: var(--fs-sm); }
-  .st-input:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
-  .st-input.mono { font-family: var(--font-mono); }
-  .st-secret { position: relative; display: inline-flex; align-items: center; }
-  .st-secret .st-input { padding-right: 34px; }
-  .st-eye { position: absolute; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: none; color: var(--fg-subtle); cursor: pointer; border-radius: 6px; }
-  .st-eye:hover { color: var(--fg); background: var(--surface-hover); }
-
-  .st-btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; border-radius: var(--radius); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg-2); transition: background 120ms, border-color 120ms, color 120ms; white-space: nowrap; }
-  .st-btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
-  .st-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-  .st-btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-fg); box-shadow: 0 4px 14px -5px color-mix(in srgb, var(--accent) 60%, transparent); }
-  .st-btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
-  .st-btn :global(svg) { color: currentColor; }
-  .st-btn :global(.st-spin) { animation: st-spin 0.8s linear infinite; }
-  @keyframes st-spin { to { transform: rotate(360deg); } }
-  @media (prefers-reduced-motion: reduce) { .st-btn :global(.st-spin) { animation: none; } }
-
-  .st-pill { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 650; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); }
-  .st-pill .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
-  .st-pill.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
-  .st-pill.ok .dot { background: var(--ok); }
-  .st-pill.warn { background: var(--warn-soft); border-color: color-mix(in oklab, var(--warn) 28%, transparent); color: var(--warn); }
-  .st-pill.warn .dot { background: var(--warn); }
+  /* Input · button · status-pill kit → $lib/styles/settings-controls.css */
 </style>

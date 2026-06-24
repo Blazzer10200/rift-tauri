@@ -14,6 +14,7 @@
   import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
   import AnimatedCount from "./AnimatedCount.svelte";
+  import { tooltip } from "$lib/actions/tooltip";
 
   let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
 
@@ -224,7 +225,8 @@
         <span class="ran"><Check size={13} strokeWidth={2.5} /> Done</span>
       {/if}
       {#if turn.meta}
-        <span class="sapplied-meta">{turn.meta.time}{#if turn.meta.cost} · {turn.meta.cost}{/if}</span>
+        <span class="sapplied-meta">{turn.meta.time}</span>
+        {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
       {/if}
     </div>
   {/if}

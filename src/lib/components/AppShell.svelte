@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack, onMount } from "svelte";
   import { commandPalette } from "../state/command-palette.svelte";
   import CommandPalette from "./dialogs/CommandPalette.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
@@ -6,7 +7,8 @@
   import Topbar from "./shell/Topbar.svelte";
   import StatusBar from "./shell/StatusBar.svelte";
   import ToastHost from "./ToastHost.svelte";
-  import UpdatePill from "./UpdatePill.svelte";
+  import UpdateBanner from "./shell/UpdateBanner.svelte";
+  // (UpdatePill retired — app updates now surface in the top UpdateBanner.)
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
   import { shell } from "../state/shell.svelte";
@@ -15,6 +17,7 @@
   import { browserDock } from "../state/browserDock.svelte";
   import { activityDock } from "../state/activityDock.svelte";
   import { updates } from "../state/updates.svelte";
+  import { cliUpdate } from "../state/cliUpdate.svelte";
   import { assistant } from "../state/assistant.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
   import { toast, notify } from "../state/toast.svelte";
@@ -48,21 +51,39 @@
   }
 
   // ── lifecycle ──────────────────────────────────────────────────────
-  $effect(() => {
-    // Boot lands on Home, which reads workspace/conversations off the
-    // assistant store — init here, not just on Chat/Settings mount, or the
-    // dashboard renders the empty-state lie until another workspace runs it.
+  // One-time boot init. MUST be onMount, NOT $effect: these init() calls write
+  // $state the stores also read (shell.pinned, toast.history), so an $effect
+  // would re-trigger itself → effect_update_depth_exceeded. onMount runs once,
+  // non-reactively. (Boot lands on Home, which reads workspace/conversations off
+  // the assistant store — init here, not just on Chat/Settings mount, or the
+  // dashboard renders the empty-state lie until another workspace runs it.)
+  onMount(() => {
     void assistant.init();
     shell.init();
     browserDock.init();
     activityDock.init();
+    toast.init();
     void updates.checkOnLaunch();
+    // CLI update: check npm for the latest claude version once on launch so the
+    // top banner can surface it app-wide (was Settings-only before). Throttled
+    // to 6h internally; method syncs reactively below once auth lands.
+    void cliUpdate.maybeCheck();
     // Dev-only: expose the update store so CDP can drive its visual states
     // (toast + dialog) without a live feed. Stripped from prod builds.
     if (import.meta.env.DEV) {
       (window as unknown as { __updates?: typeof updates }).__updates = updates;
       (window as unknown as { __assistant?: typeof assistant }).__assistant = assistant;
+      (window as unknown as { __toast?: typeof toast }).__toast = toast;
     }
+  });
+
+  // Keep the CLI-update store's install method in sync with the auth probe so
+  // the top banner shows the correct upgrade command. `untrack` the write so the
+  // effect depends ONLY on auth.installMethod, never on cliUpdate.method (which
+  // setMethod touches) — that self-dependency was the effect_update_depth loop.
+  $effect(() => {
+    const m = assistant.auth?.installMethod ?? null;
+    untrack(() => cliUpdate.setMethod(m));
   });
 
   // HMR-safe global keydown — $effect cleanup runs on unmount AND when the
@@ -186,6 +207,7 @@
     <div class="app-body">
       <Sidebar />
       <div class="main">
+        <UpdateBanner />
         <Topbar />
         <main class="workspace">
           <WorkspaceShell />
@@ -196,8 +218,6 @@
   {/if}
 
   <UpdateDialog />
-
-  <UpdatePill />
 
   <ToastHost />
 

@@ -467,8 +467,8 @@
   .ah-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
   .ah-chip.ok .dot { background: var(--accent); }
-  .ah-chip.warn .dot { background: #e0a82e; }
-  .ah-chip.hot .dot { background: #e0573e; }
+  .ah-chip.warn .dot { background: var(--warn); }
+  .ah-chip.hot .dot { background: var(--danger); }
 
   .ah-advisor { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border-radius: 14px; background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 10%, transparent), color-mix(in oklab, var(--accent) 3%, transparent)); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-adv-ic { width: 40px; height: 40px; flex: none; border-radius: 11px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
@@ -514,14 +514,14 @@
     .ah-an-orb :global(.ah-an-orb-ic), .ah-an-ring, .ah-an-dot, .ah-an-shimmer::after { animation: none; }
     .ah-an-ring { border-color: color-mix(in oklab, var(--accent) 22%, transparent); border-top-color: var(--accent); border-right-color: var(--accent); }
   }
-  .ah-advice-err { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: #e0573e; padding: 10px 14px; border-radius: 10px; background: color-mix(in oklab, #e0573e 8%, transparent); }
+  .ah-advice-err { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--danger); padding: 10px 14px; border-radius: 10px; background: color-mix(in oklab, var(--danger) 8%, transparent); }
   .ah-advice { display: flex; flex-direction: column; gap: 12px; }
   .ah-advice-sum { font-size: var(--fs-sm); color: var(--fg-muted); margin: 0 2px; line-height: 1.5; }
   .ah-cards { display: flex; flex-direction: column; gap: 10px; }
   .ah-rec { display: flex; gap: 13px; padding: 14px 16px; border-radius: 12px; background: var(--surface-1, var(--bg-2)); box-shadow: inset 0 0 0 1px var(--border); }
   .ah-rec-impact { flex: none; align-self: flex-start; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; }
   .ah-rec-impact.high { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent); }
-  .ah-rec-impact.medium { background: color-mix(in oklab, #e0a82e 18%, transparent); color: #e0a82e; }
+  .ah-rec-impact.medium { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
   .ah-rec-impact.low { background: var(--ghost-border); color: var(--fg-subtle); }
   .ah-rec-tx { min-width: 0; }
   .ah-rec-tt { font-size: 14px; font-weight: 660; letter-spacing: -0.01em; }
@@ -561,8 +561,8 @@
   .ah-track { height: 7px; border-radius: 999px; background: var(--ghost-border); overflow: hidden; }
   .ah-track.sm { height: 5px; flex: 1; }
   .ah-fill { height: 100%; border-radius: 999px; transition: width 0.3s ease; background: var(--accent); }
-  .ah-fill.warn { background: #e0a82e; }
-  .ah-fill.hot { background: #e0573e; }
+  .ah-fill.warn { background: var(--warn); }
+  .ah-fill.hot { background: var(--danger); }
 
   .ah-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
   .ah-tile { padding: 12px 14px; border-radius: 10px; background: var(--bg-2, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--ghost-border); }

@@ -44,7 +44,7 @@
       out:fly={{ y: reducedMotion ? 0 : 6, duration: reducedMotion ? 0 : 140 }}
     >
       <span class="kind" data-severity={item.severity}>
-        <Icon size={12}/>
+        <Icon size={14}/>
       </span>
       <span class="text">
         <span class="title">{item.title}</span>
@@ -90,27 +90,37 @@
     --tone: var(--info);
     /* Opaque, NO backdrop-filter — WebView2 mis-composites it on bottom-anchored
        fixed elements (garbage rects + collapsed box; same measured bug class
-       fixed on the update pill in v0.8.10). */
-    background: var(--bg-elev-1);
-    border: 1px solid color-mix(in oklch, var(--tone) 18%, var(--border-strong));
-    border-left: 2px solid var(--tone);
-    border-radius: 8px;
-    padding: 7px 8px 7px 11px;
+       fixed on the update pill in v0.8.10). The severity wash is a flat
+       color-mix layered into the bg (no gradient image) so it stays opaque. */
+    background:
+      linear-gradient(100deg, color-mix(in oklab, var(--tone) 9%, transparent), transparent 46%),
+      var(--bg-elev-1);
+    border: 1px solid color-mix(in oklch, var(--tone) 22%, var(--border-strong));
+    border-radius: 11px;
+    padding: 9px 10px 9px 11px;
     display: grid;
     grid-template-columns: auto 1fr auto auto;
-    gap: 10px;
+    gap: 11px;
     align-items: center;
     color: var(--fg);
-    box-shadow: 0 8px 22px -10px oklch(0 0 0 / 0.5);
-    width: 340px;
+    box-shadow:
+      0 14px 34px -14px oklch(0 0 0 / 0.6),
+      0 1px 3px -1px oklch(0 0 0 / 0.4),
+      inset 0 1px 0 oklch(1 0 0 / 0.03);
+    width: 348px;
     max-width: 100%;
     font: inherit;
     text-align: left;
-    transition: border-color 140ms ease-out;
+    transition: border-color 140ms ease-out, transform 140ms var(--ease-soft), box-shadow 140ms ease-out;
   }
   .toast.clickable { cursor: pointer; }
   .toast.clickable:hover {
-    border-color: color-mix(in oklch, var(--tone) 32%, var(--border-strong));
+    border-color: color-mix(in oklch, var(--tone) 40%, var(--border-strong));
+    transform: translateY(-1px);
+    box-shadow:
+      0 18px 40px -14px oklch(0 0 0 / 0.65),
+      0 1px 3px -1px oklch(0 0 0 / 0.4),
+      inset 0 1px 0 oklch(1 0 0 / 0.04);
   }
 
   .toast[data-severity="ok"]     { --tone: var(--ok); }
@@ -120,8 +130,8 @@
   .toast[data-severity="muted"]  { --tone: var(--border-strong); }
 
   .kind {
-    width: 22px; height: 22px;
-    border-radius: var(--radius-xs);
+    width: 28px; height: 28px;
+    border-radius: 8px;
     display: inline-flex; align-items: center; justify-content: center;
     background: var(--bg-elev-3);
     color: var(--fg-muted);

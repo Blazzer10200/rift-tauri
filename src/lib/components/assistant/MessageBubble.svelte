@@ -593,7 +593,7 @@
               <span class="ts-dot" aria-hidden="true"></span>
               <span class="ts-item mono"><Clock size={12} />{formatDuration(turnDurationMs)}</span>
             {/if}
-            {#if costLabel}<span class="ts-item mono">{costLabel}</span>{/if}
+            {#if costLabel}<span class="ts-dot" aria-hidden="true"></span><span class="ts-cost mono" use:tooltip={"Total cost of this turn"}>{costLabel}</span>{/if}
           </div>
           <div class="ts-actions">
             {#if autoApplied}
@@ -785,8 +785,8 @@
        aurora identity without shouting. */
     background: linear-gradient(to bottom,
       transparent 0,
-      color-mix(in oklab, var(--accent) 20%, var(--border)) 10px,
-      color-mix(in oklab, var(--accent) 20%, var(--border)) calc(100% - 10px),
+      color-mix(in oklab, var(--accent) 42%, var(--border)) 12px,
+      color-mix(in oklab, var(--accent) 30%, var(--border)) calc(100% - 14px),
       transparent 100%);
     transition: opacity 200ms ease-out, box-shadow 200ms ease-out;
   }
@@ -954,10 +954,10 @@
      gets a wider gap (12px) — telegraphs "new beat" so multi-Edit turns stop
      reading as if the message ended after the first big block. */
   .bubble[data-role="assistant"] .tl-node:not(:first-child) {
-    margin-top: 0.5rem;
+    margin-top: 12px;
   }
   .bubble[data-role="assistant"] .tl-node[data-group-cont="true"] {
-    margin-top: 0.25rem;
+    margin-top: 5px;
   }
   .tl-node::before {
     content: "";
@@ -1287,7 +1287,9 @@
 
   .content {
     display: flex; flex-direction: column;
-    gap: 5px;
+    /* tl-node margins own the inter-block rhythm (see #2 narration-grouping);
+       a content gap here would stack on top and blur the 4px/12px hierarchy. */
+    gap: 0;
   }
   /* Per-block reveal handled by .stagger wrapper now (see grouped each loop).
      Don't double-animate here — would re-fire on inner text deltas. */
@@ -1456,11 +1458,14 @@
   .turn-summary {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     flex-wrap: wrap;
-    margin-top: 10px; padding: 9px 13px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    margin-top: 12px; padding: 9px 13px;
+    background: color-mix(in oklab, var(--surface) 72%, transparent);
+    backdrop-filter: blur(8px) saturate(1.1);
+    -webkit-backdrop-filter: blur(8px) saturate(1.1);
+    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
+    border-radius: 11px;
     font-size: var(--fs-sm);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 color-mix(in oklab, var(--fg) 5%, transparent);
   }
   .turn-summary[data-auto="true"] {
     background: var(--accent-soft);
@@ -1481,6 +1486,16 @@
   .ts-add { color: var(--ok); }
   .ts-del { color: var(--danger); }
   .ts-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-faint); }
+  /* Cost — quiet prominence: a soft accent-tinted chip lifts it above the muted
+     stat row without shouting (it's the one number worth glancing at). */
+  .ts-cost {
+    display: inline-flex; align-items: center;
+    padding: 1px 7px; border-radius: 6px;
+    font-size: 11px; font-variant-numeric: tabular-nums;
+    color: color-mix(in oklab, var(--accent) 78%, var(--fg));
+    background: color-mix(in oklab, var(--accent) 9%, transparent);
+    cursor: default;
+  }
   .ts-actions { display: flex; align-items: center; gap: 8px; }
   .ts-mode {
     display: inline-flex; align-items: center; gap: 5px;

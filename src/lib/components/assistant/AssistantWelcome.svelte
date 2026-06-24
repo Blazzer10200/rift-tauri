@@ -8,7 +8,7 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import StatsPanel from "$lib/components/home/StatsPanel.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
-  import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
+  import { greeting } from "$lib/components/workspace/welcomeShared";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
@@ -81,18 +81,6 @@
   // Activity stats overlay — opens the (previously-orphaned) usage dashboard.
   let statsOpen = $state(false);
 
-  // Resume-tiles — top recent conversations excluding the current empty tab.
-  // Curate, don't dump: a 1-turn convo (≤2 messages) is almost always a
-  // throwaway/test. Surface only sessions with a real back-and-forth so RECENT
-  // reads as "work in progress". ≥3 messages = the user engaged past answer 1.
-  const MIN_RESUMABLE_MESSAGES = 3;
-  const recentChats = $derived(
-    assistant.conversations
-      .filter((c) => c.id !== assistant.currentConvoId)
-      .filter((c) => c.messageCount >= MIN_RESUMABLE_MESSAGES)
-      .slice(0, 3),
-  );
-
 </script>
 
 <div class="welcome">
@@ -155,34 +143,6 @@
           </button>
         </div>
       </div>
-
-      <!-- Resume — 2-col cards of recent conversations. -->
-      {#if recentChats.length > 0}
-        <div class="home-resume">
-          <div class="hr-label">Pick up where you left off</div>
-          <div class="hr-grid">
-            {#each recentChats as c (c.id)}
-              <button
-                class="hr-card"
-                type="button"
-                onclick={() => void assistant.openTab(c.id)}
-                use:tooltip={`${c.title} · ${c.model}`}
-              >
-                <div class="hr-card-top">
-                  <span class="hr-ic"><MessageSquare size={13}/></span>
-                  <span class="hr-title">{c.title}</span>
-                  <span class="hr-time">{fmtAgo(c.updatedAt)}</span>
-                </div>
-                {#if c.lastSnippet}<div class="hr-snip">{c.lastSnippet}</div>{/if}
-                <div class="hr-meta">
-                  <span class="hr-readonly mono">{c.model} · {c.messageCount} msg</span>
-                  <span class="hr-open">Open <ChevronRight size={12} /></span>
-                </div>
-              </button>
-            {/each}
-          </div>
-        </div>
-      {/if}
 
       <!-- New to Rift? — quiet, collapsible orientation footer. -->
       <div class="newrift" class:open={newToRiftOpen}>
@@ -348,7 +308,7 @@
     font-size: var(--fs-md); line-height: 1.55; color: var(--fg-muted);
   }
 
-  /* ── Warm launchpad — greeting · quick-chips · resume · new-to-rift ─────── */
+  /* ── Warm launchpad — greeting · quick-chips · new-to-rift ─────────────── */
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
   .wel-inner.home-launchpad { gap: 0; max-width: 680px; text-align: left; }
   .greet { margin-bottom: 0; }
@@ -362,31 +322,13 @@
     font-size: 12px; color: var(--fg-muted); letter-spacing: 0.005em; }
   .greet-cue :global(svg) { color: var(--fg-faint); }
   .greet-cue b { color: var(--fg-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .branch-pill { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-weight: 500; font-size: 12.5px; }
+  /* .branch-pill → app.css (shared w/ WorkspacePage). */
   .greet-switch { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px;
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-muted);
     font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
     transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
   .greet-switch:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .greet-switch :global(svg) { color: var(--fg-faint); }
-
-  /* resume — 2-col cards */
-  .home-resume { margin-top: 22px; }
-  .hr-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 10px; }
-  .hr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-  .hr-card { display: flex; flex-direction: column; gap: 7px; padding: 13px 14px; border-radius: 13px; text-align: left; cursor: pointer; font: inherit;
-    background: color-mix(in oklab, var(--fg) 2.5%, transparent); border: 1px solid var(--border);
-    transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
-  .hr-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-2px); }
-  .hr-card-top { display: flex; align-items: center; gap: 8px; }
-  .hr-ic { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; flex: none; background: var(--accent-soft); color: var(--accent); }
-  .hr-title { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .hr-time { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; flex: none; }
-  .hr-snip { font-size: 11.5px; line-height: 1.5; color: var(--fg-muted); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .hr-meta { display: flex; align-items: center; justify-content: space-between; margin-top: 1px; font-size: 10.5px; }
-  .hr-readonly { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-faint); }
-  .hr-open { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-subtle); font-weight: 600; transition: color var(--dur-fast); }
-  .hr-card:hover .hr-open { color: var(--accent); }
 
   /* new to rift? — collapsible orientation footer */
   .newrift { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 14px; }

@@ -136,7 +136,7 @@ export class CliUpdate {
   }
 
   setMethod(m: string | null) {
-    this.method = m;
+    if (this.method !== m) this.method = m;
   }
 
   constructor() {

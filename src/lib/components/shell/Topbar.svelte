@@ -8,6 +8,7 @@
   import { commandPalette } from "$lib/state/command-palette.svelte";
   import { WORKSPACES } from "../workspaces";
   import { tooltip } from "$lib/actions/tooltip";
+  import NotificationCenter from "./NotificationCenter.svelte";
 
   const win = getCurrentWindow();
 
@@ -55,6 +56,7 @@
     <button class="topbar-ic" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search — Ctrl+K"} aria-label="Search commands & chats">
       <Search size={15} />
     </button>
+    <NotificationCenter />
     <button class="topbar-ic" type="button" onclick={() => invoke("open_new_window").catch(console.error)} use:tooltip={"New window"} aria-label="New window">
       <AppWindow size={15} />
     </button>

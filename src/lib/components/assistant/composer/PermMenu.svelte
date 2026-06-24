@@ -95,10 +95,7 @@
   /* Portaled to <body> — rules ride :global (the portal re-parents the node, so
      scoped selectors can't be relied on). Visual spec = docs/design/rift-redesign.html
      `.pop` / `.pop-item.rich`. Namespaced under `.perm-menu` to avoid leaking. */
-  @keyframes -global-pop-in {
-    from { opacity: 0; transform: translateY(8px) scale(0.96); }
-    to   { opacity: 1; transform: none; }
-  }
+  /* pop-in keyframe → app.css (shared). */
   :global(.perm-menu.pop) {
     position: fixed; z-index: 9998; min-width: 264px; padding: 7px;
     border-radius: 16px; transform-origin: bottom left;
