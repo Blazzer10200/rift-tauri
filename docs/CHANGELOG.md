@@ -2,14 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.36.1 — The Claude CLI update actually updates now
+## v0.36.2 — Fable 5 is back
 
-> Clicking "Update" on the Claude CLI bar would spin, then snap right back to the same notification as if nothing happened. Fixed — plus a round of quiet reliability work under the hood.
+> The Fable 5 model returned, so it's available again in the model picker.
 
-- **Fixed: the Claude CLI update that wouldn't stick.** Updating the Claude CLI from the top bar reported "Updating…" and then re-showed the same update prompt, never moving the version. Two things were fighting it: Rift keeps a Claude process warm for fast replies, and on Windows that process held the CLI's own file locked — so the updater silently couldn't replace it. And even when it did update, the bar kept reading the old version. Now Rift shuts those background Claude processes down before updating (so the new version can actually be written) and re-checks the version right after (so the bar clears the moment it's done).
-- **Quieter under the hood.** A long session no longer lets its list of background-agent activity grow without bound, and a handful of small correctness fixes from an internal review pass landed (multi-select prompt answers with commas in them, a couple of teardown races on rapid reload).
+- **Fable 5 is selectable again.** Anthropic's limited-run Fable 5 model — temporarily pulled — is back, so it's once more an option in the model picker with its full 1M-token context and effort range. Pick it per chat just like Opus, Sonnet, or Haiku.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.36.1** — The Claude CLI update actually updates now: clicking "Update" on the CLI bar would spin and then snap right back to the same prompt without moving the version (a running background Claude process held the CLI's file locked on Windows, and the bar read the stale version). Now Rift shuts those processes down before updating and re-checks right after. Plus quieter internals — bounded background-agent history and a handful of small correctness fixes.
 
 - **v0.36.0** — One place for everything that happens: a real **notification center** (a bell in the toolbar with history grouped by when, persisting across restarts), updates moved into an always-visible top bar instead of the corner, redesigned toasts, a calmer chat surface (collapsing long code blocks, stream spacing polish), and a fix for a burst of internal errors on startup.
 
