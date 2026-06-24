@@ -199,13 +199,12 @@ pub(super) fn is_valid_local_base_url(s: &str) -> bool {
 /// sunset a stale pref/session pin falls back to `opus` instead of firing at
 /// a retired model id.
 pub(super) const FABLE_MODEL: &str = "claude-fable-5";
-pub(super) const FABLE_SUNSET_EPOCH_SECS: u64 = 1_782_172_800; // 2026-06-23T00:00:00Z
-/// Manual kill-switch — Fable pulled 2026-06-14 (US-gov disablement, temporary).
-/// Mirrors the frontend `FABLE_DISABLED` (state/assistant/helpers.ts). While
-/// true a pinned/stale Fable session falls back to opus even before the date
-/// sunset, so a gov-disabled model id never reaches the API. Flip back to false
-/// (both sides) the moment it's re-enabled.
-pub(super) const FABLE_DISABLED: bool = true;
+pub(super) const FABLE_SUNSET_EPOCH_SECS: u64 = 4_070_908_800; // 2099-01-01T00:00:00Z
+/// Manual kill-switch — Fable re-enabled 2026-06-24 (the temporary US-gov pull
+/// was lifted). Mirrors the frontend `FABLE_DISABLED` (helpers.ts). Set true to
+/// pull Fable again: a pinned/stale Fable session falls back to opus before the
+/// model id can reach the API. Mirror any change on both sides.
+pub(super) const FABLE_DISABLED: bool = false;
 
 pub(super) fn fable_sunset_passed() -> bool {
     std::time::SystemTime::now()

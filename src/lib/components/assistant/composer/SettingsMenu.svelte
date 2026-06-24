@@ -149,7 +149,7 @@
       <span class="pi-text">
         <span class="pi-name">
           <span class="model-name">{m.label} {m.version}</span>
-          {#if m.limited}<span class="pi-tag accent">Until Jun 22</span>
+          {#if m.limited}<span class="pi-tag accent">Limited</span>
           {:else if m.suffix}<span class="pi-tag">{m.suffix}</span>{/if}
         </span>
         <span class="pi-sub">{m.blurb}</span>

@@ -9,14 +9,14 @@ const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
 ] as const;
 
-// Claude Fable 5 — limited run, offered only through Jun 22 2026 (EOD UTC).
-// After sunset the picker hides it and a stored pref self-heals to the default.
-export const FABLE_SUNSET_MS = Date.UTC(2026, 5, 23);
-// Manual kill-switch — Fable pulled 2026-06-14 (US-gov disablement, temporary).
-// While true the picker hides Fable and any stored/selected Fable pref coerces
-// to the default, exactly as a post-sunset state would. Flip back to false the
-// moment it's re-enabled; the date-based sunset still applies underneath.
-export const FABLE_DISABLED = true;
+// Claude Fable 5 — re-enabled 2026-06-24 after the temporary US-gov pull was
+// lifted. Sunset set far out (no practical auto-hide); to retire it again, set
+// FABLE_DISABLED back to true (the kill-switch) rather than relying on the date.
+export const FABLE_SUNSET_MS = Date.UTC(2099, 0, 1);
+// Manual kill-switch — set true to pull Fable again (hides the picker row + any
+// stored/selected Fable pref coerces to the default, and the backend swaps a
+// pinned Fable session → opus before it can hit the API). Mirror in config.rs.
+export const FABLE_DISABLED = false;
 export function fableAvailable(): boolean {
   return !FABLE_DISABLED && Date.now() < FABLE_SUNSET_MS;
 }

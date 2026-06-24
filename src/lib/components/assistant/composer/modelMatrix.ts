@@ -49,10 +49,11 @@ export type ModelOpt = {
 // legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
 // 1M-ctx beta); `claude-opus-4-7` pins the prior generation. The CLI takes
 // the alias / pinned id; name + suffix are display-only.
-// Fable 5 is a limited run — row exists only while fableAvailable() (through
-// Jun 22 2026); after sunset the list collapses back to the standard four.
+// Fable 5 is a limited run — row exists only while fableAvailable() (gated by
+// FABLE_DISABLED + the sunset date in helpers.ts); when pulled the list
+// collapses back to the standard four.
 export const MODEL_OPTIONS: ModelOpt[] = [
-  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run, retired after Jun 22", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"] }] : []),
+  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"] }] : []),
   { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus },
   { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet },
   { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku },
