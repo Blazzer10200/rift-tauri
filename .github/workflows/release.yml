@@ -24,8 +24,60 @@ on:
 
 permissions:
   contents: read
+  issues: write   # watchdog opens an alert issue when the runner stalls
 
 jobs:
+  # Queue-stall watchdog. Self-hosted runners can wedge: the listener reports
+  # `online` to GitHub but stops pulling jobs, so the release sits `queued`
+  # forever (timeout-minutes only counts AFTER a runner picks the job up, so it
+  # never fires here). This GitHub-hosted job is the alarm: it polls THIS run's
+  # release job and, if it hasn't left the queue inside the grace window, fails
+  # loudly + opens an issue. Cheap (~free ubuntu), turns a silent stall into a
+  # visible red X + notification. It does NOT build — revive proxmox-win then
+  # re-run (see docs/RUNNER-RUNBOOK.md).
+  watchdog:
+    name: runner-stall watchdog
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      actions: read
+      issues: write
+    steps:
+      - name: Wait for the release job to leave the queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref_name }}
+          GRACE_SECONDS: '300'   # 5 min: prior good releases dispatch in seconds
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + GRACE_SECONDS ))
+          while :; do
+            status=$(gh api "repos/$REPO/actions/runs/$RUN_ID/jobs" \
+              --jq '.jobs[] | select(.name | startswith("build + pack + publish")) | .status' || echo "")
+            echo "release job status: ${status:-<none>}"
+            if [ "$status" = "in_progress" ] || [ "$status" = "completed" ]; then
+              echo "Release job dispatched to a runner — watchdog clear."
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Release job for $REF still queued after ${GRACE_SECONDS}s — runner likely wedged."
+              runners=$(gh api "repos/$REPO/actions/runners" --jq '[.runners[] | {name,status,busy}]' || echo "[]")
+              body=$(printf '**Release \`%s\` stalled in the queue (%ss).**\n\nThe self-hosted runner did not pick up the build job. It usually reports `online` but has stopped pulling work (wedged listener).\n\nRunners: \`%s\`\n\n**Fix:** on the `proxmox-win` host, restart the runner service, then re-run this workflow. See `docs/RUNNER-RUNBOOK.md`.\n\nRun: %s/%s/actions/runs/%s' \
+                "$REF" "$GRACE_SECONDS" "$runners" "${GITHUB_SERVER_URL:-https://github.com}" "$REPO" "$RUN_ID")
+              gh issue create --repo "$REPO" \
+                --title "Release $REF stalled: self-hosted runner not dispatching" \
+                --body "$body" \
+                --label "ci,release-blocked" 2>/dev/null \
+                || gh issue create --repo "$REPO" \
+                     --title "Release $REF stalled: self-hosted runner not dispatching" \
+                     --body "$body"
+              exit 1
+            fi
+            sleep 15
+          done
+
   release:
     name: build + pack + publish
     # Self-hosted WS2022 runner on Proxmox (blazzer-labs). Free + warm target/ +
