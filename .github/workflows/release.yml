@@ -129,10 +129,10 @@ jobs:
           $repo = 'Blazzer10200/rift-releases'
           Write-Host "Verifying $tag published to $repo ..."
           $assets = & gh release view $tag --repo $repo --json assets --jq '.assets[].name'
-          if ($LASTEXITCODE -ne 0) { throw "Release $tag not found in $repo — publish did not land." }
+          if ($LASTEXITCODE -ne 0) { throw "Release $tag not found in $repo -- publish did not land." }
           Write-Host "Assets: $assets"
           if ($assets -notmatch 'Rift-win-Setup\.exe') {
-            throw "Release $tag exists but Rift-win-Setup.exe asset is missing — partial publish."
+            throw "Release $tag exists but Rift-win-Setup.exe asset is missing -- partial publish."
           }
           Write-Host "OK: $tag published with installer asset."
         env:
