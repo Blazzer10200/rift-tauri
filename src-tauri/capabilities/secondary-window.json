@@ -49,7 +49,18 @@
         { "path": "**/*.ps1xml" },
         { "path": "**/*.gadget" },
         { "path": "**/*.application" },
-        { "path": "**/*.appref-ms" }
+        { "path": "**/*.appref-ms" },
+        { "path": "**/*.py" },
+        { "path": "**/*.pyw" },
+        { "path": "**/*.sh" },
+        { "path": "**/*.bash" },
+        { "path": "**/*.zsh" },
+        { "path": "**/*.fish" },
+        { "path": "**/*.rb" },
+        { "path": "**/*.pl" },
+        { "path": "**/*.lua" },
+        { "path": "**/*.r" },
+        { "path": "**/*.rmd" }
       ]
     },
     {
