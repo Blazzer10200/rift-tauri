@@ -26,8 +26,6 @@ export type WorkspaceDef = {
   icon: WorkspaceIcon;
   kbd: string;
   disabled?: boolean;
-  getCount?: () => number;
-  getTone?: "warn" | "danger" | "info";
 };
 
 export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {

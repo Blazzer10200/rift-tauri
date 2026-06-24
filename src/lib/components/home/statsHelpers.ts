@@ -56,7 +56,7 @@ export function localDayIndex(ms: number): number {
 }
 
 /** ms threshold for a range window (inclusive lower bound). "all" → -Infinity. */
-export function rangeStart(range: StatRange, now: number): number {
+function rangeStart(range: StatRange, now: number): number {
   if (range === "7d") return now - 7 * DAY_MS;
   if (range === "30d") return now - 30 * DAY_MS;
   return -Infinity;
@@ -84,7 +84,7 @@ export function summarize(stats: ConvoStat[]): Totals {
 }
 
 /** Distinct active local days, as a sorted ascending array of day indices. */
-export function activeDaySet(stats: ConvoStat[]): number[] {
+function activeDaySet(stats: ConvoStat[]): number[] {
   const set = new Set<number>();
   for (const s of stats) set.add(localDayIndex(s.updatedAt));
   return [...set].sort((a, b) => a - b);
@@ -192,11 +192,6 @@ export function intensity(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
   if (r > 0.5) return 3;
   if (r > 0.25) return 2;
   return 1;
-}
-
-/** Trailing daily series (most recent `days` days) for the Models-tab bars. */
-export function dailySeries(stats: ConvoStat[], days: number, now: number): DayCell[] {
-  return heatmap(stats, days, now).cells;
 }
 
 /** One honest, self-deprecating-ish highlight line. Prefers the words/Moby-Dick

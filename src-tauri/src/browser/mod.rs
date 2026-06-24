@@ -261,7 +261,7 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
         })
         .unwrap_or_default();
     Ok(PageContent {
-        title: raw.title,
+        title: raw.title.chars().take(1024).collect(),
         url,
         text: raw.text,
         truncated: raw.truncated,

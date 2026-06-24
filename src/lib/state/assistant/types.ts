@@ -218,10 +218,10 @@ export type StreamEnvelope =
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
 
 /** Extended-thinking tier, mirroring the CLI's effort ladder: none→low ·
- *  quick→medium · smart→high (API default) · deep→xhigh (Claude Code's agentic
- *  default) · ultra = ultracode: xhigh effort + autonomous dynamic-workflow
- *  orchestration via the CLI's `ultracode` settings key (see assistant_send in
- *  turn.rs). Haiku rejects the effort flag server-side, so it gets none. */
+ *  quick→medium · smart→medium (interactive default) · deep→high · ultra =
+ *  ultracode: xhigh effort + autonomous dynamic-workflow orchestration via the
+ *  CLI's `ultracode` settings key (see assistant_send in turn.rs). Haiku rejects
+ *  the effort flag server-side, so it gets none. */
 export type ThinkingEffort = "none" | "quick" | "smart" | "deep" | "ultra";
 
 /** Model selection — stored value IS the string handed to the CLI's `--model`,
@@ -242,10 +242,9 @@ export type ModelFamily = "sonnet" | "opus" | "haiku";
  *  `plan`) need the approval surface from Piece 2 to be fully functional. */
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions";
 
-/** Assistant trust level gating the local git tools (and, later, RCON). Must
- *  stay in sync with `is_valid_trust_level` in src-tauri/src/assistant/mod.rs.
- *  `readonly` → git status/diff/log; `standard` → adds commit/pull/push;
- *  `full` → reserved for RCON raw passthrough (phase 2). */
+/** Assistant trust level gating the local git tools. Must stay in sync with
+ *  `is_valid_trust_level` in src-tauri/src/assistant/config.rs.
+ *  `readonly` → git status/diff/log; `standard` → adds commit/pull/push. */
 export type TrustLevel = "readonly" | "standard";
 
 /** A suggestion the CLI attaches to a `can_use_tool` ask — e.g.

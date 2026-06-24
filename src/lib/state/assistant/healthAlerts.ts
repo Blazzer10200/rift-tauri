@@ -12,11 +12,6 @@ import type { TurnRecord } from "./types";
 // hint once, not a nag (same pattern as send.ts's fableSunsetNoticed).
 const warned = new Set<"deadWait" | "staleCache" | "toolErrors">();
 
-/** Test-only reset. */
-export function resetHealthLatches() {
-  warned.clear();
-}
-
 function tabTitle(tab: TabState): string {
   if (tab.convoTitle) return tab.convoTitle;
   const first = tab.messages.find((m) => m.role === "user");

@@ -96,6 +96,7 @@ fn with_enhance_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
 /// Tree-kill one PID, best-effort + blocking (mirrors `kill_all_session_children`
 /// — grounded enhances parent a `rift-tauri.exe` MCP child, so `/T` matters).
 fn tree_kill(pid: u32) {
+    if pid == 0 { return; }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -321,6 +322,11 @@ names), then output the rewritten prompt. Keep lookups minimal."
             tree_kill(pid);
             return Err("enhance cancelled".into());
         }
+    } else {
+        // child.id() returned None — child exited before we could track it; remove
+        // the sentinel so it doesn't leak in the registry.
+        with_enhance_pids(|m| { m.remove(&request_id); });
+        return Err("enhancer exited before pid could be tracked".into());
     }
     let stdout = child.stdout.take().ok_or("enhancer stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("enhancer stderr unavailable")?;

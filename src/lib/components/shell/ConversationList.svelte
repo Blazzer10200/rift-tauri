@@ -216,6 +216,7 @@
       class="cscope-btn"
       class:on={!shell.allProjects}
       type="button"
+      aria-pressed={!shell.allProjects}
       onclick={() => { if (shell.allProjects) shell.toggleAllProjects(); }}
       title={projLabel(assistant.activeRoot)}
     >This project</button>
@@ -223,6 +224,7 @@
       class="cscope-btn"
       class:on={shell.allProjects}
       type="button"
+      aria-pressed={shell.allProjects}
       onclick={() => { if (!shell.allProjects) shell.toggleAllProjects(); }}
     >All projects</button>
   </div>

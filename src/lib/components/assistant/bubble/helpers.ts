@@ -16,7 +16,6 @@ export function shortToolName(name: string): string { return name.replace(/^mcp_
 export function isCardTool(name: string): boolean {
   return /^(mcp__rift__)?Agent$/.test(name)
     || /^(mcp__rift__)?TodoWrite$/.test(name)
-    || /^(mcp__rift__)?AskUserQuestion$/.test(name)
     || /^mcp__rift__ask_user$/.test(name);
 }
 // Groupable = a plain status chip (Read/Grep/Bash/…): not an inline diff

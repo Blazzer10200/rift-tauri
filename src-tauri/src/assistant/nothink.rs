@@ -179,7 +179,7 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
     } else {
         std::env::var("RIFT_CLOUD_UPSTREAM")
             .ok()
-            .filter(|s| !s.trim().is_empty())
+            .filter(|s| !s.trim().is_empty() && super::config::is_valid_local_base_url(s.trim()))
             .unwrap_or_else(|| "https://api.anthropic.com".to_string())
             .trim_end_matches('/')
             .to_string()

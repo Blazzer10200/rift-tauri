@@ -367,7 +367,6 @@ pub(super) fn is_valid_trust_level(v: &str) -> bool {
 pub(super) fn effective_trust_level(trust_level: &Option<String>) -> String {
     match trust_level.as_deref() {
         Some("full") | Some("standard") => "standard".into(),
-        Some("readonly") => "readonly".into(),
         _ => "readonly".into(),
     }
 }

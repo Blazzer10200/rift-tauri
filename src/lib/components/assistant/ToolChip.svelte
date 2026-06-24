@@ -524,7 +524,7 @@
       {#if durationLabel}
         <span class="chip-duration mono" use:tooltip={"Wall-clock duration"}>{durationLabel}</span>
       {/if}
-      <span class="chip-status">
+      <span class="chip-status" aria-label={tool.status === "pending" ? "Running" : tool.status === "error" ? "Error" : "Done"}>
         {#if tool.status === "pending"}<Loader2 size={12} class="chip-spin" />
         {:else if tool.status === "error"}<AlertCircle size={12} />
         {:else}<CheckCircle2 size={12} />{/if}
@@ -540,7 +540,7 @@
         <span class="todo-sep">/</span>
         <span class="todo-count total" use:tooltip={"total"}>{todoCounts.total}</span>
       </span>
-      <span class="chip-status">
+      <span class="chip-status" aria-label={tool.status === "pending" ? "Running" : tool.status === "error" ? "Error" : "Done"}>
         {#if tool.status === "pending"}<Loader2 size={11} class="chip-spin" />
         {:else if tool.status === "error"}<AlertCircle size={11} />
         {:else}<CheckCircle2 size={11} />{/if}

@@ -211,6 +211,8 @@
         <button
           class="rail-clear"
           type="button"
+          aria-label="Clear all queued messages"
+          use:tooltip={"Clear all queued messages"}
           onclick={() => { if (tab) tab.queue = []; }}
         >
           Clear

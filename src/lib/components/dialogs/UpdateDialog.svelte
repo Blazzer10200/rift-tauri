@@ -176,7 +176,7 @@
               <span>Downloading v{updates.info?.version}…</span>
               <span class="mono">{updates.progress}%</span>
             </div>
-            <div class="dl-track"><div class="dl-fill" style="width:{updates.progress}%"></div></div>
+            <div class="dl-track" role="progressbar" aria-valuenow={updates.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Download progress"><div class="dl-fill" style="width:{updates.progress}%"></div></div>
             {#if updates.sizeLabel}<div class="dl-sub">{updates.sizeLabel}</div>{/if}
           </div>
 

@@ -275,13 +275,14 @@
           bind:value={query}
           type="text"
           placeholder="Search or run a command…"
+          aria-label="Search commands and chats"
           autocomplete="off"
           spellcheck="false"
         />
         <kbd class="cp-hint">Esc</kbd>
       </div>
 
-      <div class="cp-list" bind:this={listEl}>
+      <div class="cp-list" role="list" aria-label="Results" bind:this={listEl}>
         {#if flat.length === 0}
           <div class="cp-empty">No matches</div>
         {:else}

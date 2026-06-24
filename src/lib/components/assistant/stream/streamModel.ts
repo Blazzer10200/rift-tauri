@@ -316,7 +316,7 @@ const isRich = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k =
 
 // Split a work run: rich tools each get their own block; edits batch; the rest
 // collapse to one quiet WorkLine. Order preserved.
-export function segmentWork(tools: StreamTool[]): WorkSeg[] {
+function segmentWork(tools: StreamTool[]): WorkSeg[] {
   const segs: WorkSeg[] = [];
   let cur: { seg: "edit" | "other"; tools: StreamTool[] } | null = null;
   for (const t of tools) {
@@ -328,7 +328,7 @@ export function segmentWork(tools: StreamTool[]): WorkSeg[] {
   return segs;
 }
 
-export function groupSummary(tools: StreamTool[]): string {
+function groupSummary(tools: StreamTool[]): string {
   const kinds = new Set(tools.map((t) => t.kind));
   const n = tools.length;
   if (kinds.size === 1) {

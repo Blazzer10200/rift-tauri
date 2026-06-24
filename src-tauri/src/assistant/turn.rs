@@ -303,6 +303,9 @@ pub async fn assistant_answer_ask_user(
     request_id: String,
     answer: serde_json::Value,
 ) -> Result<(), String> {
+    if serde_json::to_string(&answer).map(|s| s.len()).unwrap_or(usize::MAX) > 64 * 1024 {
+        return Err("answer payload too large".into());
+    }
     if !registry.resolve(&request_id, answer) {
         // Stale id — request already timed out or never existed. Not fatal:
         // the chip just no-ops on its end. Surface as a debug log only.
@@ -978,14 +981,14 @@ pub async fn assistant_send(
     // was safe (string-arg passthrough) but the log line was unredacted.
     // Clamp the requested tier to the model's ceiling before mapping to a flag,
     // and reject a tier the ladder doesn't define. Sonnet 4.6 tops out at
-    // "smart" (high); xhigh + the ultracode workflow key are Opus-tier only — so
+    // "smart" (medium); xhigh + the ultracode workflow key are Opus-tier only — so
     // a stale out-of-range tier (e.g. a workspace pinned to `ultra` under Opus,
     // then switched to Sonnet) can't push Sonnet to xhigh/ultracode. This is the
     // only point that builds the actual CLI args, so it's the authoritative
     // gate; the frontend coerces too. `clamp_effort`/`model_max_effort` mirror
     // MODEL_MAX_EFFORT in src/lib/state/assistant/helpers.ts.
     if !is_valid_effort_tier(&effort) {
-        log::warn!("assistant_send: unknown effort tier {effort:?} — treating as smart (high)");
+        log::warn!("assistant_send: unknown effort tier {effort:?} — treating as deep (high)");
     }
     let effort_tier = clamp_effort(&effort, &model);
     let effort_level = match effort_tier {

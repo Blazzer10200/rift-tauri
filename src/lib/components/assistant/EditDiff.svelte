@@ -291,7 +291,7 @@
         >
           <ChevronRight size={12} />
         </button>
-        <button type="button" class="edit-crumb mono" onclick={openFile} use:tooltip={{ text: "File actions — open, reveal, copy path", placement: "bottom" }}>
+        <button type="button" class="edit-crumb mono" aria-label={`File actions for ${baseName} — open, reveal, copy path`} onclick={openFile} use:tooltip={{ text: "File actions — open, reveal, copy path", placement: "bottom" }}>
           <FileText size={12} class="crumb-file" />
           {#if dirLabel}<span class="dir">{dirLabel}</span>{/if}<span class="name">{baseName}</span>
           <CornerDownLeft size={11} class="edit-open" />

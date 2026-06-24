@@ -51,12 +51,12 @@
   });
 </script>
 
-<div class="rift-menu slash-menu" role="menu">
+<div class="rift-menu slash-menu" role="menu" aria-label="Slash commands">
   <div class="sm-list" bind:this={listEl}>
     {#each commands as c, i (c.name)}
       {@const Icon = META[c.name]?.icon ?? Terminal}
       {#if i === 0 || groupOf(c.name) !== groupOf(commands[i - 1].name)}
-        <div class="sm-group">{groupOf(c.name)}</div>
+        <div class="sm-group" role="separator">{groupOf(c.name)}</div>
       {/if}
       <button
         type="button"

@@ -53,7 +53,6 @@
   // panes showing the welcome can advertise different project dirs.
   const paneRoot = $derived(assistant.effectiveRoot(targetTab));
   const hasRoot = $derived(paneRoot != null);
-  const hasWorkspace = $derived(hasRoot);
   const recents = $derived(assistant.workspace.recent);
 
   // Context pill — folder identity + real signals only. Branch resolves via
@@ -144,7 +143,7 @@
         <p class="muted">Or open <strong>Settings → Assistant</strong> and paste an <code>sk-ant-api03-…</code> key.</p>
       </div>
     </div>
-  {:else if hasWorkspace}
+  {:else if hasRoot}
     <div class="wel-inner home-launchpad">
       <!-- Greeting — one quiet line: time-of-day + the project question. -->
       <div class="greet">
