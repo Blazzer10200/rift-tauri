@@ -183,6 +183,39 @@ export function heatmap(stats: ConvoStat[], days: number, now: number): { cells:
   return { cells, leadPad, max };
 }
 
+/** Dense per-day series for a column bar chart — last `days` calendar days
+ *  ending today, gap-filled with zeros, oldest→newest. Unlike `heatmap` this is
+ *  a flat run (no weekday padding) meant to be drawn as side-by-side bars. */
+export function dailySeries(stats: ConvoStat[], days: number, now: number): { cells: DayCell[]; max: number } {
+  const today = localDayIndex(now);
+  const first = today - (days - 1);
+  const byDay = new Map<number, DayCell>();
+  for (let d = first; d <= today; d++) {
+    byDay.set(d, { day: d, ms: d * DAY_MS, messages: 0, toolCalls: 0, cost: 0, sessions: 0 });
+  }
+  for (const s of stats) {
+    const cell = byDay.get(localDayIndex(s.updatedAt));
+    if (!cell) continue;
+    cell.messages += s.messages;
+    cell.toolCalls += s.toolCalls;
+    cell.cost += s.costUsd;
+    cell.sessions += 1;
+  }
+  const cells = [...byDay.values()];
+  let max = 0;
+  for (const c of cells) if (c.messages > max) max = c.messages;
+  return { cells, max };
+}
+
+/** Short local date label for a day cell ("Jun 3", "Mon"). `weekday` form is
+ *  used when the series is short enough that weekday is more legible than date. */
+export function dayLabel(ms: number, weekday = false): string {
+  const d = new Date(ms);
+  return weekday
+    ? d.toLocaleDateString("en-US", { weekday: "short" })
+    : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 /** 5-step intensity (0 empty … 4 hot) for a heatmap cell, log-ish so a few
  *  monster days don't wash out everything else. */
 export function intensity(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
@@ -208,6 +241,16 @@ export function funFact(t: Totals): string | null {
     return `${fmtInt(t.toolCalls)} tool ${t.toolCalls === 1 ? "call" : "calls"} run across ${fmtInt(t.sessions)} ${t.sessions === 1 ? "session" : "sessions"}.`;
   }
   return null;
+}
+
+/** One human sentence summarizing the range — sits under the hero number so the
+ *  panel reads as a story, not a spreadsheet. Drops empty clauses gracefully. */
+export function summaryLine(t: Totals, peak: number | null): string {
+  const parts: string[] = [];
+  parts.push(`${fmtInt(t.sessions)} session${t.sessions === 1 ? "" : "s"}`);
+  if (t.activeDays > 0) parts.push(`across ${fmtInt(t.activeDays)} active day${t.activeDays === 1 ? "" : "s"}`);
+  if (peak != null) parts.push(`busiest around ${hourLabel(peak)}`);
+  return parts.join(" · ");
 }
 
 // ── Formatters ──────────────────────────────────────────────────────────────

@@ -321,7 +321,7 @@
 {/if}
 
 <style>
-  .conv-search { display: flex; align-items: center; gap: 8px; height: 32px; margin: 2px 2px 7px; padding: 0 10px; flex: none;
+  .conv-search { display: flex; align-items: center; gap: 8px; height: 32px; margin: 2px 2px 6px; padding: 0 10px; flex: none;
     border-radius: 9px; background: var(--bg-inset); border: 1px solid var(--border); color: var(--fg-subtle);
     transition: border-color var(--dur-fast), background var(--dur-fast); }
   .conv-search:focus-within { border-color: var(--border-focus); background: var(--surface); box-shadow: 0 0 0 3px var(--ring); }
@@ -331,11 +331,11 @@
   .cs-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--fg-faint); flex: none; }
   .cs-clear:hover { background: var(--surface-active); color: var(--fg-2); }
 
-  /* per-project scope toggle — segmented control under the search box */
-  .conv-scope { display: flex; gap: 2px; margin: 0 2px 6px; padding: 2px; flex: none;
-    border-radius: 8px; background: var(--bg-inset); border: 1px solid var(--border); }
-  .cscope-btn { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 6px;
-    font-size: 11px; font-weight: 600; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  /* per-project scope toggle — slim segmented control, tightly coupled to search */
+  .conv-scope { display: flex; gap: 2px; margin: 0 2px 4px; padding: 2px; flex: none;
+    border-radius: 7px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .cscope-btn { flex: 1; min-width: 0; height: 22px; padding: 0 8px; border-radius: 5px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     transition: background var(--dur-fast), color var(--dur-fast); }
   .cscope-btn:hover { color: var(--fg-2); }
   .cscope-btn.on { background: var(--surface-active); color: var(--fg); }
@@ -350,9 +350,11 @@
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .conv-list::-webkit-scrollbar { width: 8px; }
   .conv-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-  .conv-group-label { display: flex; align-items: center; gap: 7px; padding: 12px 8px 5px 11px; flex: none;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); }
-  .conv-group-label .cgl-ct { font-weight: 600; opacity: 0.65; font-variant-numeric: tabular-nums; }
+  .conv-group-label { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 7px; padding: 11px 8px 4px 11px; flex: none;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint);
+    background: linear-gradient(180deg, var(--sidebar-bg, color-mix(in oklab, var(--bg) 72%, transparent)) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .conv-group-label:first-child { padding-top: 4px; }
+  .conv-group-label .cgl-ct { font-weight: 600; opacity: 0.55; font-variant-numeric: tabular-nums; }
   .conv-empty { padding: 22px 14px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--fg-subtle); white-space: pre-line; }
 
   .crow { position: relative; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 6px 0 11px; flex: none;

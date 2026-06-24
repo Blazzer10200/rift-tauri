@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PanelLeftClose } from "lucide-svelte";
+  import { PanelLeftClose, Plus } from "lucide-svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
@@ -8,6 +8,7 @@
   import ConversationList from "./ConversationList.svelte";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import { tooltip } from "$lib/actions/tooltip";
+  import { goHome } from "$lib/state/nav";
 
   // Sidebar nav: Workspace (home) + Local LLM + AI Health. Settings pinned to foot;
   // Chat and legacy Projects excluded (Projects nav replaced by the Workspace entry).
@@ -89,6 +90,11 @@
       {/each}
     </nav>
 
+    <button class="new-chat" type="button" onclick={() => goHome()} use:tooltip={"New chat"}>
+      <Plus size={16} strokeWidth={2.4} />
+      <span class="nc-lbl">New chat</span>
+    </button>
+
     <div class="side-sec">
       <ConversationList />
     </div>
@@ -165,8 +171,22 @@
   .exp-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--warn);
     box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 55%, transparent); }
 
+  /* primary action — New chat. Reads as primary via an accent-tinted surface +
+     accent icon/glow, not a saturated slab, so it blends with the rail's soft,
+     bordered, low-saturation language (matches .ws-switch chrome). */
+  .new-chat { display: flex; align-items: center; gap: 9px; height: 38px; margin-top: 10px; padding: 0 11px; flex: none;
+    border-radius: 11px; font-size: 13px; font-weight: 580; color: var(--fg);
+    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 13%, transparent), color-mix(in oklab, var(--accent) 6%, transparent));
+    transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); }
+  .new-chat:hover { background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 20%, transparent), color-mix(in oklab, var(--accent) 10%, transparent));
+    border-color: color-mix(in oklab, var(--accent) 48%, var(--border)); }
+  .new-chat:active { transform: translateY(1px); }
+  .new-chat .nc-lbl { flex: 1; text-align: left; }
+  .new-chat :global(svg) { flex: none; color: var(--accent); }
+
   /* conversation-list section wrapper */
-  .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 10px; }
+  .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 12px; }
 
   .side-foot { display: flex; flex-direction: column; gap: 2px; flex: none; padding-top: 8px; }
 

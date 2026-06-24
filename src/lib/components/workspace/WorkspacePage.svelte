@@ -1,12 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import {
-    FolderTree, FolderOpen, Plus, Trash2, Check, X, Pencil,
+    FolderOpen, Plus, Trash2, Check, X, Pencil,
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare, BarChart3,
     ChevronRight, Sparkles, History,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import PageHero from "../shared/PageHero.svelte";
   import StatsPanel from "../home/StatsPanel.svelte";
   import { projects, projectRootKey } from "../../state/projects.svelte";
   import { assistant } from "../../state/assistant.svelte";
@@ -53,8 +52,12 @@
   // recent folder that isn't yet a project can be "adopted" into one in a click.
   const knownKeys = $derived(new Set(projects.items.map((p) => projectRootKey(p.root))));
   const activeIsProject = $derived(hasRoot && knownKeys.has(projectRootKey(paneRoot)));
+  // Recent folders not yet projects — and not the active folder, which has its
+  // own dedicated "Add <folder> as a project" CTA (avoid a duplicate pill).
   const adoptableRecents = $derived(
-    assistant.workspace.recent.filter((r) => !knownKeys.has(projectRootKey(r))).slice(0, 6),
+    assistant.workspace.recent
+      .filter((r) => !knownKeys.has(projectRootKey(r)) && projectRootKey(r) !== projectRootKey(paneRoot))
+      .slice(0, 6),
   );
 
   // ── Project editor state ────────────────────────────────────────────────────
@@ -180,82 +183,47 @@
 </script>
 
 <div class="sb-main">
-  <PageHero
-    eyebrow="Your workspace"
-    title="Workspace"
-    desc="Pick up where you left off, or bring a folder under Rift. A project names a workspace folder and scopes what the assistant can see — include/exclude globs constrain its file tools, grep, and the @-mention picker to exactly the files that matter."
-  >
-    {#snippet icon()}<FolderTree size={22} strokeWidth={1.75} />{/snippet}
-    {#snippet chip()}
-      <button class="new-btn" type="button" onclick={() => startNew()}>
-        <Plus size={15} strokeWidth={2.4} /> New project
-      </button>
-    {/snippet}
-  </PageHero>
-
   <div class="sb-scroll">
     <div class="sb-wrap">
 
-      <!-- Active-folder band — greeting + identity, and the adopt CTA when the
-           folder you're standing in isn't a project yet. -->
-      {#if hasRoot}
-        <section class="band">
-          <p class="greet-line">
-            <span class="greet-hello">{greet}.</span>
-            <span class="greet-ctx"> What's next for <b>{ctxName}</b>?</span>
-          </p>
-
-          <div class="band-row">
-            <span class="cue">
-              <FolderGit2 size={13} />
-              {#if branch}<span class="branch-pill"><GitBranch size={11} />{branch}</span>{/if}
-              {#if fileCount > 0}<b>{fileCount.toLocaleString()}</b> files{/if}
-            </span>
-            <button class="chip-btn" type="button" onclick={() => void assistant.pickTabFolder(null)}>
-              <Folder size={13} /> Switch folder
-            </button>
-            <button class="chip-btn" type="button" onclick={() => (statsOpen = true)}>
-              <BarChart3 size={13} /> Activity
-            </button>
-          </div>
-
-          {#if !activeIsProject && !editing}
-            <button class="adopt-cta" type="button" onclick={adoptActive}>
-              <span class="adopt-ic"><Sparkles size={15} /></span>
-              <span class="adopt-tx">
-                <b>Add <i>{ctxName}</i> as a project</b>
-                <small>Name this folder and scope its files — you're already working in it.</small>
-              </span>
-              <ArrowRight size={16} class="adopt-go" />
-            </button>
+      <!-- Header — greeting is the page title; New project sits top-right. -->
+      <header class="head">
+        <div class="head-id">
+          {#if hasRoot}
+            <h1 class="greet-line">
+              <span class="greet-hello">{greet}.</span>
+              <span class="greet-ctx"> What's next for <b>{ctxName}</b>?</span>
+            </h1>
+          {:else}
+            <h1 class="greet-line"><span class="greet-hello">{greet}.</span></h1>
           {/if}
-        </section>
-      {/if}
-
-      <!-- Resume — recent conversations. -->
-      {#if recentChats.length > 0}
-        <section class="resume">
-          <div class="section-h"><History size={13} /> Pick up where you left off</div>
-          <div class="resume-grid">
-            {#each recentChats as c (c.id)}
-              <button class="rc" type="button" onclick={() => { void assistant.openTab(c.id); goHome(); }}>
-                <div class="rc-top">
-                  <span class="rc-ic"><MessageSquare size={13} /></span>
-                  <span class="rc-title">{c.title}</span>
-                  <span class="rc-time">{fmtAgo(c.updatedAt)}</span>
-                </div>
-                {#if c.lastSnippet}<div class="rc-snip">{c.lastSnippet}</div>{/if}
-                <div class="rc-meta">
-                  <span class="mono rc-sub">{c.model} · {c.messageCount} msg</span>
-                  <span class="rc-open">Open <ChevronRight size={12} /></span>
-                </div>
+          {#if hasRoot}
+            <div class="band-row">
+              <span class="cue">
+                <FolderGit2 size={13} />
+                {#if branch}<span class="branch-pill"><GitBranch size={11} />{branch}</span>{/if}
+                {#if fileCount > 0}<b>{fileCount.toLocaleString()}</b> files{/if}
+              </span>
+              <button class="chip-btn" type="button" onclick={() => void assistant.pickTabFolder(null)}>
+                <Folder size={13} /> Switch folder
               </button>
-            {/each}
-          </div>
-        </section>
-      {/if}
+              <button class="chip-btn" type="button" onclick={() => (statsOpen = true)}>
+                <BarChart3 size={13} /> Activity
+              </button>
+            </div>
+          {/if}
+        </div>
+        <div class="head-acts">
+          <button class="new-btn primary" type="button" onclick={() => goHome()}>
+            <MessageSquare size={15} strokeWidth={2.2} /> New chat
+          </button>
+          <button class="new-btn ghost" type="button" onclick={() => startNew()}>
+            <Plus size={15} strokeWidth={2.4} /> New project
+          </button>
+        </div>
+      </header>
 
-      <!-- Inline project editor -->
+      <!-- Inline project editor — focused task, spans full width above columns. -->
       {#if editing}
         <section class="editor">
           <div class="ed-head">
@@ -331,89 +299,106 @@
         </section>
       {/if}
 
-      <!-- Projects spine -->
-      {#if !projects.loaded && projects.lastError && !editing}
-        <section class="empty">
-          <div class="empty-ic"><FolderTree size={30} strokeWidth={1.5} /></div>
-          <div class="empty-tt">Couldn't load projects</div>
-          <div class="empty-sub">{projects.lastError}</div>
-          <button class="save-btn" type="button" onclick={() => projects.refresh()}>Retry</button>
-        </section>
-      {:else if projects.items.length === 0 && !editing}
-        <!-- Compact empty-state. When the folder band already shows an adopt CTA,
-             keep this lean (no repeated buttons/recent-strip) so the page fits
-             one screen with no scroll. -->
-        <section class="empty" class:lean={hasRoot}>
-          <div class="empty-ic"><FolderTree size={hasRoot ? 24 : 30} strokeWidth={1.5} /></div>
-          <div class="empty-tt">No projects yet</div>
-          <div class="empty-sub">Give a workspace folder a name and scope which files Rift can read{hasRoot ? "." : ", fresh or adopted from one you already work in."}</div>
-          {#if !hasRoot}
-            <div class="empty-acts">
+      <!-- Two-column body: Continue (resume) | Workspace (projects).
+           Collapses to one column on narrow widths. -->
+      <div class="cols" class:single={recentChats.length === 0}>
+
+        <!-- ── Left: Continue ───────────────────────────────────────────────── -->
+        {#if recentChats.length > 0}
+          <section class="col continue">
+            <div class="section-h"><History size={13} /> Continue</div>
+            <div class="resume-list">
+              {#each recentChats as c (c.id)}
+                <button class="rc" type="button" onclick={() => { void assistant.openTab(c.id); goHome(); }}>
+                  <div class="rc-top">
+                    <span class="rc-ic"><MessageSquare size={13} /></span>
+                    <span class="rc-title">{c.title}</span>
+                    <span class="rc-time">{fmtAgo(c.updatedAt)}</span>
+                  </div>
+                  {#if c.lastSnippet}<div class="rc-snip">{c.lastSnippet}</div>{/if}
+                  <div class="rc-meta">
+                    <span class="mono rc-sub">{c.model} · {c.messageCount} msg</span>
+                    <span class="rc-open">Open <ChevronRight size={12} /></span>
+                  </div>
+                </button>
+              {/each}
+            </div>
+          </section>
+        {/if}
+
+        <!-- ── Right: Workspace (projects) ──────────────────────────────────── -->
+        <section class="col projects-col">
+          <div class="section-h"><FolderGit2 size={13} /> Projects</div>
+
+          <!-- Adopt the active folder when it isn't a project yet. -->
+          {#if hasRoot && !activeIsProject && !editing}
+            <button class="adopt-cta" type="button" onclick={adoptActive}>
+              <span class="adopt-ic"><Sparkles size={15} /></span>
+              <span class="adopt-tx">
+                <b>Add <i>{ctxName}</i> as a project</b>
+                <small>Name this folder and scope its files — you're already working in it.</small>
+              </span>
+              <ArrowRight size={16} class="adopt-go" />
+            </button>
+          {/if}
+
+          {#if !projects.loaded && projects.lastError}
+            <div class="empty">
+              <div class="empty-tt">Couldn't load projects</div>
+              <div class="empty-sub">{projects.lastError}</div>
+              <button class="save-btn" type="button" onclick={() => projects.refresh()}>Retry</button>
+            </div>
+          {:else if projects.items.length === 0 && !(hasRoot && !activeIsProject) && adoptableRecents.length === 0}
+            <!-- True empty-state only when there's no adopt path (no active folder
+                 to adopt + no recent folders). The adopt CTA / pills already guide
+                 the common case, so we don't repeat the instruction. -->
+            <div class="empty lean">
+              <div class="empty-tt">No projects yet</div>
+              <div class="empty-sub">Name a workspace folder and scope which files Rift can read.</div>
               <button class="save-btn" type="button" onclick={() => startNew()}>
                 <Plus size={15} strokeWidth={2.4} /> New project
               </button>
             </div>
-            {#if adoptableRecents.length > 0}
-              <div class="adopt-strip">
-                <div class="section-h"><History size={12} /> Or adopt a recent folder</div>
-                <div class="adopt-list">
-                  {#each adoptableRecents as r (r)}
-                    <button class="adopt-pill" type="button" onclick={() => adoptRecent(r)}>
-                      <Folder size={13} /> {leafName(r)}
+          {:else if projects.items.length > 0}
+            <div class="proj-list">
+              {#each projects.sorted as p (p.id)}
+                <div class="card" class:active={isActive(p)}>
+                  <div class="card-top">
+                    <span class="card-ic"><FolderGit2 size={16} /></span>
+                    <div class="card-id">
+                      <div class="card-name">{p.name}</div>
+                      <div class="card-path mono">{prettyPath(p.root)}</div>
+                    </div>
+                    {#if isActive(p)}<span class="active-pill">Active</span>{/if}
+                  </div>
+
+                  <div class="card-foot">
+                    {#if p.include.length || p.exclude.length}
+                      <span class="card-pats">
+                        <Filter size={12} />
+                        <span class="pat-count">
+                          {#if p.include.length}{p.include.length} inc{/if}
+                          {#if p.include.length && p.exclude.length} · {/if}
+                          {#if p.exclude.length}{p.exclude.length} exc{/if}
+                        </span>
+                      </span>
+                    {:else}
+                      <span class="card-pats muted"><Filter size={12} /> <span class="pat-count">full folder</span></span>
+                    {/if}
+                    <button class="card-act" type="button" onclick={() => startEdit(p)}><Pencil size={13} /> Edit</button>
+                    <button class="card-open" type="button" disabled={isActive(p)} onclick={() => openProject(p)}>
+                      Open <ArrowRight size={14} />
                     </button>
-                  {/each}
+                  </div>
                 </div>
-              </div>
-            {/if}
+              {/each}
+            </div>
           {/if}
-        </section>
-      {:else if !editing || projects.items.length > 0}
-        <section class="spine">
-          <div class="grid">
-            {#each projects.sorted as p (p.id)}
-              <div class="card" class:active={isActive(p)}>
-                <div class="card-top">
-                  <span class="card-ic"><FolderGit2 size={17} /></span>
-                  <div class="card-id">
-                    <div class="card-name">{p.name}</div>
-                    <div class="card-path mono">{prettyPath(p.root)}</div>
-                  </div>
-                  {#if isActive(p)}<span class="active-pill">Active</span>{/if}
-                </div>
 
-                {#if p.include.length || p.exclude.length}
-                  <div class="card-pats">
-                    <Filter size={12} />
-                    <span class="pat-count">
-                      {#if p.include.length}{p.include.length} include{/if}
-                      {#if p.include.length && p.exclude.length} · {/if}
-                      {#if p.exclude.length}{p.exclude.length} exclude{/if}
-                    </span>
-                  </div>
-                {:else}
-                  <div class="card-pats muted"><Filter size={12} /> <span class="pat-count">No patterns — full folder</span></div>
-                {/if}
-
-                <div class="card-foot">
-                  <button class="card-act" type="button" onclick={() => startEdit(p)}><Pencil size={13} /> Edit</button>
-                  <button class="card-open" type="button" disabled={isActive(p)} onclick={() => openProject(p)}>
-                    Open <ArrowRight size={14} />
-                  </button>
-                </div>
-              </div>
-            {/each}
-
-            <!-- Adopt tile — always offers folder-first creation alongside the cards. -->
-            <button class="add-tile" type="button" onclick={() => startNew()}>
-              <span class="add-ic"><Plus size={18} strokeWidth={2.2} /></span>
-              <span class="add-tt">New project</span>
-              <span class="add-sub">Name a folder & scope its files</span>
-            </button>
-          </div>
-
+          <!-- Adopt a recent folder — compact pill strip. -->
           {#if adoptableRecents.length > 0}
-            <div class="adopt-strip framed">
-              <div class="section-h"><History size={12} /> Adopt a folder you already work in</div>
+            <div class="adopt-strip">
+              <div class="adopt-strip-h">Adopt a folder you already work in</div>
               <div class="adopt-list">
                 {#each adoptableRecents as r (r)}
                   <button class="adopt-pill" type="button" onclick={() => adoptRecent(r)} title={prettyPath(r)}>
@@ -424,7 +409,8 @@
             </div>
           {/if}
         </section>
-      {/if}
+
+      </div>
 
     </div>
   </div>
@@ -437,25 +423,44 @@
 <style>
   .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .sb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-  .sb-wrap { max-width: 840px; margin: 0 auto; padding: 22px 40px 32px; display: flex; flex-direction: column; gap: 16px; }
+  .sb-wrap { max-width: 1040px; margin: 0 auto; padding: 22px 40px 28px; display: flex; flex-direction: column; gap: 18px; }
 
-  .new-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: var(--radius-lg);
-    background: var(--accent); color: var(--accent-fg); font-size: var(--fs-md); font-weight: 600;
-    transition: filter var(--dur-fast), transform var(--dur-fast); }
-  .new-btn:hover { filter: brightness(1.08); }
+  /* ── Header ─────────────────────────────────────────────────────────────── */
+  .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .head-id { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .head-acts { display: flex; align-items: center; gap: 8px; flex: none; }
+  /* Both header actions speak the rail's soft-bordered language so the two
+     "New chat" affordances (here + sidebar) read identically. Primary leans on
+     an accent-tinted surface + accent icon, not a saturated slab. */
+  .new-btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; flex: none; border-radius: var(--radius-lg);
+    font-size: var(--fs-md); font-weight: 580; border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-2);
+    transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
   .new-btn:active { transform: translateY(1px); }
+  .new-btn :global(svg) { color: var(--fg-faint); transition: color var(--dur-fast); }
+  .new-btn.primary { color: var(--fg);
+    border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 13%, transparent), color-mix(in oklab, var(--accent) 6%, transparent)); }
+  .new-btn.primary:hover { border-color: color-mix(in oklab, var(--accent) 48%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 20%, transparent), color-mix(in oklab, var(--accent) 10%, transparent)); }
+  .new-btn.primary :global(svg) { color: var(--accent); }
+  .new-btn.ghost:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
+  .new-btn.ghost:hover :global(svg) { color: var(--accent); }
 
   .section-h { display: flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
-    text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 10px; }
+    text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 11px; }
   .section-h :global(svg) { color: var(--fg-faint); }
 
-  /* ── Active-folder band ─────────────────────────────────────────────────── */
-  .band { display: flex; flex-direction: column; }
-  .greet-line { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.38; margin: 0; text-wrap: pretty; }
+  .greet-line { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.28; margin: 0; text-wrap: pretty; }
   .greet-hello { color: var(--fg); }
   .greet-ctx { color: var(--fg-subtle); font-weight: 400; }
   .greet-ctx b { color: var(--fg-2); font-weight: 600; }
-  .band-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .band-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  /* ── Two-column body ────────────────────────────────────────────────────── */
+  .cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 28px; align-items: start; }
+  .cols.single { grid-template-columns: minmax(0, 1fr); max-width: 620px; }
+  .col { min-width: 0; }
+  @media (max-width: 760px) { .cols { grid-template-columns: minmax(0, 1fr); } }
   .cue { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px 4px 9px; border-radius: 999px;
     background: color-mix(in oklab, var(--fg) 4%, transparent); border: 1px solid var(--border);
     font-size: var(--fs-sm); color: var(--fg-muted); }
@@ -470,7 +475,7 @@
   .chip-btn:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .chip-btn :global(svg) { color: var(--fg-faint); }
 
-  .adopt-cta { display: flex; align-items: center; gap: 12px; margin-top: 16px; padding: 13px 14px; text-align: left;
+  .adopt-cta { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 12px 13px; text-align: left;
     border-radius: var(--radius-xl); cursor: pointer; font: inherit;
     border: 1px solid var(--ghost-border); background: linear-gradient(180deg, var(--accent-soft), transparent);
     transition: border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page), background var(--dur-fast); }
@@ -483,8 +488,8 @@
   .adopt-tx small { font-size: var(--fs-sm); color: var(--fg-muted); }
   .adopt-cta :global(.adopt-go) { color: var(--accent); flex: none; }
 
-  /* ── Resume cards ───────────────────────────────────────────────────────── */
-  .resume-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  /* ── Resume cards (Continue column) ─────────────────────────────────────── */
+  .resume-list { display: flex; flex-direction: column; gap: 10px; }
   .rc { display: flex; flex-direction: column; gap: 7px; padding: 13px 14px; border-radius: var(--radius-xl); text-align: left;
     cursor: pointer; font: inherit; background: color-mix(in oklab, var(--fg) 2.5%, transparent); border: 1px solid var(--border);
     transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
@@ -557,23 +562,17 @@
   .save-btn:active:not(:disabled) { transform: translateY(1px); }
   .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  /* ── Empty state ────────────────────────────────────────────────────────── */
-  .empty { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 40px 24px;
-    border-radius: var(--radius-2xl); border: 1px dashed var(--border-strong); background: color-mix(in oklab, var(--fg) 2%, transparent); }
-  .empty.lean { padding: 22px; gap: 6px; }
-  .empty-ic { width: 56px; height: 56px; border-radius: var(--radius-2xl); display: grid; place-items: center; margin-bottom: 4px;
-    background: var(--accent-soft); color: var(--accent); }
-  .empty.lean .empty-ic { width: 42px; height: 42px; margin-bottom: 0; }
-  .empty-tt { font-size: var(--fs-xl); font-weight: 680; }
-  .empty-sub { font-size: var(--fs-md); color: var(--fg-muted); max-width: 44ch; line-height: 1.5; margin-bottom: 8px; }
-  .empty-acts { display: flex; gap: 10px; align-items: center; }
+  /* ── Empty state — slim inline panel, no giant placeholder ──────────────── */
+  .empty { display: flex; flex-direction: column; align-items: flex-start; text-align: left; gap: 8px; padding: 18px 16px;
+    border-radius: var(--radius-xl); border: 1px dashed var(--border-strong); background: color-mix(in oklab, var(--fg) 2%, transparent); }
+  .empty.lean { gap: 6px; }
+  .empty-tt { font-size: var(--fs-lg); font-weight: 660; }
+  .empty-sub { font-size: var(--fs-sm); color: var(--fg-muted); line-height: 1.5; }
+  .empty .save-btn { margin-top: 4px; }
 
-  .adopt-strip { width: 100%; margin-top: 18px; }
-  .adopt-strip.framed { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
-  .adopt-strip .section-h { justify-content: center; }
-  .adopt-strip.framed .section-h { justify-content: flex-start; }
-  .adopt-list { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-  .adopt-strip.framed .adopt-list { justify-content: flex-start; }
+  .adopt-strip { width: 100%; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .adopt-strip-h { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 9px; }
+  .adopt-list { display: flex; flex-wrap: wrap; gap: 8px; }
   .adopt-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px;
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-2);
     font-size: var(--fs-sm); font-weight: 540; cursor: pointer;
@@ -582,42 +581,29 @@
   .adopt-pill :global(svg) { color: var(--fg-faint); }
   .adopt-pill:hover :global(svg) { color: var(--accent); }
 
-  /* ── Project cards ──────────────────────────────────────────────────────── */
-  .spine { display: flex; flex-direction: column; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 14px; }
-  .card { display: flex; flex-direction: column; gap: 12px; padding: 15px; border-radius: var(--radius-xl);
+  /* ── Project cards — vertical list in the right column ──────────────────── */
+  .proj-list { display: flex; flex-direction: column; gap: 10px; }
+  .card { display: flex; flex-direction: column; gap: 10px; padding: 13px 14px; border-radius: var(--radius-xl);
     border: 1px solid var(--border); background: var(--bg-elev-1);
     transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast); }
   .card:hover { border-color: var(--border-strong); box-shadow: 0 8px 22px -16px color-mix(in oklab, var(--fg) 35%, transparent); transform: translateY(-1px); }
   .card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft); }
-  .card-top { display: flex; align-items: flex-start; gap: 10px; }
-  .card-ic { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent); }
+  .card-top { display: flex; align-items: center; gap: 10px; }
+  .card-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent); }
   .card-id { flex: 1; min-width: 0; }
   .card-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .card-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
   .active-pill { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 7px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); }
-  .card-pats { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-muted); }
+  .card-pats { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--fg-muted); min-width: 0; }
   .card-pats.muted { color: var(--fg-subtle); }
   .card-pats :global(svg) { color: var(--fg-faint); flex: none; }
   .pat-count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 2px; }
-  .card-act { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: var(--radius); color: var(--fg-muted); font-size: var(--fs-sm); font-weight: 550; transition: background var(--dur-fast), color var(--dur-fast); }
+  .card-foot { display: flex; align-items: center; gap: 6px; }
+  .card-act { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; margin-left: auto; border-radius: var(--radius); color: var(--fg-muted); font-size: var(--fs-sm); font-weight: 550; transition: background var(--dur-fast), color var(--dur-fast); }
   .card-act:hover { background: var(--surface-hover); color: var(--fg); }
-  .card-open { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; margin-left: auto; border-radius: var(--radius); background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); font-size: var(--fs-sm); font-weight: 600; transition: background var(--dur-fast); }
+  .card-open { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: var(--radius); background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); font-size: var(--fs-sm); font-weight: 600; transition: background var(--dur-fast); }
   .card-open:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 22%, transparent); }
   .card-open:disabled { opacity: 0.45; cursor: default; }
-
-  /* Folder-first add tile — sits in the grid alongside project cards. */
-  .add-tile { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px;
-    min-height: 116px; padding: 15px; border-radius: var(--radius-xl); cursor: pointer; font: inherit; text-align: left;
-    border: 1px dashed var(--border-strong); background: color-mix(in oklab, var(--fg) 1.5%, transparent);
-    transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
-  .add-tile:hover { border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
-  .add-ic { display: grid; place-items: center; width: 30px; height: 30px; border-radius: var(--radius-lg);
-    background: var(--accent-soft); color: var(--accent); margin-bottom: 4px; }
-  .add-tile:hover .add-ic { background: var(--accent); color: var(--accent-fg); }
-  .add-tt { font-size: var(--fs-md); font-weight: 640; color: var(--fg-2); }
-  .add-sub { font-size: var(--fs-xs); color: var(--fg-subtle); }
 
   .mono { font-family: var(--font-mono); }
 </style>
