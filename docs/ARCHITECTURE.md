@@ -56,7 +56,7 @@ Key properties:
 |---|---|
 | `turn.rs` | Live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, steer/stop, per-turn env snapshot. The hot file. |
 | `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + bridge-gated `ask_user` / `open_browser` / `notify`. Workspace-scoped, trust-gated. |
-| `git_local.rs` | Hardened `run_git` (no shell, args pre-split, env stripped, non-interactive) + path/message validators. Backs both the MCP git tools and `commands/git.rs`. |
+| `git_local.rs` | Hardened `run_git` (no shell, args pre-split, env stripped, non-interactive) + path/message validators. Backs the `git_*` MCP tools in `mcp_server.rs` (there is no `commands/git.rs`). |
 | `bridge.rs` | Loopback TCP UI bridge (127.0.0.1, ephemeral port, 192-bit token) so MCP tools can round-trip `ask_user`/`open_browser`/`notify` through the running webview. |
 | `convo_store.rs` | On-disk conversation persistence + export. |
 | `oneshot.rs` | One-off CLI calls (prompt-enhance, title) outside the live turn loop. |
@@ -86,7 +86,7 @@ Svelte-5 runes-class singletons (the `export const store = new Store()` pattern)
 | `tabs.ts` · `types.ts` | Multi-tab / multi-pane state (`PaneState`, `MAX_PANES=4`), persisted to `localStorage`. |
 | `persistence.ts` · `telemetry.ts` · `attachments.ts` · `workspace.ts` · `healthAlerts.ts` · `helpers.ts` | disk save · usage rollups · file attachments · per-tab workspace root · health banners · effort/model mapping. |
 
-Other stores: `environment.svelte.ts` (the Environment floating widget — pill/expanded panel; `open` auto-managed, `expanded` persisted), `projects.svelte.ts` (named-folder registry), `usage.svelte.ts` (rate-limit gauges), `cliUpdate.svelte.ts` + `updates.svelte.ts` (CLI + app update notices), `stt.svelte.ts`, `browserDock.svelte.ts` / `activityDock.svelte.ts`, `localLlm.svelte.ts`, `workspace.svelte.ts`, `ui-prefs.svelte.ts`, `toast.svelte.ts`.
+Other stores: `environment.svelte.ts` (host-tool presence — git/node/npm/cargo/code, probed once via `environment_check` and cached to hide dead affordances), `projects.svelte.ts` (named-folder registry), `usage.svelte.ts` (rate-limit gauges), `cliUpdate.svelte.ts` + `updates.svelte.ts` (CLI + app update notices), `stt.svelte.ts`, `browserDock.svelte.ts` / `activityDock.svelte.ts` (the sub-agent live-activity float — pill/expanded panel, `open` = card-expanded vs pill-collapsed), `localLlm.svelte.ts`, `workspace.svelte.ts`, `ui-prefs.svelte.ts`, `toast.svelte.ts`.
 
 ### Components (`src/lib/components/`)
 - `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `AssistantWelcome` (warm/cold welcome), `PermissionBar`, `SubAgentDock`.
@@ -105,7 +105,7 @@ The MCP server runs as a child process and can't touch the webview directly. For
 
 ## 7. Self-update (Velopack)
 
-`update_service.rs` wraps `velopack::UpdateManager` over a Velopack `HttpSource` pointed at the Cloudflare R2 feed (`UPDATE_FEED_URL`, `update_service.rs:34`). Flow: check on launch + every 6h → background download with progress (`update-progress`/`update-downloaded`) → on consent, `wait_exit_then_apply_updates(silent, restart)`. **Critical:** before exit, `apply()` reaps the per-turn `rift-tauri.exe` MCP children (they lock `current/`, and `app.exit(0)` skips `Drop` so `kill_on_drop` never fires). The CLI child's cwd defaulting to `temp_dir()` (not the install dir) is the load-bearing prevention added in v0.12.3. Full lineage + rationale: `git log -- docs/design/velopack-auto-update.md` (arc doc retired after ship).
+`update_service.rs` wraps `velopack::UpdateManager` over a Velopack `HttpSource` pointed at the Cloudflare R2 feed (`UPDATE_FEED_URL`, `update_service.rs:35`). Flow: check on launch + every 6h → background download with progress (`update-progress`/`update-downloaded`) → on consent, `wait_exit_then_apply_updates(silent, restart)`. **Critical:** before exit, `apply()` reaps the per-turn `rift-tauri.exe` MCP children (they lock `current/`, and `app.exit(0)` skips `Drop` so `kill_on_drop` never fires). The CLI child's cwd defaulting to `temp_dir()` (not the install dir) is the load-bearing prevention added in v0.12.3. Full lineage + rationale: `git log -- docs/design/velopack-auto-update.md` (arc doc retired after ship).
 
 ## 8. Build & release
 

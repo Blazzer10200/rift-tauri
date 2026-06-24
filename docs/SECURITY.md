@@ -49,7 +49,8 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
 - **Secrets** (`secrets.rs`). API keys live in the OS keychain (`keyring`),
   never serialized to disk or logged.
 - **Tauri capability surface.** Window/dialog/opener grants are explicit in
-  `src-tauri/capabilities/`; `opener` is https-only.
+  `src-tauri/capabilities/`; `opener:allow-open-url` is restricted to `https://**`
+  and `mailto:*`.
 - **Self-update.** A standard release binary fetches the production feed over
   HTTPS only — the local test feed is compiled in solely under
   `#[cfg(any(debug_assertions, feature = "update-test-feed"))]`, so a normal
