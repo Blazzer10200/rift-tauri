@@ -2,16 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.30.0 — Attach files, smarter starters, and a Performance panel
+## v0.30.1 — Hardening and accessibility polish
 
-> A round of quality-of-life upgrades for everyday work: pull real files into a message, get starter prompts that fit your project, and see how fast Rift is actually replying — plus the spend cap now behaves correctly for subscription plans.
+> A maintenance release: tighter security around how Rift handles links, file paths, and external content, a fix for a Windows-only path bug in the git tools, and a pass of accessibility improvements across dialogs and chat controls. Nothing changes in how the app looks or works day-to-day — it's just safer and reads better to screen readers.
 
-- **Attach text files to a message.** Drop, paste, or click the paperclip to attach text files — logs, configs, source — into the composer. They show up as chips with the filename and size, and when you send, their contents are included automatically as formatted code blocks so the assistant sees them verbatim. Files over 256 KB still go through but are trimmed with a note; the total text across all attachments is capped at 1 MB per message. Binary files (executables, archives, video) are skipped.
-- **Quick-start chips that fit your stack.** The starter chips on an empty tab now adapt to the open project. Node, Rust, Python, and Go projects each get their own set of starters — dependency audits, entry-point traces, error-handling scans — detected automatically from files like `package.json`, `Cargo.toml`, or `go.mod`. The generic "map / explain / find TODOs" set now appears only when no known stack is recognized.
-- **A Performance card in AI Health.** Once you have a few turns under your belt (3+), AI Health shows how Rift is actually performing: p50/p90 time-to-first-reply, typical turn time, cache-hit rate, total tokens generated, turns measured, and a 7-day cost-trend bar — all from per-turn records Rift now keeps locally in the background.
-- **The spend cap now respects subscription billing.** The per-turn dollar cap (and any advice about it) only appears when you're connected with an API key. On a subscription plan the Cost-guard card is hidden entirely, and AI Health stops suggesting a dollar-per-turn limit — instead it frames advice around your plan's rate-limit window, since subscriptions are governed by rate limits, not per-turn dollars.
-- **Friendlier voice-input setup.** When the on-device Whisper engine isn't built into your copy of Rift, the voice settings now show a calm note ("Web Speech is selected for you and works right now — no setup, no download") with the developer build steps tucked behind a collapsible section, instead of a raw command-line warning. And if your browser doesn't support Web Speech either, the message now points you to that note rather than a dead end.
-- **Internal cleanup.** Removed a non-functional "Fast Mode" toggle (the underlying capability never existed), plus an orphaned navigate command and an unused export command. No change to how the app behaves for you.
+- **Git tools now accept full file paths on Windows.** Fixed a Windows-only bug where passing an absolute path (like `C:\project\src\main.rs`) to the assistant's git tools could be wrongly rejected as "outside the workspace" — the path check didn't account for Windows' canonical path form. In-workspace absolute paths now work correctly, while paths that genuinely escape the workspace are still blocked.
+- **Security hardening across several surfaces.** A round of defense-in-depth limits: the embedded browser's "add page to chat" now caps the page title and URL it captures, the "Open file" action refuses to launch executable scripts (`.py`, `.sh`, `.rb`, and friends — open them in an editor instead), and a few internal size limits and input checks were tightened so malformed or oversized data can't bloat memory.
+- **Accessibility polish.** Buttons, menus, dialogs, and the download progress bar across the app now carry proper labels and roles, so screen readers announce them clearly. This includes the command palette, slash-command menu, file-action menus, the update dialog, and the project filter in the chat sidebar.
+- **Internal cleanup.** Removed dead code paths and corrected some internal documentation. No change to how the app behaves for you.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
