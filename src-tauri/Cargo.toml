@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.30.1"
+version = "0.31.0"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 edition = "2021"

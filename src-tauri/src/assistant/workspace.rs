@@ -130,6 +130,13 @@ fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
 pub fn list_workspace_files_sync(root: &std::path::Path) -> Vec<String> {
     const MENTION_LIMIT: usize = 4000;
     use super::mcp_server::SKIP_DIRS;
+    // Per-project file-pattern scoping: if a defined project owns this root, the
+    // `@`-mention picker honors its include/exclude so it offers the same files
+    // the workspace tools can actually read. No project → empty filter → all
+    // files (minus SKIP_DIRS), unchanged.
+    let (inc, exc) = super::projects::patterns_for_root(&super::load_config(), root);
+    let filter = super::mcp_server::PathFilter::from_globs(&inc.join("\n"), &exc.join("\n"));
+    let filter_active = filter.is_active();
     let mut out = Vec::with_capacity(512);
     for entry in walkdir::WalkDir::new(root)
         .follow_links(false)
@@ -150,7 +157,11 @@ pub fn list_workspace_files_sync(root: &std::path::Path) -> Vec<String> {
             continue;
         }
         let rel = entry.path().strip_prefix(root).unwrap_or(entry.path());
-        out.push(rel.to_string_lossy().replace('\\', "/"));
+        let rel = rel.to_string_lossy().replace('\\', "/");
+        if filter_active && !filter.allows_rel(&rel) {
+            continue;
+        }
+        out.push(rel);
         if out.len() >= MENTION_LIMIT {
             break;
         }

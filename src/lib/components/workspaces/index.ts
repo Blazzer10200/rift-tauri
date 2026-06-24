@@ -1,10 +1,11 @@
 import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
-  Home as HomeIcon, MessageSquare,
+  MessageSquare, FolderTree,
   Activity, Settings as SettingsIcon, Cpu, HeartPulse,
 } from "lucide-svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
+import WorkspacePage from "../workspace/WorkspacePage.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
 import LocalLlmPage from "../local-llm/LocalLlmPage.svelte";
 import AiHealthPage from "../ai-health/AiHealthPage.svelte";
@@ -29,13 +30,12 @@ export type WorkspaceDef = {
 };
 
 export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
-  // "Home is a verb" (redesign §6): the Home nav button routes via goHome() to
-  // the empty Chat surface — this entry is never mounted (home never enters
-  // everOpened), so it points at AssistantPage purely to keep WORKSPACES total
-  // over WorkspaceId and stay crash-safe if any future path mounts it.
-  home:        { component: AssistantPage,     title: "Home",        icon: HomeIcon,      kbd: "1" },
+  // Workspace page: merged Home + Projects destination. Mounted normally via workspace.setActive("home").
+  home:        { component: WorkspacePage,     title: "Workspace",   icon: FolderTree,    kbd: "1" },
   chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "2" },
-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "3" },
-  "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "4" },
-  "ai-health": { component: AiHealthPage,       title: "AI Health",   icon: HeartPulse,    kbd: "5" },
+  // Legacy "projects" id: aliases WorkspacePage to keep the Record exhaustive + handle persisted activeId (init() folds it → "home").
+  projects:    { component: WorkspacePage,     title: "Workspace",   icon: FolderTree,    kbd: "3" },
+  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
+  "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "5" },
+  "ai-health": { component: AiHealthPage,       title: "AI Health",   icon: HeartPulse,    kbd: "6" },
 };

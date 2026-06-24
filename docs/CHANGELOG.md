@@ -2,16 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.30.1 — Hardening and accessibility polish
+## v0.31.0 — Projects, and a single Workspace home
 
-> A maintenance release: tighter security around how Rift handles links, file paths, and external content, a fix for a Windows-only path bug in the git tools, and a pass of accessibility improvements across dialogs and chat controls. Nothing changes in how the app looks or works day-to-day — it's just safer and reads better to screen readers.
+> Two things this release. First: **named projects** — give any folder a name, scope exactly which files Rift can see inside it with include/exclude globs, and switch between them in a click. Second: **Home and Projects are now one page — your Workspace.** Plus a reliability fix so a stuck turn ends honestly instead of hanging forever on a misleading "waiting on the API" message.
 
-- **Git tools now accept full file paths on Windows.** Fixed a Windows-only bug where passing an absolute path (like `C:\project\src\main.rs`) to the assistant's git tools could be wrongly rejected as "outside the workspace" — the path check didn't account for Windows' canonical path form. In-workspace absolute paths now work correctly, while paths that genuinely escape the workspace are still blocked.
-- **Security hardening across several surfaces.** A round of defense-in-depth limits: the embedded browser's "add page to chat" now caps the page title and URL it captures, the "Open file" action refuses to launch executable scripts (`.py`, `.sh`, `.rb`, and friends — open them in an editor instead), and a few internal size limits and input checks were tightened so malformed or oversized data can't bloat memory.
-- **Accessibility polish.** Buttons, menus, dialogs, and the download progress bar across the app now carry proper labels and roles, so screen readers announce them clearly. This includes the command palette, slash-command menu, file-action menus, the update dialog, and the project filter in the chat sidebar.
-- **Internal cleanup.** Removed dead code paths and corrected some internal documentation. No change to how the app behaves for you.
+- **Projects: name a folder, scope what Rift sees.** A project is a named alias for a workspace folder plus its own include/exclude file patterns. Those patterns constrain everything the assistant touches there — file reads, directory listings, grep, and the @-mention picker — so Claude works against exactly the files that matter and ignores the noise (build output, lockfiles, `node_modules`, whatever you list). Create, edit, and delete projects from the Workspace page; the active project's name now labels its conversations in the sidebar.
+- **One Workspace page (Home + Projects, merged).** The separate Home and Projects nav entries are gone, replaced by a single **Workspace** destination. It opens with a time-of-day greeting and your current folder's context (branch, file count), cards to pick up recent conversations where you left off, and the full project manager below — create a project, switch folders, or jump back into work, all from one place. Chat stays one click away and the in-chat welcome screen is unchanged.
+- **Honest stalled-turn handling — no more fake "waiting on the API."** If a turn produces nothing for three minutes with no tool running, Rift now ends it with a truthful message: this is the local Claude process stalling (a hung start, a stuck tool, a dropped pipe), *not* a slow model or the Anthropic API. The waiting indicator was rewritten to match — it no longer claims to know a cause it can't actually see. A genuinely wedged turn can no longer hang indefinitely.
+- **Switching to a project is everything-aware.** Opening a project points the active workspace root at its folder, so turns, file scoping, @-mentions, and conversation filtering all follow automatically — no extra setup.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.30.1** — Hardening and accessibility polish: Windows full-path fix in the git tools, defense-in-depth size/input caps, executable-open refusals, and proper screen-reader labels/roles across dialogs, menus, and the command palette.
 
 - **v0.29.0** — AI Health: a coach for your Claude plan. New workspace tab (shortcut **5**) that reads how you actually use Claude through Rift, then asks **your own Claude** (your subscription, your private data) for a few plain-English, ranked suggestions grounded in your real numbers — with one-tap, fully-undoable apply for the settings it can tune. Only ever touches Rift's own settings, never your global Claude config.
 

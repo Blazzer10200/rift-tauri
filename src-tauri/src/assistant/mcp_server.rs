@@ -86,6 +86,112 @@ fn load_roots() -> Vec<PathBuf> {
         .collect()
 }
 
+/// Per-project file-pattern filter, compiled from `RIFT_MCP_INCLUDE` /
+/// `RIFT_MCP_EXCLUDE` (newline-separated globs, injected by
+/// `mod::write_mcp_config`). Applied ON TOP of the always-on SKIP_DIRS baseline
+/// — it scopes the user-facing project, never the hardcoded safety exclusions.
+///
+/// Matching is against the path RELATIVE to the workspace root, forward-slash
+/// normalized — the same target shape `tool_grep`'s glob already uses. A glob
+/// with no `/` matches the basename (so `*.rs` matches `src/main.rs`), mirroring
+/// the grep `glob_filename_only` rule; a glob with `/` matches the full relpath.
+#[derive(Default)]
+pub(crate) struct PathFilter {
+    include: Vec<(regex::Regex, bool)>, // (matcher, filename_only)
+    exclude: Vec<(regex::Regex, bool)>,
+}
+
+fn compile_globs(raw: &str) -> Vec<(regex::Regex, bool)> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|g| glob_to_regex(g).ok().map(|re| (re, !g.contains('/'))))
+        .collect()
+}
+
+impl PathFilter {
+    fn from_env() -> Self {
+        PathFilter {
+            include: compile_globs(&std::env::var("RIFT_MCP_INCLUDE").unwrap_or_default()),
+            exclude: compile_globs(&std::env::var("RIFT_MCP_EXCLUDE").unwrap_or_default()),
+        }
+    }
+
+    /// Build from explicit glob lists (newline-joined). Used by the `@`-mention
+    /// file walk (parent process — no MCP env) and by tests, which both need a
+    /// filter from patterns rather than the process-global env `from_env` reads.
+    pub(crate) fn from_globs(include: &str, exclude: &str) -> Self {
+        PathFilter {
+            include: compile_globs(include),
+            exclude: compile_globs(exclude),
+        }
+    }
+
+    /// Visibility for a precomputed root-relative, `/`-normalized path. Public
+    /// for the mention-picker walk, which already has relpaths in hand.
+    pub(crate) fn allows_rel(&self, rel: &str) -> bool {
+        self.allows(rel)
+    }
+
+    pub(crate) fn is_active(&self) -> bool {
+        !self.is_empty()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.include.is_empty() && self.exclude.is_empty()
+    }
+
+    /// Match a (filename_only, relpath) glob pair against a relative path.
+    fn matches_any(set: &[(regex::Regex, bool)], rel: &str, file_name: &str) -> bool {
+        set.iter().any(|(re, fname_only)| re.is_match(if *fname_only { file_name } else { rel }))
+    }
+
+    /// Whether a file at `rel` (root-relative, `/`-normalized) is visible:
+    /// excluded paths are hidden; if any include globs exist, only matching
+    /// paths are visible. Empty filter → everything visible.
+    fn allows(&self, rel: &str) -> bool {
+        let file_name = rel.rsplit('/').next().unwrap_or(rel);
+        if Self::matches_any(&self.exclude, rel, file_name) {
+            return false;
+        }
+        if self.include.is_empty() {
+            return true;
+        }
+        Self::matches_any(&self.include, rel, file_name)
+    }
+
+    /// Compute the root-relative, `/`-normalized path of `p` under `root`, then
+    /// test visibility. A path outside the root (shouldn't happen post-resolve)
+    /// is allowed — the root-containment check is the real boundary.
+    fn allows_path(&self, p: &Path, root: &Path) -> bool {
+        if self.is_empty() {
+            return true;
+        }
+        match p.strip_prefix(root) {
+            Ok(rel) => self.allows(&rel.to_string_lossy().replace('\\', "/")),
+            Err(_) => true,
+        }
+    }
+
+    /// Directory visibility — only the EXCLUDE rule applies. Include globs must
+    /// NOT hide a directory: an include like `src/**` needs `src/` to stay
+    /// listed so the model can drill into it. An explicit exclude (`docs`,
+    /// `vendor/**`) does hide the directory.
+    fn allows_dir(&self, p: &Path, root: &Path) -> bool {
+        if self.exclude.is_empty() {
+            return true;
+        }
+        match p.strip_prefix(root) {
+            Ok(rel) => {
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                let file_name = rel.rsplit('/').next().unwrap_or(&rel);
+                !Self::matches_any(&self.exclude, &rel, file_name)
+            }
+            Err(_) => true,
+        }
+    }
+}
+
 /// Resolve `path` (which may be absolute or relative) to an absolute path that
 /// MUST live under one of the workspace roots. Returns canonicalized
 /// `PathBuf` on success, error string otherwise.
@@ -170,6 +276,17 @@ fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
     let resolved = resolve_under_roots(path, roots)?;
     reject_skipped(&resolved)?;
+    // Per-project file-pattern scoping — a file the project excludes (or that
+    // falls outside a non-empty include set) is reported as out-of-scope.
+    let filter = PathFilter::from_env();
+    if let Some(ws_root) = roots.first() {
+        if !filter.allows_path(&resolved, ws_root) {
+            return Err(format!(
+                "{} is outside this project's file patterns",
+                resolved.display()
+            ));
+        }
+    }
     let meta = std::fs::metadata(&resolved).map_err(|e| format!("stat: {e}"))?;
     if !meta.is_file() {
         return Err(format!("{} is not a regular file", resolved.display()));
@@ -210,6 +327,9 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     if !meta.is_dir() {
         return Err(format!("{} is not a directory", resolved.display()));
     }
+    // Per-project file-pattern scoping, relative to the workspace root.
+    let filter = PathFilter::from_env();
+    let ws_root = roots.first().cloned().unwrap_or_else(|| resolved.clone());
     // (name, is_dir, is_symlink, size)
     let mut entries: Vec<(String, bool, bool, u64)> = Vec::new();
     let iter = std::fs::read_dir(&resolved).map_err(|e| format!("read_dir: {e}"))?;
@@ -224,6 +344,15 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             Ok(f) => f,
             Err(_) => continue,
         };
+        // Hide files the project filter excludes; keep directories navigable
+        // (a parent dir of an included path must stay listed so the model can
+        // drill down to it) — only an explicit exclude hides a directory.
+        if !ft.is_dir() && !filter.allows_path(&de.path(), &ws_root) {
+            continue;
+        }
+        if ft.is_dir() && !filter.allows_dir(&de.path(), &ws_root) {
+            continue;
+        }
         let is_symlink = ft.is_symlink();
         let size = if ft.is_file() {
             de.metadata().map(|m| m.len()).unwrap_or(0)
@@ -299,6 +428,12 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     // itself so grep(path:".git") can't read .git/config etc. at walk-depth 1.
     reject_skipped(&search_root)?;
 
+    // Per-project include/exclude scoping — relative to the WORKSPACE root
+    // (roots[0]), not the search subdir, so a project glob like `src/**` means
+    // the same thing regardless of where grep starts walking.
+    let filter = PathFilter::from_env();
+    let ws_root = roots.first().cloned().unwrap_or_else(|| search_root.clone());
+
     let mut files_scanned = 0usize;
     let mut matches: Vec<String> = Vec::new();
 
@@ -321,6 +456,10 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             continue;
         }
         let p = entry.path();
+        // Per-project file-pattern scoping (skips quietly, like SKIP_DIRS).
+        if !filter.allows_path(p, &ws_root) {
+            continue;
+        }
         if let Some(ref gm) = glob_matcher {
             // #120: filename-only globs (no `/`) match the basename; otherwise
             // match the full relpath like before.
@@ -1189,6 +1328,45 @@ mod tests {
         // `.` is a literal, not a wildcard.
         let dot = glob_to_regex("a.txt").unwrap();
         assert!(!dot.is_match("axtxt"), "'.' must be escaped to a literal");
+    }
+
+    // ─── PathFilter (per-project include/exclude scoping) ─────────────────────
+
+    #[test]
+    fn pathfilter_empty_allows_everything() {
+        let f = PathFilter::from_globs("", "");
+        assert!(f.is_empty());
+        assert!(f.allows("src/main.rs"));
+        assert!(f.allows("anything/at/all.bin"));
+    }
+
+    #[test]
+    fn pathfilter_exclude_hides_matching() {
+        let f = PathFilter::from_globs("", "*.log\nvendor/**");
+        assert!(f.allows("src/main.rs"));
+        assert!(!f.allows("app.log"), "filename-only glob matches basename anywhere");
+        assert!(!f.allows("logs/app.log"));
+        assert!(!f.allows("vendor/dep/x.js"), "relpath glob matches under dir");
+        // exclude hides the dir itself too
+        assert!(!f.allows_dir(std::path::Path::new("/ws/vendor"), std::path::Path::new("/ws")));
+        assert!(f.allows_dir(std::path::Path::new("/ws/src"), std::path::Path::new("/ws")));
+    }
+
+    #[test]
+    fn pathfilter_include_keeps_only_matching_files_but_dirs_stay() {
+        let f = PathFilter::from_globs("src/**\n*.md", "");
+        assert!(f.allows("src/lib/x.rs"));
+        assert!(f.allows("README.md"), "*.md basename match");
+        assert!(!f.allows("scripts/build.sh"), "outside include set → hidden");
+        // a non-excluded directory stays navigable even with includes set
+        assert!(f.allows_dir(std::path::Path::new("/ws/scripts"), std::path::Path::new("/ws")));
+    }
+
+    #[test]
+    fn pathfilter_exclude_wins_over_include() {
+        let f = PathFilter::from_globs("src/**", "src/**/*.test.rs");
+        assert!(f.allows("src/main.rs"));
+        assert!(!f.allows("src/foo.test.rs"), "exclude takes precedence over include");
     }
 
     // ─── trust_rank (pure, security-relevant ordering) ────────────────────────

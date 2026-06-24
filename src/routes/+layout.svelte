@@ -6,6 +6,7 @@
   import { onMount } from "svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
+  import { projects } from "$lib/state/projects.svelte";
   import { accessibility } from "$lib/state/accessibility.svelte";
   import SplashOverlay from "$lib/components/SplashOverlay.svelte";
   import ContextMenuHost from "$lib/components/shell/ContextMenuHost.svelte";
@@ -24,6 +25,8 @@
   onMount(() => {
     uiPrefs.init();
     workspace.init();
+    projects.init();
+    void projects.refresh();
     accessibility.init();
   });
 </script>

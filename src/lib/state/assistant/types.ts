@@ -12,6 +12,21 @@ export type WorkspaceState = {
   recent: string[];
 };
 
+/** A user-defined project — a named alias over a workspace folder plus
+ *  per-project file-pattern config that scopes the assistant's workspace tools
+ *  (read_file/list_dir/grep) + the @-mention picker. Mirrors `ProjectDto` in
+ *  `src-tauri/src/assistant/projects.rs`. `id` is a `crypto.randomUUID()`. */
+export type Project = {
+  id: string;
+  name: string;
+  root: string;
+  /** Glob allowlist. Empty = include everything (minus exclude + SKIP_DIRS). */
+  include: string[];
+  /** Glob blocklist, on top of the always-on SKIP_DIRS baseline. */
+  exclude: string[];
+  createdAt: number;
+};
+
 /** One detected Claude Code CLI install. A machine can have several at once
  *  (npm-global + native), which silently drift to different versions — Rift
  *  enumerates all, runs on the newest, and updates every one. */

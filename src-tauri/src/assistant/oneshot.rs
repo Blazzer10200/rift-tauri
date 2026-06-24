@@ -265,9 +265,12 @@ names), then output the rewritten prompt. Keep lookups minimal."
     // config file after the child exits (held until this fn returns).
     let _mcp_guard: Option<McpConfigGuard> = if let Some(root) = ground_root {
         let trust = effective_trust_level(&None);
+        // Honor per-project file-pattern config for the grounding root too, so an
+        // enhance/title pass greps the same scope an interactive turn would.
+        let (inc, exc) = super::projects::patterns_for_root(&super::load_config(), &root);
         // oneshot exposes only read tools (no bridge ask_user/notify), so window
         // routing is moot — pass "main".
-        match write_mcp_config(&request_id, std::slice::from_ref(&root), &trust, "main") {
+        match write_mcp_config(&request_id, std::slice::from_ref(&root), &trust, "main", &inc, &exc) {
             Ok(p) => {
                 cmd.arg("--strict-mcp-config")
                     .arg("--mcp-config").arg(&p)

@@ -3,10 +3,10 @@
 // Chat is the default workspace.
 
 export type WorkspaceId =
-  | "home" | "chat" | "settings" | "local-llm" | "ai-health";
+  | "home" | "chat" | "projects" | "settings" | "local-llm" | "ai-health";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
-  "home", "chat", "settings", "local-llm", "ai-health",
+  "home", "chat", "projects", "settings", "local-llm", "ai-health",
 ] as const;
 
 const ACTIVE_KEY = "rift.ui.workspace.v1";
@@ -67,9 +67,13 @@ class WorkspaceState {
     this.migrateLegacy();
 
     const stored = localStorage.getItem(ACTIVE_KEY);
-    // "Home is a verb" (redesign §6): the home surface is the empty Chat tab,
-    // so never land on the legacy standalone home workspace — fold it to chat.
-    if (stored && stored !== "home" && isWorkspaceId(stored) && !DISABLED.has(stored)) {
+    // "home" now maps to WorkspacePage (real mounted destination).
+    // Fold stored "projects" → "home" (migration for users who had Projects as active workspace).
+    // Fresh installs (stored=null) default to "chat".
+    if (stored === "projects") {
+      this.activeId = "home";
+      localStorage.setItem(ACTIVE_KEY, "home");
+    } else if (stored && isWorkspaceId(stored) && !DISABLED.has(stored)) {
       this.activeId = stored;
     } else {
       this.activeId = "chat";

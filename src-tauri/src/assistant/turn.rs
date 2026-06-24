@@ -655,10 +655,18 @@ pub async fn assistant_send(
     // `--append-system-prompt`. The per-turn dyslexia toggle rides the
     // user-turn <system-reminder> path below so toggling it mid-session never
     // invalidates the cached system-prompt prefix.
+    // Per-project file-pattern config: if the turn's root belongs to a defined
+    // project, thread its include/exclude globs into the MCP child so the
+    // workspace tools (read_file/list_dir/grep) honor the user's scoping. No
+    // matching project → empty lists → SKIP_DIRS-only baseline (unchanged).
+    let (proj_include, proj_exclude) = match roots.first() {
+        Some(r) => super::projects::patterns_for_root(&cfg, r),
+        None => (Vec::new(), Vec::new()),
+    };
     let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
         (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(&session_id, &roots, &trust_level, &window_label) {
+        match write_mcp_config(&session_id, &roots, &trust_level, &window_label, &proj_include, &proj_exclude) {
             Ok(p) => {
                 let guard = McpConfigGuard(p.clone());
                 (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
@@ -1551,6 +1559,23 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 let _ = done.send(Err(RETRY_COLD_SENTINEL.into()));
                 break 'turns;
             }
+            TurnOutcome::Stalled => {
+                // No stdout for the no-progress ceiling — the child is wedged
+                // (hung init, stuck CLI MCP connect, dead-but-not-EOF'd pipe).
+                // Honest error (NOT "the Anthropic API"), drop the child so the
+                // next send cold-respawns, and end the turn so the UI unwedges.
+                let msg = format!(
+                    "Claude stopped responding — no output for {STREAM_NO_PROGRESS_SECS}s, so Rift ended the turn. \
+                     This is the local Claude process stalling (a hung startup, a stuck tool/MCP connection, or a dropped pipe), not a slow model. \
+                     Try the turn again; if it keeps happening, run `claude` in a terminal to confirm the CLI itself works."
+                );
+                warm_pool::remove_if(&ctx.session_id, &ctx.warm);
+                let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
+                    "session_id": stream_sid, "message": msg.clone(),
+                }));
+                let _ = done.send(Err(msg));
+                break 'turns;
+            }
             TurnOutcome::Eof => {
                 // stdout closed without a result — the child exited (crash, bad
                 // args, user stop, lost --resume). Disambiguate via exit status +
@@ -1613,6 +1638,12 @@ enum TurnOutcome {
     /// turn failure: the loop drops the dead child and the dispatcher retries the
     /// turn cold (fresh spawn + `--resume`) so the user never sees an error.
     DeadOnReuse,
+    /// The child produced ZERO stdout for the no-progress ceiling — wedged, not
+    /// slow. A real prefill/queue wait yields its first frame in seconds; a quiet
+    /// pipe past the ceiling means the CLI is stuck (hung init handshake, a CLI
+    /// MCP server stuck connecting, a dead-but-not-EOF'd pipe). The child is
+    /// unusable → surface an honest error + drop it. Never the Anthropic API.
+    Stalled,
 }
 
 /// Borrowed per-turn context for `stream_one_turn` — keeps the long-lived
@@ -1639,6 +1670,16 @@ struct StreamCtx<'a> {
     bg_evict: &'a std::sync::atomic::AtomicBool,
     turn_start: std::time::Instant,
 }
+
+/// No-progress watchdog ceiling: max time the reader will park on `next_line()`
+/// with the child producing NOTHING — no init ack, no token, no frame — before
+/// declaring it wedged (`TurnOutcome::Stalled`). The deadline is RESET on every
+/// stdout line, so it only bites a truly silent pipe; a streaming turn (frames
+/// arriving) never trips it, and a legitimate permission wait runs inside the
+/// read arm (its own 1800s timeout governs) so the watchdog isn't even polled.
+/// 180s is far above a real prefill/queue first-frame (<60s) yet bounds the
+/// previously-infinite deadlock the UI used to mislabel as "the Anthropic API".
+const STREAM_NO_PROGRESS_SECS: u64 = 180;
 
 /// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
 /// channel (init ack, `can_use_tool` permission asks) + mid-turn steers, and
@@ -1693,9 +1734,43 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     let mut perf_ttft_thinking_ms: Option<u64> = None;
     let mut perf_ttft_text_ms: Option<u64> = None;
 
+    // Tools in flight: a `tool_use` block (assistant frame) opens one, a
+    // `tool_result` (user frame) closes it. A running tool legitimately produces
+    // no stdout for a long time — a Bash build, a deep grep, or an `ask_user`
+    // parked on the human — so the watchdog must NOT fire while count > 0. Mirrors
+    // the frontend's `liveTool != null` rule for the stall indicator.
+    let mut tools_in_flight: i32 = 0;
+
+    // No-progress watchdog: a deadline that any received line pushes forward.
+    // Parked on `next_line()` with a silent pipe → fires once at the ceiling and
+    // ends the turn as Stalled (vs the old infinite hang). Pinned so the select
+    // can re-poll the same future; reset by re-arming `deadline` after each line.
+    let watchdog = tokio::time::sleep(std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS));
+    tokio::pin!(watchdog);
+
     loop {
         tokio::select! {
+        () = &mut watchdog => {
+            // A running tool (Bash build, deep grep, ask_user parked on the user)
+            // is silent-but-healthy — re-arm and keep waiting, don't declare a
+            // stall. Only a quiet pipe with NO tool in flight is the wedge.
+            if tools_in_flight > 0 {
+                watchdog.as_mut().reset(
+                    tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
+                );
+                continue;
+            }
+            log::warn!(
+                "warm_pool: no stdout for {STREAM_NO_PROGRESS_SECS}s (user_sent={user_sent}) — child wedged, session={stream_sid}"
+            );
+            return TurnOutcome::Stalled;
+        }
         read = lines.next_line() => {
+            // Any line (even an ignored control frame) = the child is alive and
+            // making progress — push the no-progress deadline forward.
+            watchdog.as_mut().reset(
+                tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
+            );
         match read {
             Ok(Some(line)) => {
                 let trimmed = line.trim();
@@ -1742,6 +1817,14 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if let Err(e) = handle_permission_request(app_out, stream_sid, win_label, stdin, &v).await {
                             return TurnOutcome::Fatal(format!("write permission response: {e}"));
                         }
+                        // A permission ask parks on the USER (its own 1800s
+                        // timeout). That human time isn't a stalled child — re-arm
+                        // the watchdog so a slow decision doesn't trip it on the
+                        // next park; the CLI's first post-decision frame is what
+                        // the fresh deadline now waits on.
+                        watchdog.as_mut().reset(
+                            tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
+                        );
                         continue;
                     }
                     // `result` is the last frame — forward it, emit DONE, and
@@ -1776,12 +1859,31 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                     if ty == Some("assistant") {
                         if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
                             for block in content {
-                                if block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
+                                let block_ty = block.get("type").and_then(|t| t.as_str());
+                                // A tool starts → suspend the watchdog (a long Bash
+                                // build / grep / ask_user is silent-but-healthy).
+                                if block_ty == Some("tool_use") {
+                                    tools_in_flight += 1;
+                                }
+                                if block_ty == Some("tool_use")
                                     && block.get("name").and_then(|n| n.as_str()) == Some("Bash")
                                     && block.get("input").and_then(|i| i.get("run_in_background")).and_then(|b| b.as_bool()) == Some(true)
                                 {
                                     bg_evict.store(true, std::sync::atomic::Ordering::Release);
                                     log::info!("warm_pool: run_in_background Bash detected — will evict warm child after turn, session={stream_sid}");
+                                }
+                            }
+                        }
+                    }
+                    // A tool finished → its result rides a `user` frame. Close out
+                    // the in-flight count so the watchdog re-engages for the next
+                    // quiet-pipe window. Saturating at 0 (never negative) in case a
+                    // result arrives without a matching tracked tool_use.
+                    if ty == Some("user") {
+                        if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
+                            for block in content {
+                                if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                                    tools_in_flight = (tools_in_flight - 1).max(0);
                                 }
                             }
                         }

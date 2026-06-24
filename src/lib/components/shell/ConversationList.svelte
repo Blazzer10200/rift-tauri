@@ -3,6 +3,7 @@
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
+  import { projects } from "$lib/state/projects.svelte";
   import type { ConversationMeta } from "$lib/state/assistant/types";
   import { portal } from "$lib/actions/portal";
 
@@ -29,8 +30,11 @@
   function rootKey(r: string | null | undefined): string {
     return (r ?? "").replace(/[\\/]+$/, "").toLowerCase();
   }
-  /** Short project label (folder basename) for All-projects mode rows. */
+  /** Short project label for a root: the defined project's name if one owns the
+   *  folder, else the folder basename. */
   function projLabel(r: string | null | undefined): string {
+    const named = projects.byRoot(r);
+    if (named) return named.name;
     const k = (r ?? "").replace(/[\\/]+$/, "");
     if (!k) return "Unfiled";
     const seg = k.split(/[\\/]/).pop();

@@ -106,15 +106,18 @@
     const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
     return () => clearInterval(id);
   });
-  // Stall watchdog: when the turn is live but NOTHING has come back yet — no
-  // tool in flight, no output tokens — and elapsed crosses a threshold, the
-  // wait is on the Anthropic API (prefill/queue), not Rift (TTFT is ~1s; the
-  // model's first token is normally ~4s). A rare API stall would otherwise read
-  // as a frozen app behind the whimsical cycler, so swap in an honest notice.
-  // Tiers: 0 normal · 1 soft (≥20s) · 2 strong (≥60s). Normal turns never trip
-  // it (median first-token ~4s).
+  // Stall watchdog: the turn is live but NOTHING has come back — no tool in
+  // flight, no output tokens. A short wait is normal model latency (first token
+  // ~4s); a long silence can be the model OR a wedged local Claude process. We
+  // DON'T claim to know which — the old copy asserted "it's the Anthropic API",
+  // which was a guess that read as a lie when the real cause was a stuck CLI.
+  // The backend watchdog (STREAM_NO_PROGRESS_SECS=180s in turn.rs) auto-ends a
+  // truly silent turn with an honest error; this UI just sets expectations until
+  // then. Tiers: 0 normal · 1 soft (≥20s) · 2 strong (≥60s) · 3 wedged (≥150s,
+  // approaching the backend's auto-end). Keep in lockstep w/ turn.rs's ceiling.
   const stallLevel = $derived.by(() => {
     if (!streaming || liveTool || liveTokens != null || liveSecs == null) return 0;
+    if (liveSecs >= 150) return 3;
     if (liveSecs >= 60) return 2;
     if (liveSecs >= 20) return 1;
     return 0;
@@ -122,11 +125,13 @@
   const footerVerb = $derived(
     liveTool
       ? VERB_ING[liveTool.kind]
-      : stallLevel === 2
-        ? "Still waiting on the API"
-        : stallLevel === 1
-          ? "Waiting on the model"
-          : `${WHIM_WORDS[whimTick]}…`,
+      : stallLevel === 3
+        ? "No response — ending soon"
+        : stallLevel === 2
+          ? "Still waiting for a response"
+          : stallLevel === 1
+            ? "Waiting on the model"
+            : `${WHIM_WORDS[whimTick]}…`,
   );
 </script>
 
@@ -196,10 +201,16 @@
         {/if}
       {/if}
     </div>
-    {#if stallLevel > 0}
+    {#if stallLevel >= 3}
       <div class="sstall-note">
-        The model is slow to respond right now — this is the Anthropic API, not Rift.
-        It'll stream as soon as the first token arrives; you can keep waiting or press Stop.
+        No output yet after a long wait — this can be a slow response or a stuck
+        local Claude process. Rift will end the turn automatically if nothing
+        arrives shortly. You can press Stop now and try again.
+      </div>
+    {:else if stallLevel > 0}
+      <div class="sstall-note">
+        Still waiting on the first token. This is usually just model latency —
+        it'll stream as soon as a response starts. You can keep waiting or press Stop.
       </div>
     {/if}
   {:else if turn.outcome !== "text"}

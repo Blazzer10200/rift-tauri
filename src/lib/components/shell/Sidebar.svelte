@@ -1,42 +1,30 @@
 <script lang="ts">
-  import { PanelLeftClose, Folder, GitBranch, ChevronsUpDown } from "lucide-svelte";
+  import { PanelLeftClose } from "lucide-svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
-  import { goHome } from "$lib/state/nav";
   import { WORKSPACES } from "../workspaces";
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
+  import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
-  // Sidebar nav (redesign §6): Home + Local LLM. Settings is pinned to the
-  // foot; Chat is NOT a nav destination — it's the surface reached via Home
-  // (empty) or by opening a conversation, so it's filtered out here.
+  // Sidebar nav: Workspace (home) + Local LLM + AI Health. Settings pinned to foot;
+  // Chat and legacy Projects excluded (Projects nav replaced by the Workspace entry).
   const navItems = $derived(
-    workspace.order.filter((id) => id !== "settings" && id !== "chat"),
+    workspace.order.filter((id) => id !== "settings" && id !== "chat" && id !== "projects"),
   );
 
-  // "Home is a verb": the empty Chat surface IS home. A tab with no messages
-  // (or the legacy home workspace) reads as Home-active.
-  const activeTabEmpty = $derived((assistant.activeTab?.messages.length ?? 0) === 0);
   function isNavActive(id: WorkspaceId): boolean {
-    if (id === "home") {
-      return workspace.activeId === "home" || (workspace.activeId === "chat" && activeTabEmpty);
-    }
     return workspace.activeId === id;
   }
 
   // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
   const ICON_KEY: Record<WorkspaceId, string> = {
-    home: "home", chat: "chat", "local-llm": "local", settings: "settings", "ai-health": "health",
+    home: "home", chat: "chat", projects: "projects", "local-llm": "local", settings: "settings", "ai-health": "health",
   };
 
-  const repoName = $derived(
-    (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "No folder",
-  );
-
   function goto(id: WorkspaceId) {
-    if (id === "home") { goHome(); return; }
     workspace.setActive(id);
   }
 
@@ -82,16 +70,7 @@
       </button>
     </div>
 
-    <button class="ws-switch" type="button" onclick={() => void assistant.pickFolder()} use:tooltip={assistant.activeRoot ?? "Pick a workspace folder"} aria-label="Pick a workspace folder">
-      <span class="ws-switch-ic"><Folder size={15} /></span>
-      <span class="ws-switch-text">
-        <span class="ws-switch-repo">{repoName}</span>
-        {#if assistant.workspaceBranch}
-          <span class="ws-switch-branch"><GitBranch size={11} />{assistant.workspaceBranch}</span>
-        {/if}
-      </span>
-      <ChevronsUpDown class="ws-switch-chev" size={14} />
-    </button>
+    <ProjectSwitcher />
 
     <nav class="side-nav" aria-label="Workspaces">
       {#each navItems as id (id)}
@@ -167,20 +146,6 @@
     color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
   .side-collapse:hover { background: var(--surface-hover); color: var(--fg-2); }
 
-  /* workspace switcher */
-  .ws-switch { display: flex; align-items: center; gap: 9px; width: 100%; height: 46px; padding: 0 9px 0 8px; margin: 2px 0 8px; flex: none;
-    border-radius: 11px; border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); text-align: left;
-    transition: background var(--dur-fast), border-color var(--dur-fast); }
-  .ws-switch:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-  .ws-switch-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 8px;
-    background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--fg-muted); }
-  .ws-switch-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
-  .ws-switch-repo { font-size: 12.5px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ws-switch-branch { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ws-switch-branch :global(svg) { color: var(--fg-faint); flex: none; }
-  .ws-switch :global(.ws-switch-chev) { color: var(--fg-faint); flex: none; transition: color var(--dur-fast); }
-  .ws-switch:hover :global(.ws-switch-chev) { color: var(--fg-muted); }
-
   /* nav */
   .side-nav { display: flex; flex-direction: column; gap: 2px; flex: none; }
   .snav-item { position: relative; display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 11px; border-radius: 9px;
@@ -194,6 +159,7 @@
   .snav-item :global(.snav-ic) { transition: transform 0.34s var(--ease-page); transform-origin: 50% 50%; }
   .snav-item:hover :global(.snav-ic-home)     { transform: translateY(-2.5px) scale(1.06); }
   .snav-item:hover :global(.snav-ic-chat)     { transform: rotate(-10deg) scale(1.06); }
+  .snav-item:hover :global(.snav-ic-projects) { transform: translateY(-2px) scale(1.06); }
   .snav-item:hover :global(.snav-ic-local)    { transform: rotate(90deg) scale(1.04); }
   .snav-item:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
   .exp-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--warn);

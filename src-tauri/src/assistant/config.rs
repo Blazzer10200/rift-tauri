@@ -22,6 +22,11 @@ pub(super) struct AssistantConfig {
     /// so they can jump back.
     #[serde(default)]
     pub(super) recent_roots: Vec<PathBuf>,
+    /// User-defined projects — named aliases over a workspace folder + per-project
+    /// file-pattern config. Additive: empty = the app behaves exactly as before
+    /// (folder picker + recent_roots only). See `projects.rs`.
+    #[serde(default)]
+    pub(super) projects: Vec<super::projects::Project>,
     /// When true (the default), spawn the CLI without `--strict-mcp-config`
     /// and `--disable-slash-commands` so user MCP servers + slash commands
     /// layer alongside Rift's. CLAUDE.md / hooks always load via the CLI's

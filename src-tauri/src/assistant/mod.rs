@@ -23,6 +23,7 @@ pub mod mcp_server;
 pub mod nothink;
 pub mod oneshot;
 pub mod permission;
+pub mod projects;
 pub mod turn;
 pub mod warm_pool;
 pub mod workspace;
@@ -57,6 +58,9 @@ pub use oneshot::*;
 // `current_root` stays reachable as `crate::assistant::current_root` (stt).
 pub use workspace::*;
 pub(crate) use workspace::current_root;
+// Projects: named alias over a workspace folder + per-project file-pattern
+// config. Glob re-export for the __cmd__ items (same reason as workspace).
+pub use projects::*;
 pub use permission::PermissionRegistry;
 // R8 split (2026-06-09): the live-turn nervous system — session registry
 // (PIDs/stop/steer + `kill_all_session_children`, load-bearing for the
@@ -144,6 +148,8 @@ fn write_mcp_config(
     roots: &[PathBuf],
     trust_level: &str,
     window_label: &str,
+    include: &[String],
+    exclude: &[String],
 ) -> Result<PathBuf, String> {
     let home = dirs_home()?;
     let dir = home.join(".rift").join("assistant");
@@ -173,9 +179,23 @@ fn write_mcp_config(
         .collect::<Vec<_>>()
         .join("\n");
 
+    // Per-project file-pattern globs, newline-separated like RIFT_MCP_ROOTS.
+    // Same embedded-newline strip so one pattern can't split into two phantom
+    // entries in the MCP child. Empty string = no patterns → the child applies
+    // only its always-on SKIP_DIRS baseline (unchanged behavior).
+    let join_patterns = |pats: &[String]| {
+        pats.iter()
+            .map(|s| s.to_string())
+            .filter(|s| !s.contains('\n') && !s.contains('\r'))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
     let mut env_map = serde_json::Map::new();
     env_map.insert("RIFT_MCP_SERVER".into(), Value::from("1"));
     env_map.insert("RIFT_MCP_ROOTS".into(), Value::from(roots_joined));
+    env_map.insert("RIFT_MCP_INCLUDE".into(), Value::from(join_patterns(include)));
+    env_map.insert("RIFT_MCP_EXCLUDE".into(), Value::from(join_patterns(exclude)));
     // Plumb the convo's session_id so the `ask_user` MCP tool can tag its
     // bridge request — the frontend pairs incoming `assistant://ask-user`
     // events against the correct chat tab by session_id.
