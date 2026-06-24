@@ -79,3 +79,21 @@ pub async fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
     let _ = w.set_focus();
     Ok(())
 }
+
+/// #37 cross-window sync — broadcast that the on-disk conversation store changed
+/// (a save/delete/rename in `origin_label`'s window) to every OTHER window so it
+/// can re-pull `assistant_list_conversations`. Origin is skipped: it already
+/// refreshed its own list locally, and re-firing it would loop. Two windows
+/// share one disk store but separate in-memory lists, so without this a chat
+/// created in window-2 never shows up in window-1's sidebar until a reload.
+#[tauri::command]
+pub fn broadcast_convos_changed(app: tauri::AppHandle, origin_label: String) -> Result<(), String> {
+    use tauri::{Emitter, Manager};
+    for (label, _) in app.webview_windows() {
+        if label == origin_label {
+            continue;
+        }
+        let _ = app.emit_to(label.as_str(), "convos-changed", ());
+    }
+    Ok(())
+}

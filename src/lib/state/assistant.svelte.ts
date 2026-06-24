@@ -937,6 +937,10 @@ class AssistantStore {
           detail: e.payload.detail ?? undefined,
         }),
       ),
+      // #37 multi-window: another window mutated the shared conversation store
+      // (broadcast_convos_changed skips the origin, so this only fires for
+      // changes made elsewhere) → re-pull our list so the sidebar stays in sync.
+      await listen("convos-changed", () => void this.refreshConversations()),
       await listen<{
         request_id: string;
         session_id: string;

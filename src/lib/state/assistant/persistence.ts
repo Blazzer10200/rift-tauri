@@ -92,6 +92,17 @@ export async function refreshConversations(host: PersistenceHost): Promise<void>
   }
 }
 
+// #37 cross-window sync: after THIS window mutates the shared conversation store
+// (save / delete / rename), tell every other window to re-pull its list so a
+// chat created or removed here shows up there without a reload. Fire-and-forget
+// — a failed broadcast just means the other window refreshes on its next own
+// action, never blocks the mutation that triggered it.
+export function broadcastConvosChanged(): void {
+  let label = "main";
+  try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
+  void invoke("broadcast_convos_changed", { originLabel: label }).catch(() => {});
+}
+
 /** Derive a human-friendly title from the first user message. #145: takes the
  *  tab as an arg so a debounced doSave reads from the originating tab's
  *  messages, not whichever tab is active when the timer fires. */
@@ -178,6 +189,7 @@ export function scheduleSave(host: PersistenceHost, flush = false, forConvoId?: 
     try {
       await invoke("assistant_save_conversation", { convo: record });
       await refreshConversations(host);
+      broadcastConvosChanged(); // #37: other windows pick up the new/updated chat
       // Fire-and-forget: once the first real exchange is on disk, replace the
       // raw-first-message title with a model-generated one. Never blocks save.
       void maybeGenerateTitle(host, convoId, tab);
@@ -252,6 +264,7 @@ export async function renameConversation(
     await invoke("assistant_save_conversation", { convo });
     if (host.currentConvoId === id) host.convoTitle = convo.title;
     await refreshConversations(host);
+    broadcastConvosChanged(); // #37: propagate the rename to other windows
   } catch (e) {
     host.lastError = `Failed to rename conversation: ${String(e)}`;
   }
@@ -351,6 +364,7 @@ export async function deleteConversation(host: PersistenceHost, id: string): Pro
       host.dropTab(id);
     }
     await refreshConversations(host);
+    broadcastConvosChanged(); // #37: propagate the delete to other windows
     // #149: an openTab(id) that started before the delete may have racy-pushed
     // id into openTabs while we were awaiting the IPC; close it now so the user
     // doesn't end up with a tab pointing at a deleted convo.
@@ -395,6 +409,7 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
     // Re-sync from backend regardless — a mid-loop failure leaves some convos
     // deleted server-side, so the in-memory list must reflect what survived.
     await refreshConversations(host);
+    broadcastConvosChanged(); // #37: propagate the purge to other windows
   }
 }
 
