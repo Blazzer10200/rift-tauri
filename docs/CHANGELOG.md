@@ -2,17 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.36.0 — One place for everything that happens
+## v0.36.1 — The Claude CLI update actually updates now
 
-> Notifications used to flash once in the corner and vanish. Now there's a bell in the toolbar that keeps a tidy history of everything, and updates get their own always-visible bar at the top instead of competing with the noise. Plus a quieter, more polished chat surface.
+> Clicking "Update" on the Claude CLI bar would spin, then snap right back to the same notification as if nothing happened. Fixed — plus a round of quiet reliability work under the hood.
 
-- **A real notification center.** A bell in the toolbar with an unread badge opens a dropdown listing everything that's happened — grouped by when (Now / Earlier / Today / Older), each with its own icon, detail, and time. History persists across restarts (last 50, auto-clearing anything over a week old), so a toast you missed isn't gone forever. Mark-all-read and clear-all are one click.
-- **Updates live at the top now, not in the corner.** Both kinds of update — the Rift app itself and the Claude CLI — surface in a clean, always-visible bar at the top of the window whenever one is available, showing exactly which version you're moving to. One click to update, and it shows live progress while it works. When there's nothing to update, the bar takes up zero space.
-- **Redesigned toasts.** The transient pop-ups that still appear for in-the-moment feedback got a visual refresh — clearer severity coloring, a rounded icon tile, and a subtle lift on hover.
-- **A calmer chat surface.** Long code blocks now collapse with a soft fade and a "Show more" pill instead of running on forever; the message stream got rhythm and spacing polish; and a stray cross-project "resume" card that didn't belong was removed.
-- **Fixed: error spam on startup.** A reactivity loop in the app shell logged a burst of internal errors every time Rift booted. Gone — startup is clean.
+- **Fixed: the Claude CLI update that wouldn't stick.** Updating the Claude CLI from the top bar reported "Updating…" and then re-showed the same update prompt, never moving the version. Two things were fighting it: Rift keeps a Claude process warm for fast replies, and on Windows that process held the CLI's own file locked — so the updater silently couldn't replace it. And even when it did update, the bar kept reading the old version. Now Rift shuts those background Claude processes down before updating (so the new version can actually be written) and re-checks the version right after (so the bar clears the moment it's done).
+- **Quieter under the hood.** A long session no longer lets its list of background-agent activity grow without bound, and a handful of small correctness fixes from an internal review pass landed (multi-select prompt answers with commas in them, a couple of teardown races on rapid reload).
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.36.0** — One place for everything that happens: a real **notification center** (a bell in the toolbar with history grouped by when, persisting across restarts), updates moved into an always-visible top bar instead of the corner, redesigned toasts, a calmer chat surface (collapsing long code blocks, stream spacing polish), and a fix for a burst of internal errors on startup.
 
 - **v0.35.0** — A reliability pass on the quiet edges: a stuck turn surfaces instead of hanging forever (dead-pipe detection + retry on a fresh process), the auto-updater recovers from a poisoned internal lock, CLI-update checks read as "Checking…" instead of a stale result, and git-timeout kills are scoped to git.
 
