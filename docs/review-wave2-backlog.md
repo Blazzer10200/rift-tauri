@@ -1,6 +1,6 @@
 # Review Wave-2 Backlog (cont.174, 2026-06-23)
 
-> Confirmed findings from the 507-agent frontend review workflow (161 raised → 73 adversarially-verified confirmed). Two independent parses were run; **this file uses the higher-detail parse** (agent `abe1864606dccd278`). Raw source: `tasks/wis1ev5va.output` (430KB) + `tasks/abe1864606dccd278.output`.
+> Confirmed findings from the 507-agent frontend review workflow (161 raised → 73 adversarially-verified confirmed). Two independent parses were run; **this file uses the higher-detail parse**. (Raw agent outputs were ephemeral and have been pruned — this curated backlog is the surviving record.)
 >
 > **Already fixed in the cont.174 fix-pass — do NOT re-fix:**
 > - `submitPermissionDecision` finally-block (`assistant.svelte.ts:1129-1144`) → fixed `d0babf3` (mutation moved out of `finally`).

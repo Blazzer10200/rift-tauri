@@ -15,15 +15,15 @@
 //                  ↘ uptodate                ↘ (error → back to available)
 //                  ↘ error
 //
-// The "an update is available" affordance is a dedicated, stable pill
-// (`UpdatePill.svelte`, driven by `pillVisible`) — NOT a toast. A sticky toast
-// in the shared stack was a moving target: it sat at the top of an
-// upward-growing, bottom-anchored, FLIP-animated stack, so every other toast
-// that appeared/expired slid it out from under the cursor → ~50/50 misclicks
-// (the long-standing "update button won't click" bug). The pill is a singleton
-// fixed element: it never reflows, so the click always lands. Toasts are still
+// The "an update is available" affordance is a dedicated, stable surface
+// (`shell/UpdateBanner.svelte`, gated on `hasUpdate`/`snoozeActive`/`dialogOpen`)
+// — NOT a toast. A sticky toast in the shared stack was a moving target: it sat
+// at the top of an upward-growing, bottom-anchored, FLIP-animated stack, so every
+// other toast that appeared/expired slid it out from under the cursor → ~50/50
+// misclicks (the long-standing "update button won't click" bug). The banner is a
+// fixed top strip: it never reflows, so the click always lands. Toasts are still
 // used for the transient install-FAILURE path, which can't move-target because
-// it forces the dialog open at the same time (pill hidden).
+// it forces the dialog open at the same time (banner hidden).
 //
 // Snooze is TIME-BASED (24h), persisted as {version, until} in localStorage.
 // It was version-permanent until 2026-06-09: one stray click on the pill's ×
@@ -143,13 +143,6 @@ class UpdateStore {
       this.snoozed.version === this.info.version &&
       Date.now() < this.snoozed.until
     );
-  }
-
-  /** True when there's an unsnoozed update waiting for user action — drives the
-   *  stable update pill. Hidden once the dialog is open (the dialog IS the
-   *  detail view) or while this version is snoozed (24h max — never permanent). */
-  get pillVisible(): boolean {
-    return this.hasUpdate && !this.snoozeActive && !this.dialogOpen;
   }
 
   /** UI-drift fix: the ONE derived status summary every passive update
@@ -375,13 +368,13 @@ class UpdateStore {
     if (this.snoozeTimer != null) clearTimeout(this.snoozeTimer);
     this.snoozeTimer = setTimeout(() => {
       this.snoozeTimer = null;
-      this.snoozed = null; // state write → pillVisible recomputes → pill returns
+      this.snoozed = null; // state write → banner gate recomputes → banner returns
       saveSnooze(null);
     }, ms);
   }
 
-  /** Called once on app launch from AppShell.onMount. The pill surfaces itself
-   *  reactively via `pillVisible` once `refresh()` resolves — no imperative
+  /** Called once on app launch from AppShell.onMount. The banner surfaces itself
+   *  reactively via the `hasUpdate` gate once `refresh()` resolves — no imperative
    *  notification needed. */
   async checkOnLaunch() {
     // A snooze restored from a previous launch still expires on time.

@@ -14,16 +14,10 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
-- **v0.35.0** — A reliability pass on the quiet edges: a stuck turn surfaces instead of hanging forever (dead-pipe detection + retry on a fresh process), the auto-updater recovers from a poisoned internal lock instead of bricking until reinstall, CLI-update checks read as "Checking…" instead of showing a stale result, and git-timeout kills are scoped to git specifically.
+- **v0.35.0** — A reliability pass on the quiet edges: a stuck turn surfaces instead of hanging forever (dead-pipe detection + retry on a fresh process), the auto-updater recovers from a poisoned internal lock, CLI-update checks read as "Checking…" instead of a stale result, and git-timeout kills are scoped to git.
 
-- **v0.34.0** — Windows that stay in sync: open Rift as separate native windows (one per monitor) and the conversation list stays synced across all of them (create/rename/delete in one refreshes the rest; each keeps its own tabs). Secondary windows got the main window's shell-open file-type guards, and the release pipeline stopped marking successful releases as failed.
+- **v0.31.2–v0.34.0** — Windows that stay in sync (multi-window, one per monitor; conversation list synced across all), **Use my full Claude Code config** (inherit your global `~/.claude` setup), a ground-up Workspace redesign + adopt-an-existing-folder, and a project editor that tells you what's wrong (live glob validation, plain-English errors).
 
-- **v0.33.0** — Rift runs as your Claude Code: turn on **Use my full Claude Code config** and Rift inherits your global `~/.claude` setup (`CLAUDE.md`, `settings.json`, hooks, slash commands, skills, MCP servers) exactly like the `claude` terminal (`--setting-sources user,project,local`; off is a clean sandbox). No-folder chats keep workspace-independent tools. Cleaner Workspace + Activity panel. Off-tab `ask_user`/permission prompts now respond.
-
-- **v0.32.0** — A cleaner Workspace, and start from a folder you already have: a ground-up Workspace redesign (calmer, one screen, no scroll), adopt-an-existing-folder as a one-tap project, a verified dead-code/dependency cleanup sweep, and a full documentation refresh.
-
-- **v0.31.2** — Project editor that tells you what's wrong: live inline glob validation (red outline + invalid-count, Save disabled until fixed), plain-English save/delete errors instead of doubled jargon, and a failed project load now shows "Couldn't load projects" + Retry instead of a misleading "No projects yet." Plus a 100+-case test net over the previously-untested project paths.
-
-- **v0.27.0–v0.31.1** — Projects + Workspace era (detail via `git log`): projects (named folder aliases with include/exclude scoping) and a merged **Workspace** home, glob matching that actually works (`**` spans folders, validated at save), AI Health (your own Claude coaches your plan, undoable apply, Rift-settings-only), a top-to-bottom hardening pass (145-finding multi-agent review), accessibility polish, the activity stats panel, and finished split-view.
+- **v0.27.0–v0.31.1** — Projects + Workspace era: named folder aliases with include/exclude scoping + a merged **Workspace** home, glob matching that actually works (`**` spans folders), AI Health (your own Claude coaches your plan), a 145-finding hardening pass, accessibility polish, the activity stats panel, and finished split-view.
 
 - **v0.20.7–v0.26.3** — Foundation era (detail via `git log`): full redesign port (all 7 surfaces to spec) + stream design language, the warm-CLI process (first reply ~1400ms → ~5ms after, 30-min idle survival, transparent respawn), honest API-stall watchdog, interactive `ask_user` cards, context ring, sub-agent activity dock, latency auto-scale, per-project chat scoping.
