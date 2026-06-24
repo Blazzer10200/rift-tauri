@@ -99,15 +99,6 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
     Ok(())
 }
 
-/// Navigate the existing dock webview. No-op (Ok) if it isn't open.
-pub fn navigate(app: &AppHandle, url: &str) -> Result<(), String> {
-    let u = parse_url(url)?;
-    if let Some(wv) = app.get_webview(LABEL) {
-        wv.navigate(u).map_err(|e| format!("navigate: {e}"))?;
-    }
-    Ok(())
-}
-
 /// Reposition/resize the dock webview to track the frontend placeholder rect.
 pub fn set_bounds(app: &AppHandle, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
     if let Some(wv) = app.get_webview(LABEL) {

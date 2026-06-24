@@ -224,7 +224,6 @@ pub fn run() {
             commands::assistant_workspace_branch,
             usage::limits::usage_rate_limits,
             commands::browser_open,
-            commands::browser_navigate,
             commands::browser_set_bounds,
             commands::browser_show,
             commands::browser_hide,

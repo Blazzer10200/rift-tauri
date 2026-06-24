@@ -22,11 +22,6 @@ pub async fn browser_open(
 }
 
 #[tauri::command]
-pub async fn browser_navigate(app: AppHandle, url: String) -> Result<(), String> {
-    crate::browser::navigate(&app, &url)
-}
-
-#[tauri::command]
 pub async fn browser_set_bounds(
     app: AppHandle,
     x: f64,
