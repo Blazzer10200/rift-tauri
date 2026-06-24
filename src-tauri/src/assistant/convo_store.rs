@@ -439,33 +439,6 @@ pub fn assistant_session_cwd(id: String) -> Option<String> {
     load_session_cwd(&id).map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Write an exported conversation to a user-chosen path. The markdown/json
-/// string is built on the frontend (where the typed block schema lives); this
-/// just commits the bytes. `dest` comes from the native save dialog, so the
-/// arbitrary-path write is the intended user action.
-#[tauri::command]
-pub fn assistant_export_save(dest: String, contents: String) -> Result<(), String> {
-    // Defense-in-depth: this command is IPC-reachable. Reject malformed paths.
-    // `dest` normally comes from the native save dialog (any drive is valid, so
-    // we deliberately do NOT clamp to a root — that would break save-to-USB etc.).
-    if dest.contains('\0') {
-        return Err("dest contains a null byte".into());
-    }
-    if !std::path::Path::new(&dest).is_absolute() {
-        return Err("dest must be an absolute path".into());
-    }
-    // Allowlist export extensions — prevents a compromised WebView from using
-    // this command to overwrite arbitrary files (e.g. .exe, config files).
-    let ext = std::path::Path::new(&dest)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    if !matches!(ext.to_ascii_lowercase().as_str(), "md" | "json" | "txt") {
-        return Err(format!("unsupported export extension: .{ext} (allowed: .md .json .txt)"));
-    }
-    std::fs::write(&dest, contents.as_bytes()).map_err(|e| format!("write {dest}: {e}"))
-}
-
 #[tauri::command]
 pub async fn assistant_save_conversation(convo: Conversation) -> Result<(), String> {
     // RR10: serialize + tmp-write + rename is blocking I/O — off the Tokio worker.
