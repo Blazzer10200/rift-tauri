@@ -121,20 +121,31 @@ jobs:
       # Proves the release actually landed in rift-releases for THIS tag: the
       # release exists AND carries the Velopack installer asset. Fails loudly if
       # release.ps1 reported success but the artifact didn't make it (e.g. a
-      # partial publish). Free — runs on the same self-hosted runner with the
-      # gh CLI + RELEASES_TOKEN already set up above.
+      # partial publish).
+      #
+      # UNAUTHENTICATED on purpose. rift-releases is PUBLIC (it's the update feed
+      # that update_service.rs reads with no creds), so a plain anonymous GET on
+      # the public API reads the release fine. The previous version passed
+      # GH_TOKEN=RELEASES_TOKEN to `gh release view`; that fine-grained PAT can
+      # PUBLISH (Contents:write, used by the Release step) but `gh`'s REST read
+      # path returned HTTP 401 Bad credentials for it on v0.35.0 — false-failing a
+      # release that published perfectly. Dropping the token removes that whole
+      # class of auth mismatch; no credential is needed to read a public release.
       - name: Verify published to rift-releases
         run: |
-          $tag = $env:GITHUB_REF_NAME
+          $tag  = $env:GITHUB_REF_NAME
           $repo = 'Blazzer10200/rift-releases'
-          Write-Host "Verifying $tag published to $repo ..."
-          $assets = & gh release view $tag --repo $repo --json assets --jq '.assets[].name'
-          if ($LASTEXITCODE -ne 0) { throw "Release $tag not found in $repo -- publish did not land." }
-          Write-Host "Assets: $assets"
-          if ($assets -notmatch 'Rift-win-Setup\.exe') {
+          Write-Host "Verifying $tag published to $repo (anonymous public read) ..."
+          $headers = @{ 'User-Agent' = 'rift-release-verify'; 'Accept' = 'application/vnd.github+json' }
+          $uri = "https://api.github.com/repos/$repo/releases/tags/$tag"
+          try {
+            $rel = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
+          } catch {
+            throw "Release $tag not found in $repo -- publish did not land. ($($_.Exception.Message))"
+          }
+          $assets = @($rel.assets | ForEach-Object { $_.name })
+          Write-Host "Assets: $($assets -join ', ')"
+          if ($assets -notcontains 'Rift-win-Setup.exe') {
             throw "Release $tag exists but Rift-win-Setup.exe asset is missing -- partial publish."
           }
           Write-Host "OK: $tag published with installer asset."
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
