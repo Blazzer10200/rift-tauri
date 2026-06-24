@@ -15,7 +15,7 @@ Rift is a Tauri 2 desktop app that wraps the **Claude CLI** as a per-turn subpro
 | Assistant engine | Claude CLI subprocess + stdio MCP server | `src-tauri/src/assistant/` |
 | Distribution | NSIS first-install → Velopack self-update | `update_service.rs` · `scripts/release.ps1` |
 
-The frontend is a single-window SPA (no SSR at runtime — SvelteKit is the build tool). Core workspaces — **Chat · Settings** — plus an experimental **Local LLM** page (keyboard 4, gated). Since the redesign ("Home is a verb"), the home surface IS the empty Chat tab; the standalone `"home"` workspace is folded to `chat` on load (`workspace.svelte.ts`), though `HomePage.svelte` still backs the warm/cold welcome content.
+The frontend is a single-window SPA (no SSR at runtime — SvelteKit is the build tool). The workspace registry (`src/lib/components/workspaces/index.ts`) has six IDs, keyboard-switchable: **Workspace** (`home`, ⌨1) · **Chat** (`chat`, ⌨2) · a legacy **`projects`** alias (⌨3, folded to `home` on load) · **Settings** (⌨4) · **Local LLM** (⌨5) · **AI Health** (⌨6). The `home` id mounts `WorkspacePage.svelte` — the merged Home+Projects surface (greeting, current-folder context, resume-a-chat cards, project manager, "adopt an existing folder"). `init()` migrates a stored `projects` active-id to `home` (one-time, for users who had Projects active); a fresh install with no stored value defaults to `chat` (`workspace.svelte.ts`). The empty-Chat warm/cold welcome is `AssistantWelcome.svelte` (under `assistant/`). `goHome()` is still "Home is a verb" — it floats to an empty Chat tab and is what opening a project / resuming a chat calls after picking context.
 
 ## 3. Request lifecycle — a turn, end to end
 
@@ -43,13 +43,13 @@ Composer (Svelte)
 ```
 
 Key properties:
-- **Events are broadcast app-wide** (`app.emit`) and each carries the `cliSessionId`; the frontend (`streaming.ts`) filters by id. This is what makes multi-tab / multi-pane (and future multi-window) work — the backend partitions by session, the UI demuxes.
+- **Events are scoped to the originating window** (`app.emit_to(window_label, …)`, `turn.rs`) so a second window never sees another window's turn events. Within a window, frames carry the `cliSessionId`; `streaming.ts` applies them to the matching tab. This is what makes multi-tab / multi-pane / multi-window work — the backend partitions per-window, the store routes per-session.
 - **The CLI owns conversation state.** Rift passes `--session-id` on turn 1 and `--resume` after; it never reconstructs history server-side. Session loss auto-recovers as a fresh start (`assistant://session-lost`).
 - **The prompt is never an argv.** It goes in on stdin as a stream-json user envelope — no argument-injection surface.
 
 ## 4. Backend (`src-tauri/src/`)
 
-`lib.rs` is the Tauri entry: it registers ~78 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
+`lib.rs` is the Tauri entry: it registers ~79 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
 
 ### `assistant/` — the engine
 | File | Role |
@@ -60,10 +60,12 @@ Key properties:
 | `bridge.rs` | Loopback TCP UI bridge (127.0.0.1, ephemeral port, 192-bit token) so MCP tools can round-trip `ask_user`/`open_browser`/`notify` through the running webview. |
 | `convo_store.rs` | On-disk conversation persistence + export. |
 | `oneshot.rs` | One-off CLI calls (prompt-enhance, title) outside the live turn loop. |
-| `permission.rs` · `ask_user.rs` · `config.rs` · `workspace.rs` · `auth_update.rs` · `cli_install.rs` · `env_checks.rs` | permission plumbing · UI-ask registry · per-turn config · workspace roots · auth probe · CLI install detection · environment preflight. |
+| `warm_pool.rs` | Persistent per-session CLI child (warm process) so subsequent turns skip cold-start; idle-evicts, transparently respawns on dead pipe. |
+| `projects.rs` | Named folder aliases with include/exclude file scoping (`assistant_list/save/delete_project`); validates globs via the shared `glob_to_regex`. |
+| `permission.rs` · `ask_user.rs` · `config.rs` · `workspace.rs` · `auth_update.rs` · `cli_install.rs` · `cli_caps.rs` · `env_checks.rs` · `nothink.rs` | permission plumbing · UI-ask registry · per-turn config (effort/model clamps) · workspace roots · auth probe · CLI install detection · CLI capability probe · environment preflight · thinking-flag handling. |
 
 ### Other backend domains
-- `commands/` — frontend-facing IPC: `assistant.rs`, `browser.rs`, `git.rs` (typed working-tree state for the Environment panel), `update.rs`.
+- `commands/` — frontend-facing IPC: `assistant.rs`, `browser.rs`, `update.rs`. (Git working-tree state is served by the `git_*` MCP tools in `assistant/git_local.rs`, not a `commands/git.rs`.)
 - `state/` — app-paths module (`paths.rs`): canonical `~/.rift/` locations (config, models).
 - `diagnostics/` — `DiagBus` + log forwarder + panic hook; pumps to the frontend over `diag://event`.
 - `usage/limits.rs` — OAuth `/usage` rate-limit fetch (the only usage module; read-only on the CLI token).
@@ -84,13 +86,13 @@ Svelte-5 runes-class singletons (the `export const store = new Store()` pattern)
 | `tabs.ts` · `types.ts` | Multi-tab / multi-pane state (`PaneState`, `MAX_PANES=4`), persisted to `localStorage`. |
 | `persistence.ts` · `telemetry.ts` · `attachments.ts` · `workspace.ts` · `healthAlerts.ts` · `helpers.ts` | disk save · usage rollups · file attachments · per-tab workspace root · health banners · effort/model mapping. |
 
-Other stores: `git.svelte.ts` + `environmentDock.svelte.ts` (Environment floating widget — `EnvironmentFloat` pill/expanded-panel; `open` auto-managed, `expanded` persisted), `usage.svelte.ts` (rate-limit gauges), `cliUpdate.svelte.ts` + `updates.svelte.ts` (CLI + app update notices), `stt.svelte.ts`, `browserDock` / `activityDock`, `workspace.svelte.ts`, `toast.svelte.ts`.
+Other stores: `environment.svelte.ts` (the Environment floating widget — pill/expanded panel; `open` auto-managed, `expanded` persisted), `projects.svelte.ts` (named-folder registry), `usage.svelte.ts` (rate-limit gauges), `cliUpdate.svelte.ts` + `updates.svelte.ts` (CLI + app update notices), `stt.svelte.ts`, `browserDock.svelte.ts` / `activityDock.svelte.ts`, `localLlm.svelte.ts`, `workspace.svelte.ts`, `ui-prefs.svelte.ts`, `toast.svelte.ts`.
 
 ### Components (`src/lib/components/`)
-- `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `PermissionBar`, `SubAgentDock`.
-- `environment/` — the source-control panel: `EnvironmentPanel`, `FileDiffCard`, `parseDiff`.
-- `shell/` — `ChatTabsBar`, `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `AppShell`.
-- `home/` · `settings/` · `webview/` — the other workspaces + browser pane.
+- `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `AssistantWelcome` (warm/cold welcome), `PermissionBar`, `SubAgentDock`.
+- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
+- `shell/` — `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `WorkspaceShell`, `Sidebar`, `Topbar`, `StatusBar`, `ConversationList`, `ProjectSwitcher`, `ContextMenuHost`, `RiftLogo`. (`tabsbar/` holds only pure helpers now — `ChatTabsBar` was folded in.)
+- `home/` (the `StatsPanel` widget WorkspacePage embeds) · `settings/` · `local-llm/` · `ai-health/` · `webview/` · `onboarding/` — the other workspaces, onboarding, and browser pane.
 
 ### Cross-cutting invariants
 - **Effort mapping is lockstep** across three places: `state/assistant/helpers.ts::effortToFlag` ↔ `turn.rs` match ↔ `composer/modelMatrix.ts`. Change all three together.
@@ -111,4 +113,4 @@ Tag-driven CI: push a `v*` tag → `.github/workflows/release.yml` builds + pack
 
 ## 9. What was removed (so you don't go looking)
 
-The pure-assistant conversion (2026-06-03) + minimal-core strip (2026-06-12) deleted the entire SFTP / sync / server / RCON / tunnel / transport stack, the Swarm + cost-cockpit + compaction subsystems, custom providers, and the SQLite usage DB. Rift today is first-party Anthropic only, three workspaces, no remote anything. History is in `git log`.
+The pure-assistant conversion (2026-06-03) + minimal-core strip (2026-06-12) deleted the entire SFTP / sync / server / RCON / tunnel / transport stack, the Swarm + cost-cockpit + compaction subsystems, custom providers, and the SQLite usage DB. Rift today is first-party Anthropic only, five active workspaces (Workspace · Chat · Settings · Local LLM · AI Health), no remote anything. History is in `git log`.

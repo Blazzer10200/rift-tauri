@@ -8,6 +8,7 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import StatsPanel from "$lib/components/home/StatsPanel.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
+  import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
@@ -72,12 +73,6 @@
     const t = setInterval(() => { nowHour = new Date().getHours(); }, 60_000);
     return () => clearInterval(t);
   });
-  function greeting(hr: number): string {
-    if (hr < 5) return "Still up";
-    if (hr < 12) return "Good morning";
-    if (hr < 18) return "Good afternoon";
-    return "Good evening";
-  }
   const greet = $derived(greeting(nowHour));
 
   // Warm-home "New to Rift?" collapsible orientation footer (spec NewToRift).
@@ -98,15 +93,6 @@
       .slice(0, 3),
   );
 
-  function fmtAgo(ms: number): string {
-    const diff = Date.now() - ms;
-    const min = 60_000, hr = 60 * min, day = 24 * hr;
-    if (diff < min) return "just now";
-    if (diff < hr) return `${Math.floor(diff / min)}m ago`;
-    if (diff < day) return `${Math.floor(diff / hr)}h ago`;
-    if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-    return new Date(ms).toLocaleDateString();
-  }
 </script>
 
 <div class="welcome">

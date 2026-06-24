@@ -16,7 +16,7 @@
 
 use std::io::Write as _;
 use std::sync::{Mutex, OnceLock};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -77,7 +77,6 @@ pub struct DiagEvent {
 pub struct DiagBus {
     tx: broadcast::Sender<DiagEvent>,
     seq: AtomicU64,
-    enabled: AtomicBool,
 }
 
 fn basename_only(path: &str) -> String {
@@ -91,7 +90,6 @@ impl DiagBus {
         Self {
             tx,
             seq: AtomicU64::new(0),
-            enabled: AtomicBool::new(true),
         }
     }
 
@@ -100,9 +98,6 @@ impl DiagBus {
     }
 
     pub fn publish(&self, mut event: DiagEvent) {
-        if !self.enabled.load(Ordering::Relaxed) {
-            return;
-        }
         // Renderer-bound: trailing basename only. Absolute paths leak the
         // user's directory structure (and occasionally embedded credentials)
         // to the webview. The basename keeps the signal — which file moved —

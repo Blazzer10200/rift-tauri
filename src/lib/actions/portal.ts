@@ -12,15 +12,3 @@ export function portal(node: HTMLElement, target: HTMLElement = document.body) {
     },
   };
 }
-
-// Variant for the tabs-bar popovers: additionally focuses the first
-// interactive descendant so keyboard users enter the popover immediately.
-export function portalFocus(node: HTMLElement) {
-  document.body.appendChild(node);
-  (node.querySelector('button, [href], input, [tabindex="0"]') as HTMLElement | null)?.focus();
-  return {
-    destroy() {
-      if (node.isConnected) node.remove();
-    },
-  };
-}

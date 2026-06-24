@@ -26,8 +26,10 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
 - **Workspace containment.** MCP `read_file` / `list_dir` / `grep` canonicalize
   every path and confirm it stays under a configured root (`starts_with` after
   UNC-strip). `..` is rejected lexically; non-existent paths fail closed. Grep
-  is ReDoS-bounded (regex `size_limit` + `dfa_size_limit`), file reads capped
-  (4 MiB/file, 5000 files), globs length-capped.
+  is ReDoS-bounded (regex `size_limit` + `dfa_size_limit`). `read_file` rejects
+  files over 500 KB (`MAX_READ_BYTES`); `grep` is separately bounded to 5000
+  files and 4 MiB/file (`MAX_GREP_FILES` / `MAX_GREP_FILE_BYTES`). Globs are
+  length-capped.
 - **Git tool hardening** (`git_local.rs`). Never shells out — always
   `Command::new("git").args([...])`. Allowlist-validated refs/paths with
   leading-`-` flag-injection rejection; force-push hard-refused; `git pull`
@@ -48,10 +50,13 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   never serialized to disk or logged.
 - **Tauri capability surface.** Window/dialog/opener grants are explicit in
   `src-tauri/capabilities/`; `opener` is https-only.
-- **Self-update.** Velopack fetches over HTTPS; the local test feed is gated
-  behind `#[cfg(debug_assertions)]` / the `update-test-feed` feature so a
-  release binary cannot be pointed at an attacker feed. (No binary signing —
-  transport-integrity only; documented trade-off, see DEVELOPING §4.)
+- **Self-update.** A standard release binary fetches the production feed over
+  HTTPS only — the local test feed is compiled in solely under
+  `#[cfg(any(debug_assertions, feature = "update-test-feed"))]`, so a normal
+  release build has no code path to a local/attacker feed. (A build explicitly
+  packed with the `update-test-feed` feature is the deliberate test-only
+  exception.) No binary signing — transport-integrity only; documented
+  trade-off, see DEVELOPING §4.
 
 ### Residual / accepted (low, same-user or by-design)
 
