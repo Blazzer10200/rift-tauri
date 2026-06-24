@@ -35,8 +35,11 @@ const MODEL_VALUES = ["opus", "sonnet", "haiku"] as const;
 
 /** Re-validate a model-emitted apply action into a known-safe shape, or drop it
  *  (→ null) if it's malformed or out of range. Never trust the model's value
- *  directly — this is the gate between "the model said" and "Rift will do". */
-function normalizeApply(raw: unknown): AdviceApply | null {
+ *  directly — this is the gate between "the model said" and "Rift will do".
+ *  `allowBudget` is false for subscription sessions: a per-turn dollar cap is
+ *  inert there (usage-limit windows govern spend, not dollars), so a stray
+ *  budget card from an older/confused reply is dropped rather than applied. */
+function normalizeApply(raw: unknown, allowBudget: boolean): AdviceApply | null {
   if (!raw || typeof raw !== "object") return null;
   const a = raw as Record<string, unknown>;
   const label = typeof a.label === "string" ? a.label : "";
@@ -46,7 +49,7 @@ function normalizeApply(raw: unknown): AdviceApply | null {
   if (a.kind === "model" && MODEL_VALUES.includes(a.value as never)) {
     return { kind: "model", value: a.value as string, label };
   }
-  if (a.kind === "budget") {
+  if (a.kind === "budget" && allowBudget) {
     const n = typeof a.value === "number" ? a.value : Number(a.value);
     if (Number.isFinite(n) && n > 0 && n <= 100) {
       return { kind: "budget", value: Math.round(n * 100) / 100, label };
@@ -77,8 +80,10 @@ class UsageStore {
 
   /** Spawn the user's own Claude to analyze a usage snapshot and produce advice
    *  cards. `snapshotJson` is the frontend-assembled limits + telemetry + setup
-   *  blob; the backend enriches it with server-only config before the call. */
-  async analyzeUsage(snapshotJson: string): Promise<void> {
+   *  blob; the backend enriches it with server-only config before the call.
+   *  `allowBudget` (API-key sessions only) lets a per-turn dollar-cap apply card
+   *  through; subscription sessions drop it — a $ cap is inert under plan limits. */
+  async analyzeUsage(snapshotJson: string, allowBudget: boolean): Promise<void> {
     this.analyzing = true;
     this.adviceError = null;
     try {
@@ -96,7 +101,7 @@ class UsageStore {
           detail: String(c?.detail ?? ""),
           impact: (["high", "medium", "low"] as const).includes(c?.impact as never)
             ? c.impact : "medium",
-          apply: normalizeApply((c as Record<string, unknown>)?.apply),
+          apply: normalizeApply((c as Record<string, unknown>)?.apply, allowBudget),
         })),
       };
     } catch (e) {

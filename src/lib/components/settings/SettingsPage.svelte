@@ -31,7 +31,7 @@
   type Section = "appearance" | "chat" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance", label: "Appearance", icon: Palette,  sub: "Theme, density, and chat rendering — applied instantly across Rift." },
-    { id: "chat",       label: "Chat",       icon: Sparkles, sub: "Your Claude session, reading comfort, and per-turn cost guard." },
+    { id: "chat",       label: "Chat",       icon: Sparkles, sub: "Your Claude session, reading comfort, and model routing." },
     { id: "speech",     label: "Speech",     icon: Mic,      sub: "Voice-to-text input — Web Speech (online) or Whisper (on-device, accent-tuned)." },
     { id: "about",      label: "About",      icon: Info,     sub: "Build info, file paths, keyboard shortcuts, and support diagnostics." },
   ];
@@ -557,20 +557,26 @@
             </div>
           </div>
         {:else}
-          <div class="card">
-            <div class="card-tt">Cost guard</div>
-            <div class="ctl-row tight">
-              <div><label class="ctl-t" for="asst-budget">Per-turn cost cap</label><div class="ctl-s">Stops a turn before it spends more than this dollar amount. Leave blank for no cap.</div></div>
-              <div class="ctl-actions">
-                <input id="asst-budget" class="st-input mono" type="number" min="0" step="0.01" placeholder="5.00" style="width:88px; text-align:right;" bind:value={asstMaxBudgetDraft} />
-                <button class="st-btn primary" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving || !asstMaxBudgetDirty}>{asstMaxBudgetSaving ? "Saving…" : "Save"}</button>
-                {#if assistantStore.maxBudgetUsd != null}
-                  <button class="st-btn" type="button" disabled={asstMaxBudgetSaving} onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}>Clear</button>
-                {/if}
+          <!-- Per-turn dollar cap only does anything in API-key mode (pay-per-token,
+               --max-budget-usd stops the turn). A subscription session bills against
+               plan usage-limit windows, not dollars, so the cap is inert there and
+               the card is hidden rather than shown as a no-op control. -->
+          {#if assistantStore.hasApiKey}
+            <div class="card">
+              <div class="card-tt">Cost guard</div>
+              <div class="ctl-row tight">
+                <div><label class="ctl-t" for="asst-budget">Per-turn cost cap</label><div class="ctl-s">Stops a turn before it spends more than this dollar amount of API credit. Applies to API-key turns only. Leave blank for no cap.</div></div>
+                <div class="ctl-actions">
+                  <input id="asst-budget" class="st-input mono" type="number" min="0" step="0.01" placeholder="5.00" style="width:88px; text-align:right;" bind:value={asstMaxBudgetDraft} />
+                  <button class="st-btn primary" type="button" onclick={saveAsstMaxBudget} disabled={asstMaxBudgetSaving || !asstMaxBudgetDirty}>{asstMaxBudgetSaving ? "Saving…" : "Save"}</button>
+                  {#if assistantStore.maxBudgetUsd != null}
+                    <button class="st-btn" type="button" disabled={asstMaxBudgetSaving} onclick={() => { asstMaxBudgetDraft = null; void saveAsstMaxBudget(); }}>Clear</button>
+                  {/if}
+                </div>
               </div>
+              {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
             </div>
-            {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
-          </div>
+          {/if}
 
           <div class="card">
             <div class="card-tt">Model &amp; routing</div>

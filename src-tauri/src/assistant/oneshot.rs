@@ -687,11 +687,17 @@ tap, fill it in with a CONCRETE machine value so Rift can apply it directly. Use
 = cheaper/faster. Recommend lowering it only if the usage suggests over-spend on simple turns.\n\
 - kind \"model\": value is one of \"opus\"|\"sonnet\"|\"haiku\" — the default model. Recommend a cheaper default \
 (sonnet/haiku) when an expensive model dominates spend on routine work.\n\
-- kind \"budget\": value is a positive NUMBER of US dollars — a per-turn spend ceiling. Recommend when there's no cap \
-and spend is high.\n\
-The \"currentSetup\" object in the <usage> block shows the user's CURRENT effortDefault, model, and maxBudgetUsd \
-(maxBudgetUsd null = no cap set) — NEVER emit an apply whose value equals what's already set, and never suggest a \
-change already in place. Return 0-4 cards.";
+- kind \"budget\": value is a positive NUMBER of US dollars — a per-turn spend ceiling. ONLY valid when the \
+snapshot's currentSetup.authMode is \"api-key\" (the user pays per-token through the Anthropic API, so a dollar \
+cap actually stops spend). When authMode is \"subscription\" the user pays through a Claude plan governed by \
+usage-limit WINDOWS, not dollars — a dollar cap does NOTHING for them, so you MUST NOT emit a kind \"budget\" apply, \
+and must not frame any advice around per-turn dollars. For subscription users, the lever that stretches a plan is \
+spending FEWER tokens per turn (cheaper model, lower effort, batching tool calls) so the 5-hour / weekly limit \
+windows last longer — frame benefit as \"you'll get more replies before hitting your limit\", never as saving dollars.\n\
+The \"currentSetup\" object in the <usage> block shows the user's CURRENT effortDefault, model, authMode, and \
+maxBudgetUsd (maxBudgetUsd null = no cap set; only meaningful when authMode is \"api-key\") — NEVER emit an apply \
+whose value equals what's already set, and never suggest a change already in place. The \"planLimits\" block (when \
+present) shows the user's real usage-limit windows — ground subscription advice in those percentages. Return 0-4 cards.";
 
 /// Analyze a user's usage snapshot and return plain-English optimization advice.
 /// The AI Health tab assembles `snapshot_json` (limits + session/all-time

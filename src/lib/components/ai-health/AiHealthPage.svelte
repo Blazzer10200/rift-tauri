@@ -81,10 +81,15 @@
       // The live harness knobs the advisor can recommend changing. Authoritative
       // here (effort + model live in localStorage post-F48, not config.json), so
       // the model sees the real current values to avoid no-op suggestions.
+      // authMode tells the advisor whether per-turn DOLLARS are a coherent lever:
+      // an API key bills pay-per-token (a $ cap stops spend), a subscription is
+      // governed by usage-limit windows (a $ cap does nothing). maxBudgetUsd is
+      // only meaningful — and only sent — in api-key mode.
       currentSetup: {
         effortDefault: assistant.thinkingEffort,
         model: modelKey(assistant.model),
-        maxBudgetUsd: assistant.maxBudgetUsd,
+        authMode: assistant.hasApiKey ? "api-key" : "subscription",
+        ...(assistant.hasApiKey ? { maxBudgetUsd: assistant.maxBudgetUsd } : {}),
       },
       planLimits: usage.rateLimits,
       thisSession: session,
@@ -95,7 +100,7 @@
     });
   }
   async function analyze() {
-    await usage.analyzeUsage(buildSnapshot());
+    await usage.analyzeUsage(buildSnapshot(), assistant.hasApiKey);
   }
 
   // ── "Analyzing…" card ── a rotating set of plain-English steps so the wait
@@ -136,10 +141,13 @@
   const modelKey = (m: string) => (m === "opus" || m === "claude-opus-4-7" ? "opus" : m === "haiku" ? "haiku" : m === "claude-fable-5" ? "fable" : "sonnet");
   const budgetLabel = (n: number | null) => (n == null ? "No cap" : `$${n.toFixed(2)}/turn`);
 
+  // Per-turn dollar budget is only a real knob in API-key mode (pay-per-token).
+  // For a subscription session it's inert (usage-limit windows govern spend), so
+  // it's dropped from the "knobs Rift can tune" list rather than shown as a lie.
   const configRows = $derived([
     { k: "Default effort", v: EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort },
     { k: "Default model", v: MODEL_LABEL[assistant.model] ?? assistant.model },
-    { k: "Per-turn budget", v: budgetLabel(assistant.maxBudgetUsd) },
+    ...(assistant.hasApiKey ? [{ k: "Per-turn budget", v: budgetLabel(assistant.maxBudgetUsd) }] : []),
   ]);
 
   // Read the live value a given apply action would replace — for current→new.
