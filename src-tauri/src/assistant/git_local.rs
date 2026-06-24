@@ -265,11 +265,22 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
         Ok(result) => result.map_err(|e| format!("failed to run git: {e}"))?,
         Err(_) => {
             // Kill the whole process tree; ignore result — already timed out.
+            // PID-recycle guard (#31): the drain thread still owns the live
+            // `Child`, so the OS can't recycle `pid` while we're here — but scope
+            // the kill to git anyway (`/FI "IMAGENAME eq git.exe"`) so that even
+            // in the microsecond race where the child exits and `recv_timeout`
+            // returns Timeout at the same instant, a recycled PID landing on a
+            // non-git process is left untouched. On a no-match taskkill is a
+            // harmless no-op.
             #[cfg(windows)]
             {
                 use std::os::windows::process::CommandExt;
                 let _ = std::process::Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/T", "/F"])
+                    .args([
+                        "/PID", &pid.to_string(),
+                        "/FI", "IMAGENAME eq git.exe",
+                        "/T", "/F",
+                    ])
                     .creation_flags(0x08000000)
                     .status();
             }

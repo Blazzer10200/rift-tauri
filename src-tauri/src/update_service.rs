@@ -71,6 +71,17 @@ pub struct UpdateService {
 }
 
 impl UpdateService {
+    /// Lock `inner`, recovering a poisoned guard rather than dead-ending. The
+    /// guarded `Inner` is plain data (an Option<UpdateManager> clone-handle,
+    /// two flags, an epoch counter) — a panic while some other path held the
+    /// lock can't leave that data half-written in a way that matters here. The
+    /// old `.map_err(|_| "update mutex poisoned")?` turned a one-time panic into
+    /// a permanently bricked updater (every later check/download/apply returned
+    /// the same poison error). `into_inner()` keeps the updater alive. (#31)
+    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
     pub fn new() -> Self {
         let (mgr, init_error) = match resolve_manager() {
             Ok(Some(m)) => (Some(m), None),
@@ -95,7 +106,7 @@ impl UpdateService {
         // check — the "click Check and it spins forever" bug. `download()`/
         // `apply()` already clone out; `check()` must match.
         let mgr = {
-            let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let mut g = self.lock();
             match g.mgr.as_ref() {
                 Some(m) => m.clone(),
                 None => {
@@ -143,7 +154,7 @@ impl UpdateService {
                     size_bytes: asset.Size,
                     notes_markdown: asset.NotesMarkdown.clone(),
                 };
-                let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+                let mut g = self.lock();
                 // Bump the epoch so any download still in flight against a prior
                 // plan can't later flip `downloaded=true` against THIS pending —
                 // same race arm_repair guards (RR2). Replacing `pending` while an
@@ -156,7 +167,7 @@ impl UpdateService {
             }
             Ok(_) => {
                 log::info!("update check: up to date");
-                let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+                let mut g = self.lock();
                 // RR8: bump the epoch here too (third arm — mirrors UpdateAvailable
                 // + arm_repair). If a download is in flight when the feed flips to
                 // "up to date" (yanked version), an un-bumped epoch lets the zombie
@@ -184,7 +195,7 @@ impl UpdateService {
         // before giving up — the user sees an "available" UI, so a missing
         // pending should resolve transparently, not dead-end the download.
         let needs_recheck = {
-            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let g = self.lock();
             g.pending.is_none()
         };
         if needs_recheck {
@@ -204,7 +215,7 @@ impl UpdateService {
         // Capture the epoch now; if it's been bumped by the time we finish,
         // this attempt was abandoned (stall) and must not flip `downloaded`.
         let (mgr, info, epoch) = {
-            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let g = self.lock();
             let mgr = g.mgr.clone().ok_or_else(|| "no update source configured".to_string())?;
             let info = g
                 .pending
@@ -220,7 +231,7 @@ impl UpdateService {
             })?;
         log::info!("update download: complete v{}", info.TargetFullRelease.Version);
         // Mark downloaded under lock so apply() can guard against skipped download.
-        let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        let mut g = self.lock();
         if g.download_epoch != epoch {
             // Watchdog gave up on this transfer and the user already saw a stall
             // error — discard the zombie result rather than arm apply(). (RR-9)
@@ -244,7 +255,7 @@ impl UpdateService {
     /// this, the regular `download()` → `apply()` chain reinstalls it.
     pub fn arm_repair(&self) -> Result<UpdateInfoDto, String> {
         let mgr = {
-            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let g = self.lock();
             match g.mgr.as_ref() {
                 Some(m) => m.clone(),
                 None => {
@@ -299,7 +310,7 @@ impl UpdateService {
         });
         let info: UpdateInfo =
             serde_json::from_value(info_json).map_err(|e| format!("repair: build update info: {e}"))?;
-        let mut g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+        let mut g = self.lock();
         // Bump the epoch so a concurrently in-flight normal download can't later
         // flip `downloaded=true` against the repair plan we're about to set —
         // that would arm an apply with the wrong package on disk. (RR2)
@@ -314,10 +325,9 @@ impl UpdateService {
     /// Called by the command layer when its stall watchdog gives up on a wedged
     /// transfer. (RR-9)
     pub fn cancel_inflight_download(&self) {
-        if let Ok(mut g) = self.inner.lock() {
-            g.download_epoch = g.download_epoch.wrapping_add(1);
-            g.downloaded = false;
-        }
+        let mut g = self.lock();
+        g.download_epoch = g.download_epoch.wrapping_add(1);
+        g.downloaded = false;
     }
 
     /// Schedule the downloaded update to apply once this process exits, then
@@ -327,7 +337,7 @@ impl UpdateService {
     /// shutdown (so WebView2 children unwind in order, no file lock).
     pub fn apply(&self, app: &tauri::AppHandle) -> Result<(), String> {
         let (mgr, info) = {
-            let g = self.inner.lock().map_err(|_| "update mutex poisoned".to_string())?;
+            let g = self.lock();
             let mgr = g.mgr.clone().ok_or_else(|| "no update source configured".to_string())?;
             let info = g
                 .pending

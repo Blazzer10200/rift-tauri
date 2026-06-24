@@ -205,6 +205,11 @@ export class CliUpdate {
     const count = installs?.length ?? 0;
     if (this.updateError)
       return { tone: "danger", headline: "Update failed", detail: this.updateError };
+    // A check in flight should read as "checking", not a stale "Update available"
+    // from a prior result — surfaces that poll summary() mid-check showed the old
+    // headline for a beat. (#42)
+    if (this.status === "checking" && !this.updating)
+      return { tone: "accent", headline: "Checking for updates…", detail: "Contacting npm for the latest claude CLI version." };
     if (this.updateStuck) {
       // A native update applies on the NEXT launch — so an unchanged version
       // right after `claude update` is almost always "staged, pending restart,"

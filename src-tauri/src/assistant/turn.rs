@@ -1507,7 +1507,19 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         drop(ctx.mcp_guard);
         return;
     }
-    let _ = stdin.flush().await;
+    // A flush error means the init envelope never reached the child's stdin pipe
+    // — the handshake will never complete and the turn would hang silently.
+    // Surface it the same way the write_all failure above does. (#31)
+    if let Err(e) = stdin.flush().await {
+        let _ = ctx.first_turn.app.emit_to(&ctx.first_turn.window_label, ERROR_EVENT, serde_json::json!({
+            "session_id": ctx.session_id, "message": format!("flush initialize: {e}"),
+        }));
+        let _ = ctx.first_turn.done.send(Err(format!("flush initialize: {e}")));
+        loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
+        stderr_handle.abort();
+        drop(ctx.mcp_guard);
+        return;
+    }
 
     // The first turn is in hand; subsequent ones arrive on turn_rx.
     let mut current: Option<warm_pool::TurnCmd> = Some(ctx.first_turn);
@@ -1743,7 +1755,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
         if stdin.write_all(user_line).await.is_err() {
             return TurnOutcome::DeadOnReuse;
         }
-        let _ = stdin.flush().await;
+        // Flush failure here = the warm child's pipe broke (died while parked);
+        // no output produced yet, so it's retryable — drop + respawn cold. (#31)
+        if stdin.flush().await.is_err() {
+            return TurnOutcome::DeadOnReuse;
+        }
         true
     } else {
         false
@@ -1825,7 +1841,9 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if let Err(e) = stdin.write_all(user_line).await {
                             return TurnOutcome::Fatal(format!("write user turn: {e}"));
                         }
-                        let _ = stdin.flush().await;
+                        if let Err(e) = stdin.flush().await {
+                            return TurnOutcome::Fatal(format!("flush user turn: {e}"));
+                        }
                         for m in steer_pending.drain(..) {
                             match build_user_envelope(&m.text, &m.attachments) {
                                 Ok(env) => {
@@ -1840,7 +1858,9 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                 }
                             }
                         }
-                        let _ = stdin.flush().await;
+                        if let Err(e) = stdin.flush().await {
+                            return TurnOutcome::Fatal(format!("flush steer: {e}"));
+                        }
                         continue;
                     }
                     // A `control_response` on a REUSED turn (handshake already
@@ -1988,7 +2008,12 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             }));
                             return TurnOutcome::Fatal(format!("write steer: {e}"));
                         }
-                        let _ = stdin.flush().await;
+                        if let Err(e) = stdin.flush().await {
+                            let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
+                                "session_id": stream_sid, "message": format!("flush steer: {e}"),
+                            }));
+                            return TurnOutcome::Fatal(format!("flush steer: {e}"));
+                        }
                     }
                     Err(e) => {
                         let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({

@@ -2,19 +2,22 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.34.0 — Windows that stay in sync
+## v0.35.0 — Fewer silent failures
 
-> Open Rift as separate native windows — one per monitor — and your conversation list now stays in sync across all of them. Plus a security tightening for those extra windows and a quieter release pipeline.
+> A reliability pass on the quiet edges: when something can't go through, Rift now notices and tells you instead of hanging. No new surfaces — your turns, git operations, and updates just fail loudly when they fail at all.
 
-- **Multi-window, properly synced.** You could already open a second Rift window (one per monitor), but each window kept its own copy of the conversation list — create, rename, or delete a chat in one window and the other's sidebar wouldn't notice until you reloaded it. Now every window is told the moment the conversation store changes and refreshes itself, so all your windows always show the same up-to-date list. Each window still keeps its own open tabs.
-- **Secondary windows are as locked-down as the main one.** Extra windows were missing a few of the "don't shell-open this" file-type guards the main window has — so a script file (`.py`, `.sh`, `.lua`, …) could have been launched from a secondary window where the main window would've blocked it. The guard lists are now identical everywhere.
-- **No more false-failed releases.** A release that built and published perfectly was being marked failed because of a hosted helper job that can't run while the build server is self-hosted. That job is gone, replaced by a check that actually confirms the new version landed — so a red mark now means something really went wrong.
+- **A stuck turn now surfaces instead of hanging.** When Rift hands a message to the Claude process, the final "push it through" step could fail unnoticed — the message never arrived and the turn sat there forever with no reply and no error. Rift now checks that step and either retries on a fresh process or shows a clear error, so a dead pipe can't silently swallow a turn.
+- **The auto-updater can't brick itself.** If something crashed at exactly the wrong moment mid-update, the updater's internal lock could get permanently "poisoned" — after which every future check, download, and apply failed the same way until you reinstalled. It now recovers from that state on its own.
+- **Update checks read as "checking," not stale.** While a CLI-update check is in flight, the status line briefly showed the previous result. It now says "Checking for updates…" until the real answer lands.
+- **Safer git-timeout cleanup.** When a git command runs past 30 seconds and Rift kills it, the kill is now scoped to git specifically — closing a tiny window where it could in theory have signalled an unrelated process that reused the same ID.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
-- **v0.33.0** — Rift runs as your Claude Code: turn on **Use my full Claude Code config** and Rift inherits your global `~/.claude` setup (`CLAUDE.md`, `settings.json`, hooks, slash commands, skills, MCP servers) exactly like the `claude` terminal — `--setting-sources user,project,local`, off is a clean sandbox. No-folder chats keep their workspace-independent tools. Cleaner Workspace + Activity panel (floating sub-agents card, stats dashboard). Off-tab `ask_user`/permission prompts now respond. Release pipeline runs the full test suite before publishing.
+- **v0.34.0** — Windows that stay in sync: open Rift as separate native windows (one per monitor) and the conversation list stays synced across all of them (create/rename/delete in one refreshes the rest; each keeps its own tabs). Secondary windows got the main window's shell-open file-type guards, and the release pipeline stopped marking successful releases as failed.
 
-- **v0.32.0** — A cleaner Workspace, and start from a folder you already have: a ground-up Workspace redesign (calmer, fits one screen, no scroll), adopt-an-existing-folder as a one-tap project from your recent folders, a verified dead-code/dependency cleanup sweep, and a full documentation refresh (16 confirmed drift errors fixed against source).
+- **v0.33.0** — Rift runs as your Claude Code: turn on **Use my full Claude Code config** and Rift inherits your global `~/.claude` setup (`CLAUDE.md`, `settings.json`, hooks, slash commands, skills, MCP servers) exactly like the `claude` terminal (`--setting-sources user,project,local`; off is a clean sandbox). No-folder chats keep workspace-independent tools. Cleaner Workspace + Activity panel. Off-tab `ask_user`/permission prompts now respond.
+
+- **v0.32.0** — A cleaner Workspace, and start from a folder you already have: a ground-up Workspace redesign (calmer, one screen, no scroll), adopt-an-existing-folder as a one-tap project, a verified dead-code/dependency cleanup sweep, and a full documentation refresh.
 
 - **v0.31.2** — Project editor that tells you what's wrong: live inline glob validation (red outline + invalid-count, Save disabled until fixed), plain-English save/delete errors instead of doubled jargon, and a failed project load now shows "Couldn't load projects" + Retry instead of a misleading "No projects yet." Plus a 100+-case test net over the previously-untested project paths.
 
