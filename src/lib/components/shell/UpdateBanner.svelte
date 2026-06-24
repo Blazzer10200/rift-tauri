@@ -74,7 +74,10 @@
         busyLabel: "Updating…",
         progress: null,
         cta: "Update",
-        onAct: () => void cliUpdate.runUpdate(),
+        // Re-probe auth on success so the fresh cliVersion/installs land — without
+        // it the banner reads the stale pre-update version and re-appears even on
+        // a clean update ("says updating, goes right back to the notification").
+        onAct: async () => { if (await cliUpdate.runUpdate()) await assistant.refreshAuth(); },
         onDismiss: () => { cliUpdate.dismissed = cliUpdate.latest; },
       });
     }

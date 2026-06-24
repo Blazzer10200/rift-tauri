@@ -267,6 +267,21 @@ pub async fn assistant_update_cli() -> Result<CliUpdateResult, String> {
         .unwrap_or_else(|| "unknown".into());
     log::info!("cli-update: updating {} install(s)", installs.len());
 
+    // The updater overwrites the SAME `claude(.exe)` Rift is actively spawning.
+    // On Windows a running warm-pool / in-flight-turn `claude` process holds that
+    // binary locked, so `npm install -g`/`claude update` silently no-ops the file
+    // replace (npm reports "changed 0 packages", the native updater stages-but-
+    // can't-swap) → the version never moves → the update banner re-appears as if
+    // nothing happened (the "says updating, goes back to the notification" bug).
+    // Reap every live claude child first, then let the OS release the handles,
+    // so the overwrite actually lands. Mirrors the Velopack apply child-reap.
+    crate::assistant::warm_pool::drain_all_for_shutdown();
+    crate::assistant::kill_all_session_children();
+    // taskkill /F returns before Windows fully releases the file handle; a short
+    // settle avoids racing the overwrite against a not-yet-closed lock.
+    #[cfg(windows)]
+    tokio::time::sleep(std::time::Duration::from_millis(750)).await;
+
     let mut reports: Vec<String> = Vec::new();
     let mut any_ok = false;
     let mut any_err = false;
