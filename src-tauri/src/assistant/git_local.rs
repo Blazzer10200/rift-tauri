@@ -49,6 +49,24 @@ fn truncate_bytes(s: &str, limit: usize) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(format!("{}\n… (output truncated at {} KB)", &s[..end], limit / 1024))
 }
 
+/// Strip the Windows verbatim `\\?\` prefix so a canonicalized root (which
+/// `std::fs::canonicalize` returns in `\\?\C:\…` form) compares lexically equal
+/// to a plain absolute path. No-op on non-Windows. Mirrors `strip_unc` in
+/// mcp_server.rs (kept local — git tools don't import across that boundary).
+#[cfg(windows)]
+fn strip_verbatim(p: &Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p.to_path_buf(),
+    }
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim(p: &Path) -> PathBuf {
+    p.to_path_buf()
+}
+
 // ─── validation ─────────────────────────────────────────────────────────────
 
 /// Validate a ref / branch / remote name. Strict allowlist; rejects anything
@@ -92,8 +110,15 @@ pub(crate) fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
         return Err(format!("path `{raw}` escapes the workspace root (`..` not allowed)"));
     }
     if p.is_absolute() {
-        // Absolute paths must already live under the root.
-        if !p.starts_with(root) {
+        // Absolute paths must already live under the root. Strip the verbatim
+        // `\\?\` prefix from BOTH sides first: `load_roots` canonicalizes roots
+        // via `std::fs::canonicalize`, which yields `\\?\C:\…` on Windows, while
+        // a caller-supplied absolute path is plain `C:\…` — a raw `starts_with`
+        // would false-reject every in-workspace absolute path. `..` is already
+        // rejected above, so this lexical check can't be defeated by traversal,
+        // and it works for not-yet-existing paths (new files for `git add`) that
+        // `canonicalize` can't resolve.
+        if !strip_verbatim(&p).starts_with(strip_verbatim(root)) {
             return Err(format!("path `{raw}` is outside the workspace root"));
         }
     } else if p.components().any(|c| matches!(c, std::path::Component::Prefix(_))) {
@@ -560,6 +585,24 @@ mod tests {
             assert!(validate_path(&root, r"\\server\share\x").is_err());
             assert!(validate_path(&root, r"D:\other\x").is_err());
         }
+    }
+
+    // `load_roots` canonicalizes roots via std::fs::canonicalize, which on
+    // Windows yields a verbatim `\\?\C:\…` form. A caller-supplied absolute path
+    // is plain `C:\…`, so the lexical prefix check must strip `\\?\` on both
+    // sides — else every in-workspace absolute path is false-rejected.
+    #[cfg(windows)]
+    #[test]
+    fn accepts_plain_abs_under_verbatim_root() {
+        let root = PathBuf::from(r"\\?\C:\ws");
+        // In-workspace plain absolute path — must pass now (was false-rejected).
+        assert!(validate_path(&root, r"C:\ws\src\main.rs").is_ok());
+        // Boundary still holds: outside-root + cross-drive absolute paths stay
+        // rejected even against a verbatim root.
+        assert!(validate_path(&root, r"C:\other\x").is_err());
+        assert!(validate_path(&root, r"D:\ws\x").is_err());
+        // And a `..` escape under a verbatim root is still caught.
+        assert!(validate_path(&root, r"C:\ws\..\Windows\x").is_err());
     }
 
     #[test]

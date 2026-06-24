@@ -314,10 +314,12 @@ pub fn scrub_log_message(msg: &str) -> String {
         if let Ok(home) = std::env::var(var) {
             if !home.is_empty() {
                 let fwd = home.replace('\\', "/");
-                if home.len() >= 3 {
+                // Guard each replace with `contains` — `str::replace` scans + allocates
+                // a fresh String unconditionally, but most log lines hold no home-dir.
+                if home.len() >= 3 && out.contains(&home) {
                     out = out.replace(&home, "~");
                 }
-                if fwd != home && fwd.len() >= 3 {
+                if fwd != home && fwd.len() >= 3 && out.contains(&fwd) {
                     out = out.replace(&fwd, "~");
                 }
             }
