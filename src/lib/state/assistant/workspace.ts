@@ -147,7 +147,9 @@ export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
   } catch (e) {
     console.warn("assistant_list_workspace_files failed", e);
   } finally {
-    host.workspaceFilesLoadingFor = null;
+    // Only release the guard if it's still ours — a root-switch mid-await may
+    // have armed a newer load; clearing unconditionally would mask it.
+    if (host.workspaceFilesLoadingFor === root) host.workspaceFilesLoadingFor = null;
   }
 }
 

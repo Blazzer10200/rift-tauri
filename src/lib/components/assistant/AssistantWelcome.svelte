@@ -41,7 +41,11 @@
   // Kick off a workspace file walk lazily once the empty-state renders.
   // Cheap (~ms) on typical FiveM resource folders; cached on the store.
   $effect(() => {
-    if (paneRoot && assistant.workspaceFiles.length === 0) {
+    if (
+      paneRoot &&
+      assistant.workspaceFiles.length === 0 &&
+      assistant.workspaceFilesLoadingFor == null
+    ) {
       void assistant.loadWorkspaceFiles();
     }
   });

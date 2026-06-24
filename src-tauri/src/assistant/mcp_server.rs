@@ -738,11 +738,14 @@ fn format_ask_user_result(data: &Value) -> String {
         let ans_val = a.get("answer");
         let label = match ans_val {
             Some(Value::String(s)) => s.clone(),
+            // Join multi-select labels with US (\x1F) so the frontend can split
+            // unambiguously even when a label itself contains ", " (A1). The
+            // model still reads it as readable prose (US renders as nothing).
             Some(Value::Array(arr)) => arr
                 .iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
                 .collect::<Vec<_>>()
-                .join(", "),
+                .join("\u{1f}"),
             Some(other) => other.to_string(),
             None => "(no answer)".into(),
         };

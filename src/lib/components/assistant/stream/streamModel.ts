@@ -415,7 +415,13 @@ export function parseAskUserResult(result: string | null | undefined): AnsweredP
     const m = block.match(/^([\s\S]*)\nA: ([\s\S]*)$/);
     if (!m) continue;
     const question = m[1].trim();
-    const answers = m[2].split(", ").map((s) => s.trim()).filter(Boolean);
+    // Backend joins multi-select labels with US (\x1F) so a label containing
+    // ", " can't fracture into phantom answers (A1). Fall back to ", " for any
+    // legacy/cached result that predates the US delimiter.
+    const raw = m[2];
+    const answers = (raw.includes("\u{1f}") ? raw.split("\u{1f}") : raw.split(", "))
+      .map((s) => s.trim())
+      .filter(Boolean);
     if (question) out.push({ question, answers });
   }
   return out;

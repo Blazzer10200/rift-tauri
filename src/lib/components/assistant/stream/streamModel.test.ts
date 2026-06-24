@@ -175,7 +175,19 @@ describe("parseAskUserResult — answered ask_user → chips", () => {
     ]);
   });
 
-  it("multi-select answer splits on comma-space", () => {
+  it("multi-select answer splits on the US delimiter", () => {
+    expect(parseAskUserResult("Q: Pick features\nA: Auth\u{1f}Billing\u{1f}Search")).toEqual([
+      { question: "Pick features", answers: ["Auth", "Billing", "Search"] },
+    ]);
+  });
+
+  it("a label containing ', ' survives intact (A1)", () => {
+    expect(parseAskUserResult("Q: Pick\nA: Auth, Billing\u{1f}Search")).toEqual([
+      { question: "Pick", answers: ["Auth, Billing", "Search"] },
+    ]);
+  });
+
+  it("legacy comma-space join still parses (back-compat)", () => {
     expect(parseAskUserResult("Q: Pick features\nA: Auth, Billing, Search")).toEqual([
       { question: "Pick features", answers: ["Auth", "Billing", "Search"] },
     ]);

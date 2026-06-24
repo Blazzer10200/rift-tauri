@@ -1317,10 +1317,15 @@ class AssistantStore {
     // user who closes the login window without finishing isn't stuck "Signing
     // in…" forever.
     const deadline = Date.now() + 180_000;
+    // Capture the init generation so a destroy()/HMR mid-poll cancels the loop
+    // instead of writing auth state into a dead store for up to 3 min.
+    const gen = this.initGen;
     try {
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 2500));
+        if (gen !== this.initGen) return;
         await this.refreshAuth();
+        if (gen !== this.initGen) return;
         const pill = this.auth?.pill;
         if (pill === "green" || pill === "yellow") {
           this.lastError = null;
