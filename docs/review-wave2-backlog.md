@@ -2,11 +2,15 @@
 
 > Confirmed findings from the 507-agent frontend review workflow (161 raised → 73 adversarially-verified confirmed). Two independent parses were run; **this file uses the higher-detail parse**. (Raw agent outputs were ephemeral and have been pruned — this curated backlog is the surviving record.)
 >
-> **Already fixed in the cont.174 fix-pass — do NOT re-fix:**
-> - `submitPermissionDecision` finally-block (`assistant.svelte.ts:1129-1144`) → fixed `d0babf3` (mutation moved out of `finally`).
-> - ToolChip agent-result no cap (`ToolChip.svelte:603`) → fixed `d0babf3` (20k-char `agentResult` cap).
-> - StreamTurn copyTimer leak (`StreamTurn.svelte:28,35`) → fixed `108dc3d` (unmount cleanup `$effect`).
-> - **PARTIAL:** stream diff memo — `108dc3d` added `diffCountsCached` for STREAM-mode diff *counts*. The wave-2 `diffArrays` finding (`streamModel.ts:183`, `messageToTurn`) is a **different code path** (full Myers diff per chunk) — **NOT covered, still open.**
+> **⚠ RE-TRIAGED 2026-06-24 (cont.189) — Tier A + B + C1–C22 only.** Those ranges were re-grepped against current code. **The cont.174 fix-pass + later work landed all of Tier A + nearly all of B + C1–C22.** Of that scope only **C5 + C7** stay open (judgment calls — see bottom). The 4 still-live ones (A1, C2, C3, C20) were fixed + committed `b0ec8b6`. **C23–C35 + Tier D were NOT re-triaged this pass — status unknown, re-grep before acting.** Do NOT re-investigate the FIXED set below.
+>
+> **VERIFIED FIXED (do NOT re-fix):**
+> - **A1** `parseAskUserResult` multi-select split → `b0ec8b6` (US `\x1F` delimiter, backend+frontend lockstep, +3 vitest).
+> - **A2** `diffArrays` quadratic Myers diff → FIXED: `diffCountsCached` (streamModel.ts:165,230) memoizes per tool id, runs once not per-frame. (Backlog's "NOT covered" note was stale.)
+> - **A4/A5** web-context injection (`WebBrowserPage.svelte:164-165`): `i` flag + body strips `[Page context:` + `[End page context]`. FIXED.
+> - **B1** init double-register → `initGen` cancellation (assistant.svelte.ts:851,959,994). **B2** enhance spawn leak → RR9 unconditional `enhanceSeq` bump (Composer.svelte:51-60). **B5–B11** all FIXED (stt `polishGuard`/`cancelPolish`, updates `repairing` flag, settings validate).
+> - **C1** dropTab saveTimer clear (persistence.ts). **C4** telemetry caps (500/2000). **C6** rawLineLog capped. **C8** QueueRail prevSteerCount reset. **C9** EnhanceBar `{#key enhancedPreview}`. **C10** slashOpen Enter swallowed. **C11** mentionResults `$derived.by` (single scan). **C16** StreamAskUser `untrack`. **C17** parseAskUserResult greedy first-group. **C18** liveTokens no `void now`. **C19** hoverTimer teardown `$effect`. **C21** AssistantPane FLIP reset. **C22** onWinDrop captures targetConvoId pre-await.
+> - **C2** startLogin uncancellable loop, **C3** loadWorkspaceFiles guard race, **C20** AssistantWelcome concurrent load → all `b0ec8b6`.
 >
 > **Discipline:** findings are HINTS, not facts. The two parses DISAGREE on line numbers + some detail (e.g. dropTab cited as both `:555` and `persistence.ts:173`) — **re-grep each by symbol before editing.** Wave-1 had 7 false-positives + a split verdict. The fix-pass already shifted some lines. Apply in green-verified batches; re-verify line numbers fresh.
 
@@ -100,3 +104,8 @@
 - **Index-keyed `{#each}`** (C9, C30, D6): stable-id keys.
 - **`stt.svelte.ts` is the single densest hotspot** (~11 findings) — STT-focused pass clears a big chunk.
 - **Prompt-injection via webview page content** (A4, A5, D10): one hardening of `WebBrowserPage` sanitization covers all.
+
+## STILL OPEN after cont.189 triage (Tier A/B/C1–C22 scope)
+Both are deliberate skips — real findings, but the "right" fix is a judgment call, not a mechanical one-liner:
+- **C5** — `tab.agentSpawns` never reset in `beginTurn()` (`streaming.ts`), grows O(n) per turn. NOT auto-fixed: the activity dock + `helpers.ts:267` render *completed* spawns from earlier in the conversation, so a blind reset-per-turn would wipe history the UI intends to show. Needs a decision: cap+evict (keep recent N) vs reset-per-turn (lose cross-turn view) vs leave (it's perf, not correctness). Lean cap+evict.
+- **C7** — `promptPreview` (120 chars of user text) stored in every `TurnRecord` with no TTL (`send.ts:119`), a mild privacy/retention concern. NOT auto-fixed: redacting/omitting it may break whatever surfaces read the preview (telemetry, recent-turn UI). Needs a policy call on retention vs the feature that consumes it before editing.
