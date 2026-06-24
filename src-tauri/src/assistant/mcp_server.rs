@@ -557,10 +557,11 @@ fn trust_at_least(min: &str) -> bool {
     trust_rank(trust_level()) >= trust_rank(min)
 }
 
-/// Tiny glob → regex compiler. Supports `*` (any, including `/`), `?` (one
-/// non-`/`), `**` (also any), and literal everything else. Sufficient for
-/// `*.rs`, `src/**/*.svelte` style patterns.
-fn glob_to_regex(glob: &str) -> Result<regex::Regex, String> {
+/// Tiny glob → regex. `*`=one segment, `?`=one non-`/`, `**`=any depth. `**`
+/// collapses its adjacent `/` so it spans ZERO-or-more segments: `src/**/*.rs`
+/// matches `src/x.rs`, and trailing `dir/**` matches bare `dir` and everything
+/// under it. `pub(super)` so `projects.rs` validates against the same dialect.
+pub(super) fn glob_to_regex(glob: &str) -> Result<regex::Regex, String> {
     let mut out = String::from("^");
     let mut chars = glob.chars().peekable();
     while let Some(c) = chars.next() {
@@ -568,7 +569,18 @@ fn glob_to_regex(glob: &str) -> Result<regex::Regex, String> {
             '*' => {
                 if chars.peek() == Some(&'*') {
                     chars.next();
-                    out.push_str(".*");
+                    // `**/` → optional leading segments (zero-or-more); a trailing
+                    // `**` (preceded by `/`, already emitted) → optionally the
+                    // separator + anything. Bare `**` → any chars.
+                    if chars.peek() == Some(&'/') {
+                        chars.next();
+                        out.push_str("(?:.*/)?");
+                    } else if chars.peek().is_none() && out.ends_with('/') {
+                        out.truncate(out.len() - 1);
+                        out.push_str("(?:/.*)?");
+                    } else {
+                        out.push_str(".*");
+                    }
                 } else {
                     out.push_str("[^/]*");
                 }

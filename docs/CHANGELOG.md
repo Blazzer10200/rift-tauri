@@ -2,16 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.31.0 — Projects, and a single Workspace home
+## v0.31.1 — Project globs that actually match
 
-> Two things this release. First: **named projects** — give any folder a name, scope exactly which files Rift can see inside it with include/exclude globs, and switch between them in a click. Second: **Home and Projects are now one page — your Workspace.** Plus a reliability fix so a stuck turn ends honestly instead of hanging forever on a misleading "waiting on the API" message.
+> A fix on top of yesterday's Projects release. The include/exclude patterns you set on a project now match folders the way every glob is supposed to — so the scoping you configure is the scoping you get.
 
-- **Projects: name a folder, scope what Rift sees.** A project is a named alias for a workspace folder plus its own include/exclude file patterns. Those patterns constrain everything the assistant touches there — file reads, directory listings, grep, and the @-mention picker — so Claude works against exactly the files that matter and ignores the noise (build output, lockfiles, `node_modules`, whatever you list). Create, edit, and delete projects from the Workspace page; the active project's name now labels its conversations in the sidebar.
-- **One Workspace page (Home + Projects, merged).** The separate Home and Projects nav entries are gone, replaced by a single **Workspace** destination. It opens with a time-of-day greeting and your current folder's context (branch, file count), cards to pick up recent conversations where you left off, and the full project manager below — create a project, switch folders, or jump back into work, all from one place. Chat stays one click away and the in-chat welcome screen is unchanged.
-- **Honest stalled-turn handling — no more fake "waiting on the API."** If a turn produces nothing for three minutes with no tool running, Rift now ends it with a truthful message: this is the local Claude process stalling (a hung start, a stuck tool, a dropped pipe), *not* a slow model or the Anthropic API. The waiting indicator was rewritten to match — it no longer claims to know a cause it can't actually see. A genuinely wedged turn can no longer hang indefinitely.
-- **Switching to a project is everything-aware.** Opening a project points the active workspace root at its folder, so turns, file scoping, @-mentions, and conversation filtering all follow automatically — no extra setup.
+- **`**` now spans whole folders, including none.** A pattern like `src/**/*.ts` matched files one level deep but quietly skipped `src/main.ts` at the top; an exclude like `vendor/**` hid files inside `vendor` but left the folder itself listed. Both are fixed: `**` now correctly means "any depth, including zero," and a trailing `dir/**` covers the folder and everything in it. If you set up a project in v0.31.0 and the file scoping looked off, this is why — it's right now.
+- **Bad patterns are caught when you save, not silently ignored later.** A glob that can't compile is rejected with a clear message at save time instead of no-op'ing invisibly during file reads.
+- **A wedged turn can't outlast its own safety net.** The stall watchdog no longer re-arms forever while a tool is "in flight" — if a tool starts but never reports back and the process goes silent, the turn now ends honestly instead of hanging.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.31.0** — Projects, and a single Workspace home: named folder aliases with their own include/exclude file scoping, switchable in a click; Home and Projects merged into one **Workspace** page (greeting, current-folder context, resume-a-chat cards, full project manager); and honest stalled-turn handling that names the real cause instead of blaming the API.
 
 - **v0.30.1** — Hardening and accessibility polish: Windows full-path fix in the git tools, defense-in-depth size/input caps, executable-open refusals, and proper screen-reader labels/roles across dialogs, menus, and the command palette.
 

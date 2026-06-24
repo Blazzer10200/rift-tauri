@@ -1681,6 +1681,11 @@ struct StreamCtx<'a> {
 /// previously-infinite deadlock the UI used to mislabel as "the Anthropic API".
 const STREAM_NO_PROGRESS_SECS: u64 = 180;
 
+/// Consecutive dead-silent watchdog fires tolerated with a tool in flight before
+/// declaring a stall — bounds the re-arm so a never-completing tool can't disable
+/// the net forever (2 ≈ 6min). Any received line resets the counter.
+const STREAM_TOOL_GRACE_WINDOWS: u32 = 2;
+
 /// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
 /// channel (init ack, `can_use_tool` permission asks) + mid-turn steers, and
 /// return when `result` lands / stdout EOFs / a fatal write fails. Ported
@@ -1740,6 +1745,10 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // parked on the human — so the watchdog must NOT fire while count > 0. Mirrors
     // the frontend's `liveTool != null` rule for the stall indicator.
     let mut tools_in_flight: i32 = 0;
+    // Consecutive watchdog fires survived purely because a tool was in flight.
+    // Reset to 0 by ANY received line (real progress); when it exceeds the grace
+    // cap with the pipe still dead, the "tool" is wedged → stall anyway.
+    let mut tool_grace_fires: u32 = 0;
 
     // No-progress watchdog: a deadline that any received line pushes forward.
     // Parked on `next_line()` with a silent pipe → fires once at the ceiling and
@@ -1751,26 +1760,29 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     loop {
         tokio::select! {
         () = &mut watchdog => {
-            // A running tool (Bash build, deep grep, ask_user parked on the user)
-            // is silent-but-healthy — re-arm and keep waiting, don't declare a
-            // stall. Only a quiet pipe with NO tool in flight is the wedge.
-            if tools_in_flight > 0 {
+            // In-flight tool → silent-but-healthy, re-arm; but bound the grace so a
+            // never-completing tool can't disable the net forever (see read arm: a
+            // line resets tool_grace_fires).
+            if tools_in_flight > 0 && tool_grace_fires < STREAM_TOOL_GRACE_WINDOWS {
+                tool_grace_fires += 1;
                 watchdog.as_mut().reset(
                     tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
                 );
                 continue;
             }
             log::warn!(
-                "warm_pool: no stdout for {STREAM_NO_PROGRESS_SECS}s (user_sent={user_sent}) — child wedged, session={stream_sid}"
+                "warm_pool: no stdout for {STREAM_NO_PROGRESS_SECS}s (user_sent={user_sent}, tools_in_flight={tools_in_flight}, grace={tool_grace_fires}) — child wedged, session={stream_sid}"
             );
             return TurnOutcome::Stalled;
         }
         read = lines.next_line() => {
             // Any line (even an ignored control frame) = the child is alive and
-            // making progress — push the no-progress deadline forward.
+            // making progress — push the no-progress deadline forward and clear
+            // the tool-grace counter (a working tool just proved itself).
             watchdog.as_mut().reset(
                 tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
             );
+            tool_grace_fires = 0;
         match read {
             Ok(Some(line)) => {
                 let trimmed = line.trim();

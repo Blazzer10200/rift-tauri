@@ -106,6 +106,11 @@ fn sanitize_patterns(patterns: Vec<String>) -> Result<Vec<String>, String> {
         if p.contains('\n') || p.contains('\r') {
             return Err("pattern may not contain newlines".into());
         }
+        // Compile against the SAME glob→regex the matcher uses → reject at save
+        // time, not silently at walk time.
+        if let Err(e) = super::mcp_server::glob_to_regex(p) {
+            return Err(format!("invalid glob \"{p}\": {e}"));
+        }
         out.push(p.to_string());
         if out.len() >= PATTERNS_MAX {
             break;
