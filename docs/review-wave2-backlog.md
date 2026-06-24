@@ -107,5 +107,5 @@
 
 ## STILL OPEN after cont.189 triage (Tier A/B/C1–C22 scope)
 Both are deliberate skips — real findings, but the "right" fix is a judgment call, not a mechanical one-liner:
-- **C5** — `tab.agentSpawns` never reset in `beginTurn()` (`streaming.ts`), grows O(n) per turn. NOT auto-fixed: the activity dock + `helpers.ts:267` render *completed* spawns from earlier in the conversation, so a blind reset-per-turn would wipe history the UI intends to show. Needs a decision: cap+evict (keep recent N) vs reset-per-turn (lose cross-turn view) vs leave (it's perf, not correctness). Lean cap+evict.
+- ~~**C5**~~ — FIXED `<this batch>`: `agentSpawns` capped to most-recent 200 (`streaming.ts::capSpawns`, applied at both Task/Agent + Skill append sites). Chose cap+evict over reset-per-turn so the dock keeps recent cross-turn history while bounding growth + the per-frame O(n) scans.
 - **C7** — `promptPreview` (120 chars of user text) stored in every `TurnRecord` with no TTL (`send.ts:119`), a mild privacy/retention concern. NOT auto-fixed: redacting/omitting it may break whatever surfaces read the preview (telemetry, recent-turn UI). Needs a policy call on retention vs the feature that consumes it before editing.

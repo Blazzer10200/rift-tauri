@@ -20,6 +20,15 @@ import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } fro
 import { flattenToolResult, previewToolInput } from "./helpers";
 import { browserDock } from "../browserDock.svelte";
 
+// S124: agentSpawns appends per Task/Agent/Skill and is never reset within a
+// conversation (the dock shows the running history), so a long session grew it
+// unboundedly + made the per-frame .some()/.findIndex() scans O(n). Cap to the
+// most-recent MAX_SPAWNS so the dock keeps recent history without unbounded growth.
+const MAX_SPAWNS = 200;
+function capSpawns(list: TabState["agentSpawns"]): TabState["agentSpawns"] {
+  return list.length > MAX_SPAWNS ? list.slice(list.length - MAX_SPAWNS) : list;
+}
+
 // DesignSync writes land in the cloud claude.ai/design project — pop the
 // browser dock to it the first time a sync mutates this tab, so the result is
 // visible without the user hunting for it. Once-per-tab (WeakSet) so repeat
@@ -423,10 +432,10 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   if (block.name === "Task" || block.name === "Agent") {
     const subagentType = String(block.input?.subagent_type ?? "fork");
     const description = String(block.input?.description ?? "(no description)");
-    tab.agentSpawns = [
+    tab.agentSpawns = capSpawns([
       ...tab.agentSpawns,
       { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false, blocks: [] },
-    ];
+    ]);
     return;
   }
   const DENY = new Set(["ToolSearch"]);
@@ -660,7 +669,7 @@ function promoteSkillSpawn(tab: TabState, block: ToolBlock) {
   const description = isSkill
     ? `/${String(block.input?.skill ?? "")}${args ? ` ${args}` : ""}`.trim()
     : String(block.input?.command ?? "(command)");
-  tab.agentSpawns = [
+  tab.agentSpawns = capSpawns([
     ...tab.agentSpawns,
     {
       id: block.id,
@@ -672,7 +681,7 @@ function promoteSkillSpawn(tab: TabState, block: ToolBlock) {
       blocks: [],
       kind: "skill",
     },
-  ];
+  ]);
 }
 
 export function onStreamLine(tab: TabState, raw: string) {
