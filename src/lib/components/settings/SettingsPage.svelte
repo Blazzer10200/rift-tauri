@@ -508,7 +508,7 @@
         <div class="card">
           <div class="card-tt">Claude session</div>
           <div class="ctl-row tight">
-            <div><div class="ctl-t">Use my full Claude Code config</div><div class="ctl-s">Layers <code>~/.claude/CLAUDE.md</code>, slash commands, skills, and MCP servers into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only).</div></div>
+            <div><div class="ctl-t">Use my full Claude Code config</div><div class="ctl-s">Runs Rift as your Claude Code: layers your global <code>~/.claude</code> setup — <code>CLAUDE.md</code>, <code>settings.json</code>, hooks, slash commands, skills, and MCP servers — into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only, no global config or hooks).</div></div>
             <button class="toggle" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}><span class="toggle-knob"></span></button>
           </div>
           <div class="ctl-row tight">

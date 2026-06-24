@@ -136,6 +136,19 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      # Test gate: the tag-driven release used to build+publish with NO test gate
+      # (tests lived only in the separate, push-triggered `check` workflow, which
+      # cancel-in-progress can kill before a tag ships). v0.31.0 shipped a build
+      # whose `cargo test` had gone red in check. These three steps run on the
+      # warm self-hosted target/ and fail the job BEFORE the build/publish below,
+      # so a tag can never ship un-tested code again.
+      - name: cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: svelte-check
+        run: npm run check
+      - name: vitest
+        run: npm test
+
       # release.ps1 -Ci: skips the dirty-tree refusal, asserts GITHUB_REF_NAME
       # matches the bumped version, then build + pack + publish to rift-releases
       # using the PAT.

@@ -27,13 +27,17 @@ pub(super) struct AssistantConfig {
     /// (folder picker + recent_roots only). See `projects.rs`.
     #[serde(default)]
     pub(super) projects: Vec<super::projects::Project>,
-    /// When true (the default), spawn the CLI without `--strict-mcp-config`
-    /// and `--disable-slash-commands` so user MCP servers + slash commands
-    /// layer alongside Rift's. CLAUDE.md / hooks always load via the CLI's
-    /// own resolution; the `Skill` tool is explicitly added to the
-    /// `--allowed-tools` allowlist so `/handoff`, `/check`, `/plan`, etc.
-    /// can invoke. No opt-out short of `--bare`, which fires automatically
-    /// in API-key mode.
+    /// When true (the default), Rift runs as a faithful reskin of the user's
+    /// Claude Code setup: the CLI spawns with `--setting-sources
+    /// user,project,local` (inheriting the global ~/.claude CLAUDE.md,
+    /// settings.json, and hooks) and WITHOUT `--strict-mcp-config` /
+    /// `--disable-slash-commands` (so user MCP servers + slash commands layer
+    /// alongside Rift's). The `Skill` tool is in the `--allowed-tools`
+    /// allowlist so `/handoff`, `/check`, `/plan`, etc. invoke. When false,
+    /// Rift is a clean sandbox: the `user` setting source is dropped (no global
+    /// CLAUDE.md/hooks) and only Rift's own MCP tools are exposed. Forced off
+    /// in API-key + local-LLM modes (both fire `--bare`, which suppresses user
+    /// config wholesale).
     /// `None` = default (true). Switch off for a sandboxed Assistant.
     #[serde(default)]
     pub(super) use_full_config: Option<bool>,

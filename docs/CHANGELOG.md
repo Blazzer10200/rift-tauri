@@ -2,15 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.32.0 — A cleaner Workspace, and start from a folder you already have
+## v0.33.0 — Rift runs as your Claude Code
 
-> The Workspace page got a ground-up redesign — calmer, more modern, fits one screen with no scrolling — and you can now point Rift at a project you started long before Rift existed. Plus a codebase cleanup pass and a full documentation refresh.
+> Turn on **Use my full Claude Code config** and Rift now genuinely runs as *your* Claude: it inherits your global `~/.claude` setup — `CLAUDE.md`, `settings.json`, hooks, slash commands, skills, and custom MCP servers — exactly the way the `claude` terminal does. Plus a cleaner Workspace + Activity panel, and a safer release pipeline.
 
-- **Redesigned Workspace page.** Cleaner layout that blends with the rest of the app, fits a normal window without scrolling, and drops the duplicated greeting/time logic that used to live in two places. Resume-a-chat cards, current-folder context, and the project manager are all there, just tighter.
-- **Adopt an existing project.** Already have a folder you've been working in? Rift now surfaces your recent folders as one-tap "add this as a project" entries — from a banner when you're sitting in an un-adopted folder, from the project grid, and from a recent-folders dropdown right in the project editor. No need to have started the project inside Rift.
-- **Codebase cleanup + docs refresh.** A verified sweep removed dead code, two unused dependencies, and four orphaned files (suite + build still green), and every living doc was audited against the source with 16 confirmed drift errors fixed — so the docs now match what the code actually does.
+- **Use my full Claude Code config — now actually full.** The setting always promised to layer your global `~/.claude/CLAUDE.md` into every turn, but a hard-coded flag quietly dropped the `user` setting source, so your global config, `settings.json`, and hooks never loaded. Fixed: with the toggle on, Rift runs with `--setting-sources user,project,local` — your full setup rides along. Off is a clean sandbox (Rift's own MCP tools only, no global config or hooks). API-key and local-LLM modes stay sandboxed by design.
+- **Tools that work without a folder open.** A chat with no project open used to disable *every* tool. Now, when you're running your full Claude Code config, a no-folder chat still gets your workspace-independent tools — slash commands, skills, web search — so it behaves like `claude` in an empty directory instead of a dead sandbox. (File and shell tools still require an open folder, for path safety.)
+- **Cleaner Workspace + Activity panel.** Another pass on the Workspace page and the sidebar's New-chat flow, plus a reworked Activity/Sub-agents panel — a floating top-right card that collapses to a small pill instead of a full-height sidebar, and the activity stats dashboard (streaks, peak hour, 12-week heatmap, per-model breakdown) wired up and reachable.
+- **Off-tab prompts that actually respond.** An `ask_user` question or permission prompt raised while you'd switched to another tab used to render but stay dead — buttons disabled, stuck on "Connecting to the chat session…". Fixed: prompts now resolve from whichever tab owns the turn, so they work from any tab or pane.
+- **A release can't ship red tests anymore.** The tag-driven release pipeline now runs the full suite (`cargo test` + `svelte-check` + `vitest`) *before* it builds and publishes — closing the gap that let a build with failing tests ship once. Plus a fixed Git-tools trust toggle that now takes effect immediately mid-session instead of waiting for an unrelated change.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.32.0** — A cleaner Workspace, and start from a folder you already have: a ground-up Workspace redesign (calmer, fits one screen, no scroll), adopt-an-existing-folder as a one-tap project from your recent folders, a verified dead-code/dependency cleanup sweep, and a full documentation refresh (16 confirmed drift errors fixed against source).
 
 - **v0.31.2** — Project editor that tells you what's wrong: live inline glob validation (red outline + invalid-count, Save disabled until fixed), plain-English save/delete errors instead of doubled jargon, and a failed project load now shows "Couldn't load projects" + Retry instead of a misleading "No projects yet." Plus a 100+-case test net over the previously-untested project paths.
 

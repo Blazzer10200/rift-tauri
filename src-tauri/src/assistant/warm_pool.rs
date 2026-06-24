@@ -86,6 +86,12 @@ pub(super) struct SpawnKey {
     /// red-team M4) → effort change MUST respawn. Silent wrong-effort is worse
     /// than a cold turn.
     pub effort_level: String,
+    /// Git-tools trust gates the `--allowed-tools` argv (git-write tools are
+    /// appended only at `standard`) AND the MCP child's RIFT_TRUST_LEVEL env —
+    /// both baked at spawn. Without it in the key, flipping Read-only⇄Standard
+    /// mid-session reused a warm child with the stale allowlist until some other
+    /// field forced a respawn. Keyed so a trust change drains + respawns.
+    pub trust_level: String,
     /// Cheap fingerprint of the system-prompt addendum variant (TOOLS / NO_WS /
     /// LOCAL) — a change here means a different `--append-system-prompt`.
     pub addendum_ptr: usize,

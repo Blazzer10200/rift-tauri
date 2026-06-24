@@ -693,10 +693,15 @@ pub async fn assistant_send(
     // newline-free so .cmd shims work under Rust 1.77+ batch validation
     // (CVE-2024-24576). Addenda + MCP config path are single-line by design,
     // so they're safe as args.
-    // "Piggyback" mode: drop the two fences so the CLI loads user MCP servers
-    // (from `~/.claude.json`) and honors user slash commands. CLAUDE.md / hooks
-    // / skills already load today via the CLI's own resolution regardless of
-    // these flags — verified live via CDP probe 2026-05-16 (S71).
+    // "Piggyback" (`use_full_config`) mode: drop the two MCP/slash fences AND
+    // add the `user` setting source (below) so Rift inherits the user's full
+    // Claude Code setup — global ~/.claude CLAUDE.md, settings.json, hooks,
+    // custom MCP servers (from `~/.claude.json`), and slash commands — running
+    // their `claude` the same way a terminal would. (The global CLAUDE.md /
+    // settings / hooks ride the `user` setting source specifically; an older
+    // S71 comment claimed they loaded regardless — that was wrong once
+    // `--setting-sources` started excluding `user`. Fixed here + at the
+    // setting-sources branch below.)
     // API-key mode forces `--bare`, which suppresses user config wholesale,
     // so we runtime-disable piggyback in that path. Local-LLM mode also forces
     // `--bare` (below), so it disables piggyback for the same reason — keeps
@@ -758,10 +763,17 @@ pub async fn assistant_send(
         .arg("--verbose")
         .arg("--model").arg(&model)
         .arg("--permission-mode").arg(&permission_mode);
-    // Latency: drop the `user` setting source so the dev's personal ~/.claude
-    // SessionStart hooks/auto-memory don't re-run on every fresh per-turn spawn.
-    // Keeps OAuth auth (separate source) + project/local settings.
-    cmd.arg("--setting-sources").arg("project,local");
+    // The `user` setting source carries the global ~/.claude CLAUDE.md +
+    // settings.json + hooks. `use_full_config` on = inherit them (full reskin);
+    // off = sandbox (Rift MCP only). OAuth auth is a separate source, kept
+    // either way. Latency: with the warm pool (#48) user SessionStart hooks run
+    // once per warm child, not per turn. `use_full_config` is in the SpawnKey →
+    // toggling it drains + respawns.
+    if use_full_config {
+        cmd.arg("--setting-sources").arg("user,project,local");
+    } else {
+        cmd.arg("--setting-sources").arg("project,local");
+    }
     // Moves the CLI's own per-machine sections (cwd, env info, memory paths,
     // git status) out of the system prompt and into the first user message.
     // Keeps the cached system-prompt prefix stable across users and across our
@@ -897,8 +909,23 @@ pub async fn assistant_send(
         if let Some(first) = roots.first() {
             cmd.current_dir(first);
         }
+    } else if use_full_config && !prompting_mode {
+        // No folder open, but the user runs Rift as their full Claude Code: still
+        // expose the WORKSPACE-INDEPENDENT tools so global slash commands +
+        // skills + web tools work without a project open (`/cost`, `/help`, the
+        // user's own `/commands`, `Skill`, `WebSearch`). File/Bash/Edit tools
+        // stay OFF here — there's no `--mcp-config` and no workspace root, so
+        // there's no path-safety boundary to scope a write or a shell against;
+        // those need an open folder (the `Some(p)` branch above). `mcp__*` is
+        // omitted too (no Rift MCP server is spawned without a root). This makes
+        // a no-folder chat behave like `claude` in an empty dir rather than a
+        // tools-disabled sandbox.
+        const NO_WS_TOOLS: &str = "Agent,ExitPlanMode,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch";
+        cmd.arg("--allowed-tools").arg(NO_WS_TOOLS);
     } else {
-        // No MCP config → keep the SDK's built-in tools off via empty tool set.
+        // No MCP config + sandboxed/prompting (or api-key/local-LLM, which force
+        // !use_full_config) → keep the SDK's built-in tools off via empty set.
+        // Pure conversational mode.
         cmd.arg("--tools").arg("");
     }
 
@@ -1132,6 +1159,7 @@ pub async fn assistant_send(
         local_llm_enabled: cfg.local_llm_enabled,
         thinking_on,
         effort_level: effort_level.to_string(),
+        trust_level: trust_level.clone(),
         addendum_ptr: addendum.as_ptr() as usize,
     };
 

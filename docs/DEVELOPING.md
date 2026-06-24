@@ -168,6 +168,13 @@ Maintainers only. Versions bumped manually (or via `/git-ship`) across all three
 
 `release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish to the public `Blazzer10200/rift` repo (renamed from `rift-releases` at v0.16.2), with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin). Full update flow + lineage: `git log -- docs/design/velopack-auto-update.md` (arc doc retired after ship).
 
+### Ship flow + guard rails
+
+The tag-driven `release.yml` now **runs the full test suite (`cargo test` + `svelte-check` + `vitest`) before it builds/publishes** — a tag can no longer ship code whose tests are red (the v0.31.0 failure mode). Two optional helpers around a ship:
+
+- `pwsh scripts/smoke-turn.ps1 -Model haiku` — **before** tagging, prove a real Claude turn still completes end-to-end (spawns `claude` with Rift's exact turn flags against a throwaway folder; ~a cent of quota). Covers the live-turn check that CDP can't.
+- `pwsh scripts/ship-watch.ps1` — **after** `git push --tags`, blocks on the release run and reports green/red (exit-status mirrors the run). Replaces the manual "confirm CI landed next session" step.
+
 ---
 
 ## 5. Configuration & environment variables
