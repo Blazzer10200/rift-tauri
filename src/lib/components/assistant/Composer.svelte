@@ -8,7 +8,7 @@
   import type { PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
-  import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach } from "./composer/helpers";
+  import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
   import { quickStartsFor } from "./composer/quickStarts";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
@@ -87,6 +87,7 @@
   const tab = $derived(assistant.tabFor(tabId));
   const draft = $derived(tab?.draft ?? "");
   const attachments = $derived(tab?.attachments ?? []);
+  const textAttachments = $derived(tab?.textAttachments ?? []);
   const queue = $derived(tab?.queue ?? []);
   const streaming = $derived(tab?.streaming ?? false);
 
@@ -927,6 +928,14 @@
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
   }
+  // Stage a dropped/picked file set: images → binary attachments, everything
+  // else → inlined text attachments. Each helper skips the other's files, so
+  // running both over the same set partitions cleanly. Merges both notices.
+  async function stageFiles(files: Iterable<File>) {
+    const imgRes = await attachImageFiles(files, (a) => assistant.addAttachment(a, tabId));
+    const txtRes = await attachTextFiles(files, (a) => assistant.addTextAttachment(a, tabId));
+    attachError = [summarizeAttach(imgRes), summarizeTextAttach(txtRes)].filter(Boolean).join(" · ") || null;
+  }
   async function onDrop(e: DragEvent) {
     if (!isFileDrag(e)) return;
     e.preventDefault();
@@ -934,21 +943,19 @@
     dragDepth = 0;
     const files = e.dataTransfer?.files;
     if (!files || files.length === 0) return;
-    const res = await attachImageFiles(files, (a) => assistant.addAttachment(a, tabId));
-    attachError = summarizeAttach(res);
+    await stageFiles(files);
   }
 
   // ── Click-to-attach ───────────────────────────────────────────────────────
-  // Paste + drag-drop already stage images; this adds the discoverable path
-  // the placeholder has long advertised. Same staging + 20 MiB guard as onDrop.
+  // Paste + drag-drop already stage attachments; this adds the discoverable
+  // path the placeholder has long advertised. Same staging + caps as onDrop.
   let fileInput = $state<HTMLInputElement | undefined>();
   function openFilePicker() { fileInput?.click(); }
   async function onFilePick(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const files = input.files;
     if (!files || files.length === 0) return;
-    const res = await attachImageFiles(files, (a) => assistant.addAttachment(a, tabId));
-    attachError = summarizeAttach(res);
+    await stageFiles(files);
     input.value = ""; // allow re-picking the same file
   }
 </script>
@@ -1056,8 +1063,10 @@
       <div class="composer-box" class:multiline={multiline}>
       <AttachmentsRow
         {attachments}
+        {textAttachments}
         {attachError}
         onRemove={(id) => assistant.removeAttachment(id, tabId)}
+        onRemoveText={(id) => assistant.removeTextAttachment(id, tabId)}
         onDismissError={() => (attachError = null)}
       />
       <div class="cbox-row">
@@ -1174,7 +1183,6 @@
           <input
             bind:this={fileInput}
             type="file"
-            accept="image/*"
             multiple
             class="file-input-hidden"
             onchange={onFilePick}
@@ -1185,8 +1193,8 @@
             type="button"
             class="cbtn ic attachbtn"
             onclick={openFilePicker}
-            use:tooltip={"Attach image — or paste / drag-drop"}
-            aria-label="Attach image"
+            use:tooltip={"Attach a file or image — or paste / drag-drop"}
+            aria-label="Attach a file"
           >
             <Paperclip size={15} />
           </button>

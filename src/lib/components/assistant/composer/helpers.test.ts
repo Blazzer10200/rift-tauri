@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachImageFiles, bytesToBase64, effortIdxFromX, fmtClock, fmtSize, fuzzyScore, isFileDrag, summarizeAttach } from "./helpers";
+import { attachImageFiles, bytesToBase64, effortIdxFromX, fmtClock, fmtSize, fuzzyScore, isFileDrag, summarizeAttach, summarizeTextAttach } from "./helpers";
 
 describe("fmtClock", () => {
   it("formats zero and sub-second values", () => {
@@ -124,16 +124,34 @@ describe("summarizeAttach", () => {
   it("returns null when everything attached cleanly", () => {
     expect(summarizeAttach({ attached: 2, nonImage: [], tooLarge: [], failed: [], limitHit: false })).toBeNull();
   });
-  it("names a single non-image file", () => {
-    const s = summarizeAttach({ attached: 0, nonImage: ["code.ts"], tooLarge: [], failed: [], limitHit: false });
-    expect(s).toContain("code.ts");
-    expect(s).toContain("only images");
+  it("no longer flags non-image files (they route to the text-attach path)", () => {
+    // nonImage is populated by attachImageFiles but summarizeAttach ignores it —
+    // non-image files are handled by attachTextFiles / summarizeTextAttach now.
+    expect(summarizeAttach({ attached: 0, nonImage: ["code.ts"], tooLarge: [], failed: [], limitHit: false })).toBeNull();
   });
-  it("joins multiple rejection categories with a separator", () => {
+  it("joins the remaining rejection categories with a separator", () => {
     const s = summarizeAttach({ attached: 1, nonImage: ["a", "b"], tooLarge: ["big.png"], failed: [], limitHit: true })!;
-    expect(s).toContain("2 non-image");
     expect(s).toContain("big.png");
     expect(s).toContain("limit reached");
+    expect(s).toContain(" · ");
+    expect(s).not.toContain("non-image");
+  });
+});
+
+describe("summarizeTextAttach", () => {
+  it("returns null when everything attached cleanly", () => {
+    expect(summarizeTextAttach({ attached: 2, binary: [], truncated: [], failed: [], limitHit: false })).toBeNull();
+  });
+  it("names a single binary file that couldn't attach as text", () => {
+    const s = summarizeTextAttach({ attached: 0, binary: ["app.exe"], truncated: [], failed: [], limitHit: false });
+    expect(s).toContain("app.exe");
+    expect(s).toContain("binary");
+  });
+  it("reports truncation and the per-turn text cap", () => {
+    const s = summarizeTextAttach({ attached: 1, binary: [], truncated: ["huge.log"], failed: [], limitHit: true })!;
+    expect(s).toContain("huge.log");
+    expect(s).toContain("truncated");
+    expect(s).toContain("1 MB");
     expect(s).toContain(" · ");
   });
 });

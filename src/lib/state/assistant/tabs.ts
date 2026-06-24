@@ -13,6 +13,7 @@
 // (racy openTab during delete), #181 (persistTabs in finally on restore).
 
 import { MAX_PANES, type PaneState } from "./types";
+import type { TextAttachment } from "./attachments";
 import { tabsStorageKey } from "./persistence";
 import { notify } from "../toast.svelte";
 
@@ -36,6 +37,7 @@ export type TabsHost = {
   convoTitle: string | null;
   composerDraft: string;
   composerAttachments: { id: string; mime: string; dataBase64: string; sizeBytes: number }[];
+  composerTextAttachments: TextAttachment[];
   // @-mention walk + branch caches — invalidated on focus change so a pane
   // with a different root re-walks instead of showing a sibling's file list.
   workspaceFiles: string[];
@@ -444,6 +446,7 @@ export async function newTab(host: TabsHost) {
   // Fresh tab → empty composer (no cache entry yet).
   host.composerDraft = "";
   host.composerAttachments = [];
+  host.composerTextAttachments = [];
   assignFocusedPane(host, id);
   host.persistTabs();
 }
@@ -492,6 +495,7 @@ export async function clearConversation(host: TabsHost) {
   notify.info("Conversation cleared", { detail: "Previous chat saved to History." });
   host.composerDraft = "";
   host.composerAttachments = [];
+  host.composerTextAttachments = [];
   // Retire the old tab's in-memory state; the disk record stays (still in
   // History). #144: drop both the TabState and its UI scratch.
   host.dropTab(oldId);

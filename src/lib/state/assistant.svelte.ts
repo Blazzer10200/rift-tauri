@@ -79,6 +79,10 @@ import {
   addAttachment as attAdd,
   removeAttachment as attRemove,
   clearAttachments as attClear,
+  addTextAttachment as txtAdd,
+  removeTextAttachment as txtRemove,
+  clearTextAttachments as txtClear,
+  type TextAttachment,
 } from "./assistant/attachments";
 // M3 split (2026-05-26): workspace free fns in `./assistant/workspace`.
 import {
@@ -250,6 +254,9 @@ export class TabState {
   /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
    *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
   attachments = $state<{ id: string; mime: string; dataBase64: string; sizeBytes: number }[]>([]);
+  /** Per-tab staged text-file attachments — inlined into the prompt at send,
+   *  not sent as binary blocks. 1 MiB cumulative cap enforced by addTextAttachment. */
+  textAttachments = $state<TextAttachment[]>([]);
   /** S124: in-flight sub-agent spawns. Pushed on Task/Agent tool_use, marked
    *  done on the matching tool_result. The CLI DOES multiplex sub-agent output
    *  into the same stream — nested frames carry `parent_tool_use_id` = this
@@ -628,6 +635,12 @@ class AssistantStore {
   }
   set composerAttachments(v: { id: string; mime: string; dataBase64: string; sizeBytes: number }[]) {
     if (this.activeTab) this.activeTab.attachments = v;
+  }
+  get composerTextAttachments(): TextAttachment[] {
+    return this.activeTab?.textAttachments ?? [];
+  }
+  set composerTextAttachments(v: TextAttachment[]) {
+    if (this.activeTab) this.activeTab.textAttachments = v;
   }
   // queue moved to TabState (S105 follow-up) — per-tab so a queued msg in
   // Tab A can't drain into Tab B if the user switches mid-turn. UI binds via
@@ -1413,6 +1426,24 @@ class AssistantStore {
   clearAttachments(tabId?: string | null) {
     const tab = tabId ? this.tabFor(tabId) : this.activeTab;
     if (tab) attClear(tab);
+  }
+
+  addTextAttachment(
+    att: { name: string; text: string; sizeBytes: number; truncated: boolean },
+    tabId?: string | null,
+  ): boolean {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    return tab ? txtAdd(tab, att) : false;
+  }
+
+  removeTextAttachment(id: string, tabId?: string | null) {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (tab) txtRemove(tab, id);
+  }
+
+  clearTextAttachments(tabId?: string | null) {
+    const tab = tabId ? this.tabFor(tabId) : this.activeTab;
+    if (tab) txtClear(tab);
   }
 
   /** User-driven pin from a chat checklist into the Tasks dock.

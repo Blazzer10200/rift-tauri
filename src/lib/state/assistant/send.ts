@@ -26,8 +26,8 @@ let fableSunsetNoticed = false;
 export async function send(store: AssistantStore, prompt: string) {
   const trimmed = prompt.trim();
   // Empty prompts are allowed when attachments are staged (paste-and-go).
-  // Drop only if BOTH the prompt and attachments are empty.
-  if (!trimmed && store.composerAttachments.length === 0) return;
+  // Drop only if the prompt AND both attachment kinds are empty.
+  if (!trimmed && store.composerAttachments.length === 0 && store.composerTextAttachments.length === 0) return;
   // Try-handle as a slash command first; if it matched, we're done.
   if (trimmed.startsWith("/") && runSlash(store, trimmed)) return;
   // Auth chokepoint — every send path funnels here (composer Enter/button,
@@ -144,14 +144,13 @@ export async function send(store: AssistantStore, prompt: string) {
     tab.promptHistory = [...tab.promptHistory, trimmed].slice(-50);
   }
   // User bubble text: when paste-and-go with no text, show an attachment
-  // marker so the bubble isn't blank.
+  // marker so the bubble isn't blank. Counts both kinds.
   const attachCount = store.composerAttachments.length;
-  const bubbleText =
-    trimmed.length > 0
-      ? trimmed
-      : attachCount === 1
-      ? "📎 1 image"
-      : `📎 ${attachCount} images`;
+  const textCount = store.composerTextAttachments.length;
+  const markerParts: string[] = [];
+  if (attachCount > 0) markerParts.push(`📎 ${attachCount} image${attachCount === 1 ? "" : "s"}`);
+  if (textCount > 0) markerParts.push(`📄 ${textCount} file${textCount === 1 ? "" : "s"}`);
+  const bubbleText = trimmed.length > 0 ? trimmed : markerParts.join(" · ");
   // Build the user message blocks — image blocks (one per attachment) first,
   // then the text block. Order matches the visual stack (thumbs above text)
   // in MessageBubble's user-side render path.
@@ -163,6 +162,13 @@ export async function send(store: AssistantStore, prompt: string) {
       dataBase64: a.dataBase64,
       sizeBytes: a.sizeBytes,
     });
+  }
+  // Text-file attachments: a compact marker block listing the filenames goes in
+  // the visible bubble (the full contents are inlined into the prompt below, not
+  // shown — they'd flood the transcript). One line per file so the user sees
+  // what they sent.
+  for (const t of store.composerTextAttachments) {
+    userBlocks.push({ type: "text", text: `📄 ${t.name}${t.truncated ? " (truncated)" : ""}` });
   }
   userBlocks.push({ type: "text", text: bubbleText });
   tab.messages = [
@@ -181,10 +187,20 @@ export async function send(store: AssistantStore, prompt: string) {
     mime: a.mime,
     dataBase64: a.dataBase64,
   }));
+  // Inline text-file attachments into the prompt as fenced blocks before the
+  // user's typed text. The backend pipes `prompt` to the CLI verbatim, so no
+  // backend change is needed — the assistant simply sees the file contents.
+  const textBlocks = store.composerTextAttachments
+    .map((t) => `\`\`\`${t.name}\n${t.text}\n\`\`\``)
+    .join("\n\n");
+  const effectivePrompt = textBlocks
+    ? (trimmed ? `${textBlocks}\n\n${trimmed}` : textBlocks)
+    : trimmed;
   store.composerAttachments = [];
+  store.composerTextAttachments = [];
   try {
     await invoke("assistant_send", {
-      prompt: trimmed,
+      prompt: effectivePrompt,
       sessionId: tab.cliSessionId,
       isFirstTurn,
       model: store.effectiveModel,

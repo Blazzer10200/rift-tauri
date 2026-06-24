@@ -71,13 +71,52 @@ export function isFileDrag(e: DragEvent): boolean {
 }
 
 const ATTACH_MAX_BYTES = 20 * 1024 * 1024;
+// Per-file cap on inlined text. ~256 KB ≈ 64K tokens worst case — generous for
+// a log/config/output, and the 1 MiB per-turn cap (attachments.ts) keeps the
+// total well under the backend 2 MiB prompt ceiling. Larger files truncate
+// with a marker rather than being rejected.
+const TEXT_FILE_MAX_BYTES = 256 * 1024;
 
 export type AttachResult = {
   attached: number;
-  nonImage: string[]; // dropped/pasted but not an image
+  nonImage: string[]; // dropped/pasted but not an image (image-only path)
   tooLarge: string[]; // image over the 20 MB cap
   failed: string[]; // couldn't be read
   limitHit: boolean; // per-turn total-size cap reached
+};
+
+// Files we won't inline as text — a non-image binary the assistant can't use as
+// prose. Detected by extension since File.type is unreliable for code/config.
+const BINARY_EXT = new Set([
+  "exe", "dll", "so", "dylib", "bin", "o", "a", "lib", "obj",
+  "zip", "tar", "gz", "7z", "rar", "bz2", "xz",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "mp3", "mp4", "wav", "mov", "avi", "mkv", "webm", "ogg", "flac",
+  "ttf", "otf", "woff", "woff2", "eot",
+  "wasm", "class", "pyc", "jar", "node",
+]);
+
+function looksBinary(name: string, type: string): boolean {
+  if (type && !type.startsWith("text/") && !TEXTUAL_MIME.has(type)) {
+    // an explicit non-textual MIME (e.g. application/octet-stream) → binary
+    if (type.startsWith("image/") || type.startsWith("audio/") || type.startsWith("video/")) return true;
+  }
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  return BINARY_EXT.has(ext);
+}
+
+// MIMEs that are textual despite not starting with "text/".
+const TEXTUAL_MIME = new Set([
+  "application/json", "application/xml", "application/javascript",
+  "application/x-yaml", "application/toml", "application/x-sh",
+]);
+
+export type TextAttachResult = {
+  attached: number;
+  binary: string[]; // skipped — a non-text binary
+  truncated: string[]; // inlined but clipped at the per-file cap
+  failed: string[]; // couldn't be read as text
+  limitHit: boolean; // per-turn text cap reached
 };
 
 /** Stage image files as attachments via the supplied `add` callback (kept as a
@@ -103,17 +142,60 @@ export async function attachImageFiles(
   return r;
 }
 
-/** One-line summary of what an attach attempt rejected — null when everything
- *  attached cleanly. Drives a single warn toast instead of a swallowed skip. */
+/** Stage text files as inline-prompt attachments via the supplied `add`
+ *  callback (store-free + unit-testable, like attachImageFiles). Reads each as
+ *  UTF-8, truncates at the per-file cap with a marker, and skips non-text
+ *  binaries. Caller routes images here AFTER attachImageFiles has claimed them;
+ *  this path handles everything that isn't an image. */
+export async function attachTextFiles(
+  files: Iterable<File>,
+  add: (att: { name: string; text: string; sizeBytes: number; truncated: boolean }) => boolean,
+): Promise<TextAttachResult> {
+  const r: TextAttachResult = { attached: 0, binary: [], truncated: [], failed: [], limitHit: false };
+  for (const file of Array.from(files)) {
+    const name = file.name || "file";
+    if (file.type.startsWith("image/")) continue; // images go through attachImageFiles
+    if (looksBinary(name, file.type)) { r.binary.push(name); continue; }
+    try {
+      const raw = await file.text();
+      const truncated = raw.length > TEXT_FILE_MAX_BYTES;
+      const text = truncated
+        ? raw.slice(0, TEXT_FILE_MAX_BYTES) + `\n\n…[truncated — ${fmtSize(file.size)} file clipped at ${fmtSize(TEXT_FILE_MAX_BYTES)}]`
+        : raw;
+      if (add({ name, text, sizeBytes: file.size, truncated })) {
+        r.attached++;
+        if (truncated) r.truncated.push(name);
+      } else {
+        r.limitHit = true;
+      }
+    } catch {
+      r.failed.push(name);
+    }
+  }
+  return r;
+}
+
+/** One-line summary of what an image-attach attempt rejected — null when
+ *  everything attached cleanly. nonImage is no longer flagged here: non-image
+ *  files route to attachTextFiles, summarized separately. */
 export function summarizeAttach(r: AttachResult): string | null {
   const parts: string[] = [];
-  if (r.nonImage.length) {
-    parts.push(r.nonImage.length === 1
-      ? `${r.nonImage[0]} isn't an image — only images attach (the assistant can read workspace files directly)`
-      : `${r.nonImage.length} non-image files skipped — only images attach`);
-  }
   if (r.tooLarge.length) parts.push(`${r.tooLarge.length === 1 ? r.tooLarge[0] : `${r.tooLarge.length} images`} over the 20 MB cap`);
   if (r.failed.length) parts.push(`${r.failed.length} file(s) couldn't be read`);
   if (r.limitHit) parts.push("attachment limit reached (20 MB per turn)");
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** One-line summary of a text-attach attempt — null when all clean. */
+export function summarizeTextAttach(r: TextAttachResult): string | null {
+  const parts: string[] = [];
+  if (r.binary.length) {
+    parts.push(r.binary.length === 1
+      ? `${r.binary[0]} is a binary file — can't attach as text`
+      : `${r.binary.length} binary files skipped — only text/images attach`);
+  }
+  if (r.truncated.length) parts.push(`${r.truncated.length === 1 ? r.truncated[0] : `${r.truncated.length} files`} truncated to fit`);
+  if (r.failed.length) parts.push(`${r.failed.length} file(s) couldn't be read as text`);
+  if (r.limitHit) parts.push("text attachment limit reached (1 MB per turn)");
   return parts.length ? parts.join(" · ") : null;
 }
