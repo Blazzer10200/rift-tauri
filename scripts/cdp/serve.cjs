@@ -46,15 +46,79 @@ const API_PORT = Number(process.env.RIFT_CDP_API_PORT || 9223);
 const TMP_DIR = path.join(__dirname, '.tmp');
 const TMP_KEEP = Number(process.env.RIFT_CDP_TMP_KEEP || 20);
 const LOG_KEEP = Number(process.env.RIFT_CDP_LOG_KEEP || 200);
-// Whole-page screenshots are capped to this CSS long-edge before capture. A raw
-// HiDPI surface is ~2000x1250 (2.5MP) — over Anthropic's vision envelope (long
-// edge ≤1568, ≤~1.15MP), so every Read uploaded an oversized image that their
-// API resized server-side anyway, taxing latency for zero legibility gain. CSS-px
-// clip + deviceScaleFactor=1 makes the output size deterministic + DPR-independent.
-// 1280 long edge ≈ 1.0MP, lands inside the envelope, stays legible for UI checks.
-const MAX_EDGE = Number(process.env.RIFT_CDP_MAX_EDGE || 1280);
+// --- Vision-aware capture (rebuilt 2026-06-25) ---
+// Claude's vision model is PATCH-based, not megapixel-based: it tiles the image
+// into 28×28-px patches (one "visual token" each), so an image costs
+// ⌈w/28⌉ × ⌈h/28⌉ tokens. Each model has a native ceiling — long edge AND token
+// count — above which the API resizes server-side BEFORE the model sees it:
+//   Opus 4.7 / 4.8 / Fable 5 / Mythos 5: 2576 px long edge, 4784 tokens.
+//   Every older model:                   1568 px long edge, 1568 tokens.
+// The previous tool hard-clamped to 1280 px @ deviceScaleFactor=1 under a stale
+// "≤1568 px / ≤1.15 MP" assumption that predates the Opus-4.7 high-res bump — so
+// on Opus 4.8 it shipped 1280×800 = 1334 visual tokens when the model accepts up
+// to 4784 (≈3.5× the detail), and pinning DSF=1 re-rasterized the HiDPI surface
+// at 1× CSS density (the lowest-fidelity option WebView2 offers → soft text).
+// Rebuild: render at a supersampled DSF for crisp text, then clip+scale to the
+// LARGEST aspect-preserving size that lands EXACTLY inside the model's envelope —
+// max detail, zero server-side resize. Defaults target Opus 4.7+/Fable; override
+// RIFT_CDP_MAX_EDGE / RIFT_CDP_MAX_TOKENS for an older model.
+const MAX_EDGE = Number(process.env.RIFT_CDP_MAX_EDGE || 2576);
+const MAX_TOKENS = Number(process.env.RIFT_CDP_MAX_TOKENS || 4784);
+const PATCH = 28;
+// Supersample factor: render the page this many × CSS density, then downscale to
+// the target. 2× = anti-aliased, sharp text at the cost of a bigger intermediate
+// raster; 1× = no supersampling (faster, softer). 1.5–2 is the sweet spot.
+const SS_FACTOR = Number(process.env.RIFT_CDP_SS_FACTOR || 2);
+
+// One visual token per 28×28 patch.
+function imageTokens(w, h) { return Math.ceil(w / PATCH) * Math.ceil(h / PATCH); }
+// Does (w,h) fit BOTH the edge limit (measured on the padded-to-28 size, as the
+// API does) and the visual-token budget?
+function fitsEnvelope(w, h, maxEdge, maxTok) {
+    return Math.ceil(w / PATCH) * PATCH <= maxEdge
+        && Math.ceil(h / PATCH) * PATCH <= maxEdge
+        && imageTokens(w, h) <= maxTok;
+}
+// The largest aspect-preserving (w,h) that fits the model's envelope — i.e. the
+// exact size the API would resize to, computed up front so WE produce it and the
+// server never re-touches the pixels. Mirrors Anthropic's reference resized_size().
+function envelopeSize(W, H, maxEdge = MAX_EDGE, maxTok = MAX_TOKENS) {
+    if (fitsEnvelope(W, H, maxEdge, maxTok)) return { w: W, h: H };
+    const portrait = H > W;
+    const lw = portrait ? H : W, lh = portrait ? W : H;     // long edge first
+    const ar = lw / lh;
+    let lo = 1, hi = lw, best = { w: 1, h: 1 };
+    while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const w = mid, h = Math.round(mid / ar);
+        if (fitsEnvelope(w, h, maxEdge, maxTok)) { best = { w, h }; lo = mid + 1; }
+        else hi = mid - 1;
+    }
+    return portrait ? { w: best.h, h: best.w } : best;
+}
 
 if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
+
+// Emulation override is a SINGLE shared layout state per target — two captures
+// that set+clear deviceScaleFactor concurrently stomp each other and can wedge
+// WebView2's viewport baseline permanently (recoverable only by a webview
+// restart). So any capture that touches setDeviceMetricsOverride is serialized
+// through this per-target promise chain: each waits for the previous to fully
+// set→capture→clear before starting. Parallel /batch screenshots still "work"
+// (the batch dispatcher fires them at once); they just queue here and run back
+// to back. Pure reads (eval/state/ax) never enter this lock.
+const emuLocks = new Map(); // target -> tail promise
+function withEmuLock(target, fn) {
+    const prev = emuLocks.get(target) || Promise.resolve();
+    let release;
+    const next = new Promise((r) => { release = r; });
+    emuLocks.set(target, prev.then(() => next));
+    return prev.then(fn).finally(() => {
+        release();
+        // Drop the lock entry once we're the tail, so the Map doesn't grow.
+        if (emuLocks.get(target) === next) emuLocks.delete(target);
+    });
+}
 
 let snapSeq = 0;
 
@@ -339,7 +403,18 @@ async function waitFor({ js, timeoutMs = 60000, intervalMs = 200 }, target = 'ma
     return { error: 'timeout', polls, elapsedMs: Date.now() - start };
 }
 
-async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, vh } = {}, target = 'main') {
+function screenshot(opts = {}, target = 'main') {
+    // Serialize ONLY captures that touch the Emulation override (whole-page auto-
+    // scale, or an explicit vw/vh viewport). Selector / explicit-clip shots set no
+    // override, so they run free (and concurrent with each other). This is what
+    // makes parallel /batch screenshots safe — overlapping overrides used to wedge
+    // the viewport permanently.
+    const usesOverride = (opts.vw && opts.vh) || (!opts.clip && !opts.selector);
+    if (usesOverride) return withEmuLock(target, () => _screenshotImpl(opts, target));
+    return _screenshotImpl(opts, target);
+}
+
+async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, vw, vh } = {}, target = 'main') {
     // Optional layout-viewport override (vw/vh): forces the page to lay out + render
     // at the given CSS size regardless of the real OS window size, so shots stay
     // faithful even when the window is parked tiny. Cleared after capture.
@@ -382,18 +457,25 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, v
         clip = r.value;
         viewportClip = true;
     }
-    // Whole-page default: clamp the CSS long-edge to MAX_EDGE and pin DSF=1 so the
-    // captured pixels land inside Anthropic's vision envelope at the source (no
-    // oversized upload, no server-side resize). Skipped when a selector/explicit
-    // clip/viewport override is in play — those callers chose their own framing.
+    // Whole-page default: produce the LARGEST aspect-preserving image that fits the
+    // model's vision envelope (edge ≤ MAX_EDGE, ≤ MAX_TOKENS visual tokens), rendered
+    // crisp. Two steps: (1) render the page at SS_FACTOR× CSS density via a DSF
+    // override — supersampling, so text is anti-aliased instead of 1×-soft; (2) set
+    // clip.scale so the captured surface lands EXACTLY on the envelope target. CDP
+    // composes clip.scale with the override DSF, so the emitted pixels = css ×
+    // SS_FACTOR × scale = target, regardless of the real monitor's DPR. Net: the API
+    // ingests it verbatim (no server resize) at max usable detail. Skipped when a
+    // selector / explicit clip / viewport override is in play — those framed it.
     let autoScaled = false;
     if (!clip && !selector && !overrideViewport) {
         const vp = await evalJs('({w: innerWidth, h: innerHeight})', 8000, target);
         const w = vp.value?.w, h = vp.value?.h;
         if (w && h) {
-            const scale = Math.min(1, MAX_EDGE / Math.max(w, h));
+            const tgt = envelopeSize(Math.round(w * SS_FACTOR), Math.round(h * SS_FACTOR));
+            // scale maps the SS_FACTOR×-density render down onto the envelope target.
+            const scale = tgt.w / (w * SS_FACTOR);
             await cdp('Emulation.setDeviceMetricsOverride',
-                { width: w, height: h, deviceScaleFactor: 1, mobile: false }, 8000, target);
+                { width: w, height: h, deviceScaleFactor: SS_FACTOR, mobile: false }, 8000, target);
             autoScaled = true;
             clip = { x: 0, y: 0, width: w, height: h, scale };
         }

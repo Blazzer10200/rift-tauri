@@ -14,9 +14,10 @@
 #   bash scripts/cdp/c.sh page                           # generic "where am I"
 #   bash scripts/cdp/c.sh ax                             # image-FREE a11y structure (what's on screen + clickable)
 #   bash scripts/cdp/c.sh ax ".ah-wrap"                  # scope to a selector subtree
-#   bash scripts/cdp/c.sh shot                           # jpeg q65, long-edge capped ~1280px, prints path only
-#     (whole-page shots auto-clamp to RIFT_CDP_MAX_EDGE=1280 CSS-px @ DSF=1 — keeps
-#      every Read inside Anthropic's vision envelope; raise the env knob for detail)
+#   bash scripts/cdp/c.sh shot                           # jpeg q65, prints path only
+#     (whole-page shots target the model's vision envelope: 2419x1512 / 4698 visual
+#      tokens on a 16:10 window — largest size Opus 4.7/4.8 ingests w/o server resize,
+#      supersampled for crisp text. Knobs: RIFT_CDP_MAX_EDGE/MAX_TOKENS/SS_FACTOR)
 #   bash scripts/cdp/c.sh shot png 0                     # png lossless
 #   bash scripts/cdp/c.sh shot jpeg 65 --json            # full JSON response
 #   bash scripts/cdp/c.sh shot-sel ".tabs-rail"          # clip to a selector
