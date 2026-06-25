@@ -692,6 +692,13 @@ of reading it from cache. Lever: keep one session going longer rather than start
 context is far cheaper AND faster.\n\
 - COST SPIKE: if the most recent day in costTrend is much higher than the others, call it out and ask what changed.\n\
 - ADD-ON CREDITS: if planLimits.extraUsage.isEnabled is true, factor their top-up credits into the picture.\n\
+- ZERO-TOOL WASTE (thisSession.zeroToolTurns / zeroToolCostUsd): pure-conversation turns (no tool calls) that ran on \
+an expensive model are the cheapest thing to route cheaper. If zeroToolTurns is a large share of totalTurns AND the \
+default model is opus/a costly one, suggest a cheaper default for chat-only work, quoting the count and its spend. \
+This can be an effort/model apply OR an apply:null behavior tip (\"start chat-only questions in a Sonnet tab\").\n\
+- CONTEXT THRASH (thisSession.staleCacheTurns): continuation turns that paid full cache-creation but got zero \
+cache-read mean the context isn't being reused. If staleCacheTurns is more than a couple, flag it as an apply:null \
+tip — keep one session going rather than restarting, so the conversation stays cached (faster AND cheaper).\n\
 Quote the actual number (the ms, the %, the dollar figure) that motivates each diagnosis. A latency or cache card \
 can carry apply:null (it's a behavior tip) OR an effort/model apply when that's the real lever.\n\
 \n\
