@@ -2,38 +2,26 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.50.0 — A workspace dashboard, AI news, and AI Health that earns its tab
+## v0.51.0 — A faster assistant, a redesigned model picker, and a working Tasks panel
 
-> The biggest release in a while: the Workspace page becomes a real dashboard with your activity and the latest AI news front-and-center, the AI Health tab grows up into a genuine diagnostic, and a broad compatibility pass lets Rift run cleanly on other people's Windows machines.
+> This release kills a painful "everything is slow" regression, rebuilds the model + effort picker to look and feel like the rest of Rift, and brings the Tasks/Plan panel back to life.
 
-### Workspace dashboard + "What's new in AI"
-- **Your activity, on the page — not behind a button.** The usage stats (messages, daily chart, sessions / tool calls / spend / streak, model mix) used to hide behind a small "Activity" chip that popped a modal. They now live inline as a full-width band across the top of the Workspace page — visible at a glance, no click.
-- **"What's new in AI" feed.** A new panel surfaces recent Claude Code releases automatically (pulled from the official changelog, free, no AI cost) with version, date, and the highlights. One latest release shows by default; "Show more" reveals the rest so the page stays one screen.
-- **"Summarize this week in AI" (optional).** A one-tap button has your own Claude search the web and write a short digest of the latest Anthropic + Claude Code news (model launches, API changes) — the same private, on-your-subscription pattern as AI Health's "Analyze my usage." Strictly opt-in; nothing runs until you ask.
-- **Reorganized as a bento dashboard** — a wide Activity band on top, then Projects and What's-new side by side, balanced and fitting one screen with no scroll pile.
-- **Richer Projects panel.** The Projects list now reads as a clear hierarchy: a count badge + "New" button in the header, the active project as a framed hero card (monogram, live "Active" badge, scope, "Continue" button), the rest as a tidy grid of clickable cards, and a single "Add a project" zone that merges the adopt-current-folder prompt with recent folders. A duplicate folder switcher was removed from the sidebar.
+### The assistant is fast again
+- **Fixed the "slowest AI in the world" bug.** A previous release quietly flipped the fresh-install permission default away from "just run it," so every file read, edit, and command silently parked waiting on an approval the UI never surfaced — turns could hang for many minutes. Fresh installs now default to running tools directly again (approval prompts are still one toggle away), and the permission round-trip is hardened with a sane timeout and an actionable message if it ever does wait.
+- **Extended thinking is off by default.** Matching Claude Code, a quick "hello" replies in a second or two instead of pausing to think first. Turn it back on anytime from the model menu.
 
-### AI Health — a real diagnostic
-- **An at-a-glance health score** with plain-English wording instead of jargon, so the tab tells you how things are actually going.
-- **Latency, explained.** When a turn is slow, Rift attributes the root cause (thinking vs. tools vs. a cold start) instead of just showing a number — and it's warm-aware, so the normal warm-up after launch no longer flashes the score red.
+### Redesigned model + effort picker
+- **One polished picker, in Rift's design language.** Each model is a clean row with its own identity icon, full description (no more cut-off text), context size, and a number hotkey. The current model lights up with a checkmark.
+- **"More models" flyout.** Previous-generation models (e.g. Opus 4.7) tuck into an expandable "More models" submenu instead of cluttering the main list — and it opens automatically if one of them is your active model.
+- **A real effort dial.** The effort control is now a stepped slider labeled with the actual levels — **Low · Medium · Medium+ · High · X-High** (plain, honest names instead of marketing labels) — with the active level called out, smooth animations, and clickable steps. Each model shows only the levels it actually supports (Sonnet stops at High; Haiku, which doesn't use effort, hides the dial entirely).
+- **Consistent typography throughout** — every label, tag, and hotkey sits on one deliberate type scale so the whole menu reads as tidy and organized.
 
-### Works on other Windows machines
-> A cross-machine compatibility pass driven by two multi-agent audit/research workflows (adversarially verified — 19 false leads discarded).
-
-- **Safer first-run default.** A brand-new user no longer silently starts in the most permissive "bypass all permissions" mode — fresh installs default to asking, and bypass stays an explicit opt-in.
-- **Works behind corporate TLS proxies.** Rift now trusts your machine's own Windows-store root certificates for both its own network calls and the Claude CLI it runs, so HTTPS to Anthropic / model downloads / updates no longer fail on networks that inspect TLS (Zscaler/Palo Alto/Netskope-style). Additive only — nothing changes on a normal home network, and certificate verification is never weakened.
-- **Finds the Claude CLI in more setups** — custom npm install locations are detected and updated with the right command; a slow first-launch antivirus scan no longer permanently disables CLI features for the session.
-- **Locked-down + domain machines.** Security-sensitive files lock down correctly on domain-joined PCs; the installer now bundles the WebView2 runtime so the app still installs on an offline/restricted machine that lacks it.
-- **Smaller screens + laptops.** Minimum window size lowered so the window fits 1366×768 laptops and 125–150% display scaling without going off-screen.
-- **Fewer dead-ends.** Downloads no longer hang forever on a silently-blocked network; first-time Git push works on a fresh machine; clearer, honest error messages (names the real update host, points expired logins to Sign In, Windows-correct config path).
-
-### Interface polish
-- **One tidy toolbar menu.** The cluster of utility icons in the top bar collapsed into a single dropdown; a stray sidebar hover-preview and a cold-start welcome flash are gone.
-- **Calmer, more consistent surfaces** — a cross-surface rhythm pass aligned Settings, smoothed page transitions, and normalized AI Health styling. The window also no longer steals focus when it launches.
-
-> Note: a handful of edge-case cross-machine paths (domain icacls, custom npm proxy, native-installer layout, Velopack TLS interception, GUI stale-PATH) are implemented but await verification on a second physical Windows machine — tracked in ISSUES #61.
+### Tasks / Plan panel works again
+- **The Tasks panel is no longer dead.** A Claude CLI update renamed its task tools, but Rift's allow-list still referenced the old names — so the model would say "there's no task tool here" and give up. Rift now recognizes the new task tools, and a live plan card renders in the conversation, ticking off 0/4 → 4/4 as the model works.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.50.0** — The biggest release in a while: the Workspace page became a real bento **dashboard** (your activity inline + a "What's new in AI" feed + a richer Projects panel), the **AI Health** tab grew into a genuine diagnostic (plain-English health score + warm-aware root-cause latency), and a broad **cross-machine compatibility** pass (safer first-run default, corporate-TLS trust, domain/locked-down machines, smaller screens, honest errors) lets Rift run cleanly on other people's Windows PCs.
 
 - **v0.36.2** — Fable 5 is back: Anthropic's limited-run Fable 5 model returned, so it's once more an option in the model picker with its full 1M-token context and effort range.
 

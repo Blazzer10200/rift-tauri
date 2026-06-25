@@ -18,6 +18,22 @@ export type TKind =
 
 export type PlanItem = { text: string; status: "done" | "active" | "todo" };
 
+/** Map the store's aggregated task list (`tab.tasks`, maintained across
+ *  TaskCreate/TaskUpdate/TodoWrite/checklist-pin) into the plan-card shape. The
+ *  newer CLI emits one TaskCreate per item (no `todos[]` array), so a single
+ *  tool block can't carry the whole plan — the aggregate in the store can.
+ *  StreamTurn falls back to this when a plan block's own items are empty. */
+export function tasksToPlanItems(
+  tasks: { content: string; status: "pending" | "in_progress" | "completed" }[],
+): PlanItem[] {
+  return tasks
+    .filter((t) => typeof t.content === "string" && t.content.length > 0)
+    .map((t) => ({
+      text: t.content,
+      status: t.status === "completed" ? "done" : t.status === "in_progress" ? "active" : "todo",
+    }));
+}
+
 export type StreamTool = {
   id: string;
   kind: TKind;
@@ -255,12 +271,14 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   let thinkText: string[] = [];
   let thinkSecs = 0;
   let thinkActive = false;
+  let thinkSeen = false;
   let totalSecs = 0;
 
   for (const b of m.blocks as Block[]) {
     if (b.type === "text") {
       if (b.text.trim()) blocks.push({ type: "say", text: b.text });
     } else if (b.type === "thinking") {
+      thinkSeen = true;
       if (b.text.trim()) thinkText.push(b.text.trim());
       if (typeof b.durationMs === "number") { thinkSecs += b.durationMs / 1000; totalSecs += b.durationMs / 1000; }
       if (b.status === "active") thinkActive = true;
@@ -274,7 +292,14 @@ export function messageToTurn(m: ChatMessage): TurnModel {
     // boundary / image blocks are not part of a stream turn body
   }
 
-  const thinking = (thinkText.length || thinkActive)
+  // Show the thinking indicator whenever the model actually thought — even with
+  // NO readable text. Opus 4.7/4.8 default thinking.display to "omitted" (only a
+  // signature streams, empty text), so gating on text alone hid the "Thought for
+  // Xs" chip entirely → Opus thinking-on looked like it did nothing while still
+  // costing thinking tokens. A bare thinking block w/ a real duration still earns
+  // the chip. (text.length || active) kept so a 0-duration empty block is dropped
+  // as noise; thinkSeen with measurable time surfaces the honest indicator.
+  const thinking = (thinkText.length || thinkActive || (thinkSeen && thinkSecs > 0))
     ? { active: thinkActive, durSecs: thinkSecs, text: thinkText.join("\n\n") }
     : null;
 
@@ -322,7 +347,20 @@ function segmentWork(tools: StreamTool[]): WorkSeg[] {
   const segs: WorkSeg[] = [];
   let cur: { seg: "edit" | "other"; tools: StreamTool[] } | null = null;
   for (const t of tools) {
-    if (isRich(t.kind)) { cur = null; segs.push({ seg: "rich", tool: t }); continue; }
+    if (isRich(t.kind)) {
+      cur = null;
+      // Coalesce consecutive plan blocks: the newer CLI emits one TaskCreate /
+      // TaskUpdate per item, so a 4-item plan would otherwise render 4 separate
+      // plan cards. They all describe the same evolving plan, so keep ONE rich
+      // seg (the latest block) — StreamTurn renders it from the live aggregate.
+      const last = segs[segs.length - 1];
+      if (t.kind === "plan" && last?.seg === "rich" && last.tool.kind === "plan") {
+        last.tool = t;
+        continue;
+      }
+      segs.push({ seg: "rich", tool: t });
+      continue;
+    }
     const grp = t.kind === "edit" || t.kind === "create" ? "edit" : "other";
     if (!cur || cur.seg !== grp) { cur = { seg: grp, tools: [] }; segs.push(cur); }
     cur.tools.push(t);

@@ -121,7 +121,12 @@ export function loadThinkingEnabled(ws?: string | null): boolean {
   } catch {
     /* SSR or storage disabled */
   }
-  return true;
+  // Thinking OFF by default — mirrors Claude Code's own behavior (extended
+  // thinking is opt-in, not every-turn), so a casual "hello" answers in ~1-2s
+  // instead of burning ~3s on a hidden thinking block first. Any user who set a
+  // preference (on/off stored above) is respected; only the fresh default flips.
+  // Turn it on per-send (or raise effort) when a turn needs real reasoning.
+  return false;
 }
 
 export function saveThinkingEnabled(v: boolean, ws?: string | null) {
@@ -142,9 +147,14 @@ export function loadPermissionMode(): PermissionMode {
   } catch {
     /* SSR or storage disabled */
   }
-  // Fresh installs (no stored key) get the SAFE default — a new user must opt
-  // into bypass explicitly (onboarding Step 4 / composer), never silently.
-  return "default";
+  // Fresh installs (no stored key) get bypassPermissions — Rift is an embedded
+  // coding partner whose system prompt explicitly says "don't ask for permission
+  // on routine work"; the user expects tools to just run and reverts via git.
+  // The prompting modes (default/acceptEdits/plan) remain available per-tab via
+  // the composer for anyone who wants the Allow/Deny gate. (Reverted from the
+  // cont.202 "safe default" experiment: in prompting mode every Bash/Edit/Write
+  // parked on a can_use_tool round-trip that wedged the turn for up to 30 min.)
+  return "bypassPermissions";
 }
 
 export function savePermissionMode(v: PermissionMode) {

@@ -10,7 +10,7 @@
   import StreamResult from "./StreamResult.svelte";
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
-  import { messageToTurn, groupBlocks, fmtDur, isFillerSay, VERB_ING, type StreamTool } from "./streamModel";
+  import { messageToTurn, groupBlocks, fmtDur, isFillerSay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
   import AnimatedCount from "./AnimatedCount.svelte";
@@ -20,6 +20,17 @@
 
   const turn = $derived(messageToTurn(message));
   const groups = $derived(groupBlocks(turn.blocks));
+
+  // Newer CLI emits one TaskCreate per item, so a plan tool block carries no
+  // `todos[]` — its own `items` is empty. The store aggregates the whole plan in
+  // `assistant.tasks` (TaskCreate/TaskUpdate/TodoWrite/checklist-pin all feed it),
+  // so fall back to that for the plan card. Gate the live aggregate to the LAST
+  // turn: with one plan per conversation, only the current turn's card should
+  // mirror the live state — older plan blocks resolve to empty and are skipped
+  // (the {#if planItemsFor(...).length} guard at the render site), so a plan-turn
+  // followed by an update-turn shows ONE card, not a duplicate per turn.
+  const livePlanItems = $derived(isLast ? tasksToPlanItems(assistant.tasks) : []);
+  const planItemsFor = (tool: StreamTool) => (tool.items?.length ? tool.items : livePlanItems);
 
   const plainText = $derived(
     message.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim(),
@@ -162,7 +173,8 @@
       {#each g.segs as seg, si (si)}
         {#if seg.seg === "rich"}
           {#if seg.tool.kind === "plan"}
-            <StreamPlan items={seg.tool.items ?? []} />
+            {@const planItems = planItemsFor(seg.tool)}
+            {#if planItems.length}<StreamPlan items={planItems} />{/if}
           {:else if seg.tool.kind === "web" || seg.tool.kind === "fetch"}
             <StreamWeb tool={seg.tool} />
           {:else if seg.tool.kind === "test" || seg.tool.kind === "lint"}

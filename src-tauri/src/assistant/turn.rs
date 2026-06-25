@@ -451,6 +451,10 @@ async fn handle_permission_request(
         })).await?;
         return Ok(());
     }
+    log::info!(
+        "permission ask: tool={tool_name} session={session_id} request_id={request_id} \
+         tool_use_id={tool_use_id} — emitting card, awaiting user decision"
+    );
     if let Err(e) = app.emit_to(window_label, PERMISSION_EVENT, serde_json::json!({
         "session_id": session_id,
         "request_id": request_id,
@@ -467,13 +471,29 @@ async fn handle_permission_request(
         return Ok(());
     }
 
-    // Cap the wait so a forgotten prompt can't wedge the turn forever; deny on
-    // timeout / cancel (e.g. the user closed the tab).
-    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(1800), rx).await {
-        Ok(Ok(v)) => v,
+    // Cap the wait so a forgotten prompt can't wedge the turn. 120s, NOT 30 min:
+    // a real Allow/Deny click happens in seconds, so the only thing the long
+    // ceiling ever bought was a half-hour silent freeze when the card failed to
+    // render (the prompting-mode path that cont.202 made default — historically
+    // untested, since bypassPermissions never raises an ask). Deny-on-timeout
+    // with an actionable message lets the user recover instead of staring at a
+    // frozen "Working…". The model sees the deny and can ask in plain text.
+    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+        Ok(Ok(v)) => {
+            log::info!("permission decision: tool={tool_name} session={session_id} → {}",
+                v.get("behavior").and_then(|b| b.as_str()).unwrap_or("?"));
+            v
+        }
         _ => {
             registry.cancel(&request_id);
-            serde_json::json!({ "behavior": "deny", "message": "No response (timed out or the turn ended)." })
+            log::warn!(
+                "permission ask TIMED OUT after 120s: tool={tool_name} session={session_id} \
+                 — no Allow/Deny answer arrived (card not shown or not clicked); auto-denying"
+            );
+            serde_json::json!({ "behavior": "deny",
+                "message": "Permission prompt wasn't answered in time. Rift auto-denied this action. \
+                            If you didn't see an Allow/Deny prompt, switch the permission mode to \
+                            'Bypass' in the composer so tools run without asking." })
         }
     };
     // The CLI requires `updatedInput` on an allow. The UI sends only the
@@ -865,13 +885,20 @@ pub async fn assistant_send(
         // built-in for the Claude Design integration; kept out of SAFE_BUILTINS
         // so its cloud writes ride the can_use_tool prompt. OAuth-path only —
         // it has no auth under --bare.
-        const BUILTINS: &str = "Agent,Bash,BashOutput,DesignSync,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch,Write";
+        // Task* are the CLI 2.1.18x+ rename of TodoWrite (the Tasks-dock driver):
+        // TaskCreate/TaskUpdate/TaskList/TaskGet/TaskStop. Keep BOTH names — old
+        // CLIs emit TodoWrite, new ones emit Task*; the FE (streaming.ts
+        // applyTaskCreate/applyTaskUpdate) already renders both into the same Plan
+        // card. Omitting Task* silently killed the Tasks panel on current CLI: the
+        // model has the tools but the allowlist gated them out, so it fell back to
+        // describing the plan in plain text. (Found in the 2026-06-25 stress test.)
+        const BUILTINS: &str = "Agent,Bash,BashOutput,DesignSync,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,TodoWrite,WebFetch,WebSearch,Write";
         // Read-only / non-mutating subset always auto-approved even in a
         // prompting mode — these shouldn't interrupt the user. Everything
         // omitted (Bash, Edit, Write, MultiEdit, NotebookEdit, Agent, Skill,
         // SlashCommand, ExitPlanMode, and the mutating mcp__rift__* tools)
         // falls through to the `can_use_tool` prompt.
-        const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TodoWrite,WebFetch,WebSearch";
+        const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,TodoWrite,WebFetch,WebSearch";
         // UI-presentation tools (ask_user / open_browser / notify) are safe to
         // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
         const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify";
@@ -924,7 +951,7 @@ pub async fn assistant_send(
         // omitted too (no Rift MCP server is spawned without a root). This makes
         // a no-folder chat behave like `claude` in an empty dir rather than a
         // tools-disabled sandbox.
-        const NO_WS_TOOLS: &str = "Agent,ExitPlanMode,Skill,SlashCommand,TodoWrite,WebFetch,WebSearch";
+        const NO_WS_TOOLS: &str = "Agent,ExitPlanMode,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,TodoWrite,WebFetch,WebSearch";
         cmd.arg("--allowed-tools").arg(NO_WS_TOOLS);
     } else {
         // No MCP config + sandboxed/prompting (or api-key/local-LLM, which force

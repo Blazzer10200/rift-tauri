@@ -322,6 +322,11 @@ export class TabState {
    *  of each turn. Reset in beginTurn. */
   turnStartNotified = false;
   dockAutoOpenedThisConvo = false;
+  /** Id of the single inline plan block appended this turn (TaskCreate/TodoWrite).
+   *  The newer CLI emits one TaskCreate per item, so instead of one block per
+   *  call we append ONE plan block on the first task event of a turn and let it
+   *  render from the live `tasks` aggregate. Reset to null in beginTurn. */
+  planBlockId: string | null = null;
   /** Telemetry record for the in-flight turn. Set by AssistantStore.send()
    *  before invoking the backend, filled by stream handlers, finalized in
    *  onDone / onError. Null between turns. */

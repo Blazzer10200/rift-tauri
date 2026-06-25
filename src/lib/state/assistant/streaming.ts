@@ -62,6 +62,7 @@ export function beginTurn(tab: TabState) {
   // a new turn's TaskCreate mint id "1" — colliding with a prior turn's task —
   // and a TaskUpdate{taskId:"1"} would then patch the wrong (older) task.
   tab.taskCreateCount = tab.tasks.length;
+  tab.planBlockId = null;
   tab.streaming = true;
 }
 
@@ -400,6 +401,25 @@ function applyTaskUpdate(tab: TabState, input: Record<string, unknown> | undefin
   tab.tasks = tab.tasks.map((t) => (t.id === taskId ? { ...t, status } : t));
 }
 
+// Ensure exactly ONE inline plan block exists for this turn. The plan card
+// (StreamPlan via StreamTurn) renders from the live `tab.tasks` aggregate, so a
+// single placeholder block is enough — every TaskCreate/TaskUpdate/TodoWrite
+// just mutates `tasks` and the one block re-renders reactively. Without a block
+// in the message the card has no mount point (the bug found 2026-06-25: tasks
+// were created in state but nothing displayed them).
+function ensurePlanBlock(tab: TabState) {
+  if (tab.planBlockId) return;
+  const id = `plan-${tab.streamingMsgId ?? "x"}-${tab.tasks.length}`;
+  tab.planBlockId = id;
+  mutateStreaming(tab, (m) => ({
+    ...m,
+    blocks: [
+      ...m.blocks,
+      { type: "tool", id, name: "TodoWrite", input: {}, result: null, isError: false, status: "done", startedAt: Date.now() },
+    ],
+  }));
+}
+
 function appendToolUse(tab: TabState, block: { id: string; name: string; input?: Record<string, unknown> }) {
   if (tab.seenToolUseIds.has(block.id)) return;
   tab.seenToolUseIds.add(block.id);
@@ -416,16 +436,19 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   }
   if (block.name === "TodoWrite") {
     const opensDock = applyTodoWrite(tab, block.input);
+    ensurePlanBlock(tab);
     tab.onTodoApplied?.(tab, opensDock);
     return;
   }
   if (block.name === "TaskCreate") {
     const opensDock = applyTaskCreate(tab, block.input);
+    ensurePlanBlock(tab);
     tab.onTodoApplied?.(tab, opensDock);
     return;
   }
   if (block.name === "TaskUpdate") {
     applyTaskUpdate(tab, block.input);
+    ensurePlanBlock(tab);
     tab.onTodoApplied?.(tab, false);
     return;
   }

@@ -111,7 +111,7 @@ fn harden_config_acl(path: &std::path::Path) {
         std::thread::spawn(move || {
             let status = std::process::Command::new("icacls")
                 .arg(&path_for_acl)
-                .args(["/inheritance:r", "/grant:r", &format!("\"{principal}\":(F)")])
+                .args(["/inheritance:r", "/grant:r", &format!("{principal}:(F)")])
                 .creation_flags(CREATE_NO_WINDOW)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())

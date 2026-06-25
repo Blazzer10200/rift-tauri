@@ -2,11 +2,11 @@
 // option tables + their pure derivation helpers, lifted from Composer.svelte
 // 2026-06-10 so the parent's onKey navigation and the SettingsMenu/PermMenu
 // children derive from one source and can never disagree.
-import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon } from "lucide-svelte";
+import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit } from "lucide-svelte";
 import type { ModelSel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
 import { fableAvailable, MODEL_MAX_EFFORT } from "../../../state/assistant/helpers";
 
-export type EffortOpt = { id: ThinkingEffort; label: string; hint: string; level: 1 | 2 | 3 | 4 | 5 };
+export type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
 // Effort ladder mapped to the CLI's `--effort` flag (low/medium/high/xhigh) by
 // effortToFlag (helpers.ts): none→low · quick→medium · smart→medium · deep→high
 // · ultra→xhigh. "smart" is Rift's default and maps to `medium` — Anthropic's
@@ -15,12 +15,16 @@ export type EffortOpt = { id: ThinkingEffort; label: string; hint: string; level
 // time before any visible text, which reads as a frozen UI). "deep" (high) is
 // explicit heavy reasoning; "ultra" rides xhigh + the ultracode workflow key.
 // Haiku rejects effort server-side, so the slider hides entirely there.
+// Labels track the real CLI `--effort` flag each tier sends (low/medium/high/
+// xhigh), per the user's "keep it vanilla" call — no marketing names. Two tiers
+// ("quick"/"smart") both send `medium`; "Medium" vs "Medium+" keeps them
+// distinguishable on the slider without inventing a flag the CLI doesn't have.
 export const EFFORT_OPTIONS: EffortOpt[] = [
-  { id: "none",  label: "Instant", level: 1, hint: "Instant — minimal reasoning. Fastest answers for quick lookups and small edits." },
-  { id: "quick", label: "Quick",   level: 2, hint: "Quick — light reasoning with leaner tool use. Good for routine, well-defined tasks." },
-  { id: "smart", label: "Smart",   level: 3, hint: "Smart — balanced reasoning + fast responses. The recommended default for everyday work." },
-  { id: "deep",  label: "Deep",    level: 4, hint: "Deep — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
-  { id: "ultra", label: "Ultracode", level: 5, hint: "Ultracode — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
+  { id: "none",  label: "Low",     hint: "Low — minimal reasoning. Fastest answers for quick lookups and small edits." },
+  { id: "quick", label: "Medium",  hint: "Medium — light reasoning with leaner tool use. Good for routine, well-defined tasks." },
+  { id: "smart", label: "Medium+", hint: "Medium+ — balanced reasoning + fast responses. The recommended default for everyday work." },
+  { id: "deep",  label: "High",    hint: "High — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
+  { id: "ultra", label: "X-High",  hint: "X-High — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
 ];
 
 export type ModelOpt = {
@@ -31,8 +35,9 @@ export type ModelOpt = {
   blurb: string;     // short second-line description in the model menu row
   ctx: string;
   suffix: string;    // muted inline tag beside the name (e.g. "1M context")
-  legacy: boolean;   // previous-generation — grouped under a "Legacy" subhead
+  legacy: boolean;   // previous-generation — moved into the "More models" flyout
   limited?: boolean; // limited-run — accent name + "until" badge (Fable)
+  icon: typeof Gem;  // per-model identity glyph in the row's leading tile
   // ── Capability matrix (source of truth for what each model can actually do).
   // Drives every affordance gate so the panel never offers a mode the model
   // ignores server-side. Grounded in the model capability docs:
@@ -53,14 +58,21 @@ export type ModelOpt = {
 // FABLE_DISABLED + the sunset date in helpers.ts); when pulled the list
 // collapses back to the standard four.
 export const MODEL_OPTIONS: ModelOpt[] = [
-  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"] }] : []),
-  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus },
-  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet },
-  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku },
-  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"] },
+  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles }] : []),
+  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem },
+  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather },
+  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit },
+  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], icon: Gem },
 ];
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
+
+// Current-generation models surface in the main list; previous generations
+// (`legacy`) fold into the "More models" flyout — matching the desktop picker.
+// Both derive from the one MODEL_OPTIONS table so the number hotkeys (which
+// index into MODEL_OPTIONS) and the row split can never disagree.
+export const currentModels = MODEL_OPTIONS.filter((m) => !m.legacy);
+export const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
 
 /** The slider's allowed tiers — EFFORT_OPTIONS truncated at the model's
  *  ceiling. A prefix slice, so an index into it equals the absolute tier index. */

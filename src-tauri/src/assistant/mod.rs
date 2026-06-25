@@ -263,9 +263,13 @@ fn write_mcp_config(
             std::thread::spawn(move || {
                 let icacls_status = std::process::Command::new("icacls")
                     .arg(&path_for_acl)
-                    // Quote the principal: domain usernames can contain spaces, which
-                    // icacls would otherwise parse as separate ACL tokens.
-                    .args(["/inheritance:r", "/grant:r", &format!("\"{principal}\":(F)")])
+                    // No manual quotes: Rust's Windows Command quotes any argv element
+                    // containing spaces when it builds the command line, so a
+                    // `DOMAIN\First Last:(F)` principal is wrapped automatically and
+                    // icacls sees a single token. Embedding literal `"` here instead
+                    // gets re-escaped into the command line and icacls rejects the
+                    // mangled token — the silent every-turn failure cont.202 shipped.
+                    .args(["/inheritance:r", "/grant:r", &format!("{principal}:(F)")])
                     .creation_flags(CREATE_NO_WINDOW)
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
