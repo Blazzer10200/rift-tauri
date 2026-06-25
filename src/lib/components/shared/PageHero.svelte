@@ -7,14 +7,16 @@
     desc: string;
     /** Add bottom padding on the hero row (false when a tab bar follows). */
     padBottom?: boolean;
+    /** Inner column width — hero + tab bar align to this so the body below can match. */
+    maxWidth?: number;
     icon?: Snippet;
     chip?: Snippet;
     children?: Snippet;
   }
-  const { eyebrow, title, desc, padBottom = true, icon, chip, children }: Props = $props();
+  const { eyebrow, title, desc, padBottom = true, maxWidth = 820, icon, chip, children }: Props = $props();
 </script>
 
-<div class="sb-topbar">
+<div class="sb-topbar" style="--hero-w: {maxWidth}px">
   <div class="sb-hero" class:pb={padBottom}>
     <div class="sb-hero-l">
       {#if icon}
@@ -30,13 +32,15 @@
       <div class="sb-hero-r">{@render chip()}</div>
     {/if}
   </div>
-  {#if children}{@render children()}{/if}
+  {#if children}<div class="sb-hero-extra">{@render children()}</div>{/if}
 </div>
 
 <style>
   .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, transparent), transparent 140px); border-bottom: 1px solid var(--border); }
-  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: 820px; margin: 0 auto; }
+  .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: var(--hero-w, 820px); margin: 0 auto; }
   .sb-hero.pb { padding-bottom: 26px; }
+  /* tab bar / extra content aligns to the same centered column as the hero */
+  .sb-hero-extra { max-width: var(--hero-w, 820px); margin: 0 auto; }
   .sb-hero-l { display: flex; align-items: center; gap: 14px; min-width: 0; }
   .sb-hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .sb-hero-ic :global(svg) { color: var(--accent); }

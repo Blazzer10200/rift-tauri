@@ -820,7 +820,7 @@
 <style>
   .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .ah-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-  .ah-wrap { max-width: 820px; margin: 0 auto; padding: 18px 24px 28px; display: flex; flex-direction: column; gap: 14px; }
+  .ah-wrap { max-width: 820px; margin: 0 auto; padding: 18px 40px 28px; display: flex; flex-direction: column; gap: 14px; }
 
   .ah-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
@@ -828,7 +828,7 @@
   .ah-chip.warn .dot { background: var(--warn); }
   .ah-chip.hot .dot { background: var(--danger); }
 
-  .ah-advisor { display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: 14px; background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 13%, transparent), color-mix(in oklab, var(--accent) 4%, transparent)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, var(--ghost-border)); }
+  .ah-advisor { display: flex; align-items: center; gap: 16px; padding: 20px; border-radius: var(--radius-xl); background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 13%, transparent), color-mix(in oklab, var(--accent) 4%, transparent)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, var(--ghost-border)); }
   .ah-adv-ic { width: 36px; height: 36px; flex: none; border-radius: 10px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
   .ah-adv-tx { flex: 1; min-width: 0; }
   .ah-adv-tt { font-size: 16px; font-weight: 700; letter-spacing: -0.015em; }
@@ -838,7 +838,7 @@
      Neutral card surface with a colored left-rule + dot per the stream design
      language (accent = meaningful signal only). Right side: labeled value pills
      for any flagged dimension, or three all-clear dots when nothing's wrong. */
-  .ah-verdict-strip { display: flex; align-items: center; gap: 11px; padding: 13px 20px; border-radius: 14px; background: var(--surface-1, var(--bg-2)); box-shadow: inset 0 0 0 1px var(--border); border-left: 3px solid var(--fg-subtle); animation: ah-vs-in 0.42s var(--ease-page) both; }
+  .ah-verdict-strip { display: flex; align-items: center; gap: 11px; padding: 13px 20px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); border-left: 3px solid var(--fg-subtle); animation: ah-vs-in 0.42s var(--ease-page) both; }
   .ah-verdict-strip.ok { border-left-color: var(--accent); }
   .ah-verdict-strip.warn { border-left-color: var(--warn); }
   .ah-verdict-strip.hot { border-left-color: var(--danger); }
@@ -863,7 +863,7 @@
   /* Problem dimensions: labeled value pills inline on the right of the strip —
      the one place the flagged metric is stated (no separate chip row). */
   .ah-vs-flags { display: inline-flex; gap: 7px; margin-left: auto; flex: none; flex-wrap: wrap; justify-content: flex-end; }
-  .ah-vs-flag { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: var(--fs-sm); background: var(--bg-2, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .ah-vs-flag { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: var(--fs-sm); background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-vs-flag.warn { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 36%, transparent); }
   .ah-vs-flag.hot { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 38%, transparent); }
   .ah-vs-flag-k { color: var(--fg-muted); }
@@ -872,7 +872,7 @@
   .ah-vs-flag-v { font-weight: 680; font-variant-numeric: tabular-nums; }
 
   .ah-adv-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; line-height: 1.45; }
-  .ah-adv-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 10px; border: none; font-size: 13px; font-weight: 640; cursor: pointer; background: var(--accent); color: var(--accent-fg, #fff); }
+  .ah-adv-btn { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 10px; border: none; font-size: 13px; font-weight: 640; cursor: pointer; background: var(--accent); color: var(--accent-fg); }
   .ah-adv-btn:disabled { opacity: 0.6; cursor: default; }
   .ah-adv-btn :global(.ah-spin) { animation: ah-spin 0.9s linear infinite; }
   @keyframes ah-spin { to { transform: rotate(360deg); } }
@@ -886,7 +886,7 @@
   .ah-advice { display: flex; flex-direction: column; gap: 12px; }
   .ah-advice-sum { font-size: var(--fs-sm); color: var(--fg-muted); margin: 0 2px; line-height: 1.5; }
   .ah-cards { display: flex; flex-direction: column; gap: 10px; }
-  .ah-rec { display: flex; gap: 13px; padding: 15px 20px; border-radius: 14px; background: var(--surface-1, var(--bg-2)); box-shadow: inset 0 0 0 1px var(--border); }
+  .ah-rec { display: flex; gap: 13px; padding: 15px 20px; border-radius: var(--radius-xl); background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
   .ah-rec-impact { flex: none; align-self: flex-start; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 8px; border-radius: 6px; }
   .ah-rec-impact.high { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent); }
   .ah-rec-impact.medium { background: color-mix(in oklab, var(--warn) 18%, transparent); color: var(--warn); }
@@ -916,7 +916,7 @@
   .ah-cfg-v { font-size: var(--fs-sm); font-weight: 640; color: var(--fg); font-variant-numeric: tabular-nums; }
   .ah-cfg-note { font-size: 11.5px; color: var(--fg-subtle); margin: 11px 0 0; line-height: 1.45; }
 
-  .ah-card { border-radius: 14px; padding: 15px 20px; background: var(--surface-1, var(--bg-2)); box-shadow: inset 0 0 0 1px var(--border); }
+  .ah-card { border-radius: var(--radius-xl); padding: 15px 20px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
   .ah-card-h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 660; letter-spacing: -0.01em; margin-bottom: 12px; color: var(--fg); }
   .ah-card-h :global(svg) { color: var(--accent); }
   /* intro line under a card header — plain-English context before the numbers */
@@ -948,7 +948,7 @@
   .ah-fill.hot { background: var(--danger); }
 
   .ah-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
-  .ah-tile { padding: 12px 14px; border-radius: 10px; background: var(--bg-2, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .ah-tile { padding: 12px 14px; border-radius: 10px; background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-tiles.sm .ah-tile { padding: 10px 12px; }
   .ah-tiles.sm .ah-tile-v { font-size: 18px; }
   .ah-tile-v { font-size: 20px; font-weight: 720; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
@@ -959,9 +959,9 @@
   .ah-tile-k { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; line-height: 1.45; }
   /* WS1: signal tints — a faint wash + colored inset ring on the tile whose
      verdict matters, reusing the shared accent/warn/danger tokens. */
-  .ah-tile.ok { background: color-mix(in srgb, var(--accent) 8%, var(--bg-2, var(--surface-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent); }
-  .ah-tile.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg-2, var(--surface-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 42%, transparent); }
-  .ah-tile.hot { background: color-mix(in srgb, var(--danger) 10%, var(--bg-2, var(--surface-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
+  .ah-tile.ok { background: color-mix(in srgb, var(--accent) 8%, var(--bg-inset)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent); }
+  .ah-tile.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg-inset)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 42%, transparent); }
+  .ah-tile.hot { background: color-mix(in srgb, var(--danger) 10%, var(--bg-inset)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
   .ah-verdict { display: inline-block; margin-left: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; padding: 1px 5px; border-radius: 999px; line-height: 1.5; white-space: nowrap; vertical-align: baseline; color: var(--fg-subtle); background: color-mix(in srgb, var(--fg-subtle) 13%, transparent); }
   .ah-verdict.ok { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .ah-verdict.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }

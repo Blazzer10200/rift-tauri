@@ -289,7 +289,7 @@
 
 <div class="sb-main">
   <!-- ── Hero + sticky tab bar ── -->
-  <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false}>
+  <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={1040}>
     {#snippet icon()}<HeroIcon size={22} strokeWidth={1.75} />{/snippet}
     {#snippet chip()}
       <span class="sb-chip"><span class="mono">local workspace</span></span>
@@ -448,7 +448,7 @@
             </div>
             <div class="sb-status-main">
               <b>{assistantStore.auth ? assistantStore.auth.summary : assistantStore.authChecking ? "Checking session…" : "Session unknown"}</b>
-              <div class="sub">Rift runs your local <code>claude</code> install{#if cliInstalled}{' — '}<code>{cliInstalled}</code>{/if}. Not signed in? Run <code>claude login</code> in a terminal, then re-probe.</div>
+              <div class="sub">Rift runs your local <code>claude</code> install{#if cliInstalled}{' — '}<code>{cliInstalled}</code>{/if}.{#if !assistantStore.auth && !assistantStore.authChecking}{' '}Not signed in? Run <code>claude login</code> in a terminal, then re-probe.{/if}</div>
               {#if cliVersionUnknown}
                 <div class="sub st-cli-warn" use:tooltip={"`claude --version` failed or timed out, so Rift can't tell how new this CLI is. To stay safe it treats it as an old version and turns newer features off. Re-probe after an update, or check the install is healthy."}>⚠ Couldn't read this CLI's version — newer features are off until it's readable.</div>
               {:else if cliBelowFeatureFloor && !cliNewer}
@@ -889,14 +889,15 @@
 </div>
 
 <style>
-  .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: transparent; color: var(--fg); }
+  .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
 
   /* ════════ Redesign RailShell (spec: rift-redesign.html) ════════ */
   @keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
   /* hero tab bar */
-  .tabnav { display: flex; gap: 4px; padding: 0 40px; flex: none; border-bottom: 1px solid var(--border); }
+  .tabnav { display: flex; gap: 4px; flex: none; }
   .snav { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 4px; margin: 0 8px; background: none; border: 0; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color var(--dur-fast); }
+  .tabnav .snav:first-child { margin-left: 0; }
   .snav:hover { color: var(--fg-2); }
   .snav.on { color: var(--fg); border-bottom-color: var(--accent); }
   .snav :global(svg) { flex: none; color: var(--fg-subtle); transition: color var(--dur-fast); }

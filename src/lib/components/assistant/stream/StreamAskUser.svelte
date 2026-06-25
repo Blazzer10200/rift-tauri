@@ -401,7 +401,7 @@
     background: transparent;
     color: var(--fg-2, inherit);
   }
-  .sask-btn.submit { background: var(--accent); color: var(--accent-fg, #fff); }
+  .sask-btn.submit { background: var(--accent); color: var(--accent-fg); }
   .sask-btn:disabled { opacity: 0.5; cursor: default; }
   .sask-hint { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 55%, transparent)); }
   .sask-empty { font-size: 12px; color: var(--fg-2, inherit); font-style: italic; }

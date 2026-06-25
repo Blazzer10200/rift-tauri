@@ -98,7 +98,7 @@
   /* pop-in keyframe → app.css (shared). */
   :global(.perm-menu.pop) {
     position: fixed; z-index: 9998; min-width: 264px; padding: 7px;
-    border-radius: 16px; transform-origin: bottom left;
+    border-radius: 14px; transform-origin: bottom left;
     background: color-mix(in oklab, var(--bg-elev-2) 56%, transparent);
     -webkit-backdrop-filter: blur(26px) saturate(1.6);
     backdrop-filter: blur(26px) saturate(1.6);

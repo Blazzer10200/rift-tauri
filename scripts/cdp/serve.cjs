@@ -510,6 +510,7 @@ async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, 
     const filePath = path.join(TMP_DIR, `snap-${tag}${ts}-${++snapSeq}.${format}`);
     const buf = Buffer.from(resp.result.data, 'base64');
     fs.writeFileSync(filePath, buf);
+    pruneTmp(); // keep .tmp/ bounded between restarts (not just at boot) — snaps no longer pile up
     return { path: filePath, bytes: buf.length };
 }
 

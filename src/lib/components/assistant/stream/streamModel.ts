@@ -74,7 +74,9 @@ const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : 
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 
 export function fmtDur(t: number): string {
-  t = Math.max(0, Math.round(t));
+  const raw = Math.max(0, t);
+  t = Math.round(raw);
+  if (t === 0) return raw > 0 ? "<1s" : "0s"; // don't round real sub-second work down to "0s"
   if (t < 60) return t + "s";
   const m = Math.floor(t / 60), s = t % 60;
   return m + "m" + (s ? " " + s + "s" : "");
