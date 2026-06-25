@@ -149,7 +149,7 @@ pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits
         .collect();
     let ua = format!(
         "claude-code/{}",
-        if ver.is_empty() { "2.1.0" } else { ver.as_str() }
+        if ver.is_empty() { env!("CARGO_PKG_VERSION") } else { ver.as_str() }
     );
 
     let resp = reqwest::Client::new()

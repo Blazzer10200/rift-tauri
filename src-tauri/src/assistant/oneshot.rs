@@ -671,15 +671,35 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
 /// keep it trustworthy: (1) ground every claim in the numbers it was given —
 /// never invent usage it can't see; (2) emit ONLY the JSON contract so the
 /// frontend can render cards without parsing prose.
-const ANALYZE_META_PROMPT: &str = "You are Rift's usage advisor — a friendly coach helping someone get more out of \
-their Claude plan. You are given a JSON snapshot of the user's setup and recent usage. Your job: surface a FEW \
-concrete, high-impact changes they could make, explained in plain language a non-expert understands.\n\
+const ANALYZE_META_PROMPT: &str = "You are Rift's AI Health advisor — a friendly coach who helps someone work BETTER and \
+FASTER with their Claude setup, not just spend less. You are given a JSON snapshot of the user's setup, recent usage, \
+and measured per-turn performance. Your job: surface a FEW concrete, high-impact changes, explained in plain language \
+a non-expert understands. Optimization (cost/limits) is ONE lens — diagnosing slowness and bad usage patterns matters \
+just as much. Be a versatile advisor: latency, responsiveness, quality fit, and efficiency are all in scope.\n\
+\n\
+DIAGNOSE, don't just report. The snapshot's \"signals\" block holds pre-computed verdicts (latency: ok|slow|degraded; \
+cache: thrash|fair|good; rateLimitRisk: ok|warn|hot). Lead with whichever signal is worst, explain WHAT is likely \
+causing it, and recommend the specific lever. Common causes to reason about:\n\
+- SLOW first reply (high p90FirstReplyMs): a cold model warm-up on the first turn, too-high default effort on simple \
+chat turns, or a large context being re-uploaded each turn. Lever: lower effort for routine turns, or keep sessions \
+alive so the model stays warm.\n\
+- PER-MODEL latency (perf.byModel): each entry is one (model, effort) pair with its own p50/p90 first-reply and turn \
+time. Use it to pin slowness to a specific choice — e.g. if Opus/deep p50FirstReplyMs is 22000 but Sonnet/smart is \
+4000, the lever is \"use Sonnet (or a lower effort) for routine turns\" with the two real numbers quoted side by side. \
+Only compare groups with enough turns to trust; don't over-read a 1-turn group.\n\
+- CACHE THRASH (low cacheHitRate): short, frequently-restarted sessions re-bill the whole context every turn instead \
+of reading it from cache. Lever: keep one session going longer rather than starting fresh — explain that cached \
+context is far cheaper AND faster.\n\
+- COST SPIKE: if the most recent day in costTrend is much higher than the others, call it out and ask what changed.\n\
+- ADD-ON CREDITS: if planLimits.extraUsage.isEnabled is true, factor their top-up credits into the picture.\n\
+Quote the actual number (the ms, the %, the dollar figure) that motivates each diagnosis. A latency or cache card \
+can carry apply:null (it's a behavior tip) OR an effort/model apply when that's the real lever.\n\
 \n\
 Hard rules:\n\
 - Ground EVERY recommendation in the numbers in the snapshot. Quote the actual figure that motivates it. Never \
 invent or assume usage you were not given. If the data is too thin to advise, say so honestly with fewer cards.\n\
 - Speak to a newcomer. No jargon without a one-line plain explanation. Frame advice as benefit (\"you'll get more \
-replies before hitting your limit\"), not mechanism.\n\
+replies before hitting your limit\", or \"your replies will start ~3s sooner\"), not mechanism.\n\
 - Be specific and actionable. \"Switch chat-only turns to Quick effort\" beats \"optimize your settings\".\n\
 - Do NOT recommend changes the snapshot shows are already in place. Do NOT pad — 2 strong cards beat 5 weak ones.\n\
 \n\
@@ -694,8 +714,10 @@ tap, fill it in with a CONCRETE machine value so Rift can apply it directly. Use
 (e.g. \"batch your tool calls\") that no single setting captures.\n\
 - kind \"effort\": value is one of \"none\"|\"quick\"|\"smart\"|\"deep\"|\"ultra\" — the default reasoning tier. Lower \
 = cheaper/faster. Recommend lowering it only if the usage suggests over-spend on simple turns.\n\
-- kind \"model\": value is one of \"opus\"|\"sonnet\"|\"haiku\" — the default model. Recommend a cheaper default \
-(sonnet/haiku) when an expensive model dominates spend on routine work.\n\
+- kind \"model\": value is one of \"opus\"|\"sonnet\"|\"haiku\"|\"fable\" — the default model. Recommend a cheaper default \
+(sonnet/haiku) when an expensive model dominates spend on routine work. \"fable\" is Anthropic's most capable model \
+(1M context) — suggest it as a STEP-UP when the user is hitting quality ceilings or context limits on hard work, not \
+as a cost lever. Only recommend \"fable\" if the snapshot shows it's available to them (it appears in the model lineup).\n\
 - kind \"budget\": value is a positive NUMBER of US dollars — a per-turn spend ceiling. ONLY valid when the \
 snapshot's currentSetup.authMode is \"api-key\" (the user pays per-token through the Anthropic API, so a dollar \
 cap actually stops spend). When authMode is \"subscription\" the user pays through a Claude plan governed by \
@@ -718,8 +740,12 @@ present) shows the user's real usage-limit windows — ground subscription advic
 /// `--resume`, no session persistence — never touches `warm_pool`. The frontend
 /// owns the snapshot shape so adding cross-session history later is additive
 /// (more data in the same string) with no backend change.
+/// Frontend listens on this to drive a REAL (frame-driven) "Analyzing…" stage,
+/// not a cosmetic timer. Payload: { stage: "spawned" | "thinking" | "writing" }.
+pub const ANALYZE_PROGRESS_EVENT: &str = "usage-analyze-progress";
+
 #[tauri::command]
-pub async fn assistant_analyze_usage(snapshot_json: String) -> Result<String, String> {
+pub async fn assistant_analyze_usage(app: AppHandle, snapshot_json: String) -> Result<String, String> {
     let trimmed = snapshot_json.trim();
     if trimmed.is_empty() {
         return Err("no usage snapshot to analyze".into());
@@ -746,8 +772,9 @@ pub async fn assistant_analyze_usage(snapshot_json: String) -> Result<String, St
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
     let user_msg = format!(
-        "Analyze this user's Rift usage and produce optimization advice per your instructions. \
-         The <setup> block is their live harness config; the <usage> block is their plan limits + usage telemetry.\n\n\
+        "Analyze this user's Rift usage and performance, and produce health advice per your instructions — \
+         diagnose any slowness or bad patterns, not just cost. \
+         The <setup> block is their live harness config; the <usage> block is their plan limits + usage + perf telemetry.\n\n\
          <setup>\n{setup}\n</setup>\n\n<usage>\n{trimmed}\n</usage>"
     );
     cmd.arg("-p").arg(&user_msg)
@@ -785,6 +812,10 @@ pub async fn assistant_analyze_usage(snapshot_json: String) -> Result<String, St
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("spawn `claude` (analyze): {e}"))?;
+    // WS3: frame-driven progress. "spawned" the instant the child is live; the
+    // read loop advances to "thinking"/"writing" as real frames arrive. Best-
+    // effort emits — a dropped event only costs a stage label, never the result.
+    let _ = app.emit(ANALYZE_PROGRESS_EVENT, serde_json::json!({ "stage": "spawned" }));
     let stdout = child.stdout.take().ok_or("analyze stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("analyze stderr unavailable")?;
 
@@ -807,8 +838,10 @@ pub async fn assistant_analyze_usage(snapshot_json: String) -> Result<String, St
     // forever. 90s: the FIRST analyze after launch races the warm pool's own
     // auth warmup and can take ~50-60s (a settled call returns in <10s); 60s sat
     // right on that edge and tripped a false timeout on cold start.
+    let progress_app = app.clone();
     let read_wait = async {
         let mut acc = String::new();
+        let mut wrote = false; // emit "writing" only once (first assistant frame)
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let trimmed = line.trim();
@@ -818,6 +851,20 @@ pub async fn assistant_analyze_usage(snapshot_json: String) -> Result<String, St
             let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
                 continue;
             };
+            // WS3: advance the stage as real frames land. The init `system` frame
+            // means the model is reasoning; the first `assistant` frame means it's
+            // producing the answer. (Partials are off, so these are coarse but
+            // honest — driven by the CLI, not a guessing timer.)
+            match v.get("type").and_then(|t| t.as_str()) {
+                Some("system") => {
+                    let _ = progress_app.emit(ANALYZE_PROGRESS_EVENT, serde_json::json!({ "stage": "thinking" }));
+                }
+                Some("assistant") if !wrote => {
+                    wrote = true;
+                    let _ = progress_app.emit(ANALYZE_PROGRESS_EVENT, serde_json::json!({ "stage": "writing" }));
+                }
+                _ => {}
+            }
             // The terminal `result` frame carries the authoritative final text —
             // harvest it and stop (deltas can include partial JSON).
             if v.get("type").and_then(|t| t.as_str()) == Some("result") {

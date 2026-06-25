@@ -1321,6 +1321,8 @@ async fn cold_spawn_and_run(
     // starts it, so a process that never opens a chat pays nothing).
     warm_pool::ensure_evictor();
 
+    // Capture effort before `key` is moved into the warm entry (perf grouping, WS5).
+    let effort = key.effort_level.clone();
     let turn_start = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     let turn_pid = child.id();
@@ -1406,6 +1408,7 @@ async fn cold_spawn_and_run(
         mcp_guard,
         is_first_turn,
         model,
+        effort,
         turn_start,
     }));
 
@@ -1441,6 +1444,7 @@ struct RunCtx {
     mcp_guard: Option<McpConfigGuard>,
     is_first_turn: bool,
     model: String,
+    effort: String,
     turn_start: std::time::Instant,
 }
 
@@ -1561,6 +1565,8 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             app_out: &app_out,
             win_label: &win_label,
             stream_sid: &stream_sid,
+            model: &ctx.model,
+            effort: &ctx.effort,
             user_line: &user_line,
             handshake_done: &mut handshake_done,
             bg_evict: &bg_evict,
@@ -1697,6 +1703,10 @@ struct StreamCtx<'a> {
     app_out: &'a AppHandle,
     win_label: &'a str,
     stream_sid: &'a str,
+    /// Model + effort for THIS process (baked at spawn; per-process constants).
+    /// Threaded only so the perf record can be grouped by model/effort (WS5).
+    model: &'a str,
+    effort: &'a str,
     user_line: &'a [u8],
     /// True once the per-process `initialize` handshake has been acked. The
     /// FIRST turn waits for the first `control_response` (the init ack) before
@@ -1736,7 +1746,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     use tokio::io::AsyncWriteExt;
 
     let StreamCtx {
-        stdin, lines, steer_rx, app_out, win_label, stream_sid, user_line,
+        stdin, lines, steer_rx, app_out, win_label, stream_sid, model, effort, user_line,
         handshake_done, bg_evict, turn_start,
     } = ctx;
 
@@ -1903,7 +1913,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         // perf record. Fire-and-forget — never gates the DONE emit.
                         record_turn_perf(
                             &v, ts_start_ms, turn_start, perf_ttft_thinking_ms,
-                            perf_ttft_text_ms, stream_sid,
+                            perf_ttft_text_ms, stream_sid, model, effort,
                         );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
                             "session_id": stream_sid, "line": trimmed,
@@ -2096,6 +2106,8 @@ fn record_turn_perf(
     ttft_thinking_ms: Option<u64>,
     ttft_text_ms: Option<u64>,
     stream_sid: &str,
+    model: &str,
+    effort: &str,
 ) {
     use crate::diagnostics::{self, perf::TurnPerf, DiagLevel, DiagStage};
 
@@ -2127,6 +2139,8 @@ fn record_turn_perf(
         cache_hit_rate,
         session_id: stream_sid.to_owned(),
         result_subtype,
+        model: Some(model.to_owned()),
+        effort: Some(effort.to_owned()),
     };
 
     // Structured bus event — DiagStage::Log so it rides the normal 200/s cap,

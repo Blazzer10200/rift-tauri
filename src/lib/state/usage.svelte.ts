@@ -31,7 +31,7 @@ export type AdviceCard = {
 export type UsageAdvice = { summary: string; cards: AdviceCard[] };
 
 const EFFORT_VALUES = ["none", "quick", "smart", "deep", "ultra"] as const;
-const MODEL_VALUES = ["opus", "sonnet", "haiku"] as const;
+const MODEL_VALUES = ["opus", "sonnet", "haiku", "fable"] as const;
 
 /** Re-validate a model-emitted apply action into a known-safe shape, or drop it
  *  (→ null) if it's malformed or out of range. Never trust the model's value
