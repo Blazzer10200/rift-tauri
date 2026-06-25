@@ -3,14 +3,14 @@
   // current turn spawned is a collapsible section that streams its own transcript
   // (thinking / text / tool steps) as its parent-tagged frames arrive — see
   // applySubAgentFrame in streaming.ts.
-  import { slide } from "svelte/transition";
+  import { slide, fade } from "svelte/transition";
   import { assistant } from "../../state/assistant.svelte";
   import { activityDock } from "../../state/activityDock.svelte";
   import { captionForTool } from "./toolCaption";
   import { tooltip } from "$lib/actions/tooltip";
   import Markdown from "./Markdown.svelte";
   import { scale } from "svelte/transition";
-  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, Minus } from "lucide-svelte";
+  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, Minus, Brain, Terminal, FileText } from "lucide-svelte";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -23,6 +23,57 @@
   function statusOf(a: { completedAt: number | null; isError: boolean }): Status {
     if (a.completedAt == null) return "running";
     return a.isError ? "error" : "done";
+  }
+
+  // ── Live activity ─────────────────────────────────────────────────────────
+  // The point of the panel: tell the user what each sub-agent is DOING, live.
+  // A block stream (thinking / text / tool) arrives per agent; we project it to
+  // a single human "now-doing" line + the recent-steps trail so the user reads
+  // momentum at a glance without expanding anything.
+  type Block = { type: string; status?: string; name?: string; input?: Record<string, unknown>; text?: string };
+  type ActKind = "thinking" | "tool" | "text" | "idle";
+  type Activity = { kind: ActKind; label: string; live: boolean };
+
+  function captionBlock(b: Block): Activity {
+    if (b.type === "thinking") return { kind: "thinking", label: "Thinking", live: b.status !== "done" };
+    if (b.type === "text") return { kind: "text", label: "Writing response", live: false };
+    // tool
+    return { kind: "tool", label: captionForTool(b.name ?? "", b.input ?? {}), live: b.status === "pending" };
+  }
+
+  // The single headline line: whatever the agent is touching RIGHT NOW (a
+  // pending tool / active thinking), else the most recent completed step. Falls
+  // back to a spin-up message before the first block lands.
+  function currentActivity(a: { blocks: Block[]; completedAt: number | null }): Activity {
+    const blocks = a.blocks;
+    if (blocks.length === 0) {
+      return a.completedAt == null
+        ? { kind: "thinking", label: "Spinning up", live: true }
+        : { kind: "idle", label: "Done", live: false };
+    }
+    // Prefer the live block (pending tool or active thinking) nearest the end.
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if ((b.type === "tool" && b.status === "pending") || (b.type === "thinking" && b.status !== "done")) {
+        return captionBlock(b);
+      }
+    }
+    // Nothing live → the most recent settled step, dimmed (not "live").
+    const last = captionBlock(blocks[blocks.length - 1]);
+    return { ...last, live: false };
+  }
+
+  // The trail: the last few SETTLED tool steps (newest first), captioned. Drives
+  // the "Read X · Grepped Y · Ran Z" momentum strip under a collapsed agent.
+  function recentSteps(blocks: Block[], n = 3): { id: number; kind: ActKind; label: string }[] {
+    const out: { id: number; kind: ActKind; label: string }[] = [];
+    for (let i = blocks.length - 1; i >= 0 && out.length < n; i--) {
+      const b = blocks[i];
+      if (b.type === "tool" && b.status !== "pending") {
+        out.push({ id: i, kind: "tool", label: captionForTool(b.name ?? "", b.input ?? {}) });
+      }
+    }
+    return out;
   }
 
   // Section open-state. Default: running agents + a lone agent are open; once
@@ -68,11 +119,8 @@
   const elapsed = (a: { startedAt: number; completedAt: number | null }) =>
     fmtDur((a.completedAt ?? now) - a.startedAt);
 
-  // Count the tool steps in a transcript for the collapsed-section summary.
+  // Count the tool steps in a transcript for the collapsed-section "+N earlier".
   const toolCount = (blocks: { type: string }[]) => blocks.filter((b) => b.type === "tool").length;
-  // Of those steps, how many have settled (done/error) — drives the progress bar.
-  const doneToolCount = (blocks: { type: string; status?: string }[]) =>
-    blocks.filter((b) => b.type === "tool" && b.status !== "pending").length;
 </script>
 
 {#if !activityDock.open}
@@ -93,7 +141,7 @@
         {#if runningCount > 0}<Loader2 size={13} class="spin" />{:else}<Bot size={13} />{/if}
       </span>
       {#if runningCount > 0}
-        <span class="pill-live"><span class="live-dot"></span>{runningCount}</span>
+        <span class="pill-live"><span class="live-dot"></span>{runningCount} working</span>
       {:else}
         <span class="pill-count">{spawns.length}</span>
       {/if}
@@ -103,17 +151,19 @@
 <div class="subagent-dock" role="complementary" aria-label="Sub-agent activity"
      transition:scale={{ duration: reducedMotion ? 0 : 180, start: 0.96 }}
      onpointerenter={() => activityDock.notePointerEnter()}>
-  <header class="head">
-    <span class="head-badge" class:live={runningCount > 0}><Bot size={15} /></span>
+  <header class="head" class:live={runningCount > 0}>
+    <span class="head-badge" class:live={runningCount > 0}>
+      {#if runningCount > 0}<Loader2 size={15} class="spin" />{:else}<Bot size={15} />{/if}
+    </span>
     <span class="head-text">
-      <span class="title">Sub-agents</span>
+      <span class="title">{runningCount > 0 ? "Working" : "Sub-agents"}</span>
       {#if runningCount > 0}
-        <span class="head-live" use:tooltip={`${runningCount} running`}><span class="live-dot"></span>{runningCount} live</span>
+        <span class="head-live"><span class="live-dot"></span>{runningCount} agent{runningCount === 1 ? "" : "s"} active</span>
       {:else if spawns.length > 0}
-        <span class="head-rest">{spawns.length} done</span>
+        <span class="head-rest">{spawns.length} finished</span>
       {/if}
     </span>
-    {#if spawns.length > 0}<span class="count">{spawns.length}</span>{/if}
+    {#if spawns.length > 0}<span class="count" class:live={runningCount > 0}>{spawns.length}</span>{/if}
     <button class="close" onclick={() => activityDock.toggle()} use:tooltip={"Minimize to pill"} aria-label="Minimize sub-agent panel">
       <Minus size={15} />
     </button>
@@ -130,6 +180,7 @@
       {#each spawns as a (a.id)}
         {@const st = statusOf(a)}
         {@const open = isOpen(a)}
+        {@const act = currentActivity(a)}
         <section class="agent" data-status={st} class:open>
           <button class="agent-head" onclick={() => toggleAgent(a.id, open)} aria-expanded={open}>
             <span class="chev">{#if open}<ChevronDown size={14} />{:else}<ChevronRight size={14} />{/if}</span>
@@ -149,6 +200,25 @@
               <span class="desc">{a.description}</span>
             </span>
           </button>
+
+          <!-- ── Live action line ── the headline of the whole panel: what this
+               agent is doing RIGHT NOW, in plain language. Only while in flight
+               (running/error) — a done agent leads with its steps trail instead,
+               so the "now" line never just echoes the last completed step. -->
+          {#if st !== "done"}
+            <div class="now" data-status={st} class:running={act.live}>
+              <span class="now-icon" data-kind={act.kind}>
+                {#if act.live && act.kind === "thinking"}<Brain size={13} class="pulse" />
+                {:else if act.live}<Loader2 size={12} class="spin" />
+                {:else if act.kind === "thinking"}<Brain size={13} />
+                {:else if act.kind === "text"}<FileText size={13} />
+                {:else}<Terminal size={13} />{/if}
+              </span>
+              {#key act.label}
+                <span class="now-label" class:live={act.live} transition:fade={{ duration: reducedMotion ? 0 : 140 }}>{act.label}{#if act.live && act.kind === "thinking"}<span class="dots"><span></span><span></span><span></span></span>{/if}</span>
+              {/key}
+            </div>
+          {/if}
 
           {#if open}
             <div class="agent-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
@@ -186,18 +256,18 @@
               {/if}
             </div>
           {:else}
+            {@const steps = recentSteps(a.blocks)}
             {@const total = toolCount(a.blocks)}
-            {@const settled = doneToolCount(a.blocks)}
-            <div class="agent-summary">
-              {#if total > 0}
-                <span class="prog-track" aria-hidden="true">
-                  <span class="prog-fill" data-status={st} style="width:{Math.round((settled / total) * 100)}%"></span>
-                </span>
-                <span class="prog-label">{settled}/{total} step{total === 1 ? "" : "s"}</span>
-              {:else}
-                <span class="prog-label muted">no steps yet</span>
-              {/if}
-            </div>
+            {#if steps.length > 0}
+              <ul class="trail" aria-label="Recent steps">
+                {#each steps as s (s.id)}
+                  <li class="trail-step"><span class="trail-dot"></span><span class="trail-label">{s.label}</span></li>
+                {/each}
+                {#if total > steps.length}
+                  <li class="trail-more">+{total - steps.length} earlier step{total - steps.length === 1 ? "" : "s"}</li>
+                {/if}
+              </ul>
+            {/if}
           {/if}
         </section>
       {/each}
@@ -275,11 +345,16 @@
     background: var(--bg-elev-2); color: var(--fg-muted);
     transition: color var(--dur-base) var(--ease-soft), background var(--dur-base) var(--ease-soft);
   }
+  .head.live {
+    background: linear-gradient(180deg, color-mix(in oklch, var(--accent-soft) 38%, var(--bg)), var(--bg));
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--accent) 28%, transparent);
+  }
   .head-badge.live {
     color: var(--accent);
     background: var(--accent-soft);
     box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent);
   }
+  .head .count.live { background: var(--accent-soft); color: var(--accent); }
   .head-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.1; min-width: 0; }
   .head .title { font-size: var(--fs-sm); font-weight: 650; letter-spacing: -0.01em; }
   .head-rest { font-size: 10px; color: var(--fg-subtle); }
@@ -381,23 +456,53 @@
     overflow: hidden; text-overflow: ellipsis;
   }
 
-  .agent-summary {
-    display: flex; align-items: center; gap: 8px;
-    padding: 0 12px 10px 33px;
+  /* ── Live action line ── the panel's headline. A captioned "now-doing" row
+     under each agent head: kind icon + plain-language label. Running agents get
+     an accent label + a soft animated wash so the eye lands on live work. */
+  .now {
+    display: flex; align-items: center; gap: 7px;
+    padding: 7px 12px 9px 33px;
+    min-width: 0;
   }
-  .prog-track {
-    flex: 1 1 auto; height: 4px; border-radius: 999px; overflow: hidden;
-    background: var(--bg-inset);
+  .now-icon { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
+  .now.running .now-icon { color: var(--accent); }
+  .now[data-status="error"] .now-icon { color: var(--danger); }
+  .now-label {
+    flex: 1 1 auto; min-width: 0;
+    font-size: var(--fs-sm); line-height: 1.35; color: var(--fg-muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: inline-flex; align-items: center;
   }
-  .prog-fill {
-    display: block; height: 100%; border-radius: 999px;
-    background: var(--ok);
-    transition: width var(--dur-slow) var(--ease-page), background var(--dur-base);
+  .now-label.live { color: var(--accent); font-weight: 550; }
+  /* Animated ellipsis for active thinking — three breathing dots. */
+  .dots { display: inline-flex; gap: 2px; margin-left: 4px; }
+  .dots span {
+    width: 3px; height: 3px; border-radius: 999px; background: currentColor;
+    animation: dot-bounce 1.2s var(--ease-soft) infinite;
   }
-  .prog-fill[data-status="running"] { background: var(--accent); }
-  .prog-fill[data-status="error"] { background: var(--danger); }
-  .prog-label { flex: 0 0 auto; font-size: 10px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
-  .prog-label.muted { color: var(--fg-faint); }
+  .dots span:nth-child(2) { animation-delay: 0.15s; }
+  .dots span:nth-child(3) { animation-delay: 0.3s; }
+
+  /* ── Recent-steps trail ── replaces the old static progress bar under a
+     collapsed agent. The last few captioned tool steps, newest first, so the
+     user reads actual work ("Read X · Searched Y") not a meaningless fill %. */
+  .trail {
+    list-style: none; margin: 0; padding: 0 12px 9px 33px;
+    display: flex; flex-direction: column; gap: 3px;
+  }
+  .trail-step {
+    display: flex; align-items: center; gap: 7px;
+    font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.4;
+    min-width: 0;
+  }
+  .trail-step:first-child { color: var(--fg-muted); }
+  .trail-dot {
+    flex: 0 0 auto; width: 4px; height: 4px; border-radius: 999px;
+    background: color-mix(in oklch, var(--fg-subtle) 60%, transparent);
+  }
+  .trail-step:first-child .trail-dot { background: var(--ok); }
+  .trail-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .trail-more { font-size: 10px; color: var(--fg-faint); padding-left: 11px; }
 
   /* ── Transcript body ── */
   .agent-body {
@@ -471,8 +576,11 @@
   }
 
   :global(.subagent-dock .spin) { animation: subagent-spin 0.9s linear infinite; }
+  :global(.subagent-dock .pulse) { animation: now-pulse 1.6s var(--ease-soft) infinite; }
 
   @keyframes subagent-spin { to { transform: rotate(360deg); } }
+  @keyframes now-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+  @keyframes dot-bounce { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
   @keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
   @keyframes live-pulse { 0% { box-shadow: 0 0 0 0 var(--accent-soft); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
   @keyframes tool-pulse {
@@ -483,6 +591,7 @@
   @media (prefers-reduced-motion: reduce) {
     .empty, .block, .agent { animation: none; }
     .live-dot, .tool[data-status="pending"] { animation: none; }
+    .dots span, :global(.subagent-dock .pulse) { animation: none; }
     .subagent-pill:hover { transform: none; }
   }
 </style>

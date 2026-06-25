@@ -185,7 +185,12 @@
 </script>
 
 <div class="assistant">
-  <div class="workbench" bind:this={workbenchEl} data-dock-dragging={dockDragging}>
+  <div
+    class="workbench"
+    class:dock-reserve={activityDock.enabled && activityDock.open && (assistant.activeTab?.agentSpawns?.length ?? 0) > 0}
+    bind:this={workbenchEl}
+    data-dock-dragging={dockDragging}
+  >
   <div class="layout">
     {#if assistant.splitActive}
       <div
@@ -297,6 +302,17 @@
     display: flex;
     overflow: hidden;
     position: relative;
+    /* When the sub-agent card is expanded it reserves a right gutter so wide
+       chat messages stop sliding under the float (the overlap bug). The float
+       still overlays this gutter; the content lane just stops short of it.
+       Card is 360px + 12px float inset + 16px breathing room. Only applies on
+       wide enough windows — on a narrow pane the card max-width clamps + the
+       reserve would crush the chat, so we drop it under 720px. */
+    transition: padding-right var(--dur-base) var(--ease-soft);
+  }
+  .workbench.dock-reserve .layout { padding-right: 388px; }
+  @media (max-width: 720px) {
+    .workbench.dock-reserve .layout { padding-right: 0; }
   }
   /* Animated reveal container. Width is content-derived at rest (it shrink-
      wraps .dock-inner's fixed width) so the dockSlide transition is free to

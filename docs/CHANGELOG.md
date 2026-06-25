@@ -2,24 +2,21 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.51.0 — A faster assistant, a redesigned model picker, and a working Tasks panel
+## v0.51.1 — Live sub-agent activity
 
-> This release kills a painful "everything is slow" regression, rebuilds the model + effort picker to look and feel like the rest of Rift, and brings the Tasks/Plan panel back to life.
+> A focused hotfix that overhauls the sub-agent panel so you can actually see what Claude's helper agents are doing, and stops it from overlapping the chat.
 
-### The assistant is fast again
-- **Fixed the "slowest AI in the world" bug.** A previous release quietly flipped the fresh-install permission default away from "just run it," so every file read, edit, and command silently parked waiting on an approval the UI never surfaced — turns could hang for many minutes. Fresh installs now default to running tools directly again (approval prompts are still one toggle away), and the permission round-trip is hardened with a sane timeout and an actionable message if it ever does wait.
-- **Extended thinking is off by default.** Matching Claude Code, a quick "hello" replies in a second or two instead of pausing to think first. Turn it back on anytime from the model menu.
+### You can see what sub-agents are doing now
+- **A live "now doing" line per agent.** When Claude delegates work to a helper agent, the panel shows what it's touching *right now* in plain language — "Reading config.json," "Searching for…," "Thinking…" — with a live cue, instead of a meaningless checkmark and a green bar.
+- **A recent-steps trail.** A finished agent shows the actual actions it took ("Searched for X · Read Y · +2 earlier steps") so you can tell what it accomplished at a glance, without expanding anything.
+- **The panel header reads as alive.** "Working · 2 agents active" with a pulse while running, settling to "2 finished" when done.
 
-### Redesigned model + effort picker
-- **One polished picker, in Rift's design language.** Each model is a clean row with its own identity icon, full description (no more cut-off text), context size, and a number hotkey. The current model lights up with a checkmark.
-- **"More models" flyout.** Previous-generation models (e.g. Opus 4.7) tuck into an expandable "More models" submenu instead of cluttering the main list — and it opens automatically if one of them is your active model.
-- **A real effort dial.** The effort control is now a stepped slider labeled with the actual levels — **Low · Medium · Medium+ · High · X-High** (plain, honest names instead of marketing labels) — with the active level called out, smooth animations, and clickable steps. Each model shows only the levels it actually supports (Sonnet stops at High; Haiku, which doesn't use effort, hides the dial entirely).
-- **Consistent typography throughout** — every label, tag, and hotkey sits on one deliberate type scale so the whole menu reads as tidy and organized.
-
-### Tasks / Plan panel works again
-- **The Tasks panel is no longer dead.** A Claude CLI update renamed its task tools, but Rift's allow-list still referenced the old names — so the model would say "there's no task tool here" and give up. Rift now recognizes the new task tools, and a live plan card renders in the conversation, ticking off 0/4 → 4/4 as the model works.
+### No more overlap
+- **The chat no longer slides under the panel.** When the sub-agent card is open it reserves space, so wide messages stop getting clipped behind it. It releases that space the moment you minimize the panel back to its pill, and steps aside on narrow windows.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.51.0** — A faster assistant + a redesigned picker: fixed the "everything is slow" regression (a flipped permission default was parking every tool on an approval the UI never showed), turned extended thinking off by default, rebuilt the model + effort picker in Rift's design language (identity icons, a "More models" flyout, an honest Low→X-High effort dial), and revived the Tasks/Plan panel after a CLI tool-rename broke its allow-list.
 
 - **v0.50.0** — The biggest release in a while: the Workspace page became a real bento **dashboard** (your activity inline + a "What's new in AI" feed + a richer Projects panel), the **AI Health** tab grew into a genuine diagnostic (plain-English health score + warm-aware root-cause latency), and a broad **cross-machine compatibility** pass (safer first-run default, corporate-TLS trust, domain/locked-down machines, smaller screens, honest errors) lets Rift run cleanly on other people's Windows PCs.
 
