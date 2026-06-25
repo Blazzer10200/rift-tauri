@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, SlidersHorizontal } from "lucide-svelte";
+  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, SlidersHorizontal, Wifi, Snowflake } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { usage, type LimitWindow, type AdviceApply } from "../../state/usage.svelte";
   import { assistant, type ModelSel } from "../../state/assistant.svelte";
@@ -39,6 +39,14 @@
     p90_ttft_text_ms: number | null;
     p50_duration_ms: number | null;
     p90_duration_ms: number | null;
+    // Warm-only first-reply (excludes the one-time cold-start warm-up tax) —
+    // the health verdict reads these so a spawn cost doesn't flash red. Null
+    // below the 8-warm-turn floor. Cold split is informational context.
+    p90_ttft_text_warm_ms: number | null;
+    p50_ttft_text_warm_ms: number | null;
+    warm_turns_measured: number;
+    cold_turns_measured: number;
+    p90_ttft_text_cold_ms: number | null;
     cache_hit_rate: number | null;
     total_output_tokens: number;
     cost_by_day: [string, number][];
@@ -180,10 +188,64 @@
   // labelled signal ("slow") rather than re-thresholding raw ms every call.
   // p90 first-reply: <4s ok · <9s slow · ≥9s degraded (matches the felt-latency
   // bands in the latency doctrine). cache-hit <40% = thrash when there's history.
+  //
+  // G1 — the latency verdict reads the WARM-ONLY p90 (cold-start warm-up excluded),
+  // so a one-time spawn cost the user can't act on never flashes the score red.
+  // The cold turn of each session pays model warm-up + a 40-50K cache-create tax;
+  // folding it into the verdict made the score cry wolf. Fallback to the all-turns
+  // p90 only while no turn carries the (post-WS6) was_cold tag yet — older history.
+  // G2 — below the sample floor the warm p90 is null (backend min_samples=8), so
+  // `latencySignal` is null → the UI shows a "still learning" state, not a red
+  // verdict over a handful of turns.
+  const latencyP90Source = $derived.by((): { ms: number | null; warm: boolean } => {
+    const warm = perfStats?.p90_ttft_text_warm_ms;
+    if (warm != null) return { ms: warm, warm: true };
+    // Warm p90 is null. TWO very different cases:
+    //  (a) tagged data exists but is below the warm floor (warm+cold turns seen)
+    //      → DON'T fall back to the all-turns p90: it's cold-poisoned, the exact
+    //      number we're excluding. Return null so the UI shows "still learning".
+    //  (b) no tagged data at all (pure pre-WS6 legacy history) → the all-turns
+    //      p90 is all we have; use it (already floored at 10 by the backend).
+    const tagged = (perfStats?.warm_turns_measured ?? 0) + (perfStats?.cold_turns_measured ?? 0);
+    if (tagged > 0) return { ms: null, warm: false };
+    return { ms: perfStats?.p90_ttft_text_ms ?? null, warm: false };
+  });
   const latencySignal = $derived.by(() => {
-    const p90 = perfStats?.p90_ttft_text_ms;
+    const p90 = latencyP90Source.ms;
     if (p90 == null) return null;
     return p90 < 4000 ? "ok" : p90 < 9000 ? "slow" : "degraded";
+  });
+  // G3 — "still learning" when we have perf data but not enough WARM turns to
+  // trust a latency verdict. Distinct from "no data at all" (perfStats null).
+  const latencyLearning = $derived.by(() => {
+    if (!perfStats) return false;
+    // We have records but the warm signal hasn't cleared its floor AND we're not
+    // falling back to a trustworthy all-turns p90.
+    return latencySignal == null && perfStats.total_turns > 0;
+  });
+  // G5 — is the slow first-reply the API or Rift? A large COLD p90 alongside a
+  // snappy warm p90 means the wait is one-time spawn/warm-up, not steady-state.
+  // A slow WARM p90 with a healthy cache points upstream (Anthropic API/queue),
+  // not at the user's setup — the most reassuring thing we can tell them.
+  const latencyAttribution = $derived.by((): string | null => {
+    if (latencySignal == null || latencySignal === "ok") return null;
+    const cache = perfStats?.cache_hit_rate;
+    // Warm + slow + healthy cache = upstream. (A cache miss would mean context
+    // re-upload, which the advisor handles separately.)
+    if (latencyP90Source.warm && cache != null && cache >= 0.7) {
+      return "This looks like the Anthropic API being slow, not your Rift setup — it usually passes.";
+    }
+    return null;
+  });
+  // Show the cold-start aside only when warm is genuinely faster than cold
+  // (≥2s gap) so "keeping a chat going stays fast" is a true claim, not hollow
+  // (if warm is also slow, that's a real signal the verdict already owns).
+  const showColdNote = $derived.by(() => {
+    if (!latencyP90Source.warm) return false;
+    const cold = perfStats?.p90_ttft_text_cold_ms;
+    const warm = perfStats?.p90_ttft_text_warm_ms;
+    if (cold == null || warm == null || (perfStats?.cold_turns_measured ?? 0) === 0) return false;
+    return cold - warm >= 2000;
   });
   const cacheSignal = $derived.by(() => {
     const c = perfStats?.cache_hit_rate;
@@ -212,7 +274,10 @@
     // Each dimension carries its live value so the verdict strip can show the
     // metric inline (one health line) instead of a separate, redundant chip row.
     const dims: { k: string; tint: string; v: string }[] = [];
-    if (latencyTint) dims.push({ k: "Latency", tint: latencyTint, v: fmtMs(perfStats?.p90_ttft_text_ms ?? null) });
+    // Latency dim reads the WARM p90 (the value the verdict is actually based on),
+    // so the metric shown next to the verdict matches the verdict — not the
+    // cold-poisoned all-turns number.
+    if (latencyTint) dims.push({ k: "Latency", tint: latencyTint, v: fmtMs(latencyP90Source.ms) });
     if (cacheTint && perfStats?.cache_hit_rate != null) dims.push({ k: "Cache", tint: cacheTint, v: `${Math.round(perfStats.cache_hit_rate * 100)}%` });
     // Only when a real usage window reported — a non-null rateLimits with all
     // windows null (Pro plan, or pre-data) must NOT contribute a false "ok".
@@ -270,6 +335,15 @@
         ? {
             p50FirstReplyMs: perfStats.p50_ttft_text_ms,
             p90FirstReplyMs: perfStats.p90_ttft_text_ms,
+            // Warm-only first-reply — the STEADY-STATE latency the advisor should
+            // judge. p90FirstReplyMs (all turns) is poisoned by the one-time
+            // cold-start tax; lead with warm and treat cold as the separate
+            // warm-up cost it is. Null until 8 warm turns accrue.
+            p90FirstReplyWarmMs: perfStats.p90_ttft_text_warm_ms,
+            p50FirstReplyWarmMs: perfStats.p50_ttft_text_warm_ms,
+            warmTurnsMeasured: perfStats.warm_turns_measured,
+            coldTurnsMeasured: perfStats.cold_turns_measured,
+            p90FirstReplyColdMs: perfStats.p90_ttft_text_cold_ms,
             p50TurnMs: perfStats.p50_duration_ms,
             p90TurnMs: perfStats.p90_duration_ms,
             cacheHitRate: perfStats.cache_hit_rate,
@@ -295,8 +369,16 @@
         : null,
       costTrend: perfStats?.cost_by_day.slice(0, 7) ?? [],
       // Pre-digested verdicts: the advisor leads with these, then cites the raw
-      // number from perf/planLimits that justifies the call.
-      signals: { latency: latencySignal, cache: cacheSignal, rateLimitRisk },
+      // number from perf/planLimits that justifies the call. `latency` is the
+      // WARM-aware verdict (cold excluded); `latencyBasis` tells the advisor
+      // whether the verdict rests on warm-tagged data or the all-turns fallback
+      // (so it doesn't over-trust a cold-poisoned number on older history).
+      signals: {
+        latency: latencySignal,
+        latencyBasis: latencyP90Source.warm ? "warm" : perfStats ? "all-turns-fallback" : null,
+        cache: cacheSignal,
+        rateLimitRisk,
+      },
     });
   }
   async function analyze() {
@@ -638,10 +720,18 @@
               <div class="ah-tile-v">{fmtMs(perfStats.p50_ttft_text_ms)}</div>
               <div class="ah-tile-k">typical wait to first reply</div>
             </div>
-            {#if perfStats.p90_ttft_text_ms != null}
+            {#if latencyP90Source.ms != null}
+              <!-- Warm-only slow-reply (cold-start excluded) so the tinted verdict
+                   reflects steady-state speed, not a one-time spawn cost. -->
               <div class="ah-tile {latencyTint}">
-                <div class="ah-tile-v">{fmtMs(perfStats.p90_ttft_text_ms)}</div>
+                <div class="ah-tile-v">{fmtMs(latencyP90Source.ms)}</div>
                 <div class="ah-tile-k">on a slow reply{#if latencyVerdict}<span class="ah-verdict {latencyTint}">{latencyVerdict}</span>{/if}</div>
+              </div>
+            {:else if latencyLearning}
+              <!-- G3: perf data exists but warm sample is below the floor. -->
+              <div class="ah-tile">
+                <div class="ah-tile-v">—</div>
+                <div class="ah-tile-k">slow-reply speed<span class="ah-verdict">learning</span></div>
               </div>
             {/if}
             <div class="ah-tile">
@@ -659,6 +749,20 @@
               <div class="ah-tile-k">words written (tokens)</div>
             </div>
           </div>
+
+          <!-- G5: tell the user when slowness is upstream (the API), not their
+               setup — the single most reassuring thing to surface. -->
+          {#if latencyAttribution}
+            <p class="ah-attrib"><Wifi size={13} strokeWidth={1.9} />{latencyAttribution}</p>
+          {/if}
+          <!-- G1: cold-start shown as the one-time warm-up it is, never as a
+               problem with the user's setup. Only when warm is meaningfully
+               faster than cold (≥2s gap) — else "keeping a chat going stays fast"
+               would be a hollow claim (warm is slow too → that's a real signal,
+               not a warm-up artifact, and the verdict/advisor already own it). -->
+          {#if showColdNote}
+            <p class="ah-attrib subtle"><Snowflake size={13} strokeWidth={1.9} />The first reply of a session takes ~{fmtMs(perfStats.p90_ttft_text_cold_ms)} while Claude warms up — a one-time cost, not counted against your speed above. Keeping a chat going stays fast.</p>
+          {/if}
 
           {#if latencySpark}
             <div class="ah-spark-row">
@@ -824,6 +928,13 @@
   .ah-glossary { font-size: 11.5px; color: var(--fg-subtle); margin: 13px 0 0; padding-top: 12px; border-top: 1px solid var(--ghost-border); line-height: 1.6; }
   .ah-glossary strong { color: var(--fg-muted); font-weight: 620; }
 
+  /* G5/G1 — inline attribution notes (API-not-Rift, cold-start warm-up). Calm,
+     boxless, left-iconed; subtle variant for the one-time cold-start aside. */
+  .ah-attrib { display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--fg-muted); line-height: 1.55; margin: 12px 0 0; }
+  .ah-attrib :global(svg) { flex: 0 0 auto; margin-top: 1px; color: color-mix(in oklab, var(--accent) 70%, var(--fg-subtle)); }
+  .ah-attrib.subtle { color: var(--fg-subtle); }
+  .ah-attrib.subtle :global(svg) { color: var(--fg-subtle); }
+
   .ah-bars { display: flex; flex-direction: column; gap: 14px; }
   .ah-extra { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ghost-border); }
   .ah-bar-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
@@ -851,7 +962,7 @@
   .ah-tile.ok { background: color-mix(in srgb, var(--accent) 8%, var(--bg-2, var(--surface-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent); }
   .ah-tile.warn { background: color-mix(in srgb, var(--warn) 10%, var(--bg-2, var(--surface-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 42%, transparent); }
   .ah-tile.hot { background: color-mix(in srgb, var(--danger) 10%, var(--bg-2, var(--surface-2))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent); }
-  .ah-verdict { display: inline-block; margin-left: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; padding: 1px 5px; border-radius: 999px; line-height: 1.5; white-space: nowrap; vertical-align: baseline; }
+  .ah-verdict { display: inline-block; margin-left: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; padding: 1px 5px; border-radius: 999px; line-height: 1.5; white-space: nowrap; vertical-align: baseline; color: var(--fg-subtle); background: color-mix(in srgb, var(--fg-subtle) 13%, transparent); }
   .ah-verdict.ok { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
   .ah-verdict.warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 18%, transparent); }
   .ah-verdict.hot { color: var(--danger); background: color-mix(in srgb, var(--danger) 18%, transparent); }

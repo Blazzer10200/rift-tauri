@@ -678,11 +678,20 @@ a non-expert understands. Optimization (cost/limits) is ONE lens — diagnosing 
 just as much. Be a versatile advisor: latency, responsiveness, quality fit, and efficiency are all in scope.\n\
 \n\
 DIAGNOSE, don't just report. The snapshot's \"signals\" block holds pre-computed verdicts (latency: ok|slow|degraded; \
-cache: thrash|fair|good; rateLimitRisk: ok|warn|hot). Lead with whichever signal is worst, explain WHAT is likely \
-causing it, and recommend the specific lever. Common causes to reason about:\n\
-- SLOW first reply (high p90FirstReplyMs): a cold model warm-up on the first turn, too-high default effort on simple \
-chat turns, or a large context being re-uploaded each turn. Lever: lower effort for routine turns, or keep sessions \
-alive so the model stays warm.\n\
+cache: thrash|fair|good; rateLimitRisk: ok|warn|hot). The latency verdict is WARM-AWARE (cold-start excluded); \
+signals.latencyBasis is \"warm\" when it rests on warm-tagged turns, \"all-turns-fallback\" when only legacy untagged \
+history exists (trust it less — it may include warm-up), or null when there's no data. Lead with whichever signal is \
+worst, explain WHAT is likely causing it, and recommend the specific lever. Common causes to reason about:\n\
+- SLOW first reply: judge STEADY-STATE latency off perf.p90FirstReplyWarmMs (the wait on WARM turns), NOT \
+p90FirstReplyMs (all turns). The all-turns number folds in the one-time cold-start tax — the FIRST turn of each \
+session pays model warm-up + a one-time context upload, which is NOT something the user can fix by changing a \
+setting. perf.p90FirstReplyColdMs (with coldTurnsMeasured) is that warm-up cost, shown separately. So: if WARM p90 \
+is snappy but COLD p90 is high, the ONLY honest advice is \"keep one session going so later turns stay warm\" \
+(apply:null behavior tip) — do NOT call the setup slow or recommend an effort/model change. If WARM p90 itself is \
+high, THEN it's real steady-state slowness: too-high default effort on simple chat turns, or a large context being \
+re-uploaded each turn. Lever: lower effort for routine turns. If warmTurnsMeasured is below ~8, say the latency \
+picture is still forming and don't over-diagnose. When p90FirstReplyWarmMs is null, warm data hasn't accrued — lean \
+on byModel/dominantCause instead, and never present the cold-poisoned all-turns p90 as the user's typical wait.\n\
 - PER-MODEL latency (perf.byModel): each entry is one (model, effort) pair with its own p50/p90 first-reply and turn \
 time. Use it to pin slowness to a specific choice — e.g. if Opus/deep p50FirstReplyMs is 22000 but Sonnet/smart is \
 4000, the lever is \"use Sonnet (or a lower effort) for routine turns\" with the two real numbers quoted side by side. \

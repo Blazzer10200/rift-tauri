@@ -198,6 +198,29 @@ pub struct TurnPerfStats {
     pub p90_ttft_text_ms: Option<u64>,
     pub p50_duration_ms: Option<u64>,
     pub p90_duration_ms: Option<u64>,
+    /// p50/p90 first-reply over WARM turns only (was_cold=false). The cold turn
+    /// of each session pays a one-time model warm-up + cache-create tax that is
+    /// NOT steady-state latency — folding it into the health verdict makes the
+    /// score cry wolf over a spawn cost the user can't act on. The UI drives the
+    /// latency signal off these, falling back to the all-turns p90 only when no
+    /// turn carries the (post-WS6) `was_cold` tag yet. None below the sample floor.
+    #[serde(default)]
+    pub p90_ttft_text_warm_ms: Option<u64>,
+    #[serde(default)]
+    pub p50_ttft_text_warm_ms: Option<u64>,
+    /// Count of WARM turns that carried a first-reply measurement — the honest
+    /// denominator for the latency verdict's sample floor (a red score over 3
+    /// turns is noise, not a diagnosis).
+    #[serde(default)]
+    pub warm_turns_measured: usize,
+    /// Count of turns explicitly tagged cold (was_cold=true). Lets the UI show a
+    /// separate "first reply of a session" note instead of blaming the model.
+    #[serde(default)]
+    pub cold_turns_measured: usize,
+    /// p90 first-reply over COLD turns only — the warm-up cost, shown as context
+    /// (not a problem to fix). None below the sample floor.
+    #[serde(default)]
+    pub p90_ttft_text_cold_ms: Option<u64>,
     /// Aggregate cache-hit rate: Σcache_read / Σ(cache_read + input).
     pub cache_hit_rate: Option<f64>,
     /// Σ output tokens across all turns (a rough throughput proxy).
@@ -249,6 +272,11 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     use std::collections::BTreeMap;
 
     let mut ttft_text: Vec<u64> = Vec::new();
+    // Warm/cold split of first-reply (drives the warm-aware latency signal). A
+    // record only joins one of these when it carries the post-WS6 `was_cold` tag;
+    // untagged history stays in the all-turns `ttft_text` fallback.
+    let mut ttft_text_warm: Vec<u64> = Vec::new();
+    let mut ttft_text_cold: Vec<u64> = Vec::new();
     let mut durations: Vec<u64> = Vec::new();
     let mut cache_read_sum: u64 = 0;
     let mut input_sum: u64 = 0;
@@ -273,6 +301,13 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
         total += 1;
         if let Some(v) = rec.ttft_text_ms {
             ttft_text.push(v);
+            // Warm/cold split — only when the turn was tagged (post-WS6). An
+            // untagged record contributes to the all-turns fallback only.
+            match rec.was_cold {
+                Some(true) => ttft_text_cold.push(v),
+                Some(false) => ttft_text_warm.push(v),
+                None => {}
+            }
         }
         if let Some(v) = rec.duration_ms {
             durations.push(v);
@@ -313,6 +348,10 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     }
 
     ttft_text.sort_unstable();
+    ttft_text_warm.sort_unstable();
+    ttft_text_cold.sort_unstable();
+    let warm_turns_measured = ttft_text_warm.len();
+    let cold_turns_measured = ttft_text_cold.len();
     durations.sort_unstable();
 
     let cache_hit_rate = if cache_read_sum + input_sum > 0 {
@@ -368,6 +407,14 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
         p90_ttft_text_ms: percentile(&ttft_text, 0.90, 10),
         p50_duration_ms: percentile(&durations, 0.50, 1),
         p90_duration_ms: percentile(&durations, 0.90, 10),
+        // Warm p90 floored at 8 measured warm turns — the sample floor for a
+        // health verdict (a red over a handful of turns is noise). p50 at 1.
+        p90_ttft_text_warm_ms: percentile(&ttft_text_warm, 0.90, 8),
+        p50_ttft_text_warm_ms: percentile(&ttft_text_warm, 0.50, 1),
+        warm_turns_measured,
+        cold_turns_measured,
+        // Cold p90 is informational context — a single cold turn is a real point.
+        p90_ttft_text_cold_ms: percentile(&ttft_text_cold, 0.90, 1),
         cache_hit_rate,
         total_output_tokens: total_output,
         cost_by_day,
@@ -448,6 +495,31 @@ mod tests {
             pre_text_tool_ms: None,
             was_cold: None,
             dominant_cause: cause.map(|c| c.to_string()),
+        };
+        serde_json::to_string(&r).unwrap()
+    }
+
+    // Like `rec` but stamps `was_cold` so the warm/cold latency split can be tested.
+    fn rec_cold(ttft: u64, was_cold: bool) -> String {
+        let r = TurnPerf {
+            ts_start_ms: 1_700_000_000_000,
+            ttft_thinking_ms: None,
+            ttft_text_ms: Some(ttft),
+            duration_ms: Some(ttft * 2),
+            input_tokens: Some(100),
+            output_tokens: Some(100),
+            cache_read_tokens: None,
+            cache_create_tokens: None,
+            cost_usd: Some(0.01),
+            cache_hit_rate: None,
+            session_id: "s".into(),
+            result_subtype: Some("success".into()),
+            model: Some("opus".into()),
+            effort: Some("deep".into()),
+            ttft_first_line_ms: None,
+            pre_text_tool_ms: None,
+            was_cold: Some(was_cold),
+            dominant_cause: None,
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -555,6 +627,39 @@ mod tests {
             classify_latency_cause(Some(10_000), Some(7000), Some(2000), Some(1500), false, None),
             Some("none".into())
         );
+    }
+
+    #[test]
+    fn aggregate_splits_warm_and_cold_latency() {
+        // 8 warm turns (all 3s) + 2 cold turns (30s, the warm-up tax). The warm
+        // p90 must reflect ONLY the snappy warm turns; cold is broken out separately
+        // and never poisons the warm signal.
+        let mut lines: Vec<String> = (0..8).map(|_| rec_cold(3000, false)).collect();
+        lines.push(rec_cold(30_000, true));
+        lines.push(rec_cold(28_000, true));
+        // An untagged record (pre-WS6 history) joins neither warm nor cold.
+        lines.push(rec(Some(50_000), Some(60_000), None, None));
+        let s = aggregate(lines.into_iter());
+        assert_eq!(s.warm_turns_measured, 8);
+        assert_eq!(s.cold_turns_measured, 2);
+        // Warm p90 over eight 3s turns is 3s — the cold 30s turns are excluded.
+        assert_eq!(s.p90_ttft_text_warm_ms, Some(3000));
+        assert_eq!(s.p50_ttft_text_warm_ms, Some(3000));
+        // Cold p90 is the warm-up cost, surfaced as context not a problem.
+        assert_eq!(s.p90_ttft_text_cold_ms, Some(30_000));
+        // The all-turns p90 still includes everything (untagged history relies on it).
+        assert!(s.p90_ttft_text_ms.unwrap() >= 28_000);
+    }
+
+    #[test]
+    fn warm_p90_below_floor_is_none() {
+        // Only 3 warm turns — below the 8-sample floor → warm p90 is None so the UI
+        // shows "still learning" rather than a red verdict over noise.
+        let lines: Vec<String> = (0..3).map(|_| rec_cold(3000, false)).collect();
+        let s = aggregate(lines.into_iter());
+        assert_eq!(s.warm_turns_measured, 3);
+        assert_eq!(s.p90_ttft_text_warm_ms, None);
+        assert_eq!(s.p50_ttft_text_warm_ms, Some(3000)); // p50 floor is 1
     }
 
     #[test]
