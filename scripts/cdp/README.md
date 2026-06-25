@@ -111,9 +111,33 @@ bash scripts/cdp/c.sh console "" 50 1      # last 50 of any level, then clear
 
 Each entry: `{ kind: console|exception|log, level, text, ts, url, line, source? }`. `console` is also a `/batch` op, so a single batched call can fire an action then read what it threw. **Workflow:** after any UI action that should mutate state but didn't, pull `console` before guessing — an async throw is the usual culprit, and it was previously unseeable.
 
+## /ax — image-free structure probe (2026-06-25)
+
+The cheap counterpart to a screenshot. `Accessibility.getFullAXTree` returns the page's accessibility tree — every control, landmark, and readable text node — as compact `role: name [state]` lines, for **zero image tokens**. Use it to answer "what's on screen / what can I click / what does the page say" *before* deciding whether you actually need pixels.
+
+```bash
+bash scripts/cdp/c.sh ax                 # whole page: controls + landmarks + headings + text
+bash scripts/cdp/c.sh ax ".ah-wrap"      # scope to a selector's subtree (the useful default)
+bash scripts/cdp/c.sh ax "" full 200     # every named node (verbose), cap raised to 200
+```
+
+```
+[ax] 60 nodes
+  button: Analyze my usage
+  StaticText: Speed & efficiency
+  StaticText: typical wait to first reply
+  StaticText: 5.6s
+  StaticText: LAGGY
+  ...
+```
+
+Default tier = interactive roles (button/link/textbox/tab/menuitem/…) + landmarks + **StaticText** (the readable content), with `InlineTextBox` dropped and consecutive duplicate text collapsed. States surfaced: `focused`, `disabled`, `checked`, `expanded/collapsed`, `selected`, heading `level`. `full:true` keeps generic/group roles too. Whole-page shots cap at 120 nodes (raise via the 3rd arg, or scope with a selector — Rift's conversation list alone is 250+ buttons).
+
+**When `ax` beats `shot`:** label/value/ordering checks ("did the badge land after its label", "is the right model shown", "what controls exist", "did the empty-state text change"). **When you still need `shot`:** anything visual — spacing, colour, overlap, animation, contrast, alignment. Reading order in `ax` ≠ visual layout, so a real pixel collision needs the image. Rule of thumb: "what does it SAY / what's THERE" → `ax`; "does it LOOK right" → `shot`.
+
 ## Cost discipline
 
-Per-screenshot ~$0.07 + image input tokens.
+Per-screenshot ~$0.07 + image input tokens. **`ax` first when the question is structural** — it's free of image tokens and often settles "did it render / what's on screen" without a shot.
 
 1. **`/state` or `/eval` first.** Reads DOM for free. Covers most "did it render?" questions.
 2. **Screenshot only when pixels matter** — layout bugs, animations, contrast, drag region.
@@ -126,9 +150,9 @@ Per-screenshot ~$0.07 + image input tokens.
 - **Auto-reconnect** — `connect()` retries the CDP `/json` lookup 3× w/ 500ms gap before throwing, so a cold Tauri boot races cleanly.
 - **In-flight cleanup** — when the WebView2 socket closes, all pending requests reject immediately w/ `ws closed before response` (no 30s timeout hangs).
 - **`/health`** — fires a real `Runtime.evaluate('1')` ping; reports `pingMs`. Half-broken socket (port open, no response) surfaces as `ok:false`.
-- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `key`, `screenshot`, `state`, `page`, `console`.
+- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `sleep`, `key`, `screenshot`, `state`, `page`, `console`, `ax`, `look`.
 - **Clicks are real pointer events** — `click` (and therefore `act click`) drives the CDP Input domain (`mouseMoved`→`mousePressed`→`mouseReleased`) at the element's center, firing the full `pointerdown`/`mousedown`/`focus`/`mouseup`/`click` sequence + real hover/active states. The old `el.click()` fired ONLY a synthetic `click` event, so any UI bound to `mousedown`/`pointerdown` (model picker, permission menu, dropdowns, sliders, drag handles) silently no-op'd and nothing was observable. Response carries `{via:"input", x, y, covered}`; `covered:true` means another element overlays the hit-point. Off-viewport targets fall back to `el.click()` (`via:"js-fallback"`). Verified 2026-06-16: the model picker (mousedown-bound) opens via `click` now, didn't before.
-- **Screenshots** now pass `optimizeForSpeed:true` + `fromSurface:true`; clipped/selector shots add `captureBeyondViewport:true` so below-the-fold elements capture correctly.
+- **Screenshots** pass `optimizeForSpeed:true` + `fromSurface:true`. **Selector shots auto-scroll the target into view** (`scrollIntoView({block:'center'})` + a 120ms compositor settle) then clip in **viewport space** with `captureBeyondViewport` **OFF** — fixed 2026-06-25. The old path set `captureBeyondViewport:true` on a viewport-space `getBoundingClientRect` clip, which silently mismatched and produced **blank captures for any below-the-fold component**, because Rift's pages scroll inside nested `overflow:auto` containers (the inner scroll never moves the document origin, so `captureBeyondViewport`'s document-space clip landed in empty space). The whole-page origin clip still uses `captureBeyondViewport:true` (it IS document-space). Net: `shot-sel`/`look "<sel>"` now work on any component regardless of scroll position — no manual scroll dance.
 - **Auto-cap (whole-page shots)** — capture clamps to `RIFT_CDP_MAX_EDGE` CSS long-edge (default 1280) at `deviceScaleFactor:1`, via a full-viewport clip with `scale`. Output size is DPR-independent + deterministic (1280×800 on a 16:10 window) and lands inside Anthropic's vision envelope (≤1568px / ≤~1.15MP) so no oversized upload + server resize. Selector/explicit-`clip`/`vw,vh` shots are exempt — those callers framed it themselves.
 
 ## Limits

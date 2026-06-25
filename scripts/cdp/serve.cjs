@@ -29,6 +29,7 @@
 //   GET  /state                                 -> assistant-state snapshot
 //   GET  /page                                  -> generic page snapshot
 //   GET  /console  [?clear=1&level=&limit=]     -> { total, count, logs } console/exception/log ring buffer
+//   GET/POST /ax   { selector?, full?, limit? }  -> { count, nodes } a11y-tree structure (image-free)
 //   POST /batch    { ops, parallel? }           -> { results, elapsedMs }
 //   POST /shutdown                              -> { ok }
 //
@@ -351,16 +352,35 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, v
     // Page.Viewport requires {x,y,width,height,scale}; coords are CSS pixels
     // (Page.getLayoutMetrics — cssLayoutViewport is "in CSS pixels", clip uses
     // same convention). https://chromedevtools.github.io/devtools-protocol/tot/Page/#type-Viewport
+    // A selector clip is in VIEWPORT space (getBoundingClientRect), so it must NOT
+    // use captureBeyondViewport — that flag reinterprets the clip in DOCUMENT/layout
+    // space, which silently mismatches whenever anything is scrolled (esp. Rift's
+    // nested overflow:auto containers, where the inner scroll never moves the
+    // document origin). The old shot-sel set both → blank captures for any
+    // below-the-fold component. Fix: scrollIntoView to bring it onto the rendered
+    // surface, then clip in plain viewport coords with captureBeyondViewport OFF.
+    let viewportClip = false;
     if (selector && !clip) {
         const r = await evalJs(`(() => {
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return null;
+            el.scrollIntoView({ block: 'center', inline: 'nearest' });
             const r = el.getBoundingClientRect();
             if (!r.width || !r.height) return null;
-            return { x: r.x, y: r.y, width: r.width, height: r.height };
+            // Clamp into the visible viewport — a target taller than the viewport
+            // still yields a valid in-bounds clip instead of an off-surface rect.
+            const x = Math.max(0, r.x), y = Math.max(0, r.y);
+            const width = Math.min(r.width, innerWidth - x);
+            const height = Math.min(r.height, innerHeight - y);
+            if (width <= 0 || height <= 0) return null;
+            return { x, y, width, height };
         })()`, 30000, target);
         if (!r.value) throw new Error(`selector not found or zero-size: ${selector}`);
+        // Let the scroll settle one paint before capture (scrollIntoView updates
+        // layout synchronously, but the compositor needs a frame to present it).
+        await new Promise((res) => setTimeout(res, 120));
         clip = r.value;
+        viewportClip = true;
     }
     // Whole-page default: clamp the CSS long-edge to MAX_EDGE and pin DSF=1 so the
     // captured pixels land inside Anthropic's vision envelope at the source (no
@@ -379,13 +399,16 @@ async function screenshot({ format = 'jpeg', quality = 65, clip, selector, vw, v
         }
     }
     // optimizeForSpeed: we JPEG-downscale anyway, so faster encoding beats smaller
-    // bytes. captureBeyondViewport (with a clip) lets us shoot below-the-fold
-    // elements that getBoundingClientRect places outside the visible viewport.
+    // bytes. captureBeyondViewport reinterprets the clip in DOCUMENT space — right
+    // for the whole-page (origin-anchored) clip, WRONG for a viewport-space selector
+    // clip (see viewportClip note above), so it's gated off in that case.
     const params = { format, optimizeForSpeed: true, fromSurface: true };
     if (format !== 'png') params.quality = quality;
     if (clip) {
         params.clip = { x: clip.x, y: clip.y, width: clip.width, height: clip.height, scale: clip.scale || 1 };
-        params.captureBeyondViewport = true;
+        // ON for document-space clips (whole-page origin clip); OFF for a
+        // viewport-space selector clip, else the clip lands in empty doc space.
+        if (!viewportClip) params.captureBeyondViewport = true;
     }
     // try/finally: if capture throws (or times out), the metrics override MUST
     // still be cleared — otherwise an interrupted shot wedges the layout viewport
@@ -463,6 +486,83 @@ async function pageState(target = 'main') {
             return { workspaceActiveId, pathname: location.pathname, title: document.title, url: location.href, ts: Date.now() };
         })()
     `, 30000, target);
+}
+
+// /ax — image-free structural snapshot via the Accessibility tree. Returns the
+// interactive/labelled nodes (buttons, links, inputs, headings, tabs, etc.) as
+// compact "role: name [state]" lines — answers "what's on screen + what can I
+// click" for ~0 image tokens, complementing the pixel-cost screenshot path. An
+// optional selector scopes to that element's subtree (via DOM.querySelector →
+// backendNodeId → Accessibility.queryAXTree); otherwise the whole document.
+//
+// Roles worth surfacing by default — controls + landmarks + text the user reads.
+// `full:true` returns every non-ignored named node instead.
+const AX_KEEP_ROLES = new Set([
+    'button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'switch',
+    'slider', 'spinbutton', 'combobox', 'listbox', 'option', 'menuitem',
+    'menuitemcheckbox', 'menuitemradio', 'tab', 'tabpanel', 'heading',
+    'dialog', 'alertdialog', 'alert', 'progressbar', 'navigation', 'menu',
+    'menubar', 'toolbar', 'img', 'tooltip', 'status',
+]);
+async function axTree({ selector, full, limit } = {}, target = 'main') {
+    // Accessibility domain is per-session; enabling is idempotent + cheap.
+    await cdp('DOM.enable', {}, 8000, target).catch(() => {});
+    await cdp('Accessibility.enable', {}, 8000, target).catch(() => {});
+    let nodes;
+    if (selector) {
+        const doc = await cdp('DOM.getDocument', { depth: 0 }, 8000, target);
+        const rootId = doc.result?.root?.nodeId;
+        if (!rootId) return { error: 'DOM.getDocument returned no root' };
+        const q = await cdp('DOM.querySelector', { nodeId: rootId, selector }, 8000, target);
+        const nodeId = q.result?.nodeId;
+        if (!nodeId) return { error: `selector not found: ${selector}` };
+        const sub = await cdp('Accessibility.queryAXTree', { nodeId }, 15000, target);
+        nodes = sub.result?.nodes || [];
+    } else {
+        const tree = await cdp('Accessibility.getFullAXTree', {}, 20000, target);
+        nodes = tree.result?.nodes || [];
+    }
+    const cap = Number(limit) > 0 ? Number(limit) : 120;
+    const out = [];
+    let lastText = null; // dedupe consecutive identical StaticText runs
+    for (const n of nodes) {
+        if (n.ignored) continue;
+        const role = n.role?.value;
+        const name = (n.name?.value || '').trim();
+        if (!role) continue;
+        // InlineTextBox always duplicates its parent StaticText — pure noise.
+        if (role === 'InlineTextBox') continue;
+        if (!name && role !== 'img') continue;           // unnamed noise — skip
+        // Default tier = interactive controls + landmarks + the page's readable
+        // StaticText (so `ax` answers "what's on screen" without a screenshot).
+        // `full:true` keeps every other named role too (generic/group/etc.).
+        const keep = full || AX_KEEP_ROLES.has(role) || role === 'StaticText';
+        if (!keep) continue;
+        if (role === 'StaticText') {
+            if (name === lastText) continue;             // collapse repeats
+            lastText = name;
+        } else {
+            lastText = null;
+        }
+        const entry = { role, name: name.slice(0, 120) };
+        const val = n.value?.value;
+        if (val != null && String(val) !== name) entry.value = String(val).slice(0, 80);
+        // Surface load-bearing states only (a11y `properties` array of {name,value}).
+        const states = [];
+        for (const p of n.properties || []) {
+            const pv = p.value?.value;
+            if (p.name === 'focused' && pv) states.push('focused');
+            else if (p.name === 'disabled' && pv) states.push('disabled');
+            else if (p.name === 'checked' && pv && pv !== 'false') states.push(`checked=${pv}`);
+            else if (p.name === 'expanded') states.push(pv ? 'expanded' : 'collapsed');
+            else if (p.name === 'selected' && pv) states.push('selected');
+            else if (p.name === 'level' && pv) states.push(`h${pv}`);
+        }
+        if (states.length) entry.state = states.join(',');
+        out.push(entry);
+        if (out.length >= cap) break;
+    }
+    return { count: out.length, total: nodes.length, truncated: out.length >= cap, nodes: out };
 }
 
 // Drain/peek the per-target console ring buffer. `level` filters (error/warning/
@@ -550,6 +650,7 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'state': return assistantState(t);
         case 'page': return pageState(t);
         case 'console': return consoleLogs(params, t);
+        case 'ax': return axTree(params, t);
         case 'look': return look(params, t);
         default: return { error: `unknown op: ${op}` };
     }
@@ -594,6 +695,8 @@ const routes = {
     'GET /state': async (body, target) => assistantState(target),
     'GET /page': async (body, target) => pageState(target),
     'GET /console': async (body, target, query) => consoleLogs(query, target),
+    'GET /ax': async (body, target, query) => axTree(query, target),
+    'POST /ax': async (body, target) => axTree(body, target),
     'POST /batch': async ({ ops = [], parallel = false }, target) => {
         const t0 = Date.now();
         let results;

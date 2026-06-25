@@ -12,6 +12,8 @@
 #   bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
 #   bash scripts/cdp/c.sh state                          # assistant snapshot
 #   bash scripts/cdp/c.sh page                           # generic "where am I"
+#   bash scripts/cdp/c.sh ax                             # image-FREE a11y structure (what's on screen + clickable)
+#   bash scripts/cdp/c.sh ax ".ah-wrap"                  # scope to a selector subtree
 #   bash scripts/cdp/c.sh shot                           # jpeg q65, long-edge capped ~1280px, prints path only
 #     (whole-page shots auto-clamp to RIFT_CDP_MAX_EDGE=1280 CSS-px @ DSF=1 — keeps
 #      every Read inside Anthropic's vision envelope; raise the env knob for detail)
@@ -67,6 +69,29 @@ post() {
 case "$cmd" in
   health|state|page|targets)
     http_get "$API/$cmd$qs"
+    ;;
+  ax)
+    # ax [selector] [full] [limit] — image-FREE structural snapshot via the a11y
+    # tree. Answers "what's on screen + what can I click" for ~0 image tokens.
+    #   c.sh ax                  -> controls + landmarks + headings, whole page
+    #   c.sh ax ".ah-wrap"       -> scope to a selector's subtree
+    #   c.sh ax "" full          -> every named non-ignored node (verbose)
+    #   c.sh ax "" "" 200        -> raise the node cap (default 120)
+    sel="${1:-}"; full="${2:-}"; lim="${3:-}"
+    body="$(jq -nc --arg s "$sel" --arg f "$full" --arg l "$lim" \
+      '{} + (if $s=="" then {} else {selector:$s} end)
+          + (if $f=="" then {} else {full:true} end)
+          + (if $l=="" then {} else {limit:($l|tonumber)} end)')"
+    resp="$(post ax "$body")"
+    if [ -n "$(printf '%s' "$resp" | jq -r '.error // empty')" ]; then
+      printf '%s' "$resp" | jq -r '"[ax] ERROR: " + .error'
+    else
+      printf '%s' "$resp" | jq -r '
+        "[ax] " + (.count|tostring) + " nodes" + (if .truncated then " (capped — raise limit)" else "" end),
+        (.nodes[] | "  " + .role + ": " + (.name // "")
+          + (if .value then " = " + .value else "" end)
+          + (if .state then "  [" + .state + "]" else "" end))'
+    fi
     ;;
   console)
     # console [level] [limit] [clear]  — drains nothing unless clear=1 given.
@@ -173,7 +198,7 @@ case "$cmd" in
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|reset-viewport|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|ax|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|reset-viewport|shutdown} ..." >&2
     exit 2
     ;;
 esac
