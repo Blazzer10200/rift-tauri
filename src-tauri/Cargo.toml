@@ -101,6 +101,7 @@ sha2 = "0.10"
 # (`rand::fill`) + base64url token/request-id encoding in the MCP child.
 rand = "0.10"
 base64 = "0.22"
+rustls-native-certs = "0.8"
 
 # Phase 6 (#9.3 / #37 / #38): OS-keychain bridge. Windows Credential Manager,
 # macOS Keychain, Linux Secret Service. Migrates bridge_token + api_key out of

@@ -188,7 +188,23 @@ impl UpdateService {
                 // Network/parse failures are surfaced so the UI can show an
                 // error card rather than a false "up to date".
                 log::error!("update check FAILED: {e}");
-                Err(format!("check_for_updates: {e}"))
+                // Mirror the init-failure classification (above) + add TLS/cert
+                // keywords: a corporate TLS-intercepting proxy (Zscaler etc.)
+                // presents a CA the Velopack client's bundled roots don't trust,
+                // so the raw error reads as an opaque cert failure. Name the cause.
+                let raw = e.to_string();
+                let low = raw.to_ascii_lowercase();
+                let looks_network = [
+                    "connect", "dns", "timeout", "timed out", "network", "refused",
+                    "unreachable", "resolve", "certificate", "tls", "ssl", "verify",
+                ]
+                .iter()
+                .any(|k| low.contains(k));
+                if looks_network {
+                    Err(format!("Couldn't reach the update server — check your network/firewall, or a TLS-intercepting proxy may be blocking the feed host pub-*.r2.dev: {raw}"))
+                } else {
+                    Err(format!("check_for_updates: {raw}"))
+                }
             }
         }
     }

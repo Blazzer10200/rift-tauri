@@ -185,7 +185,7 @@
           {#if savingKey}<Loader2 size={14} class="spin" />{:else}<KeyRound size={14} />{/if} Save key
         </button>
       </div>
-      <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. API-key turns run the CLI bare — your personal <code>~/.claude</code> config, MCP servers, and CLAUDE.md won't load.</span></p>
+      <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. API-key turns run the CLI bare — your personal Claude config (<code>%USERPROFILE%\.claude</code>), MCP servers, and CLAUDE.md won't load.</span></p>
     {/if}
   {:else}
     <div class="ob-connbar"><span class="dot"></span> Claude is connected and ready — you're set.</div>

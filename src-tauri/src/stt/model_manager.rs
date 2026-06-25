@@ -182,9 +182,7 @@ pub async fn download(
     let resume_from = partial_path.metadata().map(|m| m.len()).unwrap_or(0);
 
     let url = format!("{HF_BASE}/{}", entry.filename);
-    let client = reqwest::Client::builder()
-        .build()
-        .map_err(|e| format!("reqwest client: {e}"))?;
+    let client = crate::certs::download_client();
     let mut req = client.get(&url);
     if resume_from > 0 {
         req = req.header(reqwest::header::RANGE, format!("bytes={resume_from}-"));

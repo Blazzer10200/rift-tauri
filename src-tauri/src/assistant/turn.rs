@@ -751,8 +751,12 @@ pub async fn assistant_send(
          API key in Settings → CLI session."
             .to_string()
     })?;
-    // Default child cwd to temp so the CLI (and any daemon its SessionStart hooks spawn) never inherits Rift's install dir — a live handle on `…\current\` blocks Velopack's update apply. Overridden to the workspace root below when one exists.
-    cmd.current_dir(std::env::temp_dir());
+    // Default child cwd so the CLI (and any daemon its SessionStart hooks spawn) never inherits Rift's install dir — a live handle on `…\current\` blocks Velopack's update apply. Overridden to the workspace root below when one exists. Prefer LOCALAPPDATA (always a LOCAL path — GPO forbids redirecting it) over temp_dir(), which a corporate machine can redirect to a UNC share that breaks Node's cwd internals.
+    let cwd_fallback = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
+    cmd.current_dir(cwd_fallback);
     cmd.arg("-p")
         .arg("--append-system-prompt").arg(addendum)
         .arg("--output-format").arg("stream-json")

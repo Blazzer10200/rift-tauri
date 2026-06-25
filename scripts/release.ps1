@@ -309,8 +309,11 @@ if ($version -match '-(alpha|beta|rc)') {
 if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
 
 # --- Optional: dual-publish to Cloudflare R2 (self-hosted feed) -------------
-# Fires only when R2 creds are present (CI secrets). Until then, no-op -- the
-# GitHub path above remains the live feed. (arc: git log -- docs/design/self-hosted-distribution.md)
+# Fires only when R2 creds are present (CI secrets). WARNING: the app's live
+# update feed IS R2 only (update_service.rs UPDATE_FEED_URL) -- GitHub is NOT a
+# fallback. If R2 creds are absent here, the R2 feed goes stale and shipped
+# clients see no new update. Fix R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY /
+# R2_ENDPOINT in CI secrets. (arc: git log -- docs/design/self-hosted-distribution.md)
 if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) {
     Write-Host '=== vpk upload s3 (Cloudflare R2) ===' -ForegroundColor Cyan
     $r2Args = @(

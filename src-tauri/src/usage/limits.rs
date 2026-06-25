@@ -163,18 +163,17 @@ pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits
         if ver.is_empty() { env!("CARGO_PKG_VERSION") } else { ver.as_str() }
     );
 
-    let resp = reqwest::Client::new()
+    let resp = crate::certs::usage_client()
         .get(USAGE_URL)
         .header("Authorization", format!("Bearer {token}"))
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("User-Agent", ua)
-        .timeout(Duration::from_secs(15))
         .send()
         .await
         .map_err(|e| format!("usage endpoint unreachable: {e}"))?;
 
     match resp.status().as_u16() {
-        401 => return Err("Claude rejected the login token — run a turn to refresh it".into()),
+        401 => return Err("Claude session expired — open Settings and use Sign In to re-authenticate".into()),
         429 => return Err("usage endpoint rate-limited — retry in a few minutes".into()),
         s if !(200..300).contains(&s) => {
             return Err(format!("usage endpoint returned HTTP {s}"));

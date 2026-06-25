@@ -70,7 +70,7 @@ pub async fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
         .title("Rift")
         .decorations(false)
         .inner_size(1600.0, 1000.0)
-        .min_inner_size(1100.0, 800.0)
+        .min_inner_size(900.0, 600.0)
         .visible(false)
         .build()
         .map_err(|e| format!("open_new_window: {e}"))?;

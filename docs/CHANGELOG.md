@@ -2,6 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Works on other Windows machines (cont.202, staged, no version bump yet)
+
+> A cross-machine compatibility pass so Rift runs for users whose Windows setup differs from the developer's. Driven by two multi-agent audit/research workflows (adversarially verified — 19 false leads discarded). Staged in the working tree; not yet shipped.
+
+- **Safer first-run default.** A brand-new user no longer silently starts in the most permissive "bypass all permissions" mode — fresh installs default to asking, and bypass stays an explicit opt-in.
+- **Works behind corporate TLS proxies.** Rift now trusts your machine's own Windows-store root certificates for both its own network calls and the Claude CLI it runs, so HTTPS to Anthropic / model downloads / updates no longer fail on networks that inspect TLS (Zscaler/Palo Alto/Netskope-style). Additive only — nothing changes on a normal home network, and certificate verification is never weakened.
+- **Finds the Claude CLI in more setups** — custom npm install locations are detected and updated with the right command; a slow first-launch antivirus scan no longer permanently disables CLI features for the session.
+- **Locked-down + domain machines.** Security-sensitive files lock down correctly on domain-joined PCs; the installer now bundles the WebView2 runtime so the app still installs on an offline/restricted machine that lacks it.
+- **Smaller screens + laptops.** Minimum window size lowered so the window fits 1366×768 laptops and 125–150% display scaling without going off-screen.
+- **Fewer dead-ends.** Downloads no longer hang forever on a silently-blocked network; first-time Git push works on a fresh machine; clearer, honest error messages (names the real update host, points expired logins to Sign In, Windows-correct config path).
+
 ## v0.36.2 — Fable 5 is back
 
 > The Fable 5 model returned, so it's available again in the model picker.

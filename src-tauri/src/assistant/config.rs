@@ -106,19 +106,36 @@ fn harden_config_acl(path: &std::path::Path) {
         if user.is_empty() {
             return;
         }
+        let principal = acl_principal(&user);
         let path_for_acl = path.to_path_buf();
         std::thread::spawn(move || {
             let status = std::process::Command::new("icacls")
                 .arg(&path_for_acl)
-                .args(["/inheritance:r", "/grant:r", &format!("\"{user}\":(F)")])
+                .args(["/inheritance:r", "/grant:r", &format!("\"{principal}\":(F)")])
                 .creation_flags(CREATE_NO_WINDOW)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null())
                 .status();
             if !matches!(status, Ok(s) if s.success()) {
-                log::warn!("icacls failed to lock down {} for user {user}", path_for_acl.display());
+                log::warn!("icacls failed to lock down {} for {principal}", path_for_acl.display());
             }
         });
+    }
+}
+
+/// Windows icacls principal for the current user. On a domain-joined machine the
+/// bare `USERNAME` (e.g. `jsmith`) is NOT a resolvable SID for icacls — it needs
+/// the `DOMAIN\user` form. USERDOMAIN holds the AD domain on a joined box and the
+/// machine name on a standalone box; only prefix when it differs from
+/// COMPUTERNAME, so standalone machines keep the exact bare-username behavior.
+#[cfg(windows)]
+pub(super) fn acl_principal(user: &str) -> String {
+    let domain = std::env::var("USERDOMAIN").unwrap_or_default();
+    let computer = std::env::var("COMPUTERNAME").unwrap_or_default();
+    if !domain.is_empty() && !domain.eq_ignore_ascii_case(&computer) {
+        format!("{domain}\\{user}")
+    } else {
+        user.to_string()
     }
 }
 

@@ -109,6 +109,11 @@ fn classify_install_method(p: &Path) -> &'static str {
     let s = p.to_string_lossy().to_ascii_lowercase();
     if s.contains("\\npm\\node_modules\\")
         || s.contains("/npm/node_modules/")
+        // Custom npm prefix (`npm config set prefix D:\tools`) drops the package
+        // outside any `\npm\` dir — match the package path itself so a power-user
+        // install is classified "npm" (→ correct `npm i -g` update), not "unknown".
+        || s.contains("\\node_modules\\@anthropic-ai\\claude-code\\")
+        || s.contains("/node_modules/@anthropic-ai/claude-code/")
         || s.ends_with(".cmd")
         || s.ends_with(".bat")
     {
@@ -280,7 +285,14 @@ pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
             // `.cmd` shim is — the bundled exe lives one dir deeper than PATH.
             let on_path = where_norm.contains(&pn)
                 || (method == "npm"
-                    && where_norm.iter().any(|w| w.contains("\\npm\\") || w.contains("/npm/")));
+                    && where_norm.iter().any(|w| {
+                        w.contains("\\npm\\")
+                            || w.contains("/npm/")
+                            // Custom-prefix shim: the PATH hit shows the package
+                            // path rather than a `\npm\` dir.
+                            || w.contains("\\node_modules\\@anthropic-ai\\")
+                            || w.contains("/node_modules/@anthropic-ai/")
+                    }));
             ClaudeInstall {
                 version: probe_version_at(&p),
                 method: method.to_string(),
@@ -447,6 +459,13 @@ pub(crate) fn claude_command() -> Option<Command> {
     // trap that cost a collaborator hours). The only sanctioned API-key path
     // re-adds it explicitly on the configured-key send branch (`assistant_send`).
     cmd.env_remove("ANTHROPIC_API_KEY");
+    // Corporate TLS: inject the Windows-store root PEM so Node trusts
+    // TLS-intercepting proxy CAs (Zscaler/Palo Alto/Netskope). No-op when
+    // corp_pem_path() returns None (dev machine or write failure).
+    #[cfg(windows)]
+    if let Some(pem_path) = crate::certs::corp_pem_path() {
+        cmd.env("NODE_EXTRA_CA_CERTS", pem_path);
+    }
     Some(cmd)
 }
 
@@ -485,11 +504,19 @@ pub(super) fn active_cli_version() -> Option<(u64, u64, u64)> {
         }
     }
     let ver = probe_version_at(&exe).as_deref().and_then(parse_semver);
-    let mut g = match CLAUDE_VERSION.lock() {
-        Ok(g) => g,
-        Err(p) => p.into_inner(),
-    };
-    *g = Some((exe, ver));
+    // Only cache a SUCCESSFUL read. A `None` here is almost always a transient
+    // 5s probe timeout (first-launch AV scan of an unknown exe), not a real
+    // "this CLI has no version" — caching it would gate every capability flag off
+    // for the whole session. Leaving it uncached re-probes next call (≤5s) and
+    // self-heals the moment AV releases the binary. A genuinely unreadable CLI
+    // just re-probes cheaply; the success path caches and never re-probes.
+    if ver.is_some() {
+        let mut g = match CLAUDE_VERSION.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        *g = Some((exe, ver));
+    }
     ver
 }
 

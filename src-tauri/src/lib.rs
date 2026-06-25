@@ -15,6 +15,7 @@
 
 pub mod assistant;
 pub mod browser;
+pub mod certs;
 pub mod commands;
 pub mod diagnostics;
 pub mod secrets;
@@ -116,6 +117,13 @@ pub fn run() {
     // (the installer passes `--veloapp-*` args). In all other cases this is a
     // near-instant no-op. Must run before Tauri spins up. See update_service.rs.
     velopack::VelopackApp::build().run();
+
+    // Prime the corporate-root PEM before the first claude spawn so the file
+    // exists on disk by the time any cli_install::claude_command() is called.
+    // Additive-only: the PEM carries the user's own Windows-store roots; Node
+    // still trusts its built-ins, reqwest still trusts webpki — on a non-proxied
+    // machine this changes nothing observable. Never disables verification.
+    let _ = certs::corp_pem_path();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())

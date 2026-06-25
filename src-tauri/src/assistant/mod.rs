@@ -253,18 +253,21 @@ fn write_mcp_config(
             // file is delete-on-exit and the token rotates each launch, so a
             // not-yet-applied DACL during the spawn window is acceptable.
             let path_for_acl = path.clone();
+            // Domain-qualify the principal — bare USERNAME isn't a resolvable SID
+            // for icacls on a domain-joined machine (see config::acl_principal).
+            let principal = config::acl_principal(&user);
             std::thread::spawn(move || {
                 let icacls_status = std::process::Command::new("icacls")
                     .arg(&path_for_acl)
                     // Quote the principal: domain usernames can contain spaces, which
                     // icacls would otherwise parse as separate ACL tokens.
-                    .args(["/inheritance:r", "/grant:r", &format!("\"{user}\":(F)")])
+                    .args(["/inheritance:r", "/grant:r", &format!("\"{principal}\":(F)")])
                     .creation_flags(CREATE_NO_WINDOW)
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null())
                     .status();
                 if !matches!(icacls_status, Ok(s) if s.success()) {
-                    log::warn!("icacls failed to lock down {} for user {user}", path_for_acl.display());
+                    log::warn!("icacls failed to lock down {} for {principal}", path_for_acl.display());
                 }
             });
         }

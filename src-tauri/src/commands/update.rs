@@ -35,7 +35,7 @@ pub async fn check_for_updates(
     // before the network call, so a later check spawns cleanly.
     match tokio::time::timeout(Duration::from_secs(30), task).await {
         Ok(joined) => joined.map_err(|e| format!("update check task: {e}"))?,
-        Err(_) => Err("update check timed out after 30s — GitHub may be unreachable or blocked".to_string()),
+        Err(_) => Err("update check timed out after 30s — the update feed (pub-*.r2.dev) may be unreachable or blocked by your network/firewall".to_string()),
     }
 }
 

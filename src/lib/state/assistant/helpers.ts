@@ -142,8 +142,9 @@ export function loadPermissionMode(): PermissionMode {
   } catch {
     /* SSR or storage disabled */
   }
-  // Preserve Rift's historical behavior until the user picks a mode.
-  return "bypassPermissions";
+  // Fresh installs (no stored key) get the SAFE default — a new user must opt
+  // into bypass explicitly (onboarding Step 4 / composer), never silently.
+  return "default";
 }
 
 export function savePermissionMode(v: PermissionMode) {
