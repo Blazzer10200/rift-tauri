@@ -20,6 +20,7 @@ pub mod convo_store;
 pub mod env_checks;
 pub mod git_local;
 pub mod mcp_server;
+pub mod news;
 pub mod nothink;
 pub mod oneshot;
 pub mod permission;
@@ -53,6 +54,9 @@ pub use env_checks::*;
 // R6 split (2026-06-09): one-shot headless spawns (enhance / title) in
 // `oneshot.rs`. Glob re-export for the __cmd__ items.
 pub use oneshot::*;
+// "What's new in AI" feed (Workspace page): deterministic changelog+npm fetch +
+// opt-in AI digest in `news.rs`. Glob re-export for the __cmd__ items.
+pub use news::*;
 // R7 split (2026-06-09): workspace root state + @-mention file enumeration +
 // branch probe in `workspace.rs`. Glob re-export for the same __cmd__ reason;
 // `current_root` stays reachable as `crate::assistant::current_root` (stt).

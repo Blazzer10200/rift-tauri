@@ -1,17 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import {
     FolderOpen, Plus, Trash2, Check, X, Pencil,
-    ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare, BarChart3,
-    Sparkles, History,
+    ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
+    Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
-  import StatsPanel from "../home/StatsPanel.svelte";
+  import NewsFeed from "./NewsFeed.svelte";
+  import {
+    type ConvoStat, type StatRange,
+    filterRange, summarize, streaks, peakHour, perModel, topModel,
+    dailySeries, dayLabel, summaryLine, funFact,
+    fmtInt, fmtCompact, fmtCost,
+  } from "../home/statsHelpers";
   import { projects, projectRootKey } from "../../state/projects.svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { goHome } from "../../state/nav";
   import { prettyPath, leafName, shortPath } from "../shell/tabsbar/helpers";
   import { notify } from "../../state/toast.svelte";
+  import { tooltip } from "$lib/actions/tooltip";
   import { globSummary } from "./globPreview";
   import { greeting } from "./welcomeShared";
   import type { Project } from "../../state/assistant/types";
@@ -30,7 +38,37 @@
   });
   const greet = $derived(greeting(nowHour));
 
-  let statsOpen = $state(false);
+  // ── Inline Activity stats (was the StatsPanel modal — now lives on the page) ──
+  let statsRaw = $state<ConvoStat[]>([]);
+  let statsLoading = $state(true);
+  let statsError = $state<string | null>(null);
+  let range = $state<StatRange>("all");
+  let statsNow = $state(Date.now());
+  onMount(() => {
+    invoke<ConvoStat[]>("assistant_stats")
+      .then((s) => { statsRaw = s; })
+      .catch((e) => { statsError = String(e); })
+      .finally(() => { statsLoading = false; });
+  });
+  $effect(() => {
+    void range;
+    statsNow = Date.now();
+    const h = setInterval(() => { statsNow = Date.now(); }, 60_000);
+    return () => clearInterval(h);
+  });
+  const stats = $derived(filterRange(statsRaw, range, statsNow));
+  const totals = $derived(summarize(stats));
+  const strk = $derived(streaks(stats, statsNow));
+  const peak = $derived(peakHour(stats));
+  const models = $derived(perModel(stats).filter((m) => m.messages > 0).slice(0, 5));
+  const topMdl = $derived(topModel(stats));
+  const windowDays = $derived(range === "7d" ? 14 : range === "30d" ? 30 : 60);
+  const series = $derived(dailySeries(stats, windowDays, statsNow));
+  const statSummary = $derived(summaryLine(totals, peak));
+  const fact = $derived(funFact(totals));
+  const statsEmpty = $derived(!statsLoading && !statsError && statsRaw.length === 0);
+  const SEG_HUES = [163, 220, 285, 35, 130];
+  const segs = $derived(models.map((m, i) => ({ ...m, hue: SEG_HUES[i % SEG_HUES.length] })));
 
   $effect(() => {
     if (paneRoot && assistant.workspaceFiles.length === 0) void assistant.loadWorkspaceFiles();
@@ -49,7 +87,7 @@
   const adoptableRecents = $derived(
     assistant.workspace.recent
       .filter((r) => !knownKeys.has(projectRootKey(r)) && projectRootKey(r) !== projectRootKey(paneRoot))
-      .slice(0, 6),
+      .slice(0, 4),
   );
 
   // ── Project editor state ────────────────────────────────────────────────────
@@ -172,6 +210,36 @@
     await assistant.setRoot(p.root);
     goHome();
   }
+
+  // ── Project card helpers ─────────────────────────────────────────────────────
+  // Hierarchy: the active project renders as a hero card; the rest fill a grid.
+  const activeProject = $derived(projects.sorted.find(isActive) ?? null);
+  const otherProjects = $derived(projects.sorted.filter((p) => !isActive(p)));
+
+  // Monogram: first alnum char of the name, for the card avatar.
+  const monogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
+
+  // Compact scope label for a project's include/exclude globs.
+  function scopeLabel(p: Project): string {
+    if (!p.include.length && !p.exclude.length) return "Full folder";
+    const parts: string[] = [];
+    if (p.include.length) parts.push(`${p.include.length} include`);
+    if (p.exclude.length) parts.push(`${p.exclude.length} exclude`);
+    return parts.join(" · ");
+  }
+
+  // "Added 3d ago" — relative time from createdAt, omitted when unknown.
+  function addedLabel(ts: number): string {
+    if (!ts) return "";
+    const d = Math.max(0, statsNow - ts);
+    const day = 86_400_000;
+    if (d < day) return "Added today";
+    const days = Math.round(d / day);
+    if (days < 7) return `Added ${days}d ago`;
+    if (days < 30) return `Added ${Math.round(days / 7)}w ago`;
+    if (days < 365) return `Added ${Math.round(days / 30)}mo ago`;
+    return `Added ${Math.round(days / 365)}y ago`;
+  }
 </script>
 
 <div class="sb-main">
@@ -198,9 +266,6 @@
               </span>
               <button class="chip-btn" type="button" onclick={() => void assistant.pickTabFolder(null)}>
                 <Folder size={13} /> Switch folder
-              </button>
-              <button class="chip-btn" type="button" onclick={() => (statsOpen = true)}>
-                <BarChart3 size={13} /> Activity
               </button>
             </div>
           {/if}
@@ -291,26 +356,98 @@
         </section>
       {/if}
 
-      <!-- Projects + adopt-folder. The cross-project "Continue" resume column
-           was removed (2026-06-24): it pulled chat history unscoped to the
-           project folder — the resume affordance lives in the sidebar list. -->
-      <div class="cols single">
+      <!-- ── Bento dashboard (2026-06-25 v2) ───────────────────────────────────
+           Row 1: a FULL-WIDTH Activity band (stats are wide-but-short — hero+chart
+           left, tiles+model-mix right) so it doesn't pile vertically.
+           Row 2: Projects (left) · What's new in AI (right) — two balanced columns.
+           Replaces the v1 single tall right-rail that scrolled 2.7 screens. -->
+
+      <!-- ── Activity band (full width) ───────────────────────────────────────── -->
+      <section class="act-band">
+        <div class="section-h-row">
+          <div class="section-h"><ActivityIcon size={13} /> Activity</div>
+          <div class="range" role="group" aria-label="Time range">
+            <button class:on={range === "7d"} type="button" onclick={() => (range = "7d")}>7d</button>
+            <button class:on={range === "30d"} type="button" onclick={() => (range = "30d")}>30d</button>
+            <button class:on={range === "all"} type="button" onclick={() => (range = "all")}>All</button>
+          </div>
+        </div>
+
+        {#if statsLoading}
+          <div class="act-state"><Loader2 size={16} class="spin" /><span>Reading conversations…</span></div>
+        {:else if statsError}
+          <div class="act-state err">Couldn't load stats: {statsError}</div>
+        {:else if statsEmpty}
+          <div class="act-state">No conversations yet — your activity will show up here.</div>
+        {:else}
+          <div class="act-card">
+            <!-- Left: the headline + the daily chart. Right: stat tiles + model mix. -->
+            <div class="act-main">
+              <div class="hero">
+                <div class="hero-num">
+                  <span class="hn-v">{fmtInt(totals.messages)}</span>
+                  <span class="hn-l">messages exchanged</span>
+                </div>
+                <p class="hero-sub">{statSummary}</p>
+              </div>
+              <section class="chart">
+                <div class="chart-axis">
+                  <span class="ch-cap">Per day · last {windowDays}</span>
+                  {#if series.max > 0}<span class="ch-peak">peak {fmtInt(series.max)}</span>{/if}
+                </div>
+                <div class="chart-plot" style="--cols:{series.cells.length}">
+                  {#each series.cells as c (c.day)}
+                    <span class="ch-col" class:zero={c.messages === 0}
+                      style="--h:{series.max > 0 ? Math.max(c.messages > 0 ? 6 : 0, (c.messages / series.max) * 100) : 0}%"
+                      use:tooltip={`${dayLabel(c.ms)} · ${fmtInt(c.messages)} msg · ${c.sessions} session${c.sessions === 1 ? "" : "s"}`}
+                      aria-hidden="true"></span>
+                  {/each}
+                </div>
+              </section>
+            </div>
+
+            <div class="act-side">
+              <div class="strip">
+                <div class="st"><Cpu size={13} /><b>{fmtInt(totals.sessions)}</b><span>sessions</span></div>
+                <div class="st"><Wrench size={13} /><b>{fmtCompact(totals.toolCalls)}</b><span>tool calls</span></div>
+                <div class="st"><DollarSign size={13} /><b>{fmtCost(totals.cost)}</b><span>spent</span></div>
+                <div class="st"><Flame size={13} /><b>{strk.current}d</b><span>streak · best {strk.longest}d</span></div>
+              </div>
+              {#if segs.length}
+                <section class="mix">
+                  <div class="mix-h">Model mix{#if topMdl}<span class="mix-sub">· mostly {topMdl}</span>{/if}</div>
+                  <div class="mix-bar" role="img" aria-label="Model usage share">
+                    {#each segs as m (m.model)}
+                      <span class="mseg" style="flex:{Math.max(0.04, m.share)}; --mh:{m.hue}"
+                        use:tooltip={`${m.label} · ${fmtInt(m.messages)} msg · ${Math.round(m.share * 100)}%`}></span>
+                    {/each}
+                  </div>
+                  <div class="mix-legend">
+                    {#each segs as m (m.model)}
+                      <span class="lg"><i style="--mh:{m.hue}"></i>{m.label}<small>{Math.round(m.share * 100)}%</small></span>
+                    {/each}
+                  </div>
+                </section>
+              {/if}
+              {#if fact}<div class="sig">{fact}</div>{/if}
+            </div>
+          </div>
+        {/if}
+      </section>
+
+      <!-- ── Row 2: Projects · What's new in AI ───────────────────────────────── -->
+      <div class="dash">
 
         <!-- ── Workspace (projects) ─────────────────────────────────────────── -->
         <section class="col projects-col">
-          <div class="section-h"><FolderGit2 size={13} /> Projects</div>
-
-          <!-- Adopt the active folder when it isn't a project yet. -->
-          {#if hasRoot && !activeIsProject && !editing}
-            <button class="adopt-cta" type="button" onclick={adoptActive}>
-              <span class="adopt-ic"><Sparkles size={15} /></span>
-              <span class="adopt-tx">
-                <b>Add <i>{ctxName}</i> as a project</b>
-                <small>Name this folder and scope its files — you're already working in it.</small>
-              </span>
-              <ArrowRight size={16} class="adopt-go" />
+          <div class="section-h-row">
+            <div class="section-h"><FolderGit2 size={13} /> Projects
+              {#if projects.items.length > 0}<span class="count">{projects.items.length}</span>{/if}
+            </div>
+            <button class="mini-new" type="button" onclick={() => startNew()} use:tooltip={"New project"}>
+              <Plus size={14} strokeWidth={2.4} /> New
             </button>
-          {/if}
+          </div>
 
           {#if !projects.loaded && projects.lastError}
             <div class="empty">
@@ -320,8 +457,8 @@
             </div>
           {:else if projects.items.length === 0 && !(hasRoot && !activeIsProject) && adoptableRecents.length === 0}
             <!-- True empty-state only when there's no adopt path (no active folder
-                 to adopt + no recent folders). The adopt CTA / pills already guide
-                 the common case, so we don't repeat the instruction. -->
+                 to adopt + no recent folders). The adopt zone already guides the
+                 common case, so we don't repeat the instruction. -->
             <div class="empty lean">
               <div class="empty-tt">No projects yet</div>
               <div class="empty-sub">Name a workspace folder and scope which files Rift can read.</div>
@@ -330,49 +467,78 @@
               </button>
             </div>
           {:else if projects.items.length > 0}
-            <div class="proj-list">
-              {#each projects.sorted as p (p.id)}
-                <div class="card" class:active={isActive(p)}>
-                  <div class="card-top">
-                    <span class="card-ic"><FolderGit2 size={16} /></span>
-                    <div class="card-id">
-                      <div class="card-name">{p.name}</div>
-                      <div class="card-path mono">{prettyPath(p.root)}</div>
+            <!-- Hero: the active project, framed + primary. -->
+            {#if activeProject}
+              {@const p = activeProject}
+              <div class="hero-card">
+                <span class="hero-glow" aria-hidden="true"></span>
+                <div class="hero-row">
+                  <span class="hero-mono">{monogram(p.name)}</span>
+                  <div class="hero-id">
+                    <div class="hero-name-row">
+                      <span class="hero-name">{p.name}</span>
+                      <span class="active-pill"><span class="live-dot"></span>Active</span>
                     </div>
-                    {#if isActive(p)}<span class="active-pill">Active</span>{/if}
-                  </div>
-
-                  <div class="card-foot">
-                    {#if p.include.length || p.exclude.length}
-                      <span class="card-pats">
-                        <Filter size={12} />
-                        <span class="pat-count">
-                          {#if p.include.length}{p.include.length} inc{/if}
-                          {#if p.include.length && p.exclude.length} · {/if}
-                          {#if p.exclude.length}{p.exclude.length} exc{/if}
-                        </span>
-                      </span>
-                    {:else}
-                      <span class="card-pats muted"><Filter size={12} /> <span class="pat-count">full folder</span></span>
-                    {/if}
-                    <button class="card-act" type="button" onclick={() => startEdit(p)}><Pencil size={13} /> Edit</button>
-                    <button class="card-open" type="button" disabled={isActive(p)} onclick={() => openProject(p)}>
-                      Open <ArrowRight size={14} />
-                    </button>
+                    <div class="hero-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</div>
                   </div>
                 </div>
-              {/each}
-            </div>
+                <div class="hero-foot">
+                  <span class="scope-chip"><Filter size={11} /> {scopeLabel(p)}</span>
+                  {#if p.createdAt}<span class="meta-dot">·</span><span class="added">{addedLabel(p.createdAt)}</span>{/if}
+                  <button class="hero-edit" type="button" onclick={() => startEdit(p)} use:tooltip={"Edit project"}>
+                    <Pencil size={13} />
+                  </button>
+                  <button class="hero-open" type="button" onclick={() => goHome()}>
+                    Continue <ArrowRight size={14} />
+                  </button>
+                </div>
+              </div>
+            {/if}
+
+            <!-- The rest — a 2-up grid of compact, equal cards. A lone card spans
+                 full width so it doesn't sit half-empty beside the hero. -->
+            {#if otherProjects.length > 0}
+              <div class="proj-grid" class:solo={otherProjects.length === 1}>
+                {#each otherProjects as p (p.id)}
+                  <div class="gcard" role="button" tabindex="0" onclick={() => openProject(p)}
+                    onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProject(p); } }}>
+                    <div class="gcard-top">
+                      <span class="gcard-mono">{monogram(p.name)}</span>
+                      <span class="gcard-go" aria-hidden="true"><ArrowRight size={14} /></span>
+                    </div>
+                    <div class="gcard-name">{p.name}</div>
+                    <div class="gcard-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</div>
+                    <div class="gcard-foot">
+                      <span class="scope-chip sm"><Filter size={10} /> {scopeLabel(p)}</span>
+                      <button class="gcard-edit" type="button"
+                        onclick={(e) => { e.stopPropagation(); startEdit(p); }} use:tooltip={"Edit"} aria-label="Edit project">
+                        <Pencil size={12} />
+                      </button>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
           {/if}
 
-          <!-- Adopt a recent folder — compact pill strip. -->
-          {#if adoptableRecents.length > 0}
-            <div class="adopt-strip">
-              <div class="adopt-strip-h">Adopt a folder you already work in</div>
-              <div class="adopt-list">
+          <!-- ── Add a project — one consistent adopt zone ──────────────────── -->
+          {#if (hasRoot && !activeIsProject && !editing) || adoptableRecents.length > 0}
+            <div class="add-zone">
+              <div class="add-zone-h">Add a project</div>
+              <div class="add-list">
+                {#if hasRoot && !activeIsProject && !editing}
+                  <button class="add-tile active-folder" type="button" onclick={adoptActive}>
+                    <span class="add-ic"><Sparkles size={14} /></span>
+                    <span class="add-tx">
+                      <b>{ctxName}</b>
+                      <small>Current folder · click to scope it</small>
+                    </span>
+                  </button>
+                {/if}
                 {#each adoptableRecents as r (r)}
-                  <button class="adopt-pill" type="button" onclick={() => adoptRecent(r)} title={prettyPath(r)}>
-                    <Folder size={13} /> {leafName(r)}
+                  <button class="add-tile" type="button" onclick={() => adoptRecent(r)} use:tooltip={prettyPath(r)}>
+                    <span class="add-ic ghost"><Folder size={14} /></span>
+                    <span class="add-tx"><b>{leafName(r)}</b><small>Recent folder</small></span>
                   </button>
                 {/each}
               </div>
@@ -380,20 +546,21 @@
           {/if}
         </section>
 
+        <!-- ── What's new in AI (right column) ───────────────────────────────── -->
+        <aside class="news-col">
+          <NewsFeed />
+        </aside>
+
       </div>
 
     </div>
   </div>
 </div>
 
-{#if statsOpen}
-  <StatsPanel onclose={() => (statsOpen = false)} />
-{/if}
-
 <style>
   .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
   .sb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-  .sb-wrap { max-width: 1040px; margin: 0 auto; padding: 22px 40px 28px; display: flex; flex-direction: column; gap: 18px; }
+  .sb-wrap { max-width: 1200px; margin: 0 auto; padding: 20px 40px 20px; display: flex; flex-direction: column; gap: 14px; }
 
   /* ── Header ─────────────────────────────────────────────────────────────── */
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -426,9 +593,87 @@
   .greet-ctx b { color: var(--fg-2); font-weight: 600; }
   .band-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-  /* ── Body (single Projects column since Continue was removed) ───────────── */
-  .cols { display: grid; grid-template-columns: minmax(0, 1fr); max-width: 620px; }
+  /* ── Bento dashboard v2 — full-width Activity band on top, then Projects · News.
+     Trades the v1 single tall right-rail (scrolled 2.7 screens) for horizontal
+     organization that fits ~one screen. ─────────────────────────────────────── */
+
+  /* Section header with a trailing control (the Activity range toggle). The bare
+     .section-h carries its own bottom margin; in a row we zero that + align. */
+  .section-h-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+  .section-h-row .section-h { margin: 0; }
+  .range { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .range button { height: 22px; padding: 0 10px; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--fg-subtle);
+    transition: background var(--dur-fast), color var(--dur-fast); }
+  .range button:hover { color: var(--fg-2); }
+  .range button.on { background: var(--surface-active); color: var(--fg); }
+
+  /* ── Activity band (full width, horizontal) ────────────────────────────── */
+  .act-band { min-width: 0; }
+  .act-card { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 22px;
+    padding: 18px 20px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
+  .act-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  /* The chart flexes to fill the band's height (matched to the side column's
+     stat-grid + mix), so there's no dead vertical void beside the tiles. */
+  .act-main .chart { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
+  .act-main .chart-plot { flex: 1 1 auto; height: auto; min-height: 96px; }
+  .act-side { display: flex; flex-direction: column; gap: 14px; min-width: 0;
+    padding-left: 24px; border-left: 1px solid var(--border); }
+  /* Stack the two halves on narrower windows so neither gets crushed. */
+  @media (max-width: 920px) {
+    .act-card { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+    .act-side { padding-left: 0; border-left: 0; padding-top: 16px; border-top: 1px solid var(--border); }
+  }
+  .act-state { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 34px 20px; text-align: center;
+    font-size: var(--fs-sm); color: var(--fg-subtle); border-radius: var(--radius-2xl);
+    border: 1px solid var(--border); background: var(--bg-elev-1); }
+  .act-state.err { color: var(--danger); }
+
+  /* ── Row 2 — Projects · News (two balanced columns) ────────────────────── */
+  .dash { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+  @media (max-width: 1080px) { .dash { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
   .col { min-width: 0; }
+  .news-col { min-width: 0; }
+
+  .hero { display: flex; flex-direction: column; gap: 5px; }
+  .hero-num { display: flex; align-items: baseline; gap: 10px; }
+  .hn-v { font-size: 40px; font-weight: 760; line-height: 1; letter-spacing: -0.025em; color: var(--fg); font-variant-numeric: tabular-nums;
+    background: linear-gradient(180deg, var(--fg), color-mix(in oklab, var(--accent) 30%, var(--fg)));
+    -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .hn-l { font-size: 13px; font-weight: 550; color: var(--fg-subtle); }
+  .hero-sub { margin: 0; font-size: 12.5px; color: var(--fg-muted); }
+
+  .chart-axis { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+  .ch-cap { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); }
+  .ch-peak { font-size: 10.5px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+  .chart-plot { display: grid; grid-template-columns: repeat(var(--cols), 1fr); align-items: end; gap: 2px; height: 80px;
+    padding: 6px 8px; border-radius: 12px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .ch-col { height: var(--h); min-height: 0; border-radius: 2px 2px 1px 1px; align-self: end;
+    background: linear-gradient(180deg, oklch(0.82 0.15 var(--accent-h)), oklch(0.66 0.13 var(--accent-h)));
+    transition: filter var(--dur-fast), transform var(--dur-fast); transform-origin: bottom; }
+  .ch-col:hover { filter: brightness(1.18); transform: scaleY(1.03); }
+  .ch-col.zero { height: 2px; background: color-mix(in oklab, var(--fg) 8%, transparent); border-radius: 2px; }
+
+  .strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; padding: 1px; border-radius: 12px; background: var(--border); overflow: hidden; }
+  .st { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 11px 13px; background: var(--bg-inset); }
+  .st :global(svg) { color: var(--accent); opacity: 0.8; margin-bottom: 2px; }
+  .st b { font-size: 17px; font-weight: 700; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
+  .st span { font-size: 10px; color: var(--fg-subtle); }
+
+  .mix-h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); margin-bottom: 9px; }
+  .mix-sub { margin-left: 7px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--fg-subtle); }
+  .mix-bar { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; }
+  .mseg { min-width: 3px; border-radius: 2px; background: linear-gradient(180deg, oklch(0.78 0.15 var(--mh)), oklch(0.62 0.13 var(--mh))); transition: filter var(--dur-fast); }
+  .mseg:hover { filter: brightness(1.15); }
+  .mix-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+  .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-2); }
+  .lg i { width: 9px; height: 9px; border-radius: 3px; flex: none; background: oklch(0.72 0.14 var(--mh)); }
+  .lg small { color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+
+  .sig { font-size: 12px; color: var(--fg-muted); padding-top: 16px; border-top: 1px solid var(--border); text-align: center; font-style: italic; }
+
+  :global(.act-band .spin) { animation: wsActSpin 0.9s linear infinite; }
+  @keyframes wsActSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { :global(.act-band .spin) { animation: none; } }
   .cue { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px 4px 9px; border-radius: 999px;
     background: color-mix(in oklab, var(--fg) 4%, transparent); border: 1px solid var(--border);
     font-size: var(--fs-sm); color: var(--fg-muted); }
@@ -442,18 +687,16 @@
   .chip-btn:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .chip-btn :global(svg) { color: var(--fg-faint); }
 
-  .adopt-cta { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding: 12px 13px; text-align: left;
-    border-radius: var(--radius-xl); cursor: pointer; font: inherit;
-    border: 1px solid var(--ghost-border); background: linear-gradient(180deg, var(--accent-soft), transparent);
-    transition: border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page), background var(--dur-fast); }
-  .adopt-cta:hover { border-color: var(--accent); transform: translateY(-1px); }
-  .adopt-ic { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: var(--radius-lg);
-    background: var(--accent-soft); color: var(--accent); }
-  .adopt-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
-  .adopt-tx b { font-size: var(--fs-md); font-weight: 640; color: var(--fg); }
-  .adopt-tx b i { font-style: normal; color: var(--accent); }
-  .adopt-tx small { font-size: var(--fs-sm); color: var(--fg-muted); }
-  .adopt-cta :global(.adopt-go) { color: var(--accent); flex: none; }
+  /* Projects section header: count badge + a compact "New" affordance. */
+  .projects-col .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 5px; margin-left: 2px;
+    border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0; color: var(--fg-subtle);
+    background: color-mix(in oklab, var(--fg) 8%, transparent); }
+  .mini-new { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px 0 8px; border-radius: 7px;
+    font-size: 11.5px; font-weight: 600; color: var(--fg-muted); border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--fg) 3%, transparent); transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
+  .mini-new:hover { background: var(--surface-hover); color: var(--fg); border-color: var(--border-strong); }
+  .mini-new :global(svg) { color: var(--fg-faint); transition: color var(--dur-fast); }
+  .mini-new:hover :global(svg) { color: var(--accent); }
 
   /* ── Editor ─────────────────────────────────────────────────────────────── */
   .editor { display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: var(--radius-2xl);
@@ -521,40 +764,90 @@
   .empty-sub { font-size: var(--fs-sm); color: var(--fg-muted); line-height: 1.5; }
   .empty .save-btn { margin-top: 4px; }
 
-  .adopt-strip { width: 100%; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .adopt-strip-h { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 9px; }
-  .adopt-list { display: flex; flex-wrap: wrap; gap: 8px; }
-  .adopt-pill { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px;
-    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-2);
-    font-size: var(--fs-sm); font-weight: 540; cursor: pointer;
-    transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
-  .adopt-pill:hover { background: var(--accent-soft); border-color: var(--ghost-border); color: var(--accent); }
-  .adopt-pill :global(svg) { color: var(--fg-faint); }
-  .adopt-pill:hover :global(svg) { color: var(--accent); }
+  /* ── Hero card — the active project, framed + primary ───────────────────── */
+  .hero-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 13px; padding: 15px 16px; margin-bottom: 12px;
+    border-radius: var(--radius-2xl); border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, var(--bg-elev-1)), var(--bg-elev-1) 70%);
+    box-shadow: 0 14px 36px -22px color-mix(in oklab, var(--accent) 60%, transparent); }
+  .hero-glow { position: absolute; top: -40%; right: -10%; width: 220px; height: 220px; pointer-events: none; z-index: 0;
+    background: radial-gradient(circle, color-mix(in oklab, var(--accent) 22%, transparent), transparent 68%); filter: blur(8px); }
+  .hero-card > :not(.hero-glow) { position: relative; z-index: 1; }
+  .hero-row { display: flex; align-items: center; gap: 12px; }
+  .hero-mono { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: var(--radius-lg);
+    font-size: 17px; font-weight: 720; letter-spacing: -0.02em; color: var(--accent-fg);
+    background: linear-gradient(150deg, color-mix(in oklab, var(--accent) 92%, white), var(--accent));
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 60%, transparent), 0 4px 12px -6px color-mix(in oklab, var(--accent) 50%, transparent); }
+  .hero-id { flex: 1; min-width: 0; }
+  .hero-name-row { display: flex; align-items: center; gap: 8px; }
+  .hero-name { font-size: 16px; font-weight: 680; letter-spacing: -0.015em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .active-pill { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 3px 8px 3px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
+  .live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 60%, transparent); animation: livePulse 2.2s ease-out infinite; }
+  @keyframes livePulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 5px transparent; } }
+  @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+  .hero-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .hero-foot { display: flex; align-items: center; gap: 8px; }
+  .meta-dot { color: var(--fg-faint); }
+  .added { font-size: 11px; color: var(--fg-subtle); }
+  .hero-edit { width: 30px; height: 30px; flex: none; margin-left: auto; display: grid; place-items: center; border-radius: var(--radius);
+    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast); }
+  .hero-edit:hover { background: var(--surface-hover); color: var(--fg); }
+  .hero-open { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; flex: none; border-radius: var(--radius-lg);
+    background: var(--accent); color: var(--accent-fg); font-size: var(--fs-sm); font-weight: 620;
+    transition: filter var(--dur-fast), transform var(--dur-fast); }
+  .hero-open:hover { filter: brightness(1.08); }
+  .hero-open:active { transform: translateY(1px); }
 
-  /* ── Project cards — vertical list in the right column ──────────────────── */
-  .proj-list { display: flex; flex-direction: column; gap: 10px; }
-  .card { display: flex; flex-direction: column; gap: 10px; padding: 13px 14px; border-radius: var(--radius-xl);
-    border: 1px solid var(--border); background: var(--bg-elev-1);
-    transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast); }
-  .card:hover { border-color: var(--border-strong); box-shadow: 0 8px 22px -16px color-mix(in oklab, var(--fg) 35%, transparent); transform: translateY(-1px); }
-  .card.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent-soft); }
-  .card-top { display: flex; align-items: center; gap: 10px; }
-  .card-ic { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent); }
-  .card-id { flex: 1; min-width: 0; }
-  .card-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
-  .active-pill { flex: none; font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 3px 7px; border-radius: var(--radius-sm); background: var(--accent-soft); color: var(--accent); }
-  .card-pats { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--fg-muted); min-width: 0; }
-  .card-pats.muted { color: var(--fg-subtle); }
-  .card-pats :global(svg) { color: var(--fg-faint); flex: none; }
-  .pat-count { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .card-foot { display: flex; align-items: center; gap: 6px; }
-  .card-act { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; margin-left: auto; border-radius: var(--radius); color: var(--fg-muted); font-size: var(--fs-sm); font-weight: 550; transition: background var(--dur-fast), color var(--dur-fast); }
-  .card-act:hover { background: var(--surface-hover); color: var(--fg); }
-  .card-open { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: var(--radius); background: color-mix(in oklab, var(--accent) 14%, transparent); color: var(--accent); font-size: var(--fs-sm); font-weight: 600; transition: background var(--dur-fast); }
-  .card-open:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 22%, transparent); }
-  .card-open:disabled { opacity: 0.45; cursor: default; }
+  /* Shared scope chip — used by hero + grid cards. */
+  .scope-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 540; color: var(--fg-muted); background: color-mix(in oklab, var(--fg) 4%, transparent);
+    border: 1px solid var(--border); white-space: nowrap; }
+  .scope-chip.sm { height: 20px; padding: 0 8px; font-size: 10.5px; }
+  .scope-chip :global(svg) { color: var(--fg-faint); flex: none; }
+
+  /* ── Other projects — 2-up grid of compact, clickable cards ─────────────── */
+  .proj-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .proj-grid.solo { grid-template-columns: minmax(0, 1fr); }
+  @media (max-width: 560px) { .proj-grid { grid-template-columns: minmax(0, 1fr); } }
+  .gcard { display: flex; flex-direction: column; gap: 7px; padding: 12px 13px; text-align: left; cursor: pointer; font: inherit;
+    border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
+    transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast), background var(--dur-fast); }
+  .gcard:hover { border-color: var(--border-strong); background: var(--bg-elev-2);
+    box-shadow: 0 10px 24px -18px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-2px); }
+  .gcard-top { display: flex; align-items: center; justify-content: space-between; }
+  .gcard-mono { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
+    font-size: 13px; font-weight: 700; color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent); }
+  .gcard-go { display: grid; place-items: center; color: var(--fg-faint); opacity: 0; transform: translateX(-4px);
+    transition: opacity var(--dur-fast), transform var(--dur-fast), color var(--dur-fast); }
+  .gcard:hover .gcard-go { opacity: 1; transform: translateX(0); color: var(--accent); }
+  .gcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gcard-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gcard-foot { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .gcard-edit { width: 24px; height: 24px; flex: none; margin-left: auto; display: grid; place-items: center; border-radius: 6px;
+    color: var(--fg-faint); opacity: 0; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
+  .gcard:hover .gcard-edit { opacity: 1; }
+  .gcard-edit:hover { background: var(--surface-hover); color: var(--fg); }
+
+  /* ── Add-a-project zone — unified adopt tiles ───────────────────────────── */
+  .add-zone { width: 100%; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .add-zone-h { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 10px; }
+  .add-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  @media (max-width: 560px) { .add-list { grid-template-columns: minmax(0, 1fr); } }
+  .add-tile { display: flex; align-items: center; gap: 10px; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
+    border-radius: var(--radius-lg); border: 1px dashed var(--border-strong); background: color-mix(in oklab, var(--fg) 2%, transparent);
+    transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); }
+  .add-tile:hover { border-style: solid; border-color: var(--ghost-border); background: var(--accent-soft); transform: translateY(-1px); }
+  .add-tile.active-folder { border-color: var(--ghost-border); background: linear-gradient(180deg, var(--accent-soft), transparent); }
+  .add-tile.active-folder:hover { border-color: var(--accent); }
+  .add-ic { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
+    background: var(--accent-soft); color: var(--accent); }
+  .add-ic.ghost { background: color-mix(in oklab, var(--fg) 5%, transparent); color: var(--fg-muted); }
+  .add-tile:hover .add-ic.ghost { background: var(--accent-soft); color: var(--accent); }
+  .add-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .add-tx b { font-size: var(--fs-sm); font-weight: 620; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .add-tx small { font-size: 10.5px; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .mono { font-family: var(--font-mono); }
 </style>

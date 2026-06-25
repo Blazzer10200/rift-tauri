@@ -18,6 +18,7 @@
   import { activityDock } from "../state/activityDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { cliUpdate } from "../state/cliUpdate.svelte";
+  import { news } from "../state/news.svelte";
   import { assistant } from "../state/assistant.svelte";
   import { uiPrefs } from "../state/ui-prefs.svelte";
   import { toast, notify } from "../state/toast.svelte";
@@ -68,6 +69,10 @@
     // top banner can surface it app-wide (was Settings-only before). Throttled
     // to 6h internally; method syncs reactively below once auth lands.
     void cliUpdate.maybeCheck();
+    // "What's new in AI" feed (Workspace page): fetch the Claude Code release feed
+    // once on launch (free, deterministic). Throttled to 6h internally; the
+    // Workspace page paints from cache instantly while this refreshes.
+    void news.maybeFetch();
     // Dev-only: expose the update store so CDP can drive its visual states
     // (toast + dialog) without a live feed. Stripped from prod builds.
     if (import.meta.env.DEV) {

@@ -2,6 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Workspace dashboard + "What's new in AI" (cont.203, staged, no version bump yet)
+
+> The Workspace page becomes a real dashboard, and recent Anthropic / Claude Code news lands right on it. Staged in the working tree; not yet shipped.
+
+- **Your activity, on the page — not behind a button.** The usage stats (messages, daily chart, sessions / tool calls / spend / streak, model mix) used to hide behind a small "Activity" chip that popped a modal. They now live inline as a full-width band across the top of the Workspace page — visible at a glance, no click.
+- **"What's new in AI" feed.** A new panel surfaces recent Claude Code releases automatically (pulled from the official changelog, free, no AI cost) with version, date, and the highlights. One latest release shows by default; "Show more" reveals the rest so the page stays one screen.
+- **"Summarize this week in AI" (optional).** A one-tap button has your own Claude search the web and write a short digest of the latest Anthropic + Claude Code news (model launches, API changes) — the same private, on-your-subscription pattern as AI Health's "Analyze my usage." Strictly opt-in; nothing runs until you ask.
+- **Reorganized as a bento dashboard** — a wide Activity band on top, then Projects and What's-new side by side, balanced and fitting one screen with no scroll pile.
+- **Richer Projects panel.** The Projects list was reorganized into a clear hierarchy: a count badge + "New" button in the header, the active project rendered as a framed hero card (monogram, live "Active" badge, scope, "Continue" button), the rest as a tidy grid of clickable cards, and a single unified "Add a project" zone that merges the adopt-current-folder prompt with recent folders. On-palette with the app accent — no off-color tints.
+- **Removed a duplicate folder switcher** from the sidebar — the project/folder selector that sat under "New chat" duplicated context already shown on the Workspace page.
+
 ## Unreleased — Works on other Windows machines (cont.202, staged, no version bump yet)
 
 > A cross-machine compatibility pass so Rift runs for users whose Windows setup differs from the developer's. Driven by two multi-agent audit/research workflows (adversarially verified — 19 false leads discarded). Staged in the working tree; not yet shipped.

@@ -6,12 +6,11 @@
   import { WORKSPACES } from "../workspaces";
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
-  import ProjectSwitcher from "./ProjectSwitcher.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { goHome } from "$lib/state/nav";
 
   // Sidebar nav: Workspace (home) + AI Health. Settings pinned to foot; Chat,
-  // legacy Projects, and any disabled workspace (e.g. local-llm) excluded.
+  // legacy Projects, the project switcher, and any disabled workspace excluded.
   const navItems = $derived(
     workspace.order.filter(
       (id) => id !== "settings" && id !== "chat" && id !== "projects" && !WORKSPACES[id].disabled,
@@ -78,8 +77,6 @@
       <span class="nc-lbl">New chat</span>
       <kbd class="nc-kbd">Ctrl N</kbd>
     </button>
-
-    <ProjectSwitcher />
 
     <nav class="side-nav" aria-label="Workspaces">
       {#each navItems as id (id)}
