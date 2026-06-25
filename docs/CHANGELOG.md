@@ -2,20 +2,23 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Workspace dashboard + "What's new in AI" (cont.203, staged, no version bump yet)
+## v0.50.0 — A workspace dashboard, AI news, and AI Health that earns its tab
 
-> The Workspace page becomes a real dashboard, and recent Anthropic / Claude Code news lands right on it. Staged in the working tree; not yet shipped.
+> The biggest release in a while: the Workspace page becomes a real dashboard with your activity and the latest AI news front-and-center, the AI Health tab grows up into a genuine diagnostic, and a broad compatibility pass lets Rift run cleanly on other people's Windows machines.
 
+### Workspace dashboard + "What's new in AI"
 - **Your activity, on the page — not behind a button.** The usage stats (messages, daily chart, sessions / tool calls / spend / streak, model mix) used to hide behind a small "Activity" chip that popped a modal. They now live inline as a full-width band across the top of the Workspace page — visible at a glance, no click.
 - **"What's new in AI" feed.** A new panel surfaces recent Claude Code releases automatically (pulled from the official changelog, free, no AI cost) with version, date, and the highlights. One latest release shows by default; "Show more" reveals the rest so the page stays one screen.
 - **"Summarize this week in AI" (optional).** A one-tap button has your own Claude search the web and write a short digest of the latest Anthropic + Claude Code news (model launches, API changes) — the same private, on-your-subscription pattern as AI Health's "Analyze my usage." Strictly opt-in; nothing runs until you ask.
 - **Reorganized as a bento dashboard** — a wide Activity band on top, then Projects and What's-new side by side, balanced and fitting one screen with no scroll pile.
-- **Richer Projects panel.** The Projects list was reorganized into a clear hierarchy: a count badge + "New" button in the header, the active project rendered as a framed hero card (monogram, live "Active" badge, scope, "Continue" button), the rest as a tidy grid of clickable cards, and a single unified "Add a project" zone that merges the adopt-current-folder prompt with recent folders. On-palette with the app accent — no off-color tints.
-- **Removed a duplicate folder switcher** from the sidebar — the project/folder selector that sat under "New chat" duplicated context already shown on the Workspace page.
+- **Richer Projects panel.** The Projects list now reads as a clear hierarchy: a count badge + "New" button in the header, the active project as a framed hero card (monogram, live "Active" badge, scope, "Continue" button), the rest as a tidy grid of clickable cards, and a single "Add a project" zone that merges the adopt-current-folder prompt with recent folders. A duplicate folder switcher was removed from the sidebar.
 
-## Unreleased — Works on other Windows machines (cont.202, staged, no version bump yet)
+### AI Health — a real diagnostic
+- **An at-a-glance health score** with plain-English wording instead of jargon, so the tab tells you how things are actually going.
+- **Latency, explained.** When a turn is slow, Rift attributes the root cause (thinking vs. tools vs. a cold start) instead of just showing a number — and it's warm-aware, so the normal warm-up after launch no longer flashes the score red.
 
-> A cross-machine compatibility pass so Rift runs for users whose Windows setup differs from the developer's. Driven by two multi-agent audit/research workflows (adversarially verified — 19 false leads discarded). Staged in the working tree; not yet shipped.
+### Works on other Windows machines
+> A cross-machine compatibility pass driven by two multi-agent audit/research workflows (adversarially verified — 19 false leads discarded).
 
 - **Safer first-run default.** A brand-new user no longer silently starts in the most permissive "bypass all permissions" mode — fresh installs default to asking, and bypass stays an explicit opt-in.
 - **Works behind corporate TLS proxies.** Rift now trusts your machine's own Windows-store root certificates for both its own network calls and the Claude CLI it runs, so HTTPS to Anthropic / model downloads / updates no longer fail on networks that inspect TLS (Zscaler/Palo Alto/Netskope-style). Additive only — nothing changes on a normal home network, and certificate verification is never weakened.
@@ -24,13 +27,15 @@
 - **Smaller screens + laptops.** Minimum window size lowered so the window fits 1366×768 laptops and 125–150% display scaling without going off-screen.
 - **Fewer dead-ends.** Downloads no longer hang forever on a silently-blocked network; first-time Git push works on a fresh machine; clearer, honest error messages (names the real update host, points expired logins to Sign In, Windows-correct config path).
 
-## v0.36.2 — Fable 5 is back
+### Interface polish
+- **One tidy toolbar menu.** The cluster of utility icons in the top bar collapsed into a single dropdown; a stray sidebar hover-preview and a cold-start welcome flash are gone.
+- **Calmer, more consistent surfaces** — a cross-surface rhythm pass aligned Settings, smoothed page transitions, and normalized AI Health styling. The window also no longer steals focus when it launches.
 
-> The Fable 5 model returned, so it's available again in the model picker.
-
-- **Fable 5 is selectable again.** Anthropic's limited-run Fable 5 model — temporarily pulled — is back, so it's once more an option in the model picker with its full 1M-token context and effort range. Pick it per chat just like Opus, Sonnet, or Haiku.
+> Note: a handful of edge-case cross-machine paths (domain icacls, custom npm proxy, native-installer layout, Velopack TLS interception, GUI stale-PATH) are implemented but await verification on a second physical Windows machine — tracked in ISSUES #61.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.36.2** — Fable 5 is back: Anthropic's limited-run Fable 5 model returned, so it's once more an option in the model picker with its full 1M-token context and effort range.
 
 - **v0.36.1** — The Claude CLI update actually updates now: clicking "Update" on the CLI bar would spin and then snap right back to the same prompt without moving the version (a running background Claude process held the CLI's file locked on Windows, and the bar read the stale version). Now Rift shuts those processes down before updating and re-checks right after. Plus quieter internals — bounded background-agent history and a handful of small correctness fixes.
 
