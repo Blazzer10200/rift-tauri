@@ -132,8 +132,12 @@ pub fn run() {
             // can position it before the user sees it.
             if let Some(main) = app.get_webview_window("main") {
                 center_in_work_area(&main);
+                // show() makes the window visible (taskbar entry + a flash) but
+                // does NOT steal foreground. Deliberately NO set_focus() here:
+                // an auto-update/dev relaunch firing set_focus() yanks the user
+                // out of a fullscreen game (focus loss = minimized game). The
+                // user clicks the taskbar when THEY want Rift. (2026-06-25)
                 let _ = main.show();
-                let _ = main.set_focus();
             }
             // Diagnostics: stream bus events to the frontend (`diag://event`)
             // and emit a periodic pipeline-state snapshot (`diag://state`)
