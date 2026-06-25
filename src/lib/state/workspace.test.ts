@@ -100,9 +100,9 @@ describe("setActive()", () => {
 
   it("everOpened retains previously opened ids when adding a new one", () => {
     workspace.setActive("settings");
-    workspace.setActive("local-llm");
+    workspace.setActive("ai-health");
     expect(workspace.everOpened.has("settings")).toBe(true);
-    expect(workspace.everOpened.has("local-llm")).toBe(true);
+    expect(workspace.everOpened.has("ai-health")).toBe(true);
   });
 
   it("persists to localStorage", () => {
@@ -115,5 +115,23 @@ describe("setActive()", () => {
     const size = workspace.everOpened.size;
     workspace.setActive("chat");
     expect(workspace.everOpened.size).toBe(size);
+  });
+});
+
+// local-llm disabled 2026-06-25 (DISABLED set). Page + code kept for re-enable;
+// these guard that it stays un-navigable so a stale flip doesn't resurface it.
+describe("local-llm disabled", () => {
+  it("setActive('local-llm') is a no-op", () => {
+    fakeLS.setItem(ACTIVE_KEY, "chat");
+    workspace.init();
+    workspace.setActive("local-llm");
+    expect(workspace.activeId).toBe("chat");
+    expect(workspace.everOpened.has("local-llm")).toBe(false);
+  });
+
+  it("stored activeId 'local-llm' falls back to 'chat' on init", () => {
+    fakeLS.setItem(ACTIVE_KEY, "local-llm");
+    workspace.init();
+    expect(workspace.activeId).toBe("chat");
   });
 });

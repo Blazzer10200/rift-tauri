@@ -170,6 +170,9 @@
       }
     }
     const k = e.key.toLowerCase();
+    // Ctrl+N → new chat (global; mirrors the sidebar's primary action). "home"
+    // is a verb — floats to the empty Chat surface and mints a fresh tab.
+    if (!e.altKey && !e.shiftKey && k === "n") { e.preventDefault(); goHome(); return; }
     // View toggles (browser dock) — keyboard mirror of the topbar.
     if (e.shiftKey && k === "b") { e.preventDefault(); browserDock.toggle(); return; }
     // Ctrl+0 → return to Chat workspace.

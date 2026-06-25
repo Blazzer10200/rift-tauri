@@ -10,10 +10,12 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { goHome } from "$lib/state/nav";
 
-  // Sidebar nav: Workspace (home) + Local LLM + AI Health. Settings pinned to foot;
-  // Chat and legacy Projects excluded (Projects nav replaced by the Workspace entry).
+  // Sidebar nav: Workspace (home) + AI Health. Settings pinned to foot; Chat,
+  // legacy Projects, and any disabled workspace (e.g. local-llm) excluded.
   const navItems = $derived(
-    workspace.order.filter((id) => id !== "settings" && id !== "chat" && id !== "projects"),
+    workspace.order.filter(
+      (id) => id !== "settings" && id !== "chat" && id !== "projects" && !WORKSPACES[id].disabled,
+    ),
   );
 
   function isNavActive(id: WorkspaceId): boolean {
@@ -71,6 +73,12 @@
       </button>
     </div>
 
+    <button class="new-chat" type="button" onclick={() => goHome()} use:tooltip={"New chat · Ctrl+N"}>
+      <span class="nc-ic"><Plus size={16} strokeWidth={2.4} /></span>
+      <span class="nc-lbl">New chat</span>
+      <kbd class="nc-kbd">Ctrl N</kbd>
+    </button>
+
     <ProjectSwitcher />
 
     <nav class="side-nav" aria-label="Workspaces">
@@ -85,15 +93,9 @@
         >
           <def.icon class="snav-ic snav-ic-{ICON_KEY[id]}" size={16} />
           <span class="lbl">{def.title}</span>
-          {#if id === "local-llm"}<span class="exp-dot" aria-hidden="true"></span>{/if}
         </button>
       {/each}
     </nav>
-
-    <button class="new-chat" type="button" onclick={() => goHome()} use:tooltip={"New chat"}>
-      <Plus size={16} strokeWidth={2.4} />
-      <span class="nc-lbl">New chat</span>
-    </button>
 
     <div class="side-sec">
       <ConversationList />
@@ -166,29 +168,34 @@
   .snav-item:hover :global(.snav-ic-home)     { transform: translateY(-2.5px) scale(1.06); }
   .snav-item:hover :global(.snav-ic-chat)     { transform: rotate(-10deg) scale(1.06); }
   .snav-item:hover :global(.snav-ic-projects) { transform: translateY(-2px) scale(1.06); }
-  .snav-item:hover :global(.snav-ic-local)    { transform: rotate(90deg) scale(1.04); }
+  .snav-item:hover :global(.snav-ic-health)   { transform: scale(1.1); }
   .snav-item:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
-  .exp-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--warn);
-    box-shadow: 0 0 6px color-mix(in oklab, var(--warn) 55%, transparent); }
 
-  /* primary action — New chat. Reads as primary via an accent-tinted surface +
-     accent icon/glow, not a saturated slab, so it blends with the rail's soft,
-     bordered, low-saturation language (matches .ws-switch chrome). */
-  .new-chat { display: flex; align-items: center; gap: 9px; height: 38px; margin-top: 10px; padding: 0 11px; flex: none;
-    border-radius: 11px; font-size: 13px; font-weight: 580; color: var(--fg);
-    border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
-    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 13%, transparent), color-mix(in oklab, var(--accent) 6%, transparent));
+  /* primary action — New chat. Promoted to the top of the rail. Reads as primary
+     via an accent-tinted surface + accent icon, not a saturated slab, so it stays
+     in the rail's soft, low-saturation language. Kbd hint sits flush-right. */
+  .new-chat { display: flex; align-items: center; gap: 10px; height: 38px; margin: 2px 0 8px; padding: 0 10px 0 11px; flex: none;
+    border-radius: 10px; font-size: 13px; font-weight: 580; color: var(--fg);
+    border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), color-mix(in oklab, var(--accent) 5%, transparent));
     transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); }
-  .new-chat:hover { background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 20%, transparent), color-mix(in oklab, var(--accent) 10%, transparent));
-    border-color: color-mix(in oklab, var(--accent) 48%, var(--border)); }
+  .new-chat:hover { background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 18%, transparent), color-mix(in oklab, var(--accent) 9%, transparent));
+    border-color: color-mix(in oklab, var(--accent) 44%, var(--border)); }
   .new-chat:active { transform: translateY(1px); }
+  .new-chat .nc-ic { display: inline-flex; flex: none; }
   .new-chat .nc-lbl { flex: 1; text-align: left; }
-  .new-chat :global(svg) { flex: none; color: var(--accent); }
+  .new-chat :global(svg) { flex: none; color: var(--accent); transition: transform 0.34s var(--ease-page); }
+  .new-chat:hover :global(svg) { transform: rotate(90deg); }
+  .nc-kbd { flex: none; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em;
+    padding: 2px 5px; border-radius: 5px; color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 6%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 7%, transparent); transition: color var(--dur-fast); }
+  .new-chat:hover .nc-kbd { color: var(--fg-subtle); }
 
   /* conversation-list section wrapper */
-  .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 12px; }
+  .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 10px; }
 
-  .side-foot { display: flex; flex-direction: column; gap: 2px; flex: none; padding-top: 8px; }
+  .side-foot { display: flex; flex-direction: column; gap: 2px; flex: none; padding-top: 8px;
+    margin-top: 4px; border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
 
   @keyframes barPop { from { transform: translateY(-50%) scaleY(0.25); } to { transform: translateY(-50%) scaleY(1); } }
 </style>

@@ -36,6 +36,7 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   // Legacy "projects" id: aliases WorkspacePage to keep the Record exhaustive + handle persisted activeId (init() folds it → "home").
   projects:    { component: WorkspacePage,     title: "Workspace",   icon: FolderTree,    kbd: "3" },
   settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
-  "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "5" },
+  // Disabled 2026-06-25 — hidden from nav + un-navigable. Code/page kept intact for re-enable (flip `disabled` + drop from DISABLED set in workspace.svelte.ts).
+  "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "5", disabled: true },
   "ai-health": { component: AiHealthPage,       title: "AI Health",   icon: HeartPulse,    kbd: "6" },
 };

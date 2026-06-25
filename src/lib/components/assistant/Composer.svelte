@@ -33,7 +33,10 @@
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
   // mic until they opened Settings → Speech once.
-  onMount(() => { void stt.init(); void localLlm.refresh(); });
+  // localLlm.refresh() intentionally NOT called — local-LLM feature disabled 2026-06-25.
+  // Leaving `enabled` at its false default keeps every local-mode branch (pill,
+  // placeholders, gating) dead. Re-enable: restore refresh() + the nav page.
+  onMount(() => { void stt.init(); });
 
   // RR2 unmount hygiene — the Composer is destroyed when its tab/split-pane
   // closes (parent gates rendering on tab presence). Without this, pending

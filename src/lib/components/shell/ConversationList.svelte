@@ -331,14 +331,15 @@
   .cs-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--fg-faint); flex: none; }
   .cs-clear:hover { background: var(--surface-active); color: var(--fg-2); }
 
-  /* per-project scope toggle — slim segmented control, tightly coupled to search */
-  .conv-scope { display: flex; gap: 2px; margin: 0 2px 4px; padding: 2px; flex: none;
-    border-radius: 7px; background: var(--bg-inset); border: 1px solid var(--border); }
-  .cscope-btn { flex: 1; min-width: 0; height: 22px; padding: 0 8px; border-radius: 5px;
-    font-size: 10.5px; font-weight: 600; letter-spacing: 0.01em; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  /* per-project scope toggle — slim segmented control, radius-matched to the
+     search field above so the two read as one coupled block, not a bolt-on. */
+  .conv-scope { display: flex; gap: 3px; margin: 0 2px 6px; padding: 3px; flex: none;
+    border-radius: 9px; background: var(--bg-inset); border: 1px solid var(--border); }
+  .cscope-btn { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 6px;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.01em; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     transition: background var(--dur-fast), color var(--dur-fast); }
-  .cscope-btn:hover { color: var(--fg-2); }
-  .cscope-btn.on { background: var(--surface-active); color: var(--fg); }
+  .cscope-btn:hover:not(.on) { color: var(--fg-2); background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .cscope-btn.on { background: var(--surface-active); color: var(--fg); box-shadow: var(--shadow-sm); }
 
   /* per-row project label (All-projects mode only) */
   .crow-proj { flex: none; max-width: 84px; padding: 1px 6px; border-radius: 5px;
